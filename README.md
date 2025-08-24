@@ -1,14 +1,12 @@
-![ISRC Code Manager Logo](Assets/app_logo.png)
 
-# ------------------------------------------------------------
 # Created by M. van de Kleut
-# 22-aug-2025
-#
-# License:
-# This software is provided "as is", without warranty of any kind.
-# Free to use, copy, and distribute for any purpose, provided that
-# original credits are retained. Not for resale.
-# ------------------------------------------------------------
+22-aug-2025
+
+License:
+This software is provided "as is", without warranty of any kind.
+Free to use, copy, and distribute for any purpose, provided that
+original credits are retained. Not for resale.
+
 # ISRC Manager
 
 ## IMPORTANT LEGAL NOTICE
