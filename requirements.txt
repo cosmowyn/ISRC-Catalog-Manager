@@ -1,0 +1,3 @@
+pyinstaller==6.15.0
+PySide6==6.9.1
+audioread==3.0.1
