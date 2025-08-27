@@ -561,6 +561,187 @@ class TwoDigitSpinBox(QSpinBox):
         except Exception:
             return str(v)
 
+class _ManageArtistsDialog(QDialog):
+    """Safely purge only unused artists (no refs in Tracks or TrackArtists)."""
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setWindowTitle("Manage stored artists")
+        self.setModal(True)
+        self.conn = parent.conn
+        self.cur  = parent.cursor
+
+        v = QVBoxLayout(self)
+        v.addWidget(QLabel("Only artists with 0 references can be deleted."))
+
+        self.tbl = QTableWidget(0, 5, self)
+        self.tbl.setHorizontalHeaderLabels(["Artist", "Main uses", "Extra uses", "Total", "Delete?"])
+        hh = self.tbl.horizontalHeader()
+        hh.setSectionResizeMode(0, QHeaderView.Stretch)
+        for c in (1, 2, 3, 4): hh.setSectionResizeMode(c, QHeaderView.ResizeToContents)
+        self.tbl.setEditTriggers(QTableWidget.NoEditTriggers)
+        v.addWidget(self.tbl)
+
+        h = QHBoxLayout()
+        btn_refresh = QPushButton("Refresh"); btn_purge = QPushButton("Purge all unused")
+        btn_delete  = QPushButton("Delete selected"); btn_close = QPushButton("Close")
+        h.addWidget(btn_refresh); h.addWidget(btn_purge); h.addWidget(btn_delete); h.addStretch(1); h.addWidget(btn_close)
+        v.addLayout(h)
+
+        btn_refresh.clicked.connect(self._load)
+        btn_purge.clicked.connect(self._purge_unused)
+        btn_delete.clicked.connect(self._delete_selected)
+        btn_close.clicked.connect(self.accept)
+
+        self._load()
+
+    def _usage_counts(self, artist_id: int):
+        self.cur.execute("SELECT COUNT(*) FROM Tracks WHERE main_artist_id=?", (artist_id,))
+        main_uses = int(self.cur.fetchone()[0])
+        self.cur.execute("SELECT COUNT(*) FROM TrackArtists WHERE artist_id=?", (artist_id,))
+        extra_uses = int(self.cur.fetchone()[0])
+        return main_uses, extra_uses, main_uses + extra_uses
+
+    def _load(self):
+        self.tbl.setRowCount(0)
+        self.cur.execute("SELECT id, name FROM Artists ORDER BY name COLLATE NOCASE")
+        for (aid, name) in self.cur.fetchall():
+            main_u, extra_u, total = self._usage_counts(aid)
+            r = self.tbl.rowCount(); self.tbl.insertRow(r)
+
+            self.tbl.setItem(r, 0, QTableWidgetItem(name or ""))
+            it_main = QTableWidgetItem(str(main_u)); it_main.setTextAlignment(Qt.AlignCenter)
+            it_extra = QTableWidgetItem(str(extra_u)); it_extra.setTextAlignment(Qt.AlignCenter)
+            it_total = QTableWidgetItem(str(total));  it_total.setTextAlignment(Qt.AlignCenter)
+            self.tbl.setItem(r, 1, it_main); self.tbl.setItem(r, 2, it_extra); self.tbl.setItem(r, 3, it_total)
+
+            chk = QTableWidgetItem(); chk.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            chk.setCheckState(Qt.Checked if total == 0 else Qt.Unchecked)
+            if total > 0: chk.setFlags(Qt.NoItemFlags)
+            chk.setData(Qt.UserRole, aid)  # keep id
+            self.tbl.setItem(r, 4, chk)
+
+    def _selected_unused_ids(self):
+        ids = []
+        for r in range(self.tbl.rowCount()):
+            total = int(self.tbl.item(r, 3).text())
+            it = self.tbl.item(r, 4)
+            if total == 0 and it and it.checkState() == Qt.Checked:
+                ids.append(int(it.data(Qt.UserRole)))
+        return ids
+
+    def _delete_selected(self):
+        ids = self._selected_unused_ids()
+        if not ids:
+            QMessageBox.information(self, "Nothing to delete", "No unused artists selected."); return
+        if QMessageBox.question(self, "Confirm", f"Delete {len(ids)} unused artist(s)?") != QMessageBox.Yes:
+            return
+        for aid in ids:
+            self.cur.execute("DELETE FROM Artists WHERE id=?", (aid,))
+        self.conn.commit()
+        self._load()
+
+    def _purge_unused(self):
+        self.cur.execute("SELECT id FROM Artists")
+        all_ids = [row[0] for row in self.cur.fetchall()]
+        to_del = []
+        for aid in all_ids:
+            _, _, total = self._usage_counts(aid)
+            if total == 0: to_del.append(aid)
+        if not to_del:
+            QMessageBox.information(self, "Nothing to purge", "No unused artists found."); return
+        if QMessageBox.question(self, "Confirm", f"Purge {len(to_del)} unused artist(s)?") != QMessageBox.Yes:
+            return
+        for aid in to_del:
+            self.cur.execute("DELETE FROM Artists WHERE id=?", (aid,))
+        self.conn.commit()
+        self._load()
+
+
+class _ManageAlbumsDialog(QDialog):
+    """Safely purge only unused albums (no refs in Tracks.album_id)."""
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setWindowTitle("Manage stored album names")
+        self.setModal(True)
+        self.conn = parent.conn
+        self.cur  = parent.cursor
+
+        v = QVBoxLayout(self)
+        v.addWidget(QLabel("Only albums with 0 references can be deleted."))
+
+        self.tbl = QTableWidget(0, 3, self)
+        self.tbl.setHorizontalHeaderLabels(["Album", "Uses", "Delete?"])
+        hh = self.tbl.horizontalHeader()
+        hh.setSectionResizeMode(0, QHeaderView.Stretch)
+        hh.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        hh.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.tbl.setEditTriggers(QTableWidget.NoEditTriggers)
+        v.addWidget(self.tbl)
+
+        h = QHBoxLayout()
+        btn_refresh = QPushButton("Refresh"); btn_purge = QPushButton("Purge all unused")
+        btn_delete  = QPushButton("Delete selected"); btn_close = QPushButton("Close")
+        h.addWidget(btn_refresh); h.addWidget(btn_purge); h.addWidget(btn_delete); h.addStretch(1); h.addWidget(btn_close)
+        v.addLayout(h)
+
+        btn_refresh.clicked.connect(self._load)
+        btn_purge.clicked.connect(self._purge_unused)
+        btn_delete.clicked.connect(self._delete_selected)
+        btn_close.clicked.connect(self.accept)
+
+        self._load()
+
+    def _usage(self, album_id: int) -> int:
+        self.cur.execute("SELECT COUNT(*) FROM Tracks WHERE album_id=?", (album_id,))
+        return int(self.cur.fetchone()[0])
+
+    def _load(self):
+        self.tbl.setRowCount(0)
+        self.cur.execute("SELECT id, title FROM Albums ORDER BY title COLLATE NOCASE")
+        for (aid, title) in self.cur.fetchall():
+            uses = self._usage(aid)
+            r = self.tbl.rowCount(); self.tbl.insertRow(r)
+            self.tbl.setItem(r, 0, QTableWidgetItem(title or ""))
+            it_uses = QTableWidgetItem(str(uses)); it_uses.setTextAlignment(Qt.AlignCenter)
+            self.tbl.setItem(r, 1, it_uses)
+
+            chk = QTableWidgetItem(); chk.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            chk.setCheckState(Qt.Checked if uses == 0 else Qt.Unchecked)
+            if uses > 0: chk.setFlags(Qt.NoItemFlags)
+            chk.setData(Qt.UserRole, aid)
+            self.tbl.setItem(r, 2, chk)
+
+    def _selected_unused_ids(self):
+        ids = []
+        for r in range(self.tbl.rowCount()):
+            uses = int(self.tbl.item(r, 1).text())
+            it = self.tbl.item(r, 2)
+            if uses == 0 and it and it.checkState() == Qt.Checked:
+                ids.append(int(it.data(Qt.UserRole)))
+        return ids
+
+    def _delete_selected(self):
+        ids = self._selected_unused_ids()
+        if not ids:
+            QMessageBox.information(self, "Nothing to delete", "No unused albums selected."); return
+        if QMessageBox.question(self, "Confirm", f"Delete {len(ids)} unused album(s)?") != QMessageBox.Yes:
+            return
+        for aid in ids:
+            self.cur.execute("DELETE FROM Albums WHERE id=?", (aid,))
+        self.conn.commit()
+        self._load()
+
+    def _purge_unused(self):
+        self.cur.execute("SELECT id FROM Albums")
+        to_del = [aid for (aid,) in self.cur.fetchall() if self._usage(aid) == 0]
+        if not to_del:
+            QMessageBox.information(self, "Nothing to purge", "No unused albums found."); return
+        if QMessageBox.question(self, "Confirm", f"Purge {len(to_del)} unused album(s)?") != QMessageBox.Yes:
+            return
+        for aid in to_del:
+            self.cur.execute("DELETE FROM Albums WHERE id=?", (aid,))
+        self.conn.commit()
+        self._load()
 
 # =============================================================================
 # App (Relational schema; auto-ISO; custom field editors; auto-learn)
@@ -750,6 +931,18 @@ class App(QMainWindow):
         manage_fields_action = QAction("Manage Custom Columns…", self)
         manage_fields_action.triggered.connect(self.manage_custom_columns)
         fields_menu.addAction(manage_fields_action)
+
+        # --- Edit menu
+        edit_menu = QMenu("Edit", self)
+        self.menu_bar.addMenu(edit_menu)
+
+        act_manage_artists = QAction("Manage stored artists…", self)
+        act_manage_artists.triggered.connect(self._manage_stored_artists)
+        edit_menu.addAction(act_manage_artists)
+
+        act_manage_albums = QAction("Manage stored album names…", self)
+        act_manage_albums.triggered.connect(self._manage_stored_albums)
+        edit_menu.addAction(act_manage_albums)
 
         # ----- Profiles toolbar (quick DB switch)
         self.toolbar = QToolBar("Profiles", self)
@@ -1252,6 +1445,16 @@ class App(QMainWindow):
             self.logger.exception(f"Remove profile failed: {e}")
             QMessageBox.critical(self, "Remove Error", f"Could not delete the database:\n{e}")
 
+
+    def _manage_stored_artists(self):
+        dlg = _ManageArtistsDialog(self)
+        dlg.exec()
+        self.populate_all_comboboxes()
+
+    def _manage_stored_albums(self):
+        dlg = _ManageAlbumsDialog(self)
+        dlg.exec()
+        self.populate_all_comboboxes()
 
     # -------------------------------------------------------------------------
     # DB: open/init helpers + MIGRATIONS
