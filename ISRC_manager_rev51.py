@@ -12,6 +12,7 @@ import os
 import sys
 import re
 import json
+import time
 import uuid
 import hashlib
 import shutil
@@ -25,18 +26,19 @@ from datetime import datetime
 from functools import lru_cache
 from logging.handlers import RotatingFileHandler
 
-from PySide6.QtCore import (
-    Qt, QDate, QPoint, QSettings, QStandardPaths, QLockFile, QByteArray, QUrl, QEvent, QTimer
+from PySide6.QtCore import(QRegularExpression, Signal, QEvent,
+    Qt, QDate, QPoint, QSettings, QStandardPaths, QLockFile, QByteArray, QUrl, QEvent, QTimer, QSortFilterProxyModel, )
+
+from PySide6.QtGui import (QDesktopServices, QCursor, QAction,
+    QIcon, QAction, QKeySequence, QImage, QPixmap, QStandardItemModel, QStandardItem
 )
-from PySide6.QtGui import (
-    QIcon, QAction, QKeySequence, QImage, QPixmap
-)
-from PySide6.QtWidgets import (
+from PySide6.QtWidgets import ( QListView, QMenuBar, QListWidget, QListWidgetItem, 
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QMessageBox,
     QCalendarWidget, QRadioButton, QMenuBar, QMenu, QInputDialog, QTableWidget, QTableWidgetItem,
     QHeaderView, QDialog, QMainWindow, QSizePolicy, QComboBox, QCompleter, QListWidget,
-    QListWidgetItem, QFileDialog, QToolBar, QFrame, QSpinBox, QScrollArea, QSlider, QAbstractItemView
+    QListWidgetItem, QFileDialog, QToolBar, QFrame, QSpinBox, QScrollArea, QSlider, QAbstractItemView, QFormLayout, QTableView, QTabWidget
 )
+
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 
 # ---------------------------------------------------------------------
@@ -121,7 +123,7 @@ FIELD_TYPE_CHOICES = ["text", "dropdown", "checkbox", "date", "blob_image", "blo
 
 # ---- DB schema versioning ----
 SCHEMA_BASELINE = 1   # First schema version
-SCHEMA_TARGET   = 10  # Bump when you add a new migration
+SCHEMA_TARGET   = 11  # Bump when you add a new migration
 
 
 # =============================================================================
@@ -746,6 +748,578 @@ class _ManageAlbumsDialog(QDialog):
 # =============================================================================
 # App (Relational schema; auto-ISO; custom field editors; auto-learn)
 # =============================================================================
+# ====== License Management: Helpers & Dialogs ======
+class LicenseUploadDialog(QDialog):
+    saved = Signal()
+
+    def __init__(self, conn, tracks, licensees, preselect_track_id=None, parent=None, data_dir=None):
+        super().__init__(parent)
+        self.conn = conn
+        self.data_dir = Path(data_dir) if data_dir else (DATA_DIR() / "licenses")
+        self.setWindowTitle("Add License (PDF)")
+        self.setModal(True)
+
+        # --- Controls ---
+        self.track_combo = QComboBox()
+        for tid, title in tracks:
+            self.track_combo.addItem(title, tid)
+        if preselect_track_id:
+            idx = self.track_combo.findData(preselect_track_id)
+            if idx >= 0:
+                self.track_combo.setCurrentIndex(idx)
+
+        self.lic_combo = QComboBox()
+        self.lic_combo.setEditable(True)
+        for lid, name in licensees:
+            self.lic_combo.addItem(name, lid)
+
+        self.file_label = QLabel("No file chosen")
+        self.btn_pick = QPushButton("Upload PDF…")
+        self.btn_pick.clicked.connect(self._pick_pdf)
+
+        self.btn_save = QPushButton("Save")
+        self.btn_save.setEnabled(False)
+        self.btn_cancel = QPushButton("Cancel")
+        self.btn_cancel.clicked.connect(self.reject)
+        self.btn_save.clicked.connect(self._save)
+
+        # --- Layout ---
+        form = QFormLayout()
+        form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        form.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)
+        form.setHorizontalSpacing(12)
+        form.setVerticalSpacing(10)
+        form.addRow("Track", self.track_combo)
+        form.addRow("Licensee", self.lic_combo)
+
+        file_row = QHBoxLayout()
+        file_row.addWidget(self.file_label, 1)
+        file_row.addSpacing(12)
+        file_row.addWidget(self.btn_pick, 0, Qt.AlignRight)
+
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(16, 16, 16, 16)
+        main_layout.setSpacing(12)
+        main_layout.addLayout(form)
+        main_layout.addLayout(file_row)
+        main_layout.addStretch(1)  # push content up/left
+
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        buttons.addWidget(self.btn_cancel)
+        buttons.addSpacing(16)
+        buttons.addWidget(self.btn_save)
+        buttons.addStretch(1)
+        main_layout.addLayout(buttons)
+
+        self.resize(560, 240)
+        self._picked_path = None
+
+    def _pick_pdf(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Select signed license (PDF)", "", "PDF (*.pdf)")
+        if not path:
+            return
+        if not path.lower().endswith(".pdf"):
+            QMessageBox.warning(self, "Invalid", "Please select a .pdf file.")
+            return
+        self._picked_path = path
+        self.file_label.setText(Path(path).name)
+        self.btn_save.setEnabled(True)
+
+    def _ensure_licensee(self, name: str) -> int:
+        name = name.strip()
+        if not name:
+            raise ValueError("Licensee name is empty")
+        c = self.conn.cursor()
+        try:
+            c.execute("INSERT INTO Licensees(name) VALUES (?)", (name,))
+        except Exception:
+            pass
+        c.execute("SELECT id FROM Licensees WHERE name=?", (name,))
+        row = c.fetchone()
+        return row[0] if row else None
+
+    def _save(self):
+        try:
+            lic_text = self.lic_combo.currentText().strip()
+            if not lic_text:
+                QMessageBox.warning(self, "Missing", "Licensee is required.")
+                return
+            licensee_id = self._ensure_licensee(lic_text)
+            track_id = self.track_combo.currentData()
+            if not self._picked_path:
+                QMessageBox.warning(self, "Missing", "Please choose a PDF.")
+                return
+
+            # copy into managed folder and store RELATIVE path (portable)
+            self.data_dir.mkdir(parents=True, exist_ok=True)
+            filename = f"{int(time.time())}_{Path(self._picked_path).name}"
+            dst = self.data_dir / filename
+            shutil.copy2(self._picked_path, dst)
+            rel = str(dst.relative_to(DATA_DIR()))
+
+            c = self.conn.cursor()
+            c.execute(
+                "INSERT INTO Licenses(track_id, licensee_id, file_path, filename) VALUES (?,?,?,?)",
+                (track_id, licensee_id, rel, filename),
+            )
+            self.conn.commit()
+            self.saved.emit()
+            self.accept()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", str(e))
+
+
+class LicensesBrowserDialog(QDialog):
+    def __init__(self, conn, track_filter_id=None, parent=None):
+        super().__init__(parent)
+        self.conn = conn
+        self.setWindowTitle("Licenses")
+        self.setModal(True)
+        self.resize(900, 520)
+
+        # --- model/proxy ---
+        self.model = QStandardItemModel(self)
+        self.model.setHorizontalHeaderLabels(["Licensee", "Track", "Uploaded", "Filename", "_file", "_id"])
+        self.proxy = QSortFilterProxyModel(self)
+        self.proxy.setSourceModel(self.model)
+        self.proxy.setFilterCaseSensitivity(Qt.CaseInsensitive)
+        self.proxy.setFilterKeyColumn(-1)
+
+        # --- views ---
+        self.table = QTableView()
+        self.table.setModel(self.proxy)
+        self.table.setSelectionBehavior(QTableView.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.table.setEditTriggers(QTableView.NoEditTriggers)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._ctx_menu)
+        self.table.installEventFilter(self)
+
+        self.list = QListView()
+        self.list.setModel(self.proxy)
+        self.list.setSelectionMode(QListView.SingleSelection)
+        self.list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.list.customContextMenuRequested.connect(self._ctx_menu)
+        self.list.installEventFilter(self)
+
+        tabs = QTabWidget()
+        tabs.addTab(self.table, "Table")
+        tabs.addTab(self.list, "List")
+
+        # --- filter ---
+        self.filter_edit = QLineEdit()
+        self.filter_edit.setPlaceholderText("Fuzzy filter…")
+        self.filter_edit.textChanged.connect(self._apply_filter)
+
+        # --- actions (single instances, reused in menu + context) ---
+        self.act_preview = QAction("Preview (Space)", self)
+        self.act_preview.triggered.connect(self._preview_pdf)
+
+        self.act_download = QAction("Download PDF…", self)
+        self.act_download.triggered.connect(self._download_pdf)
+
+        self.act_edit = QAction("Edit…", self)
+        self.act_edit.triggered.connect(self._edit_selected)
+
+        self.act_delete = QAction("Delete Selected", self)
+        self.act_delete.triggered.connect(self._delete_selected)
+
+        # --- menubar ---
+        mbar = QMenuBar(self)
+        act_menu = mbar.addMenu("Actions")
+        act_menu.addAction(self.act_preview)
+        act_menu.addAction(self.act_download)
+        act_menu.addSeparator()
+        act_menu.addAction(self.act_edit)
+        act_menu.addAction(self.act_delete)
+
+        # --- layout ---
+        v = QVBoxLayout(self)
+        v.setMenuBar(mbar)
+        v.addWidget(self.filter_edit)
+        v.addWidget(tabs)
+
+        # --- init/load ---
+        self._track_filter_id = track_filter_id
+        self._load_rows(self._track_filter_id)
+
+        # after views exist, hook selection signals
+        self.table.selectionModel().selectionChanged.connect(lambda *_: self._update_action_states())
+        self.list.selectionModel().selectionChanged.connect(lambda *_: self._update_action_states())
+        self._update_action_states()
+
+    # ---------- helpers ----------
+    def _update_action_states(self):
+        has = bool(self._selected_record())
+        for a in (self.act_preview, self.act_download, self.act_edit, self.act_delete):
+            a.setEnabled(has)
+
+    def refresh_data(self):
+        filt = self.filter_edit.text()
+        self._load_rows(self._track_filter_id)
+        self.filter_edit.setText(filt)
+        self._update_action_states()
+
+    def _apply_filter(self, text):
+        pattern = ".*".join(map(re.escape, text.strip()))
+        self.proxy.setFilterRegularExpression(QRegularExpression(pattern, QRegularExpression.CaseInsensitiveOption))
+
+    def _load_rows(self, track_filter_id=None):
+        if track_filter_id is None:
+            track_filter_id = self._track_filter_id
+        self.model.removeRows(0, self.model.rowCount())
+        c = self.conn.cursor()
+        if track_filter_id:
+            c.execute(
+                "SELECT licensee, tracktitle, uploaded_at, filename, file_path, id "
+                "FROM vw_Licenses WHERE track_id=? ORDER BY uploaded_at DESC",
+                (track_filter_id,),
+            )
+        else:
+            c.execute(
+                "SELECT licensee, tracktitle, uploaded_at, filename, file_path, id "
+                "FROM vw_Licenses ORDER BY uploaded_at DESC"
+            )
+        for lic, track, up, fn, fp, _id in c.fetchall():
+            items = [
+                QStandardItem(lic),
+                QStandardItem(track),
+                QStandardItem(up),
+                QStandardItem(fn),
+                QStandardItem(fp or ""),
+                QStandardItem(str(_id)),
+            ]
+            for it in items:
+                it.setEditable(False)
+            self.model.appendRow(items)
+        self.table.setColumnHidden(4, True)  # _file
+        self.table.setColumnHidden(5, True)  # _id
+        self.table.resizeColumnsToContents()
+
+    def _selected_record(self):
+        # prefer the view that has focus; fall back to table
+        idx = self.table.currentIndex() if self.table.hasFocus() else self.list.currentIndex()
+        if not idx.isValid():
+            idx = self.table.currentIndex()
+            if not idx.isValid():
+                return None
+        src = self.proxy.mapToSource(idx)
+        row = src.row()
+        file_path = self.model.item(row, 4).text()
+        rec_id = int(self.model.item(row, 5).text())
+        return rec_id, file_path
+
+    def _ctx_menu(self, _pos):
+        # reuse same actions as menu bar
+        menu = QMenu(self)
+        menu.addAction(self.act_preview)
+        menu.addAction(self.act_download)
+        menu.addSeparator()
+        menu.addAction(self.act_edit)
+        menu.addAction(self.act_delete)
+        self._update_action_states()
+        menu.exec(QCursor.pos())
+
+    # ---------- actions ----------
+    def _preview_pdf(self):
+        rec = self._selected_record()
+        if not rec:
+            return
+        _, path = rec
+
+        # resolve relative -> absolute
+        abs_path = Path(path) if Path(path).is_absolute() else (DATA_DIR() / path)
+        if not abs_path.exists():
+            QMessageBox.warning(self, "Missing file", "The file could not be found.")
+            return
+
+        try:
+            from PySide6.QtPdfWidgets import QPdfView
+            from PySide6.QtPdf import QPdfDocument
+
+            dlg = QDialog(self)
+            dlg.setWindowTitle(abs_path.name)
+            dlg.resize(900, 640)
+
+            doc = QPdfDocument(dlg)
+            if doc.load(str(abs_path)) != QPdfDocument.NoError:
+                raise RuntimeError("Failed to load PDF")
+
+            view = QPdfView(dlg)
+            view.setDocument(doc)
+            view.setZoomMode(QPdfView.ZoomMode.FitToWidth)
+            view.setPageMode(QPdfView.PageMode.SinglePage)
+
+            layout = QVBoxLayout(dlg)
+            layout.addWidget(view)
+
+            from PySide6.QtCore import QTimer
+            dlg.finished.connect(lambda _: QTimer.singleShot(200, doc.deleteLater))
+            dlg.finished.connect(lambda _: QTimer.singleShot(250, view.deleteLater))
+
+            dlg.exec()
+        except Exception:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(abs_path)))
+
+    def _download_pdf(self):
+        rec = self._selected_record()
+        if not rec:
+            return
+        _, path = rec
+        abs_path = Path(path) if Path(path).is_absolute() else (DATA_DIR() / path)
+        if not abs_path.exists():
+            QMessageBox.warning(self, "Missing", "File not found.")
+            return
+        dst, _ = QFileDialog.getSaveFileName(self, "Save PDF as…", abs_path.name, "PDF (*.pdf)")
+        if dst:
+            shutil.copy2(str(abs_path), dst)
+
+    def _edit_selected(self):
+        rec = self._selected_record()
+        if not rec:
+            return
+        rec_id, path = rec
+        c = self.conn.cursor()
+        c.execute("SELECT track_id, licensee_id FROM Licenses WHERE id=?", (rec_id,))
+        row = c.fetchone()
+        if not row:
+            return
+        track_id, licensee_id = row
+        d = QDialog(self)
+        d.setWindowTitle("Edit License")
+        track_lbl = QLabel("Track cannot be changed")
+        lic_combo = QComboBox()
+        lic_combo.setEditable(True)
+        # load licensees
+        c.execute("SELECT id, name FROM Licensees ORDER BY name COLLATE NOCASE")
+        for lid, name in c.fetchall():
+            lic_combo.addItem(name, lid)
+        idx = lic_combo.findData(licensee_id)
+        if idx >= 0:
+            lic_combo.setCurrentIndex(idx)
+        file_lbl = QLabel(Path(path).name if path else "No file")
+        pick_btn = QPushButton("Replace PDF…")
+        new_path = {"p": None}
+
+        def pick():
+            p, _ = QFileDialog.getOpenFileName(self, "Select PDF", "", "PDF (*.pdf)")
+            if p:
+                new_path["p"] = p
+                file_lbl.setText(Path(p).name)
+
+        pick_btn.clicked.connect(pick)
+        btn_ok = QPushButton("Save")
+        btn_ok.clicked.connect(lambda: d.accept())
+        btn_cancel = QPushButton("Cancel")
+        btn_cancel.clicked.connect(lambda: d.reject())
+        f = QFormLayout(d)
+        f.addRow(track_lbl)
+        f.addRow("Licensee", lic_combo)
+        h = QHBoxLayout()
+        h.addWidget(file_lbl)
+        h.addWidget(pick_btn)
+        f.addRow("File", h)
+        bb = QHBoxLayout()
+        bb.addStretch()
+        bb.addWidget(btn_cancel)
+        bb.addWidget(btn_ok)
+        f.addRow(bb)
+        if d.exec() != QDialog.Accepted:
+            return
+        # ensure licensee
+        new_name = lic_combo.currentText().strip()
+        if new_name:
+            try:
+                c.execute("INSERT INTO Licensees(name) VALUES (?)", (new_name,))
+            except Exception:
+                pass
+            c.execute("SELECT id FROM Licensees WHERE name=?", (new_name,))
+            r = c.fetchone()
+            new_lic_id = r[0] if r else licensee_id
+        else:
+            new_lic_id = licensee_id
+        new_file_path = path
+        new_filename = Path(path).name if path else ""
+        if new_path["p"]:
+            store_dir = DATA_DIR() / "licenses"
+            store_dir.mkdir(parents=True, exist_ok=True)
+            new_filename = f"{int(time.time())}_{Path(new_path['p']).name}"
+            new_abs = store_dir / new_filename
+            shutil.copy2(new_path["p"], new_abs)
+            new_file_path = str(new_abs.relative_to(DATA_DIR()))
+        c.execute(
+            "UPDATE Licenses SET licensee_id=?, file_path=?, filename=? WHERE id=?",
+            (new_lic_id, new_file_path, new_filename, rec_id),
+        )
+        self.conn.commit()
+        self.refresh_data()
+
+    def _delete_selected(self):
+        sel = self.table.selectionModel().selectedRows()
+        if not sel:
+            QMessageBox.information(self, "Delete Licenses", "No records selected.")
+            return
+
+        ids, paths = [], []
+        for proxy_idx in sel:
+            src_idx = self.proxy.mapToSource(proxy_idx)
+            row = src_idx.row()
+            rec_id = int(self.model.item(row, 5).text())  # _id
+            fpath = self.model.item(row, 4).text()        # _file
+            ids.append(rec_id)
+            paths.append(fpath)
+
+        confirm = QMessageBox.question(
+            self, "Delete Licenses",
+            f"Delete {len(ids)} selected license(s)?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if confirm != QMessageBox.Yes:
+            return
+
+        delete_files = QMessageBox.question(
+            self, "Delete Files",
+            "Also delete the stored PDF files (if any)?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        ) == QMessageBox.Yes
+
+        c = self.conn.cursor()
+        for rec_id, fpath in zip(ids, paths):
+            try:
+                c.execute("DELETE FROM Licenses WHERE id=?", (rec_id,))
+                if delete_files and fpath:
+                    p = Path(fpath) if Path(fpath).is_absolute() else (DATA_DIR() / fpath)
+                    if p.exists():
+                        p.unlink()
+            except Exception as e:
+                logging.exception(f"Failed to delete license {rec_id}: {e}")
+        self.conn.commit()
+
+        QMessageBox.information(self, "Done", f"Deleted {len(ids)} license(s).")
+        self.refresh_data()
+
+    def _reload_current(self):
+        self.refresh_data()
+
+    def eventFilter(self, obj, ev):
+        if ev.type() == QEvent.KeyPress and ev.key() == Qt.Key_Space:
+            self._preview_pdf()
+            return True
+        return super().eventFilter(obj, ev)
+
+
+class LicenseeManagerDialog(QDialog):
+    def __init__(self, conn, parent=None):
+        super().__init__(parent)
+        self.conn = conn
+        self.setWindowTitle("Manage Licensees")
+        self.resize(420, 480)
+
+        self.list = QListWidget()
+        self._reload()
+
+        btn_add = QPushButton("Add")
+        btn_ren = QPushButton("Rename")
+        btn_del = QPushButton("Delete")
+        btn_add.clicked.connect(self._add)
+        btn_ren.clicked.connect(self._rename)
+        btn_del.clicked.connect(self._delete)
+
+        h = QHBoxLayout()
+        h.addWidget(btn_add)
+        h.addWidget(btn_ren)
+        h.addWidget(btn_del)
+        v = QVBoxLayout(self)
+        v.addWidget(self.list)
+        v.addLayout(h)
+
+    def _reload(self):
+        self.list.clear()
+        c = self.conn.cursor()
+        c.execute(
+            """
+            SELECT lic.id,
+                   lic.name,
+                   COALESCE(cnt.n, 0) AS n
+            FROM Licensees lic
+            LEFT JOIN (
+                SELECT licensee_id, COUNT(*) AS n
+                FROM Licenses
+                GROUP BY licensee_id
+            ) AS cnt ON cnt.licensee_id = lic.id
+            ORDER BY lic.name COLLATE NOCASE
+            """
+        )
+        for lid, name, n in c.fetchall():
+            it = QListWidgetItem(f"{name} ({n})")
+            it.setData(Qt.UserRole, lid)
+            it.setData(Qt.UserRole + 1, n)  # store count
+            it.setToolTip(f"{name}\nLinked licenses: {n}")
+            self.list.addItem(it)
+
+    def _add(self):
+        text, ok = QInputDialog.getText(self, "Add licensee", "Name:")
+        if not ok or not text.strip():
+            return
+        c = self.conn.cursor()
+        try:
+            c.execute("INSERT INTO Licensees(name) VALUES (?)", (text.strip(),))
+            self.conn.commit()
+        except Exception:
+            pass
+        self._reload()
+
+    def _rename(self):
+        it = self.list.currentItem()
+        if not it:
+            return
+        # strip " (n)" display suffix for default text
+        old = it.text().rsplit(" (", 1)[0]
+        text, ok = QInputDialog.getText(self, "Rename licensee", "Name:", text=old)
+        if not ok or not text.strip():
+            return
+        try:
+            self.conn.execute("UPDATE Licensees SET name=? WHERE id=?", (text.strip(), it.data(Qt.UserRole)))
+            self.conn.commit()
+            self._reload()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", str(e))
+
+    def _delete(self):
+        it = self.list.currentItem()
+        if not it:
+            return
+        lid = it.data(Qt.UserRole)
+        n = it.data(Qt.UserRole + 1) or 0
+        name = it.text().rsplit(" (", 1)[0]
+
+        if n > 0:
+            QMessageBox.warning(
+                self,
+                "In use",
+                f"“{name}” has {n} linked license record(s).\n"
+                "Remove or reassign those licenses before deleting this licensee.",
+            )
+            return
+
+        if (
+            QMessageBox.question(
+                self,
+                "Delete licensee",
+                f"Delete “{name}”?\nThis cannot be undone.",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            != QMessageBox.Yes
+        ):
+            return
+
+        self.conn.execute("DELETE FROM Licensees WHERE id=?", (lid,))
+        self.conn.commit()
+        self._reload()
+        
 class App(QMainWindow):
     BASE_HEADERS = [
         'ID', 'ISRC', 'Entry Date', 'Track Title', 'Artist Name',
@@ -875,6 +1449,11 @@ class App(QMainWindow):
 
         # View menu
         view_menu = QMenu("View", self)
+
+
+        act_view_licenses = QAction("Licenses…", self)
+        act_view_licenses.triggered.connect(lambda: self.open_licenses_browser(track_filter_id=None))
+        view_menu.addAction(act_view_licenses)
         self.menu_bar.addMenu(view_menu)
 
         table_view_menu = QMenu("Table View", self)
@@ -941,6 +1520,11 @@ class App(QMainWindow):
         edit_menu.addAction(act_manage_artists)
 
         act_manage_albums = QAction("Manage stored album names…", self)
+
+
+        act_manage_licensees = QAction("Manage licensee parties…", self)
+        act_manage_licensees.triggered.connect(lambda: LicenseeManagerDialog(self.conn, parent=self).exec())
+        edit_menu.addAction(act_manage_licensees)
         act_manage_albums.triggered.connect(self._manage_stored_albums)
         edit_menu.addAction(act_manage_albums)
 
@@ -1552,6 +2136,41 @@ class App(QMainWindow):
         self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_upc ON Tracks(upc)")
         self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_genre ON Tracks(genre)")
 
+        # Licenses & Licensees
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS Licensees (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE
+            )
+        """)
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS Licenses (
+                id INTEGER PRIMARY KEY,
+                track_id INTEGER NOT NULL,
+                licensee_id INTEGER NOT NULL,
+                file_path TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                uploaded_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY(track_id) REFERENCES Tracks(id) ON DELETE CASCADE,
+                FOREIGN KEY(licensee_id) REFERENCES Licensees(id) ON DELETE RESTRICT
+            )
+        """)
+        self.cursor.execute("""
+            CREATE VIEW IF NOT EXISTS vw_Licenses AS
+            SELECT l.id,
+                lic.name AS licensee,
+                t.track_title AS tracktitle,
+                l.uploaded_at,
+                l.filename,
+                l.file_path,
+                l.track_id,
+                l.licensee_id
+            FROM Licenses l
+            JOIN Licensees lic ON lic.id = l.licensee_id
+            JOIN Tracks t ON t.id = l.track_id
+        """)
+
+
         self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS TrackArtists (
                 track_id INTEGER NOT NULL,
@@ -1725,6 +2344,10 @@ class App(QMainWindow):
             elif v == 9:
                 self._apply_migration(9, self._mig_9_to_10)
                 v = 10
+            elif v == 10:
+                self._apply_migration(10, self._mig_10_to_11)
+                v = 11
+
             else:
                 self.logger.warning(f"Unknown migration path from version {v}")
                 break
@@ -2013,6 +2636,42 @@ class App(QMainWindow):
                 SELECT RAISE(ABORT, 'Non-BLOB field must not store blob_value');
             END
         """)
+
+    def _mig_10_to_11(self):
+        cur = self.conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS Licensees (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS Licenses (
+                id INTEGER PRIMARY KEY,
+                track_id INTEGER NOT NULL,
+                licensee_id INTEGER NOT NULL,
+                file_path TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                uploaded_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY(track_id) REFERENCES Tracks(id) ON DELETE CASCADE,
+                FOREIGN KEY(licensee_id) REFERENCES Licensees(id) ON DELETE RESTRICT
+            )
+        """)
+        cur.execute("""
+            CREATE VIEW IF NOT EXISTS vw_Licenses AS
+            SELECT l.id,
+                lic.name AS licensee,
+                t.track_title AS tracktitle,
+                l.uploaded_at,
+                l.filename,
+                l.file_path,
+                l.track_id,
+                l.licensee_id
+            FROM Licenses l
+            JOIN Licensees lic ON lic.id = l.licensee_id
+            JOIN Tracks t ON t.id = l.track_id
+        """)
+        self.conn.commit()
 
 
     # --- Audit helpers ---
@@ -3724,6 +4383,23 @@ class App(QMainWindow):
         act_delete = QAction("Delete Entry", self)
         act_delete.triggered.connect(self.delete_entry)
         menu.addAction(act_delete)
+            
+        menu.addSeparator()
+        # Licenses actions
+        try:
+            id_item = self.table.item(row, 0)
+            track_id = int(id_item.text()) if id_item else None
+        except Exception:
+            track_id = None
+        if track_id:
+            act_add_license = QAction("Add License to this Track…", self)
+            act_add_license.triggered.connect(lambda: self.open_license_upload(preselect_track_id=track_id))
+            menu.addAction(act_add_license)
+
+            act_view_licenses = QAction("View Licenses for this Track…", self)
+            act_view_licenses.triggered.connect(lambda: self.open_licenses_browser(track_filter_id=track_id))
+            menu.addAction(act_view_licenses)
+
 
         cell_item = self.table.item(row, col)
         cell_text = cell_item.text() if cell_item else ""
@@ -4701,6 +5377,31 @@ class App(QMainWindow):
         dlg.show()
         dlg._player.play()
 
+    def _list_all_tracks(self):
+        cur = self.conn.cursor()
+        cur.execute("SELECT id, track_title FROM Tracks ORDER BY track_title COLLATE NOCASE")
+        return cur.fetchall()
+
+    def _list_licensees(self):
+        cur = self.conn.cursor()
+        cur.execute("SELECT id, name FROM Licensees ORDER BY name COLLATE NOCASE")
+        return cur.fetchall()
+
+    def open_license_upload(self, preselect_track_id=None):
+        dlg = LicenseUploadDialog(
+            self.conn,
+            self._list_all_tracks(),
+            self._list_licensees(),
+            preselect_track_id=preselect_track_id,
+            parent=self,
+            data_dir=(DATA_DIR() / "licenses"),
+        )
+        dlg.saved.connect(lambda: self.statusBar().showMessage("License saved", 3000))
+        dlg.exec()
+
+    def open_licenses_browser(self, track_filter_id=None):
+        LicensesBrowserDialog(self.conn, track_filter_id=track_filter_id, parent=self).exec()
+
 
 class EditDialog(QDialog):
     """Edits a single Track row (base columns only)."""
@@ -5159,6 +5860,18 @@ class _AudioPreviewDialog(QDialog):
 
         super().keyPressEvent(e)
 
+
+
+# ==== Licenses: helpers & actions ====
+def open_license_upload(self, preselect_track_id=None):
+    dlg = LicenseUploadDialog(self.conn, self._list_all_tracks(), self._list_licensees(),
+                              preselect_track_id=preselect_track_id, parent=self,
+                              data_dir=(DATA_DIR() / "licenses"))
+    dlg.saved.connect(lambda: self.statusBar().showMessage("License saved", 3000))
+    dlg.exec()
+
+def open_licenses_browser(self, track_filter_id=None):
+    LicensesBrowserDialog(self.conn, track_filter_id=track_filter_id, parent=self).exec()
 
 class WaveformWidget(QWidget):
     def __init__(self, parent=None):
