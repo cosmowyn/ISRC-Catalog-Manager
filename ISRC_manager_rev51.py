@@ -123,7 +123,7 @@ FIELD_TYPE_CHOICES = ["text", "dropdown", "checkbox", "date", "blob_image", "blo
 
 # ---- DB schema versioning ----
 SCHEMA_BASELINE = 1   # First schema version
-SCHEMA_TARGET   = 11  # Bump when you add a new migration
+SCHEMA_TARGET   = 14  # Bump when you add a new migration
 
 
 # =============================================================================
