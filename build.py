@@ -24,17 +24,33 @@ import sys
 import textwrap
 from pathlib import Path
 import venv
+from typing import Optional
 
-try:
-    from PIL import Image
-except ImportError:
-    Image = None  # Icon factory will be unavailable if Pillow is missing
+# Pillow is loaded lazily so this script can run on a clean machine.
+Image = None  # type: ignore[assignment]
+
+
+def ensure_pillow_loaded():
+    """
+    Lazy-load Pillow's Image module.
+
+    Returns:
+        Image module object if available, otherwise None.
+    """
+    global Image
+    if Image is not None:
+        return Image
+    try:
+        from PIL import Image as _Image  # type: ignore[import]
+        Image = _Image
+    except ImportError:
+        Image = None
+    return Image
+
 
 # Icon-factory constants (used when creating icons via GUI)
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".tif", ".tiff", ".bmp", ".webp"}
 MIN_MACOS_ICON_SIZE = 1024  # Recommended base size for macOS .icns
-
-from typing import Optional
 
 # ---- Project constants ----
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -137,7 +153,7 @@ ASSETS = [PROJECT_ROOT / "LogoWhite.png"]  # will be placed under assets/ if pre
 
 def _factory_select_image_file(root) -> Path | None:
     """Open a file dialog to select an image, validate extension, and return the path."""
-    if Image is None:
+    if ensure_pillow_loaded() is None:
         return None
 
     from tkinter import filedialog, messagebox
@@ -175,7 +191,7 @@ def _factory_select_image_file(root) -> Path | None:
             # loop again
 
 
-def _factory_crop_to_center_square(img: Image.Image) -> Image.Image:
+def _factory_crop_to_center_square(img) -> "Image.Image":
     """Crop image to centered 1:1 square."""
     w, h = img.size
     side = min(w, h)
@@ -186,7 +202,7 @@ def _factory_crop_to_center_square(img: Image.Image) -> Image.Image:
     return img.crop((left, top, right, bottom))
 
 
-def _factory_get_square_image(root) -> Image.Image | None:
+def _factory_get_square_image(root) -> "Image.Image | None":
     """
     Select an image and ensure it's square.
     If not square, let user choose to crop center or pick another image.
@@ -195,7 +211,7 @@ def _factory_get_square_image(root) -> Image.Image | None:
     let them reselect or accept upscaling.
     Returns an RGBA square image, or None if user cancels.
     """
-    if Image is None:
+    if ensure_pillow_loaded() is None:
         return None
 
     from tkinter import messagebox
@@ -339,8 +355,9 @@ def _factory_output_dir(os_name: str) -> Path:
     return out_dir
 
 
-def _factory_generate_windows_icon(img: Image.Image, out_path: Path) -> None:
+def _factory_generate_windows_icon(img, out_path: Path) -> None:
     """Generate a multi-size .ico for Windows."""
+    ensure_pillow_loaded()
     min_side = min(img.size)
     if min_side < 256:
         img = img.resize((256, 256), Image.LANCZOS)
@@ -357,15 +374,17 @@ def _factory_generate_windows_icon(img: Image.Image, out_path: Path) -> None:
     img.save(out_path, format="ICO", sizes=icon_sizes)
 
 
-def _factory_generate_macos_icon(img: Image.Image, out_path: Path) -> None:
+def _factory_generate_macos_icon(img, out_path: Path) -> None:
     """Generate a .icns for macOS."""
+    ensure_pillow_loaded()
     if img.size[0] < MIN_MACOS_ICON_SIZE:
         img = img.resize((MIN_MACOS_ICON_SIZE, MIN_MACOS_ICON_SIZE), Image.LANCZOS)
     img.save(out_path, format="ICNS")
 
 
-def _factory_generate_linux_icon(img: Image.Image, out_path: Path) -> None:
+def _factory_generate_linux_icon(img, out_path: Path) -> None:
     """Generate a PNG icon for Linux (512x512)."""
+    ensure_pillow_loaded()
     target_size = 512
     if img.size[0] != target_size:
         img = img.resize((target_size, target_size), Image.LANCZOS)
@@ -380,7 +399,7 @@ def _factory_create_icon_for_current_os(root) -> Path | None:
     """
     from tkinter import messagebox
 
-    if Image is None:
+    if ensure_pillow_loaded() is None:
         messagebox.showerror(
             "Pillow not available",
             "Pillow (PIL) is not installed in this environment.\n"

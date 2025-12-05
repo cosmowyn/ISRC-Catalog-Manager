@@ -1,1 +1,10 @@
+# PyInstaller output
+build/
+dist/
+*.spec
+
+# Virtual environments
 .venv/
+
+# macOS junk
+.DS_Store
