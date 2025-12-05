@@ -3,16 +3,18 @@
 Build and install ISRCManager (PySide6) without bundling a database.
 
 - Detects and re-execs into ./.venv if present.
-- Ensures PyInstaller is available in the active environment.
-- Builds a GUI app (default --onedir; pass --onefile to override).
+- Ensures required dependencies are installed into that environment.
+- Can either:
+    * Only create/refresh the virtual environment + dependencies, or
+    * Also build and install the packaged application via PyInstaller.
+- Prompts the user on launch which mode to use (GUI dialog if possible,
+  falling back to a console prompt).
 - Prompts the user for an install directory (GUI); defaults to a safe user path.
 - Creates a project layout there and copies the packaged app.
 - Does NOT package or copy any existing Database files.
 
-Usage:
+Typical usage:
   python build_and_install.py
-  python build_and_install.py --onefile
-  python build_and_install.py --console   # show console window (debug)
 """
 
 import argparse
@@ -774,12 +776,81 @@ def _pick_build_options_by_os() -> tuple[bool, bool]:
     return True, False
 
 
+def ask_build_mode() -> str:
+    """
+    Ask the user whether to:
+      - only prepare the environment ("env_only"), or
+      - prepare env + build & install app ("build").
+
+    Prefers a Tkinter dialog if available, falls back to console input.
+
+    Returns:
+        "env_only" or "build". Exits the script on user cancellation.
+    """
+    # First try a GUI dialog
+    try:
+        from tkinter import messagebox
+
+        root = get_tk_root()
+        root.update()
+
+        msg = (
+            "This script can perform two types of setup:\n\n"
+            "  • Prepare a Python virtual environment and install all required\n"
+            "    Python packages (no build).\n"
+            "  • Prepare the environment and also build & install the\n"
+            "    ISRCManager application using PyInstaller.\n\n"
+            "Do you want to build and install the application now?\n\n"
+            "Yes  → Create environment AND build/install the app.\n"
+            "No   → Only create/refresh the environment (no build).\n"
+        )
+
+        res = messagebox.askyesno(
+            "ISRCManager setup",
+            msg,
+            parent=root,
+        )
+        if res:
+            print("[mode] Environment + build/install selected.")
+            return "build"
+        else:
+            print("[mode] Environment-only setup selected.")
+            return "env_only"
+    except Exception as e:
+        print(f"[warn] GUI mode selection unavailable ({e}); falling back to console prompt.")
+
+    # Console fallback
+    while True:
+        print(
+            "\nISRCManager setup options:\n"
+            "  [b]  Create virtual environment, install dependencies,\n"
+            "       and build/install the ISRCManager application.\n"
+            "  [e]  Only create/refresh the virtual environment and\n"
+            "       install dependencies (no build, no installer).\n"
+            "  [q]  Quit without making changes.\n"
+        )
+        choice = input("Choose mode [b/e/q]: ").strip().lower()
+        if choice in ("b", "build"):
+            print("[mode] Environment + build/install selected.")
+            return "build"
+        if choice in ("e", "env", "env_only"):
+            print("[mode] Environment-only setup selected.")
+            return "env_only"
+        if choice in ("q", "quit", "exit"):
+            print("[info] User aborted setup.")
+            sys.exit(0)
+        print("Invalid choice, please enter 'b', 'e' or 'q'.")
+
+
 def main():
     # Ensure .venv exists first, then re-exec into it if needed
     venv_path = PROJECT_ROOT / ".venv"
     if not venv_path.exists():
         create_venv(venv_path)
     reexec_in_dotvenv_if_found()
+
+    # Decide what to do: env-only or env + build
+    mode = ask_build_mode()
 
     # Inside .venv now (or already was). Ensure pip + requirements installed.
     try:
@@ -789,6 +860,13 @@ def main():
     except Exception as e:
         print(f"[warn] Skipping requirements install step: {e}")
 
+    # If the user only wanted the environment, stop here
+    if mode == "env_only":
+        print("\n[ok] Environment setup complete. No build or installation was performed.")
+        destroy_tk_root()
+        return
+
+    # Otherwise, continue with the build/install as before
     ensure_pyinstaller()
 
     # 1) Build binary
