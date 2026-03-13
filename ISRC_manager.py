@@ -66,9 +66,11 @@ from isrc_manager.services import (
     CustomFieldDefinitionService,
     CustomFieldValueService,
     DatabaseMaintenanceService,
+    DatabaseSessionService,
     XMLExportService,
     XMLImportService,
     LicenseService,
+    ProfileKVService,
     ProfileStoreService,
     SettingsMutationService,
     TrackCreatePayload,
@@ -1053,6 +1055,7 @@ class App(QMainWindow):
 
         self.backups_dir = DATA_DIR() / "backups"
         self.backups_dir.mkdir(parents=True, exist_ok=True)
+        self.database_session = DatabaseSessionService()
         self.profile_store = ProfileStoreService(self.database_dir)
         self.database_maintenance = DatabaseMaintenanceService(self.backups_dir)
 
@@ -1094,6 +1097,7 @@ class App(QMainWindow):
         self.catalog_service = None
         self.catalog_reads = None
         self.license_service = None
+        self.profile_kv = None
         self.custom_field_definitions = None
         self.custom_field_values = None
         self.xml_export_service = None
@@ -1504,6 +1508,7 @@ class App(QMainWindow):
         self.catalog_service = CatalogAdminService(self.conn) if self.conn is not None else None
         self.catalog_reads = CatalogReadService(self.conn) if self.conn is not None else None
         self.license_service = LicenseService(self.conn, DATA_DIR()) if self.conn is not None else None
+        self.profile_kv = ProfileKVService(self.conn) if self.conn is not None else None
         self.custom_field_definitions = (
             CustomFieldDefinitionService(self.conn) if self.conn is not None else None
         )
@@ -1583,20 +1588,20 @@ class App(QMainWindow):
 
     # --- Artist Code (AA) ---
     def _migrate_artist_code_from_qsettings_if_needed(self):
-        if self._profile_get("isrc_artist_code") is None:
+        if self.profile_kv.get("isrc_artist_code") is None:
             legacy = self.settings.value("isrc/artist_code", None)
             code = str(legacy) if legacy is not None else ""
             if not re.fullmatch(r"\d{2}", code):
                 code = "00"
-            self._profile_set("isrc_artist_code", code)
+            self.profile_kv.set("isrc_artist_code", code)
             self.logger.info("Migrated ISRC artist code from QSettings into profile DB")
 
 
     def load_artist_code(self) -> str:
-        code = self._profile_get("isrc_artist_code", None)
+        code = self.profile_kv.get("isrc_artist_code", None)
         if not (isinstance(code, str) and re.fullmatch(r"\d{2}", (code or ""))):
             code = "00"
-            self._profile_set("isrc_artist_code", code)
+            self.profile_kv.set("isrc_artist_code", code)
             self.logger.info("Normalized invalid/empty ISRC artist code to '00'")
         return code
 
@@ -1766,19 +1771,10 @@ class App(QMainWindow):
         self.populate_all_comboboxes()
 
     def _close_database_connection(self):
-        try:
-            if self.conn:
-                try:
-                    self.conn.commit()
-                except Exception:
-                    pass
-                try:
-                    self.conn.close()
-                except Exception:
-                    pass
-        finally:
-            self.conn = None
-            self.cursor = None
+        self.database_session.close(self.conn)
+        self.conn = None
+        self.cursor = None
+        self.profile_kv = None
 
     # -------------------------------------------------------------------------
     # DB: open/init helpers + MIGRATIONS
@@ -1786,12 +1782,9 @@ class App(QMainWindow):
     def open_database(self, path: str):
         """Open (or create) the SQLite DB at path; initialize schema if needed."""
         self._close_database_connection()
-
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-
-        self.conn = sqlite3.connect(path)
-
-        self._ensure_profile_store()
+        session = self.database_session.open(path)
+        self.conn = session.conn
+        self.cursor = session.cursor
         self._init_services()
 
         self._migrate_artist_code_from_qsettings_if_needed()
@@ -1800,14 +1793,8 @@ class App(QMainWindow):
 
         self.logger.info(f"Profile ISRC artist code active: '{current_code}'")
 
-        self.cursor = self.conn.cursor()
-        self.cursor.execute("PRAGMA foreign_keys = ON")
-        self.cursor.execute("PRAGMA journal_mode = WAL")
-        self.cursor.execute("PRAGMA synchronous = NORMAL")
-
         self.current_db_path = path
-        self.settings.setValue("db/last_path", path)
-        self.settings.sync()
+        self.database_session.remember_last_path(self.settings, path)
         self.logger.info("Settings synced to disk")
 
         # Create base tables/indices if missing
@@ -2010,32 +1997,6 @@ class App(QMainWindow):
     # -------------------------------------------------------------------------
     # Profile Key/Value store (per-database)
     # -------------------------------------------------------------------------
-    def _ensure_profile_store(self):
-        cur = self.conn.cursor()
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS app_kv (
-                key   TEXT PRIMARY KEY,
-                value TEXT
-            )
-        """)
-        self.conn.commit()
-
-    def _profile_get(self, key: str, default=None):
-        cur = self.conn.cursor()
-        cur.execute("SELECT value FROM app_kv WHERE key=?", (key,))
-        row = cur.fetchone()
-        return row[0] if row else default
-
-    def _profile_set(self, key: str, value):
-        cur = self.conn.cursor()
-        cur.execute(
-            "INSERT INTO app_kv(key, value) VALUES(?, ?) "
-            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            (key, str(value)),
-        )
-        self.conn.commit()
-
-
     def migrate_schema(self):
         # Ensure log table exists
         self._ensure_migration_log()

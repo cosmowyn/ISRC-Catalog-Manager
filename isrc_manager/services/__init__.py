@@ -7,6 +7,7 @@ from .database_admin import BackupResult, DatabaseMaintenanceService, ProfileSto
 from .exports import XMLExportService
 from .imports import ImportExecutionResult, ImportInspection, ImportRecord, XMLImportService
 from .licenses import LicenseRecord, LicenseRow, LicenseService
+from .session import DatabaseSessionService, OpenDatabaseSession, ProfileKVService
 from .settings_mutations import SettingsMutationService
 from .tracks import TrackCreatePayload, TrackService, TrackUpdatePayload
 
@@ -19,6 +20,7 @@ __all__ = [
     "CustomFieldDefinitionService",
     "CustomFieldValueService",
     "DatabaseMaintenanceService",
+    "DatabaseSessionService",
     "XMLExportService",
     "ImportExecutionResult",
     "ImportInspection",
@@ -27,6 +29,8 @@ __all__ = [
     "LicenseRecord",
     "LicenseRow",
     "LicenseService",
+    "OpenDatabaseSession",
+    "ProfileKVService",
     "ProfileStoreService",
     "RestoreResult",
     "SettingsMutationService",
