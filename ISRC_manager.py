@@ -72,6 +72,7 @@ from isrc_manager.services import (
     ProfileKVService,
     ProfileStoreService,
     ProfileWorkflowService,
+    SettingsReadService,
     SettingsMutationService,
     TrackCreatePayload,
     TrackService,
@@ -1095,6 +1096,7 @@ class App(QMainWindow):
         self.conn = None
         self.cursor = None
         self.track_service = None
+        self.settings_reads = None
         self.settings_mutations = None
         self.catalog_service = None
         self.catalog_reads = None
@@ -1514,6 +1516,7 @@ class App(QMainWindow):
             else None
         )
         self.track_service = TrackService(self.conn) if self.conn is not None else None
+        self.settings_reads = SettingsReadService(self.conn) if self.conn is not None else None
         self.settings_mutations = (
             SettingsMutationService(self.conn, self.settings) if self.conn is not None else None
         )
@@ -1777,6 +1780,7 @@ class App(QMainWindow):
         self.cursor = None
         self.schema_service = None
         self.profile_kv = None
+        self.settings_reads = None
 
     # -------------------------------------------------------------------------
     # DB: open/init helpers + MIGRATIONS
@@ -1846,8 +1850,7 @@ class App(QMainWindow):
 
     # --- NEW: Variant helpers (repurposed as Artist Code AA) ---
     def load_isrc_prefix(self):
-        row = self.cursor.execute("SELECT prefix FROM ISRC_Prefix WHERE id = 1").fetchone()
-        return (row[0] or "").strip() if row else ""
+        return self.settings_reads.load_isrc_prefix()
 
     def load_active_custom_fields(self):
         return self.custom_field_definitions.list_active_fields()
@@ -2580,8 +2583,7 @@ class App(QMainWindow):
                 QMessageBox.critical(self, "Error", f"Could not save prefix:\n{e}")
 
     def set_sena_number(self):
-        row = self.cursor.execute("SELECT number FROM SENA WHERE id=1").fetchone()
-        current = str(row[0]) if row else ""
+        current = self.settings_reads.load_sena_number()
         text, ok = QInputDialog.getText(self, "Set SENA Number", "Enter SENA Number:", text=current)
         if ok:
             try:
@@ -2595,8 +2597,7 @@ class App(QMainWindow):
                 QMessageBox.critical(self, "Error", f"Could not save SENA number:\n{e}")
 
     def set_btw_number(self):
-        row = self.cursor.execute("SELECT nr FROM BTW WHERE id=1").fetchone()
-        current = row[0] if row else ""
+        current = self.settings_reads.load_btw_number()
         text, ok = QInputDialog.getText(self, "Set BTW Number", "Enter BTW Number:", text=current)
         if ok:
             try:
@@ -2610,8 +2611,7 @@ class App(QMainWindow):
                 QMessageBox.critical(self, "Error", f"Could not save BTW number:\n{e}")
 
     def set_buma_info(self):
-        row = self.cursor.execute("SELECT relatie_nummer FROM BUMA_STEMRA WHERE id=1").fetchone()
-        current_rel = str(row[0]) if row else ""
+        current_rel = self.settings_reads.load_buma_relatie_nummer()
         relatie_nummer, ok = QInputDialog.getText(self, "Set BUMA Relatie Nummer", "Enter Relatie Nummer:", text=current_rel)
         if ok:
             try:
@@ -2625,8 +2625,7 @@ class App(QMainWindow):
                 QMessageBox.critical(self, "Error", f"Could not save BUMA relatie nummer:\n{e}")
 
     def set_ipi_info(self):
-        row = self.cursor.execute("SELECT ipi FROM BUMA_STEMRA WHERE id=1").fetchone()
-        current_ipi = str(row[0]) if row else ""
+        current_ipi = self.settings_reads.load_buma_ipi()
         ipi, ok = QInputDialog.getText(self, "Set BUMA IPI", "Enter IPI Number:", text=current_ipi)
         if ok:
             try:
@@ -2641,15 +2640,12 @@ class App(QMainWindow):
 
     def show_settings_summary(self):
         """View-only summary dialog (no editing)."""
-        isrc = self.load_isrc_prefix() or "(not set)"
-        sena = self.cursor.execute("SELECT number FROM SENA WHERE id=1").fetchone()
-        btw  = self.cursor.execute("SELECT nr FROM BTW WHERE id=1").fetchone()
-        buma = self.cursor.execute("SELECT relatie_nummer, ipi FROM BUMA_STEMRA WHERE id=1").fetchone()
-
-        sena_txt = sena[0] if sena and sena[0] else "(not set)"
-        btw_txt  = btw[0]  if btw  and btw[0]  else "(not set)"
-        rel_txt  = buma[0] if buma and buma[0] else "(not set)"
-        ipi_txt  = buma[1] if buma and buma[1] else "(not set)"
+        registration = self.settings_reads.load_registration_settings()
+        isrc = registration.isrc_prefix or "(not set)"
+        sena_txt = registration.sena_number or "(not set)"
+        btw_txt = registration.btw_number or "(not set)"
+        rel_txt = registration.buma_relatie_nummer or "(not set)"
+        ipi_txt = registration.buma_ipi or "(not set)"
         db_ver   = self._get_db_version()
 
         dlg = QDialog(self)
