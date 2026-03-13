@@ -372,6 +372,9 @@ class DatabaseSchemaService:
             elif version == 12:
                 self._apply_migration(12, self._mig_12_to_13)
                 version = 13
+            elif version == 13:
+                self._apply_migration(13, self._mig_13_to_14)
+                version = 14
             else:
                 self.logger.warning("Unknown migration path from version %s", version)
                 break
@@ -759,6 +762,12 @@ class DatabaseSchemaService:
         self._ensure_current_track_columns()
         self._migrate_promoted_custom_fields()
 
+    def _mig_13_to_14(self) -> None:
+        # Reconcile promoted defaults again for databases that already reached v13
+        # before the typed standard-field and legacy-blob cleanup logic was finalized.
+        self._ensure_current_track_columns()
+        self._migrate_promoted_custom_fields()
+
     def _ensure_current_track_columns(self) -> None:
         cols = self._table_columns("Tracks")
         additions = (
@@ -786,8 +795,9 @@ class DatabaseSchemaService:
         self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_buma_work_number ON Tracks(buma_work_number)")
 
     def _migrate_promoted_custom_fields(self) -> None:
+        placeholders = ",".join("?" for _ in PROMOTED_CUSTOM_FIELDS)
         defs = self.cursor.execute(
-            "SELECT id, name, field_type FROM CustomFieldDefs WHERE name IN (?, ?, ?, ?)",
+            f"SELECT id, name, field_type FROM CustomFieldDefs WHERE name IN ({placeholders})",
             tuple(field["name"] for field in PROMOTED_CUSTOM_FIELDS),
         ).fetchall()
         if not defs:
@@ -796,6 +806,8 @@ class DatabaseSchemaService:
         for field_id, name, field_type in defs:
             spec = next((item for item in PROMOTED_CUSTOM_FIELDS if item["name"] == name), None)
             if spec is None:
+                continue
+            if str(field_type or "").strip().lower() != str(spec["field_type"]).strip().lower():
                 continue
 
             if spec["field_type"] in ("blob_audio", "blob_image"):
@@ -807,27 +819,39 @@ class DatabaseSchemaService:
                     size_column=spec["size_column"],
                 )
             else:
-                self.cursor.execute(
-                    f"""
-                    UPDATE Tracks
-                    SET {spec['value_column']} = (
-                        SELECT value
-                        FROM CustomFieldValues
-                        WHERE field_def_id = ?
-                          AND track_id = Tracks.id
-                    )
-                    WHERE EXISTS (
-                        SELECT 1
-                        FROM CustomFieldValues
-                        WHERE field_def_id = ?
-                          AND track_id = Tracks.id
-                    )
-                    """,
-                    (int(field_id), int(field_id)),
+                self._migrate_promoted_text_field(
+                    field_id=int(field_id),
+                    value_column=spec["value_column"],
                 )
 
             self.cursor.execute("DELETE FROM CustomFieldValues WHERE field_def_id=?", (int(field_id),))
             self.cursor.execute("DELETE FROM CustomFieldDefs WHERE id=?", (int(field_id),))
+
+    def _migrate_promoted_text_field(self, *, field_id: int, value_column: str) -> None:
+        rows = self.cursor.execute(
+            """
+            SELECT track_id, value
+            FROM CustomFieldValues
+            WHERE field_def_id = ?
+              AND value IS NOT NULL
+            """,
+            (int(field_id),),
+        ).fetchall()
+        for track_id, value in rows:
+            if value is None:
+                continue
+            current = self.cursor.execute(
+                f"SELECT {value_column} FROM Tracks WHERE id=?",
+                (int(track_id),),
+            ).fetchone()
+            if not current:
+                continue
+            if str(current[0] or "").strip():
+                continue
+            self.cursor.execute(
+                f"UPDATE Tracks SET {value_column}=? WHERE id=?",
+                (value, int(track_id)),
+            )
 
     def _migrate_promoted_blob_field(
         self,
@@ -850,13 +874,25 @@ class DatabaseSchemaService:
         for track_id, blob_value, mime_type, size_bytes in rows:
             if blob_value is None:
                 continue
-            stored_path, resolved_mime, resolved_size = self._write_promoted_blob_file(
-                track_id=int(track_id),
-                field_name=field_name,
-                blob_value=blob_value,
-                mime_type=mime_type,
-                size_bytes=size_bytes,
-            )
+            current = self.cursor.execute(
+                f"SELECT {path_column}, {mime_column}, {size_column} FROM Tracks WHERE id=?",
+                (int(track_id),),
+            ).fetchone()
+            if not current:
+                continue
+            current_path, current_mime, current_size = current
+            if self._stored_media_needs_backfill(current_path):
+                stored_path, resolved_mime, resolved_size = self._write_promoted_blob_file(
+                    track_id=int(track_id),
+                    field_name=field_name,
+                    blob_value=blob_value,
+                    mime_type=mime_type,
+                    size_bytes=size_bytes,
+                )
+            else:
+                stored_path = str(current_path or "")
+                resolved_mime = str(current_mime or mime_type or "")
+                resolved_size = int(current_size or 0) or int(size_bytes or 0)
             self.cursor.execute(
                 f"""
                 UPDATE Tracks
@@ -865,6 +901,17 @@ class DatabaseSchemaService:
                 """,
                 (stored_path, resolved_mime, resolved_size, int(track_id)),
             )
+
+    def _stored_media_needs_backfill(self, stored_path: str | None) -> bool:
+        clean_path = str(stored_path or "").strip()
+        if not clean_path:
+            return True
+        path = Path(clean_path)
+        if path.is_absolute():
+            return not path.exists()
+        if self.data_root is None:
+            return False
+        return not (self.data_root / path).exists()
 
     def _write_promoted_blob_file(
         self,

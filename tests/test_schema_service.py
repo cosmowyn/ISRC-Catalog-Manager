@@ -176,6 +176,234 @@ class DatabaseSchemaServiceTests(unittest.TestCase):
             finally:
                 conn.close()
 
+    def test_migrate_13_to_14_reconciles_leftover_promoted_custom_fields(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = sqlite3.connect(":memory:")
+            try:
+                conn.executescript(
+                    """
+                    CREATE TABLE Tracks (
+                        id INTEGER PRIMARY KEY,
+                        isrc TEXT NOT NULL,
+                        isrc_compact TEXT,
+                        db_entry_date DATE,
+                        audio_file_path TEXT,
+                        audio_file_mime_type TEXT,
+                        audio_file_size_bytes INTEGER NOT NULL DEFAULT 0,
+                        track_title TEXT NOT NULL,
+                        catalog_number TEXT,
+                        album_art_path TEXT,
+                        album_art_mime_type TEXT,
+                        album_art_size_bytes INTEGER NOT NULL DEFAULT 0,
+                        main_artist_id INTEGER NOT NULL,
+                        buma_work_number TEXT,
+                        album_id INTEGER,
+                        release_date DATE,
+                        track_length_sec INTEGER NOT NULL DEFAULT 0,
+                        iswc TEXT,
+                        upc TEXT,
+                        genre TEXT
+                    );
+                    CREATE TABLE CustomFieldDefs (
+                        id INTEGER PRIMARY KEY,
+                        name TEXT NOT NULL UNIQUE,
+                        active INTEGER NOT NULL DEFAULT 1,
+                        sort_order INTEGER,
+                        field_type TEXT NOT NULL DEFAULT 'text',
+                        options TEXT
+                    );
+                    CREATE TABLE CustomFieldValues (
+                        track_id INTEGER NOT NULL,
+                        field_def_id INTEGER NOT NULL,
+                        value TEXT,
+                        blob_value BLOB,
+                        mime_type TEXT,
+                        size_bytes INTEGER NOT NULL DEFAULT 0,
+                        PRIMARY KEY (track_id, field_def_id)
+                    );
+                    """
+                )
+                conn.execute(
+                    """
+                    INSERT INTO Tracks(
+                        id, isrc, isrc_compact, db_entry_date,
+                        audio_file_path, audio_file_mime_type, audio_file_size_bytes,
+                        track_title, catalog_number,
+                        album_art_path, album_art_mime_type, album_art_size_bytes,
+                        main_artist_id, buma_work_number, album_id, release_date, track_length_sec, iswc, upc, genre
+                    )
+                    VALUES (
+                        1, 'NL-ABC-26-00001', 'NLABC2600001', '2026-03-13',
+                        NULL, NULL, 0,
+                        'Migrated Again', NULL,
+                        NULL, NULL, 0,
+                        1, NULL, NULL, '2026-03-13', 180, NULL, NULL, NULL
+                    )
+                    """
+                )
+                conn.executemany(
+                    """
+                    INSERT INTO CustomFieldDefs(id, name, active, sort_order, field_type, options)
+                    VALUES (?, ?, 1, ?, ?, NULL)
+                    """,
+                    [
+                        (1, "Catalog#", 1, "text"),
+                        (2, "BUMA Wnr.", 2, "text"),
+                        (3, "Audio File", 3, "blob_audio"),
+                        (4, "Album Art", 4, "blob_image"),
+                    ],
+                )
+                conn.executemany(
+                    """
+                    INSERT INTO CustomFieldValues(track_id, field_def_id, value, blob_value, mime_type, size_bytes)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        (1, 1, "CAT-V13-01", None, None, 0),
+                        (1, 2, "BUMA-V13-88", None, None, 0),
+                        (1, 3, None, sqlite3.Binary(b"AUDI"), "audio/wav", 4),
+                        (1, 4, None, sqlite3.Binary(b"IMAG"), "image/png", 4),
+                    ],
+                )
+                conn.execute("PRAGMA user_version = 13")
+                conn.commit()
+
+                service = DatabaseSchemaService(conn, data_root=tmpdir)
+                service.migrate_schema()
+
+                row = conn.execute(
+                    """
+                    SELECT
+                        catalog_number,
+                        buma_work_number,
+                        audio_file_path,
+                        audio_file_mime_type,
+                        audio_file_size_bytes,
+                        album_art_path,
+                        album_art_mime_type,
+                        album_art_size_bytes
+                    FROM Tracks
+                    WHERE id = 1
+                    """
+                ).fetchone()
+                self.assertEqual(row[0], "CAT-V13-01")
+                self.assertEqual(row[1], "BUMA-V13-88")
+                self.assertTrue(str(row[2]).startswith("track_media/audio/"))
+                self.assertEqual(row[3], "audio/wav")
+                self.assertEqual(row[4], 4)
+                self.assertTrue(str(row[5]).startswith("track_media/images/"))
+                self.assertEqual(row[6], "image/png")
+                self.assertEqual(row[7], 4)
+                self.assertEqual(
+                    conn.execute("SELECT COUNT(*) FROM CustomFieldDefs").fetchone()[0],
+                    0,
+                )
+                self.assertEqual(
+                    conn.execute("SELECT COUNT(*) FROM CustomFieldValues").fetchone()[0],
+                    0,
+                )
+                self.assertEqual(service.get_db_version(), SCHEMA_TARGET)
+            finally:
+                conn.close()
+
+    def test_migration_skips_same_name_fields_with_different_types(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = sqlite3.connect(":memory:")
+            try:
+                conn.executescript(
+                    """
+                    CREATE TABLE Tracks (
+                        id INTEGER PRIMARY KEY,
+                        isrc TEXT NOT NULL,
+                        isrc_compact TEXT,
+                        track_title TEXT NOT NULL,
+                        main_artist_id INTEGER NOT NULL,
+                        album_id INTEGER,
+                        release_date DATE,
+                        track_length_sec INTEGER NOT NULL DEFAULT 0,
+                        iswc TEXT,
+                        upc TEXT,
+                        genre TEXT
+                    );
+                    CREATE TABLE CustomFieldDefs (
+                        id INTEGER PRIMARY KEY,
+                        name TEXT NOT NULL UNIQUE,
+                        active INTEGER NOT NULL DEFAULT 1,
+                        sort_order INTEGER,
+                        field_type TEXT NOT NULL DEFAULT 'text',
+                        options TEXT
+                    );
+                    CREATE TABLE CustomFieldValues (
+                        track_id INTEGER NOT NULL,
+                        field_def_id INTEGER NOT NULL,
+                        value TEXT,
+                        blob_value BLOB,
+                        mime_type TEXT,
+                        size_bytes INTEGER NOT NULL DEFAULT 0,
+                        PRIMARY KEY (track_id, field_def_id)
+                    );
+                    """
+                )
+                conn.execute(
+                    """
+                    INSERT INTO Tracks(id, isrc, isrc_compact, track_title, main_artist_id, album_id, release_date, track_length_sec, iswc, upc, genre)
+                    VALUES (1, 'NL-ABC-26-00001', 'NLABC2600001', 'Keep Custom Types', 1, NULL, '2026-03-13', 180, NULL, NULL, NULL)
+                    """
+                )
+                conn.executemany(
+                    """
+                    INSERT INTO CustomFieldDefs(id, name, active, sort_order, field_type, options)
+                    VALUES (?, ?, 1, ?, ?, NULL)
+                    """,
+                    [
+                        (1, "Audio File", 1, "text"),
+                        (2, "Catalog#", 2, "dropdown"),
+                    ],
+                )
+                conn.executemany(
+                    """
+                    INSERT INTO CustomFieldValues(track_id, field_def_id, value, blob_value, mime_type, size_bytes)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        (1, 1, "not-a-blob", None, None, 0),
+                        (1, 2, "CAT-OPTION", None, None, 0),
+                    ],
+                )
+                conn.execute("PRAGMA user_version = 12")
+                conn.commit()
+
+                service = DatabaseSchemaService(conn, data_root=tmpdir)
+                service.migrate_schema()
+
+                row = conn.execute(
+                    """
+                    SELECT
+                        audio_file_path,
+                        audio_file_mime_type,
+                        audio_file_size_bytes,
+                        catalog_number
+                    FROM Tracks
+                    WHERE id = 1
+                    """
+                ).fetchone()
+                self.assertEqual(row, (None, None, 0, None))
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT name, field_type FROM CustomFieldDefs ORDER BY id"
+                    ).fetchall(),
+                    [("Audio File", "text"), ("Catalog#", "dropdown")],
+                )
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT track_id, field_def_id, value FROM CustomFieldValues ORDER BY field_def_id"
+                    ).fetchall(),
+                    [(1, 1, "not-a-blob"), (1, 2, "CAT-OPTION")],
+                )
+                self.assertEqual(service.get_db_version(), SCHEMA_TARGET)
+            finally:
+                conn.close()
+
     def test_init_db_tolerates_older_tracks_schema_before_migration(self):
         conn = sqlite3.connect(":memory:")
         try:

@@ -10,7 +10,25 @@ from pathlib import Path
 from typing import Iterable
 
 from isrc_manager.domain.codes import is_blank, to_compact_isrc
+from isrc_manager.domain.standard_fields import standard_media_specs_by_key
 from isrc_manager.media.blob_files import _is_valid_audio_path, _is_valid_image_path
+
+
+def _build_media_fields() -> dict[str, dict[str, object]]:
+    validators = {
+        "blob_audio": _is_valid_audio_path,
+        "blob_image": _is_valid_image_path,
+    }
+    return {
+        media_key: {
+            "path_column": spec.path_column,
+            "mime_column": spec.mime_column,
+            "size_column": spec.size_column,
+            "subdir": "audio" if spec.field_type == "blob_audio" else "images",
+            "validator": validators[spec.field_type],
+        }
+        for media_key, spec in standard_media_specs_by_key().items()
+    }
 
 
 @dataclass(slots=True)
@@ -82,22 +100,7 @@ class TrackSnapshot:
 class TrackService:
     """Centralizes track mutations and related catalog row creation."""
 
-    MEDIA_FIELDS = {
-        "audio_file": {
-            "path_column": "audio_file_path",
-            "mime_column": "audio_file_mime_type",
-            "size_column": "audio_file_size_bytes",
-            "subdir": "audio",
-            "validator": staticmethod(_is_valid_audio_path),
-        },
-        "album_art": {
-            "path_column": "album_art_path",
-            "mime_column": "album_art_mime_type",
-            "size_column": "album_art_size_bytes",
-            "subdir": "images",
-            "validator": staticmethod(_is_valid_image_path),
-        },
-    }
+    MEDIA_FIELDS = _build_media_fields()
 
     def __init__(self, conn: sqlite3.Connection, data_root: str | Path | None = None):
         self.conn = conn

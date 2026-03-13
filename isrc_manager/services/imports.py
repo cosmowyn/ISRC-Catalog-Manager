@@ -15,15 +15,13 @@ from isrc_manager.domain.codes import (
     to_iso_isrc,
     to_iso_iswc,
 )
+from isrc_manager.domain.standard_fields import promoted_text_value_columns_by_label_lower
 from isrc_manager.domain.timecode import parse_hms_text
 
 from .custom_fields import CustomFieldDefinitionService
 from .tracks import TrackService
 
-PROMOTED_TEXT_CUSTOM_FIELDS = {
-    "catalog#": "catalog_number",
-    "buma wnr.": "buma_work_number",
-}
+PROMOTED_TEXT_CUSTOM_FIELDS = promoted_text_value_columns_by_label_lower()
 
 
 @dataclass(slots=True)

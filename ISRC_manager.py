@@ -62,6 +62,7 @@ from isrc_manager.domain.codes import (
     to_iso_iswc,
     valid_upc_ean,
 )
+from isrc_manager.domain.standard_fields import standard_field_spec_for_label, standard_media_specs_by_label
 from isrc_manager.domain.timecode import hms_to_seconds, parse_hms_text, seconds_to_hms
 from isrc_manager.paths import DATA_DIR
 from isrc_manager.services import (
@@ -4418,6 +4419,19 @@ class App(QMainWindow):
     def _on_item_double_clicked(self, item: QTableWidgetItem):
         col = item.column()
         if col < len(self.BASE_HEADERS):
+            header_item = self.table.horizontalHeaderItem(col)
+            header_text = header_item.text() if header_item is not None else ""
+            standard_media_key = self._standard_media_key_for_header(header_text)
+            if standard_media_key:
+                id_item = self.table.item(item.row(), 0)
+                if not id_item:
+                    return
+                try:
+                    track_id = int(id_item.text())
+                except Exception:
+                    return
+                self._attach_standard_media_for_track(track_id, standard_media_key)
+                return
             self.edit_entry(item)
             return
 
@@ -5428,9 +5442,15 @@ class App(QMainWindow):
     @staticmethod
     def _standard_media_header_map() -> dict[str, str]:
         return {
-            "Audio File": "audio_file",
-            "Album Art": "album_art",
+            label: spec.media_key
+            for label, spec in standard_media_specs_by_label().items()
+            if spec.media_key
         }
+
+    @staticmethod
+    def _standard_field_type_for_header(header_text: str) -> str | None:
+        spec = standard_field_spec_for_label(header_text)
+        return spec.field_type if spec is not None else None
 
     def _standard_media_key_for_header(self, header_text: str) -> str | None:
         return self._standard_media_header_map().get(header_text)
