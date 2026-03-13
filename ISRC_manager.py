@@ -1280,115 +1280,6 @@ class App(QMainWindow):
         self.menu_bar = QMenuBar(self)
         self.setMenuBar(self.menu_bar)
 
-        # Settings menu
-        settings_menu = QMenu("Settings", self)
-        self.menu_bar.addMenu(settings_menu)
-
-        self.identity_action = QAction("Branding & Identity…", self)
-        self.identity_action.triggered.connect(self.edit_identity)
-        settings_menu.addAction(self.identity_action)
-
-        self.prefix_action = QAction("Set ISRC Prefix", self)
-        self.prefix_action.triggered.connect(self.set_isrc_prefix)
-        settings_menu.addAction(self.prefix_action)
-
-        # NEW: Artist Code (AA)
-        self.artist_code_action = QAction("Set ISRC Artist Code (00–99)", self)
-        self.artist_code_action.triggered.connect(self.set_artist_code)
-        settings_menu.addAction(self.artist_code_action)
-
-        self.sena_action = QAction("Set SENA Number", self)
-        self.sena_action.triggered.connect(self.set_sena_number)
-        settings_menu.addAction(self.sena_action)
-
-        self.btw_action = QAction("Set BTW Number", self)
-        self.btw_action.triggered.connect(self.set_btw_number)
-        settings_menu.addAction(self.btw_action)
-
-        self.buma_action = QAction("Set BUMA/STEMRA Relation number", self)
-        self.buma_action.triggered.connect(self.set_buma_info)
-        settings_menu.addAction(self.buma_action)
-
-        self.ipi_action = QAction("Set IPI number", self)
-        self.ipi_action.triggered.connect(self.set_ipi_info)
-        settings_menu.addAction(self.ipi_action)
-
-        # Export menu
-        export_menu = QMenu("Export", self)
-        self.menu_bar.addMenu(export_menu)
-
-        xml_action = QAction("Export All to XML…", self)
-        xml_action.triggered.connect(self.export_full_to_xml)
-        export_menu.addAction(xml_action)
-
-        xml_selected_action = QAction("Export Selected to XML…", self)
-        xml_selected_action.triggered.connect(self.export_selected_to_xml)
-        export_menu.addAction(xml_selected_action)
-
-        import_action = QAction("Import from XML…", self)
-        import_action.triggered.connect(self.import_from_xml)
-        export_menu.addAction(import_action)
-
-        # Database menu (Backups / Integrity)
-        db_menu = QMenu("Database", self)
-        self.menu_bar.addMenu(db_menu)
-
-        self.backup_action = QAction("Backup Database", self)
-        self.backup_action.triggered.connect(self.backup_database)
-        db_menu.addAction(self.backup_action)
-
-        self.verify_action = QAction("Verify Integrity", self)
-        self.verify_action.triggered.connect(self.verify_integrity)
-        db_menu.addAction(self.verify_action)
-
-        self.restore_action = QAction("Restore from Backup…", self)
-        self.restore_action.triggered.connect(self.restore_database)
-        db_menu.addAction(self.restore_action)
-
-        # View menu
-        view_menu = QMenu("View", self)
-
-
-        act_view_licenses = QAction("Licenses…", self)
-        act_view_licenses.triggered.connect(lambda: self.open_licenses_browser(track_filter_id=None))
-        view_menu.addAction(act_view_licenses)
-        self.menu_bar.addMenu(view_menu)
-
-        table_view_menu = QMenu("Table View", self)
-        view_menu.addMenu(table_view_menu)
-
-        self.col_width_action = QAction("Change Column Widths", self)
-        self.col_width_action.setCheckable(True)
-        self.col_width_action.toggled.connect(self._on_toggle_col_width)
-        table_view_menu.addAction(self.col_width_action)
-
-        self.row_height_action = QAction("Change Row Heights", self)
-        self.row_height_action.setCheckable(True)
-        self.row_height_action.toggled.connect(self._on_toggle_row_height)
-        table_view_menu.addAction(self.row_height_action)
-
-        # Allow Column Reordering
-        self.act_reorder_columns = QAction("Allow Column Reordering", self)
-        self.act_reorder_columns.setCheckable(True)
-        try:
-            movable = self.settings.value(f"{self._table_settings_prefix()}/columns_movable", False, bool)
-        except Exception:
-            movable = False
-        self.act_reorder_columns.setChecked(bool(movable))
-        self.act_reorder_columns.toggled.connect(self._toggle_columns_movable)
-        table_view_menu.addAction(self.act_reorder_columns)
-
-        self.add_data_action = QAction("Add Data Panel", self)
-        self.add_data_action.setCheckable(True)
-        self.add_data_action.toggled.connect(self._on_toggle_add_data)
-        view_menu.addAction(self.add_data_action)
-
-        self.view_info_action = QAction("Show App Info…", self)
-        self.view_info_action.triggered.connect(self.show_settings_summary)
-        view_menu.addAction(self.view_info_action)
-
-        # Open logs folder (cross-platform)
-        self.open_logs_action = QAction("Open Logs Folder…", self)
         def _open_logs():
             try:
                 if sys.platform.startswith("win"):
@@ -1399,58 +1290,310 @@ class App(QMainWindow):
                     os.system(f'xdg-open "{self.logs_dir}"')
             except Exception as e:
                 QMessageBox.warning(self, "Open Logs", f"Could not open logs folder:\n{e}")
-        self.open_logs_action.triggered.connect(_open_logs)
-        view_menu.addAction(self.open_logs_action)
 
+        try:
+            movable = self.settings.value(f"{self._table_settings_prefix()}/columns_movable", False, bool)
+        except Exception:
+            movable = False
 
-        fields_menu = QMenu("Fields", self)
-        self.menu_bar.addMenu(fields_menu)
-        manage_fields_action = QAction("Manage Custom Columns…", self)
-        manage_fields_action.triggered.connect(self.manage_custom_columns)
-        fields_menu.addAction(manage_fields_action)
+        # Shared actions with cross-platform shortcuts
+        self.undo_action = self._create_action(
+            "Undo",
+            slot=self.history_undo,
+            standard_key=QKeySequence.Undo,
+        )
+        self.redo_action = self._create_action(
+            "Redo",
+            slot=self.history_redo,
+            standard_key=QKeySequence.Redo,
+        )
+        self.copy_action = self._create_action(
+            "Copy",
+            slot=lambda: self._copy_selection_to_clipboard(False),
+            standard_key=QKeySequence.Copy,
+        )
+        self.copy_with_headers_action = self._create_action(
+            "Copy with Headers",
+            slot=lambda: self._copy_selection_to_clipboard(True),
+            shortcuts=("Ctrl+Shift+C", "Meta+Shift+C"),
+        )
+        self.save_entry_action = self._create_action(
+            "Save Entry",
+            slot=self.save,
+            standard_key=QKeySequence.Save,
+        )
+        self.delete_entry_action = self._create_action(
+            "Delete Selected Entry",
+            slot=self.delete_entry,
+            shortcuts=("Delete", "Meta+Backspace"),
+        )
+        self.reset_form_action = self._create_action(
+            "Reset Form and Search",
+            slot=lambda: (self.init_form(), self.reset_search()),
+            shortcuts=("Escape",),
+        )
 
-        # --- Edit menu
-        edit_menu = QMenu("Edit", self)
-        self.menu_bar.addMenu(edit_menu)
+        # File menu
+        file_menu = self.menu_bar.addMenu("File")
+        profiles_menu = file_menu.addMenu("Profiles")
 
-        self.undo_action = QAction("Undo", self)
-        self.undo_action.setShortcut(QKeySequence.Undo)
-        self.undo_action.triggered.connect(self.history_undo)
+        self.new_profile_action = self._create_action(
+            "New Profile…",
+            slot=self.create_new_profile,
+            standard_key=QKeySequence.New,
+        )
+        profiles_menu.addAction(self.new_profile_action)
+
+        self.open_profile_action = self._create_action(
+            "Open Profile…",
+            slot=self.browse_profile,
+            standard_key=QKeySequence.Open,
+        )
+        profiles_menu.addAction(self.open_profile_action)
+
+        self.reload_profiles_action = self._create_action(
+            "Reload Profile List",
+            slot=lambda: self._reload_profiles_list(select_path=self.current_db_path),
+            standard_key=QKeySequence.Refresh,
+        )
+        profiles_menu.addAction(self.reload_profiles_action)
+
+        self.remove_profile_action = self._create_action(
+            "Remove Selected Profile…",
+            slot=self.remove_selected_profile,
+            shortcuts=("Ctrl+Shift+-", "Meta+Shift+-"),
+        )
+        profiles_menu.addAction(self.remove_profile_action)
+
+        file_menu.addSeparator()
+
+        self.import_xml_action = self._create_action(
+            "Import XML…",
+            slot=self.import_from_xml,
+            shortcuts=("Ctrl+Shift+I", "Meta+Shift+I"),
+        )
+        file_menu.addAction(self.import_xml_action)
+
+        export_submenu = file_menu.addMenu("Export")
+        self.export_selected_action = self._create_action(
+            "Export Selected to XML…",
+            slot=self.export_selected_to_xml,
+            shortcuts=("Ctrl+E", "Meta+E"),
+        )
+        export_submenu.addAction(self.export_selected_action)
+
+        self.export_all_action = self._create_action(
+            "Export Entire Library to XML…",
+            slot=self.export_full_to_xml,
+            shortcuts=("Ctrl+Shift+E", "Meta+Shift+E"),
+        )
+        export_submenu.addAction(self.export_all_action)
+
+        file_menu.addSeparator()
+
+        database_submenu = file_menu.addMenu("Database")
+        self.backup_action = self._create_action(
+            "Backup Database",
+            slot=self.backup_database,
+            shortcuts=("Ctrl+Alt+B", "Meta+Alt+B"),
+        )
+        database_submenu.addAction(self.backup_action)
+
+        self.restore_action = self._create_action(
+            "Restore from Backup…",
+            slot=self.restore_database,
+            shortcuts=("Ctrl+Shift+B", "Meta+Shift+B"),
+        )
+        database_submenu.addAction(self.restore_action)
+
+        self.verify_action = self._create_action(
+            "Verify Integrity",
+            slot=self.verify_integrity,
+            shortcuts=("Ctrl+Shift+V", "Meta+Shift+V"),
+        )
+        database_submenu.addAction(self.verify_action)
+
+        file_menu.addSeparator()
+        self.quit_action = self._create_action(
+            "Quit",
+            slot=self.close,
+            standard_key=QKeySequence.Quit,
+        )
+        file_menu.addAction(self.quit_action)
+
+        # Edit menu
+        edit_menu = self.menu_bar.addMenu("Edit")
         edit_menu.addAction(self.undo_action)
-
-        self.redo_action = QAction("Redo", self)
-        self.redo_action.setShortcuts([QKeySequence.Redo, QKeySequence("Ctrl+Y"), QKeySequence("Meta+Y")])
-        self.redo_action.triggered.connect(self.history_redo)
         edit_menu.addAction(self.redo_action)
-
         edit_menu.addSeparator()
+        edit_menu.addAction(self.save_entry_action)
+        edit_menu.addAction(self.delete_entry_action)
+        edit_menu.addAction(self.reset_form_action)
+        edit_menu.addSeparator()
+        edit_menu.addAction(self.copy_action)
+        edit_menu.addAction(self.copy_with_headers_action)
 
-        act_manage_artists = QAction("Manage stored artists…", self)
-        act_manage_artists.triggered.connect(self._manage_stored_artists)
-        edit_menu.addAction(act_manage_artists)
+        # Catalog menu
+        catalog_menu = self.menu_bar.addMenu("Catalog")
+        self.license_browser_action = self._create_action(
+            "License Browser…",
+            slot=lambda: self.open_licenses_browser(track_filter_id=None),
+            shortcuts=("Ctrl+L", "Meta+L"),
+        )
+        catalog_menu.addAction(self.license_browser_action)
+        catalog_menu.addSeparator()
 
-        act_manage_albums = QAction("Manage stored album names…", self)
+        self.manage_fields_action = self._create_action(
+            "Manage Custom Columns…",
+            slot=self.manage_custom_columns,
+            shortcuts=("Ctrl+Alt+F", "Meta+Alt+F"),
+        )
+        catalog_menu.addAction(self.manage_fields_action)
 
+        self.manage_artists_action = self._create_action(
+            "Manage Artists…",
+            slot=self._manage_stored_artists,
+            shortcuts=("Ctrl+Alt+A", "Meta+Alt+A"),
+        )
+        catalog_menu.addAction(self.manage_artists_action)
 
-        act_manage_licensees = QAction("Manage licensee parties…", self)
-        act_manage_licensees.triggered.connect(lambda: LicenseeManagerDialog(self.catalog_service, parent=self).exec())
-        edit_menu.addAction(act_manage_licensees)
-        act_manage_albums.triggered.connect(self._manage_stored_albums)
-        edit_menu.addAction(act_manage_albums)
+        self.manage_albums_action = self._create_action(
+            "Manage Album Names…",
+            slot=self._manage_stored_albums,
+            shortcuts=("Ctrl+Alt+M", "Meta+Alt+M"),
+        )
+        catalog_menu.addAction(self.manage_albums_action)
 
-        history_menu = QMenu("History", self)
-        self.menu_bar.addMenu(history_menu)
-        history_menu.addAction(self.undo_action)
-        history_menu.addAction(self.redo_action)
-        history_menu.addSeparator()
+        self.manage_licensees_action = self._create_action(
+            "Manage Licensees…",
+            slot=lambda: LicenseeManagerDialog(self.catalog_service, parent=self).exec(),
+            shortcuts=("Ctrl+Alt+L", "Meta+Alt+L"),
+        )
+        catalog_menu.addAction(self.manage_licensees_action)
 
-        self.show_history_action = QAction("Show Undo History…", self)
-        self.show_history_action.triggered.connect(self.open_history_dialog)
+        # Settings menu
+        settings_menu = self.menu_bar.addMenu("Settings")
+        self.identity_action = self._create_action(
+            "Application Identity…",
+            slot=self.edit_identity,
+            shortcuts=("Ctrl+,", "Meta+,"),
+        )
+        settings_menu.addAction(self.identity_action)
+        settings_menu.addSeparator()
+
+        self.prefix_action = self._create_action(
+            "ISRC Prefix…",
+            slot=self.set_isrc_prefix,
+            shortcuts=("Ctrl+Alt+I", "Meta+Alt+I"),
+        )
+        settings_menu.addAction(self.prefix_action)
+
+        self.artist_code_action = self._create_action(
+            "ISRC Artist Code…",
+            slot=self.set_artist_code,
+            shortcuts=("Ctrl+Alt+U", "Meta+Alt+U"),
+        )
+        settings_menu.addAction(self.artist_code_action)
+
+        self.sena_action = self._create_action(
+            "SENA Number…",
+            slot=self.set_sena_number,
+            shortcuts=("Ctrl+Alt+N", "Meta+Alt+N"),
+        )
+        settings_menu.addAction(self.sena_action)
+
+        self.btw_action = self._create_action(
+            "VAT / BTW Number…",
+            slot=self.set_btw_number,
+            shortcuts=("Ctrl+Alt+T", "Meta+Alt+T"),
+        )
+        settings_menu.addAction(self.btw_action)
+
+        self.buma_action = self._create_action(
+            "BUMA/STEMRA Relation Number…",
+            slot=self.set_buma_info,
+            shortcuts=("Ctrl+Alt+R", "Meta+Alt+R"),
+        )
+        settings_menu.addAction(self.buma_action)
+
+        self.ipi_action = self._create_action(
+            "BUMA/STEMRA IPI Number…",
+            slot=self.set_ipi_info,
+            shortcuts=("Ctrl+Alt+P", "Meta+Alt+P"),
+        )
+        settings_menu.addAction(self.ipi_action)
+
+        # View menu
+        view_menu = self.menu_bar.addMenu("View")
+        self.add_data_action = self._create_action(
+            "Show Add Data Panel",
+            checkable=True,
+            checked=False,
+            toggled_slot=self._on_toggle_add_data,
+            shortcuts=("Ctrl+Shift+D", "Meta+Shift+D"),
+        )
+        view_menu.addAction(self.add_data_action)
+        view_menu.addSeparator()
+
+        table_view_menu = view_menu.addMenu("Table Layout")
+        self.col_width_action = self._create_action(
+            "Edit Column Widths",
+            checkable=True,
+            checked=False,
+            toggled_slot=self._on_toggle_col_width,
+            shortcuts=("Ctrl+Alt+W", "Meta+Alt+W"),
+        )
+        table_view_menu.addAction(self.col_width_action)
+
+        self.row_height_action = self._create_action(
+            "Edit Row Heights",
+            checkable=True,
+            checked=False,
+            toggled_slot=self._on_toggle_row_height,
+            shortcuts=("Ctrl+Alt+H", "Meta+Alt+H"),
+        )
+        table_view_menu.addAction(self.row_height_action)
+
+        self.act_reorder_columns = self._create_action(
+            "Allow Column Reordering",
+            checkable=True,
+            checked=bool(movable),
+            toggled_slot=self._toggle_columns_movable,
+            shortcuts=("Ctrl+Alt+O", "Meta+Alt+O"),
+        )
+        table_view_menu.addAction(self.act_reorder_columns)
+
+        # History menu
+        history_menu = self.menu_bar.addMenu("History")
+        self.show_history_action = self._create_action(
+            "Show Undo History…",
+            slot=self.open_history_dialog,
+            shortcuts=("Ctrl+Shift+H", "Meta+Shift+H"),
+        )
         history_menu.addAction(self.show_history_action)
 
-        self.create_snapshot_action = QAction("Create Snapshot…", self)
-        self.create_snapshot_action.triggered.connect(self.create_manual_snapshot)
+        self.create_snapshot_action = self._create_action(
+            "Create Snapshot…",
+            slot=self.create_manual_snapshot,
+            shortcuts=("Ctrl+Alt+S", "Meta+Alt+S"),
+        )
         history_menu.addAction(self.create_snapshot_action)
+
+        # Help menu
+        help_menu = self.menu_bar.addMenu("Help")
+        self.view_info_action = self._create_action(
+            "App Summary…",
+            slot=self.show_settings_summary,
+            shortcuts=("F1",),
+        )
+        help_menu.addAction(self.view_info_action)
+
+        self.open_logs_action = self._create_action(
+            "Open Logs Folder…",
+            slot=_open_logs,
+            shortcuts=("Ctrl+Shift+L", "Meta+Shift+L"),
+        )
+        help_menu.addAction(self.open_logs_action)
 
         # ----- Profiles toolbar (quick DB switch)
         self.toolbar = QToolBar("Profiles", self)
@@ -1639,18 +1782,6 @@ class App(QMainWindow):
         self.table.horizontalHeader().setSectionsMovable(bool(movable))
         self.table.installEventFilter(self)
 
-        # -- Copy selection shortcuts
-        act_copy = QAction("Copy", self)
-        act_copy.setShortcut(QKeySequence.Copy)
-        act_copy.triggered.connect(lambda: self._copy_selection_to_clipboard(False))
-        self.addAction(act_copy)
-
-        act_copy_hdrs = QAction("Copy with headers", self)
-        # cross-platform: Win/Linux Ctrl, macOS Meta
-        act_copy_hdrs.setShortcuts([QKeySequence("Shift+Ctrl+C"), QKeySequence("Shift+Meta+C")])
-        act_copy_hdrs.triggered.connect(lambda: self._copy_selection_to_clipboard(True))
-        self.addAction(act_copy_hdrs)
-
         # restore header state (order/widths) and watch for moves
         try:
             self._load_header_state()
@@ -1699,6 +1830,33 @@ class App(QMainWindow):
         self.settings.sync()
         self.logger.info("Settings synced to disk")
         super().closeEvent(e)
+
+    def _create_action(
+        self,
+        text: str,
+        *,
+        slot=None,
+        toggled_slot=None,
+        standard_key=None,
+        shortcuts: tuple[str, ...] | list[str] | None = None,
+        checkable: bool = False,
+        checked: bool | None = None,
+    ) -> QAction:
+        action = QAction(text, self)
+        if checkable:
+            action.setCheckable(True)
+            if checked is not None:
+                action.setChecked(bool(checked))
+        if standard_key is not None:
+            action.setShortcuts(QKeySequence.keyBindings(standard_key))
+        elif shortcuts:
+            action.setShortcuts([QKeySequence(seq) for seq in shortcuts])
+        if slot is not None:
+            action.triggered.connect(slot)
+        if toggled_slot is not None:
+            action.toggled.connect(toggled_slot)
+        self.addAction(action)
+        return action
 
     def _init_services(self):
         self.schema_service = (
