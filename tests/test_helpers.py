@@ -1,8 +1,7 @@
+import ast
 import tempfile
 import unittest
 from pathlib import Path
-
-import ISRC_manager
 
 from isrc_manager.domain.codes import (
     normalize_isrc,
@@ -63,7 +62,15 @@ class BlobFileHelperTests(unittest.TestCase):
 
 class EntryPointTests(unittest.TestCase):
     def test_main_entrypoint_is_exposed(self):
-        self.assertTrue(callable(ISRC_manager.main))
+        source = Path("ISRC_manager.py").read_text(encoding="utf-8")
+        module = ast.parse(source, filename="ISRC_manager.py")
+        function_names = {
+            node.name for node in module.body if isinstance(node, ast.FunctionDef)
+        }
+
+        self.assertIn("def main()", source)
+        self.assertIn('isrc-manager = "ISRC_manager:main"', Path("pyproject.toml").read_text(encoding="utf-8"))
+        self.assertIn("main", function_names)
 
 
 if __name__ == "__main__":
