@@ -1480,7 +1480,672 @@ class LicenseeManagerDialog(QDialog):
             self._reload()
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
-        
+
+
+class _CatalogManagerPaneBase(QWidget):
+    def __init__(self, app, parent=None):
+        super().__init__(parent)
+        self.app = app
+        self.catalog_service = app.catalog_service
+
+    @staticmethod
+    def _configure_table(table: QTableWidget) -> None:
+        table.setEditTriggers(QTableWidget.NoEditTriggers)
+        table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        table.setAlternatingRowColors(True)
+        table.setWordWrap(False)
+        table.verticalHeader().setVisible(False)
+        table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        table.setMinimumHeight(420)
+
+    @staticmethod
+    def _make_info_label(text: str) -> QLabel:
+        label = QLabel(text)
+        label.setWordWrap(True)
+        label.setMinimumHeight(44)
+        return label
+
+    @staticmethod
+    def _prepare_button(button: QPushButton, *, width: int = 148) -> QPushButton:
+        button.setMinimumWidth(width)
+        button.setMinimumHeight(34)
+        button.setAutoDefault(False)
+        return button
+
+    def _after_mutation(self) -> None:
+        try:
+            self.app.populate_all_comboboxes()
+        except Exception:
+            pass
+
+
+class _CatalogArtistsPane(_CatalogManagerPaneBase):
+    def __init__(self, app, parent=None):
+        super().__init__(app, parent)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(14)
+
+        root.addWidget(
+            self._make_info_label(
+                "Stored artists can only be removed when they are not used as a main artist or additional artist."
+            )
+        )
+
+        group = QGroupBox("Stored Artists")
+        group_layout = QVBoxLayout(group)
+        group_layout.setContentsMargins(14, 18, 14, 14)
+        group_layout.setSpacing(12)
+
+        self.summary_label = QLabel()
+        group_layout.addWidget(self.summary_label)
+
+        self.table = QTableWidget(0, 6, self)
+        self.table.setHorizontalHeaderLabels(
+            ["Artist", "Main Uses", "Additional Uses", "Total Uses", "Status", "Delete"]
+        )
+        self._configure_table(self.table)
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
+        group_layout.addWidget(self.table, 1)
+
+        buttons = QHBoxLayout()
+        buttons.setSpacing(10)
+        self.refresh_btn = self._prepare_button(QPushButton("Refresh"))
+        self.purge_btn = self._prepare_button(QPushButton("Purge All Unused"), width=172)
+        self.delete_btn = self._prepare_button(QPushButton("Delete Selected"), width=160)
+        buttons.addWidget(self.refresh_btn)
+        buttons.addStretch(1)
+        buttons.addWidget(self.purge_btn)
+        buttons.addWidget(self.delete_btn)
+        group_layout.addLayout(buttons)
+
+        root.addWidget(group, 1)
+
+        self.refresh_btn.clicked.connect(self.reload)
+        self.purge_btn.clicked.connect(self._purge_unused)
+        self.delete_btn.clicked.connect(self._delete_selected)
+
+        self.reload()
+
+    def reload(self):
+        artists = self.catalog_service.list_artists_with_usage()
+        self.table.setRowCount(0)
+        unused_count = 0
+        for artist in artists:
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+
+            self.table.setItem(row, 0, QTableWidgetItem(artist.name))
+            for col, value in enumerate((artist.main_uses, artist.extra_uses, artist.total_uses), start=1):
+                item = QTableWidgetItem(str(value))
+                item.setTextAlignment(Qt.AlignCenter)
+                self.table.setItem(row, col, item)
+
+            is_unused = int(artist.total_uses) == 0
+            if is_unused:
+                unused_count += 1
+            status = QTableWidgetItem("Unused" if is_unused else "In Use")
+            status.setTextAlignment(Qt.AlignCenter)
+            self.table.setItem(row, 4, status)
+
+            checkbox = QTableWidgetItem()
+            checkbox.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            checkbox.setCheckState(Qt.Checked if is_unused else Qt.Unchecked)
+            if not is_unused:
+                checkbox.setFlags(Qt.NoItemFlags)
+            checkbox.setData(Qt.UserRole, artist.artist_id)
+            self.table.setItem(row, 5, checkbox)
+
+        self.summary_label.setText(
+            f"{len(artists)} stored artist(s). {unused_count} currently unused and safe to remove."
+        )
+
+    def _selected_unused_ids(self) -> list[int]:
+        artist_ids = []
+        for row in range(self.table.rowCount()):
+            total_item = self.table.item(row, 3)
+            checkbox = self.table.item(row, 5)
+            if not total_item or not checkbox:
+                continue
+            try:
+                total_uses = int(total_item.text())
+            except Exception:
+                total_uses = 1
+            if total_uses == 0 and checkbox.checkState() == Qt.Checked:
+                artist_ids.append(int(checkbox.data(Qt.UserRole)))
+        return artist_ids
+
+    def _delete_selected(self):
+        artist_ids = self._selected_unused_ids()
+        if not artist_ids:
+            QMessageBox.information(self, "Nothing to Delete", "No unused artists are selected.")
+            return
+        if (
+            QMessageBox.question(
+                self,
+                "Delete Artists",
+                f"Delete {len(artist_ids)} unused artist(s)?",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            != QMessageBox.Yes
+        ):
+            return
+
+        if hasattr(self.app, "_run_snapshot_history_action"):
+            self.app._run_snapshot_history_action(
+                action_label=f"Delete Unused Artists: {len(artist_ids)}",
+                action_type="catalog.artists_delete",
+                entity_type="Artist",
+                entity_id="batch",
+                payload={"artist_ids": artist_ids, "count": len(artist_ids)},
+                mutation=lambda: self.catalog_service.delete_artists(artist_ids),
+            )
+        else:
+            self.catalog_service.delete_artists(artist_ids)
+
+        self.reload()
+        self._after_mutation()
+
+    def _purge_unused(self):
+        artist_ids = [
+            artist.artist_id for artist in self.catalog_service.list_artists_with_usage() if artist.total_uses == 0
+        ]
+        if not artist_ids:
+            QMessageBox.information(self, "Nothing to Purge", "No unused artists were found.")
+            return
+        if (
+            QMessageBox.question(
+                self,
+                "Purge Unused Artists",
+                f"Purge all {len(artist_ids)} unused artist(s)?",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            != QMessageBox.Yes
+        ):
+            return
+
+        if hasattr(self.app, "_run_snapshot_history_action"):
+            self.app._run_snapshot_history_action(
+                action_label=f"Purge Unused Artists: {len(artist_ids)}",
+                action_type="catalog.artists_purge",
+                entity_type="Artist",
+                entity_id="batch",
+                payload={"artist_ids": artist_ids, "count": len(artist_ids)},
+                mutation=lambda: self.catalog_service.delete_artists(artist_ids),
+            )
+        else:
+            self.catalog_service.delete_artists(artist_ids)
+
+        self.reload()
+        self._after_mutation()
+
+
+class _CatalogAlbumsPane(_CatalogManagerPaneBase):
+    def __init__(self, app, parent=None):
+        super().__init__(app, parent)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(14)
+
+        root.addWidget(
+            self._make_info_label(
+                "Stored album names can only be removed when they are not linked to any tracks."
+            )
+        )
+
+        group = QGroupBox("Stored Albums")
+        group_layout = QVBoxLayout(group)
+        group_layout.setContentsMargins(14, 18, 14, 14)
+        group_layout.setSpacing(12)
+
+        self.summary_label = QLabel()
+        group_layout.addWidget(self.summary_label)
+
+        self.table = QTableWidget(0, 4, self)
+        self.table.setHorizontalHeaderLabels(["Album Title", "Uses", "Status", "Delete"])
+        self._configure_table(self.table)
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        group_layout.addWidget(self.table, 1)
+
+        buttons = QHBoxLayout()
+        buttons.setSpacing(10)
+        self.refresh_btn = self._prepare_button(QPushButton("Refresh"))
+        self.purge_btn = self._prepare_button(QPushButton("Purge All Unused"), width=172)
+        self.delete_btn = self._prepare_button(QPushButton("Delete Selected"), width=160)
+        buttons.addWidget(self.refresh_btn)
+        buttons.addStretch(1)
+        buttons.addWidget(self.purge_btn)
+        buttons.addWidget(self.delete_btn)
+        group_layout.addLayout(buttons)
+
+        root.addWidget(group, 1)
+
+        self.refresh_btn.clicked.connect(self.reload)
+        self.purge_btn.clicked.connect(self._purge_unused)
+        self.delete_btn.clicked.connect(self._delete_selected)
+
+        self.reload()
+
+    def reload(self):
+        albums = self.catalog_service.list_albums_with_usage()
+        self.table.setRowCount(0)
+        unused_count = 0
+        for album in albums:
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+
+            self.table.setItem(row, 0, QTableWidgetItem(album.title))
+            uses_item = QTableWidgetItem(str(album.uses))
+            uses_item.setTextAlignment(Qt.AlignCenter)
+            self.table.setItem(row, 1, uses_item)
+
+            is_unused = int(album.uses) == 0
+            if is_unused:
+                unused_count += 1
+            status = QTableWidgetItem("Unused" if is_unused else "In Use")
+            status.setTextAlignment(Qt.AlignCenter)
+            self.table.setItem(row, 2, status)
+
+            checkbox = QTableWidgetItem()
+            checkbox.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            checkbox.setCheckState(Qt.Checked if is_unused else Qt.Unchecked)
+            if not is_unused:
+                checkbox.setFlags(Qt.NoItemFlags)
+            checkbox.setData(Qt.UserRole, album.album_id)
+            self.table.setItem(row, 3, checkbox)
+
+        self.summary_label.setText(
+            f"{len(albums)} stored album title(s). {unused_count} currently unused and safe to remove."
+        )
+
+    def _selected_unused_ids(self) -> list[int]:
+        album_ids = []
+        for row in range(self.table.rowCount()):
+            uses_item = self.table.item(row, 1)
+            checkbox = self.table.item(row, 3)
+            if not uses_item or not checkbox:
+                continue
+            try:
+                uses = int(uses_item.text())
+            except Exception:
+                uses = 1
+            if uses == 0 and checkbox.checkState() == Qt.Checked:
+                album_ids.append(int(checkbox.data(Qt.UserRole)))
+        return album_ids
+
+    def _delete_selected(self):
+        album_ids = self._selected_unused_ids()
+        if not album_ids:
+            QMessageBox.information(self, "Nothing to Delete", "No unused albums are selected.")
+            return
+        if (
+            QMessageBox.question(
+                self,
+                "Delete Albums",
+                f"Delete {len(album_ids)} unused album title(s)?",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            != QMessageBox.Yes
+        ):
+            return
+
+        if hasattr(self.app, "_run_snapshot_history_action"):
+            self.app._run_snapshot_history_action(
+                action_label=f"Delete Unused Albums: {len(album_ids)}",
+                action_type="catalog.albums_delete",
+                entity_type="Album",
+                entity_id="batch",
+                payload={"album_ids": album_ids, "count": len(album_ids)},
+                mutation=lambda: self.catalog_service.delete_albums(album_ids),
+            )
+        else:
+            self.catalog_service.delete_albums(album_ids)
+
+        self.reload()
+        self._after_mutation()
+
+    def _purge_unused(self):
+        album_ids = [album.album_id for album in self.catalog_service.list_albums_with_usage() if album.uses == 0]
+        if not album_ids:
+            QMessageBox.information(self, "Nothing to Purge", "No unused albums were found.")
+            return
+        if (
+            QMessageBox.question(
+                self,
+                "Purge Unused Albums",
+                f"Purge all {len(album_ids)} unused album title(s)?",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            != QMessageBox.Yes
+        ):
+            return
+
+        if hasattr(self.app, "_run_snapshot_history_action"):
+            self.app._run_snapshot_history_action(
+                action_label=f"Purge Unused Albums: {len(album_ids)}",
+                action_type="catalog.albums_purge",
+                entity_type="Album",
+                entity_id="batch",
+                payload={"album_ids": album_ids, "count": len(album_ids)},
+                mutation=lambda: self.catalog_service.delete_albums(album_ids),
+            )
+        else:
+            self.catalog_service.delete_albums(album_ids)
+
+        self.reload()
+        self._after_mutation()
+
+
+class _CatalogLicenseesPane(_CatalogManagerPaneBase):
+    def __init__(self, app, parent=None):
+        super().__init__(app, parent)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(14)
+
+        add_group = QGroupBox("Add Licensee")
+        add_layout = QGridLayout(add_group)
+        add_layout.setContentsMargins(14, 18, 14, 14)
+        add_layout.setHorizontalSpacing(12)
+        add_layout.setVerticalSpacing(10)
+        name_label = QLabel("Name")
+        name_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        name_label.setMinimumWidth(120)
+        self.new_name_edit = QLineEdit()
+        self.new_name_edit.setPlaceholderText("Enter a licensee name")
+        self.new_name_edit.setClearButtonEnabled(True)
+        self.new_name_edit.setMinimumWidth(360)
+        self.add_btn = self._prepare_button(QPushButton("Add Licensee"), width=156)
+        add_hint = self._make_info_label("Licensees can be renamed later, but in-use licensees cannot be deleted.")
+        add_layout.addWidget(name_label, 0, 0)
+        add_layout.addWidget(self.new_name_edit, 0, 1)
+        add_layout.addWidget(self.add_btn, 0, 2)
+        add_layout.addWidget(add_hint, 1, 1, 1, 2)
+        add_layout.setColumnStretch(1, 1)
+        root.addWidget(add_group)
+
+        list_group = QGroupBox("Stored Licensees")
+        list_layout = QVBoxLayout(list_group)
+        list_layout.setContentsMargins(14, 18, 14, 14)
+        list_layout.setSpacing(12)
+
+        self.summary_label = QLabel()
+        list_layout.addWidget(self.summary_label)
+
+        self.table = QTableWidget(0, 3, self)
+        self.table.setHorizontalHeaderLabels(["Licensee", "Linked Licenses", "Status"])
+        self._configure_table(self.table)
+        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        list_layout.addWidget(self.table, 1)
+
+        buttons = QHBoxLayout()
+        buttons.setSpacing(10)
+        self.refresh_btn = self._prepare_button(QPushButton("Refresh"))
+        self.rename_btn = self._prepare_button(QPushButton("Rename Selected"), width=156)
+        self.delete_btn = self._prepare_button(QPushButton("Delete Selected"), width=160)
+        buttons.addWidget(self.refresh_btn)
+        buttons.addStretch(1)
+        buttons.addWidget(self.rename_btn)
+        buttons.addWidget(self.delete_btn)
+        list_layout.addLayout(buttons)
+
+        root.addWidget(list_group, 1)
+
+        self.add_btn.clicked.connect(self._add)
+        self.new_name_edit.returnPressed.connect(self._add)
+        self.refresh_btn.clicked.connect(self.reload)
+        self.rename_btn.clicked.connect(self._rename)
+        self.delete_btn.clicked.connect(self._delete)
+        self.table.itemSelectionChanged.connect(self._update_button_states)
+
+        self.reload()
+
+    def reload(self):
+        licensees = self.catalog_service.list_licensees_with_usage()
+        self.table.setRowCount(0)
+        unused_count = 0
+        for licensee in licensees:
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+
+            name_item = QTableWidgetItem(licensee.name)
+            name_item.setData(Qt.UserRole, licensee.licensee_id)
+            self.table.setItem(row, 0, name_item)
+
+            count_item = QTableWidgetItem(str(licensee.license_count))
+            count_item.setTextAlignment(Qt.AlignCenter)
+            count_item.setData(Qt.UserRole, licensee.license_count)
+            self.table.setItem(row, 1, count_item)
+
+            is_unused = int(licensee.license_count) == 0
+            if is_unused:
+                unused_count += 1
+            status_item = QTableWidgetItem("Unused" if is_unused else "In Use")
+            status_item.setTextAlignment(Qt.AlignCenter)
+            self.table.setItem(row, 2, status_item)
+
+        self.summary_label.setText(
+            f"{len(licensees)} stored licensee(s). {unused_count} currently have no linked license records."
+        )
+        self._update_button_states()
+
+    def _current_selection(self):
+        row = self.table.currentRow()
+        if row < 0:
+            return None
+        name_item = self.table.item(row, 0)
+        count_item = self.table.item(row, 1)
+        if name_item is None or count_item is None:
+            return None
+        return {
+            "row": row,
+            "licensee_id": int(name_item.data(Qt.UserRole)),
+            "name": name_item.text(),
+            "license_count": int(count_item.data(Qt.UserRole) or 0),
+        }
+
+    def _update_button_states(self):
+        selection = self._current_selection()
+        has_selection = selection is not None
+        self.rename_btn.setEnabled(has_selection)
+        self.delete_btn.setEnabled(bool(selection and selection["license_count"] == 0))
+
+    def _add(self):
+        name = self.new_name_edit.text().strip()
+        if not name:
+            QMessageBox.information(self, "Missing Name", "Enter a licensee name first.")
+            self.new_name_edit.setFocus(Qt.OtherFocusReason)
+            return
+        try:
+            if hasattr(self.app, "_run_snapshot_history_action"):
+                self.app._run_snapshot_history_action(
+                    action_label=f"Add Licensee: {name}",
+                    action_type="licensee.add",
+                    entity_type="Licensee",
+                    entity_id=name,
+                    payload={"name": name},
+                    mutation=lambda: self.catalog_service.ensure_licensee(name),
+                )
+            else:
+                self.catalog_service.ensure_licensee(name)
+        except Exception as e:
+            QMessageBox.critical(self, "Add Licensee", str(e))
+            return
+
+        self.new_name_edit.clear()
+        self.reload()
+        self._after_mutation()
+
+    def _rename(self):
+        selection = self._current_selection()
+        if selection is None:
+            return
+        new_name, ok = QInputDialog.getText(
+            self,
+            "Rename Licensee",
+            "New name:",
+            text=selection["name"],
+        )
+        new_name = (new_name or "").strip()
+        if not ok or not new_name:
+            return
+        try:
+            if hasattr(self.app, "_run_snapshot_history_action"):
+                self.app._run_snapshot_history_action(
+                    action_label=f"Rename Licensee: {selection['name']}",
+                    action_type="licensee.rename",
+                    entity_type="Licensee",
+                    entity_id=selection["licensee_id"],
+                    payload={
+                        "licensee_id": selection["licensee_id"],
+                        "old_name": selection["name"],
+                        "new_name": new_name,
+                    },
+                    mutation=lambda: self.catalog_service.rename_licensee(selection["licensee_id"], new_name),
+                )
+            else:
+                self.catalog_service.rename_licensee(selection["licensee_id"], new_name)
+        except Exception as e:
+            QMessageBox.critical(self, "Rename Licensee", str(e))
+            return
+
+        self.reload()
+        self._after_mutation()
+
+    def _delete(self):
+        selection = self._current_selection()
+        if selection is None:
+            return
+        if selection["license_count"] > 0:
+            QMessageBox.warning(
+                self,
+                "In Use",
+                f"“{selection['name']}” has {selection['license_count']} linked license record(s).\n"
+                "Remove or reassign those licenses before deleting this licensee.",
+            )
+            return
+        if (
+            QMessageBox.question(
+                self,
+                "Delete Licensee",
+                f"Delete “{selection['name']}”?\nThis cannot be undone.",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            != QMessageBox.Yes
+        ):
+            return
+        try:
+            if hasattr(self.app, "_run_snapshot_history_action"):
+                self.app._run_snapshot_history_action(
+                    action_label=f"Delete Licensee: {selection['name']}",
+                    action_type="licensee.delete",
+                    entity_type="Licensee",
+                    entity_id=selection["licensee_id"],
+                    payload={
+                        "licensee_id": selection["licensee_id"],
+                        "name": selection["name"],
+                    },
+                    mutation=lambda: self.catalog_service.delete_licensee(selection["licensee_id"]),
+                )
+            else:
+                self.catalog_service.delete_licensee(selection["licensee_id"])
+        except Exception as e:
+            QMessageBox.critical(self, "Delete Licensee", str(e))
+            return
+
+        self.reload()
+        self._after_mutation()
+
+
+class CatalogManagersDialog(QDialog):
+    TAB_ORDER = ("artists", "albums", "licensees")
+
+    def __init__(self, app, *, initial_tab: str = "artists", parent=None):
+        super().__init__(parent or app)
+        self.app = app
+        self.setObjectName("catalogManagersDialog")
+        self.setWindowTitle("Catalog Managers")
+        self.setModal(True)
+        self.setMinimumSize(1100, 720)
+        self.resize(1180, 760)
+
+        self.setStyleSheet(
+            """
+            QDialog#catalogManagersDialog QLabel#catalogTitle {
+                font-size: 18px;
+                font-weight: 600;
+            }
+            QDialog#catalogManagersDialog QLabel#catalogSubtitle {
+                color: #5f6b76;
+            }
+            QDialog#catalogManagersDialog QGroupBox {
+                font-weight: 600;
+                margin-top: 10px;
+            }
+            QDialog#catalogManagersDialog QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 4px;
+            }
+            """
+        )
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(14)
+
+        title_label = QLabel("Catalog Managers")
+        title_label.setObjectName("catalogTitle")
+        root.addWidget(title_label)
+
+        subtitle_label = QLabel(
+            "Manage stored artists, album names, and licensees from a single workspace."
+        )
+        subtitle_label.setObjectName("catalogSubtitle")
+        subtitle_label.setWordWrap(True)
+        root.addWidget(subtitle_label)
+
+        self.tabs = QTabWidget()
+        self.artists_tab = _CatalogArtistsPane(app, self)
+        self.albums_tab = _CatalogAlbumsPane(app, self)
+        self.licensees_tab = _CatalogLicenseesPane(app, self)
+        self.tabs.addTab(self.artists_tab, "Artists")
+        self.tabs.addTab(self.albums_tab, "Albums")
+        self.tabs.addTab(self.licensees_tab, "Licensees")
+        root.addWidget(self.tabs, 1)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Close, Qt.Horizontal, self)
+        buttons.rejected.connect(self.reject)
+        buttons.accepted.connect(self.accept)
+        root.addWidget(buttons)
+
+        self.focus_tab(initial_tab)
+
+    def focus_tab(self, tab_name: str = "artists") -> None:
+        try:
+            index = self.TAB_ORDER.index(tab_name)
+        except ValueError:
+            index = 0
+        self.tabs.setCurrentIndex(index)
+
 class App(QMainWindow):
     BASE_HEADERS = list(DEFAULT_BASE_HEADERS)
 
@@ -1728,26 +2393,12 @@ class App(QMainWindow):
         catalog_menu.addAction(self.license_browser_action)
         catalog_menu.addSeparator()
 
-        self.manage_artists_action = self._create_action(
-            "Manage Artists…",
-            slot=self._manage_stored_artists,
-            shortcuts=("Ctrl+Alt+A", "Meta+Alt+A"),
+        self.catalog_managers_action = self._create_action(
+            "Catalog Managers…",
+            slot=self.open_catalog_managers_dialog,
+            shortcuts=("Ctrl+Alt+G", "Meta+Alt+G"),
         )
-        catalog_menu.addAction(self.manage_artists_action)
-
-        self.manage_albums_action = self._create_action(
-            "Manage Album Names…",
-            slot=self._manage_stored_albums,
-            shortcuts=("Ctrl+Alt+M", "Meta+Alt+M"),
-        )
-        catalog_menu.addAction(self.manage_albums_action)
-
-        self.manage_licensees_action = self._create_action(
-            "Manage Licensees…",
-            slot=lambda: LicenseeManagerDialog(self.catalog_service, parent=self).exec(),
-            shortcuts=("Ctrl+Alt+L", "Meta+Alt+L"),
-        )
-        catalog_menu.addAction(self.manage_licensees_action)
+        catalog_menu.addAction(self.catalog_managers_action)
 
         # Settings menu
         settings_menu = self.menu_bar.addMenu("Settings")
@@ -2565,16 +3216,19 @@ class App(QMainWindow):
             self.logger.exception(f"Remove profile failed: {e}")
             QMessageBox.critical(self, "Remove Error", f"Could not delete the database:\n{e}")
 
+    def open_catalog_managers_dialog(self, *, initial_tab: str = "artists"):
+        dlg = CatalogManagersDialog(self, initial_tab=initial_tab, parent=self)
+        dlg.exec()
+        self.populate_all_comboboxes()
 
     def _manage_stored_artists(self):
-        dlg = _ManageArtistsDialog(self)
-        dlg.exec()
-        self.populate_all_comboboxes()
+        self.open_catalog_managers_dialog(initial_tab="artists")
 
     def _manage_stored_albums(self):
-        dlg = _ManageAlbumsDialog(self)
-        dlg.exec()
-        self.populate_all_comboboxes()
+        self.open_catalog_managers_dialog(initial_tab="albums")
+
+    def _manage_licensees(self):
+        self.open_catalog_managers_dialog(initial_tab="licensees")
 
     def _close_database_connection(self):
         self.database_session.close(self.conn)
