@@ -61,6 +61,14 @@ from isrc_manager.domain.codes import (
 from isrc_manager.domain.timecode import hms_to_seconds, parse_hms_text, seconds_to_hms
 from isrc_manager.media.blob_files import _is_valid_audio_path, _is_valid_image_path, _read_blob_from_path
 from isrc_manager.paths import DATA_DIR
+from isrc_manager.services import (
+    CatalogAdminService,
+    LicenseService,
+    SettingsMutationService,
+    TrackCreatePayload,
+    TrackService,
+    TrackUpdatePayload,
+)
 from isrc_manager.settings import enforce_single_instance, init_settings
 
 
@@ -371,8 +379,7 @@ class _ManageArtistsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Manage stored artists")
         self.setModal(True)
-        self.conn = parent.conn
-        self.cur  = parent.cursor
+        self.catalog_service = parent.catalog_service
 
         v = QVBoxLayout(self)
         v.addWidget(QLabel("Only artists with 0 references can be deleted."))
@@ -398,30 +405,21 @@ class _ManageArtistsDialog(QDialog):
 
         self._load()
 
-    def _usage_counts(self, artist_id: int):
-        self.cur.execute("SELECT COUNT(*) FROM Tracks WHERE main_artist_id=?", (artist_id,))
-        main_uses = int(self.cur.fetchone()[0])
-        self.cur.execute("SELECT COUNT(*) FROM TrackArtists WHERE artist_id=?", (artist_id,))
-        extra_uses = int(self.cur.fetchone()[0])
-        return main_uses, extra_uses, main_uses + extra_uses
-
     def _load(self):
         self.tbl.setRowCount(0)
-        self.cur.execute("SELECT id, name FROM Artists ORDER BY name COLLATE NOCASE")
-        for (aid, name) in self.cur.fetchall():
-            main_u, extra_u, total = self._usage_counts(aid)
+        for artist in self.catalog_service.list_artists_with_usage():
             r = self.tbl.rowCount(); self.tbl.insertRow(r)
 
-            self.tbl.setItem(r, 0, QTableWidgetItem(name or ""))
-            it_main = QTableWidgetItem(str(main_u)); it_main.setTextAlignment(Qt.AlignCenter)
-            it_extra = QTableWidgetItem(str(extra_u)); it_extra.setTextAlignment(Qt.AlignCenter)
-            it_total = QTableWidgetItem(str(total));  it_total.setTextAlignment(Qt.AlignCenter)
+            self.tbl.setItem(r, 0, QTableWidgetItem(artist.name))
+            it_main = QTableWidgetItem(str(artist.main_uses)); it_main.setTextAlignment(Qt.AlignCenter)
+            it_extra = QTableWidgetItem(str(artist.extra_uses)); it_extra.setTextAlignment(Qt.AlignCenter)
+            it_total = QTableWidgetItem(str(artist.total_uses));  it_total.setTextAlignment(Qt.AlignCenter)
             self.tbl.setItem(r, 1, it_main); self.tbl.setItem(r, 2, it_extra); self.tbl.setItem(r, 3, it_total)
 
             chk = QTableWidgetItem(); chk.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
-            chk.setCheckState(Qt.Checked if total == 0 else Qt.Unchecked)
-            if total > 0: chk.setFlags(Qt.NoItemFlags)
-            chk.setData(Qt.UserRole, aid)  # keep id
+            chk.setCheckState(Qt.Checked if artist.total_uses == 0 else Qt.Unchecked)
+            if artist.total_uses > 0: chk.setFlags(Qt.NoItemFlags)
+            chk.setData(Qt.UserRole, artist.artist_id)  # keep id
             self.tbl.setItem(r, 4, chk)
 
     def _selected_unused_ids(self):
@@ -439,25 +437,16 @@ class _ManageArtistsDialog(QDialog):
             QMessageBox.information(self, "Nothing to delete", "No unused artists selected."); return
         if QMessageBox.question(self, "Confirm", f"Delete {len(ids)} unused artist(s)?") != QMessageBox.Yes:
             return
-        for aid in ids:
-            self.cur.execute("DELETE FROM Artists WHERE id=?", (aid,))
-        self.conn.commit()
+        self.catalog_service.delete_artists(ids)
         self._load()
 
     def _purge_unused(self):
-        self.cur.execute("SELECT id FROM Artists")
-        all_ids = [row[0] for row in self.cur.fetchall()]
-        to_del = []
-        for aid in all_ids:
-            _, _, total = self._usage_counts(aid)
-            if total == 0: to_del.append(aid)
+        to_del = [artist.artist_id for artist in self.catalog_service.list_artists_with_usage() if artist.total_uses == 0]
         if not to_del:
             QMessageBox.information(self, "Nothing to purge", "No unused artists found."); return
         if QMessageBox.question(self, "Confirm", f"Purge {len(to_del)} unused artist(s)?") != QMessageBox.Yes:
             return
-        for aid in to_del:
-            self.cur.execute("DELETE FROM Artists WHERE id=?", (aid,))
-        self.conn.commit()
+        self.catalog_service.delete_artists(to_del)
         self._load()
 
 
@@ -467,8 +456,7 @@ class _ManageAlbumsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Manage stored album names")
         self.setModal(True)
-        self.conn = parent.conn
-        self.cur  = parent.cursor
+        self.catalog_service = parent.catalog_service
 
         v = QVBoxLayout(self)
         v.addWidget(QLabel("Only albums with 0 references can be deleted."))
@@ -495,24 +483,18 @@ class _ManageAlbumsDialog(QDialog):
 
         self._load()
 
-    def _usage(self, album_id: int) -> int:
-        self.cur.execute("SELECT COUNT(*) FROM Tracks WHERE album_id=?", (album_id,))
-        return int(self.cur.fetchone()[0])
-
     def _load(self):
         self.tbl.setRowCount(0)
-        self.cur.execute("SELECT id, title FROM Albums ORDER BY title COLLATE NOCASE")
-        for (aid, title) in self.cur.fetchall():
-            uses = self._usage(aid)
+        for album in self.catalog_service.list_albums_with_usage():
             r = self.tbl.rowCount(); self.tbl.insertRow(r)
-            self.tbl.setItem(r, 0, QTableWidgetItem(title or ""))
-            it_uses = QTableWidgetItem(str(uses)); it_uses.setTextAlignment(Qt.AlignCenter)
+            self.tbl.setItem(r, 0, QTableWidgetItem(album.title))
+            it_uses = QTableWidgetItem(str(album.uses)); it_uses.setTextAlignment(Qt.AlignCenter)
             self.tbl.setItem(r, 1, it_uses)
 
             chk = QTableWidgetItem(); chk.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
-            chk.setCheckState(Qt.Checked if uses == 0 else Qt.Unchecked)
-            if uses > 0: chk.setFlags(Qt.NoItemFlags)
-            chk.setData(Qt.UserRole, aid)
+            chk.setCheckState(Qt.Checked if album.uses == 0 else Qt.Unchecked)
+            if album.uses > 0: chk.setFlags(Qt.NoItemFlags)
+            chk.setData(Qt.UserRole, album.album_id)
             self.tbl.setItem(r, 2, chk)
 
     def _selected_unused_ids(self):
@@ -530,21 +512,16 @@ class _ManageAlbumsDialog(QDialog):
             QMessageBox.information(self, "Nothing to delete", "No unused albums selected."); return
         if QMessageBox.question(self, "Confirm", f"Delete {len(ids)} unused album(s)?") != QMessageBox.Yes:
             return
-        for aid in ids:
-            self.cur.execute("DELETE FROM Albums WHERE id=?", (aid,))
-        self.conn.commit()
+        self.catalog_service.delete_albums(ids)
         self._load()
 
     def _purge_unused(self):
-        self.cur.execute("SELECT id FROM Albums")
-        to_del = [aid for (aid,) in self.cur.fetchall() if self._usage(aid) == 0]
+        to_del = [album.album_id for album in self.catalog_service.list_albums_with_usage() if album.uses == 0]
         if not to_del:
             QMessageBox.information(self, "Nothing to purge", "No unused albums found."); return
         if QMessageBox.question(self, "Confirm", f"Purge {len(to_del)} unused album(s)?") != QMessageBox.Yes:
             return
-        for aid in to_del:
-            self.cur.execute("DELETE FROM Albums WHERE id=?", (aid,))
-        self.conn.commit()
+        self.catalog_service.delete_albums(to_del)
         self._load()
 
 # =============================================================================
@@ -554,10 +531,9 @@ class _ManageAlbumsDialog(QDialog):
 class LicenseUploadDialog(QDialog):
     saved = Signal()
 
-    def __init__(self, conn, tracks, licensees, preselect_track_id=None, parent=None, data_dir=None):
+    def __init__(self, license_service, tracks, licensees, preselect_track_id=None, parent=None):
         super().__init__(parent)
-        self.conn = conn
-        self.data_dir = Path(data_dir) if data_dir else (DATA_DIR() / "licenses")
+        self.license_service = license_service
         self.setWindowTitle("Add License (PDF)")
         self.setModal(True)
 
@@ -628,44 +604,22 @@ class LicenseUploadDialog(QDialog):
         self.file_label.setText(Path(path).name)
         self.btn_save.setEnabled(True)
 
-    def _ensure_licensee(self, name: str) -> int:
-        name = name.strip()
-        if not name:
-            raise ValueError("Licensee name is empty")
-        c = self.conn.cursor()
-        try:
-            c.execute("INSERT INTO Licensees(name) VALUES (?)", (name,))
-        except Exception:
-            pass
-        c.execute("SELECT id FROM Licensees WHERE name=?", (name,))
-        row = c.fetchone()
-        return row[0] if row else None
-
     def _save(self):
         try:
             lic_text = self.lic_combo.currentText().strip()
             if not lic_text:
                 QMessageBox.warning(self, "Missing", "Licensee is required.")
                 return
-            licensee_id = self._ensure_licensee(lic_text)
             track_id = self.track_combo.currentData()
             if not self._picked_path:
                 QMessageBox.warning(self, "Missing", "Please choose a PDF.")
                 return
 
-            # copy into managed folder and store RELATIVE path (portable)
-            self.data_dir.mkdir(parents=True, exist_ok=True)
-            filename = f"{int(time.time())}_{Path(self._picked_path).name}"
-            dst = self.data_dir / filename
-            shutil.copy2(self._picked_path, dst)
-            rel = str(dst.relative_to(DATA_DIR()))
-
-            c = self.conn.cursor()
-            c.execute(
-                "INSERT INTO Licenses(track_id, licensee_id, file_path, filename) VALUES (?,?,?,?)",
-                (track_id, licensee_id, rel, filename),
+            self.license_service.add_license(
+                track_id=track_id,
+                licensee_name=lic_text,
+                source_pdf_path=self._picked_path,
             )
-            self.conn.commit()
             self.saved.emit()
             self.accept()
         except Exception as e:
@@ -673,9 +627,9 @@ class LicenseUploadDialog(QDialog):
 
 
 class LicensesBrowserDialog(QDialog):
-    def __init__(self, conn, track_filter_id=None, parent=None):
+    def __init__(self, license_service, track_filter_id=None, parent=None):
         super().__init__(parent)
-        self.conn = conn
+        self.license_service = license_service
         self.setWindowTitle("Licenses")
         self.setModal(True)
         self.resize(900, 520)
@@ -772,26 +726,14 @@ class LicensesBrowserDialog(QDialog):
         if track_filter_id is None:
             track_filter_id = self._track_filter_id
         self.model.removeRows(0, self.model.rowCount())
-        c = self.conn.cursor()
-        if track_filter_id:
-            c.execute(
-                "SELECT licensee, tracktitle, uploaded_at, filename, file_path, id "
-                "FROM vw_Licenses WHERE track_id=? ORDER BY uploaded_at DESC",
-                (track_filter_id,),
-            )
-        else:
-            c.execute(
-                "SELECT licensee, tracktitle, uploaded_at, filename, file_path, id "
-                "FROM vw_Licenses ORDER BY uploaded_at DESC"
-            )
-        for lic, track, up, fn, fp, _id in c.fetchall():
+        for row in self.license_service.list_rows(track_filter_id):
             items = [
-                QStandardItem(lic),
-                QStandardItem(track),
-                QStandardItem(up),
-                QStandardItem(fn),
-                QStandardItem(fp or ""),
-                QStandardItem(str(_id)),
+                QStandardItem(row.licensee),
+                QStandardItem(row.track_title),
+                QStandardItem(row.uploaded_at),
+                QStandardItem(row.filename),
+                QStandardItem(row.file_path),
+                QStandardItem(str(row.record_id)),
             ]
             for it in items:
                 it.setEditable(False)
@@ -832,7 +774,7 @@ class LicensesBrowserDialog(QDialog):
         _, path = rec
 
         # resolve relative -> absolute
-        abs_path = Path(path) if Path(path).is_absolute() else (DATA_DIR() / path)
+        abs_path = self.license_service.resolve_path(path)
         if not abs_path.exists():
             QMessageBox.warning(self, "Missing file", "The file could not be found.")
             return
@@ -870,7 +812,7 @@ class LicensesBrowserDialog(QDialog):
         if not rec:
             return
         _, path = rec
-        abs_path = Path(path) if Path(path).is_absolute() else (DATA_DIR() / path)
+        abs_path = self.license_service.resolve_path(path)
         if not abs_path.exists():
             QMessageBox.warning(self, "Missing", "File not found.")
             return
@@ -883,9 +825,8 @@ class LicensesBrowserDialog(QDialog):
         if not rec:
             return
         rec_id, path = rec
-        c = self.conn.cursor()
-        c.execute("SELECT track_id, licensee_id FROM Licenses WHERE id=?", (rec_id,))
-        row = c.fetchone()
+        record = self.license_service.fetch_license(rec_id)
+        row = (record.track_id, record.licensee_id) if record else None
         if not row:
             return
         track_id, licensee_id = row
@@ -895,8 +836,7 @@ class LicensesBrowserDialog(QDialog):
         lic_combo = QComboBox()
         lic_combo.setEditable(True)
         # load licensees
-        c.execute("SELECT id, name FROM Licensees ORDER BY name COLLATE NOCASE")
-        for lid, name in c.fetchall():
+        for lid, name in self.license_service.list_licensee_choices():
             lic_combo.addItem(name, lid)
         idx = lic_combo.findData(licensee_id)
         if idx >= 0:
@@ -930,33 +870,18 @@ class LicensesBrowserDialog(QDialog):
         f.addRow(bb)
         if d.exec() != QDialog.Accepted:
             return
-        # ensure licensee
         new_name = lic_combo.currentText().strip()
-        if new_name:
-            try:
-                c.execute("INSERT INTO Licensees(name) VALUES (?)", (new_name,))
-            except Exception:
-                pass
-            c.execute("SELECT id FROM Licensees WHERE name=?", (new_name,))
-            r = c.fetchone()
-            new_lic_id = r[0] if r else licensee_id
-        else:
-            new_lic_id = licensee_id
-        new_file_path = path
-        new_filename = Path(path).name if path else ""
-        if new_path["p"]:
-            store_dir = DATA_DIR() / "licenses"
-            store_dir.mkdir(parents=True, exist_ok=True)
-            new_filename = f"{int(time.time())}_{Path(new_path['p']).name}"
-            new_abs = store_dir / new_filename
-            shutil.copy2(new_path["p"], new_abs)
-            new_file_path = str(new_abs.relative_to(DATA_DIR()))
-        c.execute(
-            "UPDATE Licenses SET licensee_id=?, file_path=?, filename=? WHERE id=?",
-            (new_lic_id, new_file_path, new_filename, rec_id),
-        )
-        self.conn.commit()
-        self.refresh_data()
+        if not new_name:
+            new_name = lic_combo.currentText().strip() or ""
+        try:
+            self.license_service.update_license(
+                record_id=rec_id,
+                licensee_name=new_name,
+                replacement_pdf_path=new_path["p"],
+            )
+            self.refresh_data()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", str(e))
 
     def _delete_selected(self):
         sel = self.table.selectionModel().selectedRows()
@@ -987,17 +912,11 @@ class LicensesBrowserDialog(QDialog):
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
         ) == QMessageBox.Yes
 
-        c = self.conn.cursor()
-        for rec_id, fpath in zip(ids, paths):
-            try:
-                c.execute("DELETE FROM Licenses WHERE id=?", (rec_id,))
-                if delete_files and fpath:
-                    p = Path(fpath) if Path(fpath).is_absolute() else (DATA_DIR() / fpath)
-                    if p.exists():
-                        p.unlink()
-            except Exception as e:
-                logging.exception(f"Failed to delete license {rec_id}: {e}")
-        self.conn.commit()
+        try:
+            self.license_service.delete_licenses(ids, delete_files=delete_files)
+        except Exception as e:
+            QMessageBox.critical(self, "Delete Licenses", str(e))
+            return
 
         QMessageBox.information(self, "Done", f"Deleted {len(ids)} license(s).")
         self.refresh_data()
@@ -1013,9 +932,9 @@ class LicensesBrowserDialog(QDialog):
 
 
 class LicenseeManagerDialog(QDialog):
-    def __init__(self, conn, parent=None):
+    def __init__(self, catalog_service, parent=None):
         super().__init__(parent)
-        self.conn = conn
+        self.catalog_service = catalog_service
         self.setWindowTitle("Manage Licensees")
         self.resize(420, 480)
 
@@ -1039,36 +958,19 @@ class LicenseeManagerDialog(QDialog):
 
     def _reload(self):
         self.list.clear()
-        c = self.conn.cursor()
-        c.execute(
-            """
-            SELECT lic.id,
-                   lic.name,
-                   COALESCE(cnt.n, 0) AS n
-            FROM Licensees lic
-            LEFT JOIN (
-                SELECT licensee_id, COUNT(*) AS n
-                FROM Licenses
-                GROUP BY licensee_id
-            ) AS cnt ON cnt.licensee_id = lic.id
-            ORDER BY lic.name COLLATE NOCASE
-            """
-        )
-        for lid, name, n in c.fetchall():
-            it = QListWidgetItem(f"{name} ({n})")
-            it.setData(Qt.UserRole, lid)
-            it.setData(Qt.UserRole + 1, n)  # store count
-            it.setToolTip(f"{name}\nLinked licenses: {n}")
+        for licensee in self.catalog_service.list_licensees_with_usage():
+            it = QListWidgetItem(f"{licensee.name} ({licensee.license_count})")
+            it.setData(Qt.UserRole, licensee.licensee_id)
+            it.setData(Qt.UserRole + 1, licensee.license_count)  # store count
+            it.setToolTip(f"{licensee.name}\nLinked licenses: {licensee.license_count}")
             self.list.addItem(it)
 
     def _add(self):
         text, ok = QInputDialog.getText(self, "Add licensee", "Name:")
         if not ok or not text.strip():
             return
-        c = self.conn.cursor()
         try:
-            c.execute("INSERT INTO Licensees(name) VALUES (?)", (text.strip(),))
-            self.conn.commit()
+            self.catalog_service.ensure_licensee(text.strip())
         except Exception:
             pass
         self._reload()
@@ -1083,8 +985,7 @@ class LicenseeManagerDialog(QDialog):
         if not ok or not text.strip():
             return
         try:
-            self.conn.execute("UPDATE Licensees SET name=? WHERE id=?", (text.strip(), it.data(Qt.UserRole)))
-            self.conn.commit()
+            self.catalog_service.rename_licensee(it.data(Qt.UserRole), text.strip())
             self._reload()
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
@@ -1118,9 +1019,11 @@ class LicenseeManagerDialog(QDialog):
         ):
             return
 
-        self.conn.execute("DELETE FROM Licensees WHERE id=?", (lid,))
-        self.conn.commit()
-        self._reload()
+        try:
+            self.catalog_service.delete_licensee(lid)
+            self._reload()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", str(e))
         
 class App(QMainWindow):
     BASE_HEADERS = [
@@ -1178,6 +1081,10 @@ class App(QMainWindow):
 
         self.conn = None
         self.cursor = None
+        self.track_service = None
+        self.settings_mutations = None
+        self.catalog_service = None
+        self.license_service = None
         self.open_database(last_db)
 
         # ----- Menus -----
@@ -1325,7 +1232,7 @@ class App(QMainWindow):
 
 
         act_manage_licensees = QAction("Manage licensee parties…", self)
-        act_manage_licensees.triggered.connect(lambda: LicenseeManagerDialog(self.conn, parent=self).exec())
+        act_manage_licensees.triggered.connect(lambda: LicenseeManagerDialog(self.catalog_service, parent=self).exec())
         edit_menu.addAction(act_manage_licensees)
         act_manage_albums.triggered.connect(self._manage_stored_albums)
         edit_menu.addAction(act_manage_albums)
@@ -1576,6 +1483,14 @@ class App(QMainWindow):
         self.logger.info("Settings synced to disk")
         super().closeEvent(e)
 
+    def _init_services(self):
+        self.track_service = TrackService(self.conn) if self.conn is not None else None
+        self.settings_mutations = (
+            SettingsMutationService(self.conn, self.settings) if self.conn is not None else None
+        )
+        self.catalog_service = CatalogAdminService(self.conn) if self.conn is not None else None
+        self.license_service = LicenseService(self.conn, DATA_DIR()) if self.conn is not None else None
+
 
     # -------------------------------------------------------------------------
     # Identity & Profiles
@@ -1626,11 +1541,10 @@ class App(QMainWindow):
         lay.addLayout(btns)
 
         def do_save():
-            self.identity["window_title"] = title_edit.text().strip() or DEFAULT_WINDOW_TITLE
-            self.identity["icon_path"] = icon_edit.text().strip()
-            self.settings.setValue("identity/window_title", self.identity["window_title"])
-            self.settings.setValue("identity/icon_path", self.identity["icon_path"])
-            self.settings.sync()
+            self.identity = self.settings_mutations.set_identity(
+                window_title=title_edit.text().strip() or DEFAULT_WINDOW_TITLE,
+                icon_path=icon_edit.text().strip(),
+            )
             self.logger.info("Settings synced to disk")
             self._apply_identity()
             self.logger.info("Branding & identity updated")
@@ -1678,7 +1592,7 @@ class App(QMainWindow):
             QMessageBox.warning(self, "Invalid artist code", "Artist code must be two digits (00–99).")
             return
 
-        self._profile_set("isrc_artist_code", val)
+        self.settings_mutations.set_artist_code(val)
         self.logger.info(f"ISRC artist code set to '{val}' (profile DB)")
         if hasattr(self, "artist_edit"):
             self.artist_edit.setText(val)
@@ -1862,6 +1776,7 @@ class App(QMainWindow):
         self.conn = sqlite3.connect(path)
 
         self._ensure_profile_store()
+        self._init_services()
 
         self._migrate_artist_code_from_qsettings_if_needed()
 
@@ -2884,60 +2799,27 @@ class App(QMainWindow):
     # =============================================================================
 
     def get_or_create_artist(self, name: str) -> int:
-        name = (name or "").strip()
-        if is_blank(name):
-            raise ValueError("Artist name is required")
-        row = self.cursor.execute("SELECT id FROM Artists WHERE name=? ORDER BY id LIMIT 1", (name,)).fetchone()
-        if row:
-            return int(row[0])
-        self.cursor.execute("INSERT INTO Artists (name) VALUES (?)", (name,))
-        return int(self.cursor.lastrowid)
+        return self.track_service.get_or_create_artist(name, cursor=self.cursor)
 
     def get_or_create_album(self, title: str) -> int | None:
-        title = (title or "").strip()
-        if is_blank(title):
-            return None
-        row = self.cursor.execute("SELECT id FROM Albums WHERE title=? ORDER BY id LIMIT 1", (title,)).fetchone()
-        if row:
-            return int(row[0])
-        self.cursor.execute("INSERT INTO Albums (title) VALUES (?)", (title,))
-        return int(self.cursor.lastrowid)
+        return self.track_service.get_or_create_album(title, cursor=self.cursor)
 
     @staticmethod
     def _parse_additional_artists(s: str):
-        parts = [p.strip() for p in (s or "").split(",")]
-        return [p for p in parts if p]
+        return TrackService.parse_additional_artists(s)
 
     def _replace_additional_artists_for_track(self, track_id: int, names):
-        self.cursor.execute("DELETE FROM TrackArtists WHERE track_id=? AND role='additional'", (track_id,))
-        for nm in names:
-            try:
-                aid = self.get_or_create_artist(nm)
-                self.cursor.execute(
-                    "INSERT OR IGNORE INTO TrackArtists (track_id, artist_id, role) VALUES (?, ?, 'additional')",
-                    (track_id, aid)
-                )
-            except ValueError:
-                pass
+        self.track_service.replace_additional_artists(track_id, names, cursor=self.cursor)
 
     # =============================================================================
     # ISRC duplicate check across formats (uses new compact column)
     # =============================================================================
     def is_isrc_taken_normalized(self, candidate: str, exclude_track_id: int | None = None) -> bool:
-        norm = to_compact_isrc(candidate)
-        if not norm:
-            return False
-        if exclude_track_id is None:
-            row = self.cursor.execute(
-                "SELECT 1 FROM Tracks WHERE isrc_compact = ? LIMIT 1",
-                (norm,)
-            ).fetchone()
-        else:
-            row = self.cursor.execute(
-                "SELECT 1 FROM Tracks WHERE isrc_compact = ? AND id != ? LIMIT 1",
-                (norm, exclude_track_id)
-            ).fetchone()
-        return bool(row)
+        return self.track_service.is_isrc_taken_normalized(
+            candidate,
+            exclude_track_id=exclude_track_id,
+            cursor=self.cursor,
+        )
 
     # =============================================================================
     # Save / Edit / Delete
@@ -2950,9 +2832,6 @@ class App(QMainWindow):
             QMessageBox.warning(self, "Invalid UPC/EAN", "UPC/EAN must be 12 or 13 digits (or leave empty).")
             return
         try:
-            main_artist_id = self.get_or_create_artist(self.artist_field.currentText())
-            album_id = self.get_or_create_album(self.album_title_field.currentText())
-
             # ISWC (optional)
             raw_iswc = (self.iswc_field.text() or "").strip()
             iso_iswc = None
@@ -2982,27 +2861,20 @@ class App(QMainWindow):
 
             track_seconds = hms_to_seconds(self.track_len_h.value(), self.track_len_m.value(), self.track_len_s.value())
             self.logger.info(f"About to insert ISRC iso={generated_iso} compact={comp}")
-            self.cursor.execute("""
-                INSERT INTO Tracks (isrc, isrc_compact, track_title, main_artist_id, album_id, release_date, track_length_sec, iswc, upc, genre)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                generated_iso,
-                comp,
-                self.track_title_field.text().strip(),
-                main_artist_id,
-                album_id,
-                release_date_sql,
-                track_seconds,
-                (iso_iswc or None),
-                (self.upc_field.currentText().strip() or None),
-                (self.genre_field.currentText().strip() or None),
-            ))
-            track_id = int(self.cursor.lastrowid)
-
-            extras = self._parse_additional_artists(self.additional_artist_field.currentText())
-            self._replace_additional_artists_for_track(track_id, extras)
-
-            self.conn.commit()
+            track_id = self.track_service.create_track(
+                TrackCreatePayload(
+                    isrc=generated_iso,
+                    track_title=self.track_title_field.text().strip(),
+                    artist_name=self.artist_field.currentText(),
+                    additional_artists=self._parse_additional_artists(self.additional_artist_field.currentText()),
+                    album_title=self.album_title_field.currentText().strip() or None,
+                    release_date=release_date_sql,
+                    track_length_sec=track_seconds,
+                    iswc=(iso_iswc or None),
+                    upc=(self.upc_field.currentText().strip() or None),
+                    genre=(self.genre_field.currentText().strip() or None),
+                )
+            )
             self.logger.info(f"Track created id={track_id} isrc={generated_iso}")
             self._audit("CREATE", "Track", ref_id=track_id, details=f"isrc={generated_iso}")
             self._audit_commit()
@@ -3045,8 +2917,7 @@ class App(QMainWindow):
                     QMessageBox.warning(self, "Delete", "Could not determine record ID.")
                     return
                 row_id = int(row_id_item.text())
-                self.cursor.execute("DELETE FROM Tracks WHERE id=?", (row_id,))
-                self.conn.commit()
+                self.track_service.delete_track(row_id)
                 self.refresh_table_preserve_view()
                 self.populate_all_comboboxes()
                 self.logger.warning(f"Track deleted id={row_id}")
@@ -3678,12 +3549,7 @@ class App(QMainWindow):
                 QMessageBox.warning(self, "Invalid Prefix", "Prefix must be CC+XXX (5 chars).")
                 return
             try:
-                self.cursor.execute(
-                    "INSERT INTO ISRC_Prefix (id, prefix) VALUES (1, ?) "
-                    "ON CONFLICT(id) DO UPDATE SET prefix=excluded.prefix",
-                    (pref,)
-                )
-                self.conn.commit()
+                self.settings_mutations.set_isrc_prefix(pref)
                 self.logger.info(f"ISRC prefix updated to '{pref}'")
                 self._audit("SETTINGS", "ISRC_Prefix", ref_id=1, details=f"prefix={pref}")
                 self._audit_commit()
@@ -3698,12 +3564,7 @@ class App(QMainWindow):
         text, ok = QInputDialog.getText(self, "Set SENA Number", "Enter SENA Number:", text=current)
         if ok:
             try:
-                self.cursor.execute(
-                    "INSERT INTO SENA (id, number) VALUES (1, ?) "
-                    "ON CONFLICT(id) DO UPDATE SET number=excluded.number",
-                    ((text or "").strip(),)
-                )
-                self.conn.commit()
+                self.settings_mutations.set_sena_number((text or "").strip())
                 self.logger.info("SENA number updated")
                 self._audit("SETTINGS", "SENA", ref_id=1, details="updated")
                 self._audit_commit()
@@ -3718,12 +3579,7 @@ class App(QMainWindow):
         text, ok = QInputDialog.getText(self, "Set BTW Number", "Enter BTW Number:", text=current)
         if ok:
             try:
-                self.cursor.execute(
-                    "INSERT INTO BTW (id, nr) VALUES (1, ?) "
-                    "ON CONFLICT(id) DO UPDATE SET nr=excluded.nr",
-                    ((text or "").strip(),)
-                )
-                self.conn.commit()
+                self.settings_mutations.set_btw_number((text or "").strip())
                 self.logger.info("BTW number updated")
                 self._audit("SETTINGS", "BTW", ref_id=1, details="updated")
                 self._audit_commit()
@@ -3738,12 +3594,7 @@ class App(QMainWindow):
         relatie_nummer, ok = QInputDialog.getText(self, "Set BUMA Relatie Nummer", "Enter Relatie Nummer:", text=current_rel)
         if ok:
             try:
-                self.cursor.execute("""
-                    INSERT INTO BUMA_STEMRA (id, relatie_nummer, ipi)
-                    VALUES (1, ?, COALESCE((SELECT ipi FROM BUMA_STEMRA WHERE id=1), NULL))
-                    ON CONFLICT(id) DO UPDATE SET relatie_nummer=excluded.relatie_nummer
-                """, ((relatie_nummer or "").strip(),))
-                self.conn.commit()
+                self.settings_mutations.set_buma_relatie_nummer((relatie_nummer or "").strip())
                 self.logger.info("BUMA/STEMRA relatie nummer updated")
                 self._audit("SETTINGS", "BUMA_STEMRA", ref_id=1, details="relatie_nummer updated")
                 self._audit_commit()
@@ -3758,12 +3609,7 @@ class App(QMainWindow):
         ipi, ok = QInputDialog.getText(self, "Set BUMA IPI", "Enter IPI Number:", text=current_ipi)
         if ok:
             try:
-                self.cursor.execute("""
-                    INSERT INTO BUMA_STEMRA (id, relatie_nummer, ipi)
-                    VALUES (1, COALESCE((SELECT relatie_nummer FROM BUMA_STEMRA WHERE id=1), NULL), ?)
-                    ON CONFLICT(id) DO UPDATE SET ipi=excluded.ipi
-                """, ((ipi or "").strip(),))
-                self.conn.commit()
+                self.settings_mutations.set_buma_ipi((ipi or "").strip())
                 self.logger.info("BUMA/STEMRA IPI updated")
                 self._audit("SETTINGS", "BUMA_STEMRA", ref_id=1, details="ipi updated")
                 self._audit_commit()
@@ -5016,10 +4862,7 @@ class App(QMainWindow):
         return -1
 
     def _get_track_title(self, track_id: int) -> str:
-        row = self.cursor.execute("SELECT track_title FROM Tracks WHERE id=?", (track_id,)).fetchone()
-        if row and row[0]:
-            return str(row[0])
-        return f"track_{track_id}"
+        return self.track_service.fetch_track_title(track_id, cursor=self.cursor)
 
     def _sanitize_filename(self, text: str) -> str:
         text = (text or "").strip()
@@ -5155,24 +4998,21 @@ class App(QMainWindow):
         return cur.fetchall()
 
     def _list_licensees(self):
-        cur = self.conn.cursor()
-        cur.execute("SELECT id, name FROM Licensees ORDER BY name COLLATE NOCASE")
-        return cur.fetchall()
+        return self.catalog_service.list_licensee_choices()
 
     def open_license_upload(self, preselect_track_id=None):
         dlg = LicenseUploadDialog(
-            self.conn,
+            self.license_service,
             self._list_all_tracks(),
             self._list_licensees(),
             preselect_track_id=preselect_track_id,
             parent=self,
-            data_dir=(DATA_DIR() / "licenses"),
         )
         dlg.saved.connect(lambda: self.statusBar().showMessage("License saved", 3000))
         dlg.exec()
 
     def open_licenses_browser(self, track_filter_id=None):
-        LicensesBrowserDialog(self.conn, track_filter_id=track_filter_id, parent=self).exec()
+        LicensesBrowserDialog(self.license_service, track_filter_id=track_filter_id, parent=self).exec()
 
 
 class EditDialog(QDialog):
@@ -5407,34 +5247,21 @@ class EditDialog(QDialog):
                 QMessageBox.critical(self, "Duplicate ISRC", "Another record already uses this ISRC.")
                 return
 
-            main_artist_id = parent.get_or_create_artist(self.artist_name.currentText())
-            album_id = parent.get_or_create_album(self.album_title.currentText())
-            
-
-            # --- patched: use shared cursor, not a new one ---
-            cur = parent.cursor
-            cur.execute("""
-                UPDATE Tracks SET
-                    isrc=?, isrc_compact=?, track_title=?, main_artist_id=?, album_id=?, release_date=?,
-                    track_length_sec=?, iswc=?, upc=?, genre=?
-                WHERE id=?
-            """, (
-                iso_isrc,
-                comp,
-                new_track_title,
-                main_artist_id,
-                album_id,
-                self.release_date.selectedDate().toString("yyyy-MM-dd"),
-                hms_to_seconds(self.len_h.value(), self.len_m.value(), self.len_s.value()),
-                (iso_iswc or None),
-                (new_upc_raw or None),
-                (new_genre or None),
-                row_id
-            ))
-
-            self.parent._replace_additional_artists_for_track(row_id, new_additional_artist)
-
-            parent.conn.commit()
+            parent.track_service.update_track(
+                TrackUpdatePayload(
+                    track_id=row_id,
+                    isrc=iso_isrc,
+                    track_title=new_track_title,
+                    artist_name=self.artist_name.currentText(),
+                    additional_artists=new_additional_artist,
+                    album_title=self.album_title.currentText().strip() or None,
+                    release_date=self.release_date.selectedDate().toString("yyyy-MM-dd"),
+                    track_length_sec=hms_to_seconds(self.len_h.value(), self.len_m.value(), self.len_s.value()),
+                    iswc=(iso_iswc or None),
+                    upc=(new_upc_raw or None),
+                    genre=(new_genre or None),
+                )
+            )
             # --- patched: ensure WAL contents are flushed to the main db file ---
             parent.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
@@ -5449,7 +5276,7 @@ class EditDialog(QDialog):
             self.accept()
 
         except Exception as e:
-            parent = self.parent()
+            parent = self.parentWidget()
             if parent and hasattr(parent, "conn"):
                 parent.conn.rollback()
                 parent.logger.exception(f"Update failed: {e}")
@@ -5637,14 +5464,13 @@ class _AudioPreviewDialog(QDialog):
 
 # ==== Licenses: helpers & actions ====
 def open_license_upload(self, preselect_track_id=None):
-    dlg = LicenseUploadDialog(self.conn, self._list_all_tracks(), self._list_licensees(),
-                              preselect_track_id=preselect_track_id, parent=self,
-                              data_dir=(DATA_DIR() / "licenses"))
+    dlg = LicenseUploadDialog(self.license_service, self._list_all_tracks(), self._list_licensees(),
+                              preselect_track_id=preselect_track_id, parent=self)
     dlg.saved.connect(lambda: self.statusBar().showMessage("License saved", 3000))
     dlg.exec()
 
 def open_licenses_browser(self, track_filter_id=None):
-    LicensesBrowserDialog(self.conn, track_filter_id=track_filter_id, parent=self).exec()
+    LicensesBrowserDialog(self.license_service, track_filter_id=track_filter_id, parent=self).exec()
 
 class WaveformWidget(QWidget):
     def __init__(self, parent=None):
