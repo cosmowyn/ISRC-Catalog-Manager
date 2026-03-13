@@ -279,6 +279,7 @@ class DraggableLabel(QLabel):
         super().__init__(parent)
         self.settings_key = settings_key
         self._drag_pos = None
+        self._history_before_settings = None
         self._user_moved = False  # flag to avoid auto-reposition after user moves
         self.setWindowFlags(Qt.SubWindow | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TransparentForMouseEvents, False)
@@ -287,6 +288,11 @@ class DraggableLabel(QLabel):
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self._drag_pos = event.globalPos() - self.frameGeometry().topLeft()
+            app = self.window()
+            if hasattr(app, "history_manager") and getattr(app, "history_manager", None) is not None:
+                self._history_before_settings = app.history_manager.capture_setting_states([self.settings_key])
+            else:
+                self._history_before_settings = None
             event.accept()
 
     def mouseMoveEvent(self, event):
@@ -298,11 +304,28 @@ class DraggableLabel(QLabel):
         if event.button() == Qt.LeftButton:
             self._drag_pos = None
             self._user_moved = True
-            ini_path = Path(QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)) / "settings.ini"
-            s = QSettings(str(ini_path), QSettings.IniFormat)
-            s.setFallbacksEnabled(False)
+            app = self.window()
+            s = getattr(app, "settings", None)
+            if s is None:
+                ini_path = Path(QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)) / "settings.ini"
+                s = QSettings(str(ini_path), QSettings.IniFormat)
+                s.setFallbacksEnabled(False)
             s.setValue(self.settings_key, self.pos())
             s.sync()
+            if (
+                self._history_before_settings is not None
+                and hasattr(app, "_record_setting_bundle_from_entries")
+                and getattr(app, "history_manager", None) is not None
+            ):
+                after_settings = app.history_manager.capture_setting_states([self.settings_key])
+                label_name = (self.objectName() or self.settings_key).replace("_", " ").strip()
+                app._record_setting_bundle_from_entries(
+                    action_label=f"Move {label_name}",
+                    before_entries=self._history_before_settings,
+                    after_entries=after_settings,
+                    entity_id=self.settings_key,
+                )
+            self._history_before_settings = None
             event.accept()
 
 
@@ -886,7 +909,20 @@ class LicensesBrowserDialog(QDialog):
             return
         dst, _ = QFileDialog.getSaveFileName(self, "Save PDF as…", abs_path.name, "PDF (*.pdf)")
         if dst:
-            shutil.copy2(str(abs_path), dst)
+            app = self.parentWidget()
+            mutation = lambda: shutil.copy2(str(abs_path), dst)
+            if app is not None and hasattr(app, "_run_file_history_action"):
+                app._run_file_history_action(
+                    action_label=f"Download License PDF: {Path(dst).name}",
+                    action_type="file.download_license_pdf",
+                    target_path=dst,
+                    mutation=mutation,
+                    entity_type="License",
+                    entity_id=str(dst),
+                    payload={"source_path": str(abs_path), "target_path": str(dst)},
+                )
+            else:
+                mutation()
 
     def _edit_selected(self):
         rec = self._selected_record()
@@ -1223,6 +1259,7 @@ class App(QMainWindow):
         self.history_manager = None
         self.session_history_manager = SessionHistoryManager(self.history_dir)
         self.history_dialog = None
+        self._suspend_layout_history = False
         self.track_service = None
         self.settings_reads = None
         self.settings_mutations = None
@@ -1616,12 +1653,14 @@ class App(QMainWindow):
             self._load_header_state()
         except Exception:
             pass
-        self.table.horizontalHeader().sectionMoved.connect(self._save_header_state)
+        self._bind_header_state_signals()
 
         # save header state on app exit
         try:
             if QApplication.instance() is not None:
-                QApplication.instance().aboutToQuit.connect(self._save_header_state)
+                QApplication.instance().aboutToQuit.connect(
+                    lambda: self._save_header_state(record_history=False)
+                )
         except Exception:
             pass
 
@@ -2061,14 +2100,149 @@ class App(QMainWindow):
         self._apply_identity()
         self.active_custom_fields = self.load_active_custom_fields()
         self._rebuild_table_headers()
+        try:
+            self._load_header_state()
+        except Exception:
+            pass
+        self._apply_saved_hint_positions()
         self.populate_all_comboboxes()
         self.refresh_table_preserve_view()
         self._refresh_history_actions()
 
+    def _apply_saved_hint_positions(self):
+        for attr_name, settings_key in (
+            ("col_hint_label", "display/col_hint_pos"),
+            ("row_hint_label", "display/row_hint_pos"),
+        ):
+            label = getattr(self, attr_name, None)
+            if label is None:
+                continue
+            pos = self.settings.value(settings_key, type=QPoint)
+            if pos:
+                label.move(pos)
+
+    def _on_header_layout_changed(self, *_args):
+        if getattr(self, "_suspend_layout_history", False):
+            return
+        self._save_header_state()
+
+    def _bind_header_state_signals(self):
+        header = self.table.horizontalHeader()
+        for signal in (header.sectionMoved, header.sectionResized):
+            try:
+                signal.disconnect(self._on_header_layout_changed)
+            except (TypeError, RuntimeError):
+                pass
+        header.sectionMoved.connect(self._on_header_layout_changed)
+        header.sectionResized.connect(self._on_header_layout_changed)
+
+    def _record_setting_bundle_from_entries(
+        self,
+        *,
+        action_label: str,
+        before_entries: list[dict],
+        after_entries: list[dict],
+        entity_id: str | None = None,
+    ):
+        if self.history_manager is None or before_entries == after_entries:
+            return
+        self.history_manager.record_setting_bundle_change(
+            label=action_label,
+            before_entries=before_entries,
+            after_entries=after_entries,
+            entity_id=entity_id,
+        )
+        self._refresh_history_actions()
+
+    def _run_setting_bundle_history_action(
+        self,
+        *,
+        action_label: str,
+        setting_keys: list[str],
+        mutation,
+        entity_id: str | None = None,
+    ):
+        if self.history_manager is None:
+            return mutation()
+        before_entries = self.history_manager.capture_setting_states(setting_keys)
+        try:
+            result = mutation()
+        except Exception:
+            try:
+                self.history_manager.apply_setting_entries(before_entries)
+            except Exception as restore_error:
+                self.logger.exception(f"Settings rollback failed for {action_label}: {restore_error}")
+            raise
+        after_entries = self.history_manager.capture_setting_states(setting_keys)
+        self._record_setting_bundle_from_entries(
+            action_label=action_label,
+            before_entries=before_entries,
+            after_entries=after_entries,
+            entity_id=entity_id,
+        )
+        return result
+
+    def _run_file_history_action(
+        self,
+        *,
+        action_label,
+        action_type: str,
+        target_path: str | Path,
+        mutation,
+        companion_suffixes: tuple[str, ...] = (),
+        entity_type: str | None = "File",
+        entity_id: str | None = None,
+        payload=None,
+    ):
+        if self.history_manager is None:
+            return mutation()
+        before_state = self.history_manager.capture_file_state(
+            target_path,
+            companion_suffixes=companion_suffixes,
+        )
+        try:
+            result = mutation()
+        except Exception:
+            try:
+                self.history_manager.restore_file_state(target_path, before_state)
+            except Exception as restore_error:
+                self.logger.exception(f"File rollback failed for {action_type}: {restore_error}")
+            raise
+        after_state = self.history_manager.capture_file_state(
+            target_path,
+            companion_suffixes=companion_suffixes,
+        )
+        if before_state != after_state:
+            final_label = action_label(result) if callable(action_label) else action_label
+            final_payload = payload(result) if callable(payload) else (payload or {})
+            self.history_manager.record_file_write_action(
+                label=final_label,
+                action_type=action_type,
+                target_path=target_path,
+                before_state=before_state,
+                after_state=after_state,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                payload=final_payload,
+            )
+            self._refresh_history_actions()
+        return result
+
+    def _table_setting_keys(self, *, include_columns_movable: bool = False) -> list[str]:
+        prefix = self._table_settings_prefix()
+        keys = [
+            f"{prefix}/header_state",
+            f"{prefix}/header_labels",
+            f"{prefix}/header_labels_json",
+        ]
+        if include_columns_movable:
+            keys.append(f"{prefix}/columns_movable")
+        return keys
+
     def _activate_profile(self, path: str, *, save_current_header: bool = True):
         if save_current_header:
             try:
-                self._save_header_state()
+                self._save_header_state(record_history=False)
             except Exception:
                 pass
 
@@ -2245,6 +2419,14 @@ class App(QMainWindow):
         except Exception as e:
             self.logger.exception(f"Create snapshot failed: {e}")
             QMessageBox.critical(self, "Snapshot Error", f"Could not create snapshot:\n{e}")
+
+    def delete_snapshot_from_history(self, snapshot_id: int):
+        if self.history_manager is None:
+            return
+        self.history_manager.delete_snapshot_as_action(snapshot_id)
+        self._refresh_history_actions()
+        if self.history_dialog is not None and self.history_dialog.isVisible():
+            self.history_dialog.refresh_data()
 
     def restore_snapshot_from_history(self, snapshot_id: int):
         if self.history_manager is None:
@@ -2447,52 +2629,55 @@ class App(QMainWindow):
             self.active_custom_fields = self.load_active_custom_fields()
             self._rebuild_table_headers()
 
-        _prev_sort_enabled = self.table.isSortingEnabled()
-        if _prev_sort_enabled:
+        previous_suspend_state = self._suspend_layout_history
+        self._suspend_layout_history = True
+        try:
+            _prev_sort_enabled = self.table.isSortingEnabled()
+            if _prev_sort_enabled:
+                self.table.setSortingEnabled(False)
             self.table.setSortingEnabled(False)
-        self.table.setSortingEnabled(False)
-        self.table.setRowCount(0)
+            self.table.setRowCount(0)
 
-        rows, cf_map = self.catalog_reads.fetch_rows_with_customs(self.active_custom_fields)
-        base_cols = len(self.BASE_HEADERS)
-        self.table.setRowCount(len(rows))
+            rows, cf_map = self.catalog_reads.fetch_rows_with_customs(self.active_custom_fields)
+            base_cols = len(self.BASE_HEADERS)
+            self.table.setRowCount(len(rows))
 
-        for row_idx, row_data in enumerate(rows):
-            for col_idx in range(base_cols):
-                header = self.table.horizontalHeaderItem(col_idx).text()
-                val_raw = row_data[col_idx]
-                if header == 'Track Length (hh:mm:ss)':
-                    secs = 0
-                    try:
-                        secs = int(val_raw or 0)
-                    except Exception:
-                        secs = parse_hms_text(str(val_raw))
-                    disp = seconds_to_hms(secs)
-                    it = self._make_item(col_idx, disp)
-                    it.setData(Qt.UserRole, secs)
-                    self.table.setItem(row_idx, col_idx, it)
-                else:
-                    val = '' if val_raw is None else str(val_raw)
-                    self.table.setItem(row_idx, col_idx, self._make_item(col_idx, val))
+            for row_idx, row_data in enumerate(rows):
+                for col_idx in range(base_cols):
+                    header = self.table.horizontalHeaderItem(col_idx).text()
+                    val_raw = row_data[col_idx]
+                    if header == 'Track Length (hh:mm:ss)':
+                        secs = 0
+                        try:
+                            secs = int(val_raw or 0)
+                        except Exception:
+                            secs = parse_hms_text(str(val_raw))
+                        disp = seconds_to_hms(secs)
+                        it = self._make_item(col_idx, disp)
+                        it.setData(Qt.UserRole, secs)
+                        self.table.setItem(row_idx, col_idx, it)
+                    else:
+                        val = '' if val_raw is None else str(val_raw)
+                        self.table.setItem(row_idx, col_idx, self._make_item(col_idx, val))
 
+                track_id = row_data[0]
+                for offset, field in enumerate(self.active_custom_fields):
+                    val = cf_map.get((track_id, field["id"]), "")
+                    self.table.setItem(row_idx, base_cols + offset, self._make_item(base_cols + offset, val, custom_def=field))
 
-            track_id = row_data[0]
-            for offset, field in enumerate(self.active_custom_fields):
-                val = cf_map.get((track_id, field["id"]), "")
-                self.table.setItem(row_idx, base_cols + offset, self._make_item(base_cols + offset, val, custom_def=field))
-
-
-        self.table.resizeColumnsToContents()
-        self._update_count_label()
-        self._update_duration_label()
-        self._apply_blob_badges()
-        self.table.setSortingEnabled(True)
-        if _prev_sort_enabled:
+            self.table.resizeColumnsToContents()
+            self._update_count_label()
+            self._update_duration_label()
+            self._apply_blob_badges()
             self.table.setSortingEnabled(True)
-            try:
-                self.table.sortItems(self._last_sort_col, self._last_sort_order)
-            except Exception:
-                pass
+            if _prev_sort_enabled:
+                self.table.setSortingEnabled(True)
+                try:
+                    self.table.sortItems(self._last_sort_col, self._last_sort_order)
+                except Exception:
+                    pass
+        finally:
+            self._suspend_layout_history = previous_suspend_state
 
 
     def _update_count_label(self):
@@ -2576,9 +2761,7 @@ class App(QMainWindow):
 
         # Always rebind first (safe if duplicated)
         try:
-            self.table.horizontalHeader().sectionMoved.connect(
-                lambda *_: self._save_header_state()
-            )
+            self._bind_header_state_signals()
         except Exception as e:
             logging.warning("Failed to rebind sectionMoved: %s", e)
 
@@ -2850,18 +3033,19 @@ class App(QMainWindow):
                 ) != QMessageBox.Yes:
                     return
 
-            exported = self.xml_export_service.export_all(path)
+            exported = self._run_file_history_action(
+                action_label=lambda count: f"Export XML: {count} tracks",
+                action_type="file.export_xml_all",
+                target_path=path,
+                mutation=lambda: self.xml_export_service.export_all(path),
+                entity_type="Export",
+                entity_id=path,
+                payload=lambda count: {"path": path, "count": count},
+            )
             QMessageBox.information(self, "Export", f"All data exported:\n{path}")
             self.logger.info(f"Exported {exported} rows to {path}")
             self._audit("EXPORT", "Tracks", ref_id=path, details=f"all rows incl. duration+customs count={exported}")
             self._audit_commit()
-            self.history_manager.record_event(
-                label=f"Export XML: {exported} tracks",
-                action_type="export.xml_all",
-                entity_type="Export",
-                entity_id=path,
-                payload={"path": path, "count": exported},
-            )
         except Exception as e:
             self.logger.exception(f"Export failed: {e}")
             QMessageBox.critical(self, "Export Error", f"Failed to export:\n{e}")
@@ -2898,20 +3082,21 @@ class App(QMainWindow):
             return
 
         try:
-            exported = self.xml_export_service.export_selected(
-                out_path,
-                track_ids,
-                current_db_path=str(self.current_db_path),
+            exported = self._run_file_history_action(
+                action_label=lambda count: f"Export Selected XML: {count} tracks",
+                action_type="file.export_xml_selected",
+                target_path=out_path,
+                mutation=lambda: self.xml_export_service.export_selected(
+                    out_path,
+                    track_ids,
+                    current_db_path=str(self.current_db_path),
+                ),
+                entity_type="Export",
+                entity_id=out_path,
+                payload=lambda count: {"path": out_path, "count": count, "track_ids": track_ids},
             )
             self.logger.info(f"Exported {exported} rows to XML (ids={track_ids}) -> {out_path}")
             QMessageBox.information(self, "Export Complete", f"Saved:\n{out_path}")
-            self.history_manager.record_event(
-                label=f"Export Selected XML: {exported} tracks",
-                action_type="export.xml_selected",
-                entity_type="Export",
-                entity_id=out_path,
-                payload={"path": out_path, "count": exported, "track_ids": track_ids},
-            )
         except Exception as e:
             self.logger.exception(f"Export Selected failed: {e}")
             QMessageBox.critical(self, "Export Error", f"Could not write file:\n{e}")
@@ -3360,9 +3545,7 @@ class App(QMainWindow):
             self.col_hint_label.setStyleSheet(
                 "QLabel#colHint { background: rgba(0,0,0,0.75); color: white; padding: 4px 8px; border-radius: 6px; font: 11px 'Segoe UI'; }"
             )
-            ini_path = Path(QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)) / "settings.ini"
-            s = QSettings(str(ini_path), QSettings.IniFormat)
-            s.setFallbacksEnabled(False)
+            s = self.settings
             pos = s.value("display/col_hint_pos", type=QPoint)
             if pos:
                 self.col_hint_label.move(pos)
@@ -3375,10 +3558,7 @@ class App(QMainWindow):
             self.row_hint_label.setStyleSheet(
                 "QLabel#rowHint { background: rgba(0,0,0,0.75); color: white; padding: 4px 8px; border-radius: 6px; font: 11px 'Segoe UI'; }"
             )
-            ini_path = Path(QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)) / "settings.ini"
-            s = QSettings(str(ini_path), QSettings.IniFormat)
-            s.setFallbacksEnabled(False)
-
+            s = self.settings
             pos = s.value("display/row_hint_pos", type=QPoint)
             if pos:
                 self.row_hint_label.move(pos)
@@ -3486,9 +3666,7 @@ class App(QMainWindow):
 
         # Always rebind first (safe if duplicated)
         try:
-            self.table.horizontalHeader().sectionMoved.connect(
-                lambda *_: self._save_header_state()
-            )
+            self._bind_header_state_signals()
         except Exception as e:
             logging.warning("Failed to rebind sectionMoved after custom fields change: %s", e)
 
@@ -3982,47 +4160,68 @@ class App(QMainWindow):
 
     def _toggle_columns_movable(self, enabled: bool):
         try:
-            self.table.horizontalHeader().setSectionsMovable(bool(enabled))
-            self._save_header_state()
-            self.settings.setValue(f"{self._table_settings_prefix()}/columns_movable", bool(enabled))
-            self.settings.sync()
+            def mutation():
+                self.table.horizontalHeader().setSectionsMovable(bool(enabled))
+                self._save_header_state(record_history=False)
+                self.settings.setValue(f"{self._table_settings_prefix()}/columns_movable", bool(enabled))
+                self.settings.sync()
+
+            self._run_setting_bundle_history_action(
+                action_label="Toggle Column Reordering",
+                setting_keys=self._table_setting_keys(include_columns_movable=True),
+                mutation=mutation,
+                entity_id=f"{self._table_settings_prefix()}/columns_movable",
+            )
         except Exception as e:
             logging.warning("Exception while toggling columns movable: %s", e)
             pass
 
 
-    def _save_header_state(self):
+    def _save_header_state(self, *, record_history: bool = True):
         try:
-            header = self.table.horizontalHeader()
-            state = header.saveState()
-            prefix = self._table_settings_prefix()
+            def mutation():
+                header = self.table.horizontalHeader()
+                state = header.saveState()
+                prefix = self._table_settings_prefix()
 
-            # Native state
-            self.settings.setValue(f"{prefix}/header_state", state)
+                # Native state
+                self.settings.setValue(f"{prefix}/header_state", state)
 
-            # Visual label order (robust fallback)
-            m = self.table.model()
-            logicals = list(range(m.columnCount()))
-            visual_order = sorted(logicals, key=lambda li: header.visualIndex(li))
-            labels_visual = [
-                str(m.headerData(li, Qt.Horizontal, Qt.DisplayRole) or "")
-                for li in visual_order
-            ]
-            self.settings.setValue(f"{prefix}/header_labels", labels_visual)
-            try:
-                self.settings.setValue(f"{prefix}/header_labels_json", json.dumps(labels_visual))
-                # self.logger.info("Saved header visual order (%s): %s", prefix, labels_visual)
-            except Exception as e:
-                self.logger.warning("Failed to save header visual order JSON: %s", e)
+                # Visual label order (robust fallback)
+                m = self.table.model()
+                logicals = list(range(m.columnCount()))
+                visual_order = sorted(logicals, key=lambda li: header.visualIndex(li))
+                labels_visual = [
+                    str(m.headerData(li, Qt.Horizontal, Qt.DisplayRole) or "")
+                    for li in visual_order
+                ]
+                self.settings.setValue(f"{prefix}/header_labels", labels_visual)
+                try:
+                    self.settings.setValue(f"{prefix}/header_labels_json", json.dumps(labels_visual))
+                except Exception as e:
+                    self.logger.warning("Failed to save header visual order JSON: %s", e)
 
-            self.settings.sync()
+                self.settings.sync()
+
+            if record_history:
+                self._run_setting_bundle_history_action(
+                    action_label="Update Table Layout",
+                    setting_keys=self._table_setting_keys(include_columns_movable=False),
+                    mutation=mutation,
+                    entity_id=self._table_settings_prefix(),
+                )
+            else:
+                mutation()
         except Exception as e:
             self.logger.exception("Error saving header state: %s", e)
 
     def _load_header_state(self):
+        header = None
+        old_signal_state = False
         try:
             header = self.table.horizontalHeader()
             prefix = self._table_settings_prefix()
+            old_signal_state = header.blockSignals(True)
 
             # Current labels after (re)building headers — includes any new custom fields
             current_labels = [
@@ -4066,6 +4265,12 @@ class App(QMainWindow):
             # No exception: leave new columns as-is (visible at the end)
         except Exception as e:
             self.logger.exception("Error loading header state: %s", e)
+        finally:
+            try:
+                if header is not None:
+                    header.blockSignals(old_signal_state)
+            except Exception:
+                pass
 
     # =============================================================================
     # DB backup / restore / verify (RC blocker #7)
@@ -4104,13 +4309,27 @@ class App(QMainWindow):
                 self._audit_commit()
             except Exception:
                 pass
-            self.history_manager.record_event(
+            before_state = {
+                "target_path": str(result.backup_path),
+                "companion_suffixes": list(self.history_manager.FILE_COMPANION_SUFFIXES),
+                "exists": False,
+                "files": [],
+            }
+            after_state = self.history_manager.capture_file_state(
+                result.backup_path,
+                companion_suffixes=self.history_manager.FILE_COMPANION_SUFFIXES,
+            )
+            self.history_manager.record_file_write_action(
                 label="Create Database Backup",
-                action_type="db.backup",
+                action_type="file.db_backup",
+                target_path=result.backup_path,
+                before_state=before_state,
+                after_state=after_state,
                 entity_type="DB",
                 entity_id=str(result.backup_path),
                 payload={"path": str(result.backup_path), "method": result.method},
             )
+            self._refresh_history_actions()
 
         except Exception as e:
             self.logger.exception(f"Backup failed: {e}")
@@ -4183,6 +4402,22 @@ class App(QMainWindow):
                 "restored_path": str(result.restored_path),
                 "safety_copy_path": str(result.safety_copy_path) if result.safety_copy_path else None,
             }
+            if result.safety_copy_path is not None and self.history_manager is not None:
+                payload["file_effects"] = [
+                    {
+                        "target_path": str(result.safety_copy_path),
+                        "before_state": {
+                            "target_path": str(result.safety_copy_path),
+                            "companion_suffixes": list(self.history_manager.FILE_COMPANION_SUFFIXES),
+                            "exists": False,
+                            "files": [],
+                        },
+                        "after_state": self.history_manager.capture_file_state(
+                            result.safety_copy_path,
+                            companion_suffixes=self.history_manager.FILE_COMPANION_SUFFIXES,
+                        ),
+                    }
+                ]
             if pre_restore_snapshot is not None and self.history_manager is not None:
                 registered_before = self.history_manager.register_snapshot(
                     pre_restore_snapshot,
@@ -4309,7 +4544,15 @@ class App(QMainWindow):
         if not dest_path:
             return
         try:
-            Path(dest_path).write_bytes(data)
+            self._run_file_history_action(
+                action_label=f"Export Custom File: {Path(dest_path).name}",
+                action_type="file.export_custom_blob",
+                target_path=dest_path,
+                mutation=lambda: Path(dest_path).write_bytes(data),
+                entity_type="CustomFieldValue",
+                entity_id=f"{track_id}:{field_def_id}",
+                payload={"path": str(dest_path), "track_id": track_id, "field_id": field_def_id},
+            )
             QMessageBox.information(parent_widget or None, "Export", f"Saved:\n{dest_path}")
         except Exception as e:
             QMessageBox.critical(parent_widget or None, "Export failed", str(e))

@@ -163,7 +163,7 @@ class HistoryDialog(QDialog):
         ) != QMessageBox.Yes:
             return
         try:
-            self.app.history_manager.delete_snapshot(snapshot_id)
+            self.app.delete_snapshot_from_history(snapshot_id)
         except Exception as exc:
             QMessageBox.warning(self, "Delete Snapshot", str(exc))
         self.refresh_data()

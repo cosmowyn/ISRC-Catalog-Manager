@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QPoint, QSettings
 
 from isrc_manager.history import HistoryManager
 from isrc_manager.services import (
@@ -233,6 +233,100 @@ class HistoryManagerTests(unittest.TestCase):
 
         self.history.restore_snapshot_as_action(registered.snapshot_id)
         self.assertIsNone(self.track_service.fetch_track_snapshot(track_id))
+
+    def test_manual_snapshot_create_and_delete_can_be_undone(self):
+        created = self.history.create_manual_snapshot("Manual Snapshot")
+        self.assertIsNotNone(self.history.fetch_snapshot(created.snapshot_id))
+
+        self.history.undo()
+        self.assertIsNone(self.history.fetch_snapshot(created.snapshot_id))
+
+        self.history.redo()
+        restored_snapshots = [snap for snap in self.history.list_snapshots() if snap.label == "Manual Snapshot"]
+        self.assertEqual(len(restored_snapshots), 1)
+
+        restored = restored_snapshots[0]
+        self.history.delete_snapshot_as_action(restored.snapshot_id)
+        self.assertIsNone(self.history.fetch_snapshot(restored.snapshot_id))
+
+        self.history.undo()
+        restored_again = [snap for snap in self.history.list_snapshots() if snap.label == "Manual Snapshot"]
+        self.assertEqual(len(restored_again), 1)
+
+        self.history.redo()
+        self.assertEqual([snap for snap in self.history.list_snapshots() if snap.label == "Manual Snapshot"], [])
+
+    def test_setting_bundle_change_restores_qpoint_and_coalesces(self):
+        key = "display/col_hint_pos"
+        self.settings.setValue(key, QPoint(12, 18))
+        self.settings.sync()
+        before = self.history.capture_setting_states([key])
+
+        self.settings.setValue(key, QPoint(30, 45))
+        self.settings.sync()
+        after_first = self.history.capture_setting_states([key])
+        self.history.record_setting_bundle_change(
+            label="Move Column Hint",
+            before_entries=before,
+            after_entries=after_first,
+            entity_id=key,
+        )
+
+        self.settings.setValue(key, QPoint(60, 90))
+        self.settings.sync()
+        after_second = self.history.capture_setting_states([key])
+        self.history.record_setting_bundle_change(
+            label="Move Column Hint",
+            before_entries=after_first,
+            after_entries=after_second,
+            entity_id=key,
+        )
+
+        bundle_entries = [entry for entry in self.history.list_entries(limit=20) if entry.action_type == "settings.bundle"]
+        self.assertEqual(len(bundle_entries), 1)
+
+        self.history.undo()
+        self.assertEqual(self.settings.value(key, type=QPoint), QPoint(12, 18))
+
+        self.history.redo()
+        self.assertEqual(self.settings.value(key, type=QPoint), QPoint(60, 90))
+
+    def test_snapshot_actions_restore_external_file_side_effects(self):
+        before = self.history.capture_snapshot(kind="pre_file_side_effect", label="Before file side effect")
+        export_path = self.root / "exports" / "catalog.xml"
+        export_path.parent.mkdir(parents=True, exist_ok=True)
+        export_path.write_text("<catalog/>", encoding="utf-8")
+        after = self.history.capture_snapshot(kind="post_file_side_effect", label="After file side effect")
+
+        self.history.record_snapshot_action(
+            label="Create Export File",
+            action_type="file.export_xml_all",
+            entity_type="File",
+            entity_id=str(export_path),
+            payload={
+                "file_effects": [
+                    {
+                        "target_path": str(export_path),
+                        "before_state": {
+                            "target_path": str(export_path),
+                            "companion_suffixes": [],
+                            "exists": False,
+                            "files": [],
+                        },
+                        "after_state": self.history.capture_file_state(export_path),
+                    }
+                ]
+            },
+            snapshot_before_id=before.snapshot_id,
+            snapshot_after_id=after.snapshot_id,
+        )
+
+        self.history.undo()
+        self.assertFalse(export_path.exists())
+
+        self.history.redo()
+        self.assertTrue(export_path.exists())
+        self.assertEqual(export_path.read_text(encoding="utf-8"), "<catalog/>")
 
 
 if __name__ == "__main__":

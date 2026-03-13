@@ -7,11 +7,11 @@ import json
 import shutil
 import sqlite3
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QByteArray, QSettings
+from PySide6.QtCore import QByteArray, QPoint, QSettings
 
 from isrc_manager.services import (
     ProfileKVService,
@@ -28,6 +28,8 @@ class HistoryManager:
     """Stores history entries and applies undo/redo for supported actions."""
 
     MANAGED_DIRECTORIES = ("licenses",)
+    FILE_COMPANION_SUFFIXES = (".wal", ".shm")
+    SETTINGS_COALESCE_WINDOW_SECONDS = 2.0
     DOMAIN_TABLES_DELETE_ORDER = [
         "Licenses",
         "CustomFieldValues",
@@ -158,14 +160,54 @@ class HistoryManager:
     # ------------------------------------------------------------------
     def create_manual_snapshot(self, label: str | None = None) -> SnapshotRecord:
         snapshot = self.capture_snapshot(kind="manual", label=label or f"Manual Snapshot {self._now_stamp()}")
-        self.record_event(
+        self.record_snapshot_create(snapshot)
+        return snapshot
+
+    def record_snapshot_create(
+        self,
+        snapshot: SnapshotRecord,
+        *,
+        label: str | None = None,
+    ) -> HistoryEntry:
+        archived_snapshot = self._archive_snapshot_record(snapshot, prefix="snapshot_create")
+        entry_id = self._insert_entry(
             label=f"Create Snapshot: {snapshot.label}",
             action_type="snapshot.create",
             entity_type="Snapshot",
             entity_id=str(snapshot.snapshot_id),
-            payload={"snapshot_id": snapshot.snapshot_id},
+            reversible=True,
+            strategy="inverse",
+            payload={"snapshot_id": snapshot.snapshot_id, "label": snapshot.label},
+            inverse_payload={"snapshot_id": snapshot.snapshot_id},
+            redo_payload={"archived_snapshot": archived_snapshot},
+            snapshot_before_id=None,
+            snapshot_after_id=None,
+            move_head=True,
         )
-        return snapshot
+        return self.fetch_entry(entry_id)
+
+    def delete_snapshot_as_action(self, snapshot_id: int, *, label: str | None = None) -> HistoryEntry:
+        snapshot = self.fetch_snapshot(snapshot_id)
+        if snapshot is None:
+            raise ValueError(f"Snapshot {snapshot_id} not found")
+        archived_snapshot = self._archive_snapshot_record(snapshot, prefix="snapshot_delete")
+        snapshot_label = snapshot.label
+        self.delete_snapshot(snapshot_id)
+        entry_id = self._insert_entry(
+            label=label or f"Delete Snapshot: {snapshot_label}",
+            action_type="snapshot.delete",
+            entity_type="Snapshot",
+            entity_id=str(snapshot_id),
+            reversible=True,
+            strategy="inverse",
+            payload={"snapshot_id": snapshot_id, "label": snapshot_label},
+            inverse_payload={"archived_snapshot": archived_snapshot},
+            redo_payload={"snapshot_id": None},
+            snapshot_before_id=None,
+            snapshot_after_id=None,
+            move_head=True,
+        )
+        return self.fetch_entry(entry_id)
 
     def capture_snapshot(self, *, kind: str, label: str) -> SnapshotRecord:
         return self._create_snapshot(kind=kind, label=label)
@@ -220,6 +262,122 @@ class HistoryManager:
             raise ValueError(f"Snapshot {snapshot_id} not found")
         self._restore_snapshot_state(snapshot)
         return snapshot
+
+    def capture_file_state(
+        self,
+        target_path: str | Path,
+        *,
+        companion_suffixes: tuple[str, ...] = (),
+    ) -> dict:
+        target = Path(target_path)
+        file_dir = self.history_root / "file_states" / self.db_path.stem
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        bundle_dir = file_dir / f"{timestamp}_{target.name}"
+
+        files = []
+        for suffix in ("", *tuple(companion_suffixes)):
+            source = Path(str(target) + suffix) if suffix else target
+            if not source.exists():
+                continue
+            bundle_dir.mkdir(parents=True, exist_ok=True)
+            artifact = bundle_dir / source.name
+            shutil.copy2(source, artifact)
+            files.append({"suffix": suffix, "artifact_path": str(artifact)})
+
+        return {
+            "target_path": str(target),
+            "companion_suffixes": list(companion_suffixes),
+            "exists": bool(files),
+            "files": files,
+        }
+
+    def restore_file_state(self, target_path: str | Path, state: dict) -> None:
+        target = Path(target_path)
+        companion_suffixes = tuple(state.get("companion_suffixes", []))
+        for suffix in ("", *companion_suffixes):
+            self._remove_path(Path(str(target) + suffix) if suffix else target)
+
+        for file_info in state.get("files", []):
+            artifact = Path(file_info["artifact_path"])
+            if not artifact.exists():
+                raise FileNotFoundError(artifact)
+            suffix = file_info.get("suffix", "")
+            destination = Path(str(target) + suffix) if suffix else target
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(artifact, destination)
+
+    def capture_setting_states(self, keys: list[str]) -> list[dict]:
+        return [self._capture_setting_state(key) for key in keys]
+
+    def apply_setting_entries(self, entries: list[dict]) -> None:
+        for entry in entries:
+            self._apply_setting_state_entry(entry)
+        self.settings.sync()
+
+    def record_file_write_action(
+        self,
+        *,
+        label: str,
+        action_type: str,
+        target_path: str | Path,
+        before_state: dict,
+        after_state: dict,
+        entity_type: str | None = "File",
+        entity_id: str | None = None,
+        payload: dict | None = None,
+    ) -> HistoryEntry:
+        entry_id = self._insert_entry(
+            label=label,
+            action_type=action_type,
+            entity_type=entity_type,
+            entity_id=entity_id or str(target_path),
+            reversible=True,
+            strategy="inverse",
+            payload=payload or {"target_path": str(target_path)},
+            inverse_payload={"target_path": str(target_path), "state": before_state},
+            redo_payload={"target_path": str(target_path), "state": after_state},
+            snapshot_before_id=None,
+            snapshot_after_id=None,
+            move_head=True,
+        )
+        return self.fetch_entry(entry_id)
+
+    def record_setting_bundle_change(
+        self,
+        *,
+        label: str,
+        before_entries: list[dict],
+        after_entries: list[dict],
+        entity_id: str | None = None,
+    ) -> HistoryEntry:
+        history_entity_id = entity_id or label
+        current = self.get_current_entry()
+        if self._can_coalesce_setting_bundle(current, history_entity_id):
+            inverse_payload = current.inverse_payload or {"key": "bundle", "entries": before_entries}
+            self._update_entry_payloads(
+                current.entry_id,
+                label=label,
+                payload={"keys": [entry["setting_key"] for entry in after_entries]},
+                inverse_payload=inverse_payload,
+                redo_payload={"key": "bundle", "entries": after_entries},
+                created_at=self._history_timestamp_now(),
+            )
+            return self.fetch_entry(current.entry_id)
+        entry_id = self._insert_entry(
+            label=label,
+            action_type="settings.bundle",
+            entity_type="Settings",
+            entity_id=history_entity_id,
+            reversible=True,
+            strategy="inverse",
+            payload={"keys": [entry["setting_key"] for entry in after_entries]},
+            inverse_payload={"key": "bundle", "entries": before_entries},
+            redo_payload={"key": "bundle", "entries": after_entries},
+            snapshot_before_id=None,
+            snapshot_after_id=None,
+            move_head=True,
+        )
+        return self.fetch_entry(entry_id)
 
     def register_snapshot(
         self,
@@ -574,6 +732,7 @@ class HistoryManager:
             if snapshot is None:
                 raise ValueError(f"Snapshot {snapshot_id} not found")
             self._restore_snapshot_state(snapshot)
+            self._apply_snapshot_side_effects(entry.payload, direction=direction)
             return
 
         action_type = entry.action_type
@@ -596,6 +755,18 @@ class HistoryManager:
                 self._restore_track_from_payload(payload)
             else:
                 self._redo_track_delete(payload)
+        elif action_type == "snapshot.create":
+            if direction == "undo":
+                self._apply_snapshot_create_undo(entry, payload)
+            else:
+                self._apply_snapshot_create_redo(entry, payload)
+        elif action_type == "snapshot.delete":
+            if direction == "undo":
+                self._apply_snapshot_delete_undo(entry, payload)
+            else:
+                self._apply_snapshot_delete_redo(entry, payload)
+        elif action_type.startswith("file."):
+            self._apply_file_payload(payload)
         elif action_type.startswith("settings."):
             self._apply_setting_payload(payload)
         else:
@@ -627,6 +798,12 @@ class HistoryManager:
 
     def _apply_setting_payload(self, payload: dict) -> None:
         key = payload["key"]
+        if key == "bundle":
+            for entry in payload.get("entries", []):
+                self._apply_setting_state_entry(entry)
+            self.settings.sync()
+            return
+
         value = payload["value"]
         if key == "identity":
             self.settings_mutations.set_identity(
@@ -647,6 +824,52 @@ class HistoryManager:
             self.settings_mutations.set_buma_ipi(str(value))
         else:
             raise ValueError(f"Unknown setting history key: {key}")
+
+    def _apply_file_payload(self, payload: dict) -> None:
+        self.restore_file_state(payload["target_path"], payload["state"])
+
+    def _apply_snapshot_side_effects(self, payload: dict | None, *, direction: str) -> None:
+        if not payload:
+            return
+        for effect in payload.get("file_effects", []):
+            state = effect.get("before_state") if direction == "undo" else effect.get("after_state")
+            if state is None:
+                continue
+            self.restore_file_state(effect["target_path"], state)
+
+    def _apply_snapshot_create_undo(self, entry: HistoryEntry, payload: dict) -> None:
+        snapshot_id = payload.get("snapshot_id")
+        if snapshot_id is None:
+            raise ValueError("Missing snapshot_id for snapshot.create undo")
+        self.delete_snapshot(int(snapshot_id))
+
+    def _apply_snapshot_create_redo(self, entry: HistoryEntry, payload: dict) -> None:
+        archived_snapshot = payload.get("archived_snapshot")
+        if not archived_snapshot:
+            raise ValueError("Missing archived snapshot for snapshot.create redo")
+        restored = self._restore_snapshot_from_archive(archived_snapshot)
+        self._update_entry_payloads(
+            entry.entry_id,
+            payload={"snapshot_id": restored.snapshot_id, "label": restored.label},
+            inverse_payload={"snapshot_id": restored.snapshot_id},
+        )
+
+    def _apply_snapshot_delete_undo(self, entry: HistoryEntry, payload: dict) -> None:
+        archived_snapshot = payload.get("archived_snapshot")
+        if not archived_snapshot:
+            raise ValueError("Missing archived snapshot for snapshot.delete undo")
+        restored = self._restore_snapshot_from_archive(archived_snapshot)
+        self._update_entry_payloads(
+            entry.entry_id,
+            payload={"snapshot_id": restored.snapshot_id, "label": restored.label},
+            redo_payload={"snapshot_id": restored.snapshot_id},
+        )
+
+    def _apply_snapshot_delete_redo(self, entry: HistoryEntry, payload: dict) -> None:
+        snapshot_id = payload.get("snapshot_id")
+        if snapshot_id is None:
+            raise ValueError("Missing snapshot_id for snapshot.delete redo")
+        self.delete_snapshot(int(snapshot_id))
 
     def _create_snapshot(self, *, kind: str, label: str) -> SnapshotRecord:
         snapshot_dir = self.history_root / "snapshots" / self.db_path.stem
@@ -766,6 +989,14 @@ class HistoryManager:
             for key in self.settings.allKeys()
         }
 
+    def _capture_setting_state(self, key: str) -> dict:
+        exists = self.settings.contains(key)
+        return {
+            "setting_key": key,
+            "exists": bool(exists),
+            "serialized": self._serialize_setting_value(self.settings.value(key)) if exists else None,
+        }
+
     def _capture_managed_state(self, assets_dir: Path) -> dict:
         if self.managed_root is None:
             return {}
@@ -828,15 +1059,51 @@ class HistoryManager:
                 raise FileNotFoundError(snapshot_dir)
             shutil.copytree(snapshot_dir, target_dir)
 
+    def _archive_snapshot_record(self, snapshot: SnapshotRecord, *, prefix: str) -> dict:
+        archive_dir = self.history_root / "snapshot_archives" / self.db_path.stem
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        archive_path = archive_dir / f"{timestamp}_{prefix}.db"
+        shutil.copy2(snapshot.db_snapshot_path, archive_path)
+        manifest = self._clone_managed_manifest(snapshot.manifest, archive_path.with_suffix(".assets"))
+        return {
+            "kind": snapshot.kind,
+            "label": snapshot.label,
+            "db_snapshot_path": str(archive_path),
+            "settings_state": snapshot.settings_state,
+            "manifest": manifest,
+        }
+
+    def _restore_snapshot_from_archive(self, archived_snapshot: dict) -> SnapshotRecord:
+        snapshot = SnapshotRecord(
+            snapshot_id=0,
+            created_at="",
+            kind=archived_snapshot.get("kind", "manual"),
+            label=archived_snapshot.get("label", "Restored Snapshot"),
+            db_snapshot_path=archived_snapshot["db_snapshot_path"],
+            settings_state=archived_snapshot.get("settings_state", {}),
+            manifest=archived_snapshot.get("manifest", {}),
+        )
+        return self.register_snapshot(snapshot, kind=snapshot.kind, label=snapshot.label)
+
     def _apply_settings_state(self, state: dict) -> None:
         self.settings.clear()
         for key, serialized in state.items():
             self.settings.setValue(key, self._deserialize_setting_value(serialized))
         self.settings.sync()
 
+    def _apply_setting_state_entry(self, entry: dict) -> None:
+        key = entry["setting_key"]
+        if not entry.get("exists"):
+            self.settings.remove(key)
+            return
+        self.settings.setValue(key, self._deserialize_setting_value(entry["serialized"]))
+
     def _serialize_setting_value(self, value) -> dict:
         if isinstance(value, QByteArray):
             return {"kind": "qbytearray", "value": bytes(value.toBase64()).decode("ascii")}
+        if isinstance(value, QPoint):
+            return {"kind": "qpoint", "x": int(value.x()), "y": int(value.y())}
         if isinstance(value, bytes):
             return {"kind": "bytes", "value": base64.b64encode(value).decode("ascii")}
         if isinstance(value, list):
@@ -851,12 +1118,14 @@ class HistoryManager:
         kind = serialized.get("kind")
         if kind == "qbytearray":
             return QByteArray.fromBase64(serialized.get("value", "").encode("ascii"))
+        if kind == "qpoint":
+            return QPoint(int(serialized.get("x", 0)), int(serialized.get("y", 0)))
         if kind == "bytes":
             return base64.b64decode(serialized.get("value", "").encode("ascii"))
         if kind == "list":
             return [self._deserialize_setting_value(item) for item in serialized.get("value", [])]
         if kind == "tuple":
-            return [self._deserialize_setting_value(item) for item in serialized.get("value", [])]
+            return tuple(self._deserialize_setting_value(item) for item in serialized.get("value", []))
         return serialized.get("value")
 
     @staticmethod
@@ -868,6 +1137,52 @@ class HistoryManager:
         if value is None or isinstance(value, (bool, int, float, str)):
             return value
         return str(value)
+
+    def _can_coalesce_setting_bundle(self, entry: HistoryEntry | None, entity_id: str) -> bool:
+        if entry is None:
+            return False
+        if not entry.reversible or entry.action_type != "settings.bundle":
+            return False
+        if (entry.entity_id or "") != entity_id:
+            return False
+        if not entry.created_at:
+            return False
+        try:
+            created_at = datetime.fromisoformat(entry.created_at)
+        except ValueError:
+            return False
+        created_at_utc = created_at.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - created_at_utc).total_seconds() <= self.SETTINGS_COALESCE_WINDOW_SECONDS
+
+    def _update_entry_payloads(
+        self,
+        entry_id: int,
+        *,
+        label: str | None = None,
+        payload: dict | None = None,
+        inverse_payload: dict | None = None,
+        redo_payload: dict | None = None,
+        created_at: str | None = None,
+    ) -> None:
+        current = self.fetch_entry(entry_id)
+        if current is None:
+            raise ValueError(f"History entry {entry_id} not found")
+        with self.conn:
+            self.conn.execute(
+                """
+                UPDATE HistoryEntries
+                SET label=?, created_at=?, payload_json=?, inverse_json=?, redo_json=?
+                WHERE id=?
+                """,
+                (
+                    label if label is not None else current.label,
+                    created_at if created_at is not None else current.created_at,
+                    json.dumps(payload if payload is not None else current.payload),
+                    json.dumps(inverse_payload if inverse_payload is not None else current.inverse_payload),
+                    json.dumps(redo_payload if redo_payload is not None else current.redo_payload),
+                    int(entry_id),
+                ),
+            )
 
     @staticmethod
     def _remove_path(path: Path) -> None:
@@ -888,3 +1203,7 @@ class HistoryManager:
     @staticmethod
     def _now_stamp() -> str:
         return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    @staticmethod
+    def _history_timestamp_now() -> str:
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
