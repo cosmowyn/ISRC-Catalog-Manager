@@ -36,7 +36,8 @@ from PySide6.QtWidgets import ( QListView, QMenuBar, QListWidget, QListWidgetIte
     QCalendarWidget, QRadioButton, QMenuBar, QMenu, QInputDialog, QTableWidget, QTableWidgetItem,
     QHeaderView, QDialog, QMainWindow, QSizePolicy, QComboBox, QCompleter, QListWidget,
     QListWidgetItem, QFileDialog, QToolBar, QFrame, QSpinBox, QScrollArea, QSlider, QAbstractItemView,
-    QFormLayout, QTableView, QTabWidget, QDialogButtonBox, QGridLayout, QGroupBox, QPlainTextEdit, QCheckBox
+    QFormLayout, QTableView, QTabWidget, QDialogButtonBox, QGridLayout, QGroupBox, QPlainTextEdit, QCheckBox,
+    QDockWidget
 )
 
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
@@ -2770,6 +2771,7 @@ class App(QMainWindow):
         self.auto_snapshot_timer.timeout.connect(self._on_auto_snapshot_timer)
         self._last_auto_snapshot_marker = None
         self._suspend_layout_history = False
+        self._suspend_dock_state_sync = False
         self._header_layout_signals_bound = False
         self._col_hint_signal_bound = False
         self._row_hint_signal_bound = False
@@ -2992,6 +2994,15 @@ class App(QMainWindow):
             shortcuts=("Ctrl+Shift+D", "Meta+Shift+D"),
         )
         view_menu.addAction(self.add_data_action)
+
+        self.catalog_table_action = self._create_action(
+            "Show Catalog Table",
+            checkable=True,
+            checked=True,
+            toggled_slot=self._on_toggle_catalog_table,
+            shortcuts=("Ctrl+Shift+T", "Meta+Shift+T"),
+        )
+        view_menu.addAction(self.catalog_table_action)
         view_menu.addSeparator()
 
         table_view_menu = view_menu.addMenu("Table Layout")
@@ -3104,11 +3115,20 @@ class App(QMainWindow):
         btn_remove.clicked.connect(self.remove_selected_profile)
         self.toolbar.addWidget(btn_remove)
 
-        # ----- Central Layout -----
-        main_widget = QWidget()
-        self.setCentralWidget(main_widget)
-        self.super_layout = QHBoxLayout(main_widget)
-        self.super_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        # ----- Central dock layout -----
+        self.setDockNestingEnabled(True)
+        self.setDockOptions(
+            self.dockOptions()
+            | QMainWindow.AllowNestedDocks
+            | QMainWindow.AllowTabbedDocks
+            | QMainWindow.AnimatedDocks
+        )
+        self._dock_placeholder = QWidget()
+        self._dock_placeholder.setObjectName("dockPlaceholder")
+        self._dock_placeholder.setMinimumSize(0, 0)
+        self._dock_placeholder.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+        self.setCentralWidget(self._dock_placeholder)
+        self._dock_placeholder.hide()
 
         # Left form
         self.left_panel = QVBoxLayout()
@@ -3254,10 +3274,24 @@ class App(QMainWindow):
         self.left_scroll.setWidgetResizable(True)
         self.left_scroll.setWidget(self.left_widget_container)
         self.left_scroll.setMinimumWidth(350)
-        self.super_layout.addWidget(self.left_scroll)
+        self.add_data_dock = QDockWidget("Add Data", self)
+        self.add_data_dock.setObjectName("addDataDock")
+        self.add_data_dock.setAllowedAreas(Qt.AllDockWidgetAreas)
+        self.add_data_dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
+        self.add_data_dock.setMinimumWidth(390)
+        self.add_data_dock.setWidget(self.left_scroll)
+        self.addDockWidget(Qt.LeftDockWidgetArea, self.add_data_dock)
+        self.add_data_dock.dockLocationChanged.connect(lambda *_args: self._save_main_dock_state())
+        self.add_data_dock.topLevelChanged.connect(lambda *_args: self._save_main_dock_state())
+        self.add_data_dock.visibilityChanged.connect(
+            lambda visible: self._sync_dock_visibility(self.add_data_action, "display/add_data_panel", visible)
+        )
 
         # Right panel (search + table)
-        right_panel = QVBoxLayout()
+        self.table_panel_widget = QWidget()
+        right_panel = QVBoxLayout(self.table_panel_widget)
+        right_panel.setContentsMargins(0, 0, 0, 0)
+        right_panel.setSpacing(8)
         self.search_layout = QHBoxLayout()
 
         self.search_column_combo = QComboBox()
@@ -3348,7 +3382,26 @@ class App(QMainWindow):
         self.table.customContextMenuRequested.connect(self._on_table_context_menu)
 
         right_panel.addWidget(self.table)
-        self.super_layout.addLayout(right_panel, 1)
+
+        self.catalog_table_dock = QDockWidget("Catalog Table", self)
+        self.catalog_table_dock.setObjectName("catalogTableDock")
+        self.catalog_table_dock.setAllowedAreas(Qt.AllDockWidgetAreas)
+        self.catalog_table_dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
+        self.catalog_table_dock.setMinimumWidth(700)
+        self.catalog_table_dock.setWidget(self.table_panel_widget)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.catalog_table_dock)
+        self.catalog_table_dock.dockLocationChanged.connect(lambda *_args: self._save_main_dock_state())
+        self.catalog_table_dock.topLevelChanged.connect(lambda *_args: self._save_main_dock_state())
+        self.catalog_table_dock.visibilityChanged.connect(
+            lambda visible: self._sync_dock_visibility(
+                self.catalog_table_action,
+                "display/catalog_table_panel",
+                visible,
+            )
+        )
+
+        self.resizeDocks([self.add_data_dock, self.catalog_table_dock], [390, 890], Qt.Horizontal)
+        self._restore_main_dock_state()
 
         # Restore view preferences after all controls and panels exist
         self._apply_saved_view_preferences()
@@ -3360,6 +3413,7 @@ class App(QMainWindow):
 
 
     def closeEvent(self, e):
+        self._save_main_dock_state(sync=False)
         self.settings.sync()
         self.logger.info("Settings synced to disk")
         super().closeEvent(e)
@@ -4730,30 +4784,68 @@ class App(QMainWindow):
         self._apply_table_view_settings()
         self._reset_hint_label()
 
+    @staticmethod
+    def _dock_state_setting_key() -> str:
+        return "display/main_window_dock_state"
+
+    def _save_main_dock_state(self, *, sync: bool = True) -> None:
+        if getattr(self, "_suspend_dock_state_sync", False):
+            return
+        try:
+            self.settings.setValue(self._dock_state_setting_key(), self.saveState(1))
+            if sync:
+                self.settings.sync()
+        except Exception as e:
+            self.logger.warning("Failed to save dock state: %s", e)
+
+    def _restore_main_dock_state(self) -> None:
+        try:
+            state = self.settings.value(self._dock_state_setting_key(), None, QByteArray)
+        except Exception:
+            state = None
+        if not isinstance(state, QByteArray) or state.isEmpty():
+            return
+        previous_suspend_state = self._suspend_dock_state_sync
+        self._suspend_dock_state_sync = True
+        try:
+            self.restoreState(state, 1)
+        except Exception as e:
+            self.logger.warning("Failed to restore dock state: %s", e)
+        finally:
+            self._suspend_dock_state_sync = previous_suspend_state
+
+    def _sync_dock_visibility(self, action: QAction, setting_key: str, visible: bool) -> None:
+        self._set_action_checked_silently(action, visible)
+        if getattr(self, "_suspend_dock_state_sync", False):
+            return
+        try:
+            self.settings.setValue(setting_key, bool(visible))
+            self._save_main_dock_state(sync=False)
+            self.settings.sync()
+        except Exception as e:
+            self.logger.warning("Failed to sync dock visibility for %s: %s", setting_key, e)
+
     def _apply_add_data_panel_state(self, enabled: bool):
         enabled = bool(enabled)
-
-        if hasattr(self, "left_scroll") and isinstance(self.left_scroll, QWidget):
+        dock = getattr(self, "add_data_dock", None)
+        action = getattr(self, "add_data_action", None)
+        if action is not None:
+            self._set_action_checked_silently(action, enabled)
+        if isinstance(dock, QDockWidget):
+            dock.setVisible(enabled)
             if enabled:
-                try:
-                    self.left_scroll.setMaximumWidth(16777215)
-                    self.left_scroll.setMinimumWidth(350)
-                except Exception:
-                    pass
-                self.left_scroll.show()
-            else:
-                self.left_scroll.hide()
-                try:
-                    self.left_scroll.setMinimumWidth(0)
-                    self.left_scroll.setMaximumWidth(0)
-                except Exception:
-                    pass
+                dock.raise_()
 
-        try:
-            self.super_layout.setStretch(0, 0)
-            self.super_layout.setStretch(1, 1)
-        except Exception:
-            pass
+    def _apply_catalog_table_panel_state(self, enabled: bool):
+        enabled = bool(enabled)
+        dock = getattr(self, "catalog_table_dock", None)
+        action = getattr(self, "catalog_table_action", None)
+        if action is not None:
+            self._set_action_checked_silently(action, enabled)
+        if isinstance(dock, QDockWidget):
+            dock.setVisible(enabled)
+            if enabled:
+                dock.raise_()
 
     def _apply_saved_view_preferences(self):
         previous_suspend_state = self._suspend_layout_history
@@ -4763,16 +4855,19 @@ class App(QMainWindow):
             col_width_enabled = self.settings.value("display/interactive_col_width", False, bool)
             row_height_enabled = self.settings.value("display/interactive_row_height", False, bool)
             add_data_enabled = self.settings.value("display/add_data_panel", False, bool)
+            catalog_table_enabled = self.settings.value("display/catalog_table_panel", True, bool)
 
             self._set_action_checked_silently(self.act_reorder_columns, columns_movable)
             self._set_action_checked_silently(self.col_width_action, col_width_enabled)
             self._set_action_checked_silently(self.row_height_action, row_height_enabled)
             self._set_action_checked_silently(self.add_data_action, add_data_enabled)
+            self._set_action_checked_silently(self.catalog_table_action, catalog_table_enabled)
 
             self._apply_columns_movable_state(columns_movable)
             self._apply_col_width_mode(col_width_enabled)
             self._apply_row_height_mode(row_height_enabled)
             self._apply_add_data_panel_state(add_data_enabled)
+            self._apply_catalog_table_panel_state(catalog_table_enabled)
         finally:
             self._suspend_layout_history = previous_suspend_state
 
@@ -6104,6 +6199,21 @@ class App(QMainWindow):
             setting_keys=["display/add_data_panel"],
             mutation=mutation,
             entity_id="display/add_data_panel",
+        )
+
+    def _on_toggle_catalog_table(self, enabled: bool):
+        enabled = bool(enabled)
+
+        def mutation():
+            self._apply_catalog_table_panel_state(enabled)
+            self.settings.setValue("display/catalog_table_panel", enabled)
+            self.settings.sync()
+
+        self._run_setting_bundle_history_action(
+            action_label="Toggle Catalog Table",
+            setting_keys=["display/catalog_table_panel"],
+            mutation=mutation,
+            entity_id="display/catalog_table_panel",
         )
 
 
