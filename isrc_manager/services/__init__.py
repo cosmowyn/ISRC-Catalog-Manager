@@ -12,7 +12,7 @@ from .schema import DatabaseSchemaService
 from .settings_reads import RegistrationSettings, SettingsReadService
 from .session import DatabaseSessionService, OpenDatabaseSession, ProfileKVService
 from .settings_mutations import SettingsMutationService
-from .tracks import TrackCreatePayload, TrackService, TrackUpdatePayload
+from .tracks import TrackCreatePayload, TrackService, TrackSnapshot, TrackUpdatePayload
 
 __all__ = [
     "AlbumUsage",
@@ -45,6 +45,7 @@ __all__ = [
     "SettingsMutationService",
     "TrackCreatePayload",
     "TrackService",
+    "TrackSnapshot",
     "TrackUpdatePayload",
     "XMLImportService",
 ]

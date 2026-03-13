@@ -181,6 +181,52 @@ class DatabaseSchemaService:
             """
         )
 
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS HistoryEntries (
+                id INTEGER PRIMARY KEY,
+                parent_id INTEGER,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                label TEXT NOT NULL,
+                action_type TEXT NOT NULL,
+                entity_type TEXT,
+                entity_id TEXT,
+                reversible INTEGER NOT NULL DEFAULT 1,
+                strategy TEXT NOT NULL,
+                payload_json TEXT,
+                inverse_json TEXT,
+                redo_json TEXT,
+                snapshot_before_id INTEGER,
+                snapshot_after_id INTEGER,
+                status TEXT NOT NULL DEFAULT 'applied'
+            )
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS HistoryHead (
+                id INTEGER PRIMARY KEY CHECK(id=1),
+                current_entry_id INTEGER
+            )
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS HistorySnapshots (
+                id INTEGER PRIMARY KEY,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                kind TEXT NOT NULL,
+                label TEXT NOT NULL,
+                db_snapshot_path TEXT NOT NULL,
+                settings_json TEXT,
+                manifest_json TEXT
+            )
+            """
+        )
+        self.cursor.execute(
+            "INSERT OR IGNORE INTO HistoryHead (id, current_entry_id) VALUES (1, NULL)"
+        )
+
         self.conn.commit()
 
     def get_db_version(self) -> int:
@@ -281,6 +327,9 @@ class DatabaseSchemaService:
             elif version == 10:
                 self._apply_migration(10, self._mig_10_to_11)
                 version = 11
+            elif version == 11:
+                self._apply_migration(11, self._mig_11_to_12)
+                version = 12
             else:
                 self.logger.warning("Unknown migration path from version %s", version)
                 break
@@ -616,3 +665,50 @@ class DatabaseSchemaService:
             """
         )
         self.conn.commit()
+
+    def _mig_11_to_12(self) -> None:
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS HistoryEntries (
+                id INTEGER PRIMARY KEY,
+                parent_id INTEGER,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                label TEXT NOT NULL,
+                action_type TEXT NOT NULL,
+                entity_type TEXT,
+                entity_id TEXT,
+                reversible INTEGER NOT NULL DEFAULT 1,
+                strategy TEXT NOT NULL,
+                payload_json TEXT,
+                inverse_json TEXT,
+                redo_json TEXT,
+                snapshot_before_id INTEGER,
+                snapshot_after_id INTEGER,
+                status TEXT NOT NULL DEFAULT 'applied'
+            )
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS HistoryHead (
+                id INTEGER PRIMARY KEY CHECK(id=1),
+                current_entry_id INTEGER
+            )
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS HistorySnapshots (
+                id INTEGER PRIMARY KEY,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                kind TEXT NOT NULL,
+                label TEXT NOT NULL,
+                db_snapshot_path TEXT NOT NULL,
+                settings_json TEXT,
+                manifest_json TEXT
+            )
+            """
+        )
+        self.cursor.execute(
+            "INSERT OR IGNORE INTO HistoryHead (id, current_entry_id) VALUES (1, NULL)"
+        )

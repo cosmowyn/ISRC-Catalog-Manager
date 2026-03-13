@@ -32,6 +32,9 @@ class DatabaseSchemaServiceTests(unittest.TestCase):
         }
 
         self.assertEqual(self.service.get_db_version(), SCHEMA_TARGET)
+        self.assertIn("HistoryEntries", tables)
+        self.assertIn("HistorySnapshots", tables)
+        self.assertIn("HistoryHead", tables)
         self.assertIn("Licensees", tables)
         self.assertIn("vw_Licenses", tables)
         self.assertTrue({"blob_value", "mime_type", "size_bytes"} <= value_columns)

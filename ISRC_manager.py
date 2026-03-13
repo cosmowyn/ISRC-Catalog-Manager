@@ -39,6 +39,8 @@ from PySide6.QtWidgets import ( QListView, QMenuBar, QListWidget, QListWidgetIte
 
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 
+from isrc_manager.history import HistoryManager
+from isrc_manager.history.dialogs import HistoryDialog
 from isrc_manager.constants import (
     APP_NAME,
     DEFAULT_ICON_PATH,
@@ -75,6 +77,7 @@ from isrc_manager.services import (
     SettingsReadService,
     SettingsMutationService,
     TrackCreatePayload,
+    TrackSnapshot,
     TrackService,
     TrackUpdatePayload,
 )
@@ -1056,6 +1059,8 @@ class App(QMainWindow):
 
         self.backups_dir = DATA_DIR() / "backups"
         self.backups_dir.mkdir(parents=True, exist_ok=True)
+        self.history_dir = DATA_DIR() / "history"
+        self.history_dir.mkdir(parents=True, exist_ok=True)
         self.database_session = DatabaseSessionService()
         self.profile_store = ProfileStoreService(self.database_dir)
         self.profile_workflows = ProfileWorkflowService(self.database_dir, self.profile_store)
@@ -1095,6 +1100,8 @@ class App(QMainWindow):
 
         self.conn = None
         self.cursor = None
+        self.history_manager = None
+        self.history_dialog = None
         self.track_service = None
         self.settings_reads = None
         self.settings_mutations = None
@@ -1245,6 +1252,18 @@ class App(QMainWindow):
         edit_menu = QMenu("Edit", self)
         self.menu_bar.addMenu(edit_menu)
 
+        self.undo_action = QAction("Undo", self)
+        self.undo_action.setShortcut(QKeySequence.Undo)
+        self.undo_action.triggered.connect(self.history_undo)
+        edit_menu.addAction(self.undo_action)
+
+        self.redo_action = QAction("Redo", self)
+        self.redo_action.setShortcuts([QKeySequence.Redo, QKeySequence("Ctrl+Y"), QKeySequence("Meta+Y")])
+        self.redo_action.triggered.connect(self.history_redo)
+        edit_menu.addAction(self.redo_action)
+
+        edit_menu.addSeparator()
+
         act_manage_artists = QAction("Manage stored artists…", self)
         act_manage_artists.triggered.connect(self._manage_stored_artists)
         edit_menu.addAction(act_manage_artists)
@@ -1257,6 +1276,20 @@ class App(QMainWindow):
         edit_menu.addAction(act_manage_licensees)
         act_manage_albums.triggered.connect(self._manage_stored_albums)
         edit_menu.addAction(act_manage_albums)
+
+        history_menu = QMenu("History", self)
+        self.menu_bar.addMenu(history_menu)
+        history_menu.addAction(self.undo_action)
+        history_menu.addAction(self.redo_action)
+        history_menu.addSeparator()
+
+        self.show_history_action = QAction("Show Undo History…", self)
+        self.show_history_action.triggered.connect(self.open_history_dialog)
+        history_menu.addAction(self.show_history_action)
+
+        self.create_snapshot_action = QAction("Create Snapshot…", self)
+        self.create_snapshot_action.triggered.connect(self.create_manual_snapshot)
+        history_menu.addAction(self.create_snapshot_action)
 
         # ----- Profiles toolbar (quick DB switch)
         self.toolbar = QToolBar("Profiles", self)
@@ -1497,6 +1530,7 @@ class App(QMainWindow):
         self.refresh_table()
         self.populate_all_comboboxes()
         self.resize(1280, 800)
+        self._refresh_history_actions()
 
 
     def closeEvent(self, e):
@@ -1513,6 +1547,11 @@ class App(QMainWindow):
                 audit_commit=self._audit_commit,
             )
             if self.conn is not None
+            else None
+        )
+        self.history_manager = (
+            HistoryManager(self.conn, self.settings, self.current_db_path, self.history_dir)
+            if self.conn is not None and getattr(self, "current_db_path", None)
             else None
         )
         self.track_service = TrackService(self.conn) if self.conn is not None else None
@@ -1587,6 +1626,7 @@ class App(QMainWindow):
         lay.addLayout(btns)
 
         def do_save():
+            before_identity = dict(self.identity)
             self.identity = self.settings_mutations.set_identity(
                 window_title=title_edit.text().strip() or DEFAULT_WINDOW_TITLE,
                 icon_path=icon_edit.text().strip(),
@@ -1596,6 +1636,13 @@ class App(QMainWindow):
             self.logger.info("Branding & identity updated")
             self._audit("SETTINGS", "Identity", ref_id="QSettings", details=f"title={self.identity['window_title']}")
             self._audit_commit()
+            self.history_manager.record_setting_change(
+                key="identity",
+                label="Update Branding & Identity",
+                before_value=before_identity,
+                after_value=self.identity,
+            )
+            self._refresh_history_actions()
             QMessageBox.information(self, "Saved", "Branding and identity updated.")
         save_btn.clicked.connect(do_save)
         close_btn.clicked.connect(dlg.accept)
@@ -1638,8 +1685,16 @@ class App(QMainWindow):
             QMessageBox.warning(self, "Invalid artist code", "Artist code must be two digits (00–99).")
             return
 
+        before_value = self.load_artist_code()
         self.settings_mutations.set_artist_code(val)
         self.logger.info(f"ISRC artist code set to '{val}' (profile DB)")
+        self.history_manager.record_setting_change(
+            key="artist_code",
+            label=f"Set ISRC Artist Code: {val}",
+            before_value=before_value,
+            after_value=val,
+        )
+        self._refresh_history_actions()
         if hasattr(self, "artist_edit"):
             self.artist_edit.setText(val)
 
@@ -1779,6 +1834,7 @@ class App(QMainWindow):
         self.conn = None
         self.cursor = None
         self.schema_service = None
+        self.history_manager = None
         self.profile_kv = None
         self.settings_reads = None
 
@@ -1791,6 +1847,7 @@ class App(QMainWindow):
         session = self.database_session.open(path)
         self.conn = session.conn
         self.cursor = session.cursor
+        self.current_db_path = path
         self._init_services()
 
         self._migrate_artist_code_from_qsettings_if_needed()
@@ -1799,7 +1856,6 @@ class App(QMainWindow):
 
         self.logger.info(f"Profile ISRC artist code active: '{current_code}'")
 
-        self.current_db_path = path
         self.database_session.remember_last_path(self.settings, path)
         self.logger.info("Settings synced to disk")
 
@@ -1820,6 +1876,7 @@ class App(QMainWindow):
         self.logger.info(f"Opened database: {path}")
         self._audit("PROFILE", "Database", ref_id=path, details="open_database()")
         self._audit_commit()
+        self._refresh_history_actions()
 
     def init_db(self):
         self.schema_service.init_db()
@@ -1847,6 +1904,114 @@ class App(QMainWindow):
             self.conn.commit()
         except Exception as e:
             self.logger.exception(f"Audit commit error: {e}")
+
+    def _refresh_history_actions(self):
+        if not hasattr(self, "undo_action") or self.history_manager is None:
+            return
+
+        undo_label = self.history_manager.describe_undo()
+        redo_label = self.history_manager.describe_redo()
+
+        self.undo_action.setText(f"Undo {undo_label}" if undo_label else "Undo")
+        self.undo_action.setEnabled(bool(undo_label))
+
+        self.redo_action.setText(f"Redo {redo_label}" if redo_label else "Redo")
+        self.redo_action.setEnabled(bool(redo_label))
+
+    def _refresh_after_history_change(self):
+        self.identity = self._load_identity()
+        self._apply_identity()
+        self.active_custom_fields = self.load_active_custom_fields()
+        self._rebuild_table_headers()
+        self.populate_all_comboboxes()
+        self.refresh_table_preserve_view()
+        self._refresh_history_actions()
+        if self.history_dialog is not None and self.history_dialog.isVisible():
+            self.history_dialog.refresh_data()
+
+    def open_history_dialog(self):
+        self.history_dialog = HistoryDialog(self, parent=self)
+        self.history_dialog.exec()
+
+    def history_undo(self):
+        if self.history_manager is None:
+            return
+        try:
+            entry = self.history_manager.undo()
+            if entry is not None:
+                self._refresh_after_history_change()
+        except Exception as e:
+            self.logger.exception(f"Undo failed: {e}")
+            QMessageBox.critical(self, "Undo Error", f"Could not undo the last action:\n{e}")
+
+    def history_redo(self):
+        if self.history_manager is None:
+            return
+        try:
+            entry = self.history_manager.redo()
+            if entry is not None:
+                self._refresh_after_history_change()
+        except Exception as e:
+            self.logger.exception(f"Redo failed: {e}")
+            QMessageBox.critical(self, "Redo Error", f"Could not redo the action:\n{e}")
+
+    def create_manual_snapshot(self):
+        if self.history_manager is None:
+            return
+        label, ok = QInputDialog.getText(self, "Create Snapshot", "Snapshot label (optional):")
+        if not ok:
+            return
+        try:
+            snapshot = self.history_manager.create_manual_snapshot(label.strip() or None)
+            self.logger.info(f"Created snapshot {snapshot.snapshot_id}: {snapshot.label}")
+            QMessageBox.information(self, "Snapshot Created", f"Snapshot saved:\n{snapshot.label}")
+            self._refresh_history_actions()
+            if self.history_dialog is not None and self.history_dialog.isVisible():
+                self.history_dialog.refresh_data()
+        except Exception as e:
+            self.logger.exception(f"Create snapshot failed: {e}")
+            QMessageBox.critical(self, "Snapshot Error", f"Could not create snapshot:\n{e}")
+
+    def restore_snapshot_from_history(self, snapshot_id: int):
+        if self.history_manager is None:
+            return
+        if QMessageBox.question(
+            self,
+            "Restore Snapshot",
+            "Restore this snapshot into the current profile?\n\nThe current state can be undone afterward.",
+            QMessageBox.Yes | QMessageBox.No,
+        ) != QMessageBox.Yes:
+            return
+        try:
+            self.history_manager.restore_snapshot_as_action(snapshot_id)
+            self._refresh_after_history_change()
+        except Exception as e:
+            self.logger.exception(f"Restore snapshot failed: {e}")
+            QMessageBox.critical(self, "Restore Snapshot", f"Could not restore the snapshot:\n{e}")
+
+    def _collect_catalog_cleanup_targets(
+        self,
+        *,
+        artist_name: str,
+        additional_artists: list[str],
+        album_title: str | None,
+    ) -> tuple[list[str], list[str]]:
+        artist_names = {
+            (artist_name or "").strip(),
+            *[(name or "").strip() for name in additional_artists],
+        }
+        new_artists = sorted(
+            {
+                name
+                for name in artist_names
+                if name and not self.track_service.artist_exists(name, cursor=self.cursor)
+            }
+        )
+        clean_album = (album_title or "").strip()
+        new_albums = []
+        if clean_album and not self.track_service.album_exists(clean_album, cursor=self.cursor):
+            new_albums.append(clean_album)
+        return new_artists, new_albums
 
     # --- NEW: Variant helpers (repurposed as Artist Code AA) ---
     def load_isrc_prefix(self):
@@ -2234,6 +2399,11 @@ class App(QMainWindow):
             release_date_sql = self.release_date_field.selectedDate().toString("yyyy-MM-dd")
 
             track_seconds = hms_to_seconds(self.track_len_h.value(), self.track_len_m.value(), self.track_len_s.value())
+            cleanup_artist_names, cleanup_album_titles = self._collect_catalog_cleanup_targets(
+                artist_name=self.artist_field.currentText(),
+                additional_artists=self._parse_additional_artists(self.additional_artist_field.currentText()),
+                album_title=self.album_title_field.currentText().strip() or None,
+            )
             self.logger.info(f"About to insert ISRC iso={generated_iso} compact={comp}")
             track_id = self.track_service.create_track(
                 TrackCreatePayload(
@@ -2252,10 +2422,16 @@ class App(QMainWindow):
             self.logger.info(f"Track created id={track_id} isrc={generated_iso}")
             self._audit("CREATE", "Track", ref_id=track_id, details=f"isrc={generated_iso}")
             self._audit_commit()
+            self.history_manager.record_track_create(
+                track_id=track_id,
+                cleanup_artist_names=cleanup_artist_names,
+                cleanup_album_titles=cleanup_album_titles,
+            )
 
             self.refresh_table_preserve_view(focus_id=track_id)
             self.populate_all_comboboxes()
             self.clear_form_fields()
+            self._refresh_history_actions()
             QMessageBox.information(self, "Success", "Track info saved successfully!")
         except sqlite3.IntegrityError as e:
             self.conn.rollback()
@@ -2291,12 +2467,18 @@ class App(QMainWindow):
                     QMessageBox.warning(self, "Delete", "Could not determine record ID.")
                     return
                 row_id = int(row_id_item.text())
+                before_snapshot = self.track_service.fetch_track_snapshot(row_id)
+                if before_snapshot is None:
+                    QMessageBox.warning(self, "Delete", "Could not load the selected track for deletion.")
+                    return
                 self.track_service.delete_track(row_id)
                 self.refresh_table_preserve_view()
                 self.populate_all_comboboxes()
                 self.logger.warning(f"Track deleted id={row_id}")
                 self._audit("DELETE", "Track", ref_id=row_id, details="delete_entry")
                 self._audit_commit()
+                self.history_manager.record_track_delete(before_snapshot=before_snapshot)
+                self._refresh_history_actions()
             except Exception as e:
                 self.conn.rollback()
                 self.logger.exception(f"Delete failed: {e}")
@@ -2577,6 +2759,13 @@ class App(QMainWindow):
                 self.logger.info(f"ISRC prefix updated to '{pref}'")
                 self._audit("SETTINGS", "ISRC_Prefix", ref_id=1, details=f"prefix={pref}")
                 self._audit_commit()
+                self.history_manager.record_setting_change(
+                    key="isrc_prefix",
+                    label=f"Set ISRC Prefix: {pref}",
+                    before_value=current,
+                    after_value=pref,
+                )
+                self._refresh_history_actions()
             except Exception as e:
                 self.conn.rollback()
                 self.logger.exception(f"Set ISRC prefix failed: {e}")
@@ -2587,10 +2776,18 @@ class App(QMainWindow):
         text, ok = QInputDialog.getText(self, "Set SENA Number", "Enter SENA Number:", text=current)
         if ok:
             try:
-                self.settings_mutations.set_sena_number((text or "").strip())
+                updated = (text or "").strip()
+                self.settings_mutations.set_sena_number(updated)
                 self.logger.info("SENA number updated")
                 self._audit("SETTINGS", "SENA", ref_id=1, details="updated")
                 self._audit_commit()
+                self.history_manager.record_setting_change(
+                    key="sena_number",
+                    label="Set SENA Number",
+                    before_value=current,
+                    after_value=updated,
+                )
+                self._refresh_history_actions()
             except Exception as e:
                 self.conn.rollback()
                 self.logger.exception(f"Set SENA number failed: {e}")
@@ -2601,10 +2798,18 @@ class App(QMainWindow):
         text, ok = QInputDialog.getText(self, "Set BTW Number", "Enter BTW Number:", text=current)
         if ok:
             try:
-                self.settings_mutations.set_btw_number((text or "").strip())
+                updated = (text or "").strip()
+                self.settings_mutations.set_btw_number(updated)
                 self.logger.info("BTW number updated")
                 self._audit("SETTINGS", "BTW", ref_id=1, details="updated")
                 self._audit_commit()
+                self.history_manager.record_setting_change(
+                    key="btw_number",
+                    label="Set BTW Number",
+                    before_value=current,
+                    after_value=updated,
+                )
+                self._refresh_history_actions()
             except Exception as e:
                 self.conn.rollback()
                 self.logger.exception(f"Set BTW failed: {e}")
@@ -2615,10 +2820,18 @@ class App(QMainWindow):
         relatie_nummer, ok = QInputDialog.getText(self, "Set BUMA Relatie Nummer", "Enter Relatie Nummer:", text=current_rel)
         if ok:
             try:
-                self.settings_mutations.set_buma_relatie_nummer((relatie_nummer or "").strip())
+                updated = (relatie_nummer or "").strip()
+                self.settings_mutations.set_buma_relatie_nummer(updated)
                 self.logger.info("BUMA/STEMRA relatie nummer updated")
                 self._audit("SETTINGS", "BUMA_STEMRA", ref_id=1, details="relatie_nummer updated")
                 self._audit_commit()
+                self.history_manager.record_setting_change(
+                    key="buma_relatie_nummer",
+                    label="Set BUMA/STEMRA Relation Number",
+                    before_value=current_rel,
+                    after_value=updated,
+                )
+                self._refresh_history_actions()
             except Exception as e:
                 self.conn.rollback()
                 self.logger.exception(f"Set BUMA relatie nummer failed: {e}")
@@ -2629,10 +2842,18 @@ class App(QMainWindow):
         ipi, ok = QInputDialog.getText(self, "Set BUMA IPI", "Enter IPI Number:", text=current_ipi)
         if ok:
             try:
-                self.settings_mutations.set_buma_ipi((ipi or "").strip())
+                updated = (ipi or "").strip()
+                self.settings_mutations.set_buma_ipi(updated)
                 self.logger.info("BUMA/STEMRA IPI updated")
                 self._audit("SETTINGS", "BUMA_STEMRA", ref_id=1, details="ipi updated")
                 self._audit_commit()
+                self.history_manager.record_setting_change(
+                    key="buma_ipi",
+                    label="Set BUMA IPI",
+                    before_value=current_ipi,
+                    after_value=updated,
+                )
+                self._refresh_history_actions()
             except Exception as e:
                 self.conn.rollback()
                 self.logger.exception(f"Set BUMA IPI failed: {e}")
@@ -4042,11 +4263,20 @@ class EditDialog(QDialog):
                 QMessageBox.warning(self, "Invalid row", "Could not determine record ID.")
                 return
             row_id = int(parent.table.item(parent.table.currentRow(), 0).text())
+            before_snapshot = parent.track_service.fetch_track_snapshot(row_id)
+            if before_snapshot is None:
+                QMessageBox.warning(self, "Update Error", "Could not load the selected track.")
+                return
 
             if parent.is_isrc_taken_normalized(iso_isrc, exclude_track_id=row_id):
                 QMessageBox.critical(self, "Duplicate ISRC", "Another record already uses this ISRC.")
                 return
 
+            cleanup_artist_names, cleanup_album_titles = parent._collect_catalog_cleanup_targets(
+                artist_name=self.artist_name.currentText(),
+                additional_artists=new_additional_artist,
+                album_title=self.album_title.currentText().strip() or None,
+            )
             parent.track_service.update_track(
                 TrackUpdatePayload(
                     track_id=row_id,
@@ -4071,6 +4301,13 @@ class EditDialog(QDialog):
                 parent._audit_commit()
             except Exception as audit_err:
                 parent.logger.warning(f"Audit failed: {audit_err}")
+
+            parent.history_manager.record_track_update(
+                before_snapshot=before_snapshot,
+                cleanup_artist_names=cleanup_artist_names,
+                cleanup_album_titles=cleanup_album_titles,
+            )
+            parent._refresh_history_actions()
 
             parent.refresh_table_preserve_view(focus_id=row_id)
             self.accept()

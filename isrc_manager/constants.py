@@ -13,7 +13,7 @@ DEFAULT_ICON_PATH = ""
 FIELD_TYPE_CHOICES = ["text", "dropdown", "checkbox", "date", "blob_image", "blob_audio"]
 
 SCHEMA_BASELINE = 1
-SCHEMA_TARGET = 11
+SCHEMA_TARGET = 12
 
 CUSTOM_KIND_TEXT = "text"
 CUSTOM_KIND_INT = "int"
