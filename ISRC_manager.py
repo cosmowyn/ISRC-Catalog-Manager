@@ -62,6 +62,7 @@ from isrc_manager.domain.timecode import hms_to_seconds, parse_hms_text, seconds
 from isrc_manager.paths import DATA_DIR
 from isrc_manager.services import (
     CatalogAdminService,
+    CatalogReadService,
     CustomFieldDefinitionService,
     CustomFieldValueService,
     DatabaseMaintenanceService,
@@ -1091,6 +1092,7 @@ class App(QMainWindow):
         self.track_service = None
         self.settings_mutations = None
         self.catalog_service = None
+        self.catalog_reads = None
         self.license_service = None
         self.custom_field_definitions = None
         self.custom_field_values = None
@@ -1500,6 +1502,7 @@ class App(QMainWindow):
             SettingsMutationService(self.conn, self.settings) if self.conn is not None else None
         )
         self.catalog_service = CatalogAdminService(self.conn) if self.conn is not None else None
+        self.catalog_reads = CatalogReadService(self.conn) if self.conn is not None else None
         self.license_service = LicenseService(self.conn, DATA_DIR()) if self.conn is not None else None
         self.custom_field_definitions = (
             CustomFieldDefinitionService(self.conn) if self.conn is not None else None
@@ -2576,52 +2579,6 @@ class App(QMainWindow):
         self._update_duration_label()
 
 
-    def _fetch_rows_with_customs(self):
-        """
-        Performance path: single base query + one shot fetch of all custom field values into a dict.
-        Avoids per-row SELECTs for CustomFieldValues.
-        """
-        # Base rows with pre-joined additional artists (GROUP_CONCAT)
-        base_rows = self.cursor.execute("""
-            SELECT
-                t.id,
-                t.isrc,
-                t.db_entry_date,
-                t.track_title,
-                COALESCE(a.name, '') AS artist_name,
-                COALESCE((
-                    SELECT GROUP_CONCAT(ar.name, ', ')
-                    FROM TrackArtists ta
-                    JOIN Artists ar ON ar.id = ta.artist_id
-                    WHERE ta.track_id = t.id AND ta.role = 'additional'
-                ), '') AS additional_artists,
-                COALESCE(al.title, '') AS album_title,
-                COALESCE(t.release_date, '') AS release_date,
-                COALESCE(t.track_length_sec, 0) AS track_length_sec,
-                COALESCE(t.iswc, '') AS iswc,
-                COALESCE(t.upc, '') AS upc,
-                COALESCE(t.genre, '') AS genre
-            FROM Tracks t
-            LEFT JOIN Artists a ON a.id = t.main_artist_id
-            LEFT JOIN Albums  al ON al.id = t.album_id
-            ORDER BY t.id
-        """).fetchall()
-
-        # Prefetch all custom values into dict {(track_id, field_id): value}
-        cf_map = {}
-        if self.active_custom_fields:
-            # Fetch only for fields currently active
-            active_ids = tuple(f["id"] for f in self.active_custom_fields)
-            if len(active_ids) == 1:
-                q = "SELECT track_id, field_def_id, value FROM CustomFieldValues WHERE field_def_id=?"
-                rows = self.cursor.execute(q, (active_ids[0],)).fetchall()
-            else:
-                q = f"SELECT track_id, field_def_id, value FROM CustomFieldValues WHERE field_def_id IN ({','.join('?'*len(active_ids))})"
-                rows = self.cursor.execute(q, active_ids).fetchall()
-            for trk, fid, val in rows:
-                cf_map[(trk, fid)] = "" if val is None else str(val)
-        return base_rows, cf_map
-
     def refresh_table(self):
         # Ensure custom fields and headers are ready
         if not hasattr(self, "active_custom_fields") or self.active_custom_fields is None:
@@ -2634,7 +2591,7 @@ class App(QMainWindow):
         self.table.setSortingEnabled(False)
         self.table.setRowCount(0)
 
-        rows, cf_map = self._fetch_rows_with_customs()
+        rows, cf_map = self.catalog_reads.fetch_rows_with_customs(self.active_custom_fields)
         base_cols = len(self.BASE_HEADERS)
         self.table.setRowCount(len(rows))
 
@@ -2934,13 +2891,7 @@ class App(QMainWindow):
         title = (self.album_title_field.currentText() or "").strip()
         if not title:
             return
-        row = self.cursor.execute("""
-            SELECT t.release_date, t.upc, t.genre
-            FROM Tracks t
-            JOIN Albums a ON a.id = t.album_id
-            WHERE a.title = ?
-            LIMIT 1
-        """, (title,)).fetchone()
+        row = self.catalog_reads.find_album_metadata(title)
         if row:
             rd, upc, genre = row
             if rd:
@@ -4428,9 +4379,7 @@ class App(QMainWindow):
         dlg._player.play()
 
     def _list_all_tracks(self):
-        cur = self.conn.cursor()
-        cur.execute("SELECT id, track_title FROM Tracks ORDER BY track_title COLLATE NOCASE")
-        return cur.fetchall()
+        return self.catalog_reads.list_tracks()
 
     def _list_licensees(self):
         return self.catalog_service.list_licensee_choices()
