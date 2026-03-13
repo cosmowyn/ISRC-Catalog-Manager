@@ -65,6 +65,7 @@ from isrc_manager.services import (
     CustomFieldDefinitionService,
     CustomFieldValueService,
     DatabaseMaintenanceService,
+    XMLExportService,
     XMLImportService,
     LicenseService,
     ProfileStoreService,
@@ -1093,6 +1094,7 @@ class App(QMainWindow):
         self.license_service = None
         self.custom_field_definitions = None
         self.custom_field_values = None
+        self.xml_export_service = None
         self.xml_import_service = None
         self.open_database(last_db)
 
@@ -1505,6 +1507,7 @@ class App(QMainWindow):
         self.custom_field_values = (
             CustomFieldValueService(self.conn, self.custom_field_definitions) if self.conn is not None else None
         )
+        self.xml_export_service = XMLExportService(self.conn) if self.conn is not None else None
         self.xml_import_service = (
             XMLImportService(self.conn, self.track_service, self.custom_field_definitions)
             if self.conn is not None
@@ -2512,13 +2515,6 @@ class App(QMainWindow):
         self.genre_field.setCurrentText("")
         self.prev_release_toggle.setChecked(False)
 
-
-    def _xml_local(self, tag: str) -> str:
-        """Return local tag name without XML namespace."""
-        if "}" in tag:
-            return tag.split("}", 1)[1]
-        return tag
-
     # =============================================================================
     # Search / table refresh (with view preservation)
     # =============================================================================
@@ -3008,8 +3004,6 @@ class App(QMainWindow):
     # =============================================================================
     def export_full_to_xml(self):
         try:
-            import xml.etree.ElementTree as ET
-
             default_name = f"full_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xml"
             default_path = str(self.exports_dir / default_name)
             path, sel = QFileDialog.getSaveFileName(
@@ -3026,92 +3020,10 @@ class App(QMainWindow):
                 ) != QMessageBox.Yes:
                     return
 
-            # Base rows (+ track_length_sec)
-            self.cursor.execute("""
-                SELECT
-                    t.id                       AS id,
-                    t.isrc                     AS isrc,
-                    t.db_entry_date            AS db_entry_date,
-                    t.track_title              AS track_title,
-                    COALESCE(a.name, '')       AS artist_name,
-                    COALESCE((
-                        SELECT GROUP_CONCAT(ar.name, ', ')
-                        FROM TrackArtists ta
-                        JOIN Artists ar ON ar.id = ta.artist_id
-                        WHERE ta.track_id = t.id AND ta.role = 'additional'
-                    ), '')                     AS additional_artists,
-                    COALESCE(al.title, '')     AS album_title,
-                    COALESCE(t.release_date, '') AS release_date,
-                    COALESCE(t.track_length_sec, 0) AS track_length_sec,
-                    COALESCE(t.iswc, '')       AS iswc,
-                    COALESCE(t.upc, '')        AS upc,
-                    COALESCE(t.genre, '')      AS genre
-                FROM Tracks t
-                LEFT JOIN Artists a ON a.id = t.main_artist_id
-                LEFT JOIN Albums  al ON al.id = t.album_id
-                ORDER BY t.id
-            """)
-            cols = [d[0] for d in self.cursor.description]
-            rows = self.cursor.fetchall()
-            track_ids = [r[0] for r in rows]  # first col = id
-
-            # Custom defs + values (active only)
-            defs = self.cursor.execute("""
-                SELECT id, name, field_type, COALESCE(options,'[]') AS options
-                FROM CustomFieldDefs
-                WHERE active=1
-                ORDER BY COALESCE(sort_order, 999999), name
-            """).fetchall()
-            defmap = {d[0]: {"name": d[1], "field_type": d[2]} for d in defs}
-
-            custom_by_track = {}
-            if track_ids:
-                qmarks = ",".join("?" * len(track_ids))
-                cv = self.cursor.execute(f"""
-                    SELECT track_id, field_def_id, value, mime_type, size_bytes
-                    FROM CustomFieldValues
-                    WHERE track_id IN ({qmarks})
-                """, track_ids).fetchall()
-                for tid, fid, val, mime, size in cv:
-                    d = defmap.get(fid)
-                    if not d:
-                        continue
-                    custom_by_track.setdefault(tid, []).append({
-                        "name": d["name"],
-                        "field_type": d["field_type"],
-                        "value": val,
-                        "mime_type": mime,
-                        "size_bytes": int(size or 0),
-                    })
-
-            # XML
-            root = ET.Element("DeclarationOfSoundRecordingRightsClaimMessage")
-            for row in rows:
-                item = ET.SubElement(root, "SoundRecording")
-                row_dict = dict(zip(cols, row))
-                for col in cols:
-                    # Write TrackLength in hh:mm:ss; keep original numeric too for back-compat (optional)
-                    if col == "track_length_sec":
-                        ET.SubElement(item, "TrackLength").text = seconds_to_hms(int(row_dict[col] or 0))
-                    sub = ET.SubElement(item, col)
-                    sub.text = "" if row_dict[col] is None else str(row_dict[col])
-
-                # Custom fields
-                c_el = ET.SubElement(item, "CustomFields")
-                for c in custom_by_track.get(row_dict["id"], []):
-                    f_el = ET.SubElement(c_el, "Field", name=c["name"], type=c["field_type"])
-                    if c["field_type"] in ("blob_image", "blob_audio"):
-                        if c.get("mime_type"):
-                            ET.SubElement(f_el, "MimeType").text = c["mime_type"]
-                        ET.SubElement(f_el, "SizeBytes").text = str(int(c.get("size_bytes", 0)))
-                    else:
-                        ET.SubElement(f_el, "Value").text = c["value"] or ""
-
-            Path(path).parent.mkdir(parents=True, exist_ok=True)
-            ET.ElementTree(root).write(path, encoding="utf-8", xml_declaration=True)
+            exported = self.xml_export_service.export_all(path)
             QMessageBox.information(self, "Export", f"All data exported:\n{path}")
-            self.logger.info(f"Exported all data to {path}")
-            self._audit("EXPORT", "Tracks", ref_id=path, details="all rows incl. duration+customs")
+            self.logger.info(f"Exported {exported} rows to {path}")
+            self._audit("EXPORT", "Tracks", ref_id=path, details=f"all rows incl. duration+customs count={exported}")
             self._audit_commit()
         except Exception as e:
             self.logger.exception(f"Export failed: {e}")
@@ -3148,94 +3060,13 @@ class App(QMainWindow):
         if not out_path:
             return
 
-        qmarks = ",".join(["?"] * len(track_ids))
-        base_rows = self.cursor.execute(f"""
-            SELECT
-                t.id,
-                t.isrc,
-                COALESCE(t.db_entry_date, '') AS db_entry_date,
-                t.track_title,
-                COALESCE(a.name, '') AS artist_name,
-                COALESCE((
-                    SELECT GROUP_CONCAT(ar.name, ', ')
-                    FROM TrackArtists ta
-                    JOIN Artists ar ON ar.id = ta.artist_id
-                    WHERE ta.track_id = t.id AND ta.role = 'additional'
-                ), '') AS additional_artists,
-                COALESCE(al.title, '') AS album_title,
-                COALESCE(t.release_date, '') AS release_date,
-                COALESCE(t.track_length_sec, 0) AS track_length_sec,
-                COALESCE(t.iswc, '') AS iswc,
-                COALESCE(t.upc, '') AS upc,
-                COALESCE(t.genre, '') AS genre
-            FROM Tracks t
-            LEFT JOIN Artists a ON a.id = t.main_artist_id
-            LEFT JOIN Albums  al ON al.id = t.album_id
-            WHERE t.id IN ({qmarks})
-            ORDER BY t.id
-        """, track_ids).fetchall()
-
-        defs = self.cursor.execute("""
-            SELECT id, name, field_type, COALESCE(options,'[]') AS options
-            FROM CustomFieldDefs
-            WHERE active=1
-            ORDER BY COALESCE(sort_order, 999999), name
-        """).fetchall()
-        defmap = {d[0]: {"name": d[1], "field_type": d[2]} for d in defs}
-
-        cv = self.cursor.execute(f"""
-            SELECT track_id, field_def_id, value, mime_type, size_bytes
-            FROM CustomFieldValues
-            WHERE track_id IN ({qmarks})
-        """, track_ids).fetchall()
-
-        custom_by_track = {}
-        for tid, fid, val, mime, size in cv:
-            d = defmap.get(fid)
-            if not d:
-                continue
-            custom_by_track.setdefault(tid, []).append({
-                "name": d["name"],
-                "field_type": d["field_type"],
-                "value": val,
-                "mime_type": mime,
-                "size_bytes": int(size or 0),
-            })
-
-        from xml.etree.ElementTree import Element, SubElement, ElementTree
-        root = Element("ISRCExport")
-        meta = SubElement(root, "Meta")
-        SubElement(meta, "CreatedAt").text = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-        SubElement(meta, "ProfileDB").text = str(self.current_db_path)
-
-        tracks_el = SubElement(root, "Tracks")
-        for (tid, isrc, dbdate, title, artist, addl, album, rdate, tlen, iswc, upc, genre) in base_rows:
-            t_el = SubElement(tracks_el, "Track", id=str(tid))
-            SubElement(t_el, "ISRC").text = to_iso_isrc(isrc) or to_compact_isrc(isrc) or (isrc or "")
-            SubElement(t_el, "DBEntryDate").text = dbdate or ""
-            SubElement(t_el, "Title").text = title or ""
-            SubElement(t_el, "MainArtist").text = artist or ""
-            SubElement(t_el, "AdditionalArtists").text = addl or ""
-            SubElement(t_el, "Album").text = album or ""
-            SubElement(t_el, "ReleaseDate").text = rdate or ""
-            SubElement(t_el, "TrackLength").text = seconds_to_hms(int(tlen or 0))
-            SubElement(t_el, "ISWC").text = iswc or ""
-            SubElement(t_el, "UPCEAN").text = upc or ""
-            SubElement(t_el, "Genre").text = genre or ""
-
-            c_el = SubElement(t_el, "CustomFields")
-            for c in custom_by_track.get(tid, []):
-                f_el = SubElement(c_el, "Field", name=c["name"], type=c["field_type"])
-                if c["field_type"] in ("blob_image", "blob_audio"):
-                    if c.get("mime_type"):
-                        SubElement(f_el, "MimeType").text = c["mime_type"]
-                    SubElement(f_el, "SizeBytes").text = str(int(c.get("size_bytes", 0)))
-                else:
-                    SubElement(f_el, "Value").text = c["value"] or ""
-
         try:
-            ElementTree(root).write(out_path, encoding="utf-8", xml_declaration=True)
-            self.logger.info(f"Exported {len(base_rows)} rows to XML (ids={track_ids}) -> {out_path}")
+            exported = self.xml_export_service.export_selected(
+                out_path,
+                track_ids,
+                current_db_path=str(self.current_db_path),
+            )
+            self.logger.info(f"Exported {exported} rows to XML (ids={track_ids}) -> {out_path}")
             QMessageBox.information(self, "Export Complete", f"Saved:\n{out_path}")
         except Exception as e:
             self.logger.exception(f"Export Selected failed: {e}")

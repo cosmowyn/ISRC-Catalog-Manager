@@ -3,6 +3,7 @@
 from .catalog_admin import AlbumUsage, ArtistUsage, CatalogAdminService, LicenseeUsage
 from .custom_fields import CustomFieldDefinitionService, CustomFieldValueService
 from .database_admin import BackupResult, DatabaseMaintenanceService, ProfileStoreService, RestoreResult
+from .exports import XMLExportService
 from .imports import ImportExecutionResult, ImportInspection, ImportRecord, XMLImportService
 from .licenses import LicenseRecord, LicenseRow, LicenseService
 from .settings_mutations import SettingsMutationService
@@ -16,6 +17,7 @@ __all__ = [
     "CustomFieldDefinitionService",
     "CustomFieldValueService",
     "DatabaseMaintenanceService",
+    "XMLExportService",
     "ImportExecutionResult",
     "ImportInspection",
     "ImportRecord",
