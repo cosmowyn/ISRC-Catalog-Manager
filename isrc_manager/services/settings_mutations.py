@@ -6,6 +6,12 @@ import sqlite3
 
 from PySide6.QtCore import QSettings
 
+from isrc_manager.constants import (
+    DEFAULT_AUTO_SNAPSHOT_INTERVAL_MINUTES,
+    MAX_AUTO_SNAPSHOT_INTERVAL_MINUTES,
+    MIN_AUTO_SNAPSHOT_INTERVAL_MINUTES,
+)
+
 
 class SettingsMutationService:
     """Centralizes writes to QSettings and profile-scoped singleton tables."""
@@ -34,6 +40,16 @@ class SettingsMutationService:
 
     def set_artist_code(self, value: str) -> None:
         self._profile_set("isrc_artist_code", value)
+
+    def set_auto_snapshot_enabled(self, enabled: bool) -> None:
+        self._profile_set("auto_snapshot_enabled", "1" if bool(enabled) else "0")
+
+    def set_auto_snapshot_interval_minutes(self, minutes: int) -> None:
+        value = int(minutes)
+        value = max(MIN_AUTO_SNAPSHOT_INTERVAL_MINUTES, min(MAX_AUTO_SNAPSHOT_INTERVAL_MINUTES, value))
+        if value <= 0:
+            value = DEFAULT_AUTO_SNAPSHOT_INTERVAL_MINUTES
+        self._profile_set("auto_snapshot_interval_minutes", value)
 
     def set_isrc_prefix(self, prefix: str) -> None:
         with self.conn:

@@ -61,6 +61,8 @@ class SettingsMutationServiceTests(unittest.TestCase):
 
     def test_singleton_tables_and_profile_values_are_written(self):
         self.service.set_artist_code("42")
+        self.service.set_auto_snapshot_enabled(False)
+        self.service.set_auto_snapshot_interval_minutes(45)
         self.service.set_isrc_prefix("NLABC")
         self.service.set_sena_number("SENA-1")
         self.service.set_btw_number("BTW-2")
@@ -70,6 +72,14 @@ class SettingsMutationServiceTests(unittest.TestCase):
         self.assertEqual(
             self.conn.execute("SELECT value FROM app_kv WHERE key='isrc_artist_code'").fetchone(),
             ("42",),
+        )
+        self.assertEqual(
+            self.conn.execute("SELECT value FROM app_kv WHERE key='auto_snapshot_enabled'").fetchone(),
+            ("0",),
+        )
+        self.assertEqual(
+            self.conn.execute("SELECT value FROM app_kv WHERE key='auto_snapshot_interval_minutes'").fetchone(),
+            ("45",),
         )
         self.assertEqual(self.conn.execute("SELECT prefix FROM ISRC_Prefix WHERE id=1").fetchone(), ("NLABC",))
         self.assertEqual(self.conn.execute("SELECT number FROM SENA WHERE id=1").fetchone(), ("SENA-1",))

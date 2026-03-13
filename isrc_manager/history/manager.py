@@ -812,6 +812,10 @@ class HistoryManager:
             )
         elif key == "artist_code":
             self.settings_mutations.set_artist_code(str(value))
+        elif key == "auto_snapshot_enabled":
+            self.settings_mutations.set_auto_snapshot_enabled(bool(value))
+        elif key == "auto_snapshot_interval_minutes":
+            self.settings_mutations.set_auto_snapshot_interval_minutes(int(value))
         elif key == "isrc_prefix":
             self.settings_mutations.set_isrc_prefix(str(value))
         elif key == "sena_number":

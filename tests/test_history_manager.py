@@ -92,6 +92,41 @@ class HistoryManagerTests(unittest.TestCase):
         self.history.redo()
         self.assertEqual(self.settings_reads.load_isrc_prefix(), "NLABC")
 
+    def test_auto_snapshot_setting_changes_undo_and_redo(self):
+        self.settings_mutations.set_auto_snapshot_enabled(True)
+        self.settings_mutations.set_auto_snapshot_interval_minutes(30)
+
+        self.history.record_setting_change(
+            key="auto_snapshot_enabled",
+            label="Automatic Snapshots Enabled",
+            before_value=True,
+            after_value=False,
+        )
+        self.settings_mutations.set_auto_snapshot_enabled(False)
+
+        self.history.record_setting_change(
+            key="auto_snapshot_interval_minutes",
+            label="Set Auto Snapshot Interval: 45 minutes",
+            before_value=30,
+            after_value=45,
+        )
+        self.settings_mutations.set_auto_snapshot_interval_minutes(45)
+
+        self.assertFalse(self.settings_reads.load_auto_snapshot_enabled())
+        self.assertEqual(self.settings_reads.load_auto_snapshot_interval_minutes(), 45)
+
+        self.history.undo()
+        self.assertEqual(self.settings_reads.load_auto_snapshot_interval_minutes(), 30)
+
+        self.history.undo()
+        self.assertTrue(self.settings_reads.load_auto_snapshot_enabled())
+
+        self.history.redo()
+        self.assertFalse(self.settings_reads.load_auto_snapshot_enabled())
+
+        self.history.redo()
+        self.assertEqual(self.settings_reads.load_auto_snapshot_interval_minutes(), 45)
+
     def test_track_create_delete_and_redo_work_through_history(self):
         track_id = self._create_track()
         self.history.record_track_create(

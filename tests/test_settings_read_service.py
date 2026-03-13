@@ -1,7 +1,8 @@
 import sqlite3
 import unittest
 
-from isrc_manager.services import RegistrationSettings, SettingsReadService
+from isrc_manager.constants import DEFAULT_AUTO_SNAPSHOT_ENABLED, DEFAULT_AUTO_SNAPSHOT_INTERVAL_MINUTES
+from isrc_manager.services import AutoSnapshotSettings, RegistrationSettings, SettingsReadService
 
 
 def make_settings_conn():
@@ -24,6 +25,10 @@ def make_settings_conn():
             id INTEGER PRIMARY KEY,
             relatie_nummer TEXT,
             ipi TEXT
+        );
+        CREATE TABLE app_kv (
+            key TEXT PRIMARY KEY,
+            value TEXT
         );
         """
     )
@@ -60,6 +65,31 @@ class SettingsReadServiceTests(unittest.TestCase):
                 buma_relatie_nummer="REL-3",
                 buma_ipi="IPI-4",
             ),
+        )
+
+    def test_load_auto_snapshot_settings_returns_defaults(self):
+        self.assertEqual(
+            self.service.load_auto_snapshot_settings(),
+            AutoSnapshotSettings(
+                enabled=DEFAULT_AUTO_SNAPSHOT_ENABLED,
+                interval_minutes=DEFAULT_AUTO_SNAPSHOT_INTERVAL_MINUTES,
+            ),
+        )
+
+    def test_load_auto_snapshot_settings_reads_profile_values(self):
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO app_kv(key, value) VALUES(?, ?)",
+                ("auto_snapshot_enabled", "0"),
+            )
+            self.conn.execute(
+                "INSERT INTO app_kv(key, value) VALUES(?, ?)",
+                ("auto_snapshot_interval_minutes", "45"),
+            )
+
+        self.assertEqual(
+            self.service.load_auto_snapshot_settings(),
+            AutoSnapshotSettings(enabled=False, interval_minutes=45),
         )
 
 

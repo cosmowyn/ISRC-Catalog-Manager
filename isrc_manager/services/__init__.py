@@ -9,7 +9,7 @@ from .imports import ImportExecutionResult, ImportInspection, ImportRecord, XMLI
 from .licenses import LicenseRecord, LicenseRow, LicenseService
 from .profiles import ProfileChoice, ProfileRemovalResult, ProfileWorkflowService
 from .schema import DatabaseSchemaService
-from .settings_reads import RegistrationSettings, SettingsReadService
+from .settings_reads import AutoSnapshotSettings, RegistrationSettings, SettingsReadService
 from .session import DatabaseSessionService, OpenDatabaseSession, ProfileKVService
 from .settings_mutations import SettingsMutationService
 from .tracks import TrackCreatePayload, TrackService, TrackSnapshot, TrackUpdatePayload
@@ -17,6 +17,7 @@ from .tracks import TrackCreatePayload, TrackService, TrackSnapshot, TrackUpdate
 __all__ = [
     "AlbumUsage",
     "ArtistUsage",
+    "AutoSnapshotSettings",
     "BackupResult",
     "CatalogAdminService",
     "CatalogReadService",

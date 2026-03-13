@@ -36,7 +36,7 @@ from PySide6.QtWidgets import ( QListView, QMenuBar, QListWidget, QListWidgetIte
     QCalendarWidget, QRadioButton, QMenuBar, QMenu, QInputDialog, QTableWidget, QTableWidgetItem,
     QHeaderView, QDialog, QMainWindow, QSizePolicy, QComboBox, QCompleter, QListWidget,
     QListWidgetItem, QFileDialog, QToolBar, QFrame, QSpinBox, QScrollArea, QSlider, QAbstractItemView,
-    QFormLayout, QTableView, QTabWidget, QDialogButtonBox, QGridLayout, QGroupBox, QPlainTextEdit
+    QFormLayout, QTableView, QTabWidget, QDialogButtonBox, QGridLayout, QGroupBox, QPlainTextEdit, QCheckBox
 )
 
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
@@ -45,11 +45,15 @@ from isrc_manager.history import HistoryManager, SessionHistoryManager
 from isrc_manager.history.dialogs import HistoryDialog
 from isrc_manager.constants import (
     APP_NAME,
+    DEFAULT_AUTO_SNAPSHOT_ENABLED,
+    DEFAULT_AUTO_SNAPSHOT_INTERVAL_MINUTES,
     DEFAULT_BASE_HEADERS,
     DEFAULT_HIDDEN_CUSTOM_COLUMN_NAMES,
     DEFAULT_ICON_PATH,
     DEFAULT_WINDOW_TITLE,
     FIELD_TYPE_CHOICES,
+    MAX_AUTO_SNAPSHOT_INTERVAL_MINUTES,
+    MIN_AUTO_SNAPSHOT_INTERVAL_MINUTES,
     PROMOTED_CUSTOM_FIELD_NAMES,
     SCHEMA_TARGET,
 )
@@ -425,6 +429,8 @@ class ApplicationSettingsDialog(QDialog):
         window_title: str,
         icon_path: str,
         artist_code: str,
+        auto_snapshot_enabled: bool,
+        auto_snapshot_interval_minutes: int,
         isrc_prefix: str,
         sena_number: str,
         btw_number: str,
@@ -614,11 +620,52 @@ class ApplicationSettingsDialog(QDialog):
         self.button_box.rejected.connect(self.reject)
         root.addWidget(self.button_box)
 
+        snapshots_box = QGroupBox("Snapshots")
+        snapshots_grid = QGridLayout(snapshots_box)
+        self._configure_grid(snapshots_grid)
+        root.insertWidget(root.count() - 2, snapshots_box)
+
+        self.auto_snapshot_enabled_check = QCheckBox("Create snapshots automatically")
+        self.auto_snapshot_enabled_check.setChecked(bool(auto_snapshot_enabled))
+        self.auto_snapshot_enabled_check.setMinimumWidth(320)
+        self._add_row(
+            snapshots_grid,
+            0,
+            "Automatic Snapshots",
+            self.auto_snapshot_enabled_check,
+            "Background restore points are created while this profile is open. Turn this off to keep manual snapshots only.",
+        )
+
+        self.auto_snapshot_interval_spin = QSpinBox()
+        self.auto_snapshot_interval_spin.setRange(
+            MIN_AUTO_SNAPSHOT_INTERVAL_MINUTES,
+            MAX_AUTO_SNAPSHOT_INTERVAL_MINUTES,
+        )
+        self.auto_snapshot_interval_spin.setValue(
+            max(
+                MIN_AUTO_SNAPSHOT_INTERVAL_MINUTES,
+                min(MAX_AUTO_SNAPSHOT_INTERVAL_MINUTES, int(auto_snapshot_interval_minutes or DEFAULT_AUTO_SNAPSHOT_INTERVAL_MINUTES)),
+            )
+        )
+        self.auto_snapshot_interval_spin.setSuffix(" min")
+        self.auto_snapshot_interval_spin.setMinimumWidth(180)
+        self._add_row(
+            snapshots_grid,
+            1,
+            "Snapshot Interval",
+            self.auto_snapshot_interval_spin,
+            "Choose how often the app stores an automatic snapshot for this profile.",
+        )
+        self.auto_snapshot_enabled_check.toggled.connect(self.auto_snapshot_interval_spin.setEnabled)
+        self.auto_snapshot_interval_spin.setEnabled(self.auto_snapshot_enabled_check.isChecked())
+
         self._focus_map = {
             "window_title": self.window_title_edit,
             "icon_path": self.icon_path_edit,
             "isrc_prefix": self.isrc_prefix_edit,
             "artist_code": self.artist_code_edit,
+            "auto_snapshot_enabled": self.auto_snapshot_enabled_check,
+            "auto_snapshot_interval_minutes": self.auto_snapshot_interval_spin,
             "sena_number": self.sena_number_edit,
             "btw_number": self.btw_number_edit,
             "buma_relatie_nummer": self.buma_relatie_edit,
@@ -679,6 +726,8 @@ class ApplicationSettingsDialog(QDialog):
             "icon_path": self.icon_path_edit.text().strip(),
             "isrc_prefix": self.isrc_prefix_edit.text().strip().upper(),
             "artist_code": self.artist_code_edit.text().strip(),
+            "auto_snapshot_enabled": self.auto_snapshot_enabled_check.isChecked(),
+            "auto_snapshot_interval_minutes": int(self.auto_snapshot_interval_spin.value()),
             "sena_number": self.sena_number_edit.text().strip(),
             "btw_number": self.btw_number_edit.text().strip(),
             "buma_relatie_nummer": self.buma_relatie_edit.text().strip(),
@@ -2716,6 +2765,10 @@ class App(QMainWindow):
         self.history_manager = None
         self.session_history_manager = SessionHistoryManager(self.history_dir)
         self.history_dialog = None
+        self.auto_snapshot_timer = QTimer(self)
+        self.auto_snapshot_timer.setSingleShot(False)
+        self.auto_snapshot_timer.timeout.connect(self._on_auto_snapshot_timer)
+        self._last_auto_snapshot_marker = None
         self._suspend_layout_history = False
         self._header_layout_signals_bound = False
         self._col_hint_signal_bound = False
@@ -3972,12 +4025,87 @@ class App(QMainWindow):
             except Exception:
                 pass
 
-    def _current_settings_values(self) -> dict[str, str]:
+    def _current_auto_snapshot_settings(self) -> tuple[bool, int]:
+        if self.settings_reads is None:
+            return DEFAULT_AUTO_SNAPSHOT_ENABLED, DEFAULT_AUTO_SNAPSHOT_INTERVAL_MINUTES
+        snapshot_settings = self.settings_reads.load_auto_snapshot_settings()
+        return bool(snapshot_settings.enabled), int(snapshot_settings.interval_minutes)
+
+    def _refresh_auto_snapshot_schedule(self) -> None:
+        if not hasattr(self, "auto_snapshot_timer"):
+            return
+        if self.history_manager is None or self.settings_reads is None:
+            self.auto_snapshot_timer.stop()
+            self._last_auto_snapshot_marker = None
+            return
+
+        enabled, interval_minutes = self._current_auto_snapshot_settings()
+        if not enabled:
+            self.auto_snapshot_timer.stop()
+            self._last_auto_snapshot_marker = None
+            return
+
+        interval_minutes = max(
+            MIN_AUTO_SNAPSHOT_INTERVAL_MINUTES,
+            min(MAX_AUTO_SNAPSHOT_INTERVAL_MINUTES, int(interval_minutes or DEFAULT_AUTO_SNAPSHOT_INTERVAL_MINUTES)),
+        )
+        interval_ms = int(interval_minutes * 60 * 1000)
+        if self.auto_snapshot_timer.interval() != interval_ms or not self.auto_snapshot_timer.isActive():
+            self.auto_snapshot_timer.start(interval_ms)
+
+    def _current_auto_snapshot_marker(self) -> int | None:
+        if self.history_manager is None:
+            return None
+        entry = self.history_manager.get_current_entry()
+        while entry is not None:
+            action_type = entry.action_type or ""
+            if (
+                action_type.startswith("file.")
+                or action_type in {"db.verify", "snapshot.create", "snapshot.delete"}
+            ):
+                entry = self.history_manager.fetch_entry(entry.parent_id) if entry.parent_id is not None else None
+                continue
+            return entry.entry_id
+        return None
+
+    def _on_auto_snapshot_timer(self) -> None:
+        if self.history_manager is None or self.settings_reads is None:
+            return
+        enabled, _interval_minutes = self._current_auto_snapshot_settings()
+        if not enabled:
+            self.auto_snapshot_timer.stop()
+            return
+
+        marker = self._current_auto_snapshot_marker()
+        if marker is None or marker == self._last_auto_snapshot_marker:
+            return
+
+        label = f"Automatic Snapshot {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        try:
+            snapshot = self.history_manager.capture_snapshot(kind="auto_interval", label=label)
+            self._last_auto_snapshot_marker = marker
+            self._log_event(
+                "snapshot.auto.create",
+                "Automatic snapshot created",
+                snapshot_id=snapshot.snapshot_id,
+                label=snapshot.label,
+                marker=marker,
+            )
+            self.statusBar().showMessage(f"Automatic snapshot created: {snapshot.label}", 4000)
+            if self.history_dialog is not None and self.history_dialog.isVisible():
+                self.history_dialog.refresh_data()
+        except Exception as exc:
+            self.logger.exception(f"Automatic snapshot failed: {exc}")
+
+    def _current_settings_values(self) -> dict[str, object]:
         registration = self.settings_reads.load_registration_settings()
+        auto_snapshot_enabled, auto_snapshot_interval_minutes = self._current_auto_snapshot_settings()
         return {
             "window_title": self.identity.get("window_title") or DEFAULT_WINDOW_TITLE,
             "icon_path": self.identity.get("icon_path") or "",
             "artist_code": self.load_artist_code(),
+            "auto_snapshot_enabled": auto_snapshot_enabled,
+            "auto_snapshot_interval_minutes": auto_snapshot_interval_minutes,
             "isrc_prefix": registration.isrc_prefix,
             "sena_number": registration.sena_number,
             "btw_number": registration.btw_number,
@@ -3987,8 +4115,8 @@ class App(QMainWindow):
 
     def _apply_settings_changes(
         self,
-        before_values: dict[str, str],
-        after_values: dict[str, str],
+        before_values: dict[str, object],
+        after_values: dict[str, object],
         *,
         show_confirmation: bool = False,
     ) -> int:
@@ -4030,6 +4158,38 @@ class App(QMainWindow):
                         label=f"Set ISRC Artist Code: {after_values['artist_code']}",
                         before_value=before_values["artist_code"],
                         after_value=after_values["artist_code"],
+                    )
+                changed_count += 1
+
+            if after_values["auto_snapshot_enabled"] != before_values["auto_snapshot_enabled"]:
+                self.settings_mutations.set_auto_snapshot_enabled(bool(after_values["auto_snapshot_enabled"]))
+                self._log_event(
+                    "settings.auto_snapshot_enabled",
+                    "Automatic snapshots setting updated",
+                    enabled=bool(after_values["auto_snapshot_enabled"]),
+                )
+                if self.history_manager is not None:
+                    self.history_manager.record_setting_change(
+                        key="auto_snapshot_enabled",
+                        label="Automatic Snapshots Enabled" if after_values["auto_snapshot_enabled"] else "Automatic Snapshots Disabled",
+                        before_value=before_values["auto_snapshot_enabled"],
+                        after_value=after_values["auto_snapshot_enabled"],
+                    )
+                changed_count += 1
+
+            if after_values["auto_snapshot_interval_minutes"] != before_values["auto_snapshot_interval_minutes"]:
+                self.settings_mutations.set_auto_snapshot_interval_minutes(int(after_values["auto_snapshot_interval_minutes"]))
+                self._log_event(
+                    "settings.auto_snapshot_interval_minutes",
+                    "Automatic snapshot interval updated",
+                    interval_minutes=int(after_values["auto_snapshot_interval_minutes"]),
+                )
+                if self.history_manager is not None:
+                    self.history_manager.record_setting_change(
+                        key="auto_snapshot_interval_minutes",
+                        label=f"Set Auto Snapshot Interval: {int(after_values['auto_snapshot_interval_minutes'])} minutes",
+                        before_value=before_values["auto_snapshot_interval_minutes"],
+                        after_value=after_values["auto_snapshot_interval_minutes"],
                     )
                 changed_count += 1
 
@@ -4108,6 +4268,7 @@ class App(QMainWindow):
             raise
 
         if changed_count:
+            self._refresh_auto_snapshot_schedule()
             self._refresh_history_actions()
             if show_confirmation:
                 QMessageBox.information(self, "Settings Saved", "Application settings updated.")
@@ -4119,6 +4280,8 @@ class App(QMainWindow):
             window_title=before_values["window_title"],
             icon_path=before_values["icon_path"],
             artist_code=before_values["artist_code"],
+            auto_snapshot_enabled=before_values["auto_snapshot_enabled"],
+            auto_snapshot_interval_minutes=before_values["auto_snapshot_interval_minutes"],
             isrc_prefix=before_values["isrc_prefix"],
             sena_number=before_values["sena_number"],
             btw_number=before_values["btw_number"],
@@ -4349,6 +4512,9 @@ class App(QMainWindow):
         self.open_catalog_managers_dialog(initial_tab="licensees")
 
     def _close_database_connection(self):
+        if hasattr(self, "auto_snapshot_timer"):
+            self.auto_snapshot_timer.stop()
+        self._last_auto_snapshot_marker = None
         self.database_session.close(self.conn)
         self.conn = None
         self.cursor = None
@@ -4400,6 +4566,8 @@ class App(QMainWindow):
         self._audit("PROFILE", "Database", ref_id=path, details="open_database()")
         self._audit_commit()
         self._refresh_history_actions()
+        self._last_auto_snapshot_marker = self._current_auto_snapshot_marker()
+        self._refresh_auto_snapshot_schedule()
 
     def init_db(self):
         self.schema_service.init_db()
@@ -4470,6 +4638,8 @@ class App(QMainWindow):
             pass
         self.populate_all_comboboxes()
         self.refresh_table_preserve_view()
+        self._refresh_auto_snapshot_schedule()
+        self._last_auto_snapshot_marker = self._current_auto_snapshot_marker()
         self._refresh_history_actions()
 
     def _apply_saved_hint_positions(self):
