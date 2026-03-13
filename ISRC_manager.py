@@ -34,7 +34,8 @@ from PySide6.QtWidgets import ( QListView, QMenuBar, QListWidget, QListWidgetIte
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QMessageBox,
     QCalendarWidget, QRadioButton, QMenuBar, QMenu, QInputDialog, QTableWidget, QTableWidgetItem,
     QHeaderView, QDialog, QMainWindow, QSizePolicy, QComboBox, QCompleter, QListWidget,
-    QListWidgetItem, QFileDialog, QToolBar, QFrame, QSpinBox, QScrollArea, QSlider, QAbstractItemView, QFormLayout, QTableView, QTabWidget
+    QListWidgetItem, QFileDialog, QToolBar, QFrame, QSpinBox, QScrollArea, QSlider, QAbstractItemView,
+    QFormLayout, QTableView, QTabWidget, QDialogButtonBox, QGridLayout, QGroupBox
 )
 
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
@@ -371,6 +372,289 @@ class DatePickerDialog(QDialog):
         if self._cleared:
             return None
         return self.calendar.selectedDate().toString("yyyy-MM-dd")
+
+
+# =============================================================================
+# Consolidated Application Settings Dialog
+# =============================================================================
+class ApplicationSettingsDialog(QDialog):
+    def __init__(
+        self,
+        *,
+        window_title: str,
+        icon_path: str,
+        artist_code: str,
+        isrc_prefix: str,
+        sena_number: str,
+        btw_number: str,
+        buma_relatie_nummer: str,
+        buma_ipi: str,
+        current_profile_path: str,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.setObjectName("applicationSettingsDialog")
+        self.setWindowTitle("Application Settings")
+        self.setModal(True)
+        self.setMinimumSize(1040, 620)
+
+        self.setStyleSheet(
+            """
+            QDialog#applicationSettingsDialog QLabel#settingsTitle {
+                font-size: 18px;
+                font-weight: 600;
+            }
+            QDialog#applicationSettingsDialog QLabel#settingsSubtitle {
+                color: #5f6b76;
+            }
+            QDialog#applicationSettingsDialog QLabel[role="hint"] {
+                color: #6b7280;
+            }
+            QDialog#applicationSettingsDialog QGroupBox {
+                font-weight: 600;
+                margin-top: 10px;
+            }
+            QDialog#applicationSettingsDialog QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 4px;
+            }
+            """
+        )
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(14)
+
+        title_lbl = QLabel("Application Settings")
+        title_lbl.setObjectName("settingsTitle")
+        root.addWidget(title_lbl)
+
+        subtitle_lbl = QLabel(
+            "Edit application identity and profile-specific registration settings in one place."
+        )
+        subtitle_lbl.setObjectName("settingsSubtitle")
+        subtitle_lbl.setWordWrap(True)
+        root.addWidget(subtitle_lbl)
+
+        profile_box = QGroupBox("Current Profile")
+        profile_grid = QGridLayout(profile_box)
+        profile_grid.setColumnMinimumWidth(0, 180)
+        profile_grid.setColumnStretch(1, 1)
+        profile_grid.setHorizontalSpacing(12)
+        profile_grid.setVerticalSpacing(10)
+
+        profile_name = Path(current_profile_path).name if current_profile_path else "(not connected)"
+        profile_name_lbl = QLabel(profile_name)
+        profile_name_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        profile_path_lbl = QLabel(current_profile_path or "")
+        profile_path_lbl.setWordWrap(True)
+        profile_path_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+
+        profile_grid.addWidget(self._make_label("Profile"), 0, 0)
+        profile_grid.addWidget(profile_name_lbl, 0, 1)
+        profile_grid.addWidget(self._make_label("Path"), 1, 0)
+        profile_grid.addWidget(profile_path_lbl, 1, 1)
+        root.addWidget(profile_box)
+
+        app_box = QGroupBox("Application")
+        app_grid = QGridLayout(app_box)
+        self._configure_grid(app_grid)
+        root.addWidget(app_box)
+
+        self.window_title_edit = QLineEdit(window_title or DEFAULT_WINDOW_TITLE)
+        self.window_title_edit.setClearButtonEnabled(True)
+        self.window_title_edit.setPlaceholderText(DEFAULT_WINDOW_TITLE)
+        self.window_title_edit.setMinimumWidth(360)
+        self._add_row(
+            app_grid,
+            0,
+            "Window Title",
+            self.window_title_edit,
+            "Displayed in the main window title bar.",
+        )
+
+        self.icon_path_edit = QLineEdit(icon_path or "")
+        self.icon_path_edit.setClearButtonEnabled(True)
+        self.icon_path_edit.setPlaceholderText("Optional icon path")
+        self.icon_path_edit.setMinimumWidth(460)
+        browse_btn = QPushButton("Browse…")
+        browse_btn.setAutoDefault(False)
+        browse_btn.clicked.connect(self._browse_icon)
+        clear_btn = QPushButton("Clear")
+        clear_btn.setAutoDefault(False)
+        clear_btn.clicked.connect(self.icon_path_edit.clear)
+
+        icon_widget = QWidget(self)
+        icon_row = QHBoxLayout(icon_widget)
+        icon_row.setContentsMargins(0, 0, 0, 0)
+        icon_row.setSpacing(8)
+        icon_row.addWidget(self.icon_path_edit, 1)
+        icon_row.addWidget(browse_btn)
+        icon_row.addWidget(clear_btn)
+        icon_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._add_row(
+            app_grid,
+            1,
+            "Application Icon",
+            icon_widget,
+            "Optional image file used as the app icon.",
+        )
+
+        registration_box = QGroupBox("Registration & Codes")
+        registration_grid = QGridLayout(registration_box)
+        self._configure_grid(registration_grid)
+        root.addWidget(registration_box)
+
+        self.isrc_prefix_edit = QLineEdit((isrc_prefix or "").upper().strip())
+        self.isrc_prefix_edit.setClearButtonEnabled(True)
+        self.isrc_prefix_edit.setMaxLength(5)
+        self.isrc_prefix_edit.setPlaceholderText("Example: NLABC")
+        self.isrc_prefix_edit.setMinimumWidth(220)
+        self._add_row(
+            registration_grid,
+            0,
+            "ISRC Prefix",
+            self.isrc_prefix_edit,
+            "Five characters: country code plus registrant code.",
+        )
+
+        self.artist_code_edit = QLineEdit((artist_code or "00").strip())
+        self.artist_code_edit.setClearButtonEnabled(True)
+        self.artist_code_edit.setMaxLength(2)
+        self.artist_code_edit.setPlaceholderText("00")
+        self.artist_code_edit.setMinimumWidth(220)
+        self._add_row(
+            registration_grid,
+            1,
+            "ISRC Artist Code",
+            self.artist_code_edit,
+            "Two digits used in generated ISRC values.",
+        )
+
+        self.sena_number_edit = QLineEdit((sena_number or "").strip())
+        self.sena_number_edit.setClearButtonEnabled(True)
+        self.sena_number_edit.setMinimumWidth(220)
+        self._add_row(registration_grid, 2, "SENA Number", self.sena_number_edit)
+
+        self.btw_number_edit = QLineEdit((btw_number or "").strip())
+        self.btw_number_edit.setClearButtonEnabled(True)
+        self.btw_number_edit.setMinimumWidth(220)
+        self._add_row(registration_grid, 3, "VAT / BTW Number", self.btw_number_edit)
+
+        self.buma_relatie_edit = QLineEdit((buma_relatie_nummer or "").strip())
+        self.buma_relatie_edit.setClearButtonEnabled(True)
+        self.buma_relatie_edit.setMinimumWidth(220)
+        self._add_row(
+            registration_grid,
+            4,
+            "BUMA/STEMRA Relation Number",
+            self.buma_relatie_edit,
+        )
+
+        self.buma_ipi_edit = QLineEdit((buma_ipi or "").strip())
+        self.buma_ipi_edit.setClearButtonEnabled(True)
+        self.buma_ipi_edit.setMinimumWidth(220)
+        self._add_row(
+            registration_grid,
+            5,
+            "BUMA/STEMRA IPI Number",
+            self.buma_ipi_edit,
+        )
+
+        root.addStretch(1)
+
+        self.button_box = QDialogButtonBox(
+            QDialogButtonBox.Save | QDialogButtonBox.Cancel,
+            Qt.Horizontal,
+            self,
+        )
+        self.button_box.accepted.connect(self._accept_if_valid)
+        self.button_box.rejected.connect(self.reject)
+        root.addWidget(self.button_box)
+
+        self._focus_map = {
+            "window_title": self.window_title_edit,
+            "icon_path": self.icon_path_edit,
+            "isrc_prefix": self.isrc_prefix_edit,
+            "artist_code": self.artist_code_edit,
+            "sena_number": self.sena_number_edit,
+            "btw_number": self.btw_number_edit,
+            "buma_relatie_nummer": self.buma_relatie_edit,
+            "buma_ipi": self.buma_ipi_edit,
+        }
+
+    @staticmethod
+    def _configure_grid(grid: QGridLayout):
+        grid.setColumnMinimumWidth(0, 280)
+        grid.setColumnMinimumWidth(1, 340)
+        grid.setColumnStretch(1, 1)
+        grid.setColumnMinimumWidth(2, 260)
+        grid.setColumnStretch(2, 1)
+        grid.setHorizontalSpacing(16)
+        grid.setVerticalSpacing(12)
+
+    @staticmethod
+    def _make_label(text: str) -> QLabel:
+        label = QLabel(text)
+        label.setMinimumWidth(280)
+        label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        return label
+
+    @staticmethod
+    def _make_hint(text: str) -> QLabel:
+        hint = QLabel(text)
+        hint.setWordWrap(True)
+        hint.setProperty("role", "hint")
+        return hint
+
+    def _add_row(self, grid: QGridLayout, row: int, label: str, editor: QWidget, hint: str | None = None):
+        grid.addWidget(self._make_label(label), row, 0)
+        grid.addWidget(editor, row, 1)
+        if hint:
+            grid.addWidget(self._make_hint(hint), row, 2)
+
+    def _browse_icon(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Choose Icon",
+            "",
+            "Images (*.ico *.png *.jpg *.jpeg *.bmp)",
+        )
+        if path:
+            self.icon_path_edit.setText(path)
+
+    def focus_field(self, name: str | None):
+        widget = self._focus_map.get(name or "")
+        if widget is None:
+            return
+        widget.setFocus(Qt.OtherFocusReason)
+        if isinstance(widget, QLineEdit):
+            widget.selectAll()
+
+    def values(self) -> dict[str, str]:
+        return {
+            "window_title": self.window_title_edit.text().strip() or DEFAULT_WINDOW_TITLE,
+            "icon_path": self.icon_path_edit.text().strip(),
+            "isrc_prefix": self.isrc_prefix_edit.text().strip().upper(),
+            "artist_code": self.artist_code_edit.text().strip(),
+            "sena_number": self.sena_number_edit.text().strip(),
+            "btw_number": self.btw_number_edit.text().strip(),
+            "buma_relatie_nummer": self.buma_relatie_edit.text().strip(),
+            "buma_ipi": self.buma_ipi_edit.text().strip(),
+        }
+
+    def _accept_if_valid(self):
+        values = self.values()
+        if not re.fullmatch(r"[A-Z]{2}[A-Z0-9]{3}", values["isrc_prefix"]):
+            QMessageBox.warning(self, "Invalid Prefix", "ISRC Prefix must be 5 characters: CC + 3 letters/numbers.")
+            self.focus_field("isrc_prefix")
+            return
+        if not re.fullmatch(r"\d{2}", values["artist_code"]):
+            QMessageBox.warning(self, "Invalid Artist Code", "ISRC Artist Code must be exactly two digits (00–99).")
+            self.focus_field("artist_code")
+            return
+        self.accept()
 
 
 # =============================================================================
@@ -1473,55 +1757,12 @@ class App(QMainWindow):
 
         # Settings menu
         settings_menu = self.menu_bar.addMenu("Settings")
-        self.identity_action = self._create_action(
-            "Application Identity…",
-            slot=self.edit_identity,
+        self.settings_action = self._create_action(
+            "Application Settings…",
+            slot=self.open_settings_dialog,
             shortcuts=("Ctrl+,", "Meta+,"),
         )
-        settings_menu.addAction(self.identity_action)
-        settings_menu.addSeparator()
-
-        self.prefix_action = self._create_action(
-            "ISRC Prefix…",
-            slot=self.set_isrc_prefix,
-            shortcuts=("Ctrl+Alt+I", "Meta+Alt+I"),
-        )
-        settings_menu.addAction(self.prefix_action)
-
-        self.artist_code_action = self._create_action(
-            "ISRC Artist Code…",
-            slot=self.set_artist_code,
-            shortcuts=("Ctrl+Alt+U", "Meta+Alt+U"),
-        )
-        settings_menu.addAction(self.artist_code_action)
-
-        self.sena_action = self._create_action(
-            "SENA Number…",
-            slot=self.set_sena_number,
-            shortcuts=("Ctrl+Alt+N", "Meta+Alt+N"),
-        )
-        settings_menu.addAction(self.sena_action)
-
-        self.btw_action = self._create_action(
-            "VAT / BTW Number…",
-            slot=self.set_btw_number,
-            shortcuts=("Ctrl+Alt+T", "Meta+Alt+T"),
-        )
-        settings_menu.addAction(self.btw_action)
-
-        self.buma_action = self._create_action(
-            "BUMA/STEMRA Relation Number…",
-            slot=self.set_buma_info,
-            shortcuts=("Ctrl+Alt+R", "Meta+Alt+R"),
-        )
-        settings_menu.addAction(self.buma_action)
-
-        self.ipi_action = self._create_action(
-            "BUMA/STEMRA IPI Number…",
-            slot=self.set_ipi_info,
-            shortcuts=("Ctrl+Alt+P", "Meta+Alt+P"),
-        )
-        settings_menu.addAction(self.ipi_action)
+        settings_menu.addAction(self.settings_action)
 
         # View menu
         view_menu = self.menu_bar.addMenu("View")
@@ -1914,59 +2155,178 @@ class App(QMainWindow):
             except Exception:
                 pass
 
-    def edit_identity(self):
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Branding & Identity")
-        lay = QVBoxLayout(dlg)
+    def _current_settings_values(self) -> dict[str, str]:
+        registration = self.settings_reads.load_registration_settings()
+        return {
+            "window_title": self.identity.get("window_title") or DEFAULT_WINDOW_TITLE,
+            "icon_path": self.identity.get("icon_path") or "",
+            "artist_code": self.load_artist_code(),
+            "isrc_prefix": registration.isrc_prefix,
+            "sena_number": registration.sena_number,
+            "btw_number": registration.btw_number,
+            "buma_relatie_nummer": registration.buma_relatie_nummer,
+            "buma_ipi": registration.buma_ipi,
+        }
 
-        # Title
-        lay.addWidget(QLabel("Window Title"))
-        title_edit = QLineEdit(self.identity.get("window_title") or DEFAULT_WINDOW_TITLE)
-        lay.addWidget(title_edit)
+    def _apply_settings_changes(
+        self,
+        before_values: dict[str, str],
+        after_values: dict[str, str],
+        *,
+        show_confirmation: bool = False,
+    ) -> int:
+        changed_count = 0
 
-        # Icon
-        lay.addWidget(QLabel("Application Icon (optional)"))
-        icon_row = QHBoxLayout()
-        icon_edit = QLineEdit(self.identity.get("icon_path") or "")
-        icon_browse = QPushButton("Browse…")
-        def pick_icon():
-            path, _ = QFileDialog.getOpenFileName(self, "Choose Icon", "", "Images (*.ico *.png *.jpg *.jpeg *.bmp)")
-            if path:
-                icon_edit.setText(path)
-        icon_browse.clicked.connect(pick_icon)
-        icon_row.addWidget(icon_edit)
-        icon_row.addWidget(icon_browse)
-        lay.addLayout(icon_row)
+        try:
+            before_identity = {
+                "window_title": before_values["window_title"],
+                "icon_path": before_values["icon_path"],
+            }
+            after_identity = {
+                "window_title": after_values["window_title"],
+                "icon_path": after_values["icon_path"],
+            }
+            if after_identity != before_identity:
+                self.identity = self.settings_mutations.set_identity(
+                    window_title=after_identity["window_title"],
+                    icon_path=after_identity["icon_path"],
+                )
+                self._apply_identity()
+                self.logger.info("Branding & identity updated")
+                self._audit("SETTINGS", "Identity", ref_id="QSettings", details=f"title={self.identity['window_title']}")
+                self._audit_commit()
+                if self.history_manager is not None:
+                    self.history_manager.record_setting_change(
+                        key="identity",
+                        label="Update Branding & Identity",
+                        before_value=before_identity,
+                        after_value=self.identity,
+                    )
+                changed_count += 1
 
-        btns = QHBoxLayout()
-        save_btn = QPushButton("Save")
-        close_btn = QPushButton("Close")
-        btns.addWidget(save_btn)
-        btns.addWidget(close_btn)
-        lay.addLayout(btns)
+            if after_values["artist_code"] != before_values["artist_code"]:
+                self.settings_mutations.set_artist_code(after_values["artist_code"])
+                self.logger.info(f"ISRC artist code set to '{after_values['artist_code']}' (profile DB)")
+                if self.history_manager is not None:
+                    self.history_manager.record_setting_change(
+                        key="artist_code",
+                        label=f"Set ISRC Artist Code: {after_values['artist_code']}",
+                        before_value=before_values["artist_code"],
+                        after_value=after_values["artist_code"],
+                    )
+                changed_count += 1
 
-        def do_save():
-            before_identity = dict(self.identity)
-            self.identity = self.settings_mutations.set_identity(
-                window_title=title_edit.text().strip() or DEFAULT_WINDOW_TITLE,
-                icon_path=icon_edit.text().strip(),
-            )
-            self.logger.info("Settings synced to disk")
-            self._apply_identity()
-            self.logger.info("Branding & identity updated")
-            self._audit("SETTINGS", "Identity", ref_id="QSettings", details=f"title={self.identity['window_title']}")
-            self._audit_commit()
-            self.history_manager.record_setting_change(
-                key="identity",
-                label="Update Branding & Identity",
-                before_value=before_identity,
-                after_value=self.identity,
-            )
+            if after_values["isrc_prefix"] != before_values["isrc_prefix"]:
+                self.settings_mutations.set_isrc_prefix(after_values["isrc_prefix"])
+                self.logger.info(f"ISRC prefix updated to '{after_values['isrc_prefix']}'")
+                self._audit("SETTINGS", "ISRC_Prefix", ref_id=1, details=f"prefix={after_values['isrc_prefix']}")
+                self._audit_commit()
+                if self.history_manager is not None:
+                    self.history_manager.record_setting_change(
+                        key="isrc_prefix",
+                        label=f"Set ISRC Prefix: {after_values['isrc_prefix']}",
+                        before_value=before_values["isrc_prefix"],
+                        after_value=after_values["isrc_prefix"],
+                    )
+                changed_count += 1
+
+            if after_values["sena_number"] != before_values["sena_number"]:
+                self.settings_mutations.set_sena_number(after_values["sena_number"])
+                self.logger.info("SENA number updated")
+                self._audit("SETTINGS", "SENA", ref_id=1, details="updated")
+                self._audit_commit()
+                if self.history_manager is not None:
+                    self.history_manager.record_setting_change(
+                        key="sena_number",
+                        label="Set SENA Number",
+                        before_value=before_values["sena_number"],
+                        after_value=after_values["sena_number"],
+                    )
+                changed_count += 1
+
+            if after_values["btw_number"] != before_values["btw_number"]:
+                self.settings_mutations.set_btw_number(after_values["btw_number"])
+                self.logger.info("BTW number updated")
+                self._audit("SETTINGS", "BTW", ref_id=1, details="updated")
+                self._audit_commit()
+                if self.history_manager is not None:
+                    self.history_manager.record_setting_change(
+                        key="btw_number",
+                        label="Set BTW Number",
+                        before_value=before_values["btw_number"],
+                        after_value=after_values["btw_number"],
+                    )
+                changed_count += 1
+
+            if after_values["buma_relatie_nummer"] != before_values["buma_relatie_nummer"]:
+                self.settings_mutations.set_buma_relatie_nummer(after_values["buma_relatie_nummer"])
+                self.logger.info("BUMA/STEMRA relatie nummer updated")
+                self._audit("SETTINGS", "BUMA_STEMRA", ref_id=1, details="relatie_nummer updated")
+                self._audit_commit()
+                if self.history_manager is not None:
+                    self.history_manager.record_setting_change(
+                        key="buma_relatie_nummer",
+                        label="Set BUMA/STEMRA Relation Number",
+                        before_value=before_values["buma_relatie_nummer"],
+                        after_value=after_values["buma_relatie_nummer"],
+                    )
+                changed_count += 1
+
+            if after_values["buma_ipi"] != before_values["buma_ipi"]:
+                self.settings_mutations.set_buma_ipi(after_values["buma_ipi"])
+                self.logger.info("BUMA/STEMRA IPI updated")
+                self._audit("SETTINGS", "BUMA_STEMRA", ref_id=1, details="ipi updated")
+                self._audit_commit()
+                if self.history_manager is not None:
+                    self.history_manager.record_setting_change(
+                        key="buma_ipi",
+                        label="Set BUMA IPI",
+                        before_value=before_values["buma_ipi"],
+                        after_value=after_values["buma_ipi"],
+                    )
+                changed_count += 1
+        except Exception:
+            if self.conn is not None:
+                self.conn.rollback()
+            raise
+
+        if changed_count:
             self._refresh_history_actions()
-            QMessageBox.information(self, "Saved", "Branding and identity updated.")
-        save_btn.clicked.connect(do_save)
-        close_btn.clicked.connect(dlg.accept)
-        dlg.exec()
+            if show_confirmation:
+                QMessageBox.information(self, "Settings Saved", "Application settings updated.")
+        return changed_count
+
+    def open_settings_dialog(self, initial_focus: str | None = None):
+        before_values = self._current_settings_values()
+        dlg = ApplicationSettingsDialog(
+            window_title=before_values["window_title"],
+            icon_path=before_values["icon_path"],
+            artist_code=before_values["artist_code"],
+            isrc_prefix=before_values["isrc_prefix"],
+            sena_number=before_values["sena_number"],
+            btw_number=before_values["btw_number"],
+            buma_relatie_nummer=before_values["buma_relatie_nummer"],
+            buma_ipi=before_values["buma_ipi"],
+            current_profile_path=getattr(self, "current_db_path", ""),
+            parent=self,
+        )
+        dlg.focus_field(initial_focus)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        try:
+            self._apply_settings_changes(before_values, dlg.values(), show_confirmation=True)
+        except Exception as e:
+            self.logger.exception(f"Settings update failed: {e}")
+            QMessageBox.critical(self, "Settings Error", f"Could not save settings:\n{e}")
+
+    def _apply_single_setting_value(self, field_name: str, value: str) -> int:
+        before_values = self._current_settings_values()
+        after_values = dict(before_values)
+        after_values[field_name] = value
+        return self._apply_settings_changes(before_values, after_values)
+
+    def edit_identity(self):
+        self.open_settings_dialog(initial_focus="window_title")
 
     # --- Artist Code (AA) ---
     def _migrate_artist_code_from_qsettings_if_needed(self):
@@ -1989,32 +2349,16 @@ class App(QMainWindow):
 
 
     def set_artist_code(self, val: str | None = None):
-        # If no value provided or empty, open dialog prefilled with current code
-        if not val:
-            current = self.load_artist_code()
-            text, ok = QInputDialog.getText(
-                self, "Set ISRC Artist Code", "Enter 2 digits (00–99):", text=current
-            )
-            if not ok:
-                return
-            val = (text or "").strip()
-        else:
-            val = (val or "").strip()
+        if val is None:
+            self.open_settings_dialog(initial_focus="artist_code")
+            return
 
-        if len(val) != 2 or not val.isdigit():
+        val = (val or "").strip()
+        if not re.fullmatch(r"\d{2}", val):
             QMessageBox.warning(self, "Invalid artist code", "Artist code must be two digits (00–99).")
             return
 
-        before_value = self.load_artist_code()
-        self.settings_mutations.set_artist_code(val)
-        self.logger.info(f"ISRC artist code set to '{val}' (profile DB)")
-        self.history_manager.record_setting_change(
-            key="artist_code",
-            label=f"Set ISRC Artist Code: {val}",
-            before_value=before_value,
-            after_value=val,
-        )
-        self._refresh_history_actions()
+        self._apply_single_setting_value("artist_code", val)
         if hasattr(self, "artist_edit"):
             self.artist_edit.setText(val)
 
@@ -3537,118 +3881,60 @@ class App(QMainWindow):
     # =============================================================================
     # Settings (prefix / numbers) + summary dialog
     # =============================================================================
-    def set_isrc_prefix(self):
-        current = self.load_isrc_prefix()
-        prefix, ok = QInputDialog.getText(self, "Set ISRC Prefix", "Enter ISRC prefix (e.g., XXX0Y):", text=current)
-        if ok:
-            pref = (prefix or "").strip().upper()
-            if not re.fullmatch(r"[A-Z]{2}[A-Z0-9]{3}", pref):
-                QMessageBox.warning(self, "Invalid Prefix", "Prefix must be CC+XXX (5 chars).")
-                return
-            try:
-                self.settings_mutations.set_isrc_prefix(pref)
-                self.logger.info(f"ISRC prefix updated to '{pref}'")
-                self._audit("SETTINGS", "ISRC_Prefix", ref_id=1, details=f"prefix={pref}")
-                self._audit_commit()
-                self.history_manager.record_setting_change(
-                    key="isrc_prefix",
-                    label=f"Set ISRC Prefix: {pref}",
-                    before_value=current,
-                    after_value=pref,
-                )
-                self._refresh_history_actions()
-            except Exception as e:
-                self.conn.rollback()
-                self.logger.exception(f"Set ISRC prefix failed: {e}")
-                QMessageBox.critical(self, "Error", f"Could not save prefix:\n{e}")
+    def set_isrc_prefix(self, prefix: str | None = None):
+        if prefix is None:
+            self.open_settings_dialog(initial_focus="isrc_prefix")
+            return
 
-    def set_sena_number(self):
-        current = self.settings_reads.load_sena_number()
-        text, ok = QInputDialog.getText(self, "Set SENA Number", "Enter SENA Number:", text=current)
-        if ok:
-            try:
-                updated = (text or "").strip()
-                self.settings_mutations.set_sena_number(updated)
-                self.logger.info("SENA number updated")
-                self._audit("SETTINGS", "SENA", ref_id=1, details="updated")
-                self._audit_commit()
-                self.history_manager.record_setting_change(
-                    key="sena_number",
-                    label="Set SENA Number",
-                    before_value=current,
-                    after_value=updated,
-                )
-                self._refresh_history_actions()
-            except Exception as e:
-                self.conn.rollback()
-                self.logger.exception(f"Set SENA number failed: {e}")
-                QMessageBox.critical(self, "Error", f"Could not save SENA number:\n{e}")
+        pref = (prefix or "").strip().upper()
+        if not re.fullmatch(r"[A-Z]{2}[A-Z0-9]{3}", pref):
+            QMessageBox.warning(self, "Invalid Prefix", "Prefix must be CC+XXX (5 chars).")
+            return
+        try:
+            self._apply_single_setting_value("isrc_prefix", pref)
+        except Exception as e:
+            self.logger.exception(f"Set ISRC prefix failed: {e}")
+            QMessageBox.critical(self, "Error", f"Could not save prefix:\n{e}")
 
-    def set_btw_number(self):
-        current = self.settings_reads.load_btw_number()
-        text, ok = QInputDialog.getText(self, "Set BTW Number", "Enter BTW Number:", text=current)
-        if ok:
-            try:
-                updated = (text or "").strip()
-                self.settings_mutations.set_btw_number(updated)
-                self.logger.info("BTW number updated")
-                self._audit("SETTINGS", "BTW", ref_id=1, details="updated")
-                self._audit_commit()
-                self.history_manager.record_setting_change(
-                    key="btw_number",
-                    label="Set BTW Number",
-                    before_value=current,
-                    after_value=updated,
-                )
-                self._refresh_history_actions()
-            except Exception as e:
-                self.conn.rollback()
-                self.logger.exception(f"Set BTW failed: {e}")
-                QMessageBox.critical(self, "Error", f"Could not save BTW number:\n{e}")
+    def set_sena_number(self, value: str | None = None):
+        if value is None:
+            self.open_settings_dialog(initial_focus="sena_number")
+            return
+        try:
+            self._apply_single_setting_value("sena_number", (value or "").strip())
+        except Exception as e:
+            self.logger.exception(f"Set SENA number failed: {e}")
+            QMessageBox.critical(self, "Error", f"Could not save SENA number:\n{e}")
 
-    def set_buma_info(self):
-        current_rel = self.settings_reads.load_buma_relatie_nummer()
-        relatie_nummer, ok = QInputDialog.getText(self, "Set BUMA Relatie Nummer", "Enter Relatie Nummer:", text=current_rel)
-        if ok:
-            try:
-                updated = (relatie_nummer or "").strip()
-                self.settings_mutations.set_buma_relatie_nummer(updated)
-                self.logger.info("BUMA/STEMRA relatie nummer updated")
-                self._audit("SETTINGS", "BUMA_STEMRA", ref_id=1, details="relatie_nummer updated")
-                self._audit_commit()
-                self.history_manager.record_setting_change(
-                    key="buma_relatie_nummer",
-                    label="Set BUMA/STEMRA Relation Number",
-                    before_value=current_rel,
-                    after_value=updated,
-                )
-                self._refresh_history_actions()
-            except Exception as e:
-                self.conn.rollback()
-                self.logger.exception(f"Set BUMA relatie nummer failed: {e}")
-                QMessageBox.critical(self, "Error", f"Could not save BUMA relatie nummer:\n{e}")
+    def set_btw_number(self, value: str | None = None):
+        if value is None:
+            self.open_settings_dialog(initial_focus="btw_number")
+            return
+        try:
+            self._apply_single_setting_value("btw_number", (value or "").strip())
+        except Exception as e:
+            self.logger.exception(f"Set BTW failed: {e}")
+            QMessageBox.critical(self, "Error", f"Could not save BTW number:\n{e}")
 
-    def set_ipi_info(self):
-        current_ipi = self.settings_reads.load_buma_ipi()
-        ipi, ok = QInputDialog.getText(self, "Set BUMA IPI", "Enter IPI Number:", text=current_ipi)
-        if ok:
-            try:
-                updated = (ipi or "").strip()
-                self.settings_mutations.set_buma_ipi(updated)
-                self.logger.info("BUMA/STEMRA IPI updated")
-                self._audit("SETTINGS", "BUMA_STEMRA", ref_id=1, details="ipi updated")
-                self._audit_commit()
-                self.history_manager.record_setting_change(
-                    key="buma_ipi",
-                    label="Set BUMA IPI",
-                    before_value=current_ipi,
-                    after_value=updated,
-                )
-                self._refresh_history_actions()
-            except Exception as e:
-                self.conn.rollback()
-                self.logger.exception(f"Set BUMA IPI failed: {e}")
-                QMessageBox.critical(self, "Error", f"Could not save BUMA IPI:\n{e}")
+    def set_buma_info(self, value: str | None = None):
+        if value is None:
+            self.open_settings_dialog(initial_focus="buma_relatie_nummer")
+            return
+        try:
+            self._apply_single_setting_value("buma_relatie_nummer", (value or "").strip())
+        except Exception as e:
+            self.logger.exception(f"Set BUMA relatie nummer failed: {e}")
+            QMessageBox.critical(self, "Error", f"Could not save BUMA relatie nummer:\n{e}")
+
+    def set_ipi_info(self, value: str | None = None):
+        if value is None:
+            self.open_settings_dialog(initial_focus="buma_ipi")
+            return
+        try:
+            self._apply_single_setting_value("buma_ipi", (value or "").strip())
+        except Exception as e:
+            self.logger.exception(f"Set BUMA IPI failed: {e}")
+            QMessageBox.critical(self, "Error", f"Could not save BUMA IPI:\n{e}")
 
     def show_settings_summary(self):
         """View-only summary dialog (no editing)."""
