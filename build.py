@@ -14,10 +14,9 @@ Build and install ISRCManager (PySide6) without bundling a database.
 - Does NOT package or copy any existing Database files.
 
 Typical usage:
-  python build_and_install.py
+  python build.py
 """
 
-import argparse
 import os
 import platform
 import shutil
@@ -26,7 +25,6 @@ import sys
 import textwrap
 from pathlib import Path
 import venv
-from typing import Optional
 
 # Pillow is loaded lazily so this script can run on a clean machine.
 Image = None  # type: ignore[assignment]
@@ -739,6 +737,7 @@ def ensure_requirements(project_dir: Path) -> Path:
         req.write_text(
             "PySide6==6.9.1\n"
             "pyinstaller==6.15.0\n"
+            "audioread==3.0.1\n"
             "pillow==12.0.0\n",
             encoding="utf-8",
         )

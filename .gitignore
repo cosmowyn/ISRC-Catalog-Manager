@@ -2,6 +2,7 @@
 build/
 dist/
 *.spec
+!ISRCManager.spec
 
 # Virtual environments
 .venv/
@@ -9,6 +10,7 @@ dist/
 # Python cache
 __pycache__/
 *.py[cod]
+.pytest_cache/
 
 # macOS junk
 .DS_Store

@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "isrc-catalog-manager"
+version = "0.1.0"
+description = "Desktop ISRC catalog manager for tracks, metadata, licensing, and exports."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+  { name = "M. van de Kleut" },
+]
+dependencies = [
+  "PySide6==6.9.1",
+  "audioread==3.0.1",
+  "pillow==12.0.0",
+]
+
+[project.optional-dependencies]
+build = [
+  "pyinstaller==6.15.0",
+]
+
+[project.gui-scripts]
+isrc-manager = "ISRC_manager:main"
+
+[tool.setuptools]
+py-modules = ["ISRC_manager"]
+packages = [
+  "isrc_manager",
+  "isrc_manager.domain",
+  "isrc_manager.media",
+]
+

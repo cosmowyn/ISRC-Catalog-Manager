@@ -4237,11 +4237,7 @@ class App(QMainWindow):
                                 return
                             # Use the actual track title for the preview dialog
                             try:
-                                if hasattr(self, "_get_track_title"):
-                                    track_title = self._get_track_title(track_id) or f"track_{track_id}"
-                                else:
-                                    row_title = self.cursor.execute("SELECT track_title FROM Tracks WHERE id=?", (track_id,)).fetchone()
-                                    track_title = row_title[0] if row_title and row_title[0] else f"track_{track_id}"
+                                track_title = self._get_track_title(track_id) or f"track_{track_id}"
                             except Exception:
                                 track_title = f"track_{track_id}"
                             title = f"{track_title} — {field.get('label') or field.get('name') or 'File'}"
@@ -4323,11 +4319,7 @@ class App(QMainWindow):
 
             # Use the actual track title for the preview dialog
             try:
-                if hasattr(self, "_get_track_title"):
-                    track_title = self._get_track_title(track_id) or f"track_{track_id}"
-                else:
-                    row_title = self.cursor.execute("SELECT track_title FROM Tracks WHERE id=?", (track_id,)).fetchone()
-                    track_title = row_title[0] if row_title and row_title[0] else f"track_{track_id}"
+                track_title = self._get_track_title(track_id) or f"track_{track_id}"
             except Exception:
                 track_title = f"track_{track_id}"
             title = track_title
@@ -4351,13 +4343,6 @@ class App(QMainWindow):
             data = data_bytes
         if isinstance(data, memoryview):
             data = data.tobytes()
-
-        # Short debug — safe and fast
-        try:
-            head = data[:16] if isinstance(data, (bytes, bytearray)) else b""
-            print("[DEBUG] First 16 bytes (hex):", head.hex(), " len:", len(data) if hasattr(data, "__len__") else "n/a")
-        except Exception:
-            pass
 
         # Prefer provided MIME if present and plausible
         mime = provided_mime.lower().strip() if provided_mime else ""
@@ -4899,42 +4884,6 @@ class App(QMainWindow):
             (track_id, field_def_id, value)
         )
         self.conn.commit()
-
-
-    def cf_fetch_blob(self, track_id: int, field_def_id: int):
-        row = self.cursor.execute(
-            "SELECT blob_value, mime_type FROM CustomFieldValues WHERE track_id=? AND field_def_id=?",
-            (track_id, field_def_id)
-        ).fetchone()
-        if not row or row[0] is None:
-            raise FileNotFoundError("No file stored for this field.")
-        return row[0], row[1]
-
-    def cf_export_blob(self, track_id: int, field_def_id: int, parent_widget=None, suggested_basename: str|None=None):
-        try:
-            data, mime = self.cf_fetch_blob(track_id, field_def_id)
-        except Exception as e:
-            QMessageBox.critical(parent_widget or None, "Export failed", str(e))
-            return
-        ext = None
-        if mime:
-            ext = mimetypes.guess_extension(mime) or None
-        if not ext:
-            ext = ".png" if (mime and mime.startswith("image/")) else (".wav" if (mime and mime.startswith("audio/")) else ".bin")
-        if suggested_basename is None:
-            name_row = self.cursor.execute("SELECT name FROM CustomFieldDefs WHERE id=?", (field_def_id,)).fetchone()
-            suggested_basename = (name_row[0] if name_row and name_row[0] else "file")
-
-        default_filename = self._make_default_export_filename(track_id, field_def_id, mime)
-        dest_path, _ = QFileDialog.getSaveFileName(parent_widget or None, "Export file", default_filename, "All files (*)")
-        if not dest_path:
-            return
-        try:
-            Path(dest_path).write_bytes(data)
-            QMessageBox.information(parent_widget or None, "Export", f"Saved:\n{dest_path}")
-        except Exception as e:
-            QMessageBox.critical(parent_widget or None, "Export failed", str(e))
-
     def _attach_blob_for_cell(self, track_id: int, field_def_id: int, field_type: str, field_name: str):
         if field_type == "blob_image":
             flt = "Images (*.png *.jpg *.jpeg *.webp *.gif *.bmp *.tif *.tiff);;All files (*)"
@@ -4980,6 +4929,13 @@ class App(QMainWindow):
             (track_id, field_def_id)
         ).fetchone()
         return bool(row and row[0] is not None)
+
+    def cf_blob_size(self, track_id: int, field_def_id: int) -> int:
+        row = self.cursor.execute(
+            "SELECT size_bytes FROM CustomFieldValues WHERE track_id=? AND field_def_id=?",
+            (track_id, field_def_id)
+        ).fetchone()
+        return int(row[0] or 0) if row else 0
 
     def cf_fetch_blob(self, track_id: int, field_def_id: int):
         row = self.cursor.execute(
@@ -5058,6 +5014,20 @@ class App(QMainWindow):
             if f.get("id") == field_id:
                 return i
         return -1
+
+    def _get_track_title(self, track_id: int) -> str:
+        row = self.cursor.execute("SELECT track_title FROM Tracks WHERE id=?", (track_id,)).fetchone()
+        if row and row[0]:
+            return str(row[0])
+        return f"track_{track_id}"
+
+    def _sanitize_filename(self, text: str) -> str:
+        text = (text or "").strip()
+        if not text:
+            return "file"
+        cleaned = re.sub(r'[<>:"/\\\\|?*\\x00-\\x1f]+', "_", text)
+        cleaned = re.sub(r"\\s+", " ", cleaned).strip().rstrip(".")
+        return cleaned or "file"
 
     def _set_blob_indicator(self, row: int, col: int, track_id: int, field_id: int) -> None:
         try:
@@ -5489,6 +5459,7 @@ class EditDialog(QDialog):
 class _AudioPreviewDialog(QDialog):
     def __init__(self, parent, file_path: str, title: str):
         super().__init__(parent)
+        self._tmp_path = file_path
 
         if platform.system().lower() == "darwin":
             os.environ.setdefault("PATH", "/opt/homebrew/bin:/usr/local/bin:" + os.environ.get("PATH", ""))
@@ -5983,22 +5954,22 @@ def load_wav_peaks(path: str, width_px: int):
 # =============================================================================
 # Application Startup (Settings bootstrap + Single-instance enforcement)
 # =============================================================================
-if __name__ == '__main__':
+def main() -> int:
     settings = init_settings()
-    APP_UID = settings.value("app/uid", type=str)
 
-    # Qt app
     app = QApplication(sys.argv)
 
-    # Single-instance with crash recovery (60 s stale timeout)
     lock = enforce_single_instance(60000)
     if lock is None:
         QMessageBox.warning(None, "Already running", f"{APP_NAME} is already running.")
-        sys.exit(0)
+        return 0
 
-    # Keep the lock alive for the app lifetime
     app._single_instance_lock = lock
 
     window = App()
     window.showMaximized()
-    sys.exit(app.exec())
+    return app.exec()
+
+
+if __name__ == '__main__':
+    sys.exit(main())

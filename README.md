@@ -177,7 +177,7 @@ Both flows use Tkinter dialogs when available and automatically fall back to con
 
 ## Prerequisites
 - macOS, Windows, or Linux  
-- Python 3.9+  
+- Python 3.10+  
 
 ## Running the Installer
 
@@ -195,6 +195,17 @@ You will be prompted to choose:
 After a successful build, the installer will ask for a destination folder and install the packaged app there.
 
 The install process will never overwrite your existing Database folder.
+
+## Development Checks
+
+Run the lightweight verification suite with:
+
+```
+python -m unittest discover -s tests -v
+python -m py_compile ISRC_manager.py build.py icon_factory.py
+```
+
+GitHub Actions also runs these checks automatically on pushes and pull requests.
 
 ---
 
