@@ -13,7 +13,7 @@ DEFAULT_ICON_PATH = ""
 FIELD_TYPE_CHOICES = ["text", "dropdown", "checkbox", "date", "blob_image", "blob_audio"]
 
 SCHEMA_BASELINE = 1
-SCHEMA_TARGET = 14
+SCHEMA_TARGET = 11
 
 CUSTOM_KIND_TEXT = "text"
 CUSTOM_KIND_INT = "int"
@@ -32,4 +32,3 @@ ALLOWED_CUSTOM_KINDS = [
 BLOB_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff"}
 BLOB_AUDIO_EXTS = {".wav", ".aif", ".aiff", ".mp3", ".flac", ".m4a", ".aac", ".ogg", ".opus"}
 MAX_BLOB_BYTES = 256 * 1024 * 1024
-

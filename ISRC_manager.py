@@ -44,8 +44,6 @@ from isrc_manager.constants import (
     DEFAULT_ICON_PATH,
     DEFAULT_WINDOW_TITLE,
     FIELD_TYPE_CHOICES,
-    SCHEMA_BASELINE,
-    SCHEMA_TARGET,
 )
 from isrc_manager.domain.codes import (
     is_blank,
@@ -66,12 +64,14 @@ from isrc_manager.services import (
     CustomFieldDefinitionService,
     CustomFieldValueService,
     DatabaseMaintenanceService,
+    DatabaseSchemaService,
     DatabaseSessionService,
     XMLExportService,
     XMLImportService,
     LicenseService,
     ProfileKVService,
     ProfileStoreService,
+    ProfileWorkflowService,
     SettingsMutationService,
     TrackCreatePayload,
     TrackService,
@@ -1057,7 +1057,9 @@ class App(QMainWindow):
         self.backups_dir.mkdir(parents=True, exist_ok=True)
         self.database_session = DatabaseSessionService()
         self.profile_store = ProfileStoreService(self.database_dir)
+        self.profile_workflows = ProfileWorkflowService(self.database_dir, self.profile_store)
         self.database_maintenance = DatabaseMaintenanceService(self.backups_dir)
+        self.schema_service = None
 
         # default DB file (used if no previous DB is selected)
         DB_PATH = self.database_dir / "default.db"
@@ -1501,6 +1503,16 @@ class App(QMainWindow):
         super().closeEvent(e)
 
     def _init_services(self):
+        self.schema_service = (
+            DatabaseSchemaService(
+                self.conn,
+                logger=self.logger,
+                audit_callback=self._audit,
+                audit_commit=self._audit_commit,
+            )
+            if self.conn is not None
+            else None
+        )
         self.track_service = TrackService(self.conn) if self.conn is not None else None
         self.settings_mutations = (
             SettingsMutationService(self.conn, self.settings) if self.conn is not None else None
@@ -1629,19 +1641,12 @@ class App(QMainWindow):
             self.artist_edit.setText(val)
 
 
-    def _list_profiles(self):
-        """Return list of absolute file paths to *.db files in Database/."""
-        return self.profile_store.list_profiles()
-
     def _reload_profiles_list(self, select_path: str | None = None):
         self.profile_combo.blockSignals(True)
         self.profile_combo.clear()
-        profiles = self._list_profiles()
-        for path in profiles:
-            self.profile_combo.addItem(Path(path).name, path)
-        # ensure current path is present (might be outside Database/)
-        if hasattr(self, "current_db_path") and self.current_db_path and self.current_db_path not in profiles:
-            self.profile_combo.addItem(Path(self.current_db_path).name + " (external)", self.current_db_path)
+        current_path = getattr(self, "current_db_path", None)
+        for choice in self.profile_workflows.list_profile_choices(current_db_path=current_path):
+            self.profile_combo.addItem(choice.label, choice.path)
         if select_path:
             idx = self.profile_combo.findData(select_path)
             if idx >= 0:
@@ -1688,8 +1693,9 @@ class App(QMainWindow):
         name, ok = QInputDialog.getText(self, "New Profile", "Database file name (no path, e.g., mylabel.db):")
         if not ok or not name.strip():
             return
-        new_path = str(self.profile_store.build_profile_path(name))
-        if Path(new_path).exists():
+        try:
+            new_path = str(self.profile_workflows.build_new_profile_path(name))
+        except FileExistsError:
             QMessageBox.warning(self, "Exists", "A database with this name already exists.")
             return
         self.open_database(new_path)
@@ -1734,18 +1740,13 @@ class App(QMainWindow):
             if deleting_current:
                 self._close_database_connection()
 
-            self.profile_store.delete_profile(path)
+            result = self.profile_workflows.delete_profile(path, getattr(self, "current_db_path", None))
 
             self._reload_profiles_list(select_path=None)
 
-            if deleting_current:
-                profiles = self._list_profiles()
-                if profiles:
-                    fallback = profiles[0]
-                else:
-                    fallback = str(self.database_dir / "library.db")
-                self.open_database(fallback)
-                self._reload_profiles_list(select_path=fallback)
+            if result.deleting_current and result.fallback_path:
+                self.open_database(result.fallback_path)
+                self._reload_profiles_list(select_path=result.fallback_path)
 
             self.refresh_table_preserve_view()
             self.populate_all_comboboxes()
@@ -1774,6 +1775,7 @@ class App(QMainWindow):
         self.database_session.close(self.conn)
         self.conn = None
         self.cursor = None
+        self.schema_service = None
         self.profile_kv = None
 
     # -------------------------------------------------------------------------
@@ -1816,556 +1818,13 @@ class App(QMainWindow):
         self._audit_commit()
 
     def init_db(self):
-        # Core entities
-        self.cursor.execute("""
-            CREATE TABLE IF NOT EXISTS Artists (
-                id INTEGER PRIMARY KEY,
-                name TEXT NOT NULL
-            )
-        """)
-        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_name ON Artists(name)")
+        self.schema_service.init_db()
 
-        self.cursor.execute("""
-            CREATE TABLE IF NOT EXISTS Albums (
-                id INTEGER PRIMARY KEY,
-                title TEXT NOT NULL
-            )
-        """)
-        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_title ON Albums(title)")
-
-        self.cursor.execute("""
-            CREATE TABLE IF NOT EXISTS Tracks (
-                id INTEGER PRIMARY KEY,
-                isrc TEXT NOT NULL,
-                isrc_compact TEXT,                 -- added in migration v4 (filled & made NOT NULL with unique index)
-                db_entry_date DATE DEFAULT CURRENT_DATE,
-                track_title TEXT NOT NULL,
-                main_artist_id INTEGER NOT NULL,
-                album_id INTEGER,
-                release_date DATE,
-                track_length_sec INTEGER NOT NULL DEFAULT 0,
-                iswc TEXT,
-                upc TEXT,
-                genre TEXT,
-                FOREIGN KEY (main_artist_id) REFERENCES Artists(id) ON DELETE RESTRICT,
-                FOREIGN KEY (album_id) REFERENCES Albums(id) ON DELETE SET NULL
-            )
-        """)
-        self.cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_tracks_isrc_unique ON Tracks(isrc)")  # legacy
-        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_title ON Tracks(track_title)")
-        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_upc ON Tracks(upc)")
-        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_genre ON Tracks(genre)")
-
-        # Licenses & Licensees
-        self.cursor.execute("""
-            CREATE TABLE IF NOT EXISTS Licensees (
-                id INTEGER PRIMARY KEY,
-                name TEXT NOT NULL UNIQUE
-            )
-        """)
-        self.cursor.execute("""
-            CREATE TABLE IF NOT EXISTS Licenses (
-                id INTEGER PRIMARY KEY,
-                track_id INTEGER NOT NULL,
-                licensee_id INTEGER NOT NULL,
-                file_path TEXT NOT NULL,
-                filename TEXT NOT NULL,
-                uploaded_at TEXT NOT NULL DEFAULT (datetime('now')),
-                FOREIGN KEY(track_id) REFERENCES Tracks(id) ON DELETE CASCADE,
-                FOREIGN KEY(licensee_id) REFERENCES Licensees(id) ON DELETE RESTRICT
-            )
-        """)
-        self.cursor.execute("""
-            CREATE VIEW IF NOT EXISTS vw_Licenses AS
-            SELECT l.id,
-                lic.name AS licensee,
-                t.track_title AS tracktitle,
-                l.uploaded_at,
-                l.filename,
-                l.file_path,
-                l.track_id,
-                l.licensee_id
-            FROM Licenses l
-            JOIN Licensees lic ON lic.id = l.licensee_id
-            JOIN Tracks t ON t.id = l.track_id
-        """)
-
-
-        self.cursor.execute("""
-            CREATE TABLE IF NOT EXISTS TrackArtists (
-                track_id INTEGER NOT NULL,
-                artist_id INTEGER NOT NULL,
-                role TEXT NOT NULL DEFAULT 'additional',
-                PRIMARY KEY (track_id, artist_id, role),
-                FOREIGN KEY (track_id) REFERENCES Tracks(id) ON DELETE CASCADE,
-                FOREIGN KEY (artist_id) REFERENCES Artists(id) ON DELETE RESTRICT
-            )
-        """)
-
-        # Custom fields (definitions + values) with type + options
-        self.cursor.execute("""
-            CREATE TABLE IF NOT EXISTS CustomFieldDefs (
-                id INTEGER PRIMARY KEY,
-                name TEXT NOT NULL UNIQUE,
-                active INTEGER NOT NULL DEFAULT 1,
-                sort_order INTEGER,
-                field_type TEXT NOT NULL DEFAULT 'text',   -- 'text' | 'dropdown' | 'checkbox' | 'date'
-                options TEXT                                -- JSON array for dropdown options (nullable)
-            )
-        """)
-        self.cursor.execute("""
-            CREATE TABLE IF NOT EXISTS CustomFieldValues (
-                track_id INTEGER NOT NULL,
-                field_def_id INTEGER NOT NULL,
-                value TEXT,
-                PRIMARY KEY (track_id, field_def_id),
-                FOREIGN KEY (track_id) REFERENCES Tracks(id) ON DELETE CASCADE,
-                FOREIGN KEY (field_def_id) REFERENCES CustomFieldDefs(id) ON DELETE CASCADE
-            )
-        """)
-
-        # Settings (single-row)
-        self.cursor.execute("""CREATE TABLE IF NOT EXISTS ISRC_Prefix (id INTEGER PRIMARY KEY, prefix TEXT NOT NULL)""")
-        self.cursor.execute("""CREATE TABLE IF NOT EXISTS SENA (id INTEGER PRIMARY KEY, number TEXT)""")
-        self.cursor.execute("""CREATE TABLE IF NOT EXISTS BTW (id INTEGER PRIMARY KEY, nr TEXT)""")
-        self.cursor.execute("""CREATE TABLE IF NOT EXISTS BUMA_STEMRA (id INTEGER PRIMARY KEY, relatie_nummer TEXT, ipi TEXT)""")
-
-        # --- Audit log (immutable append-only) ---
-        self.cursor.execute("""
-            CREATE TABLE IF NOT EXISTS AuditLog (
-                id INTEGER PRIMARY KEY,
-                ts TEXT NOT NULL DEFAULT (datetime('now')),
-                user TEXT,
-                action TEXT NOT NULL,
-                entity TEXT,
-                ref_id TEXT,
-                details TEXT
-            )
-        """)
-
-        self.conn.commit()
-
-
-    # ---- Schema version helpers & migrator ----
     def _get_db_version(self) -> int:
-        row = self.cursor.execute("PRAGMA user_version").fetchone()
-        try:
-            return int(row[0]) if row and row[0] is not None else 0
-        except Exception:
-            return 0
+        return self.schema_service.get_db_version()
 
-    def _set_db_version(self, v: int):
-        self.conn.execute(f"PRAGMA user_version = {v}")
-
-    def _ensure_migration_log(self):
-        self.cursor.execute("""
-            CREATE TABLE IF NOT EXISTS _MigrationLog (
-                version     INTEGER PRIMARY KEY,
-                applied_at  TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
-                notes       TEXT
-            )
-        """)
-
-    def _apply_migration(self, from_ver: int, func):
-        self.conn.execute("SAVEPOINT mig")
-        try:
-            func()  # must NOT call commit/rollback
-            self._set_db_version(from_ver + 1)
-            self.cursor.execute(
-                "INSERT OR REPLACE INTO _MigrationLog(version, notes) VALUES (?, ?)",
-                (from_ver + 1, func.__name__)
-            )
-            try:
-                self.conn.execute("RELEASE SAVEPOINT mig")
-            except sqlite3.OperationalError as e:
-                # If a migration mistakenly committed, the savepoint was already ended.
-                if "no such savepoint" not in str(e).lower():
-                    raise
-            self.conn.commit()
-            self.logger.info(f"Applied migration {from_ver}->{from_ver+1} ({func.__name__})")
-            self._audit("MIGRATE", "DB", ref_id=f"{from_ver}->{from_ver+1}", details=func.__name__)
-            self._audit_commit()
-        except Exception as e:
-            try:
-                self.conn.execute("ROLLBACK TO SAVEPOINT mig")
-                self.conn.execute("RELEASE SAVEPOINT mig")
-            except Exception:
-                pass
-            self.logger.exception(f"Migration {from_ver}->{from_ver+1} failed: {e}")
-            raise
-
-    # -------------------------------------------------------------------------
-    # Profile Key/Value store (per-database)
-    # -------------------------------------------------------------------------
     def migrate_schema(self):
-        # Ensure log table exists
-        self._ensure_migration_log()
-
-        v = self._get_db_version()
-        if v == 0:
-            # Fresh/unknown DB → set to baseline after core tables exist
-            self._set_db_version(SCHEMA_BASELINE)
-            v = SCHEMA_BASELINE
-            self.conn.commit()
-            self.logger.info(f"Initialized DB user_version to baseline {SCHEMA_BASELINE}")
-
-        # Stepwise migrations until target
-        while v < SCHEMA_TARGET:
-            if v == 1:
-                self._apply_migration(1, self._mig_1_to_2)
-                v = 2
-            elif v == 2:
-                self._apply_migration(2, self._mig_2_to_3)
-                v = 3
-            elif v == 3:
-                self._apply_migration(3, self._mig_3_to_4)
-                v = 4
-            elif v == 4:
-                self._apply_migration(4, self._mig_4_to_5)
-                v = 5
-            elif v == 5:
-                self._apply_migration(5, self._mig_5_to_6)
-                v = 6
-            elif v == 6:
-                self._apply_migration(6, self._mig_6_to_7)
-                v = 7
-            elif v == 7:
-                self._apply_migration(7, self._mig_7_to_8)
-                v = 8
-            elif v == 8:
-                self._apply_migration(8, self._mig_8_to_9)
-                v = 9
-            elif v == 9:
-                self._apply_migration(9, self._mig_9_to_10)
-                v = 10
-            elif v == 10:
-                self._apply_migration(10, self._mig_10_to_11)
-                v = 11
-
-            else:
-                self.logger.warning(f"Unknown migration path from version {v}")
-                break
-
-    # ---- Concrete migrations ----
-    def _mig_1_to_2(self):
-        # Add CustomFieldDefs.field_type/options if missing (idempotent)
-        cols = [r[1] for r in self.cursor.execute("PRAGMA table_info(CustomFieldDefs)").fetchall()]
-        if "field_type" not in cols:
-            self.cursor.execute("ALTER TABLE CustomFieldDefs ADD COLUMN field_type TEXT NOT NULL DEFAULT 'text'")
-        if "options" not in cols:
-            self.cursor.execute("ALTER TABLE CustomFieldDefs ADD COLUMN options TEXT")
-
-    def _mig_2_to_3(self):
-        # Add useful indexes; safe if they already exist
-        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_release_date ON Tracks(release_date)")
-        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_cfvalues_field ON CustomFieldValues(field_def_id)")
-
-    def _mig_3_to_4(self):
-        # Add isrc_compact column + unique index, backfill
-        cols = [r[1] for r in self.cursor.execute("PRAGMA table_info(Tracks)").fetchall()]
-        if "isrc_compact" not in cols:
-            self.cursor.execute("ALTER TABLE Tracks ADD COLUMN isrc_compact TEXT")
-            # backfill
-            for (pk, isrc,) in self.cursor.execute("SELECT id, isrc FROM Tracks").fetchall():
-                comp = to_compact_isrc(isrc)
-                self.cursor.execute("UPDATE Tracks SET isrc_compact=? WHERE id=?", (comp, pk))
-            # unique index on compact
-            self.cursor.execute(
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_tracks_isrc_compact_unique ON Tracks(isrc_compact)"
-            )
-
-    def _mig_4_to_5(self):
-        # Add triggers to make AuditLog append-only
-        self.cursor.execute("""
-            CREATE TRIGGER IF NOT EXISTS trg_auditlog_no_update
-            BEFORE UPDATE ON AuditLog
-            BEGIN
-                SELECT RAISE(ABORT, 'AuditLog is append-only (UPDATE forbidden)');
-            END
-        """)
-        self.cursor.execute("""
-            CREATE TRIGGER IF NOT EXISTS trg_auditlog_no_delete
-            BEFORE DELETE ON AuditLog
-            BEGIN
-                SELECT RAISE(ABORT, 'AuditLog is append-only (DELETE forbidden)');
-            END
-        """)
-
-    def _mig_5_to_6(self):
-        # Data validation triggers (ISRC, UPC/EAN, release_date) on Tracks
-        # ISRC + compact consistency
-        self.cursor.execute("""
-            CREATE TRIGGER IF NOT EXISTS trg_tracks_isrc_validate_ins
-            BEFORE INSERT ON Tracks
-            FOR EACH ROW
-            WHEN NOT (
-                length(replace(replace(upper(NEW.isrc),'-',''),' ',''))=12
-                AND replace(upper(NEW.isrc),'-','') GLOB '[A-Z][A-Z][A-Z0-9][A-Z0-9][A-Z0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
-                AND NEW.isrc_compact = replace(replace(upper(NEW.isrc),'-',''),' ','')
-            )
-            BEGIN
-                SELECT RAISE(ABORT, 'ISRC validation failed');
-            END
-        """)
-        self.cursor.execute("""
-            CREATE TRIGGER IF NOT EXISTS trg_tracks_isrc_validate_upd
-            BEFORE UPDATE ON Tracks
-            FOR EACH ROW
-            WHEN NOT (
-                length(replace(replace(upper(NEW.isrc),'-',''),' ',''))=12
-                AND replace(upper(NEW.isrc),'-','') GLOB '[A-Z][A-Z][A-Z0-9][A-Z0-9][A-Z0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
-                AND NEW.isrc_compact = replace(replace(upper(NEW.isrc),'-',''),' ','')
-            )
-            BEGIN
-                SELECT RAISE(ABORT, 'ISRC validation failed');
-            END
-        """)
-        # UPC length 12 or 13 if provided
-        self.cursor.execute("""
-            CREATE TRIGGER IF NOT EXISTS trg_tracks_upc_check_ins
-            BEFORE INSERT ON Tracks
-            FOR EACH ROW
-            WHEN NEW.upc IS NOT NULL AND NEW.upc <> '' AND length(NEW.upc) NOT IN (12,13)
-            BEGIN
-                SELECT RAISE(ABORT, 'UPC/EAN must be 12 or 13 digits');
-            END
-        """)
-        self.cursor.execute("""
-            CREATE TRIGGER IF NOT EXISTS trg_tracks_upc_check_upd
-            BEFORE UPDATE ON Tracks
-            FOR EACH ROW
-            WHEN NEW.upc IS NOT NULL AND NEW.upc <> '' AND length(NEW.upc) NOT IN (12,13)
-            BEGIN
-                SELECT RAISE(ABORT, 'UPC/EAN must be 12 or 13 digits');
-            END
-        """)
-        # release_date format YYYY-MM-DD if provided
-        self.cursor.execute("""
-            CREATE TRIGGER IF NOT EXISTS trg_tracks_reldate_check_ins
-            BEFORE INSERT ON Tracks
-            FOR EACH ROW
-            WHEN NEW.release_date IS NOT NULL AND NEW.release_date <> '' AND NEW.release_date NOT GLOB '____-__-__'
-            BEGIN
-                SELECT RAISE(ABORT, 'release_date must be YYYY-MM-DD');
-            END
-        """)
-        self.cursor.execute("""
-            CREATE TRIGGER IF NOT EXISTS trg_tracks_reldate_check_upd
-            BEFORE UPDATE ON Tracks
-            FOR EACH ROW
-            WHEN NEW.release_date IS NOT NULL AND NEW.release_date <> '' AND NEW.release_date NOT GLOB '____-__-__'
-            BEGIN
-                SELECT RAISE(ABORT, 'release_date must be YYYY-MM-DD');
-            END
-        """)
-
-    def _mig_6_to_7(self):
-        # Fix release_date validator: use LIKE with '_' wildcard instead of GLOB
-        self.cursor.execute("DROP TRIGGER IF EXISTS trg_tracks_reldate_check_ins")
-        self.cursor.execute("DROP TRIGGER IF EXISTS trg_tracks_reldate_check_upd")
-
-        self.cursor.execute("""
-            CREATE TRIGGER IF NOT EXISTS trg_tracks_reldate_check_ins
-            BEFORE INSERT ON Tracks
-            FOR EACH ROW
-            WHEN NEW.release_date IS NOT NULL
-            AND NEW.release_date <> ''
-            AND NEW.release_date NOT LIKE '____-__-__'
-            BEGIN
-                SELECT RAISE(ABORT, 'release_date must be YYYY-MM-DD');
-            END
-        """)
-
-        self.cursor.execute("""
-            CREATE TRIGGER IF NOT EXISTS trg_tracks_reldate_check_upd
-            BEFORE UPDATE ON Tracks
-            FOR EACH ROW
-            WHEN NEW.release_date IS NOT NULL
-            AND NEW.release_date <> ''
-            AND NEW.release_date NOT LIKE '____-__-__'
-            BEGIN
-                SELECT RAISE(ABORT, 'release_date must be YYYY-MM-DD');
-            END
-        """)
-
-    def _mig_7_to_8(self):
-        # Fix ISRC validator: GLOB had 8 trailing [0-9] groups; should be 7
-        self.cursor.execute("DROP TRIGGER IF EXISTS trg_tracks_isrc_validate_ins")
-        self.cursor.execute("DROP TRIGGER IF EXISTS trg_tracks_isrc_validate_upd")
-
-        self.cursor.execute("""
-            CREATE TRIGGER IF NOT EXISTS trg_tracks_isrc_validate_ins
-            BEFORE INSERT ON Tracks
-            FOR EACH ROW
-            WHEN NOT (
-                length(replace(replace(upper(NEW.isrc),'-',''),' ','')) = 12
-                AND replace(replace(upper(NEW.isrc),'-',''),' ','') GLOB
-                    '[A-Z][A-Z][A-Z0-9][A-Z0-9][A-Z0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
-                AND upper(NEW.isrc_compact) = replace(replace(upper(NEW.isrc),'-',''),' ','')
-            )
-            BEGIN
-                SELECT RAISE(ABORT, 'ISRC validation failed');
-            END
-        """)
-
-        self.cursor.execute("""
-            CREATE TRIGGER IF NOT EXISTS trg_tracks_isrc_validate_upd
-            BEFORE UPDATE ON Tracks
-            FOR EACH ROW
-            WHEN NOT (
-                length(replace(replace(upper(NEW.isrc),'-',''),' ','')) = 12
-                AND replace(replace(upper(NEW.isrc),'-',''),' ','') GLOB
-                    '[A-Z][A-Z][A-Z0-9][A-Z0-9][A-Z0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
-                AND upper(NEW.isrc_compact) = replace(replace(upper(NEW.isrc),'-',''),' ','')
-            )
-            BEGIN
-                SELECT RAISE(ABORT, 'ISRC validation failed');
-            END
-        """)
-
-    def _mig_8_to_9(self):
-        # Add track_length_sec to Tracks if missing
-        cols = [r[1] for r in self.cursor.execute("PRAGMA table_info(Tracks)").fetchall()]
-        if "track_length_sec" not in cols:
-            self.cursor.execute("ALTER TABLE Tracks ADD COLUMN track_length_sec INTEGER NOT NULL DEFAULT 0")
-
-
-    def _mig_9_to_10(self):
-        """
-        Enable BLOB custom fields (image/audio) within existing CustomFieldDefs/CustomFieldValues.
-        - Adds storage columns on CustomFieldValues:
-            * blob_value   BLOB
-            * mime_type    TEXT (optional hint)
-            * size_bytes   INTEGER NOT NULL DEFAULT 0
-        - Adds constraints via triggers so:
-            * For field_type in ('blob_image','blob_audio'): blob_value required, value must be NULL.
-            * For other field_types: blob_value must be NULL (text/number/date use 'value').
-        - Adds helpful indexes.
-        """
-        # 1) Add columns if missing (idempotent)
-        cols = [r[1] for r in self.cursor.execute("PRAGMA table_info(CustomFieldValues)").fetchall()]
-        if "blob_value" not in cols:
-            self.cursor.execute("ALTER TABLE CustomFieldValues ADD COLUMN blob_value BLOB")
-        if "mime_type" not in cols:
-            self.cursor.execute("ALTER TABLE CustomFieldValues ADD COLUMN mime_type TEXT")
-        if "size_bytes" not in cols:
-            self.cursor.execute("ALTER TABLE CustomFieldValues ADD COLUMN size_bytes INTEGER NOT NULL DEFAULT 0")
-
-        # 2) Indexes to keep lookups fast
-        self.cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_cfvalues_track_field
-            ON CustomFieldValues(track_id, field_def_id)
-        """)
-        self.cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_cfvalues_field_track
-            ON CustomFieldValues(field_def_id, track_id)
-        """)
-
-        # 3) Drop old enforcement triggers if they exist (so we can recreate cleanly)
-        self.cursor.execute("DROP TRIGGER IF EXISTS trg_cfvalues_blob_enforce_ins")
-        self.cursor.execute("DROP TRIGGER IF EXISTS trg_cfvalues_blob_enforce_upd")
-        self.cursor.execute("DROP TRIGGER IF EXISTS trg_cfvalues_text_enforce_ins")
-        self.cursor.execute("DROP TRIGGER IF EXISTS trg_cfvalues_text_enforce_upd")
-
-        # 4) Enforce BLOB semantics for blob_* field types (INSERT/UPDATE)
-        self.cursor.execute("""
-            CREATE TRIGGER IF NOT EXISTS trg_cfvalues_blob_enforce_ins
-            BEFORE INSERT ON CustomFieldValues
-            FOR EACH ROW
-            WHEN EXISTS (
-                SELECT 1 FROM CustomFieldDefs d
-                WHERE d.id = NEW.field_def_id AND d.field_type IN ('blob_image','blob_audio')
-            )
-            AND (
-                NEW.blob_value IS NULL
-                OR NEW.value IS NOT NULL
-                OR NEW.size_bytes < 0
-            )
-            BEGIN
-                SELECT RAISE(ABORT, 'BLOB field requires blob_value (and NULL text); size_bytes must be >= 0');
-            END
-        """)
-        self.cursor.execute("""
-            CREATE TRIGGER IF NOT EXISTS trg_cfvalues_blob_enforce_upd
-            BEFORE UPDATE ON CustomFieldValues
-            FOR EACH ROW
-            WHEN EXISTS (
-                SELECT 1 FROM CustomFieldDefs d
-                WHERE d.id = NEW.field_def_id AND d.field_type IN ('blob_image','blob_audio')
-            )
-            AND (
-                NEW.blob_value IS NULL
-                OR NEW.value IS NOT NULL
-                OR NEW.size_bytes < 0
-            )
-            BEGIN
-                SELECT RAISE(ABORT, 'BLOB field requires blob_value (and NULL text); size_bytes must be >= 0');
-            END
-        """)
-
-        # 5) Enforce NON-BLOB semantics for other field types (INSERT/UPDATE)
-        self.cursor.execute("""
-            CREATE TRIGGER IF NOT EXISTS trg_cfvalues_text_enforce_ins
-            BEFORE INSERT ON CustomFieldValues
-            FOR EACH ROW
-            WHEN EXISTS (
-                SELECT 1 FROM CustomFieldDefs d
-                WHERE d.id = NEW.field_def_id AND d.field_type NOT IN ('blob_image','blob_audio')
-            )
-            AND NEW.blob_value IS NOT NULL
-            BEGIN
-                SELECT RAISE(ABORT, 'Non-BLOB field must not store blob_value');
-            END
-        """)
-        self.cursor.execute("""
-            CREATE TRIGGER IF NOT EXISTS trg_cfvalues_text_enforce_upd
-            BEFORE UPDATE ON CustomFieldValues
-            FOR EACH ROW
-            WHEN EXISTS (
-                SELECT 1 FROM CustomFieldDefs d
-                WHERE d.id = NEW.field_def_id AND d.field_type NOT IN ('blob_image','blob_audio')
-            )
-            AND NEW.blob_value IS NOT NULL
-            BEGIN
-                SELECT RAISE(ABORT, 'Non-BLOB field must not store blob_value');
-            END
-        """)
-
-    def _mig_10_to_11(self):
-        cur = self.conn.cursor()
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS Licensees (
-                id INTEGER PRIMARY KEY,
-                name TEXT NOT NULL UNIQUE
-            )
-        """)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS Licenses (
-                id INTEGER PRIMARY KEY,
-                track_id INTEGER NOT NULL,
-                licensee_id INTEGER NOT NULL,
-                file_path TEXT NOT NULL,
-                filename TEXT NOT NULL,
-                uploaded_at TEXT NOT NULL DEFAULT (datetime('now')),
-                FOREIGN KEY(track_id) REFERENCES Tracks(id) ON DELETE CASCADE,
-                FOREIGN KEY(licensee_id) REFERENCES Licensees(id) ON DELETE RESTRICT
-            )
-        """)
-        cur.execute("""
-            CREATE VIEW IF NOT EXISTS vw_Licenses AS
-            SELECT l.id,
-                lic.name AS licensee,
-                t.track_title AS tracktitle,
-                l.uploaded_at,
-                l.filename,
-                l.file_path,
-                l.track_id,
-                l.licensee_id
-            FROM Licenses l
-            JOIN Licensees lic ON lic.id = l.licensee_id
-            JOIN Tracks t ON t.id = l.track_id
-        """)
-        self.conn.commit()
+        self.schema_service.migrate_schema()
 
 
     # --- Audit helpers ---
