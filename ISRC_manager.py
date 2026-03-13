@@ -35,7 +35,7 @@ from PySide6.QtWidgets import ( QListView, QMenuBar, QListWidget, QListWidgetIte
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QMessageBox,
     QCalendarWidget, QRadioButton, QMenuBar, QMenu, QInputDialog, QTableWidget, QTableWidgetItem,
     QHeaderView, QDialog, QMainWindow, QSizePolicy, QComboBox, QCompleter, QListWidget,
-    QListWidgetItem, QFileDialog, QToolBar, QFrame, QSpinBox, QScrollArea, QSlider, QAbstractItemView,
+    QListWidgetItem, QFileDialog, QToolBar, QFrame, QSpinBox, QScrollArea, QSlider, QAbstractItemView, QAbstractScrollArea,
     QFormLayout, QTableView, QTabWidget, QDialogButtonBox, QGridLayout, QGroupBox, QPlainTextEdit, QCheckBox,
     QDockWidget
 )
@@ -386,7 +386,7 @@ class DatePickerDialog(QDialog):
         self.setWindowTitle(title)
         lay = QVBoxLayout(self)
 
-        self.calendar = QCalendarWidget()
+        self.calendar = FocusWheelCalendarWidget()
         if initial_iso_date:
             qd = QDate.fromString(initial_iso_date, "yyyy-MM-dd")
             self.calendar.setSelectedDate(qd if qd.isValid() else QDate.currentDate())
@@ -637,7 +637,7 @@ class ApplicationSettingsDialog(QDialog):
             "Background restore points are created while this profile is open. Turn this off to keep manual snapshots only.",
         )
 
-        self.auto_snapshot_interval_spin = QSpinBox()
+        self.auto_snapshot_interval_spin = FocusWheelSpinBox()
         self.auto_snapshot_interval_spin.setRange(
             MIN_AUTO_SNAPSHOT_INTERVAL_MINUTES,
             MAX_AUTO_SNAPSHOT_INTERVAL_MINUTES,
@@ -800,7 +800,7 @@ class ApplicationLogDialog(QDialog):
         source_layout.setVerticalSpacing(10)
         source_layout.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
-        self.log_combo = QComboBox()
+        self.log_combo = FocusWheelComboBox()
         self.log_combo.setMinimumContentsLength(28)
         self.log_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         source_layout.addRow("Log file", self.log_combo)
@@ -1240,9 +1240,118 @@ class _SortItem(QTableWidgetItem):
 
 
 # =============================================================================
+# Wheel-guarded interactive widgets
+# =============================================================================
+class _WheelIntentMixin:
+    """Ignore wheel changes unless the widget is actively focused by the user."""
+
+    def _wheel_has_user_focus(self) -> bool:
+        app = QApplication.instance()
+        focus_widget = app.focusWidget() if app is not None else None
+        if focus_widget is None:
+            return False
+        if focus_widget is self:
+            return True
+        if isinstance(focus_widget, QWidget) and self.isAncestorOf(focus_widget):
+            return True
+        view = getattr(self, "view", None)
+        if callable(view):
+            try:
+                popup = view()
+                if popup is not None and popup.isVisible():
+                    return True
+            except Exception:
+                pass
+        return False
+
+    def wheelEvent(self, event):
+        if self._wheel_has_user_focus():
+            super().wheelEvent(event)
+            return
+        event.ignore()
+
+
+class FocusWheelComboBox(_WheelIntentMixin, QComboBox):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setFocusPolicy(Qt.StrongFocus)
+
+
+class FocusWheelSpinBox(_WheelIntentMixin, QSpinBox):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setFocusPolicy(Qt.StrongFocus)
+
+
+class FocusWheelCalendarWidget(_WheelIntentMixin, QCalendarWidget):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setFocusPolicy(Qt.StrongFocus)
+
+    def showEvent(self, event):
+        self._install_calendar_wheel_filter()
+        super().showEvent(event)
+
+    def _install_calendar_wheel_filter(self):
+        self.installEventFilter(self)
+        for child in self.findChildren(QWidget):
+            child.installEventFilter(self)
+
+    @staticmethod
+    def _find_scroll_area_parent(widget: QWidget | None):
+        current = widget
+        while current is not None:
+            if isinstance(current, QAbstractScrollArea):
+                return current
+            current = current.parentWidget()
+        return None
+
+    def _forward_wheel_to_parent_scroll_area(self, source: QWidget, event) -> bool:
+        scroll_area = self._find_scroll_area_parent(source.parentWidget())
+        if scroll_area is None:
+            return False
+        scrollbar = scroll_area.verticalScrollBar()
+        if scrollbar is None:
+            return False
+
+        pixel_delta = event.pixelDelta().y()
+        if pixel_delta:
+            scroll_delta = -pixel_delta
+        else:
+            step = max(24, scrollbar.singleStep())
+            scroll_delta = int(-(event.angleDelta().y() / 120.0) * step * 3)
+        if not scroll_delta:
+            return False
+
+        scrollbar.setValue(scrollbar.value() + scroll_delta)
+        return True
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Wheel and isinstance(obj, QWidget):
+            if self._forward_wheel_to_parent_scroll_area(obj, event):
+                event.accept()
+            else:
+                event.ignore()
+            return True
+        return super().eventFilter(obj, event)
+
+    def wheelEvent(self, event):
+        if self._forward_wheel_to_parent_scroll_area(self, event):
+            event.accept()
+            return
+        event.ignore()
+
+
+class FocusWheelSlider(_WheelIntentMixin, QSlider):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setFocusPolicy(Qt.StrongFocus)
+
+
+# =============================================================================
 # Padded Spinboxes for tracklength
 # =============================================================================
-class TwoDigitSpinBox(QSpinBox):
+class TwoDigitSpinBox(FocusWheelSpinBox):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.setAlignment(Qt.AlignRight)
@@ -1463,7 +1572,7 @@ class LicenseUploadDialog(QDialog):
         self.setModal(True)
 
         # --- Controls ---
-        self.track_combo = QComboBox()
+        self.track_combo = FocusWheelComboBox()
         for tid, title in tracks:
             self.track_combo.addItem(title, tid)
         if preselect_track_id:
@@ -1471,7 +1580,7 @@ class LicenseUploadDialog(QDialog):
             if idx >= 0:
                 self.track_combo.setCurrentIndex(idx)
 
-        self.lic_combo = QComboBox()
+        self.lic_combo = FocusWheelComboBox()
         self.lic_combo.setEditable(True)
         for lid, name in licensees:
             self.lic_combo.addItem(name, lid)
@@ -1783,7 +1892,7 @@ class LicensesBrowserDialog(QDialog):
         d = QDialog(self)
         d.setWindowTitle("Edit License")
         track_lbl = QLabel("Track cannot be changed")
-        lic_combo = QComboBox()
+        lic_combo = FocusWheelComboBox()
         lic_combo.setEditable(True)
         # load licensees
         for lid, name in self.license_service.list_licensee_choices():
@@ -3090,10 +3199,11 @@ class App(QMainWindow):
 
         # ----- Profiles toolbar (quick DB switch)
         self.toolbar = QToolBar("Profiles", self)
+        self.toolbar.setObjectName("profilesToolbar")
         self.addToolBar(self.toolbar)
         self.toolbar.setMovable(True)
         self.toolbar.addWidget(QLabel("Profile: "))
-        self.profile_combo = QComboBox()
+        self.profile_combo = FocusWheelComboBox()
         self.toolbar.addWidget(self.profile_combo)
 
         self.profile_combo.currentIndexChanged.connect(self._on_profile_changed)
@@ -3132,29 +3242,72 @@ class App(QMainWindow):
 
         # Left form
         self.left_panel = QVBoxLayout()
-        self.left_panel.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        self.left_panel.setContentsMargins(14, 14, 14, 14)
+        self.left_panel.setSpacing(14)
+        self.left_panel.setAlignment(Qt.AlignTop)
+
+        self.add_data_header = QWidget()
+        self.add_data_header_layout = QVBoxLayout(self.add_data_header)
+        self.add_data_header_layout.setContentsMargins(0, 0, 0, 0)
+        self.add_data_header_layout.setSpacing(4)
+
+        self.add_data_title = QLabel("Add Track")
+        add_data_title_font = self.add_data_title.font()
+        add_data_title_font.setBold(True)
+        add_data_title_font.setPointSize(add_data_title_font.pointSize() + 3)
+        self.add_data_title.setFont(add_data_title_font)
+
+        self.add_data_subtitle = QLabel(
+            "Create a new catalog entry with all core metadata, release details, and managed media in one place."
+        )
+        self.add_data_subtitle.setWordWrap(True)
+        self.add_data_subtitle.setStyleSheet("color: #667085;")
+
+        self.add_data_header_layout.addWidget(self.add_data_title)
+        self.add_data_header_layout.addWidget(self.add_data_subtitle)
+        self.left_panel.addWidget(self.add_data_header)
 
         self.artist_label = QLabel("Artist")
-        self.artist_field = QComboBox()
+        self.artist_field = FocusWheelComboBox()
         self.artist_field.setEditable(True)
+        self.artist_field.setMinimumWidth(240)
 
-        self.additional_artist_label = QLabel("Additional Artist")
-        self.additional_artist_field = QComboBox()
+        self.additional_artist_label = QLabel("Additional Artists")
+        self.additional_artist_field = FocusWheelComboBox()
         self.additional_artist_field.setEditable(True)
+        self.additional_artist_field.setMinimumWidth(240)
 
         self.track_title_label = QLabel("Track Title")
         self.track_title_field = QLineEdit()
+        self.track_title_field.setMinimumWidth(240)
 
         self.album_title_label = QLabel("Album Title")
-        self.album_title_field = QComboBox()
+        self.album_title_field = FocusWheelComboBox()
         self.album_title_field.setEditable(True)
         self.album_title_field.setCurrentText("")
         self.album_title_field.currentTextChanged.connect(self.autofill_album_metadata)
+        self.album_title_field.setMinimumWidth(240)
+
+        self.record_id_label = QLabel("ID")
+        self.record_id_field = self._create_add_data_status_field(
+            "Assigned automatically when you save this track."
+        )
+
+        self.generated_isrc_label = QLabel("ISRC")
+        self.generated_isrc_field = self._create_add_data_status_field(
+            "Generated automatically using the current ISRC settings."
+        )
+
+        self.entry_date_preview_label = QLabel("Entry Date")
+        self.entry_date_preview_field = self._create_add_data_status_field(
+            "Stamped automatically when the track is first saved."
+        )
 
         self.audio_file_label = QLabel("Audio File")
         self.audio_file_field = QLineEdit()
         self.audio_file_field.setReadOnly(True)
         self.audio_file_field.setPlaceholderText("No audio file selected")
+        self.audio_file_field.setMinimumWidth(260)
         self.audio_file_browse_button = QPushButton("Browse…")
         self.audio_file_browse_button.clicked.connect(
             lambda: self._choose_media_into_line_edit("audio_file", self.audio_file_field)
@@ -3168,43 +3321,45 @@ class App(QMainWindow):
         self.audio_file_layout.addWidget(self.audio_file_field, 1)
         self.audio_file_layout.addWidget(self.audio_file_browse_button)
         self.audio_file_layout.addWidget(self.audio_file_clear_button)
+        self.audio_file_row.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
         self.release_date_label = QLabel("Release Date")
-        self.release_date_field = QCalendarWidget()
+        self.release_date_field = FocusWheelCalendarWidget()
         self.release_date_field.setSelectedDate(QDate.currentDate())
-        if hasattr(self, "track_len_h"):
-            track_seconds = hms_to_seconds(
-                self.track_len_h.value(),
-                self.track_len_m.value(),
-                self.track_len_s.value(),
-            )
-        else:
-            track_seconds = 0
-        self.release_date_field.setFixedHeight(250)
+        self.release_date_field.setMaximumHeight(220)
+        self.release_date_field.setVerticalHeaderFormat(QCalendarWidget.NoVerticalHeader)
+        self.release_date_field.setGridVisible(True)
+        self.release_date_field.selectionChanged.connect(self._update_add_data_generated_fields)
 
         self.iswc_label = QLabel("ISWC")
         self.iswc_field = QLineEdit()
+        self.iswc_field.setMinimumWidth(220)
 
-        self.upc_label = QLabel("UPC/EAN")
-        self.upc_field = QComboBox()
+        self.upc_label = QLabel("UPC / EAN")
+        self.upc_field = FocusWheelComboBox()
         self.upc_field.setEditable(True)
         self.upc_field.setCurrentText("")
+        self.upc_field.setMinimumWidth(220)
 
         self.genre_label = QLabel("Genre")
-        self.genre_field = QComboBox()
+        self.genre_field = FocusWheelComboBox()
         self.genre_field.setEditable(True)
         self.genre_field.setCurrentText("")
+        self.genre_field.setMinimumWidth(220)
 
         self.catalog_number_label = QLabel("Catalog#")
         self.catalog_number_field = QLineEdit()
+        self.catalog_number_field.setMinimumWidth(220)
 
         self.buma_work_number_label = QLabel("BUMA Wnr.")
         self.buma_work_number_field = QLineEdit()
+        self.buma_work_number_field.setMinimumWidth(220)
 
         self.album_art_label = QLabel("Album Art")
         self.album_art_field = QLineEdit()
         self.album_art_field.setReadOnly(True)
         self.album_art_field.setPlaceholderText("No album art selected")
+        self.album_art_field.setMinimumWidth(260)
         self.album_art_browse_button = QPushButton("Browse…")
         self.album_art_browse_button.clicked.connect(
             lambda: self._choose_media_into_line_edit("album_art", self.album_art_field)
@@ -3218,14 +3373,7 @@ class App(QMainWindow):
         self.album_art_layout.addWidget(self.album_art_field, 1)
         self.album_art_layout.addWidget(self.album_art_browse_button)
         self.album_art_layout.addWidget(self.album_art_clear_button)
-
-        # Top group
-        for w in [self.artist_label, self.artist_field, self.additional_artist_label, self.additional_artist_field,
-                self.track_title_label, self.track_title_field, self.album_title_label, self.album_title_field,
-                self.audio_file_label, self.audio_file_row,
-                self.album_art_label, self.album_art_row,
-                self.release_date_label, self.release_date_field]:
-            self.left_panel.addWidget(w)
+        self.album_art_row.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
         self.track_len_label = QLabel("Track Length (hh:mm:ss)")
         self.track_len_h = TwoDigitSpinBox(); self.track_len_h.setRange(0, 99);  self.track_len_h.setFixedWidth(60)
@@ -3238,47 +3386,90 @@ class App(QMainWindow):
         _row_len.addWidget(self.track_len_h); _row_len.addWidget(QLabel(":"))
         _row_len.addWidget(self.track_len_m); _row_len.addWidget(QLabel(":"))
         _row_len.addWidget(self.track_len_s)
+        _row_len.addStretch(1)
 
-        self.left_panel.addWidget(self.track_len_label)
-        self.left_panel.addLayout(_row_len)
+        self.track_length_row = QWidget()
+        self.track_length_layout = _row_len
+        self.track_length_row.setLayout(self.track_length_layout)
+        self.track_length_row.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
-        # Bottom group
-        for w in [
-            self.iswc_label, self.iswc_field,
-            self.upc_label, self.upc_field,
-            self.catalog_number_label, self.catalog_number_field,
-            self.buma_work_number_label, self.buma_work_number_field,
-            self.genre_label, self.genre_field,
-        ]:
-            self.left_panel.addWidget(w)
+        self.prev_release_toggle = QRadioButton("Use release year in generated ISRC")
+        self.prev_release_toggle.toggled.connect(self._update_add_data_generated_fields)
+        self.isrc_rule_label = QLabel("ISRC Rule")
 
-        self.prev_release_toggle = QRadioButton("Previous Release")
-        self.left_panel.addWidget(self.prev_release_toggle)
+        status_group, status_layout = self._create_add_data_group("Generated")
+        status_layout.addWidget(self._create_add_data_row(self.record_id_label, self.record_id_field))
+        status_layout.addWidget(self._create_add_data_row(self.generated_isrc_label, self.generated_isrc_field))
+        status_layout.addWidget(self._create_add_data_row(self.entry_date_preview_label, self.entry_date_preview_field))
+        status_layout.addWidget(self._create_add_data_row(self.isrc_rule_label, self.prev_release_toggle))
+
+        core_group, core_layout = self._create_add_data_group("Core Details")
+        core_layout.addWidget(self._create_add_data_row(self.track_title_label, self.track_title_field))
+        core_layout.addWidget(self._create_add_data_row(self.artist_label, self.artist_field))
+        core_layout.addWidget(self._create_add_data_row(self.additional_artist_label, self.additional_artist_field))
+        core_layout.addWidget(self._create_add_data_row(self.album_title_label, self.album_title_field))
+        core_layout.addWidget(self._create_add_data_row(self.genre_label, self.genre_field))
+
+        release_group, release_layout = self._create_add_data_group("Release & Codes")
+        release_layout.addWidget(self._create_add_data_row(self.release_date_label, self.release_date_field, top_aligned=True))
+        release_layout.addWidget(self._create_add_data_row(self.track_len_label, self.track_length_row))
+        release_layout.addWidget(self._create_add_data_row(self.iswc_label, self.iswc_field))
+        release_layout.addWidget(self._create_add_data_row(self.upc_label, self.upc_field))
+        release_layout.addWidget(self._create_add_data_row(self.catalog_number_label, self.catalog_number_field))
+        release_layout.addWidget(self._create_add_data_row(self.buma_work_number_label, self.buma_work_number_field))
+
+        media_group, media_layout = self._create_add_data_group("Managed Media")
+        media_layout.addWidget(self._create_add_data_row(self.audio_file_label, self.audio_file_row))
+        media_layout.addWidget(self._create_add_data_row(self.album_art_label, self.album_art_row))
+
+        for section in (status_group, core_group, release_group, media_group):
+            self.left_panel.addWidget(section)
+        self.left_panel.addStretch(1)
 
         btn_row = QHBoxLayout()
-        self.cancel_button = QPushButton("Cancel")
+        btn_row.setContentsMargins(0, 4, 0, 0)
+        btn_row.setSpacing(8)
+        self.cancel_button = QPushButton("Reset Form")
         self.cancel_button.clicked.connect(self.clear_form_fields)
-        self.save_button = QPushButton("Save")
+        self.cancel_button.setMinimumHeight(32)
+        self.save_button = QPushButton("Save Track")
         self.save_button.clicked.connect(self.save)
-        self.delete_button = QPushButton("Delete")
+        self.save_button.setMinimumHeight(32)
+        self.save_button.setDefault(True)
+        self.delete_button = QPushButton("Delete Selected")
         self.delete_button.clicked.connect(self.delete_entry)
+        self.delete_button.setMinimumHeight(32)
+        self.delete_button.setToolTip("Delete the currently selected track from the table.")
         btn_row.addWidget(self.cancel_button)
-        btn_row.addWidget(self.save_button)
+        btn_row.addStretch(1)
         btn_row.addWidget(self.delete_button)
-        self.left_panel.addLayout(btn_row)
+        btn_row.addWidget(self.save_button)
+        self.button_row_widget = QWidget()
+        self.button_row_widget.setLayout(btn_row)
+        self.left_panel.addWidget(self.button_row_widget)
+
+        self.add_data_column = QWidget()
+        self.add_data_column.setLayout(self.left_panel)
+        self.add_data_column.setMinimumWidth(620)
+        self.add_data_column.setMaximumWidth(940)
+        self.add_data_column.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
 
         self.left_widget_container = QWidget()
-        self.left_widget_container.setLayout(self.left_panel)
+        self.left_container_layout = QHBoxLayout(self.left_widget_container)
+        self.left_container_layout.setContentsMargins(0, 0, 0, 0)
+        self.left_container_layout.setSpacing(0)
+        self.left_container_layout.addWidget(self.add_data_column, 0, Qt.AlignTop | Qt.AlignLeft)
+        self.left_container_layout.addStretch(1)
         # CHANGED: make left side scrollable (prevents overlap on small viewports)
         self.left_scroll = QScrollArea()
         self.left_scroll.setWidgetResizable(True)
         self.left_scroll.setWidget(self.left_widget_container)
-        self.left_scroll.setMinimumWidth(350)
+        self.left_scroll.setMinimumWidth(420)
         self.add_data_dock = QDockWidget("Add Data", self)
         self.add_data_dock.setObjectName("addDataDock")
         self.add_data_dock.setAllowedAreas(Qt.AllDockWidgetAreas)
         self.add_data_dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
-        self.add_data_dock.setMinimumWidth(390)
+        self.add_data_dock.setMinimumWidth(440)
         self.add_data_dock.setWidget(self.left_scroll)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.add_data_dock)
         self.add_data_dock.dockLocationChanged.connect(lambda *_args: self._save_main_dock_state())
@@ -3294,7 +3485,7 @@ class App(QMainWindow):
         right_panel.setSpacing(8)
         self.search_layout = QHBoxLayout()
 
-        self.search_column_combo = QComboBox()
+        self.search_column_combo = FocusWheelComboBox()
         self.search_column_combo.setFixedHeight(25)
         self.search_column_combo.setMinimumWidth(180)
         self.search_layout.addWidget(self.search_column_combo)
@@ -3400,12 +3591,13 @@ class App(QMainWindow):
             )
         )
 
-        self.resizeDocks([self.add_data_dock, self.catalog_table_dock], [390, 890], Qt.Horizontal)
+        self.resizeDocks([self.add_data_dock, self.catalog_table_dock], [460, 820], Qt.Horizontal)
         self._restore_main_dock_state()
 
         # Restore view preferences after all controls and panels exist
         self._apply_saved_view_preferences()
 
+        self._update_add_data_generated_fields()
         self.refresh_table()
         self.populate_all_comboboxes()
         self.resize(1280, 800)
@@ -4323,6 +4515,7 @@ class App(QMainWindow):
 
         if changed_count:
             self._refresh_auto_snapshot_schedule()
+            self._update_add_data_generated_fields()
             self._refresh_history_actions()
             if show_confirmation:
                 QMessageBox.information(self, "Settings Saved", "Application settings updated.")
@@ -4691,6 +4884,7 @@ class App(QMainWindow):
         except Exception:
             pass
         self.populate_all_comboboxes()
+        self._update_add_data_generated_fields()
         self.refresh_table_preserve_view()
         self._refresh_auto_snapshot_schedule()
         self._last_auto_snapshot_marker = self._current_auto_snapshot_marker()
@@ -4994,6 +5188,7 @@ class App(QMainWindow):
         self._reload_profiles_list(select_path=path)
         self.refresh_table_preserve_view()
         self.populate_all_comboboxes()
+        self._update_add_data_generated_fields()
         self._refresh_history_actions()
 
     @staticmethod
@@ -5215,6 +5410,91 @@ class App(QMainWindow):
     # =============================================================================
     # UI helpers
     # =============================================================================
+    @staticmethod
+    def _create_add_data_group(title: str) -> tuple[QGroupBox, QVBoxLayout]:
+        group = QGroupBox(title)
+        layout = QVBoxLayout(group)
+        layout.setContentsMargins(14, 16, 14, 14)
+        layout.setSpacing(10)
+        return group, layout
+
+    @staticmethod
+    def _create_add_data_status_field(placeholder: str) -> QLineEdit:
+        field = QLineEdit()
+        field.setReadOnly(True)
+        field.setMinimumWidth(240)
+        field.setPlaceholderText(placeholder)
+        field.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        return field
+
+    @staticmethod
+    def _create_add_data_row(
+        label_widget: QLabel,
+        field_widget: QWidget,
+        *,
+        top_aligned: bool = False,
+        label_width: int = 132,
+    ) -> QWidget:
+        row = QWidget()
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+        label_widget.setMinimumWidth(label_width)
+        label_widget.setAlignment(Qt.AlignRight | (Qt.AlignTop if top_aligned else Qt.AlignVCenter))
+        if field_widget.sizePolicy().horizontalPolicy() == QSizePolicy.Preferred:
+            field_widget.setSizePolicy(QSizePolicy.Expanding, field_widget.sizePolicy().verticalPolicy())
+        layout.addWidget(label_widget, 0, Qt.AlignTop if top_aligned else Qt.AlignVCenter)
+        layout.addWidget(field_widget, 1, Qt.AlignTop if top_aligned else Qt.AlignVCenter)
+        return row
+
+    def _preview_generated_isrc(self) -> str:
+        if self.conn is None or self.cursor is None:
+            return ""
+
+        prefix = (self.load_isrc_prefix() or "").upper().strip()
+        if not re.fullmatch(r"[A-Z]{2}[A-Z0-9]{3}", prefix or ""):
+            return ""
+
+        artist_code = self.load_artist_code()
+        if not re.fullmatch(r"\d{2}", artist_code or ""):
+            return ""
+
+        year = datetime.now().year % 100
+        if hasattr(self, "prev_release_toggle") and self.prev_release_toggle.isChecked():
+            try:
+                year = self.release_date_field.selectedDate().year() % 100
+            except Exception:
+                pass
+        yy = f"{year:02d}"
+
+        for seq in range(1, 1000):
+            sss = f"{seq:03d}"
+            candidate = f"{prefix[0:2]}-{prefix[2:5]}-{yy}-{artist_code}{sss}"
+            try:
+                if not self.is_isrc_taken_normalized(candidate):
+                    return candidate
+            except Exception:
+                return candidate
+        return ""
+
+    def _update_add_data_generated_fields(self) -> None:
+        if hasattr(self, "record_id_field"):
+            self.record_id_field.clear()
+        if hasattr(self, "entry_date_preview_field"):
+            self.entry_date_preview_field.clear()
+        if not hasattr(self, "generated_isrc_field"):
+            return
+
+        preview = self._preview_generated_isrc()
+        self.generated_isrc_field.setText(preview)
+        if preview:
+            self.generated_isrc_field.setToolTip(
+                "Next available ISRC based on the current release date and ISRC settings."
+            )
+        else:
+            self.generated_isrc_field.setToolTip(
+                "Configure a valid ISRC prefix and artist code in Settings to preview the generated ISRC."
+            )
 
     def _make_item(self, col_idx, text, *, custom_def=None):
             it = _SortItem("" if text is None else str(text))
@@ -5303,6 +5583,7 @@ class App(QMainWindow):
         self.buma_work_number_field.clear()
         self.genre_field.setCurrentText("")
         self.prev_release_toggle.setChecked(False)
+        self._update_add_data_generated_fields()
 
     # =============================================================================
     # Search / table refresh (with view preservation)
@@ -5746,6 +6027,7 @@ class App(QMainWindow):
     def autofill_album_metadata(self):
         title = (self.album_title_field.currentText() or "").strip()
         if not title:
+            self._update_add_data_generated_fields()
             return
         row = self.catalog_reads.find_album_metadata(title)
         if row:
@@ -5758,6 +6040,7 @@ class App(QMainWindow):
             if genre:
                 self.genre_field.setCurrentText(genre)
             self.prev_release_toggle.setChecked(True)
+        self._update_add_data_generated_fields()
 
     # =============================================================================
     # ISRC generation (YY + AA + SSS) with strict ISO compliance
@@ -6888,7 +7171,7 @@ class App(QMainWindow):
         # Zoom row
         zoom_row = QHBoxLayout()
         zoom_row.addWidget(QLabel("Zoom"))
-        zoom_slider = QSlider(Qt.Horizontal)
+        zoom_slider = FocusWheelSlider(Qt.Horizontal)
         zoom_slider.setRange(10, 400)   # percent
         zoom_value_lbl = QLabel("")
         zoom_row.addWidget(zoom_slider, 1)
@@ -7968,7 +8251,7 @@ class EditDialog(QDialog):
             form_layout.addLayout(row)
 
         def combo(label, value, source_query, allow_empty=True):
-            cb = QComboBox()
+            cb = FocusWheelComboBox()
             cb.setEditable(True)
             items = [r[0] for r in self.parent.cursor.execute(source_query).fetchall()]
             if allow_empty:
@@ -8067,7 +8350,7 @@ class EditDialog(QDialog):
         self.buma_work_number = QLineEdit(self.snapshot.buma_work_number or "")
         add_row("BUMA Wnr.", self.buma_work_number)
 
-        self.release_date = QCalendarWidget()
+        self.release_date = FocusWheelCalendarWidget()
         self.release_date.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self.release_date.setMaximumHeight(320)
         release_qdate = QDate.fromString(self.snapshot.release_date or "", "yyyy-MM-dd")
@@ -8326,7 +8609,7 @@ class _AudioPreviewDialog(QDialog):
         )
 
         # slider + time
-        self._slider = QSlider(Qt.Horizontal)
+        self._slider = FocusWheelSlider(Qt.Horizontal)
         self._label_time = QLabel("0:00 / 0:00")
         v.addWidget(self._slider); v.addWidget(self._label_time)
 
