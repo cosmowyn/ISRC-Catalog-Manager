@@ -13,7 +13,6 @@ import sys
 import re
 import json
 import time
-import uuid
 import hashlib
 import shutil
 import sqlite3
@@ -23,11 +22,10 @@ import logging
 import mimetypes
 from pathlib import Path
 from datetime import datetime
-from functools import lru_cache
 from logging.handlers import RotatingFileHandler
 
 from PySide6.QtCore import(QRegularExpression, Signal, QEvent,
-    Qt, QDate, QPoint, QSettings, QStandardPaths, QLockFile, QByteArray, QUrl, QEvent, QTimer, QSortFilterProxyModel, )
+    Qt, QDate, QPoint, QSettings, QStandardPaths, QByteArray, QUrl, QEvent, QTimer, QSortFilterProxyModel, )
 
 from PySide6.QtGui import (QDesktopServices, QCursor, QAction,
     QIcon, QAction, QKeySequence, QImage, QPixmap, QStandardItemModel, QStandardItem
@@ -41,225 +39,29 @@ from PySide6.QtWidgets import ( QListView, QMenuBar, QListWidget, QListWidgetIte
 
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 
-# ---------------------------------------------------------------------
-# Path helpers: use _MEIPASS ONLY for bundled assets, never for writes.
-# ---------------------------------------------------------------------
-def _is_frozen() -> bool:
-    return getattr(sys, "frozen", False)
-
-def BIN_DIR() -> Path:
-    """Folder of the actual .exe (PyInstaller) or script dir in dev."""
-    return Path(sys.executable).resolve().parent if _is_frozen() else Path(__file__).resolve().parent
-
-def RES_DIR() -> Path:
-    """Read-only bundled resources at runtime; equals src dir in dev."""
-    return Path(getattr(sys, "_MEIPASS", BIN_DIR())) if _is_frozen() else BIN_DIR()
-
-def DATA_DIR(app_name: str = "ISRCManager", portable: bool | None = None) -> Path:
-    """
-    Writes go here (DB, logs, exports).
-    - Portable mode if a '.portable' file exists next to the exe, or portable=True is passed.
-    - Otherwise %LOCALAPPDATA%\\ISRCManager on Windows.
-    """
-    if portable is True or (BIN_DIR() / ".portable").exists():
-        return BIN_DIR()
-    base = Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local"))
-    return (base / app_name).resolve()
-
-# =============================================================================
-# Application Configuration (QSettings + Single-instance Helpers)
-# =============================================================================
-APP_ORG = "GenericVendor"
-APP_NAME = "ISRCManager"
-SETTINGS_BASENAME = "settings.ini"
-
-def init_settings() -> QSettings:
-    """
-    Use the OS-recommended app data dir (per-user, writable)
-      - Windows: C:/Users/<you>/AppData/Roaming/GenericVendor/ISRCManager/
-      - macOS:   ~/Library/Application Support/GenericVendor/ISRCManager/
-      - Linux:   ~/.local/share/GenericVendor/ISRCManager/
-    """
-    base_dir = Path(QStandardPaths.writableLocation(QStandardPaths.AppDataLocation))
-    base_dir.mkdir(parents=True, exist_ok=True)
-
-    ini_path = base_dir / SETTINGS_BASENAME
-    settings = QSettings(str(ini_path), QSettings.IniFormat)
-    settings.setFallbacksEnabled(False)  # force only this file
-
-    # First-run detection
-    first_run = settings.value("app/initialized", False, type=bool) is False
-    if first_run:
-        settings.setValue("app/initialized", True)
-        settings.setValue("app/schema_version", 1)
-        settings.setValue("ui/theme", "system")
-        settings.setValue("paths/database_dir", str((base_dir.parent / "Database").resolve()))
-        # Persistent app UID (stays the same across launches for this user+install)
-        settings.setValue("app/uid", str(uuid.uuid4()))
-        settings.sync()
-
-    return settings
-
-def enforce_single_instance(timeout_ms: int = 60000):
-    """Return a QLockFile if we obtained the lock; otherwise None."""
-    lock_dir = Path(QStandardPaths.writableLocation(QStandardPaths.AppDataLocation))
-    lock_dir.mkdir(parents=True, exist_ok=True)
-    lock = QLockFile(str(lock_dir / f"{APP_NAME}.lock"))
-    lock.setStaleLockTime(timeout_ms)  # if previous instance crashed, lock becomes stealable after timeout
-    if not lock.tryLock(0):
-        return None
-    return lock  # keep alive for app lifetime
-
-# =============================================================================
-# App constants (generic, user-editable via "Branding & Identity..." dialog)
-# =============================================================================
-QSETTINGS_ORG = APP_ORG
-QSETTINGS_APP = APP_NAME
-
-DEFAULT_WINDOW_TITLE = "ISRC Manager"
-DEFAULT_ICON_PATH = ""  # user can set later
-
-FIELD_TYPE_CHOICES = ["text", "dropdown", "checkbox", "date", "blob_image", "blob_audio"]
-
-# ---- DB schema versioning ----
-SCHEMA_BASELINE = 1   # First schema version
-SCHEMA_TARGET   = 14  # Bump when you add a new migration
-
-
-# =============================================================================
-# Validators & Formatting Helpers (ISO + compact)
-# =============================================================================ss
-def seconds_to_hms(total: int) -> str:
-    try:
-        total = max(0, int(total or 0))
-    except Exception:
-        total = 0
-    h = total // 3600
-    m = (total % 3600) // 60
-    s = total % 60
-    return f"{h:02d}:{m:02d}:{s:02d}"
-
-def hms_to_seconds(h: int, m: int, s: int) -> int:
-    try:
-        h = max(0, int(h or 0)); m = max(0, int(m or 0)); s = max(0, int(s or 0))
-    except Exception:
-        h, m, s = 0, 0, 0
-    if m > 59 or s > 59:
-        m = min(m, 59); s = min(s, 59)
-    return h*3600 + m*60 + s
-
-def parse_hms_text(t: str) -> int:
-    try:
-        parts = [int(x) for x in (t or "").split(":")]
-        if len(parts) == 3:
-            return hms_to_seconds(parts[0], parts[1], parts[2])
-    except Exception:
-        pass
-    return 0
-
-_ISRC_COMPACT_RE = re.compile(r"^[A-Z]{2}[A-Z0-9]{3}\d{2}\d{5}$", re.IGNORECASE)
-_ISRC_ISO_RE     = re.compile(r"^[A-Z]{2}-[A-Z0-9]{3}-\d{2}-\d{5}$", re.IGNORECASE)
-
-# Accept both compact (T1234567890) and ISO (T-123.456.789-0)
-_ISWC_ANY_RE     = re.compile(r"^(?:T\d{9}[\dX]|T-\d{3}\.\d{3}\.\d{3}-[\dX])$", re.IGNORECASE)
-_ISWC_ISO_RE     = re.compile(r"^T-\d{3}\.\d{3}\.\d{3}-[\dX]$", re.IGNORECASE)
-
-_UPC_EAN_RE = re.compile(r"^\d{12,13}$")  # optional; 12 or 13 digits
-
-def is_blank(s: str) -> bool:
-    return s is None or str(s).strip() == ""
-
-# ---------- ISRC ----------
-def normalize_isrc(s: str) -> str:
-    """Compact uppercase (e.g., XXX0X2512345)."""
-    if is_blank(s): return ""
-    return re.sub(r"[^A-Z0-9]", "", s.upper())
-
-def to_iso_isrc(s: str) -> str:
-    """From any to ISO CC-XXX-YY-NNNNN. '' if cannot format."""
-    sc = normalize_isrc(s)
-    if not _ISRC_COMPACT_RE.match(sc):
-        return ""
-    return f"{sc[0:2]}-{sc[2:5]}-{sc[5:7]}-{sc[7:12]}"
-
-def is_valid_isrc_compact_or_iso(s: str) -> bool:
-    if is_blank(s): return False
-    s = s.strip().upper()
-    return bool(_ISRC_COMPACT_RE.match(normalize_isrc(s)) or _ISRC_ISO_RE.match(s))
-
-def to_compact_isrc(s: str) -> str:
-    """Return strict compact 12-char ISRC or ''."""
-    sc = normalize_isrc(s)
-    return sc if _ISRC_COMPACT_RE.match(sc) else ""
-
-# ---------- ISWC ----------
-def normalize_iswc(s: str) -> str:
-    """Compact uppercase (e.g., T1234567890)."""
-    if is_blank(s): return ""
-    return re.sub(r"[^A-Z0-9]", "", s.upper())
-
-def to_iso_iswc(s: str) -> str:
-    """From any to ISO T-###.###.###-C. '' if cannot format."""
-    sc = normalize_iswc(s)
-    if not sc.startswith("T") or len(sc) != 11:
-        return ""
-    body = sc[1:10]   # 9 digits
-    chk  = sc[10]     # checksum 0-9 or X
-    if not (body.isdigit() and (chk.isdigit() or chk == "X")):
-        return ""
-    return f"T-{body[0:3]}.{body[3:6]}.{body[6:9]}-{chk}"
-
-def is_valid_iswc_any(s: str) -> bool:
-    if is_blank(s):  # optional
-        return True
-    return bool(_ISWC_ANY_RE.match(s.strip()))
-
-# ---------- UPC ----------
-def valid_upc_ean(s: str) -> bool:
-    if is_blank(s): return True
-    return bool(_UPC_EAN_RE.match(s.strip()))
-
-
-# ----- Custom column kinds -----
-CUSTOM_KIND_TEXT = "text"
-CUSTOM_KIND_INT = "int"
-CUSTOM_KIND_DATE = "date"
-CUSTOM_KIND_BLOB_IMAGE = "blob_image"
-CUSTOM_KIND_BLOB_AUDIO = "blob_audio"
-
-# Allowed custom kinds exposed in UI (order matters for dropdowns)
-ALLOWED_CUSTOM_KINDS = [
-    CUSTOM_KIND_TEXT,
-    CUSTOM_KIND_INT,
-    CUSTOM_KIND_DATE,
-    CUSTOM_KIND_BLOB_IMAGE,
-    CUSTOM_KIND_BLOB_AUDIO,
-]
-
-# File validation for BLOBs
-BLOB_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff"}
-BLOB_AUDIO_EXTS = {".wav", ".aif", ".aiff", ".mp3", ".flac", ".m4a", ".aac", ".ogg", ".opus"}
-MAX_BLOB_BYTES = 256 * 1024 * 1024  # 256 MB hard limit
-
-def _ext(p: str) -> str:
-    return Path(p).suffix.lower()
-
-@lru_cache(maxsize=256)
-def _guess_mime(p: str) -> str:
-    mime, _ = mimetypes.guess_type(p)
-    return mime or ""
-
-def _is_valid_image_path(p: str) -> bool:
-    return _ext(p) in BLOB_IMAGE_EXTS or _guess_mime(p).startswith("image/")
-
-def _is_valid_audio_path(p: str) -> bool:
-    return _ext(p) in BLOB_AUDIO_EXTS or _guess_mime(p).startswith("audio/")
-
-def _read_blob_from_path(path: str) -> bytes:
-    b = Path(path).read_bytes()
-    if len(b) > MAX_BLOB_BYTES:
-        raise ValueError(f"Selected file is too large (> {MAX_BLOB_BYTES} bytes)")
-    return b
+from isrc_manager.constants import (
+    APP_NAME,
+    DEFAULT_ICON_PATH,
+    DEFAULT_WINDOW_TITLE,
+    FIELD_TYPE_CHOICES,
+    SCHEMA_BASELINE,
+    SCHEMA_TARGET,
+)
+from isrc_manager.domain.codes import (
+    is_blank,
+    is_valid_isrc_compact_or_iso,
+    is_valid_iswc_any,
+    normalize_isrc,
+    normalize_iswc,
+    to_compact_isrc,
+    to_iso_isrc,
+    to_iso_iswc,
+    valid_upc_ean,
+)
+from isrc_manager.domain.timecode import hms_to_seconds, parse_hms_text, seconds_to_hms
+from isrc_manager.media.blob_files import _is_valid_audio_path, _is_valid_image_path, _read_blob_from_path
+from isrc_manager.paths import DATA_DIR
+from isrc_manager.settings import enforce_single_instance, init_settings
 
 
 # =============================================================================

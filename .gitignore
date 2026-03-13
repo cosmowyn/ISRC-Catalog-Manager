@@ -6,5 +6,9 @@ dist/
 # Virtual environments
 .venv/
 
+# Python cache
+__pycache__/
+*.py[cod]
+
 # macOS junk
 .DS_Store
