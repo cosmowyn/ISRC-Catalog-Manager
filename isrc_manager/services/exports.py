@@ -46,7 +46,26 @@ class XMLExportService:
         ET.SubElement(meta, "ProfileDB").text = str(current_db_path)
 
         tracks_element = ET.SubElement(root, "Tracks")
-        for tid, isrc, db_entry_date, title, artist, addl, album, release_date, track_length_sec, iswc, upc, genre in rows:
+        for (
+            tid,
+            isrc,
+            db_entry_date,
+            title,
+            artist,
+            addl,
+            album,
+            release_date,
+            track_length_sec,
+            iswc,
+            upc,
+            genre,
+            catalog_number,
+            buma_work_number,
+            audio_file_mime_type,
+            audio_file_size_bytes,
+            album_art_mime_type,
+            album_art_size_bytes,
+        ) in rows:
             track = ET.SubElement(tracks_element, "Track", id=str(tid))
             ET.SubElement(track, "ISRC").text = to_iso_isrc(isrc) or to_compact_isrc(isrc) or (isrc or "")
             ET.SubElement(track, "DBEntryDate").text = db_entry_date or ""
@@ -59,6 +78,12 @@ class XMLExportService:
             ET.SubElement(track, "ISWC").text = iswc or ""
             ET.SubElement(track, "UPCEAN").text = upc or ""
             ET.SubElement(track, "Genre").text = genre or ""
+            ET.SubElement(track, "CatalogNumber").text = catalog_number or ""
+            ET.SubElement(track, "BUMAWorkNumber").text = buma_work_number or ""
+            ET.SubElement(track, "AudioFileMimeType").text = audio_file_mime_type or ""
+            ET.SubElement(track, "AudioFileSizeBytes").text = str(int(audio_file_size_bytes or 0))
+            ET.SubElement(track, "AlbumArtMimeType").text = album_art_mime_type or ""
+            ET.SubElement(track, "AlbumArtSizeBytes").text = str(int(album_art_size_bytes or 0))
 
             self._append_custom_fields(track, custom_by_track.get(tid, []))
 
@@ -93,7 +118,13 @@ class XMLExportService:
                 COALESCE(t.track_length_sec, 0) AS track_length_sec,
                 COALESCE(t.iswc, '') AS iswc,
                 COALESCE(t.upc, '') AS upc,
-                COALESCE(t.genre, '') AS genre
+                COALESCE(t.genre, '') AS genre,
+                COALESCE(t.catalog_number, '') AS catalog_number,
+                COALESCE(t.buma_work_number, '') AS buma_work_number,
+                COALESCE(t.audio_file_mime_type, '') AS audio_file_mime_type,
+                COALESCE(t.audio_file_size_bytes, 0) AS audio_file_size_bytes,
+                COALESCE(t.album_art_mime_type, '') AS album_art_mime_type,
+                COALESCE(t.album_art_size_bytes, 0) AS album_art_size_bytes
             FROM Tracks t
             LEFT JOIN Artists a ON a.id = t.main_artist_id
             LEFT JOIN Albums al ON al.id = t.album_id
@@ -115,6 +146,12 @@ class XMLExportService:
             "iswc",
             "upc",
             "genre",
+            "catalog_number",
+            "buma_work_number",
+            "audio_file_mime_type",
+            "audio_file_size_bytes",
+            "album_art_mime_type",
+            "album_art_size_bytes",
         ]
         return cols, rows
 

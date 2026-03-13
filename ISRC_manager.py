@@ -44,9 +44,12 @@ from isrc_manager.history import HistoryManager, SessionHistoryManager
 from isrc_manager.history.dialogs import HistoryDialog
 from isrc_manager.constants import (
     APP_NAME,
+    DEFAULT_BASE_HEADERS,
+    DEFAULT_HIDDEN_CUSTOM_COLUMN_NAMES,
     DEFAULT_ICON_PATH,
     DEFAULT_WINDOW_TITLE,
     FIELD_TYPE_CHOICES,
+    PROMOTED_CUSTOM_FIELD_NAMES,
 )
 from isrc_manager.domain.codes import (
     is_blank,
@@ -1478,10 +1481,7 @@ class LicenseeManagerDialog(QDialog):
             QMessageBox.critical(self, "Error", str(e))
         
 class App(QMainWindow):
-    BASE_HEADERS = [
-        'ID', 'ISRC', 'Entry Date', 'Track Title', 'Artist Name',
-        'Additional Artists', 'Album Title', 'Release Date', 'Track Length (hh:mm:ss)', 'ISWC', 'UPC', 'Genre'
-    ]
+    BASE_HEADERS = list(DEFAULT_BASE_HEADERS)
 
     def __init__(self):
         super().__init__()
@@ -1727,13 +1727,6 @@ class App(QMainWindow):
         catalog_menu.addAction(self.license_browser_action)
         catalog_menu.addSeparator()
 
-        self.manage_fields_action = self._create_action(
-            "Manage Custom Columns…",
-            slot=self.manage_custom_columns,
-            shortcuts=("Ctrl+Alt+F", "Meta+Alt+F"),
-        )
-        catalog_menu.addAction(self.manage_fields_action)
-
         self.manage_artists_action = self._create_action(
             "Manage Artists…",
             slot=self._manage_stored_artists,
@@ -1766,6 +1759,30 @@ class App(QMainWindow):
 
         # View menu
         view_menu = self.menu_bar.addMenu("View")
+        self.columns_menu = view_menu.addMenu("Columns")
+        self.add_custom_column_action = self._create_action(
+            "Add Custom Column…",
+            slot=self.add_custom_column,
+            shortcuts=("Ctrl+Shift+F", "Meta+Shift+F"),
+        )
+        self.columns_menu.addAction(self.add_custom_column_action)
+
+        self.remove_custom_column_action = self._create_action(
+            "Remove Custom Column…",
+            slot=self.remove_custom_column,
+            shortcuts=("Ctrl+Alt+Shift+F", "Meta+Alt+Shift+F"),
+        )
+        self.columns_menu.addAction(self.remove_custom_column_action)
+
+        self.manage_fields_action = self._create_action(
+            "Manage Custom Columns…",
+            slot=self.manage_custom_columns,
+            shortcuts=("Ctrl+Alt+F", "Meta+Alt+F"),
+        )
+        self.columns_menu.addAction(self.manage_fields_action)
+        self.columns_menu.addSeparator()
+        self.column_visibility_actions = []
+
         self.add_data_action = self._create_action(
             "Show Add Data Panel",
             checkable=True,
@@ -1890,6 +1907,24 @@ class App(QMainWindow):
         self.album_title_field.setCurrentText("")
         self.album_title_field.currentTextChanged.connect(self.autofill_album_metadata)
 
+        self.audio_file_label = QLabel("Audio File")
+        self.audio_file_field = QLineEdit()
+        self.audio_file_field.setReadOnly(True)
+        self.audio_file_field.setPlaceholderText("No audio file selected")
+        self.audio_file_browse_button = QPushButton("Browse…")
+        self.audio_file_browse_button.clicked.connect(
+            lambda: self._choose_media_into_line_edit("audio_file", self.audio_file_field)
+        )
+        self.audio_file_clear_button = QPushButton("Clear")
+        self.audio_file_clear_button.clicked.connect(self.audio_file_field.clear)
+        self.audio_file_row = QWidget()
+        self.audio_file_layout = QHBoxLayout(self.audio_file_row)
+        self.audio_file_layout.setContentsMargins(0, 0, 0, 0)
+        self.audio_file_layout.setSpacing(8)
+        self.audio_file_layout.addWidget(self.audio_file_field, 1)
+        self.audio_file_layout.addWidget(self.audio_file_browse_button)
+        self.audio_file_layout.addWidget(self.audio_file_clear_button)
+
         self.release_date_label = QLabel("Release Date")
         self.release_date_field = QCalendarWidget()
         self.release_date_field.setSelectedDate(QDate.currentDate())
@@ -1916,9 +1951,35 @@ class App(QMainWindow):
         self.genre_field.setEditable(True)
         self.genre_field.setCurrentText("")
 
+        self.catalog_number_label = QLabel("Catalog#")
+        self.catalog_number_field = QLineEdit()
+
+        self.buma_work_number_label = QLabel("BUMA Wnr.")
+        self.buma_work_number_field = QLineEdit()
+
+        self.album_art_label = QLabel("Album Art")
+        self.album_art_field = QLineEdit()
+        self.album_art_field.setReadOnly(True)
+        self.album_art_field.setPlaceholderText("No album art selected")
+        self.album_art_browse_button = QPushButton("Browse…")
+        self.album_art_browse_button.clicked.connect(
+            lambda: self._choose_media_into_line_edit("album_art", self.album_art_field)
+        )
+        self.album_art_clear_button = QPushButton("Clear")
+        self.album_art_clear_button.clicked.connect(self.album_art_field.clear)
+        self.album_art_row = QWidget()
+        self.album_art_layout = QHBoxLayout(self.album_art_row)
+        self.album_art_layout.setContentsMargins(0, 0, 0, 0)
+        self.album_art_layout.setSpacing(8)
+        self.album_art_layout.addWidget(self.album_art_field, 1)
+        self.album_art_layout.addWidget(self.album_art_browse_button)
+        self.album_art_layout.addWidget(self.album_art_clear_button)
+
         # Top group
         for w in [self.artist_label, self.artist_field, self.additional_artist_label, self.additional_artist_field,
                 self.track_title_label, self.track_title_field, self.album_title_label, self.album_title_field,
+                self.audio_file_label, self.audio_file_row,
+                self.album_art_label, self.album_art_row,
                 self.release_date_label, self.release_date_field]:
             self.left_panel.addWidget(w)
 
@@ -1938,7 +1999,13 @@ class App(QMainWindow):
         self.left_panel.addLayout(_row_len)
 
         # Bottom group
-        for w in [self.iswc_label, self.iswc_field, self.upc_label, self.upc_field, self.genre_label, self.genre_field]:
+        for w in [
+            self.iswc_label, self.iswc_field,
+            self.upc_label, self.upc_field,
+            self.catalog_number_label, self.catalog_number_field,
+            self.buma_work_number_label, self.buma_work_number_field,
+            self.genre_label, self.genre_field,
+        ]:
             self.left_panel.addWidget(w)
 
         self.prev_release_toggle = QRadioButton("Previous Release")
@@ -2043,6 +2110,7 @@ class App(QMainWindow):
             self._rebuild_search_column_choices()
         except AttributeError:
             pass
+        self._refresh_column_visibility_menu()
 
         # Hint labels for live resize feedback
         self.col_hint_label = None
@@ -2106,6 +2174,7 @@ class App(QMainWindow):
                 logger=self.logger,
                 audit_callback=self._audit,
                 audit_commit=self._audit_commit,
+                data_root=DATA_DIR(),
             )
             if self.conn is not None
             else None
@@ -2115,7 +2184,7 @@ class App(QMainWindow):
             if self.conn is not None and getattr(self, "current_db_path", None)
             else None
         )
-        self.track_service = TrackService(self.conn) if self.conn is not None else None
+        self.track_service = TrackService(self.conn, DATA_DIR()) if self.conn is not None else None
         self.settings_reads = SettingsReadService(self.conn) if self.conn is not None else None
         self.settings_mutations = (
             SettingsMutationService(self.conn, self.settings) if self.conn is not None else None
@@ -2411,6 +2480,7 @@ class App(QMainWindow):
         except FileExistsError:
             QMessageBox.warning(self, "Exists", "A database with this name already exists.")
             return
+        self._clear_table_settings_for_path(new_path)
         self._activate_profile(new_path)
         self.logger.info(f"Created new profile DB: {new_path}")
         self._audit("PROFILE", "Database", ref_id=new_path, details="create_new_profile")
@@ -2849,6 +2919,7 @@ class App(QMainWindow):
             f"{prefix}/header_state",
             f"{prefix}/header_labels",
             f"{prefix}/header_labels_json",
+            f"{prefix}/hidden_columns_json",
         ]
         if include_columns_movable:
             keys.append(f"{prefix}/columns_movable")
@@ -3132,7 +3203,9 @@ class App(QMainWindow):
         headers = self.BASE_HEADERS + [f["name"] for f in self.active_custom_fields]
         self.table.setColumnCount(len(headers))
         self.table.setHorizontalHeaderLabels(headers)
+        self._apply_saved_column_visibility()
         self._rebuild_search_column_choices()
+        self._refresh_column_visibility_menu()
 
     def populate_all_comboboxes(self):
         artists = [r[0] for r in self.cursor.execute(
@@ -3171,9 +3244,13 @@ class App(QMainWindow):
         self.additional_artist_field.setCurrentText("")
         self.track_title_field.clear()
         self.album_title_field.setCurrentText("")
+        self.audio_file_field.clear()
+        self.album_art_field.clear()
         self.release_date_field.setSelectedDate(QDate.currentDate())
         self.iswc_field.clear()
         self.upc_field.setCurrentText("")
+        self.catalog_number_field.clear()
+        self.buma_work_number_field.clear()
         self.genre_field.setCurrentText("")
         self.prev_release_toggle.setChecked(False)
 
@@ -3186,8 +3263,14 @@ class App(QMainWindow):
         self.search_column_combo.clear()
         self.search_column_combo.addItem("All columns", -1)
 
-        headers = self.BASE_HEADERS + [f["name"] for f in self.active_custom_fields]
+        headers = [
+            self.table.horizontalHeaderItem(idx).text()
+            for idx in range(self.table.columnCount())
+            if self.table.horizontalHeaderItem(idx) is not None
+        ]
         for idx, name in enumerate(headers):
+            if self.table.isColumnHidden(idx):
+                continue
             self.search_column_combo.addItem(name, idx)
 
         restore = self.search_column_combo.findData(cur_data)
@@ -3419,6 +3502,27 @@ class App(QMainWindow):
     def _parse_additional_artists(s: str):
         return TrackService.parse_additional_artists(s)
 
+    @staticmethod
+    def _media_file_filter(media_key: str) -> str:
+        if media_key == "audio_file":
+            return "Audio (*.wav *.aif *.aiff *.mp3 *.flac *.m4a *.aac *.ogg *.opus);;All files (*)"
+        return "Images (*.png *.jpg *.jpeg *.webp *.gif *.bmp *.tif *.tiff);;All files (*)"
+
+    def _browse_track_media_file(self, media_key: str, *, parent_widget=None) -> str:
+        title = "Choose Audio File" if media_key == "audio_file" else "Choose Album Art"
+        path, _ = QFileDialog.getOpenFileName(
+            parent_widget or self,
+            title,
+            "",
+            self._media_file_filter(media_key),
+        )
+        return path or ""
+
+    def _choose_media_into_line_edit(self, media_key: str, line_edit: QLineEdit, *, parent_widget=None) -> None:
+        path = self._browse_track_media_file(media_key, parent_widget=parent_widget)
+        if path:
+            line_edit.setText(path)
+
     def _replace_additional_artists_for_track(self, track_id: int, names):
         self.track_service.replace_additional_artists(track_id, names, cursor=self.cursor)
 
@@ -3489,6 +3593,10 @@ class App(QMainWindow):
                     iswc=(iso_iswc or None),
                     upc=(self.upc_field.currentText().strip() or None),
                     genre=(self.genre_field.currentText().strip() or None),
+                    catalog_number=(self.catalog_number_field.text().strip() or None),
+                    buma_work_number=(self.buma_work_number_field.text().strip() or None),
+                    audio_file_source_path=(self.audio_file_field.text().strip() or None),
+                    album_art_source_path=(self.album_art_field.text().strip() or None),
                 )
             )
             self.logger.info(f"Track created id={track_id} isrc={generated_iso}")
@@ -3516,9 +3624,11 @@ class App(QMainWindow):
 
     def edit_entry(self, item):
         row_idx = item.row()
-        base_cols = len(self.BASE_HEADERS)
-        row_data = [self.table.item(row_idx, i).text() if self.table.item(row_idx, i) else "" for i in range(base_cols)]
-        dlg = EditDialog(row_data, self)
+        row_id_item = self.table.item(row_idx, 0)
+        if row_id_item is None:
+            QMessageBox.warning(self, "Edit Entry", "Could not determine the selected track.")
+            return
+        dlg = EditDialog(int(row_id_item.text()), self)
         dlg.exec()
         self.populate_all_comboboxes()
 
@@ -4099,66 +4209,83 @@ class App(QMainWindow):
     # ============================================================
     # Manage custom columns (persist type + options)
     # ============================================================
-    def manage_custom_columns(self):
-        dlg = CustomColumnsDialog(self.active_custom_fields, self)
-        if dlg.exec() == QDialog.Accepted:
-            new_fields = dlg.get_fields()
-            current_summary = [
-                {
-                    "id": field.get("id"),
-                    "name": field.get("name"),
-                    "field_type": field.get("field_type"),
-                    "options": field.get("options"),
-                }
-                for field in self.active_custom_fields
-            ]
-            new_summary = [
-                {
-                    "id": field.get("id"),
-                    "name": field.get("name"),
-                    "field_type": field.get("field_type"),
-                    "options": field.get("options"),
-                }
-                for field in new_fields
-            ]
-            if current_summary == new_summary:
-                return
+    def _custom_field_config_summary(self, fields):
+        return [
+            {
+                "id": field.get("id"),
+                "name": field.get("name"),
+                "field_type": field.get("field_type"),
+                "options": field.get("options"),
+            }
+            for field in fields
+        ]
 
+    def _apply_custom_field_configuration(
+        self,
+        new_fields,
+        *,
+        action_label: str,
+        action_type: str,
+    ) -> bool:
+        conflicting = [
+            field.get("name")
+            for field in new_fields
+            if (field.get("name") or "").strip() in PROMOTED_CUSTOM_FIELD_NAMES
+        ]
+        if conflicting:
+            QMessageBox.warning(
+                self,
+                "Reserved Column Name",
+                f"These names are now standard columns and cannot be used as custom fields:\n"
+                + "\n".join(sorted(set(conflicting))),
+            )
+            return False
+
+        current_summary = self._custom_field_config_summary(self.active_custom_fields)
+        new_summary = self._custom_field_config_summary(new_fields)
+        if current_summary == new_summary:
+            return False
+
+        before_snapshot = None
+        if self.history_manager is not None:
             before_snapshot = self.history_manager.capture_snapshot(
-                kind="pre_custom_fields",
-                label="Before Manage Custom Columns",
+                kind=f"pre_{action_type.replace('.', '_')}",
+                label=f"Before {action_label}",
             )
 
-            try:
-                self.custom_field_definitions.sync_fields(self.active_custom_fields, new_fields)
-            except Exception as e:
+        try:
+            self.custom_field_definitions.sync_fields(self.active_custom_fields, new_fields)
+        except Exception as e:
+            if before_snapshot is not None:
                 try:
                     self.history_manager.delete_snapshot(before_snapshot.snapshot_id)
                 except Exception:
                     pass
-                self.conn.rollback()
-                self.logger.exception(f"Custom fields update failed: {e}")
-                QMessageBox.critical(self, "Fields Error", f"Could not update fields:\n{e}")
-                return
+            self.conn.rollback()
+            self.logger.exception(f"Custom fields update failed: {e}")
+            QMessageBox.critical(self, "Fields Error", f"Could not update fields:\n{e}")
+            return False
 
-            self.active_custom_fields = self.load_active_custom_fields()
-            self._rebuild_table_headers()
-            self.refresh_table_preserve_view()
+        self._on_custom_fields_changed()
 
-            try:
-                changed_summary = json.dumps([{"id": f.get("id"), "name": f["name"], "type": f.get("field_type")} for f in new_fields])
-            except Exception:
-                changed_summary = "fields changed"
-            self.logger.info("Custom fields updated")
-            self._audit("FIELDS", "CustomFieldDefs", ref_id="batch", details=changed_summary)
-            self._audit_commit()
+        try:
+            changed_summary = json.dumps(
+                [{"id": f.get("id"), "name": f["name"], "type": f.get("field_type")} for f in new_fields]
+            )
+        except Exception:
+            changed_summary = "fields changed"
+        self.logger.info("Custom fields updated")
+        self._audit("FIELDS", "CustomFieldDefs", ref_id="batch", details=changed_summary)
+        self._audit_commit()
+
+        if before_snapshot is not None and self.history_manager is not None:
             after_snapshot = self.history_manager.capture_snapshot(
-                kind="post_custom_fields",
-                label="After Manage Custom Columns",
+                kind=f"post_{action_type.replace('.', '_')}",
+                label=f"After {action_label}",
             )
             self.history_manager.record_snapshot_action(
-                label="Manage Custom Columns",
-                action_type="fields.manage",
+                label=action_label,
+                action_type=action_type,
                 entity_type="CustomFieldDefs",
                 entity_id="batch",
                 payload={"summary": changed_summary},
@@ -4166,6 +4293,97 @@ class App(QMainWindow):
                 snapshot_after_id=after_snapshot.snapshot_id,
             )
             self._refresh_history_actions()
+        return True
+
+    def _prompt_new_custom_field(self):
+        name, ok = QInputDialog.getText(self, "Add Custom Column", "Column name:")
+        name = (name or "").strip()
+        if not (ok and name):
+            return None
+        if name in PROMOTED_CUSTOM_FIELD_NAMES:
+            QMessageBox.warning(self, "Reserved Name", f"'{name}' is now a standard column and cannot be added as custom.")
+            return None
+        if any(field.get("name") == name for field in self.active_custom_fields):
+            QMessageBox.warning(self, "Exists", f"Column '{name}' already exists.")
+            return None
+
+        field_type, ok = QInputDialog.getItem(
+            self, "Field Type", "Choose type:", FIELD_TYPE_CHOICES, 0, False
+        )
+        if not ok:
+            return None
+
+        new_field = {"id": None, "name": name, "field_type": field_type, "options": None}
+        if field_type == "dropdown":
+            opts, ok = QInputDialog.getMultiLineText(
+                self, "Dropdown Options", "Enter options (one per line):"
+            )
+            if ok:
+                options = [option.strip() for option in (opts or "").splitlines() if option.strip()]
+                new_field["options"] = json.dumps(options) if options else json.dumps([])
+        return new_field
+
+    def add_custom_column(self):
+        new_field = self._prompt_new_custom_field()
+        if new_field is None:
+            return
+        self._apply_custom_field_configuration(
+            [*self.active_custom_fields, new_field],
+            action_label=f"Add Custom Column: {new_field['name']}",
+            action_type="fields.add",
+        )
+
+    def remove_custom_column(self):
+        if not self.active_custom_fields:
+            QMessageBox.information(self, "Remove Custom Column", "There are no custom columns to remove.")
+            return
+
+        choices = [
+            f"{field['name']} ({field.get('field_type', 'text')})"
+            for field in self.active_custom_fields
+        ]
+        choice, ok = QInputDialog.getItem(
+            self,
+            "Remove Custom Column",
+            "Choose the custom column to remove:",
+            choices,
+            0,
+            False,
+        )
+        if not ok or not choice:
+            return
+
+        remove_index = choices.index(choice)
+        field = self.active_custom_fields[remove_index]
+        if (
+            QMessageBox.question(
+                self,
+                "Remove Custom Column",
+                f"Remove custom column '{field['name']}'?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            != QMessageBox.Yes
+        ):
+            return
+
+        remaining_fields = [
+            candidate for idx, candidate in enumerate(self.active_custom_fields) if idx != remove_index
+        ]
+        self._apply_custom_field_configuration(
+            remaining_fields,
+            action_label=f"Remove Custom Column: {field['name']}",
+            action_type="fields.remove",
+        )
+
+    def manage_custom_columns(self):
+        dlg = CustomColumnsDialog(self.active_custom_fields, self)
+        if dlg.exec() == QDialog.Accepted:
+            self._apply_custom_field_configuration(
+                dlg.get_fields(),
+                action_label="Manage Custom Columns",
+                action_type="fields.manage",
+            )
 
 
     def _on_custom_fields_changed(self):
@@ -4183,6 +4401,11 @@ class App(QMainWindow):
             self._load_header_state()
         except Exception as e:
             logging.warning("Failed to load header state after custom fields change: %s", e)
+
+        try:
+            self._save_header_state(record_history=False)
+        except Exception as e:
+            logging.warning("Failed to save header state after custom fields change: %s", e)
 
         self.refresh_table()
         self._update_count_label()
@@ -4350,6 +4573,43 @@ class App(QMainWindow):
 
         menu.addSeparator()
 
+        header_item = self.table.horizontalHeaderItem(col)
+        header_text = header_item.text() if header_item is not None else ""
+        standard_media_key = self._standard_media_key_for_header(header_text)
+        if track_id and standard_media_key:
+            track_title_col = self._column_index_by_header("Track Title")
+            title_item = self.table.item(row, track_title_col) if track_title_col >= 0 else None
+            track_title = title_item.text() if title_item else self._get_track_title(track_id)
+
+            if self.track_has_media(track_id, standard_media_key):
+                act_prev = QAction("Preview File…", self)
+                act_prev.triggered.connect(
+                    lambda: self._preview_standard_media_for_track(track_id, standard_media_key)
+                )
+                menu.addAction(act_prev)
+
+            menu.addSeparator()
+            act_attach_standard = QAction("Attach/Replace File…", self)
+            act_attach_standard.triggered.connect(
+                lambda: self._attach_standard_media_for_track(track_id, standard_media_key)
+            )
+            menu.addAction(act_attach_standard)
+
+            if self.track_has_media(track_id, standard_media_key):
+                act_export_standard = QAction(f"Export '{track_title}'…", self)
+                act_export_standard.triggered.connect(
+                    lambda: self._export_standard_media_for_track(track_id, standard_media_key, track_title)
+                )
+                menu.addAction(act_export_standard)
+
+                act_delete_standard = QAction("Delete File…", self)
+                act_delete_standard.triggered.connect(
+                    lambda: self._delete_standard_media_for_track(track_id, standard_media_key)
+                )
+                menu.addAction(act_delete_standard)
+
+            menu.addSeparator()
+
         # Preview file action for custom blob columns
         if col >= len(self.BASE_HEADERS):
             field = self.active_custom_fields[col - len(self.BASE_HEADERS)]
@@ -4383,7 +4643,8 @@ class App(QMainWindow):
             field = self.active_custom_fields[col - len(self.BASE_HEADERS)]
             field_id = field["id"]
             id_item = self.table.item(row, 0)
-            title_item = self.table.item(row, 3)  # Track title column
+            title_idx = self._column_index_by_header("Track Title")
+            title_item = self.table.item(row, title_idx) if title_idx >= 0 else None
             if id_item and field.get("field_type") in ("blob_image", "blob_audio"):
                 track_id = int(id_item.text())
                 track_title = title_item.text() if title_item else f"track_{track_id}"
@@ -4436,7 +4697,16 @@ class App(QMainWindow):
     def _preview_blob_for_cell(self, row: int, col: int):
         """Directly preview the blob in the given cell (image/audio)."""
         if col < len(self.BASE_HEADERS):
-            return  # only custom blob columns
+            header_item = self.table.horizontalHeaderItem(col)
+            header_text = header_item.text() if header_item is not None else ""
+            media_key = self._standard_media_key_for_header(header_text)
+            if not media_key:
+                return
+            id_item = self.table.item(row, 0)
+            if not id_item:
+                return
+            self._preview_standard_media_for_track(int(id_item.text()), media_key)
+            return
 
         field = self.active_custom_fields[col - len(self.BASE_HEADERS)]
         id_item = self.table.item(row, 0)
@@ -4659,11 +4929,52 @@ class App(QMainWindow):
     # =============================================================================
     # Table header order persistence
     # =============================================================================
-    def _table_settings_prefix(self) -> str:
+    def _table_settings_prefix_for_path(self, path: str | None) -> str:
         """Per-profile (per-DB) settings namespace for table header state."""
-        db = getattr(self, "current_db_path", "") or ""
+        db = path or ""
         h = hashlib.sha1(db.encode("utf-8")).hexdigest()[:8]
         return f"table/{h}"
+
+    def _table_settings_prefix(self) -> str:
+        return self._table_settings_prefix_for_path(getattr(self, "current_db_path", "") or "")
+
+    def _clear_table_settings_for_path(self, path: str) -> None:
+        prefix = self._table_settings_prefix_for_path(path)
+        for suffix in (
+            "header_state",
+            "header_labels",
+            "header_labels_json",
+            "hidden_columns_json",
+            "columns_movable",
+        ):
+            self.settings.remove(f"{prefix}/{suffix}")
+        self.settings.sync()
+
+    def _default_header_labels(self) -> list[str]:
+        return list(self.BASE_HEADERS) + [f["name"] for f in getattr(self, "active_custom_fields", [])]
+
+    def _apply_header_label_order(self, ordered_labels: list[str]) -> None:
+        header = self.table.horizontalHeader()
+        current_labels = [
+            self.table.horizontalHeaderItem(i).text()
+            for i in range(self.table.columnCount())
+            if self.table.horizontalHeaderItem(i) is not None
+        ]
+        seen_pos: dict[str, int] = {}
+        target_logicals: list[int] = []
+        for label in ordered_labels:
+            start = seen_pos.get(label, 0)
+            try:
+                logical_index = current_labels.index(label, start)
+            except ValueError:
+                continue
+            target_logicals.append(logical_index)
+            seen_pos[label] = logical_index + 1
+
+        for visual_pos, logical_index in enumerate(target_logicals):
+            current_visual = header.visualIndex(logical_index)
+            if current_visual != -1 and current_visual != visual_pos:
+                header.moveSection(current_visual, visual_pos)
 
 
     def _toggle_columns_movable(self, enabled: bool):
@@ -4684,6 +4995,130 @@ class App(QMainWindow):
             logging.warning("Exception while toggling columns movable: %s", e)
             pass
 
+    def _hidden_columns_setting_key(self) -> str:
+        return f"{self._table_settings_prefix()}/hidden_columns_json"
+
+    def _capture_hidden_columns_payload(self) -> list[dict[str, int | str]]:
+        if not hasattr(self, "table"):
+            return []
+        payload = []
+        labels = self._header_labels()
+        for logical_index, (label, occurrence) in enumerate(self._labels_with_occurrence(labels)):
+            if self.table.isColumnHidden(logical_index):
+                payload.append({"label": label, "occurrence": occurrence})
+        return payload
+
+    def _write_hidden_columns_setting(self, *, sync: bool = True):
+        try:
+            payload = json.dumps(self._capture_hidden_columns_payload())
+        except Exception:
+            payload = "[]"
+        self.settings.setValue(self._hidden_columns_setting_key(), payload)
+        if sync:
+            self.settings.sync()
+
+    def _load_hidden_columns_payload(self) -> list[tuple[str, int]]:
+        settings_key = self._hidden_columns_setting_key()
+        if not self.settings.contains(settings_key):
+            return [(name, 0) for name in sorted(DEFAULT_HIDDEN_CUSTOM_COLUMN_NAMES)]
+
+        raw_value = self.settings.value(settings_key, "[]")
+        payload = raw_value
+        if isinstance(raw_value, str):
+            try:
+                payload = json.loads(raw_value or "[]")
+            except Exception:
+                payload = []
+        if not isinstance(payload, list):
+            payload = []
+
+        hidden_columns = []
+        for entry in payload:
+            if not isinstance(entry, dict):
+                continue
+            label = str(entry.get("label") or "")
+            try:
+                occurrence = int(entry.get("occurrence", 0))
+            except (TypeError, ValueError):
+                occurrence = 0
+            if label:
+                hidden_columns.append((label, occurrence))
+        return hidden_columns
+
+    def _apply_saved_column_visibility(self):
+        if not hasattr(self, "table"):
+            return
+
+        hidden_columns = set(self._load_hidden_columns_payload())
+        labels = self._header_labels()
+        previous_suspend_state = self._suspend_layout_history
+        self._suspend_layout_history = True
+        try:
+            for logical_index, token in enumerate(self._labels_with_occurrence(labels)):
+                self.table.setColumnHidden(logical_index, token in hidden_columns)
+        finally:
+            self._suspend_layout_history = previous_suspend_state
+
+    def _toggle_column_visibility(self, logical_index: int, visible: bool):
+        if logical_index < 0 or logical_index >= self.table.columnCount():
+            return
+
+        header_item = self.table.horizontalHeaderItem(logical_index)
+        column_name = header_item.text() if header_item is not None else f"Column {logical_index + 1}"
+        action_label = f"{'Show' if visible else 'Hide'} Column: {column_name}"
+
+        def mutation():
+            previous_suspend_state = self._suspend_layout_history
+            self._suspend_layout_history = True
+            try:
+                self.table.setColumnHidden(logical_index, not visible)
+                self._save_header_state(record_history=False)
+                self._rebuild_search_column_choices()
+                self.apply_search_filter()
+                self._refresh_column_visibility_menu()
+            finally:
+                self._suspend_layout_history = previous_suspend_state
+
+        self._run_setting_bundle_history_action(
+            action_label=action_label,
+            setting_keys=self._table_setting_keys(include_columns_movable=False),
+            mutation=mutation,
+            entity_id=f"{self._table_settings_prefix()}/column_visibility",
+        )
+
+    def _refresh_column_visibility_menu(self):
+        if not hasattr(self, "columns_menu"):
+            return
+
+        for action in getattr(self, "column_visibility_actions", []):
+            self.columns_menu.removeAction(action)
+            try:
+                action.deleteLater()
+            except Exception:
+                pass
+        self.column_visibility_actions = []
+
+        if not hasattr(self, "table"):
+            return
+
+        header = self.table.horizontalHeader()
+        logical_indices = sorted(
+            range(self.table.columnCount()),
+            key=lambda idx: header.visualIndex(idx) if header.visualIndex(idx) >= 0 else 10_000 + idx,
+        )
+
+        for logical_index in logical_indices:
+            header_item = self.table.horizontalHeaderItem(logical_index)
+            if header_item is None:
+                continue
+            action = QAction(header_item.text(), self.columns_menu)
+            action.setCheckable(True)
+            action.setChecked(not self.table.isColumnHidden(logical_index))
+            action.toggled.connect(
+                lambda checked, idx=logical_index: self._toggle_column_visibility(idx, checked)
+            )
+            self.columns_menu.addAction(action)
+            self.column_visibility_actions.append(action)
 
     def _save_header_state(self, *, record_history: bool = True):
         try:
@@ -4709,6 +5144,7 @@ class App(QMainWindow):
                 except Exception as e:
                     self.logger.warning("Failed to save header visual order JSON: %s", e)
 
+                self._write_hidden_columns_setting(sync=False)
                 self.settings.sync()
 
             if record_history:
@@ -4730,6 +5166,11 @@ class App(QMainWindow):
             header = self.table.horizontalHeader()
             prefix = self._table_settings_prefix()
             old_signal_state = header.blockSignals(True)
+            saved_order_keys = (
+                f"{prefix}/header_state",
+                f"{prefix}/header_labels",
+                f"{prefix}/header_labels_json",
+            )
 
             # Current labels after (re)building headers — includes any new custom fields
             current_labels = [
@@ -4737,40 +5178,34 @@ class App(QMainWindow):
                 for i in range(self.table.columnCount())
             ]
 
+            if not any(self.settings.contains(key) for key in saved_order_keys):
+                self._apply_header_label_order(self._default_header_labels())
+                self._apply_saved_column_visibility()
+                self._refresh_column_visibility_menu()
+                self._rebuild_search_column_choices()
+                return
+
             # Our robust, visual-order fallback list from last save
             saved_labels = self.settings.value(f"{prefix}/header_labels", [], list)
 
             # Native state blob (may be stale when columns changed)
             state = self.settings.value(f"{prefix}/header_state", None, QByteArray)
 
+            native_state_restored = False
+
             # Only apply native restore if the label sets match (prevents dropping new columns)
             if isinstance(state, QByteArray) and not state.isEmpty():
                 if saved_labels and set(saved_labels) == set(current_labels):
-                    if header.restoreState(state):
-                        return  # done; perfect match
+                    native_state_restored = bool(header.restoreState(state))
                 # else: mismatch → skip native restore on purpose
 
             # Fallback: reorder by labels we know; any new labels remain visible at the end
-            if saved_labels:
-                # Map the first occurrence of each label to its current logical index
-                seen_pos = {}
-                target_logicals = []
-                for lbl in saved_labels:
-                    start = seen_pos.get(lbl, 0)
-                    try:
-                        idx = current_labels.index(lbl, start)
-                    except ValueError:
-                        continue  # label no longer exists
-                    target_logicals.append(idx)
-                    seen_pos[lbl] = idx + 1
+            if saved_labels and not native_state_restored:
+                self._apply_header_label_order(saved_labels)
 
-                # Move sections to match saved visual order for known labels
-                for visual_pos, logical in enumerate(target_logicals):
-                    cur_visual = header.visualIndex(logical)
-                    if cur_visual != -1 and cur_visual != visual_pos:
-                        header.moveSection(cur_visual, visual_pos)
-
-            # No exception: leave new columns as-is (visible at the end)
+            self._apply_saved_column_visibility()
+            self._refresh_column_visibility_menu()
+            self._rebuild_search_column_choices()
         except Exception as e:
             self.logger.exception("Error loading header state: %s", e)
         finally:
@@ -4989,6 +5424,116 @@ class App(QMainWindow):
 # Edit Dialog (with Copy ISO / Copy compact buttons) + compact sync
 # =============================================================================
 
+    # ---------------------- Standard track media helpers ----------------------
+    @staticmethod
+    def _standard_media_header_map() -> dict[str, str]:
+        return {
+            "Audio File": "audio_file",
+            "Album Art": "album_art",
+        }
+
+    def _standard_media_key_for_header(self, header_text: str) -> str | None:
+        return self._standard_media_header_map().get(header_text)
+
+    def track_media_meta(self, track_id: int, media_key: str):
+        return self.track_service.get_media_meta(track_id, media_key, cursor=self.cursor)
+
+    def track_has_media(self, track_id: int, media_key: str) -> bool:
+        return self.track_service.has_media(track_id, media_key, cursor=self.cursor)
+
+    def track_fetch_media(self, track_id: int, media_key: str):
+        return self.track_service.fetch_media_bytes(track_id, media_key, cursor=self.cursor)
+
+    def track_set_media(self, track_id: int, media_key: str, source_path: str):
+        return self.track_service.set_media_path(track_id, media_key, source_path, cursor=self.cursor)
+
+    def track_clear_media(self, track_id: int, media_key: str):
+        self.track_service.clear_media(track_id, media_key, cursor=self.cursor)
+
+    def _attach_standard_media_for_track(self, track_id: int, media_key: str):
+        path = self._browse_track_media_file(media_key)
+        if not path:
+            return
+        header_label = "Audio File" if media_key == "audio_file" else "Album Art"
+        try:
+            self._run_snapshot_history_action(
+                action_label=f"Attach {header_label}",
+                action_type=f"track.{media_key}.attach",
+                entity_type="Track",
+                entity_id=track_id,
+                payload={"track_id": track_id, "media_key": media_key},
+                mutation=lambda: self.track_set_media(track_id, media_key, path),
+            )
+            self.refresh_table_preserve_view(focus_id=track_id)
+        except Exception as e:
+            self.conn.rollback()
+            self.logger.exception(f"Attach {media_key} failed: {e}")
+            QMessageBox.critical(self, "Track Media Error", f"Failed to attach file:\n{e}")
+
+    def _delete_standard_media_for_track(self, track_id: int, media_key: str):
+        header_label = "Audio File" if media_key == "audio_file" else "Album Art"
+        if (
+            QMessageBox.question(
+                self,
+                "Delete File",
+                f"Remove the stored {header_label.lower()} from this track?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            != QMessageBox.Yes
+        ):
+            return
+        try:
+            self._run_snapshot_history_action(
+                action_label=f"Delete {header_label}",
+                action_type=f"track.{media_key}.delete",
+                entity_type="Track",
+                entity_id=track_id,
+                payload={"track_id": track_id, "media_key": media_key},
+                mutation=lambda: self.track_clear_media(track_id, media_key),
+            )
+            self.refresh_table_preserve_view(focus_id=track_id)
+        except Exception as e:
+            self.conn.rollback()
+            self.logger.exception(f"Delete {media_key} failed: {e}")
+            QMessageBox.critical(self, "Track Media Error", f"Failed to remove file:\n{e}")
+
+    def _preview_standard_media_for_track(self, track_id: int, media_key: str):
+        try:
+            data, _mime = self.track_fetch_media(track_id, media_key)
+            title = self._get_track_title(track_id)
+            self._preview_blob_bytes(data, title)
+        except Exception as e:
+            self.conn.rollback()
+            self.logger.exception(f"Preview {media_key} failed: {e}")
+            QMessageBox.critical(self, "Track Media Error", f"Failed to preview file:\n{e}")
+
+    def _export_standard_media_for_track(self, track_id: int, media_key: str, suggested_basename: str | None = None):
+        try:
+            data, mime = self.track_fetch_media(track_id, media_key)
+        except Exception as e:
+            QMessageBox.critical(self, "Export failed", str(e))
+            return
+        ext = mimetypes.guess_extension(mime or "") or (".wav" if media_key == "audio_file" else ".png")
+        default_basename = suggested_basename or self._sanitize_filename(self._get_track_title(track_id))
+        default_filename = f"{default_basename}{ext}"
+        dest_path, _ = QFileDialog.getSaveFileName(self, "Export file", default_filename, "All files (*)")
+        if not dest_path:
+            return
+        try:
+            self._run_file_history_action(
+                action_label=f"Export {media_key.replace('_', ' ').title()}: {Path(dest_path).name}",
+                action_type=f"file.export_{media_key}",
+                target_path=dest_path,
+                mutation=lambda: Path(dest_path).write_bytes(data),
+                entity_type="Track",
+                entity_id=str(track_id),
+                payload={"path": str(dest_path), "track_id": track_id, "media_key": media_key},
+            )
+            QMessageBox.information(self, "Export", f"Saved:\n{dest_path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Export failed", str(e))
+
     # ---------------------- BLOB CF helpers (DB IO + export) ----------------------
     def cf_get_field_type(self, field_def_id: int) -> str:
         return self.custom_field_definitions.get_field_type(field_def_id)
@@ -5100,6 +5645,13 @@ class App(QMainWindow):
                 return i
         return -1
 
+    def _column_index_by_header(self, header_text: str) -> int:
+        for idx in range(self.table.columnCount()):
+            item = self.table.horizontalHeaderItem(idx)
+            if item is not None and item.text() == header_text:
+                return idx
+        return -1
+
     def _get_track_title(self, track_id: int) -> str:
         return self.track_service.fetch_track_title(track_id, cursor=self.cursor)
 
@@ -5143,6 +5695,11 @@ class App(QMainWindow):
         """Deterministically compute blob badges from source, not cached meta."""
         base = len(self.BASE_HEADERS)
         total_rows = self.table.rowCount()
+        standard_media_columns = {
+            header: self.BASE_HEADERS.index(header)
+            for header in self._standard_media_header_map()
+            if header in self.BASE_HEADERS
+        }
         for row_idx in range(total_rows):
             # Resolve PK for this visual row
             pk = self._get_row_pk(row_idx) if hasattr(self, "_get_row_pk") else None
@@ -5154,6 +5711,27 @@ class App(QMainWindow):
                     pk = int(id_item.text())
                 except Exception:
                     continue
+
+            for header, media_key in self._standard_media_header_map().items():
+                col = standard_media_columns.get(header)
+                if col is None:
+                    continue
+                try:
+                    meta = self.track_media_meta(pk, media_key)
+                except Exception:
+                    meta = {"has_media": False, "mime_type": None, "size_bytes": 0}
+                display = (
+                    self._format_blob_badge(meta.get("mime_type"), meta.get("size_bytes", 0))
+                    if meta.get("has_media")
+                    else "—"
+                )
+                item = self.table.item(row_idx, col)
+                if item is None:
+                    item = QTableWidgetItem(display)
+                    self.table.setItem(row_idx, col, item)
+                else:
+                    item.setText(display)
+                item.setData(Qt.UserRole, (pk, media_key) if meta.get("has_media") else None)
 
             # Walk active custom fields by display order
             for j, cf in enumerate(self.active_custom_fields):
@@ -5253,42 +5831,60 @@ class App(QMainWindow):
 
 
 class EditDialog(QDialog):
-    """Edits a single Track row (base columns only)."""
-    def __init__(self, row_data, parent: App):
+    """Edits a single Track row, including promoted standard fields."""
+
+    def __init__(self, track_id: int, parent: App):
         super().__init__(parent)
-        self.parent = parent        
+        self.parent = parent
+        self.track_id = int(track_id)
+        self.snapshot = self.parent.track_service.fetch_track_snapshot(self.track_id)
+        if self.snapshot is None:
+            raise ValueError(f"Track {track_id} not found")
+
+        self._existing_audio_display_path = str(
+            self.parent.track_service.resolve_media_path(self.snapshot.audio_file_path) or ""
+        )
+        self._existing_album_art_display_path = str(
+            self.parent.track_service.resolve_media_path(self.snapshot.album_art_path) or ""
+        )
+        self._clear_audio_file = False
+        self._clear_album_art = False
 
         self.setWindowTitle("Edit Entry")
         self.setModal(True)
 
-        # === Main dialog layout ===
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(8, 8, 8, 8)
         main_layout.setSpacing(8)
 
-        # === Scrollable form container (single layout; do NOT replace later) ===
         self._form_container = QWidget(self)
         form_layout = QVBoxLayout()
         form_layout.setContentsMargins(6, 6, 6, 6)
         form_layout.setSpacing(8)
         self._form_container.setLayout(form_layout)
 
-        def add_row(label_text, w):
+        def add_row(label_text, widget):
             row = QVBoxLayout()
             lbl = QLabel(label_text)
             row.addWidget(lbl)
-            row.addWidget(w)
+            row.addWidget(widget)
             form_layout.addLayout(row)
 
-        # Safe accessor for row_data
-        def _val(i):
-            try:
-                return row_data[i] if row_data[i] is not None else ""
-            except Exception:
-                return ""
+        def combo(label, value, source_query, allow_empty=True):
+            cb = QComboBox()
+            cb.setEditable(True)
+            items = [r[0] for r in self.parent.cursor.execute(source_query).fetchall()]
+            if allow_empty:
+                cb.addItem("")
+            cb.addItems(items)
+            cb.setCurrentText(value or "")
+            comp = QCompleter(items)
+            comp.setCaseSensitivity(Qt.CaseInsensitive)
+            cb.setCompleter(comp)
+            add_row(label, cb)
+            return cb
 
-        # --- ISRC (read-only) ---
-        self.isrc_field = QLineEdit(str(_val(1)))
+        self.isrc_field = QLineEdit(self.snapshot.isrc)
         add_row("ISRC", self.isrc_field)
 
         row_isrc_btns = QHBoxLayout()
@@ -5301,65 +5897,95 @@ class EditDialog(QDialog):
         btn_isrc_copy_iso.setDefault(False)
         btn_isrc_copy_compact.clicked.connect(self._copy_isrc_compact)
 
-        # --- Entry Date (read-only) ---
-        self.entry_date_field = QLineEdit(str(_val(2)))
+        self.entry_date_field = QLineEdit(self.snapshot.db_entry_date or "")
         self.entry_date_field.setReadOnly(True)
         add_row("Entry Date", self.entry_date_field)
 
-        # --- Track Title ---
-        self.track_title = QLineEdit(str(_val(3)))
+        self.track_title = QLineEdit(self.snapshot.track_title)
         add_row("Track Title", self.track_title)
 
-        def combo(label, value, source_query, allow_empty=True):
-            cb = QComboBox()
-            cb.setEditable(True)
-            items = [r[0] for r in self.parent.cursor.execute(source_query).fetchall()]
-            if allow_empty:
-                cb.addItem("")
-            cb.addItems(items)
-            cb.setCurrentText(value)
-            comp = QCompleter(items)
-            comp.setCaseSensitivity(Qt.CaseInsensitive)
-            cb.setCompleter(comp)
-            add_row(label, cb)
-            return cb
+        self.artist_name = combo(
+            "Artist",
+            self.snapshot.artist_name,
+            "SELECT DISTINCT name FROM Artists ORDER BY name",
+            allow_empty=False,
+        )
+        self.additional_artist = combo(
+            "Additional Artist(s)",
+            ", ".join(self.snapshot.additional_artists),
+            "SELECT DISTINCT name FROM Artists ORDER BY name",
+        )
+        self.album_title = combo(
+            "Album Title",
+            self.snapshot.album_title or "",
+            "SELECT DISTINCT title FROM Albums ORDER BY title",
+        )
+        self.genre = combo(
+            "Genre",
+            self.snapshot.genre or "",
+            "SELECT DISTINCT genre FROM Tracks WHERE genre IS NOT NULL AND genre != '' ORDER BY genre",
+        )
 
-        self.artist_name = combo("Artist", row_data[4], "SELECT DISTINCT name FROM Artists ORDER BY name", allow_empty=False)
-        self.additional_artist = combo("Additional Artist(s)", row_data[5], "SELECT DISTINCT name FROM Artists ORDER BY name")
-        self.album_title = combo("Album Title", row_data[6], "SELECT DISTINCT title FROM Albums ORDER BY title")
-        self.genre = combo('Genre', row_data[11], "SELECT DISTINCT genre FROM Tracks WHERE genre IS NOT NULL AND genre != '' ORDER BY genre")
-            
+        self.audio_file = QLineEdit(self._existing_audio_display_path)
+        self.audio_file.setReadOnly(True)
+        audio_row = QWidget(self)
+        audio_layout = QHBoxLayout(audio_row)
+        audio_layout.setContentsMargins(0, 0, 0, 0)
+        audio_layout.setSpacing(8)
+        audio_layout.addWidget(self.audio_file, 1)
+        btn_audio_browse = QPushButton("Browse…")
+        btn_audio_clear = QPushButton("Clear")
+        btn_audio_browse.clicked.connect(
+            lambda: self._choose_track_media("audio_file", self.audio_file, clear_attr="_clear_audio_file")
+        )
+        btn_audio_clear.clicked.connect(
+            lambda: self._clear_track_media(self.audio_file, clear_attr="_clear_audio_file")
+        )
+        audio_layout.addWidget(btn_audio_browse)
+        audio_layout.addWidget(btn_audio_clear)
+        add_row("Audio File", audio_row)
 
+        self.album_art = QLineEdit(self._existing_album_art_display_path)
+        self.album_art.setReadOnly(True)
+        art_row = QWidget(self)
+        art_layout = QHBoxLayout(art_row)
+        art_layout.setContentsMargins(0, 0, 0, 0)
+        art_layout.setSpacing(8)
+        art_layout.addWidget(self.album_art, 1)
+        btn_art_browse = QPushButton("Browse…")
+        btn_art_clear = QPushButton("Clear")
+        btn_art_browse.clicked.connect(
+            lambda: self._choose_track_media("album_art", self.album_art, clear_attr="_clear_album_art")
+        )
+        btn_art_clear.clicked.connect(
+            lambda: self._clear_track_media(self.album_art, clear_attr="_clear_album_art")
+        )
+        art_layout.addWidget(btn_art_browse)
+        art_layout.addWidget(btn_art_clear)
+        add_row("Album Art", art_row)
 
-        # --- Release Date ---
+        self.catalog_number = QLineEdit(self.snapshot.catalog_number or "")
+        add_row("Catalog#", self.catalog_number)
+
+        self.buma_work_number = QLineEdit(self.snapshot.buma_work_number or "")
+        add_row("BUMA Wnr.", self.buma_work_number)
+
         self.release_date = QCalendarWidget()
         self.release_date.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self.release_date.setMaximumHeight(320)
-        # parse existing date
-        d = None
-        try:
-            s = str(_val(7)).strip()
-            if s:
-                for fmt in ("dd-MMM-yyyy", "yyyy-MM-dd", "dd/MM/yyyy", "dd-MM-yyyy"):
-                    qd = QDate.fromString(s, fmt)
-                    if qd.isValid():
-                        d = qd
-                        break
-        except Exception:
-            d = None
-        self.release_date.setSelectedDate(d if d and d.isValid() else QDate.currentDate())
+        release_qdate = QDate.fromString(self.snapshot.release_date or "", "yyyy-MM-dd")
+        self.release_date.setSelectedDate(release_qdate if release_qdate.isValid() else QDate.currentDate())
         add_row("Release Date", self.release_date)
 
-        # --- Track Length (hh:mm:ss) ---
-        self.len_h = TwoDigitSpinBox(); self.len_h.setRange(0, 99);  self.len_h.setFixedWidth(60)
-        self.len_m = TwoDigitSpinBox(); self.len_m.setRange(0, 59);  self.len_m.setFixedWidth(50)
-        self.len_s = TwoDigitSpinBox(); self.len_s.setRange(0, 59);  self.len_s.setFixedWidth(50)
+        self.len_h = TwoDigitSpinBox(); self.len_h.setRange(0, 99); self.len_h.setFixedWidth(60)
+        self.len_m = TwoDigitSpinBox(); self.len_m.setRange(0, 59); self.len_m.setFixedWidth(50)
+        self.len_s = TwoDigitSpinBox(); self.len_s.setRange(0, 59); self.len_s.setFixedWidth(50)
+        current_length = seconds_to_hms(int(self.snapshot.track_length_sec or 0))
         try:
-            parts = str(_val(8)).split(":")
-            if len(parts) == 3:
-                self.len_h.setValue(int(parts[0]) if parts[0].isdigit() else 0)
-                self.len_m.setValue(int(parts[1]) if parts[1].isdigit() else 0)
-                self.len_s.setValue(int(parts[2]) if parts[2].isdigit() else 0)
+            parts = current_length.split(":")
+            self.len_h.setValue(int(parts[0]))
+            self.len_m.setValue(int(parts[1]))
+            self.len_s.setValue(int(parts[2]))
         except Exception:
             pass
         tl = QHBoxLayout()
@@ -5369,8 +5995,7 @@ class EditDialog(QDialog):
         tlw = QWidget(); tlw.setLayout(tl)
         add_row("Track Length (hh:mm:ss)", tlw)
 
-        # --- ISWC / UPC / Genre ---
-        self.iswc = QLineEdit(str(_val(9)))
+        self.iswc = QLineEdit(self.snapshot.iswc or "")
         add_row("ISWC", self.iswc)
 
         row_iswc_btns = QHBoxLayout()
@@ -5383,18 +6008,16 @@ class EditDialog(QDialog):
         btn_iswc_copy_iso.setDefault(False)
         btn_iswc_copy_compact.clicked.connect(self._copy_iswc_compact)
 
-        self.upc = QLineEdit(str(_val(10)))
+        self.upc = QLineEdit(self.snapshot.upc or "")
         add_row("UPC/EAN", self.upc)
 
         add_row("Genre", self.genre)
 
-        # === Scroll area ===
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setWidget(self._form_container)
         main_layout.addWidget(scroll, 1)
 
-        # === Buttons (outside scroll, always visible) ===
         btns = QHBoxLayout()
         btns.addStretch(1)
         save_btn = QPushButton("Save Changes")
@@ -5406,7 +6029,17 @@ class EditDialog(QDialog):
         btns.addWidget(cancel_btn)
         main_layout.addLayout(btns)
 
-        self.resize(400, 650)
+        self.resize(480, 760)
+
+    def _choose_track_media(self, media_key: str, line_edit: QLineEdit, *, clear_attr: str) -> None:
+        path = self.parent._browse_track_media_file(media_key, parent_widget=self)
+        if path:
+            setattr(self, clear_attr, False)
+            line_edit.setText(path)
+
+    def _clear_track_media(self, line_edit: QLineEdit, *, clear_attr: str) -> None:
+        setattr(self, clear_attr, True)
+        line_edit.clear()
 
     # --- Copy helpers ---
     def _copy_isrc_iso(self):
@@ -5469,16 +6102,7 @@ class EditDialog(QDialog):
                 QMessageBox.critical(self, "Update Error", "No parent window set.")
                 return
 
-            current_row = parent.table.currentRow()
-            if current_row < 0:
-                QMessageBox.warning(self, "No selection", "No row selected in table.")
-                return
-
-            row_item = parent.table.item(current_row, 0)
-            if row_item is None:
-                QMessageBox.warning(self, "Invalid row", "Could not determine record ID.")
-                return
-            row_id = int(parent.table.item(parent.table.currentRow(), 0).text())
+            row_id = int(self.track_id)
             before_snapshot = parent.track_service.fetch_track_snapshot(row_id)
             if before_snapshot is None:
                 QMessageBox.warning(self, "Update Error", "Could not load the selected track.")
@@ -5493,6 +6117,12 @@ class EditDialog(QDialog):
                 additional_artists=new_additional_artist,
                 album_title=self.album_title.currentText().strip() or None,
             )
+            audio_source_path = (self.audio_file.text() or "").strip()
+            album_art_source_path = (self.album_art.text() or "").strip()
+            if audio_source_path == self._existing_audio_display_path:
+                audio_source_path = None
+            if album_art_source_path == self._existing_album_art_display_path:
+                album_art_source_path = None
             parent.track_service.update_track(
                 TrackUpdatePayload(
                     track_id=row_id,
@@ -5506,6 +6136,12 @@ class EditDialog(QDialog):
                     iswc=(iso_iswc or None),
                     upc=(new_upc_raw or None),
                     genre=(new_genre or None),
+                    catalog_number=(self.catalog_number.text().strip() or None),
+                    buma_work_number=(self.buma_work_number.text().strip() or None),
+                    audio_file_source_path=audio_source_path,
+                    album_art_source_path=album_art_source_path,
+                    clear_audio_file=bool(self._clear_audio_file and not audio_source_path),
+                    clear_album_art=bool(self._clear_album_art and not album_art_source_path),
                 )
             )
             # --- patched: ensure WAL contents are flushed to the main db file ---

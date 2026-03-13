@@ -16,9 +16,11 @@ class CatalogReadService:
             """
             SELECT
                 t.id,
-                t.isrc,
-                t.db_entry_date,
+                '' AS audio_file,
                 t.track_title,
+                COALESCE(t.track_length_sec, 0) AS track_length_sec,
+                COALESCE(al.title, '') AS album_title,
+                '' AS album_art,
                 COALESCE(a.name, '') AS artist_name,
                 COALESCE((
                     SELECT GROUP_CONCAT(ar.name, ', ')
@@ -26,11 +28,13 @@ class CatalogReadService:
                     JOIN Artists ar ON ar.id = ta.artist_id
                     WHERE ta.track_id = t.id AND ta.role = 'additional'
                 ), '') AS additional_artists,
-                COALESCE(al.title, '') AS album_title,
-                COALESCE(t.release_date, '') AS release_date,
-                COALESCE(t.track_length_sec, 0) AS track_length_sec,
+                t.isrc,
+                COALESCE(t.buma_work_number, '') AS buma_work_number,
                 COALESCE(t.iswc, '') AS iswc,
                 COALESCE(t.upc, '') AS upc,
+                COALESCE(t.catalog_number, '') AS catalog_number,
+                COALESCE(t.db_entry_date, '') AS db_entry_date,
+                COALESCE(t.release_date, '') AS release_date,
                 COALESCE(t.genre, '') AS genre
             FROM Tracks t
             LEFT JOIN Artists a ON a.id = t.main_artist_id

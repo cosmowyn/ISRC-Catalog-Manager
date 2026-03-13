@@ -21,8 +21,16 @@ def make_track_conn():
             id INTEGER PRIMARY KEY,
             isrc TEXT NOT NULL,
             isrc_compact TEXT,
+            audio_file_path TEXT,
+            audio_file_mime_type TEXT,
+            audio_file_size_bytes INTEGER NOT NULL DEFAULT 0,
             track_title TEXT NOT NULL,
+            catalog_number TEXT,
+            album_art_path TEXT,
+            album_art_mime_type TEXT,
+            album_art_size_bytes INTEGER NOT NULL DEFAULT 0,
             main_artist_id INTEGER NOT NULL,
+            buma_work_number TEXT,
             album_id INTEGER,
             release_date DATE,
             track_length_sec INTEGER NOT NULL DEFAULT 0,
@@ -66,12 +74,14 @@ class TrackServiceTests(unittest.TestCase):
                 iswc="T-123.456.789-0",
                 upc="123456789012",
                 genre="Pop",
+                catalog_number="CAT-001",
+                buma_work_number="BUMA-77",
             )
         )
 
         row = self.conn.execute(
             """
-            SELECT t.isrc, t.isrc_compact, t.track_title, a.name, al.title, t.release_date, t.track_length_sec, t.iswc, t.upc, t.genre
+            SELECT t.isrc, t.isrc_compact, t.track_title, a.name, al.title, t.release_date, t.track_length_sec, t.iswc, t.upc, t.genre, t.catalog_number, t.buma_work_number
             FROM Tracks t
             JOIN Artists a ON a.id = t.main_artist_id
             LEFT JOIN Albums al ON al.id = t.album_id
@@ -103,6 +113,8 @@ class TrackServiceTests(unittest.TestCase):
                 "T-123.456.789-0",
                 "123456789012",
                 "Pop",
+                "CAT-001",
+                "BUMA-77",
             ),
         )
         self.assertEqual([name for (name,) in additional], ["Guest One", "Guest Two"])
@@ -137,12 +149,14 @@ class TrackServiceTests(unittest.TestCase):
                 iswc="T-123.456.789-0",
                 upc="1234567890123",
                 genre="Electronic",
+                catalog_number="CAT-002",
+                buma_work_number="BUMA-88",
             )
         )
 
         row = self.conn.execute(
             """
-            SELECT t.isrc, t.isrc_compact, t.track_title, a.name, al.title, t.release_date, t.track_length_sec, t.iswc, t.upc, t.genre
+            SELECT t.isrc, t.isrc_compact, t.track_title, a.name, al.title, t.release_date, t.track_length_sec, t.iswc, t.upc, t.genre, t.catalog_number, t.buma_work_number
             FROM Tracks t
             JOIN Artists a ON a.id = t.main_artist_id
             LEFT JOIN Albums al ON al.id = t.album_id
@@ -174,6 +188,8 @@ class TrackServiceTests(unittest.TestCase):
                 "T-123.456.789-0",
                 "1234567890123",
                 "Electronic",
+                "CAT-002",
+                "BUMA-88",
             ),
         )
         self.assertEqual([name for (name,) in additional], ["New Guest"])

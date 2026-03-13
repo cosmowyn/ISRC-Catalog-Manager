@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import logging
+import mimetypes
 import sqlite3
+import time
+from pathlib import Path
 from typing import Callable
 
-from isrc_manager.constants import SCHEMA_BASELINE, SCHEMA_TARGET
+from isrc_manager.constants import PROMOTED_CUSTOM_FIELDS, SCHEMA_BASELINE, SCHEMA_TARGET
 from isrc_manager.domain.codes import to_compact_isrc
 
 
@@ -20,12 +23,17 @@ class DatabaseSchemaService:
         logger: logging.Logger | None = None,
         audit_callback: Callable[[str, str, str | int | None, str | None], None] | None = None,
         audit_commit: Callable[[], None] | None = None,
+        data_root: str | Path | None = None,
     ):
         self.conn = conn
         self.cursor = conn.cursor()
         self.logger = logger or logging.getLogger(__name__)
         self.audit_callback = audit_callback
         self.audit_commit = audit_commit
+        self.data_root = Path(data_root) if data_root is not None else None
+
+    def _table_columns(self, table_name: str) -> set[str]:
+        return {row[1] for row in self.cursor.execute(f"PRAGMA table_info({table_name})").fetchall()}
 
     def init_db(self) -> None:
         # Core entities
@@ -56,8 +64,16 @@ class DatabaseSchemaService:
                 isrc TEXT NOT NULL,
                 isrc_compact TEXT,
                 db_entry_date DATE DEFAULT CURRENT_DATE,
+                audio_file_path TEXT,
+                audio_file_mime_type TEXT,
+                audio_file_size_bytes INTEGER NOT NULL DEFAULT 0,
                 track_title TEXT NOT NULL,
+                catalog_number TEXT,
+                album_art_path TEXT,
+                album_art_mime_type TEXT,
+                album_art_size_bytes INTEGER NOT NULL DEFAULT 0,
                 main_artist_id INTEGER NOT NULL,
+                buma_work_number TEXT,
                 album_id INTEGER,
                 release_date DATE,
                 track_length_sec INTEGER NOT NULL DEFAULT 0,
@@ -69,13 +85,36 @@ class DatabaseSchemaService:
             )
             """
         )
-        self.cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_tracks_isrc_unique ON Tracks(isrc)")
-        self.cursor.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_tracks_isrc_compact_unique ON Tracks(isrc_compact)"
-        )
-        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_title ON Tracks(track_title)")
-        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_upc ON Tracks(upc)")
-        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_genre ON Tracks(genre)")
+        self._ensure_current_track_columns()
+        track_columns = self._table_columns("Tracks")
+        if "isrc" in track_columns:
+            self.cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_tracks_isrc_unique ON Tracks(isrc)")
+        if "isrc_compact" in track_columns:
+            self.cursor.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_tracks_isrc_compact_unique ON Tracks(isrc_compact)"
+            )
+        if "track_title" in track_columns:
+            self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_title ON Tracks(track_title)")
+        if "upc" in track_columns:
+            self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_upc ON Tracks(upc)")
+        if "genre" in track_columns:
+            self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_genre ON Tracks(genre)")
+        if "catalog_number" in track_columns:
+            self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_catalog_number ON Tracks(catalog_number)")
+        if "buma_work_number" in track_columns:
+            self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_buma_work_number ON Tracks(buma_work_number)")
+        if "db_entry_date" in track_columns:
+            self.cursor.execute(
+                """
+                CREATE TRIGGER IF NOT EXISTS trg_tracks_db_entry_date_fill_ins
+                AFTER INSERT ON Tracks
+                FOR EACH ROW
+                WHEN NEW.db_entry_date IS NULL OR NEW.db_entry_date = ''
+                BEGIN
+                    UPDATE Tracks SET db_entry_date = CURRENT_DATE WHERE id = NEW.id;
+                END
+                """
+            )
 
         # Licenses & Licensees
         self.cursor.execute(
@@ -330,6 +369,9 @@ class DatabaseSchemaService:
             elif version == 11:
                 self._apply_migration(11, self._mig_11_to_12)
                 version = 12
+            elif version == 12:
+                self._apply_migration(12, self._mig_12_to_13)
+                version = 13
             else:
                 self.logger.warning("Unknown migration path from version %s", version)
                 break
@@ -712,3 +754,146 @@ class DatabaseSchemaService:
         self.cursor.execute(
             "INSERT OR IGNORE INTO HistoryHead (id, current_entry_id) VALUES (1, NULL)"
         )
+
+    def _mig_12_to_13(self) -> None:
+        self._ensure_current_track_columns()
+        self._migrate_promoted_custom_fields()
+
+    def _ensure_current_track_columns(self) -> None:
+        cols = self._table_columns("Tracks")
+        additions = (
+            ("db_entry_date", "DATE"),
+            ("isrc_compact", "TEXT"),
+            ("track_length_sec", "INTEGER NOT NULL DEFAULT 0"),
+            ("audio_file_path", "TEXT"),
+            ("audio_file_mime_type", "TEXT"),
+            ("audio_file_size_bytes", "INTEGER NOT NULL DEFAULT 0"),
+            ("catalog_number", "TEXT"),
+            ("album_art_path", "TEXT"),
+            ("album_art_mime_type", "TEXT"),
+            ("album_art_size_bytes", "INTEGER NOT NULL DEFAULT 0"),
+            ("buma_work_number", "TEXT"),
+        )
+        for column_name, column_sql in additions:
+            if column_name not in cols:
+                self.cursor.execute(f"ALTER TABLE Tracks ADD COLUMN {column_name} {column_sql}")
+        if "isrc_compact" in self._table_columns("Tracks"):
+            for track_id, isrc in self.cursor.execute(
+                "SELECT id, isrc FROM Tracks WHERE isrc_compact IS NULL OR isrc_compact = ''"
+            ).fetchall():
+                self.cursor.execute("UPDATE Tracks SET isrc_compact=? WHERE id=?", (to_compact_isrc(isrc), track_id))
+        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_catalog_number ON Tracks(catalog_number)")
+        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_buma_work_number ON Tracks(buma_work_number)")
+
+    def _migrate_promoted_custom_fields(self) -> None:
+        defs = self.cursor.execute(
+            "SELECT id, name, field_type FROM CustomFieldDefs WHERE name IN (?, ?, ?, ?)",
+            tuple(field["name"] for field in PROMOTED_CUSTOM_FIELDS),
+        ).fetchall()
+        if not defs:
+            return
+
+        for field_id, name, field_type in defs:
+            spec = next((item for item in PROMOTED_CUSTOM_FIELDS if item["name"] == name), None)
+            if spec is None:
+                continue
+
+            if spec["field_type"] in ("blob_audio", "blob_image"):
+                self._migrate_promoted_blob_field(
+                    field_id=int(field_id),
+                    field_name=name,
+                    path_column=spec["path_column"],
+                    mime_column=spec["mime_column"],
+                    size_column=spec["size_column"],
+                )
+            else:
+                self.cursor.execute(
+                    f"""
+                    UPDATE Tracks
+                    SET {spec['value_column']} = (
+                        SELECT value
+                        FROM CustomFieldValues
+                        WHERE field_def_id = ?
+                          AND track_id = Tracks.id
+                    )
+                    WHERE EXISTS (
+                        SELECT 1
+                        FROM CustomFieldValues
+                        WHERE field_def_id = ?
+                          AND track_id = Tracks.id
+                    )
+                    """,
+                    (int(field_id), int(field_id)),
+                )
+
+            self.cursor.execute("DELETE FROM CustomFieldValues WHERE field_def_id=?", (int(field_id),))
+            self.cursor.execute("DELETE FROM CustomFieldDefs WHERE id=?", (int(field_id),))
+
+    def _migrate_promoted_blob_field(
+        self,
+        *,
+        field_id: int,
+        field_name: str,
+        path_column: str,
+        mime_column: str,
+        size_column: str,
+    ) -> None:
+        rows = self.cursor.execute(
+            """
+            SELECT track_id, blob_value, mime_type, size_bytes
+            FROM CustomFieldValues
+            WHERE field_def_id = ?
+              AND blob_value IS NOT NULL
+            """,
+            (int(field_id),),
+        ).fetchall()
+        for track_id, blob_value, mime_type, size_bytes in rows:
+            if blob_value is None:
+                continue
+            stored_path, resolved_mime, resolved_size = self._write_promoted_blob_file(
+                track_id=int(track_id),
+                field_name=field_name,
+                blob_value=blob_value,
+                mime_type=mime_type,
+                size_bytes=size_bytes,
+            )
+            self.cursor.execute(
+                f"""
+                UPDATE Tracks
+                SET {path_column} = ?, {mime_column} = ?, {size_column} = ?
+                WHERE id = ?
+                """,
+                (stored_path, resolved_mime, resolved_size, int(track_id)),
+            )
+
+    def _write_promoted_blob_file(
+        self,
+        *,
+        track_id: int,
+        field_name: str,
+        blob_value,
+        mime_type: str | None,
+        size_bytes: int | None,
+    ) -> tuple[str, str, int]:
+        if self.data_root is None:
+            raise ValueError(
+                f"Cannot migrate promoted field '{field_name}' without a configured data_root"
+            )
+
+        media_kind = "audio" if "audio" in field_name.lower() else "images"
+        store_dir = self.data_root / "track_media" / media_kind
+        store_dir.mkdir(parents=True, exist_ok=True)
+
+        mime = (mime_type or "").strip()
+        ext = mimetypes.guess_extension(mime) if mime else None
+        if not ext:
+            ext = ".bin"
+
+        filename = f"{int(time.time_ns())}_{track_id}_{field_name.lower().replace(' ', '_').replace('/', '_')}{ext}"
+        destination = store_dir / filename
+        data = blob_value if isinstance(blob_value, (bytes, bytearray)) else bytes(blob_value)
+        destination.write_bytes(data)
+
+        resolved_mime = mime or (mimetypes.guess_type(destination.name)[0] or "")
+        resolved_size = int(size_bytes or len(data))
+        return str(destination.relative_to(self.data_root)), resolved_mime, resolved_size

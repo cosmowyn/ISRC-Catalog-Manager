@@ -24,8 +24,16 @@ def make_import_conn():
             id INTEGER PRIMARY KEY,
             isrc TEXT NOT NULL,
             isrc_compact TEXT,
+            audio_file_path TEXT,
+            audio_file_mime_type TEXT,
+            audio_file_size_bytes INTEGER NOT NULL DEFAULT 0,
             track_title TEXT NOT NULL,
+            catalog_number TEXT,
+            album_art_path TEXT,
+            album_art_mime_type TEXT,
+            album_art_size_bytes INTEGER NOT NULL DEFAULT 0,
             main_artist_id INTEGER NOT NULL,
+            buma_work_number TEXT,
             album_id INTEGER,
             release_date DATE,
             track_length_sec INTEGER NOT NULL DEFAULT 0,
@@ -64,8 +72,20 @@ def make_import_conn():
     conn.execute("INSERT INTO Artists(id, name) VALUES (1, 'Existing Artist')")
     conn.execute(
         """
-        INSERT INTO Tracks(id, isrc, isrc_compact, track_title, main_artist_id, album_id, release_date, track_length_sec, iswc, upc, genre)
-        VALUES (1, 'NL-ABC-26-00001', 'NLABC2600001', 'Existing Song', 1, NULL, '2026-03-13', 180, NULL, NULL, NULL)
+        INSERT INTO Tracks(
+            id, isrc, isrc_compact,
+            audio_file_path, audio_file_mime_type, audio_file_size_bytes,
+            track_title, catalog_number,
+            album_art_path, album_art_mime_type, album_art_size_bytes,
+            main_artist_id, buma_work_number, album_id, release_date, track_length_sec, iswc, upc, genre
+        )
+        VALUES (
+            1, 'NL-ABC-26-00001', 'NLABC2600001',
+            NULL, NULL, 0,
+            'Existing Song', NULL,
+            NULL, NULL, 0,
+            1, NULL, NULL, '2026-03-13', 180, NULL, NULL, NULL
+        )
         """
     )
     conn.commit()
@@ -162,6 +182,8 @@ class XMLImportServiceTests(unittest.TestCase):
                   <TrackLength>00:03:15</TrackLength>
                   <ISWC>T-123.456.789-0</ISWC>
                   <UPCEAN>123456789012</UPCEAN>
+                  <CatalogNumber>CAT-IMP-001</CatalogNumber>
+                  <BUMAWorkNumber>BUMA-IMP-55</BUMAWorkNumber>
                   <Genre>Pop</Genre>
                   <CustomFields>
                     <Field name="Mood" type="dropdown">
@@ -179,7 +201,18 @@ class XMLImportServiceTests(unittest.TestCase):
         self.assertEqual((result.inserted, result.duplicate_count, result.invalid_count, result.error_count), (1, 0, 0, 0))
         row = self.conn.execute(
             """
-            SELECT t.isrc, t.track_title, a.name, al.title, t.release_date, t.track_length_sec, t.iswc, t.upc, t.genre
+            SELECT
+                t.isrc,
+                t.track_title,
+                a.name,
+                al.title,
+                t.release_date,
+                t.track_length_sec,
+                t.iswc,
+                t.upc,
+                t.genre,
+                t.catalog_number,
+                t.buma_work_number
             FROM Tracks t
             JOIN Artists a ON a.id = t.main_artist_id
             LEFT JOIN Albums al ON al.id = t.album_id
@@ -216,6 +249,8 @@ class XMLImportServiceTests(unittest.TestCase):
                 "T-123.456.789-0",
                 "123456789012",
                 "Pop",
+                "CAT-IMP-001",
+                "BUMA-IMP-55",
             ),
         )
         self.assertEqual([name for (name,) in extras], ["Guest One", "Guest Two"])

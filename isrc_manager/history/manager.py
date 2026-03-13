@@ -27,7 +27,7 @@ from .models import HistoryEntry, SnapshotRecord
 class HistoryManager:
     """Stores history entries and applies undo/redo for supported actions."""
 
-    MANAGED_DIRECTORIES = ("licenses",)
+    MANAGED_DIRECTORIES = ("licenses", "track_media")
     FILE_COMPANION_SUFFIXES = (".wal", ".shm")
     SETTINGS_COALESCE_WINDOW_SECONDS = 2.0
     DOMAIN_TABLES_DELETE_ORDER = [
@@ -74,7 +74,7 @@ class HistoryManager:
         self.db_path = Path(db_path)
         self.history_root = Path(history_root)
         self.managed_root = Path(managed_root) if managed_root is not None else None
-        self.track_service = TrackService(conn)
+        self.track_service = TrackService(conn, managed_root)
         self.settings_mutations = SettingsMutationService(conn, settings)
         self.settings_reads = SettingsReadService(conn)
         self.profile_kv = ProfileKVService(conn)

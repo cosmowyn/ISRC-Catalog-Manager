@@ -20,6 +20,11 @@ from isrc_manager.domain.timecode import parse_hms_text
 from .custom_fields import CustomFieldDefinitionService
 from .tracks import TrackService
 
+PROMOTED_TEXT_CUSTOM_FIELDS = {
+    "catalog#": "catalog_number",
+    "buma wnr.": "buma_work_number",
+}
+
 
 @dataclass(slots=True)
 class ImportRecord:
@@ -34,6 +39,8 @@ class ImportRecord:
     upc: str | None
     genre: str | None
     track_length_sec: int | None
+    catalog_number: str | None
+    buma_work_number: str | None
     custom_fields: list[dict]
 
 
@@ -108,8 +115,12 @@ class XMLImportService:
                     album_id = self.track_service.get_or_create_album(record.album, cursor=cur)
                     cur.execute(
                         """
-                        INSERT INTO Tracks (isrc, isrc_compact, track_title, main_artist_id, album_id, release_date, track_length_sec, iswc, upc, genre)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO Tracks (
+                            isrc, isrc_compact, track_title, main_artist_id, album_id,
+                            release_date, track_length_sec, iswc, upc, genre,
+                            catalog_number, buma_work_number
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             record.iso_isrc,
@@ -122,6 +133,8 @@ class XMLImportService:
                             record.iso_iswc,
                             record.upc,
                             record.genre,
+                            record.catalog_number,
+                            record.buma_work_number,
                         ),
                     )
                     track_id = int(cur.lastrowid)
@@ -130,6 +143,13 @@ class XMLImportService:
 
                     for custom in record.custom_fields:
                         if not custom["name"] or not custom["type"]:
+                            continue
+                        promoted_key = PROMOTED_TEXT_CUSTOM_FIELDS.get(custom["name"].strip().lower())
+                        if promoted_key:
+                            cur.execute(
+                                f"UPDATE Tracks SET {promoted_key}=? WHERE id=?",
+                                (custom.get("value") or "", track_id),
+                            )
                             continue
                         if custom["type"] in ("blob_image", "blob_audio"):
                             continue
@@ -218,6 +238,8 @@ class XMLImportService:
                 upc = self._get_any(child_map, "upc")
                 genre = self._get_any(child_map, "genre")
                 track_length = self._get_any(child_map, "tracklength")
+                catalog_number = self._get_any(child_map, "catalog_number")
+                buma_work_number = self._get_any(child_map, "buma_work_number")
             else:
                 isrc_raw = self._get_any(child_map, "isrc")
                 title = self._get_any(child_map, "title")
@@ -229,6 +251,8 @@ class XMLImportService:
                 upc = self._get_any(child_map, "upcean", "upc")
                 genre = self._get_any(child_map, "genre")
                 track_length = self._get_any(child_map, "tracklength")
+                catalog_number = self._get_any(child_map, "catalognumber")
+                buma_work_number = self._get_any(child_map, "bumaworknumber")
 
             iso_isrc = to_iso_isrc(isrc_raw)
             comp_isrc = to_compact_isrc(iso_isrc)
@@ -269,6 +293,8 @@ class XMLImportService:
                     upc=upc or None,
                     genre=genre or None,
                     track_length_sec=track_length_sec,
+                    catalog_number=catalog_number or None,
+                    buma_work_number=buma_work_number or None,
                     custom_fields=customs,
                 )
             )
@@ -280,7 +306,12 @@ class XMLImportService:
             (custom["name"], custom["type"])
             for record in records
             for custom in record.custom_fields
-            if custom["name"] and custom["type"] and custom["type"] not in ("blob_image", "blob_audio")
+            if (
+                custom["name"]
+                and custom["type"]
+                and custom["type"] not in ("blob_image", "blob_audio")
+                and custom["name"].strip().lower() not in PROMOTED_TEXT_CUSTOM_FIELDS
+            )
         }
         if not required:
             return []

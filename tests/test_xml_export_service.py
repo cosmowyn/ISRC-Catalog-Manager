@@ -23,8 +23,16 @@ def make_export_conn():
             id INTEGER PRIMARY KEY,
             isrc TEXT NOT NULL,
             db_entry_date TEXT,
+            audio_file_path TEXT,
+            audio_file_mime_type TEXT,
+            audio_file_size_bytes INTEGER NOT NULL DEFAULT 0,
             track_title TEXT NOT NULL,
+            catalog_number TEXT,
+            album_art_path TEXT,
+            album_art_mime_type TEXT,
+            album_art_size_bytes INTEGER NOT NULL DEFAULT 0,
             main_artist_id INTEGER NOT NULL,
+            buma_work_number TEXT,
             album_id INTEGER,
             release_date TEXT,
             track_length_sec INTEGER NOT NULL DEFAULT 0,
@@ -62,12 +70,18 @@ def make_export_conn():
     conn.execute("INSERT INTO Albums(id, title) VALUES (1, 'Album One')")
     conn.executemany(
         """
-        INSERT INTO Tracks(id, isrc, db_entry_date, track_title, main_artist_id, album_id, release_date, track_length_sec, iswc, upc, genre)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO Tracks(
+            id, isrc, db_entry_date,
+            audio_file_path, audio_file_mime_type, audio_file_size_bytes,
+            track_title, catalog_number,
+            album_art_path, album_art_mime_type, album_art_size_bytes,
+            main_artist_id, buma_work_number, album_id, release_date, track_length_sec, iswc, upc, genre
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
-            (1, "NL-ABC-26-00001", "2026-03-13", "First Song", 1, 1, "2026-03-14", 195, "T-123.456.789-0", "123456789012", "Pop"),
-            (2, "NL-ABC-26-00002", "2026-03-15", "Second Song", 3, None, "", 60, "", "", "Rock"),
+            (1, "NL-ABC-26-00001", "2026-03-13", "track_media/audio/demo.wav", "audio/wav", 512, "First Song", "CAT-001", "track_media/images/cover.png", "image/png", 42, 1, "BUMA-42", 1, "2026-03-14", 195, "T-123.456.789-0", "123456789012", "Pop"),
+            (2, "NL-ABC-26-00002", "2026-03-15", None, None, 0, "Second Song", "", None, None, 0, 3, "", None, "", 60, "", "", "Rock"),
         ],
     )
     conn.execute("INSERT INTO TrackArtists(track_id, artist_id, role) VALUES (1, 2, 'additional')")
@@ -120,6 +134,10 @@ class XMLExportServiceTests(unittest.TestCase):
         self.assertEqual(first.findtext("track_title"), "First Song")
         self.assertEqual(first.findtext("TrackLength"), "00:03:15")
         self.assertEqual(first.findtext("track_length_sec"), "195")
+        self.assertEqual(first.findtext("catalog_number"), "CAT-001")
+        self.assertEqual(first.findtext("buma_work_number"), "BUMA-42")
+        self.assertEqual(first.findtext("audio_file_mime_type"), "audio/wav")
+        self.assertEqual(first.findtext("album_art_size_bytes"), "42")
         mood = first.find("./CustomFields/Field[@name='Mood']/Value")
         artwork_size = first.find("./CustomFields/Field[@name='Artwork']/SizeBytes")
         self.assertIsNotNone(mood)
@@ -145,6 +163,10 @@ class XMLExportServiceTests(unittest.TestCase):
         self.assertEqual(track.findtext("Title"), "First Song")
         self.assertEqual(track.findtext("AdditionalArtists"), "Guest Artist")
         self.assertEqual(track.findtext("TrackLength"), "00:03:15")
+        self.assertEqual(track.findtext("CatalogNumber"), "CAT-001")
+        self.assertEqual(track.findtext("BUMAWorkNumber"), "BUMA-42")
+        self.assertEqual(track.findtext("AudioFileMimeType"), "audio/wav")
+        self.assertEqual(track.findtext("AlbumArtSizeBytes"), "42")
         self.assertEqual(track.findtext("./CustomFields/Field[@name='Mood']/Value"), "Calm")
         self.assertEqual(track.findtext("./CustomFields/Field[@name='Artwork']/MimeType"), "image/png")
 

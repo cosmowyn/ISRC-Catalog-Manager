@@ -20,8 +20,16 @@ def make_catalog_read_conn():
             id INTEGER PRIMARY KEY,
             isrc TEXT NOT NULL,
             db_entry_date TEXT,
+            audio_file_path TEXT,
+            audio_file_mime_type TEXT,
+            audio_file_size_bytes INTEGER NOT NULL DEFAULT 0,
             track_title TEXT NOT NULL,
+            catalog_number TEXT,
+            album_art_path TEXT,
+            album_art_mime_type TEXT,
+            album_art_size_bytes INTEGER NOT NULL DEFAULT 0,
             main_artist_id INTEGER NOT NULL,
+            buma_work_number TEXT,
             album_id INTEGER,
             release_date TEXT,
             track_length_sec INTEGER NOT NULL DEFAULT 0,
@@ -52,12 +60,18 @@ def make_catalog_read_conn():
     )
     conn.executemany(
         """
-        INSERT INTO Tracks(id, isrc, db_entry_date, track_title, main_artist_id, album_id, release_date, track_length_sec, iswc, upc, genre)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO Tracks(
+            id, isrc, db_entry_date,
+            audio_file_path, audio_file_mime_type, audio_file_size_bytes,
+            track_title, catalog_number,
+            album_art_path, album_art_mime_type, album_art_size_bytes,
+            main_artist_id, buma_work_number, album_id, release_date, track_length_sec, iswc, upc, genre
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
-            (1, "NL-ABC-26-00001", "2026-03-13", "First Song", 1, 1, "2026-03-14", 195, "T-123.456.789-0", "123456789012", "Pop"),
-            (2, "NL-ABC-26-00002", "2026-03-14", "Second Song", 3, 2, "2026-03-15", 60, "", "", "Rock"),
+            (1, "NL-ABC-26-00001", "2026-03-13", "track_media/audio/demo.wav", "audio/wav", 512, "First Song", "CAT-001", "track_media/images/cover.png", "image/png", 42, 1, "BUMA-101", 1, "2026-03-14", 195, "T-123.456.789-0", "123456789012", "Pop"),
+            (2, "NL-ABC-26-00002", "2026-03-14", None, None, 0, "Second Song", "", None, None, 0, 3, "", 2, "2026-03-15", 60, "", "", "Rock"),
         ],
     )
     conn.execute("INSERT INTO TrackArtists(track_id, artist_id, role) VALUES (1, 2, 'additional')")
@@ -90,16 +104,20 @@ class CatalogReadServiceTests(unittest.TestCase):
             rows[0],
             (
                 1,
-                "NL-ABC-26-00001",
-                "2026-03-13",
+                "",
                 "First Song",
+                195,
+                "Album One",
+                "",
                 "Main Artist",
                 "Guest Artist",
-                "Album One",
-                "2026-03-14",
-                195,
+                "NL-ABC-26-00001",
+                "BUMA-101",
                 "T-123.456.789-0",
                 "123456789012",
+                "CAT-001",
+                "2026-03-13",
+                "2026-03-14",
                 "Pop",
             ),
         )
