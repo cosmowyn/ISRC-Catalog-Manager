@@ -59,10 +59,11 @@ from isrc_manager.domain.codes import (
     valid_upc_ean,
 )
 from isrc_manager.domain.timecode import hms_to_seconds, parse_hms_text, seconds_to_hms
-from isrc_manager.media.blob_files import _is_valid_audio_path, _is_valid_image_path, _read_blob_from_path
 from isrc_manager.paths import DATA_DIR
 from isrc_manager.services import (
     CatalogAdminService,
+    CustomFieldDefinitionService,
+    CustomFieldValueService,
     LicenseService,
     SettingsMutationService,
     TrackCreatePayload,
@@ -1085,6 +1086,8 @@ class App(QMainWindow):
         self.settings_mutations = None
         self.catalog_service = None
         self.license_service = None
+        self.custom_field_definitions = None
+        self.custom_field_values = None
         self.open_database(last_db)
 
         # ----- Menus -----
@@ -1490,6 +1493,12 @@ class App(QMainWindow):
         )
         self.catalog_service = CatalogAdminService(self.conn) if self.conn is not None else None
         self.license_service = LicenseService(self.conn, DATA_DIR()) if self.conn is not None else None
+        self.custom_field_definitions = (
+            CustomFieldDefinitionService(self.conn) if self.conn is not None else None
+        )
+        self.custom_field_values = (
+            CustomFieldValueService(self.conn, self.custom_field_definitions) if self.conn is not None else None
+        )
 
 
     # -------------------------------------------------------------------------
@@ -2414,19 +2423,7 @@ class App(QMainWindow):
         return (row[0] or "").strip() if row else ""
 
     def load_active_custom_fields(self):
-        fields = []
-        for row in self.cursor.execute(
-            "SELECT id, name, field_type, options "
-            "FROM CustomFieldDefs WHERE active=1 "
-            "ORDER BY COALESCE(sort_order, 999999), name"
-        ).fetchall():
-            fields.append({
-                "id": row[0],
-                "name": row[1],
-                "field_type": row[2] or "text",
-                "options": row[3]
-            })
-        return fields
+        return self.custom_field_definitions.list_active_fields()
 
     # =============================================================================
     # UI helpers
@@ -3842,34 +3839,9 @@ class App(QMainWindow):
         dlg = CustomColumnsDialog(self.active_custom_fields, self)
         if dlg.exec() == QDialog.Accepted:
             new_fields = dlg.get_fields()
-            keep_ids = {f["id"] for f in new_fields if f["id"] is not None}
-
-            # Remove deleted defs (values cascade)
-            for old in self.active_custom_fields:
-                if old["id"] not in keep_ids:
-                    self.cursor.execute("DELETE FROM CustomFieldDefs WHERE id=?", (old["id"],))
-
-            # Upsert & order
-            order = 0
-            for f in new_fields:
-                name = f["name"].strip()
-                ftype = (f.get("field_type") or "text").strip()
-                opts = f.get("options")
-                if f["id"] is None:
-                    self.cursor.execute(
-                        "INSERT INTO CustomFieldDefs (name, active, sort_order, field_type, options) "
-                        "VALUES (?, 1, ?, ?, ?)",
-                        (name, order, ftype, opts)
-                    )
-                else:
-                    self.cursor.execute(
-                        "UPDATE CustomFieldDefs SET name=?, active=1, sort_order=?, field_type=?, options=? WHERE id=?",
-                        (name, order, ftype, opts, f["id"])
-                    )
-                order += 1
 
             try:
-                self.conn.commit()
+                self.custom_field_definitions.sync_fields(self.active_custom_fields, new_fields)
             except Exception as e:
                 self.conn.rollback()
                 self.logger.exception(f"Custom fields update failed: {e}")
@@ -3952,11 +3924,7 @@ class App(QMainWindow):
                 return
 
         # --- Non-BLOB editors (unchanged) ---
-        row = self.cursor.execute(
-            "SELECT value FROM CustomFieldValues WHERE track_id=? AND field_def_id=?",
-            (track_id, field_id)
-        ).fetchone()
-        current_val = row[0] if row else ""
+        current_val = self.custom_field_values.get_text_value(track_id, field_id)
 
         if field_type == "dropdown":
             choices = options[:] if options else []
@@ -3971,11 +3939,7 @@ class App(QMainWindow):
             if new_val and options is not None and new_val not in options:
                 options.append(new_val)
                 try:
-                    self.cursor.execute(
-                        "UPDATE CustomFieldDefs SET options=? WHERE id=?",
-                        (json.dumps(options), field_id)
-                    )
-                    self.conn.commit()
+                    self.custom_field_definitions.update_dropdown_options(field_id, options)
                 except Exception as e:
                     self.logger.exception(f"Failed to update dropdown options: {e}")
         elif field_type == "checkbox":
@@ -4000,12 +3964,7 @@ class App(QMainWindow):
 
         # Upsert for non-BLOB fields
         try:
-            self.cursor.execute("""
-                INSERT INTO CustomFieldValues (track_id, field_def_id, value)
-                VALUES (?, ?, ?)
-                ON CONFLICT(track_id, field_def_id) DO UPDATE SET value=excluded.value
-            """, (track_id, field_id, new_val))
-            self.conn.commit()
+            self.custom_field_values.save_value(track_id, field_id, value=new_val)
             self.refresh_table_preserve_view(focus_id=track_id)
         except Exception as e:
             self.conn.rollback()
@@ -4689,47 +4648,11 @@ class App(QMainWindow):
 
     # ---------------------- BLOB CF helpers (DB IO + export) ----------------------
     def cf_get_field_type(self, field_def_id: int) -> str:
-        row = self.cursor.execute(
-            "SELECT field_type FROM CustomFieldDefs WHERE id=?", (field_def_id,)
-        ).fetchone()
-        return row[0] if row else "text"
+        return self.custom_field_definitions.get_field_type(field_def_id)
 
     def cf_save_value(self, track_id: int, field_def_id: int, *, value=None, blob_path: str|None=None):
-        ftype = self.cf_get_field_type(field_def_id)
-        if ftype in ("blob_image", "blob_audio"):
-            # If no path provided (e.g., user cancelled), do nothing to avoid violating triggers
-            if blob_path is None:
-                return
-            if ftype == "blob_image":
-                if not _is_valid_image_path(blob_path):
-                    raise ValueError("Selected file is not a recognized image")
-            else:
-                if not _is_valid_audio_path(blob_path):
-                    raise ValueError("Selected file is not a recognized audio format")
+        self.custom_field_values.save_value(track_id, field_def_id, value=value, blob_path=blob_path)
 
-            blob_data = _read_blob_from_path(blob_path)
-            mime, _ = mimetypes.guess_type(blob_path)
-            size = len(blob_data)
-
-            self.cursor.execute(
-                "INSERT INTO CustomFieldValues (track_id, field_def_id, value, blob_value, mime_type, size_bytes) "
-                "VALUES (?, ?, ?, ?, ?, ?) "
-                "ON CONFLICT(track_id, field_def_id) DO UPDATE SET "
-                "value=excluded.value, blob_value=excluded.blob_value, mime_type=excluded.mime_type, size_bytes=excluded.size_bytes",
-                (track_id, field_def_id, None, sqlite3.Binary(blob_data), mime, size)
-            )
-            self.conn.commit()
-            return
-
-        # Non-BLOB types
-        self.cursor.execute(
-            "INSERT INTO CustomFieldValues (track_id, field_def_id, value, blob_value, mime_type, size_bytes) "
-            "VALUES (?, ?, ?, NULL, NULL, 0) "
-            "ON CONFLICT(track_id, field_def_id) DO UPDATE SET "
-            "value=excluded.value, blob_value=NULL, mime_type=NULL, size_bytes=0",
-            (track_id, field_def_id, value)
-        )
-        self.conn.commit()
     def _attach_blob_for_cell(self, track_id: int, field_def_id: int, field_type: str, field_name: str):
         if field_type == "blob_image":
             flt = "Images (*.png *.jpg *.jpeg *.webp *.gif *.bmp *.tif *.tiff);;All files (*)"
@@ -4748,49 +4671,16 @@ class App(QMainWindow):
 
     # ---------------------- BLOB CF helpers v2 (get/export/delete/format) ----------------------
     def cf_get_value_meta(self, track_id: int, field_def_id: int):
-        """
-        Returns dict with keys for a custom field value:
-            - value (TEXT)
-            - has_blob (bool)
-            - size_bytes (int or 0)
-            - mime_type (str or None)
-        """
-        row = self.cursor.execute(
-            "SELECT value, blob_value, size_bytes, mime_type FROM CustomFieldValues WHERE track_id=? AND field_def_id=?",
-            (track_id, field_def_id)
-        ).fetchone()
-        if not row:
-            return {"value": None, "has_blob": False, "size_bytes": 0, "mime_type": None}
-        value, blob_value, size_bytes, mime_type = row
-        return {
-            "value": value,
-            "has_blob": blob_value is not None,
-            "size_bytes": int(size_bytes or 0) if size_bytes is not None else 0,
-            "mime_type": mime_type,
-        }
+        return self.custom_field_values.get_value_meta(track_id, field_def_id)
 
     def cf_has_blob(self, track_id: int, field_def_id: int) -> bool:
-        row = self.cursor.execute(
-            "SELECT blob_value FROM CustomFieldValues WHERE track_id=? AND field_def_id=?",
-            (track_id, field_def_id)
-        ).fetchone()
-        return bool(row and row[0] is not None)
+        return self.custom_field_values.has_blob(track_id, field_def_id)
 
     def cf_blob_size(self, track_id: int, field_def_id: int) -> int:
-        row = self.cursor.execute(
-            "SELECT size_bytes FROM CustomFieldValues WHERE track_id=? AND field_def_id=?",
-            (track_id, field_def_id)
-        ).fetchone()
-        return int(row[0] or 0) if row else 0
+        return self.custom_field_values.blob_size(track_id, field_def_id)
 
     def cf_fetch_blob(self, track_id: int, field_def_id: int):
-        row = self.cursor.execute(
-            "SELECT blob_value, mime_type FROM CustomFieldValues WHERE track_id=? AND field_def_id=?",
-            (track_id, field_def_id)
-        ).fetchone()
-        if not row or row[0] is None:
-            raise FileNotFoundError("No file stored for this field.")
-        return row[0], row[1]
+        return self.custom_field_values.fetch_blob(track_id, field_def_id)
 
     def cf_export_blob(self, track_id: int, field_def_id: int, parent_widget=None, suggested_basename: str|None=None):
         try:
@@ -4806,8 +4696,7 @@ class App(QMainWindow):
         if not ext:
             ext = ".png" if (mime and mime.startswith("image/")) else (".wav" if (mime and mime.startswith("audio/")) else ".bin")
         if suggested_basename is None:
-            name_row = self.cursor.execute("SELECT name FROM CustomFieldDefs WHERE id=?", (field_def_id,)).fetchone()
-            suggested_basename = (name_row[0] if name_row and name_row[0] else "file")
+            suggested_basename = self.custom_field_definitions.get_field_name(field_def_id)
         default_filename = f"{suggested_basename}{ext}"
         dest_path, _ = QFileDialog.getSaveFileName(parent_widget or None, "Export file", default_filename, "All files (*)")
         if not dest_path:
@@ -4819,15 +4708,7 @@ class App(QMainWindow):
             QMessageBox.critical(parent_widget or None, "Export failed", str(e))
 
     def cf_delete_blob(self, track_id: int, field_def_id: int):
-        """
-        Remove the BLOB by deleting the row from CustomFieldValues for this (track_id, field_def_id).
-        This avoids violating triggers that require blob_value on UPDATE for blob fields.
-        """
-        self.cursor.execute(
-            "DELETE FROM CustomFieldValues WHERE track_id=? AND field_def_id=?",
-            (track_id, field_def_id)
-        )
-        self.conn.commit()
+        self.custom_field_values.delete_blob(track_id, field_def_id)
 
     def _human_size(self, n: int) -> str:
         try:
