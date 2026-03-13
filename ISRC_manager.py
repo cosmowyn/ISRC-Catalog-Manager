@@ -1683,9 +1683,8 @@ class App(QMainWindow):
         right_panel.addWidget(self.table)
         self.super_layout.addLayout(right_panel, 1)
 
-        # Default table-only
-        self.add_data_action.setChecked(False)
-        self._on_toggle_add_data(False)
+        # Restore view preferences after all controls and panels exist
+        self._apply_saved_view_preferences()
 
         self.refresh_table()
         self.populate_all_comboboxes()
@@ -2105,6 +2104,10 @@ class App(QMainWindow):
         except Exception:
             pass
         self._apply_saved_hint_positions()
+        try:
+            self._apply_saved_view_preferences()
+        except Exception:
+            pass
         self.populate_all_comboboxes()
         self.refresh_table_preserve_view()
         self._refresh_history_actions()
@@ -2135,6 +2138,116 @@ class App(QMainWindow):
                 pass
         header.sectionMoved.connect(self._on_header_layout_changed)
         header.sectionResized.connect(self._on_header_layout_changed)
+
+    @staticmethod
+    def _set_action_checked_silently(action: QAction, enabled: bool):
+        action.blockSignals(True)
+        try:
+            action.setChecked(bool(enabled))
+        finally:
+            action.blockSignals(False)
+
+    def _apply_columns_movable_state(self, enabled: bool):
+        self.table.horizontalHeader().setSectionsMovable(bool(enabled))
+
+    def _apply_col_width_mode(self, enabled: bool):
+        hh = self.table.horizontalHeader()
+        if enabled:
+            for i in range(self.table.columnCount()):
+                hh.setSectionResizeMode(i, QHeaderView.Interactive)
+            hh.setStretchLastSection(False)
+            try:
+                hh.sectionResized.disconnect(self._update_col_hint)
+            except TypeError:
+                pass
+            hh.sectionResized.connect(self._update_col_hint)
+            self._ensure_col_hint_label()
+            self.col_hint_label.show()
+            self._apply_table_view_settings()
+        else:
+            for i in range(self.table.columnCount()):
+                hh.setSectionResizeMode(i, QHeaderView.ResizeToContents)
+            hh.setStretchLastSection(True)
+            if not self.col_width_action.isChecked():
+                self.table.resizeColumnsToContents()
+            try:
+                hh.sectionResized.disconnect(self._update_col_hint)
+            except TypeError:
+                pass
+            if self.col_hint_label:
+                self.col_hint_label.hide()
+            self._apply_table_view_settings()
+        self._reset_hint_label()
+
+    def _apply_row_height_mode(self, enabled: bool):
+        vh = self.table.verticalHeader()
+        if enabled:
+            vh.setSectionResizeMode(QHeaderView.Interactive)
+            try:
+                vh.sectionResized.disconnect(self._update_row_hint)
+            except TypeError:
+                pass
+            vh.sectionResized.connect(self._update_row_hint)
+            self._ensure_row_hint_label()
+            self.row_hint_label.show()
+        else:
+            vh.setSectionResizeMode(QHeaderView.Fixed)
+            for i in range(self.table.rowCount()):
+                self.table.setRowHeight(i, 24)
+            try:
+                vh.sectionResized.disconnect(self._update_row_hint)
+            except TypeError:
+                pass
+            if self.row_hint_label:
+                self.row_hint_label.hide()
+        self._apply_table_view_settings()
+        self._reset_hint_label()
+
+    def _apply_add_data_panel_state(self, enabled: bool):
+        enabled = bool(enabled)
+
+        if hasattr(self, "left_scroll") and isinstance(self.left_scroll, QWidget):
+            if enabled:
+                try:
+                    self.left_scroll.setMaximumWidth(16777215)
+                    self.left_scroll.setMinimumWidth(350)
+                except Exception:
+                    pass
+                self.left_scroll.show()
+            else:
+                self.left_scroll.hide()
+                try:
+                    self.left_scroll.setMinimumWidth(0)
+                    self.left_scroll.setMaximumWidth(0)
+                except Exception:
+                    pass
+
+        try:
+            self.super_layout.setStretch(0, 0)
+            self.super_layout.setStretch(1, 1)
+        except Exception:
+            pass
+
+    def _apply_saved_view_preferences(self):
+        previous_suspend_state = self._suspend_layout_history
+        self._suspend_layout_history = True
+        try:
+            columns_movable = self.settings.value(f"{self._table_settings_prefix()}/columns_movable", False, bool)
+            col_width_enabled = self.settings.value("display/interactive_col_width", False, bool)
+            row_height_enabled = self.settings.value("display/interactive_row_height", False, bool)
+            add_data_enabled = self.settings.value("display/add_data_panel", False, bool)
+
+            self._set_action_checked_silently(self.act_reorder_columns, columns_movable)
+            self._set_action_checked_silently(self.col_width_action, col_width_enabled)
+            self._set_action_checked_silently(self.row_height_action, row_height_enabled)
+            self._set_action_checked_silently(self.add_data_action, add_data_enabled)
+
+            self._apply_columns_movable_state(columns_movable)
+            self._apply_col_width_mode(col_width_enabled)
+            self._apply_row_height_mode(row_height_enabled)
+            self._apply_add_data_panel_state(add_data_enabled)
+        finally:
+            self._suspend_layout_history = previous_suspend_state
 
     def _record_setting_bundle_from_entries(
         self,
@@ -3438,56 +3551,34 @@ class App(QMainWindow):
         self.table.verticalHeader().setVisible(True)
 
     def _on_toggle_col_width(self, enabled: bool):
-        hh = self.table.horizontalHeader()
-        if enabled:
-            for i in range(self.table.columnCount()):
-                hh.setSectionResizeMode(i, QHeaderView.Interactive)
-            hh.setStretchLastSection(False)
-            try:
-                hh.sectionResized.disconnect(self._update_col_hint)
-            except TypeError:
-                pass
-            hh.sectionResized.connect(self._update_col_hint)
-            self._ensure_col_hint_label()
-            self.col_hint_label.show()
-            self._apply_table_view_settings()
-        else:
-            for i in range(self.table.columnCount()):
-                hh.setSectionResizeMode(i, QHeaderView.ResizeToContents)
-            hh.setStretchLastSection(True)
-            self.table.resizeColumnsToContents()
-            try:
-                hh.sectionResized.disconnect(self._update_col_hint)
-            except TypeError:
-                pass
-            if self.col_hint_label:
-                self.col_hint_label.hide()
-            self._apply_table_view_settings()
-        self._reset_hint_label()
+        enabled = bool(enabled)
+
+        def mutation():
+            self._apply_col_width_mode(enabled)
+            self.settings.setValue("display/interactive_col_width", enabled)
+            self.settings.sync()
+
+        self._run_setting_bundle_history_action(
+            action_label="Toggle Column Width Editing",
+            setting_keys=["display/interactive_col_width"],
+            mutation=mutation,
+            entity_id="display/interactive_col_width",
+        )
 
     def _on_toggle_row_height(self, enabled: bool):
-        vh = self.table.verticalHeader()
-        if enabled:
-            vh.setSectionResizeMode(QHeaderView.Interactive)
-            try:
-                vh.sectionResized.disconnect(self._update_row_hint)
-            except TypeError:
-                pass
-            vh.sectionResized.connect(self._update_row_hint)
-            self._ensure_row_hint_label()
-            self.row_hint_label.show()
-        else:
-            vh.setSectionResizeMode(QHeaderView.Fixed)
-            for i in range(self.table.rowCount()):
-                self.table.setRowHeight(i, 24)
-            try:
-                vh.sectionResized.disconnect(self._update_row_hint)
-            except TypeError:
-                pass
-            if self.row_hint_label:
-                self.row_hint_label.hide()
-        self._apply_table_view_settings()
-        self._reset_hint_label()
+        enabled = bool(enabled)
+
+        def mutation():
+            self._apply_row_height_mode(enabled)
+            self.settings.setValue("display/interactive_row_height", enabled)
+            self.settings.sync()
+
+        self._run_setting_bundle_history_action(
+            action_label="Toggle Row Height Editing",
+            setting_keys=["display/interactive_row_height"],
+            mutation=mutation,
+            entity_id="display/interactive_row_height",
+        )
 
     def _reset_hint_label(self):
         if self.col_hint_label:
@@ -3496,46 +3587,19 @@ class App(QMainWindow):
             self.row_hint_label._user_moved = False
 
     def _on_toggle_add_data(self, enabled: bool):
-        """
-        Toggle visibility of the left 'add data' pane.
-        When disabled, the table view expands to occupy the full window.
-        """
         enabled = bool(enabled)
 
-        # If the scroll container exists (rev11), toggle it.
-        if hasattr(self, "left_scroll") and isinstance(self.left_scroll, QWidget):
-            if enabled:
-                # Restore normal width and show
-                try:
-                    self.left_scroll.setMaximumWidth(16777215)  # Qt max
-                    self.left_scroll.setMinimumWidth(350)       # your original
-                except Exception:
-                    pass
-                self.left_scroll.show()
-            else:
-                # Hide completely and collapse width so layout gives all space to the table
-                self.left_scroll.hide()
-                try:
-                    self.left_scroll.setMinimumWidth(0)
-                    self.left_scroll.setMaximumWidth(0)
-                except Exception:
-                    pass
+        def mutation():
+            self._apply_add_data_panel_state(enabled)
+            self.settings.setValue("display/add_data_panel", enabled)
+            self.settings.sync()
 
-        # Make sure the right side stretches to fill
-        try:
-            # Left index = 0 (left_scroll), right index = 1 (right_panel)
-            # Give all stretch to the right side; left can be 0
-            self.super_layout.setStretch(0, 0)
-            self.super_layout.setStretch(1, 1)
-        except Exception:
-            pass
-
-        # If you also programmatically control the QAction state elsewhere, keep it in sync
-        try:
-            self.add_data_action.blockSignals(True)
-            self.add_data_action.setChecked(enabled)
-        finally:
-            self.add_data_action.blockSignals(False)
+        self._run_setting_bundle_history_action(
+            action_label="Toggle Add Data Panel",
+            setting_keys=["display/add_data_panel"],
+            mutation=mutation,
+            entity_id="display/add_data_panel",
+        )
 
 
     def _ensure_col_hint_label(self):
