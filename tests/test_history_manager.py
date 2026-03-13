@@ -8,6 +8,7 @@ from isrc_manager.history import HistoryManager
 from isrc_manager.services import (
     DatabaseSchemaService,
     DatabaseSessionService,
+    LicenseService,
     SettingsMutationService,
     SettingsReadService,
     TrackCreatePayload,
@@ -23,6 +24,8 @@ class HistoryManagerTests(unittest.TestCase):
         self.db_path = self.root / "Database" / "library.db"
         self.settings_path = self.root / "settings.ini"
         self.history_root = self.root / "history"
+        self.data_root = self.root / "data"
+        self.data_root.mkdir(parents=True, exist_ok=True)
         self.settings = QSettings(str(self.settings_path), QSettings.IniFormat)
         self.settings.setFallbacksEnabled(False)
 
@@ -34,9 +37,16 @@ class HistoryManagerTests(unittest.TestCase):
         self.schema.migrate_schema()
 
         self.track_service = TrackService(self.conn)
+        self.license_service = LicenseService(self.conn, self.data_root)
         self.settings_mutations = SettingsMutationService(self.conn, self.settings)
         self.settings_reads = SettingsReadService(self.conn)
-        self.history = HistoryManager(self.conn, self.settings, self.db_path, self.history_root)
+        self.history = HistoryManager(
+            self.conn,
+            self.settings,
+            self.db_path,
+            self.history_root,
+            self.data_root,
+        )
 
     def tearDown(self):
         self.settings.clear()
@@ -58,6 +68,11 @@ class HistoryManagerTests(unittest.TestCase):
                 genre="Pop",
             )
         )
+
+    def _create_source_pdf(self, name: str = "signed_license.pdf") -> Path:
+        pdf_path = self.root / name
+        pdf_path.write_bytes(b"%PDF-1.4\n% history test\n")
+        return pdf_path
 
     def test_setting_change_undo_and_redo_are_persistent(self):
         self.settings_mutations.set_isrc_prefix("NLABC")
@@ -172,6 +187,52 @@ class HistoryManagerTests(unittest.TestCase):
 
         self.history.redo()
         self.assertEqual(self.track_service.fetch_track_snapshot(track_id).track_title, "Updated Song")
+
+    def test_snapshot_actions_restore_managed_license_files(self):
+        track_id = self._create_track()
+        source_pdf = self._create_source_pdf()
+
+        before = self.history.capture_snapshot(kind="pre_license_add", label="Before Add License")
+        record_id = self.license_service.add_license(
+            track_id=track_id,
+            licensee_name="Publisher BV",
+            source_pdf_path=source_pdf,
+        )
+        stored = self.license_service.fetch_license(record_id)
+        self.assertIsNotNone(stored)
+        stored_path = self.license_service.resolve_path(stored.file_path)
+        self.assertTrue(stored_path.exists())
+
+        after = self.history.capture_snapshot(kind="post_license_add", label="After Add License")
+        self.history.record_snapshot_action(
+            label="Add License PDF",
+            action_type="license.add",
+            entity_type="License",
+            entity_id=str(record_id),
+            payload={"record_id": record_id},
+            snapshot_before_id=before.snapshot_id,
+            snapshot_after_id=after.snapshot_id,
+        )
+
+        self.history.undo()
+        self.assertEqual(self.license_service.list_rows(), [])
+        self.assertFalse((self.data_root / "licenses").exists())
+
+        self.history.redo()
+        restored = self.license_service.fetch_license(record_id)
+        self.assertIsNotNone(restored)
+        self.assertTrue(self.license_service.resolve_path(restored.file_path).exists())
+
+    def test_registered_snapshot_can_be_restored(self):
+        snapshot = self.history.create_manual_snapshot("Initial State")
+        registered = self.history.register_snapshot(snapshot, kind="registered", label="Registered Initial State")
+        self.assertNotEqual(snapshot.snapshot_id, registered.snapshot_id)
+
+        track_id = self._create_track()
+        self.assertIsNotNone(self.track_service.fetch_track_snapshot(track_id))
+
+        self.history.restore_snapshot_as_action(registered.snapshot_id)
+        self.assertIsNone(self.track_service.fetch_track_snapshot(track_id))
 
 
 if __name__ == "__main__":

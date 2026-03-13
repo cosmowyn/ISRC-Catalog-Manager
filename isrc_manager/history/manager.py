@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import shutil
 import sqlite3
 from dataclasses import asdict
 from datetime import datetime
@@ -26,6 +27,7 @@ from .models import HistoryEntry, SnapshotRecord
 class HistoryManager:
     """Stores history entries and applies undo/redo for supported actions."""
 
+    MANAGED_DIRECTORIES = ("licenses",)
     DOMAIN_TABLES_DELETE_ORDER = [
         "Licenses",
         "CustomFieldValues",
@@ -63,11 +65,13 @@ class HistoryManager:
         settings: QSettings,
         db_path: str | Path,
         history_root: str | Path,
+        managed_root: str | Path | None = None,
     ):
         self.conn = conn
         self.settings = settings
         self.db_path = Path(db_path)
         self.history_root = Path(history_root)
+        self.managed_root = Path(managed_root) if managed_root is not None else None
         self.track_service = TrackService(conn)
         self.settings_mutations = SettingsMutationService(conn, settings)
         self.settings_reads = SettingsReadService(conn)
@@ -209,6 +213,38 @@ class HistoryManager:
             snapshot_after_id=target.snapshot_id,
         )
         return entry
+
+    def restore_snapshot(self, snapshot_id: int) -> SnapshotRecord:
+        snapshot = self.fetch_snapshot(snapshot_id)
+        if snapshot is None:
+            raise ValueError(f"Snapshot {snapshot_id} not found")
+        self._restore_snapshot_state(snapshot)
+        return snapshot
+
+    def register_snapshot(
+        self,
+        snapshot: SnapshotRecord,
+        *,
+        kind: str | None = None,
+        label: str | None = None,
+    ) -> SnapshotRecord:
+        snapshot_path = Path(snapshot.db_snapshot_path)
+        if not snapshot_path.exists():
+            raise FileNotFoundError(snapshot_path)
+        register_kind = kind or snapshot.kind or "registered"
+        snapshot_dir = self.history_root / "snapshots" / self.db_path.stem
+        snapshot_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        registered_path = snapshot_dir / f"{timestamp}_{register_kind}.db"
+        shutil.copy2(snapshot_path, registered_path)
+        manifest = self._clone_managed_manifest(snapshot.manifest, registered_path.with_suffix(".assets"))
+        return self._insert_snapshot_row(
+            kind=register_kind,
+            label=label or snapshot.label,
+            db_snapshot_path=str(registered_path),
+            settings_state=snapshot.settings_state,
+            manifest=manifest,
+        )
 
     def record_event(
         self,
@@ -423,8 +459,11 @@ class HistoryManager:
             self.conn.execute("DELETE FROM HistorySnapshots WHERE id=?", (int(snapshot_id),))
 
         snapshot_path = Path(snapshot.db_snapshot_path)
-        if snapshot_path.exists():
-            snapshot_path.unlink()
+        self._remove_path(snapshot_path)
+        for state in (snapshot.manifest or {}).get("managed_directories", {}).values():
+            snapshot_asset_path = state.get("snapshot_path")
+            if snapshot_asset_path:
+                self._remove_path(Path(snapshot_asset_path))
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -624,28 +663,8 @@ class HistoryManager:
             snapshot_conn.close()
 
         settings_state = self._capture_settings_state()
-        manifest = {}
-
-        with self.conn:
-            cur = self.conn.cursor()
-            cur.execute(
-                """
-                INSERT INTO HistorySnapshots (kind, label, db_snapshot_path, settings_json, manifest_json)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (
-                    kind,
-                    label,
-                    str(snapshot_path),
-                    json.dumps(settings_state),
-                    json.dumps(manifest),
-                ),
-            )
-            snapshot_id = int(cur.lastrowid)
-
-        return SnapshotRecord(
-            snapshot_id=snapshot_id,
-            created_at=datetime.now().isoformat(timespec="seconds"),
+        manifest = self._capture_managed_state(snapshot_path.with_suffix(".assets"))
+        return self._insert_snapshot_row(
             kind=kind,
             label=label,
             db_snapshot_path=str(snapshot_path),
@@ -688,7 +707,38 @@ class HistoryManager:
             self.conn.execute("DETACH DATABASE snapshot_restore")
             self.conn.execute("PRAGMA foreign_keys = ON")
 
+        self._restore_managed_state(snapshot.manifest)
         self._apply_settings_state(snapshot.settings_state)
+
+    def _insert_snapshot_row(
+        self,
+        *,
+        kind: str,
+        label: str,
+        db_snapshot_path: str,
+        settings_state: dict,
+        manifest: dict,
+    ) -> SnapshotRecord:
+        with self.conn:
+            cur = self.conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO HistorySnapshots (kind, label, db_snapshot_path, settings_json, manifest_json)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    kind,
+                    label,
+                    db_snapshot_path,
+                    json.dumps(settings_state),
+                    json.dumps(manifest),
+                ),
+            )
+            snapshot_id = int(cur.lastrowid)
+        snapshot = self.fetch_snapshot(snapshot_id)
+        if snapshot is None:
+            raise RuntimeError(f"Snapshot {snapshot_id} could not be reloaded")
+        return snapshot
 
     def _table_exists(self, db_alias: str, table_name: str) -> bool:
         row = self.conn.execute(
@@ -715,6 +765,68 @@ class HistoryManager:
             key: self._serialize_setting_value(self.settings.value(key))
             for key in self.settings.allKeys()
         }
+
+    def _capture_managed_state(self, assets_dir: Path) -> dict:
+        if self.managed_root is None:
+            return {}
+
+        manifest = {"managed_directories": {}}
+        for dir_name in self.MANAGED_DIRECTORIES:
+            source_dir = self.managed_root / dir_name
+            if source_dir.exists():
+                assets_dir.mkdir(parents=True, exist_ok=True)
+                snapshot_dir = assets_dir / dir_name
+                if snapshot_dir.exists():
+                    shutil.rmtree(snapshot_dir)
+                shutil.copytree(source_dir, snapshot_dir)
+                manifest["managed_directories"][dir_name] = {
+                    "exists": True,
+                    "snapshot_path": str(snapshot_dir),
+                }
+            else:
+                manifest["managed_directories"][dir_name] = {
+                    "exists": False,
+                    "snapshot_path": None,
+                }
+        return manifest
+
+    def _clone_managed_manifest(self, manifest: dict, assets_dir: Path) -> dict:
+        cloned = json.loads(json.dumps(manifest or {}))
+        managed_directories = cloned.get("managed_directories", {})
+        for dir_name, state in managed_directories.items():
+            source_path = state.get("snapshot_path")
+            if not state.get("exists") or not source_path:
+                state["snapshot_path"] = None
+                continue
+            src_dir = Path(source_path)
+            if not src_dir.exists():
+                raise FileNotFoundError(src_dir)
+            assets_dir.mkdir(parents=True, exist_ok=True)
+            dest_dir = assets_dir / dir_name
+            if dest_dir.exists():
+                shutil.rmtree(dest_dir)
+            shutil.copytree(src_dir, dest_dir)
+            state["snapshot_path"] = str(dest_dir)
+        return cloned
+
+    def _restore_managed_state(self, manifest: dict) -> None:
+        if self.managed_root is None:
+            return
+
+        managed_directories = (manifest or {}).get("managed_directories", {})
+        if not managed_directories:
+            return
+
+        self.managed_root.mkdir(parents=True, exist_ok=True)
+        for dir_name, state in managed_directories.items():
+            target_dir = self.managed_root / dir_name
+            self._remove_path(target_dir)
+            if not state.get("exists"):
+                continue
+            snapshot_dir = Path(state.get("snapshot_path") or "")
+            if not snapshot_dir.exists():
+                raise FileNotFoundError(snapshot_dir)
+            shutil.copytree(snapshot_dir, target_dir)
 
     def _apply_settings_state(self, state: dict) -> None:
         self.settings.clear()
@@ -756,6 +868,15 @@ class HistoryManager:
         if value is None or isinstance(value, (bool, int, float, str)):
             return value
         return str(value)
+
+    @staticmethod
+    def _remove_path(path: Path) -> None:
+        if not path.exists() and not path.is_symlink():
+            return
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
 
     @staticmethod
     def _loads(raw: str | None) -> dict:

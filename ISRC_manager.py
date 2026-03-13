@@ -449,7 +449,18 @@ class _ManageArtistsDialog(QDialog):
             QMessageBox.information(self, "Nothing to delete", "No unused artists selected."); return
         if QMessageBox.question(self, "Confirm", f"Delete {len(ids)} unused artist(s)?") != QMessageBox.Yes:
             return
-        self.catalog_service.delete_artists(ids)
+        app = self.parentWidget()
+        if app is not None and hasattr(app, "_run_snapshot_history_action"):
+            app._run_snapshot_history_action(
+                action_label=f"Delete Unused Artists: {len(ids)}",
+                action_type="catalog.artists_delete",
+                entity_type="Artist",
+                entity_id="batch",
+                payload={"artist_ids": ids, "count": len(ids)},
+                mutation=lambda: self.catalog_service.delete_artists(ids),
+            )
+        else:
+            self.catalog_service.delete_artists(ids)
         self._load()
 
     def _purge_unused(self):
@@ -458,7 +469,18 @@ class _ManageArtistsDialog(QDialog):
             QMessageBox.information(self, "Nothing to purge", "No unused artists found."); return
         if QMessageBox.question(self, "Confirm", f"Purge {len(to_del)} unused artist(s)?") != QMessageBox.Yes:
             return
-        self.catalog_service.delete_artists(to_del)
+        app = self.parentWidget()
+        if app is not None and hasattr(app, "_run_snapshot_history_action"):
+            app._run_snapshot_history_action(
+                action_label=f"Purge Unused Artists: {len(to_del)}",
+                action_type="catalog.artists_purge",
+                entity_type="Artist",
+                entity_id="batch",
+                payload={"artist_ids": to_del, "count": len(to_del)},
+                mutation=lambda: self.catalog_service.delete_artists(to_del),
+            )
+        else:
+            self.catalog_service.delete_artists(to_del)
         self._load()
 
 
@@ -524,7 +546,18 @@ class _ManageAlbumsDialog(QDialog):
             QMessageBox.information(self, "Nothing to delete", "No unused albums selected."); return
         if QMessageBox.question(self, "Confirm", f"Delete {len(ids)} unused album(s)?") != QMessageBox.Yes:
             return
-        self.catalog_service.delete_albums(ids)
+        app = self.parentWidget()
+        if app is not None and hasattr(app, "_run_snapshot_history_action"):
+            app._run_snapshot_history_action(
+                action_label=f"Delete Unused Albums: {len(ids)}",
+                action_type="catalog.albums_delete",
+                entity_type="Album",
+                entity_id="batch",
+                payload={"album_ids": ids, "count": len(ids)},
+                mutation=lambda: self.catalog_service.delete_albums(ids),
+            )
+        else:
+            self.catalog_service.delete_albums(ids)
         self._load()
 
     def _purge_unused(self):
@@ -533,7 +566,18 @@ class _ManageAlbumsDialog(QDialog):
             QMessageBox.information(self, "Nothing to purge", "No unused albums found."); return
         if QMessageBox.question(self, "Confirm", f"Purge {len(to_del)} unused album(s)?") != QMessageBox.Yes:
             return
-        self.catalog_service.delete_albums(to_del)
+        app = self.parentWidget()
+        if app is not None and hasattr(app, "_run_snapshot_history_action"):
+            app._run_snapshot_history_action(
+                action_label=f"Purge Unused Albums: {len(to_del)}",
+                action_type="catalog.albums_purge",
+                entity_type="Album",
+                entity_id="batch",
+                payload={"album_ids": to_del, "count": len(to_del)},
+                mutation=lambda: self.catalog_service.delete_albums(to_del),
+            )
+        else:
+            self.catalog_service.delete_albums(to_del)
         self._load()
 
 # =============================================================================
@@ -627,11 +671,23 @@ class LicenseUploadDialog(QDialog):
                 QMessageBox.warning(self, "Missing", "Please choose a PDF.")
                 return
 
-            self.license_service.add_license(
+            app = self.parentWidget()
+            mutation = lambda: self.license_service.add_license(
                 track_id=track_id,
                 licensee_name=lic_text,
                 source_pdf_path=self._picked_path,
             )
+            if app is not None and hasattr(app, "_run_snapshot_history_action"):
+                app._run_snapshot_history_action(
+                    action_label="Add License PDF",
+                    action_type="license.add",
+                    entity_type="License",
+                    entity_id=track_id,
+                    payload={"track_id": track_id, "licensee": lic_text},
+                    mutation=mutation,
+                )
+            else:
+                mutation()
             self.saved.emit()
             self.accept()
         except Exception as e:
@@ -886,11 +942,27 @@ class LicensesBrowserDialog(QDialog):
         if not new_name:
             new_name = lic_combo.currentText().strip() or ""
         try:
-            self.license_service.update_license(
+            app = self.parentWidget()
+            mutation = lambda: self.license_service.update_license(
                 record_id=rec_id,
                 licensee_name=new_name,
                 replacement_pdf_path=new_path["p"],
             )
+            if app is not None and hasattr(app, "_run_snapshot_history_action"):
+                app._run_snapshot_history_action(
+                    action_label="Edit License",
+                    action_type="license.update",
+                    entity_type="License",
+                    entity_id=rec_id,
+                    payload={
+                        "record_id": rec_id,
+                        "licensee": new_name,
+                        "replaced_pdf": bool(new_path["p"]),
+                    },
+                    mutation=mutation,
+                )
+            else:
+                mutation()
             self.refresh_data()
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
@@ -925,7 +997,19 @@ class LicensesBrowserDialog(QDialog):
         ) == QMessageBox.Yes
 
         try:
-            self.license_service.delete_licenses(ids, delete_files=delete_files)
+            app = self.parentWidget()
+            mutation = lambda: self.license_service.delete_licenses(ids, delete_files=delete_files)
+            if app is not None and hasattr(app, "_run_snapshot_history_action"):
+                app._run_snapshot_history_action(
+                    action_label=f"Delete Licenses: {len(ids)}",
+                    action_type="license.delete",
+                    entity_type="License",
+                    entity_id="batch",
+                    payload={"record_ids": ids, "count": len(ids), "delete_files": delete_files},
+                    mutation=mutation,
+                )
+            else:
+                mutation()
         except Exception as e:
             QMessageBox.critical(self, "Delete Licenses", str(e))
             return
@@ -982,7 +1066,19 @@ class LicenseeManagerDialog(QDialog):
         if not ok or not text.strip():
             return
         try:
-            self.catalog_service.ensure_licensee(text.strip())
+            app = self.parentWidget()
+            mutation = lambda: self.catalog_service.ensure_licensee(text.strip())
+            if app is not None and hasattr(app, "_run_snapshot_history_action"):
+                app._run_snapshot_history_action(
+                    action_label=f"Add Licensee: {text.strip()}",
+                    action_type="licensee.add",
+                    entity_type="Licensee",
+                    entity_id=text.strip(),
+                    payload={"name": text.strip()},
+                    mutation=mutation,
+                )
+            else:
+                mutation()
         except Exception:
             pass
         self._reload()
@@ -997,7 +1093,19 @@ class LicenseeManagerDialog(QDialog):
         if not ok or not text.strip():
             return
         try:
-            self.catalog_service.rename_licensee(it.data(Qt.UserRole), text.strip())
+            app = self.parentWidget()
+            mutation = lambda: self.catalog_service.rename_licensee(it.data(Qt.UserRole), text.strip())
+            if app is not None and hasattr(app, "_run_snapshot_history_action"):
+                app._run_snapshot_history_action(
+                    action_label=f"Rename Licensee: {old}",
+                    action_type="licensee.rename",
+                    entity_type="Licensee",
+                    entity_id=it.data(Qt.UserRole),
+                    payload={"licensee_id": it.data(Qt.UserRole), "old_name": old, "new_name": text.strip()},
+                    mutation=mutation,
+                )
+            else:
+                mutation()
             self._reload()
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
@@ -1032,7 +1140,19 @@ class LicenseeManagerDialog(QDialog):
             return
 
         try:
-            self.catalog_service.delete_licensee(lid)
+            app = self.parentWidget()
+            mutation = lambda: self.catalog_service.delete_licensee(lid)
+            if app is not None and hasattr(app, "_run_snapshot_history_action"):
+                app._run_snapshot_history_action(
+                    action_label=f"Delete Licensee: {name}",
+                    action_type="licensee.delete",
+                    entity_type="Licensee",
+                    entity_id=lid,
+                    payload={"licensee_id": lid, "name": name},
+                    mutation=mutation,
+                )
+            else:
+                mutation()
             self._reload()
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
@@ -1550,7 +1670,7 @@ class App(QMainWindow):
             else None
         )
         self.history_manager = (
-            HistoryManager(self.conn, self.settings, self.current_db_path, self.history_dir)
+            HistoryManager(self.conn, self.settings, self.current_db_path, self.history_dir, DATA_DIR())
             if self.conn is not None and getattr(self, "current_db_path", None)
             else None
         )
@@ -1929,6 +2049,60 @@ class App(QMainWindow):
         self.populate_all_comboboxes()
         self.refresh_table_preserve_view()
         self._refresh_history_actions()
+
+    def _run_snapshot_history_action(
+        self,
+        *,
+        action_label: str,
+        action_type: str,
+        mutation,
+        entity_type: str | None = None,
+        entity_id: str | int | None = None,
+        payload: dict | None = None,
+        before_kind: str | None = None,
+        before_label: str | None = None,
+        after_kind: str | None = None,
+        after_label: str | None = None,
+    ):
+        if self.history_manager is None:
+            return mutation()
+
+        safe_kind = action_type.replace(".", "_")
+        before_snapshot = self.history_manager.capture_snapshot(
+            kind=before_kind or f"pre_{safe_kind}",
+            label=before_label or f"Before {action_label}",
+        )
+        try:
+            result = mutation()
+        except Exception:
+            try:
+                self.history_manager.restore_snapshot(before_snapshot.snapshot_id)
+            except Exception as restore_error:
+                self.logger.exception(f"Snapshot rollback failed for {action_type}: {restore_error}")
+            try:
+                self.history_manager.delete_snapshot(before_snapshot.snapshot_id)
+            except Exception:
+                pass
+            raise
+
+        try:
+            after_snapshot = self.history_manager.capture_snapshot(
+                kind=after_kind or f"post_{safe_kind}",
+                label=after_label or f"After {action_label}",
+            )
+            self.history_manager.record_snapshot_action(
+                label=action_label,
+                action_type=action_type,
+                entity_type=entity_type,
+                entity_id=str(entity_id) if entity_id is not None else None,
+                payload=payload or {},
+                snapshot_before_id=before_snapshot.snapshot_id,
+                snapshot_after_id=after_snapshot.snapshot_id,
+            )
+            self._refresh_history_actions()
+        except Exception as e:
+            self.logger.exception(f"History recording failed for {action_type}: {e}")
+        return result
 
     def open_history_dialog(self):
         self.history_dialog = HistoryDialog(self, parent=self)
@@ -3259,8 +3433,14 @@ class App(QMainWindow):
             if not new_path:
                 return
             try:
-                # writes blob_value, mime_type, size_bytes (value=NULL) and respects triggers
-                self.cf_save_value(track_id, field_id, value=None, blob_path=new_path)
+                self._run_snapshot_history_action(
+                    action_label=f"Attach Custom File: {field['name']}",
+                    action_type="custom_field.blob_attach",
+                    entity_type="CustomFieldValue",
+                    entity_id=f"{track_id}:{field_id}",
+                    payload={"track_id": track_id, "field_id": field_id, "field_name": field["name"]},
+                    mutation=lambda: self.cf_save_value(track_id, field_id, value=None, blob_path=new_path),
+                )
                 self.refresh_table_preserve_view(focus_id=track_id)
                 return
             except Exception as e:
@@ -3272,8 +3452,10 @@ class App(QMainWindow):
         # --- Non-BLOB editors (unchanged) ---
         current_val = self.custom_field_values.get_text_value(track_id, field_id)
 
+        options_updated = False
         if field_type == "dropdown":
             choices = options[:] if options else []
+            original_options = list(choices)
             if current_val and current_val not in choices:
                 choices.append(current_val)
             new_val, ok = QInputDialog.getItem(
@@ -3284,10 +3466,7 @@ class App(QMainWindow):
                 return
             if new_val and options is not None and new_val not in options:
                 options.append(new_val)
-                try:
-                    self.custom_field_definitions.update_dropdown_options(field_id, options)
-                except Exception as e:
-                    self.logger.exception(f"Failed to update dropdown options: {e}")
+            options_updated = options != original_options
         elif field_type == "checkbox":
             choice, ok = QInputDialog.getItem(
                 self, f"Edit: {field['name']}", field['name'],
@@ -3309,8 +3488,22 @@ class App(QMainWindow):
                 return
 
         # Upsert for non-BLOB fields
+        if new_val == current_val and not options_updated:
+            return
         try:
-            self.custom_field_values.save_value(track_id, field_id, value=new_val)
+            def mutation():
+                if field_type == "dropdown" and options_updated:
+                    self.custom_field_definitions.update_dropdown_options(field_id, options)
+                self.custom_field_values.save_value(track_id, field_id, value=new_val)
+
+            self._run_snapshot_history_action(
+                action_label=f"Update Custom Field: {field['name']}",
+                action_type="custom_field.value_update",
+                entity_type="CustomFieldValue",
+                entity_id=f"{track_id}:{field_id}",
+                payload={"track_id": track_id, "field_id": field_id, "field_name": field["name"]},
+                mutation=mutation,
+            )
             self.refresh_table_preserve_view(focus_id=track_id)
         except Exception as e:
             self.conn.rollback()
@@ -3436,7 +3629,14 @@ class App(QMainWindow):
                         def _do_del():
                             if QMessageBox.question(self, "Delete File", "Remove the stored file from this cell?", QMessageBox.Yes | QMessageBox.No) == QMessageBox.Yes:
                                 try:
-                                    self.cf_delete_blob(track_id, field["id"])
+                                    self._run_snapshot_history_action(
+                                        action_label=f"Delete Custom File: {field['name']}",
+                                        action_type="custom_field.blob_delete",
+                                        entity_type="CustomFieldValue",
+                                        entity_id=f"{track_id}:{field['id']}",
+                                        payload={"track_id": track_id, "field_id": field["id"], "field_name": field["name"]},
+                                        mutation=lambda: self.cf_delete_blob(track_id, field["id"]),
+                                    )
                                     self.refresh_table_preserve_view(focus_id=track_id)
                                 except Exception as e:
                                     self.conn.rollback()
@@ -3842,6 +4042,7 @@ class App(QMainWindow):
         This completely replaces the current DB file with the selected backup,
         ensuring that **all** schema (including user-added columns) and data are restored.
         """
+        pre_restore_snapshot = None
         try:
             path, _ = QFileDialog.getOpenFileName(
                 self, "Restore...Backup", str(self.backups_dir), "SQLite DB (*.db)"
@@ -3856,6 +4057,12 @@ class App(QMainWindow):
                 QMessageBox.Yes | QMessageBox.No
             ) != QMessageBox.Yes:
                 return
+
+            if self.history_manager is not None:
+                pre_restore_snapshot = self.history_manager.capture_snapshot(
+                    kind="pre_db_restore",
+                    label=f"Before Database Restore: {Path(path).name}",
+                )
 
             self._close_database_connection()
             result = self.database_maintenance.restore_database(path, self.current_db_path)
@@ -3872,17 +4079,38 @@ class App(QMainWindow):
                 self._audit_commit()
             except Exception:
                 pass
-            self.history_manager.record_event(
-                label="Restore Database from Backup",
-                action_type="db.restore",
-                entity_type="DB",
-                entity_id=str(path),
-                payload={
-                    "source_backup": str(path),
-                    "restored_path": str(result.restored_path),
-                    "safety_copy_path": str(result.safety_copy_path) if result.safety_copy_path else None,
-                },
-            )
+            payload = {
+                "source_backup": str(path),
+                "restored_path": str(result.restored_path),
+                "safety_copy_path": str(result.safety_copy_path) if result.safety_copy_path else None,
+            }
+            if pre_restore_snapshot is not None and self.history_manager is not None:
+                registered_before = self.history_manager.register_snapshot(
+                    pre_restore_snapshot,
+                    kind="pre_db_restore_registered",
+                    label=pre_restore_snapshot.label,
+                )
+                after_snapshot = self.history_manager.capture_snapshot(
+                    kind="post_db_restore",
+                    label=f"After Database Restore: {Path(path).name}",
+                )
+                self.history_manager.record_snapshot_action(
+                    label="Restore Database from Backup",
+                    action_type="db.restore",
+                    entity_type="DB",
+                    entity_id=str(path),
+                    payload=payload,
+                    snapshot_before_id=registered_before.snapshot_id,
+                    snapshot_after_id=after_snapshot.snapshot_id,
+                )
+            elif self.history_manager is not None:
+                self.history_manager.record_event(
+                    label="Restore Database from Backup",
+                    action_type="db.restore",
+                    entity_type="DB",
+                    entity_id=str(path),
+                    payload=payload,
+                )
             self._refresh_history_actions()
 
         except Exception as e:
@@ -3935,7 +4163,14 @@ class App(QMainWindow):
         if not p:
             return
         try:
-            self.cf_save_value(track_id, field_def_id, value=None, blob_path=p)
+            self._run_snapshot_history_action(
+                action_label=f"Attach Custom File: {field_name}",
+                action_type="custom_field.blob_attach",
+                entity_type="CustomFieldValue",
+                entity_id=f"{track_id}:{field_def_id}",
+                payload={"track_id": track_id, "field_id": field_def_id, "field_name": field_name},
+                mutation=lambda: self.cf_save_value(track_id, field_def_id, value=None, blob_path=p),
+            )
             self.refresh_table_preserve_view(focus_id=track_id)
         except Exception as e:
             self.conn.rollback()
