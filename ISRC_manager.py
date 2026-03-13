@@ -64,7 +64,9 @@ from isrc_manager.services import (
     CatalogAdminService,
     CustomFieldDefinitionService,
     CustomFieldValueService,
+    DatabaseMaintenanceService,
     LicenseService,
+    ProfileStoreService,
     SettingsMutationService,
     TrackCreatePayload,
     TrackService,
@@ -1048,6 +1050,8 @@ class App(QMainWindow):
 
         self.backups_dir = DATA_DIR() / "backups"
         self.backups_dir.mkdir(parents=True, exist_ok=True)
+        self.profile_store = ProfileStoreService(self.database_dir)
+        self.database_maintenance = DatabaseMaintenanceService(self.backups_dir)
 
         # default DB file (used if no previous DB is selected)
         DB_PATH = self.database_dir / "default.db"
@@ -1609,9 +1613,7 @@ class App(QMainWindow):
 
     def _list_profiles(self):
         """Return list of absolute file paths to *.db files in Database/."""
-        if not self.database_dir.exists():
-            return []
-        return [str(p) for p in sorted(self.database_dir.glob("*.db"))]
+        return self.profile_store.list_profiles()
 
     def _reload_profiles_list(self, select_path: str | None = None):
         self.profile_combo.blockSignals(True)
@@ -1668,10 +1670,7 @@ class App(QMainWindow):
         name, ok = QInputDialog.getText(self, "New Profile", "Database file name (no path, e.g., mylabel.db):")
         if not ok or not name.strip():
             return
-        safe = re.sub(r"[^A-Za-z0-9_.-]", "_", name.strip())
-        if not safe.lower().endswith(".db"):
-            safe += ".db"
-        new_path = str(self.database_dir / safe)
+        new_path = str(self.profile_store.build_profile_path(name))
         if Path(new_path).exists():
             QMessageBox.warning(self, "Exists", "A database with this name already exists.")
             return
@@ -1714,22 +1713,10 @@ class App(QMainWindow):
         deleting_current = (getattr(self, "current_db_path", None) == path)
 
         try:
-            if deleting_current and self.conn:
-                try:
-                    self.conn.commit()
-                except Exception:
-                    pass
-                try:
-                    self.conn.close()
-                except Exception:
-                    pass
-                self.conn = None
-                self.cursor = None
+            if deleting_current:
+                self._close_database_connection()
 
-            try:
-                os.remove(path)
-            except FileNotFoundError:
-                pass  # already gone
+            self.profile_store.delete_profile(path)
 
             self._reload_profiles_list(select_path=None)
 
@@ -1765,20 +1752,27 @@ class App(QMainWindow):
         dlg.exec()
         self.populate_all_comboboxes()
 
-    # -------------------------------------------------------------------------
-    # DB: open/init helpers + MIGRATIONS
-    # -------------------------------------------------------------------------
-    def open_database(self, path: str):
-        """Open (or create) the SQLite DB at path; initialize schema if needed."""
+    def _close_database_connection(self):
         try:
             if self.conn:
                 try:
                     self.conn.commit()
                 except Exception:
                     pass
-                self.conn.close()
-        except Exception:
-            pass
+                try:
+                    self.conn.close()
+                except Exception:
+                    pass
+        finally:
+            self.conn = None
+            self.cursor = None
+
+    # -------------------------------------------------------------------------
+    # DB: open/init helpers + MIGRATIONS
+    # -------------------------------------------------------------------------
+    def open_database(self, path: str):
+        """Open (or create) the SQLite DB at path; initialize schema if needed."""
+        self._close_database_connection()
 
         Path(path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -4440,73 +4434,22 @@ class App(QMainWindow):
                 QMessageBox.warning(self, "Backup", "No current database to backup.")
                 return
 
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            bkp_dir = self.database_dir / "backups"
-            bkp_dir.mkdir(parents=True, exist_ok=True)
-            dst = bkp_dir / f"{src.stem}_{ts}.db"
+            result = self.database_maintenance.create_backup(
+                self.conn,
+                src,
+                close_connection=self._close_database_connection,
+                reopen_connection=lambda: self.open_database(str(src)),
+            )
 
-            # Ensure all writes are flushed
+            QMessageBox.information(self, "Backup", f"Backup created:\n{result.backup_path}")
+            self.logger.info(f"Database backed up to {result.backup_path} using {result.method}")
             try:
-                self.conn.commit()
-            except Exception:
-                pass
-
-            backed_up = False
-            # Preferred: Online Backup API (includes all schema + data, even custom columns)
-            try:
-                with sqlite3.connect(str(dst)) as bkp_conn:
-                    self.conn.backup(bkp_conn)
-                backed_up = True
-                self.logger.info("Backup: used sqlite3.Connection.backup API")
-            except Exception as e:
-                self.logger.warning(f"Backup API failed, trying VACUUM INTO: {e}")
-
-            # Fallback: VACUUM INTO (SQLite 3.27+)
-            if not backed_up:
-                try:
-                    with sqlite3.connect(str(src)) as src_conn:
-                        src_conn.execute(f"VACUUM INTO '{dst.as_posix()}'")
-                    backed_up = True
-                    self.logger.info("Backup: used VACUUM INTO")
-                except Exception as e:
-                    self.logger.warning(f"VACUUM INTO failed, falling back to file copy: {e}")
-
-            # Last resort: file copy (also copy companion WAL/SHM if present)
-            if not backed_up:
-                try:
-                    # Close current connection temporarily to ensure file consistency
-                    try:
-                        self.conn.close()
-                    except Exception:
-                        pass
-
-                    shutil.copy2(src, dst)
-                    for ext in (".wal", ".shm"):
-                        comp = src.with_suffix(src.suffix + ext)
-                        if comp.exists():
-                            shutil.copy2(comp, dst.with_suffix(dst.suffix + ext))
-
-                    # Reopen
-                    self.open_database(str(src))
-                    backed_up = True
-                    self.logger.info("Backup: used file copy")
-                except Exception as e:
-                    raise RuntimeError(f"Backup failed during file copy: {e}")
-
-            # Verify integrity of backup
-            try:
-                with sqlite3.connect(str(dst)) as check_conn:
-                    row = check_conn.execute("PRAGMA integrity_check").fetchone()
-                    res = row[0] if row else "unknown"
-                    if res.lower() != "ok":
-                        raise RuntimeError(f"Integrity check failed for backup: {res}")
-            except Exception as e:
-                raise RuntimeError(f"Backup created but integrity verification failed: {e}")
-
-            QMessageBox.information(self, "Backup", f"Backup created:\n{dst}")
-            self.logger.info(f"Database backed up to {dst}")
-            try:
-                self._audit("BACKUP", "DB", ref_id=str(dst), details="Full DB (schema+data), custom columns included")
+                self._audit(
+                    "BACKUP",
+                    "DB",
+                    ref_id=str(result.backup_path),
+                    details=f"Full DB (schema+data), method={result.method}",
+                )
                 self._audit_commit()
             except Exception:
                 pass
@@ -4517,8 +4460,7 @@ class App(QMainWindow):
 
     def verify_integrity(self):
         try:
-            row = self.cursor.execute("PRAGMA integrity_check").fetchone()
-            res = row[0] if row else "unknown"
+            res = self.database_maintenance.verify_integrity(self.current_db_path)
             QMessageBox.information(self, "Integrity Check", f"Result: {res}")
             self.logger.info(f"Integrity check: {res}")
             self._audit("VERIFY", "DB", ref_id=self.current_db_path, details=res)
@@ -4536,7 +4478,7 @@ class App(QMainWindow):
         """
         try:
             path, _ = QFileDialog.getOpenFileName(
-                self, "Restore...Backup", str(self.database_dir / "backups"), "SQLite DB (*.db)"
+                self, "Restore...Backup", str(self.backups_dir), "SQLite DB (*.db)"
             )
             if not path:
                 return
@@ -4549,65 +4491,18 @@ class App(QMainWindow):
             ) != QMessageBox.Yes:
                 return
 
-            # Close current connection to release file handles
-            try:
-                self.conn.commit()
-            except Exception:
-                pass
-            try:
-                self.conn.close()
-            except Exception:
-                pass
-
-            dst = Path(self.current_db_path)
-            src = Path(path)
-
-            # Safety copy of current DB (one-shot undo)
-            try:
-                safe_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                safe_dir = self.database_dir / "backups" / "pre_restore"
-                safe_dir.mkdir(parents=True, exist_ok=True)
-                safe_copy = safe_dir / f"{dst.stem}_pre_restore_{safe_ts}.db"
-                if dst.exists():
-                    shutil.copy2(dst, safe_copy)
-                    for ext in (".wal", ".shm"):
-                        comp = dst.with_suffix(dst.suffix + ext)
-                        if comp.exists():
-                            shutil.copy2(comp, safe_copy.with_suffix(safe_copy.suffix + ext))
-                self.logger.info(f"Pre-restore safety copy saved to {safe_copy}")
-            except Exception as e:
-                # Non-fatal; continue restoring
-                self.logger.warning(f"Failed to create pre-restore safety copy: {e}")
-
-            # Replace DB file
-            shutil.copy2(src, dst)
-
-            # Remove any stale WAL/SHM from previous DB
-            for ext in (".wal", ".shm"):
-                stale = dst.with_suffix(dst.suffix + ext)
-                try:
-                    if stale.exists():
-                        stale.unlink()
-                except Exception:
-                    pass
-
-            # Re-open the restored DB
-            self.open_database(str(dst))
-
-            # Verify integrity, then refresh UI
-            try:
-                row = self.cursor.execute("PRAGMA integrity_check").fetchone()
-                res = row[0] if row else "unknown"
-                if str(res).lower() != "ok":
-                    raise RuntimeError(f"Integrity check failed after restore: {res}")
-            except Exception as e:
-                raise RuntimeError(f"Restore integrity verification failed: {e}")
+            self._close_database_connection()
+            result = self.database_maintenance.restore_database(path, self.current_db_path)
+            self.open_database(str(result.restored_path))
 
             self.refresh_table_preserve_view()
             QMessageBox.information(self, "Restore", "Database restored successfully (schema + data).")
             self.logger.warning(f"Database restored from {path}")
             try:
-                self._audit("RESTORE", "DB", ref_id=path, details=f"restored to {dst}")
+                details = f"restored to {result.restored_path}"
+                if result.safety_copy_path is not None:
+                    details += f"; safety_copy={result.safety_copy_path}"
+                self._audit("RESTORE", "DB", ref_id=path, details=details)
                 self._audit_commit()
             except Exception:
                 pass
