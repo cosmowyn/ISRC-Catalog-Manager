@@ -3,6 +3,7 @@
 from .catalog_admin import AlbumUsage, ArtistUsage, CatalogAdminService, LicenseeUsage
 from .custom_fields import CustomFieldDefinitionService, CustomFieldValueService
 from .database_admin import BackupResult, DatabaseMaintenanceService, ProfileStoreService, RestoreResult
+from .imports import ImportExecutionResult, ImportInspection, ImportRecord, XMLImportService
 from .licenses import LicenseRecord, LicenseRow, LicenseService
 from .settings_mutations import SettingsMutationService
 from .tracks import TrackCreatePayload, TrackService, TrackUpdatePayload
@@ -15,6 +16,9 @@ __all__ = [
     "CustomFieldDefinitionService",
     "CustomFieldValueService",
     "DatabaseMaintenanceService",
+    "ImportExecutionResult",
+    "ImportInspection",
+    "ImportRecord",
     "LicenseeUsage",
     "LicenseRecord",
     "LicenseRow",
@@ -25,4 +29,5 @@ __all__ = [
     "TrackCreatePayload",
     "TrackService",
     "TrackUpdatePayload",
+    "XMLImportService",
 ]

@@ -65,6 +65,7 @@ from isrc_manager.services import (
     CustomFieldDefinitionService,
     CustomFieldValueService,
     DatabaseMaintenanceService,
+    XMLImportService,
     LicenseService,
     ProfileStoreService,
     SettingsMutationService,
@@ -1092,6 +1093,7 @@ class App(QMainWindow):
         self.license_service = None
         self.custom_field_definitions = None
         self.custom_field_values = None
+        self.xml_import_service = None
         self.open_database(last_db)
 
         # ----- Menus -----
@@ -1502,6 +1504,11 @@ class App(QMainWindow):
         )
         self.custom_field_values = (
             CustomFieldValueService(self.conn, self.custom_field_definitions) if self.conn is not None else None
+        )
+        self.xml_import_service = (
+            XMLImportService(self.conn, self.track_service, self.custom_field_definitions)
+            if self.conn is not None
+            else None
         )
 
 
@@ -3259,250 +3266,55 @@ class App(QMainWindow):
                 QMessageBox.Yes | QMessageBox.No
             ) == QMessageBox.Yes
 
-            import xml.etree.ElementTree as ET
             try:
-                tree = ET.parse(file_path)
-                root = tree.getroot()
+                inspection = self.xml_import_service.inspect_file(file_path)
             except Exception as e:
-                QMessageBox.critical(self, "Import Error", f"Could not read XML:\n{e}")
+                QMessageBox.critical(self, "Import Error", str(e))
                 return
 
-            rtag = self._xml_local(root.tag)
-            records = []
-            schema = None  # "full" or "selected"
-
-            if rtag == "DeclarationOfSoundRecordingRightsClaimMessage":
-                records = list(root.findall("SoundRecording"))
-                schema = "full"
-            else:
-                tracks_el = None
-                if rtag == "Tracks":
-                    tracks_el = root
-                else:
-                    for el in root.iter():
-                        if self._xml_local(el.tag) == "Tracks":
-                            tracks_el = el
-                            break
-                if tracks_el is not None:
-                    records = [el for el in tracks_el if self._xml_local(el.tag) == "Track"]
-                    if records:
-                        schema = "selected"
-
-            if not records:
-                QMessageBox.critical(self, "Import Error", f"Unexpected XML root element: <{rtag}> or no importable records found.")
-                return
-
-            # ---------- Parse all records first ----------
-            parsed = []  # list of dicts with all fields, including custom_fields[]
-            def lower_map(el):
-                m = {}
-                for ch in el:
-                    k = self._xml_local(ch.tag or "").strip().lower()
-                    v = "" if ch.text is None else ch.text.strip()
-                    m[k] = v
-                return m
-
-            for rec in records:
-                child_map = lower_map(rec)
-                # custom fields subtree
-                customs = []
-                for ch in rec:
-                    if self._xml_local(ch.tag) == "CustomFields":
-                        for fld in ch:
-                            if self._xml_local(fld.tag) != "Field":
-                                continue
-                            name = (fld.attrib.get("name") or "").strip()
-                            ftype = (fld.attrib.get("type") or "text").strip()
-                            val = ""
-                            mime = None
-                            sz = None
-                            for sub in fld:
-                                tagl = self._xml_local(sub.tag).lower()
-                                if tagl == "value":
-                                    val = "" if sub.text is None else sub.text.strip()
-                                elif tagl == "mimetype":
-                                    mime = (sub.text or "").strip()
-                                elif tagl == "sizebytes":
-                                    try: sz = int((sub.text or "0").strip())
-                                    except: sz = 0
-                            customs.append({"name": name, "type": ftype, "value": val, "mime": mime, "size": sz})
-
-                def get_any(m, *keys):
-                    for k in keys:
-                        v = m.get(k)
-                        if v is not None and v != "": return v
-                    return ""
-
-                if schema == "full":
-                    isrc_raw = get_any(child_map, "isrc")
-                    title    = get_any(child_map, "track_title")
-                    artist   = get_any(child_map, "artist_name")
-                    addl     = get_any(child_map, "additional_artists")
-                    album    = get_any(child_map, "album_title")
-                    rel_date = get_any(child_map, "release_date")
-                    iswc_raw = get_any(child_map, "iswc")
-                    upc      = get_any(child_map, "upc")
-                    genre    = get_any(child_map, "genre")
-                    tlen_txt = get_any(child_map, "tracklength")  # hh:mm:ss (new)
-                else:
-                    isrc_raw = get_any(child_map, "isrc")
-                    title    = get_any(child_map, "title")
-                    artist   = get_any(child_map, "mainartist")
-                    addl     = get_any(child_map, "additionalartists")
-                    album    = get_any(child_map, "album")
-                    rel_date = get_any(child_map, "releasedate")
-                    iswc_raw = get_any(child_map, "iswc")
-                    upc      = get_any(child_map, "upcean", "upc")
-                    genre    = get_any(child_map, "genre")
-                    tlen_txt = get_any(child_map, "tracklength")
-
-                iso_isrc = to_iso_isrc(isrc_raw)
-                comp_isrc = to_compact_isrc(iso_isrc)
-                if not comp_isrc or not is_valid_isrc_compact_or_iso(iso_isrc):
-                    parsed.append({"skip":"invalid_isrc"});  # mark skip
-                    continue
-                if is_blank(title) or is_blank(artist):
-                    parsed.append({"skip":"missing_title_artist"});
-                    continue
-
-                iso_iswc = None
-                if iswc_raw:
-                    iso_iswc = to_iso_iswc(iswc_raw)
-                    if not iso_iswc or not is_valid_iswc_any(iso_iswc):
-                        parsed.append({"skip":"invalid_iswc"})
-                        continue
-
-                if rel_date and not re.match(r"^\d{4}-\d{2}-\d{2}$", rel_date):
-                    rel_date = None
-
-                # track length parse
-                tlen_sec = None
-                if tlen_txt:
-                    try:
-                        tlen_sec = parse_hms_text(tlen_txt)
-                    except Exception:
-                        tlen_sec = None
-
-                parsed.append({
-                    "iso_isrc": iso_isrc, "comp_isrc": comp_isrc,
-                    "title": title, "artist": artist, "addl": addl,
-                    "album": album, "rel_date": rel_date, "iso_iswc": iso_iswc,
-                    "upc": upc or None, "genre": genre or None,
-                    "tlen_sec": tlen_sec,
-                    "custom_fields": customs
-                })
-
-            # Filter out the ones marked for skip
-            valid = [p for p in parsed if "skip" not in p]
-
-            # ---------- Custom fields schema validation BEFORE writing ----------
-            # Build required set { (name, type) } from incoming (non-blob only; blobs are metadata-only)
-            required = {(c["name"], c["type"]) for p in valid for c in p["custom_fields"]
-                        if c["name"] and c["type"] and c["type"] not in ("blob_image","blob_audio")}
-            missing = []
-            if required:
-                existing = self.cursor.execute("""
-                    SELECT name, field_type FROM CustomFieldDefs WHERE active=1
-                """).fetchall()
-                exist_set = {(n, t) for (n, t) in existing}
-                for name, ftype in sorted(required):
-                    if (name, ftype) not in exist_set:
-                        missing.append((name, ftype))
-
-            if missing:
-                msg = "Missing custom columns (name : type):\n" + "\n".join(f"- {n} : {t}" for n,t in missing)
-                self.logger.warning(f"Import aborted due to missing custom columns: {missing}")
+            if inspection.missing_custom_fields:
+                msg = "Missing custom columns (name : type):\n" + "\n".join(
+                    f"- {name} : {field_type}" for name, field_type in inspection.missing_custom_fields
+                )
+                self.logger.warning(
+                    "Import aborted due to missing custom columns: %s",
+                    inspection.missing_custom_fields,
+                )
                 QMessageBox.critical(self, "Import Error", msg + "\n\nNo changes were made.")
                 return
 
-            # Map custom name->id for inserts
-            name_to_id = {}
-            if required:
-                rows = self.cursor.execute("""
-                    SELECT id, name, field_type FROM CustomFieldDefs WHERE active=1
-                """).fetchall()
-                for fid, nm, tp in rows:
-                    name_to_id[(nm, tp)] = fid
-
-            # ---------- Do the import (or dry-run summary) ----------
-            inserted = skipped_dupe = skipped_invalid = errors = 0
-
-            # Count duplicates/invalids based on existing DB for reporting
-            for p in valid:
-                if self.is_isrc_taken_normalized(p["iso_isrc"]):
-                    skipped_dupe += 1
-
-            # Skips already counted in parsed for invalid; compute:
-            skipped_invalid = len([p for p in parsed if "skip" in p])
-
             # If dry-run, show summary then optionally proceed
             if dry:
-                would_insert = len([p for p in valid if not self.is_isrc_taken_normalized(p["iso_isrc"])])
-                self.logger.info(f"Dry-run: would_insert={would_insert}, dupes={skipped_dupe}, invalid={skipped_invalid}, errors={errors}")
+                self.logger.info(
+                    "Dry-run: would_insert=%s, dupes=%s, invalid=%s, errors=0",
+                    inspection.would_insert,
+                    inspection.duplicate_count,
+                    inspection.invalid_count,
+                )
                 proceed = QMessageBox.question(
                     self, "Dry-run finished",
-                    f"Would insert: {would_insert}\n"
-                    f"Skipped (duplicates): {skipped_dupe}\n"
-                    f"Skipped (invalid): {skipped_invalid}\n"
-                    f"Errors: {errors}\n\n"
+                    f"Would insert: {inspection.would_insert}\n"
+                    f"Skipped (duplicates): {inspection.duplicate_count}\n"
+                    f"Skipped (invalid): {inspection.invalid_count}\n"
+                    f"Errors: 0\n\n"
                     f"Proceed with import now?",
                     QMessageBox.Yes | QMessageBox.No
                 ) == QMessageBox.Yes
                 if not proceed:
-                    self._audit("IMPORT", "Tracks", ref_id=file_path, details=f"mode=dry_only, would_ins={would_insert}, dup={skipped_dupe}, inv={skipped_invalid}, err={errors}")
+                    self._audit(
+                        "IMPORT",
+                        "Tracks",
+                        ref_id=file_path,
+                        details=(
+                            f"mode=dry_only, would_ins={inspection.would_insert}, "
+                            f"dup={inspection.duplicate_count}, inv={inspection.invalid_count}, err=0"
+                        ),
+                    )
                     self._audit_commit()
                     return
-                # If proceeding, fall through to commit using the parsed data.
 
-            # Commit path
-            self.conn.execute("BEGIN")
             try:
-                for p in valid:
-                    if self.is_isrc_taken_normalized(p["iso_isrc"]):
-                        continue  # counted as dupes already
-                    self.conn.execute("SAVEPOINT row_import")
-                    try:
-                        main_artist_id = self.get_or_create_artist(p["artist"])
-                        album_id = self.get_or_create_album(p["album"])
-
-                        self.cursor.execute("""
-                            INSERT INTO Tracks (isrc, isrc_compact, track_title, main_artist_id, album_id, release_date, track_length_sec, iswc, upc, genre)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """, (
-                            p["iso_isrc"], p["comp_isrc"], p["title"],
-                            main_artist_id, album_id,
-                            (p["rel_date"] or None),
-                            (p["tlen_sec"] if p["tlen_sec"] is not None else None),
-                            (p["iso_iswc"] or None),
-                            p["upc"], p["genre"],
-                        ))
-                        track_id = int(self.cursor.lastrowid)
-
-                        extras = self._parse_additional_artists(p["addl"])
-                        self._replace_additional_artists_for_track(track_id, extras)
-
-                        # Custom values (non-blob only)
-                        for c in p["custom_fields"]:
-                            if not c["name"] or not c["type"]:
-                                continue
-                            if c["type"] in ("blob_image","blob_audio"):
-                                continue  # metadata-only export; nothing to import
-                            fid = name_to_id.get((c["name"], c["type"]))
-                            if not fid:
-                                continue  # should not happen after pre-check
-                            self.cursor.execute("""
-                                INSERT INTO CustomFieldValues (track_id, field_def_id, value)
-                                VALUES (?, ?, ?)
-                                ON CONFLICT(track_id, field_def_id) DO UPDATE SET value=excluded.value
-                            """, (track_id, fid, c.get("value") or ""))
-
-                        self.conn.execute("RELEASE SAVEPOINT row_import")
-                        inserted += 1
-                    except Exception as e:
-                        self.conn.execute("ROLLBACK TO SAVEPOINT row_import")
-                        self.conn.execute("RELEASE SAVEPOINT row_import")
-                        errors += 1
-                self.conn.commit()
+                result = self.xml_import_service.execute_import(file_path)
             except Exception as e:
                 self.conn.rollback()
                 self.logger.exception(f"Import transaction failed: {e}")
@@ -3513,16 +3325,32 @@ class App(QMainWindow):
             self.populate_all_comboboxes()
 
             mode = "Import finished" if not dry else "Import finished (after dry-run)"
-            self.logger.info(f"{mode}: inserted={inserted}, dupes={skipped_dupe}, invalid={skipped_invalid}, errors={errors}")
-            self._audit("IMPORT", "Tracks", ref_id=file_path, details=f"mode={'commit_after_dry' if dry else 'commit'}, ins={inserted}, dup={skipped_dupe}, inv={skipped_invalid}, err={errors}")
+            self.logger.info(
+                "%s: inserted=%s, dupes=%s, invalid=%s, errors=%s",
+                mode,
+                result.inserted,
+                result.duplicate_count,
+                result.invalid_count,
+                result.error_count,
+            )
+            self._audit(
+                "IMPORT",
+                "Tracks",
+                ref_id=file_path,
+                details=(
+                    f"mode={'commit_after_dry' if dry else 'commit'}, "
+                    f"ins={result.inserted}, dup={result.duplicate_count}, "
+                    f"inv={result.invalid_count}, err={result.error_count}"
+                ),
+            )
             self._audit_commit()
 
             QMessageBox.information(
                 self, mode,
-                f"Inserted: {inserted}\n"
-                f"Skipped (duplicates): {skipped_dupe}\n"
-                f"Skipped (invalid): {skipped_invalid}\n"
-                f"Errors: {errors}"
+                f"Inserted: {result.inserted}\n"
+                f"Skipped (duplicates): {result.duplicate_count}\n"
+                f"Skipped (invalid): {result.invalid_count}\n"
+                f"Errors: {result.error_count}"
             )
         except Exception as e:
             self.logger.exception(f"Import failed: {e}")
