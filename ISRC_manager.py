@@ -1260,6 +1260,9 @@ class App(QMainWindow):
         self.session_history_manager = SessionHistoryManager(self.history_dir)
         self.history_dialog = None
         self._suspend_layout_history = False
+        self._header_layout_signals_bound = False
+        self._col_hint_signal_bound = False
+        self._row_hint_signal_bound = False
         self.track_service = None
         self.settings_reads = None
         self.settings_mutations = None
@@ -2131,13 +2134,12 @@ class App(QMainWindow):
 
     def _bind_header_state_signals(self):
         header = self.table.horizontalHeader()
-        for signal in (header.sectionMoved, header.sectionResized):
-            try:
-                signal.disconnect(self._on_header_layout_changed)
-            except (TypeError, RuntimeError):
-                pass
+        if self._header_layout_signals_bound:
+            header.sectionMoved.disconnect(self._on_header_layout_changed)
+            header.sectionResized.disconnect(self._on_header_layout_changed)
         header.sectionMoved.connect(self._on_header_layout_changed)
         header.sectionResized.connect(self._on_header_layout_changed)
+        self._header_layout_signals_bound = True
 
     @staticmethod
     def _set_action_checked_silently(action: QAction, enabled: bool):
@@ -2156,11 +2158,11 @@ class App(QMainWindow):
             for i in range(self.table.columnCount()):
                 hh.setSectionResizeMode(i, QHeaderView.Interactive)
             hh.setStretchLastSection(False)
-            try:
+            if self._col_hint_signal_bound:
                 hh.sectionResized.disconnect(self._update_col_hint)
-            except TypeError:
-                pass
+                self._col_hint_signal_bound = False
             hh.sectionResized.connect(self._update_col_hint)
+            self._col_hint_signal_bound = True
             self._ensure_col_hint_label()
             self.col_hint_label.show()
             self._apply_table_view_settings()
@@ -2170,10 +2172,9 @@ class App(QMainWindow):
             hh.setStretchLastSection(True)
             if not self.col_width_action.isChecked():
                 self.table.resizeColumnsToContents()
-            try:
+            if self._col_hint_signal_bound:
                 hh.sectionResized.disconnect(self._update_col_hint)
-            except TypeError:
-                pass
+                self._col_hint_signal_bound = False
             if self.col_hint_label:
                 self.col_hint_label.hide()
             self._apply_table_view_settings()
@@ -2183,21 +2184,20 @@ class App(QMainWindow):
         vh = self.table.verticalHeader()
         if enabled:
             vh.setSectionResizeMode(QHeaderView.Interactive)
-            try:
+            if self._row_hint_signal_bound:
                 vh.sectionResized.disconnect(self._update_row_hint)
-            except TypeError:
-                pass
+                self._row_hint_signal_bound = False
             vh.sectionResized.connect(self._update_row_hint)
+            self._row_hint_signal_bound = True
             self._ensure_row_hint_label()
             self.row_hint_label.show()
         else:
             vh.setSectionResizeMode(QHeaderView.Fixed)
             for i in range(self.table.rowCount()):
                 self.table.setRowHeight(i, 24)
-            try:
+            if self._row_hint_signal_bound:
                 vh.sectionResized.disconnect(self._update_row_hint)
-            except TypeError:
-                pass
+                self._row_hint_signal_bound = False
             if self.row_hint_label:
                 self.row_hint_label.hide()
         self._apply_table_view_settings()
