@@ -1918,6 +1918,9 @@ class App(QMainWindow):
         self.redo_action.setText(f"Redo {redo_label}" if redo_label else "Redo")
         self.redo_action.setEnabled(bool(redo_label))
 
+        if self.history_dialog is not None and self.history_dialog.isVisible():
+            self.history_dialog.refresh_data()
+
     def _refresh_after_history_change(self):
         self.identity = self._load_identity()
         self._apply_identity()
@@ -1926,8 +1929,6 @@ class App(QMainWindow):
         self.populate_all_comboboxes()
         self.refresh_table_preserve_view()
         self._refresh_history_actions()
-        if self.history_dialog is not None and self.history_dialog.isVisible():
-            self.history_dialog.refresh_data()
 
     def open_history_dialog(self):
         self.history_dialog = HistoryDialog(self, parent=self)
@@ -2581,6 +2582,13 @@ class App(QMainWindow):
             self.logger.info(f"Exported {exported} rows to {path}")
             self._audit("EXPORT", "Tracks", ref_id=path, details=f"all rows incl. duration+customs count={exported}")
             self._audit_commit()
+            self.history_manager.record_event(
+                label=f"Export XML: {exported} tracks",
+                action_type="export.xml_all",
+                entity_type="Export",
+                entity_id=path,
+                payload={"path": path, "count": exported},
+            )
         except Exception as e:
             self.logger.exception(f"Export failed: {e}")
             QMessageBox.critical(self, "Export Error", f"Failed to export:\n{e}")
@@ -2624,6 +2632,13 @@ class App(QMainWindow):
             )
             self.logger.info(f"Exported {exported} rows to XML (ids={track_ids}) -> {out_path}")
             QMessageBox.information(self, "Export Complete", f"Saved:\n{out_path}")
+            self.history_manager.record_event(
+                label=f"Export Selected XML: {exported} tracks",
+                action_type="export.xml_selected",
+                entity_type="Export",
+                entity_id=out_path,
+                payload={"path": out_path, "count": exported, "track_ids": track_ids},
+            )
         except Exception as e:
             self.logger.exception(f"Export Selected failed: {e}")
             QMessageBox.critical(self, "Export Error", f"Could not write file:\n{e}")
@@ -2646,6 +2661,8 @@ class App(QMainWindow):
             file_path, _ = QFileDialog.getOpenFileName(self, "Import from XML", "", "XML Files (*.xml)")
             if not file_path:
                 return
+
+            before_snapshot = None
 
             dry = QMessageBox.question(
                 self, "Dry Run?",
@@ -2701,8 +2718,17 @@ class App(QMainWindow):
                     return
 
             try:
+                before_snapshot = self.history_manager.capture_snapshot(
+                    kind="pre_import",
+                    label=f"Before Import XML: {Path(file_path).name}",
+                )
                 result = self.xml_import_service.execute_import(file_path)
             except Exception as e:
+                if before_snapshot is not None:
+                    try:
+                        self.history_manager.delete_snapshot(before_snapshot.snapshot_id)
+                    except Exception:
+                        pass
                 self.conn.rollback()
                 self.logger.exception(f"Import transaction failed: {e}")
                 QMessageBox.critical(self, "Import Error", f"Import failed:\n{e}")
@@ -2731,6 +2757,42 @@ class App(QMainWindow):
                 ),
             )
             self._audit_commit()
+
+            if result.inserted > 0 and before_snapshot is not None:
+                after_snapshot = self.history_manager.capture_snapshot(
+                    kind="post_import",
+                    label=f"After Import XML: {Path(file_path).name}",
+                )
+                self.history_manager.record_snapshot_action(
+                    label=f"Import XML: {result.inserted} tracks",
+                    action_type="import.xml",
+                    entity_type="Import",
+                    entity_id=file_path,
+                    payload={
+                        "path": file_path,
+                        "inserted": result.inserted,
+                        "duplicate_count": result.duplicate_count,
+                        "invalid_count": result.invalid_count,
+                        "error_count": result.error_count,
+                    },
+                    snapshot_before_id=before_snapshot.snapshot_id,
+                    snapshot_after_id=after_snapshot.snapshot_id,
+                )
+            else:
+                self.history_manager.record_event(
+                    label=f"Import XML: {result.inserted} tracks",
+                    action_type="import.xml",
+                    entity_type="Import",
+                    entity_id=file_path,
+                    payload={
+                        "path": file_path,
+                        "inserted": result.inserted,
+                        "duplicate_count": result.duplicate_count,
+                        "invalid_count": result.invalid_count,
+                        "error_count": result.error_count,
+                    },
+                )
+            self._refresh_history_actions()
 
             QMessageBox.information(
                 self, mode,
@@ -3080,10 +3142,39 @@ class App(QMainWindow):
         dlg = CustomColumnsDialog(self.active_custom_fields, self)
         if dlg.exec() == QDialog.Accepted:
             new_fields = dlg.get_fields()
+            current_summary = [
+                {
+                    "id": field.get("id"),
+                    "name": field.get("name"),
+                    "field_type": field.get("field_type"),
+                    "options": field.get("options"),
+                }
+                for field in self.active_custom_fields
+            ]
+            new_summary = [
+                {
+                    "id": field.get("id"),
+                    "name": field.get("name"),
+                    "field_type": field.get("field_type"),
+                    "options": field.get("options"),
+                }
+                for field in new_fields
+            ]
+            if current_summary == new_summary:
+                return
+
+            before_snapshot = self.history_manager.capture_snapshot(
+                kind="pre_custom_fields",
+                label="Before Manage Custom Columns",
+            )
 
             try:
                 self.custom_field_definitions.sync_fields(self.active_custom_fields, new_fields)
             except Exception as e:
+                try:
+                    self.history_manager.delete_snapshot(before_snapshot.snapshot_id)
+                except Exception:
+                    pass
                 self.conn.rollback()
                 self.logger.exception(f"Custom fields update failed: {e}")
                 QMessageBox.critical(self, "Fields Error", f"Could not update fields:\n{e}")
@@ -3100,6 +3191,20 @@ class App(QMainWindow):
             self.logger.info("Custom fields updated")
             self._audit("FIELDS", "CustomFieldDefs", ref_id="batch", details=changed_summary)
             self._audit_commit()
+            after_snapshot = self.history_manager.capture_snapshot(
+                kind="post_custom_fields",
+                label="After Manage Custom Columns",
+            )
+            self.history_manager.record_snapshot_action(
+                label="Manage Custom Columns",
+                action_type="fields.manage",
+                entity_type="CustomFieldDefs",
+                entity_id="batch",
+                payload={"summary": changed_summary},
+                snapshot_before_id=before_snapshot.snapshot_id,
+                snapshot_after_id=after_snapshot.snapshot_id,
+            )
+            self._refresh_history_actions()
 
 
     def _on_custom_fields_changed(self):
@@ -3700,6 +3805,13 @@ class App(QMainWindow):
                 self._audit_commit()
             except Exception:
                 pass
+            self.history_manager.record_event(
+                label="Create Database Backup",
+                action_type="db.backup",
+                entity_type="DB",
+                entity_id=str(result.backup_path),
+                payload={"path": str(result.backup_path), "method": result.method},
+            )
 
         except Exception as e:
             self.logger.exception(f"Backup failed: {e}")
@@ -3712,6 +3824,13 @@ class App(QMainWindow):
             self.logger.info(f"Integrity check: {res}")
             self._audit("VERIFY", "DB", ref_id=self.current_db_path, details=res)
             self._audit_commit()
+            self.history_manager.record_event(
+                label=f"Verify Integrity: {res}",
+                action_type="db.verify",
+                entity_type="DB",
+                entity_id=str(self.current_db_path),
+                payload={"result": res, "path": str(self.current_db_path)},
+            )
         except Exception as e:
             self.logger.exception(f"Integrity check failed: {e}")
             QMessageBox.critical(self, "Integrity Error", f"Failed to verify:\n{e}")
@@ -3753,6 +3872,18 @@ class App(QMainWindow):
                 self._audit_commit()
             except Exception:
                 pass
+            self.history_manager.record_event(
+                label="Restore Database from Backup",
+                action_type="db.restore",
+                entity_type="DB",
+                entity_id=str(path),
+                payload={
+                    "source_backup": str(path),
+                    "restored_path": str(result.restored_path),
+                    "safety_copy_path": str(result.safety_copy_path) if result.safety_copy_path else None,
+                },
+            )
+            self._refresh_history_actions()
 
         except Exception as e:
             self.logger.exception(f"Restore failed: {e}")

@@ -153,7 +153,7 @@ class HistoryManager:
     # Recording actions
     # ------------------------------------------------------------------
     def create_manual_snapshot(self, label: str | None = None) -> SnapshotRecord:
-        snapshot = self._create_snapshot(kind="manual", label=label or f"Manual Snapshot {self._now_stamp()}")
+        snapshot = self.capture_snapshot(kind="manual", label=label or f"Manual Snapshot {self._now_stamp()}")
         self.record_event(
             label=f"Create Snapshot: {snapshot.label}",
             action_type="snapshot.create",
@@ -163,27 +163,52 @@ class HistoryManager:
         )
         return snapshot
 
+    def capture_snapshot(self, *, kind: str, label: str) -> SnapshotRecord:
+        return self._create_snapshot(kind=kind, label=label)
+
+    def record_snapshot_action(
+        self,
+        *,
+        label: str,
+        action_type: str,
+        snapshot_before_id: int,
+        snapshot_after_id: int,
+        entity_type: str | None = None,
+        entity_id: str | None = None,
+        payload: dict | None = None,
+    ) -> HistoryEntry:
+        entry_id = self._insert_entry(
+            label=label,
+            action_type=action_type,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            reversible=True,
+            strategy="snapshot",
+            payload=payload or {},
+            inverse_payload=None,
+            redo_payload=None,
+            snapshot_before_id=snapshot_before_id,
+            snapshot_after_id=snapshot_after_id,
+            move_head=True,
+        )
+        return self.fetch_entry(entry_id)
+
     def restore_snapshot_as_action(self, snapshot_id: int, *, label: str | None = None) -> HistoryEntry:
-        before = self._create_snapshot(kind="auto_pre_restore", label="Before Snapshot Restore")
+        before = self.capture_snapshot(kind="auto_pre_restore", label="Before Snapshot Restore")
         target = self.fetch_snapshot(snapshot_id)
         if target is None:
             raise ValueError(f"Snapshot {snapshot_id} not found")
         self._restore_snapshot_state(target)
-        entry_id = self._insert_entry(
+        entry = self.record_snapshot_action(
             label=label or f"Restore Snapshot: {target.label}",
             action_type="snapshot.restore",
             entity_type="Snapshot",
             entity_id=str(snapshot_id),
-            reversible=True,
-            strategy="snapshot",
             payload={"snapshot_id": snapshot_id, "label": target.label},
-            inverse_payload=None,
-            redo_payload=None,
             snapshot_before_id=before.snapshot_id,
             snapshot_after_id=target.snapshot_id,
-            move_head=True,
         )
-        return self.fetch_entry(entry_id)
+        return entry
 
     def record_event(
         self,
@@ -502,8 +527,7 @@ class HistoryManager:
             )
 
     def _apply_entry_payload(self, entry: HistoryEntry, payload: dict | None, *, direction: str) -> None:
-        action_type = entry.action_type
-        if action_type == "snapshot.restore":
+        if entry.strategy == "snapshot":
             snapshot_id = entry.snapshot_before_id if direction == "undo" else entry.snapshot_after_id
             if snapshot_id is None:
                 return
@@ -513,6 +537,7 @@ class HistoryManager:
             self._restore_snapshot_state(snapshot)
             return
 
+        action_type = entry.action_type
         if payload is None:
             return
 
