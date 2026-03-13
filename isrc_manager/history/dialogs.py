@@ -30,6 +30,9 @@ class HistoryDialog(QDialog):
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs)
 
+        self.session_table = self._build_table(["Current", "Time", "Label", "Action", "Strategy"])
+        self.tabs.addTab(self.session_table, "Session")
+
         self.history_table = self._build_table(["Current", "Time", "Label", "Action", "Strategy"])
         self.tabs.addTab(self.history_table, "History")
 
@@ -79,22 +82,12 @@ class HistoryDialog(QDialog):
         return table
 
     def refresh_data(self):
-        history_entries = self.app.history_manager.list_entries()
-        self.history_table.setRowCount(len(history_entries))
-        for row_idx, entry in enumerate(history_entries):
-            values = [
-                "●" if entry.is_current else "",
-                entry.created_at,
-                entry.label,
-                entry.action_type,
-                entry.strategy,
-            ]
-            for col_idx, value in enumerate(values):
-                self.history_table.setItem(row_idx, col_idx, QTableWidgetItem(value))
-            self.history_table.item(row_idx, 0).setData(Qt.UserRole, entry.entry_id)
-        self.history_table.resizeColumnsToContents()
+        self._populate_entry_table(self.session_table, self.app.session_history_manager.list_entries())
 
-        snapshots = self.app.history_manager.list_snapshots()
+        history_entries = self.app.history_manager.list_entries() if self.app.history_manager is not None else []
+        self._populate_entry_table(self.history_table, history_entries)
+
+        snapshots = self.app.history_manager.list_snapshots() if self.app.history_manager is not None else []
         self.snapshot_table.setRowCount(len(snapshots))
         for row_idx, snapshot in enumerate(snapshots):
             values = [
@@ -108,10 +101,28 @@ class HistoryDialog(QDialog):
             self.snapshot_table.item(row_idx, 0).setData(Qt.UserRole, snapshot.snapshot_id)
         self.snapshot_table.resizeColumnsToContents()
 
-        self.undo_btn.setEnabled(bool(self.app.history_manager.can_undo()))
-        self.redo_btn.setEnabled(bool(self.app.history_manager.can_redo()))
-        self.restore_snapshot_btn.setEnabled(self.snapshot_table.rowCount() > 0)
-        self.delete_snapshot_btn.setEnabled(self.snapshot_table.rowCount() > 0)
+        undo_source, undo_entry = self.app._get_best_history_candidate("undo")
+        redo_source, redo_entry = self.app._get_best_history_candidate("redo")
+        self.undo_btn.setEnabled(bool(undo_source and undo_entry))
+        self.redo_btn.setEnabled(bool(redo_source and redo_entry))
+        self.restore_snapshot_btn.setEnabled(self.app.history_manager is not None and self.snapshot_table.rowCount() > 0)
+        self.delete_snapshot_btn.setEnabled(self.app.history_manager is not None and self.snapshot_table.rowCount() > 0)
+
+    @staticmethod
+    def _populate_entry_table(table: QTableWidget, entries):
+        table.setRowCount(len(entries))
+        for row_idx, entry in enumerate(entries):
+            values = [
+                "●" if entry.is_current else "",
+                entry.created_at,
+                entry.label,
+                entry.action_type,
+                entry.strategy,
+            ]
+            for col_idx, value in enumerate(values):
+                table.setItem(row_idx, col_idx, QTableWidgetItem(value))
+            table.item(row_idx, 0).setData(Qt.UserRole, entry.entry_id)
+        table.resizeColumnsToContents()
 
     def _selected_snapshot_id(self) -> int | None:
         row = self.snapshot_table.currentRow()

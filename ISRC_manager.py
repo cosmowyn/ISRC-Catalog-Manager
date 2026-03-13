@@ -39,7 +39,7 @@ from PySide6.QtWidgets import ( QListView, QMenuBar, QListWidget, QListWidgetIte
 
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 
-from isrc_manager.history import HistoryManager
+from isrc_manager.history import HistoryManager, SessionHistoryManager
 from isrc_manager.history.dialogs import HistoryDialog
 from isrc_manager.constants import (
     APP_NAME,
@@ -1221,6 +1221,7 @@ class App(QMainWindow):
         self.conn = None
         self.cursor = None
         self.history_manager = None
+        self.session_history_manager = SessionHistoryManager(self.history_dir)
         self.history_dialog = None
         self.track_service = None
         self.settings_reads = None
@@ -1845,57 +1846,55 @@ class App(QMainWindow):
         ) != QMessageBox.Yes:
             return
 
-        # NEW: persist current profile's header state
-        try:
-            self._save_header_state()
-        except Exception:
-            pass
-
-        self.open_database(path)
-
-        # Rebuild headers for the new profile and restore its saved order
-        try:
-            self.active_custom_fields = self.load_active_custom_fields()
-            self._rebuild_table_headers()
-            self._load_header_state()
-        except Exception:
-            pass
-
-        self.refresh_table_preserve_view()
-        self.populate_all_comboboxes()
+        previous_path = self.current_db_path
+        self._activate_profile(path)
         self.logger.info(f"Switched profile to: {path}")
         self._audit("PROFILE", "Database", ref_id=path, details="switch_profile")
         self._audit_commit()
+        self.session_history_manager.record_profile_switch(
+            from_path=previous_path,
+            to_path=path,
+            action_type="profile.switch",
+        )
+        self._refresh_history_actions()
 
     def create_new_profile(self):
         name, ok = QInputDialog.getText(self, "New Profile", "Database file name (no path, e.g., mylabel.db):")
         if not ok or not name.strip():
             return
+        previous_path = self.current_db_path
         try:
             new_path = str(self.profile_workflows.build_new_profile_path(name))
         except FileExistsError:
             QMessageBox.warning(self, "Exists", "A database with this name already exists.")
             return
-        self.open_database(new_path)
-        self._reload_profiles_list(select_path=new_path)
-        self.refresh_table_preserve_view()
-        self.populate_all_comboboxes()
+        self._activate_profile(new_path)
         self.logger.info(f"Created new profile DB: {new_path}")
         self._audit("PROFILE", "Database", ref_id=new_path, details="create_new_profile")
         self._audit_commit()
+        self.session_history_manager.record_profile_create(
+            created_path=new_path,
+            previous_path=previous_path,
+        )
+        self._refresh_history_actions()
         QMessageBox.information(self, "Profile Created", f"Database created:\n{new_path}")
 
     def browse_profile(self):
         path, _ = QFileDialog.getOpenFileName(self, "Open Database", str(self.database_dir), "SQLite DB (*.db);;All Files (*)")
         if not path:
             return
-        self.open_database(path)
-        self._reload_profiles_list(select_path=path)
-        self.refresh_table_preserve_view()
-        self.populate_all_comboboxes()
+        previous_path = self.current_db_path
+        self._activate_profile(path)
         self.logger.info(f"Opened external profile DB via browse: {path}")
         self._audit("PROFILE", "Database", ref_id=path, details="browse_profile")
         self._audit_commit()
+        self.session_history_manager.record_profile_switch(
+            from_path=previous_path,
+            to_path=path,
+            action_type="profile.browse",
+            label=f"Browse Profile: {Path(path).name}",
+        )
+        self._refresh_history_actions()
 
     def remove_selected_profile(self):
         idx = self.profile_combo.currentIndex()
@@ -1913,8 +1912,14 @@ class App(QMainWindow):
             return
 
         deleting_current = (getattr(self, "current_db_path", None) == path)
+        current_path = self.current_db_path
+        removed_snapshot_path = None
 
         try:
+            removed_snapshot_path = self.session_history_manager.capture_profile_snapshot(
+                path,
+                kind="profile_remove",
+            )
             if deleting_current:
                 self._close_database_connection()
 
@@ -1931,6 +1936,14 @@ class App(QMainWindow):
             self.logger.warning(f"Removed profile DB from disk: {path}")
             self._audit("PROFILE", "Database", ref_id=path, details="remove_profile")
             self._audit_commit()
+            self.session_history_manager.record_profile_remove(
+                deleted_path=path,
+                current_path=current_path,
+                fallback_path=result.fallback_path,
+                deleting_current=result.deleting_current,
+                snapshot_path=removed_snapshot_path,
+            )
+            self._refresh_history_actions()
             QMessageBox.information(self, "Profile Removed", f"Deleted:\n{path}")
         except Exception as e:
             if hasattr(self, "conn") and self.conn:
@@ -2026,11 +2039,13 @@ class App(QMainWindow):
             self.logger.exception(f"Audit commit error: {e}")
 
     def _refresh_history_actions(self):
-        if not hasattr(self, "undo_action") or self.history_manager is None:
+        if not hasattr(self, "undo_action"):
             return
 
-        undo_label = self.history_manager.describe_undo()
-        redo_label = self.history_manager.describe_redo()
+        undo_source, undo_entry = self._get_best_history_candidate("undo")
+        redo_source, redo_entry = self._get_best_history_candidate("redo")
+        undo_label = undo_entry.label if undo_entry is not None else None
+        redo_label = redo_entry.label if redo_entry is not None else None
 
         self.undo_action.setText(f"Undo {undo_label}" if undo_label else "Undo")
         self.undo_action.setEnabled(bool(undo_label))
@@ -2049,6 +2064,74 @@ class App(QMainWindow):
         self.populate_all_comboboxes()
         self.refresh_table_preserve_view()
         self._refresh_history_actions()
+
+    def _activate_profile(self, path: str, *, save_current_header: bool = True):
+        if save_current_header:
+            try:
+                self._save_header_state()
+            except Exception:
+                pass
+
+        self.open_database(path)
+
+        try:
+            self.active_custom_fields = self.load_active_custom_fields()
+            self._rebuild_table_headers()
+            self._load_header_state()
+        except Exception:
+            pass
+
+        self._reload_profiles_list(select_path=path)
+        self.refresh_table_preserve_view()
+        self.populate_all_comboboxes()
+        self._refresh_history_actions()
+
+    @staticmethod
+    def _history_time_key(entry):
+        if entry is None or not entry.created_at:
+            return datetime.min
+        try:
+            return datetime.fromisoformat(entry.created_at)
+        except ValueError:
+            return datetime.min
+
+    def _get_best_history_candidate(self, direction: str):
+        candidates = []
+
+        if direction == "undo":
+            if self.history_manager is not None and self.history_manager.can_undo():
+                candidates.append(("profile", self.history_manager.get_current_entry()))
+            if self.session_history_manager.can_undo():
+                candidates.append(("session", self.session_history_manager.get_current_entry()))
+        else:
+            if self.history_manager is not None:
+                redo_entry = self.history_manager.get_default_redo_entry()
+                if redo_entry is not None:
+                    candidates.append(("profile", redo_entry))
+            redo_entry = self.session_history_manager.get_default_redo_entry()
+            if redo_entry is not None:
+                candidates.append(("session", redo_entry))
+
+        if not candidates:
+            return None, None
+        return max(candidates, key=lambda item: (self._history_time_key(item[1]), item[1].entry_id))
+
+    def _session_history_open_profile(self, path: str):
+        self._activate_profile(path)
+
+    def _session_history_reload_profiles(self, select_path: str | None = None):
+        chosen_path = select_path or getattr(self, "current_db_path", None)
+        self._reload_profiles_list(select_path=chosen_path)
+        if self.conn is not None:
+            self.refresh_table_preserve_view()
+            self.populate_all_comboboxes()
+        self._refresh_history_actions()
+
+    def _session_history_delete_profile(self, path: str):
+        profile_path = str(Path(path))
+        if getattr(self, "current_db_path", None) == profile_path and self.conn is not None:
+            self._close_database_connection()
+        self.profile_workflows.profile_store.delete_profile(profile_path)
 
     def _run_snapshot_history_action(
         self,
@@ -2109,23 +2192,39 @@ class App(QMainWindow):
         self.history_dialog.exec()
 
     def history_undo(self):
-        if self.history_manager is None:
+        source, _ = self._get_best_history_candidate("undo")
+        if source is None:
             return
         try:
-            entry = self.history_manager.undo()
-            if entry is not None:
-                self._refresh_after_history_change()
+            if source == "session":
+                entry = self.session_history_manager.undo(self)
+                if entry is not None:
+                    self._refresh_history_actions()
+                    if self.history_dialog is not None and self.history_dialog.isVisible():
+                        self.history_dialog.refresh_data()
+            else:
+                entry = self.history_manager.undo()
+                if entry is not None:
+                    self._refresh_after_history_change()
         except Exception as e:
             self.logger.exception(f"Undo failed: {e}")
             QMessageBox.critical(self, "Undo Error", f"Could not undo the last action:\n{e}")
 
     def history_redo(self):
-        if self.history_manager is None:
+        source, _ = self._get_best_history_candidate("redo")
+        if source is None:
             return
         try:
-            entry = self.history_manager.redo()
-            if entry is not None:
-                self._refresh_after_history_change()
+            if source == "session":
+                entry = self.session_history_manager.redo(self)
+                if entry is not None:
+                    self._refresh_history_actions()
+                    if self.history_dialog is not None and self.history_dialog.isVisible():
+                        self.history_dialog.refresh_data()
+            else:
+                entry = self.history_manager.redo()
+                if entry is not None:
+                    self._refresh_after_history_change()
         except Exception as e:
             self.logger.exception(f"Redo failed: {e}")
             QMessageBox.critical(self, "Redo Error", f"Could not redo the action:\n{e}")
