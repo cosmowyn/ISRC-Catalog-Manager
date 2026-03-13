@@ -20,6 +20,7 @@ import tempfile
 import platform
 import logging
 import mimetypes
+from importlib import metadata
 from pathlib import Path
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
@@ -35,7 +36,7 @@ from PySide6.QtWidgets import ( QListView, QMenuBar, QListWidget, QListWidgetIte
     QCalendarWidget, QRadioButton, QMenuBar, QMenu, QInputDialog, QTableWidget, QTableWidgetItem,
     QHeaderView, QDialog, QMainWindow, QSizePolicy, QComboBox, QCompleter, QListWidget,
     QListWidgetItem, QFileDialog, QToolBar, QFrame, QSpinBox, QScrollArea, QSlider, QAbstractItemView,
-    QFormLayout, QTableView, QTabWidget, QDialogButtonBox, QGridLayout, QGroupBox
+    QFormLayout, QTableView, QTabWidget, QDialogButtonBox, QGridLayout, QGroupBox, QPlainTextEdit
 )
 
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
@@ -50,6 +51,7 @@ from isrc_manager.constants import (
     DEFAULT_WINDOW_TITLE,
     FIELD_TYPE_CHOICES,
     PROMOTED_CUSTOM_FIELD_NAMES,
+    SCHEMA_TARGET,
 )
 from isrc_manager.domain.codes import (
     is_blank,
@@ -87,6 +89,41 @@ from isrc_manager.services import (
     TrackUpdatePayload,
 )
 from isrc_manager.settings import enforce_single_instance, init_settings
+
+
+class _JsonLogFormatter(logging.Formatter):
+    """Writes structured JSON lines for troubleshooting and traceability."""
+
+    EXTRA_ATTRS = (
+        "event",
+        "action",
+        "entity",
+        "entity_id",
+        "ref_id",
+        "status",
+        "profile",
+        "db_path",
+        "details",
+        "path",
+        "result",
+        "repair_key",
+    )
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "timestamp": datetime.fromtimestamp(record.created).strftime("%Y-%m-%d %H:%M:%S"),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        for attr in self.EXTRA_ATTRS:
+            value = getattr(record, attr, None)
+            if value in (None, "", [], {}, ()):
+                continue
+            payload[attr] = value
+        if record.exc_info:
+            payload["exception"] = self.formatException(record.exc_info)
+        return json.dumps(payload, ensure_ascii=True, default=str)
 
 
 # =============================================================================
@@ -659,6 +696,477 @@ class ApplicationSettingsDialog(QDialog):
             self.focus_field("artist_code")
             return
         self.accept()
+
+
+class ApplicationLogDialog(QDialog):
+    def __init__(self, app, parent=None):
+        super().__init__(parent or app)
+        self.app = app
+        self.setObjectName("applicationLogDialog")
+        self.setWindowTitle("Application Log")
+        self.resize(860, 700)
+        self.setMinimumSize(720, 560)
+        self.setStyleSheet(
+            """
+            QDialog#applicationLogDialog QLabel#logTitle {
+                font-size: 28px;
+                font-weight: 700;
+            }
+            QDialog#applicationLogDialog QLabel#logSubtitle {
+                color: #64748b;
+                font-size: 15px;
+            }
+            QDialog#applicationLogDialog QGroupBox {
+                font-size: 16px;
+                font-weight: 600;
+                margin-top: 8px;
+            }
+            QDialog#applicationLogDialog QGroupBox::title {
+                left: 10px;
+                padding: 0 6px;
+            }
+            QDialog#applicationLogDialog QLabel[role="meta"] {
+                color: #475569;
+            }
+            """
+        )
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(14)
+
+        title = QLabel("Application Log")
+        title.setObjectName("logTitle")
+        subtitle = QLabel("Review the live application logs, open archived log files, and jump straight to the log folder.")
+        subtitle.setObjectName("logSubtitle")
+        subtitle.setWordWrap(True)
+        root.addWidget(title)
+        root.addWidget(subtitle)
+
+        source_group = QGroupBox("Application Log")
+        source_layout = QFormLayout(source_group)
+        source_layout.setContentsMargins(14, 18, 14, 14)
+        source_layout.setHorizontalSpacing(14)
+        source_layout.setVerticalSpacing(10)
+        source_layout.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
+        self.log_combo = QComboBox()
+        self.log_combo.setMinimumContentsLength(28)
+        self.log_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        source_layout.addRow("Log file", self.log_combo)
+
+        self.log_path_label = QLabel()
+        self.log_path_label.setProperty("role", "meta")
+        self.log_path_label.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+        self.log_path_label.setWordWrap(True)
+        source_layout.addRow("Path", self.log_path_label)
+        root.addWidget(source_group)
+
+        contents_group = QGroupBox("Log Contents")
+        contents_layout = QVBoxLayout(contents_group)
+        contents_layout.setContentsMargins(14, 18, 14, 14)
+        contents_layout.setSpacing(12)
+
+        button_row = QHBoxLayout()
+        button_row.setSpacing(10)
+        self.refresh_button = QPushButton("Refresh")
+        self.open_file_button = QPushButton("Open File")
+        self.open_folder_button = QPushButton("Open Log Folder")
+        for button in (self.refresh_button, self.open_file_button, self.open_folder_button):
+            button.setMinimumWidth(134)
+            button_row.addWidget(button)
+        button_row.addStretch(1)
+        contents_layout.addLayout(button_row)
+
+        self.contents_edit = QPlainTextEdit(self)
+        self.contents_edit.setReadOnly(True)
+        self.contents_edit.setLineWrapMode(QPlainTextEdit.NoWrap)
+        self.contents_edit.setMinimumHeight(360)
+        contents_layout.addWidget(self.contents_edit, 1)
+        root.addWidget(contents_group, 1)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Close, Qt.Horizontal, self)
+        buttons.rejected.connect(self.reject)
+        root.addWidget(buttons)
+
+        self.log_combo.currentIndexChanged.connect(self._load_selected_log)
+        self.refresh_button.clicked.connect(self.refresh)
+        self.open_file_button.clicked.connect(self._open_selected_log)
+        self.open_folder_button.clicked.connect(lambda: self.app._open_local_path(self.app.logs_dir, "Open Log Folder"))
+
+        self.refresh()
+
+    def refresh(self):
+        current_path = self.log_combo.currentData()
+        log_files = self.app._available_log_files()
+
+        self.log_combo.blockSignals(True)
+        self.log_combo.clear()
+        for path in log_files:
+            stamp = datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+            kind = "Trace log" if ".jsonl" in path.name else "Application log"
+            self.log_combo.addItem(f"{kind}: {path.name}    {stamp}", str(path))
+        self.log_combo.blockSignals(False)
+
+        if not log_files:
+            self.log_path_label.setText("No log files found in the application log folder.")
+            self.contents_edit.setPlainText("No log files are available yet.")
+            self.open_file_button.setEnabled(False)
+            return
+
+        target_index = 0
+        if current_path:
+            for idx in range(self.log_combo.count()):
+                if self.log_combo.itemData(idx) == current_path:
+                    target_index = idx
+                    break
+
+        self.open_file_button.setEnabled(True)
+        self.log_combo.setCurrentIndex(target_index)
+        self._load_selected_log()
+
+    def _selected_log_path(self) -> Path | None:
+        data = self.log_combo.currentData()
+        return Path(data) if data else None
+
+    def _load_selected_log(self):
+        path = self._selected_log_path()
+        if path is None:
+            self.log_path_label.setText("No log file selected.")
+            self.contents_edit.setPlainText("")
+            self.open_file_button.setEnabled(False)
+            return
+
+        self.log_path_label.setText(str(path))
+        self.open_file_button.setEnabled(path.exists())
+        text = self.app._read_log_for_viewer(path)
+        self.contents_edit.setPlainText(text)
+        self.contents_edit.verticalScrollBar().setValue(0)
+
+    def _open_selected_log(self):
+        path = self._selected_log_path()
+        if path is not None:
+            self.app._open_local_path(path, "Open Log File")
+
+
+class DiagnosticsDialog(QDialog):
+    def __init__(self, app, parent=None):
+        super().__init__(parent or app)
+        self.app = app
+        self._checks = []
+        self.setObjectName("diagnosticsDialog")
+        self.setWindowTitle("Diagnostics")
+        self.resize(1080, 780)
+        self.setMinimumSize(980, 680)
+        self.setStyleSheet(
+            """
+            QDialog#diagnosticsDialog QLabel#diagnosticsTitle {
+                font-size: 28px;
+                font-weight: 700;
+            }
+            QDialog#diagnosticsDialog QLabel#diagnosticsSubtitle {
+                color: #64748b;
+                font-size: 15px;
+            }
+            QDialog#diagnosticsDialog QGroupBox {
+                font-size: 16px;
+                font-weight: 600;
+                margin-top: 8px;
+            }
+            QDialog#diagnosticsDialog QGroupBox::title {
+                left: 10px;
+                padding: 0 6px;
+            }
+            """
+        )
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(14)
+
+        title = QLabel("Diagnostics")
+        title.setObjectName("diagnosticsTitle")
+        subtitle = QLabel("Inspect the current profile, schema, and managed files to quickly spot anything that needs attention.")
+        subtitle.setObjectName("diagnosticsSubtitle")
+        subtitle.setWordWrap(True)
+        root.addWidget(title)
+        root.addWidget(subtitle)
+
+        self.environment_group = QGroupBox("Environment")
+        env_layout = QGridLayout(self.environment_group)
+        env_layout.setContentsMargins(14, 18, 14, 14)
+        env_layout.setHorizontalSpacing(18)
+        env_layout.setVerticalSpacing(10)
+        env_layout.setColumnMinimumWidth(0, 190)
+        self.environment_labels = {}
+        self.environment_name_labels = {}
+        for row, key in enumerate((
+            "App version",
+            "Schema version",
+            "Current profile",
+            "Database path",
+            "Data folder",
+            "Log folder",
+            "Restore points",
+            "Platform",
+            "Python",
+        )):
+            name_label = QLabel(key)
+            name_label.setAlignment(Qt.AlignRight | Qt.AlignTop)
+            name_label.setMinimumWidth(190)
+            name_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.MinimumExpanding)
+            label = QLabel()
+            label.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+            label.setWordWrap(True)
+            label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+            label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.MinimumExpanding)
+            env_layout.addWidget(name_label, row, 0, alignment=Qt.AlignRight | Qt.AlignTop)
+            env_layout.addWidget(label, row, 1)
+            self.environment_name_labels[key] = name_label
+            self.environment_labels[key] = label
+        env_layout.setColumnStretch(1, 1)
+        root.addWidget(self.environment_group)
+
+        checks_group = QGroupBox("Checks")
+        checks_layout = QVBoxLayout(checks_group)
+        checks_layout.setContentsMargins(14, 18, 14, 14)
+        checks_layout.setSpacing(12)
+        self.checks_list = QListWidget(self)
+        self.checks_list.setMinimumHeight(220)
+        checks_layout.addWidget(self.checks_list, 1)
+        root.addWidget(checks_group, 1)
+
+        details_group = QGroupBox("Details")
+        details_layout = QVBoxLayout(details_group)
+        details_layout.setContentsMargins(14, 18, 14, 14)
+        self.details_edit = QPlainTextEdit(self)
+        self.details_edit.setReadOnly(True)
+        self.details_edit.setMinimumHeight(190)
+        details_layout.addWidget(self.details_edit)
+        root.addWidget(details_group)
+
+        button_row = QHBoxLayout()
+        button_row.setSpacing(10)
+        self.refresh_button = QPushButton("Refresh")
+        self.preview_repair_button = QPushButton("Preview Repair")
+        self.repair_button = QPushButton("Repair Issue")
+        self.open_logs_button = QPushButton("Open Log Folder")
+        self.open_data_button = QPushButton("Open Data Folder")
+        self.close_button = QPushButton("Close")
+        for button in (
+            self.refresh_button,
+            self.preview_repair_button,
+            self.repair_button,
+            self.open_logs_button,
+            self.open_data_button,
+            self.close_button,
+        ):
+            button.setMinimumWidth(140)
+        button_row.addWidget(self.refresh_button)
+        button_row.addWidget(self.preview_repair_button)
+        button_row.addWidget(self.repair_button)
+        button_row.addWidget(self.open_logs_button)
+        button_row.addWidget(self.open_data_button)
+        button_row.addStretch(1)
+        button_row.addWidget(self.close_button)
+        root.addLayout(button_row)
+
+        self.refresh_button.clicked.connect(self.refresh)
+        self.preview_repair_button.clicked.connect(self._preview_selected_repair)
+        self.repair_button.clicked.connect(self._run_selected_repair)
+        self.open_logs_button.clicked.connect(lambda: self.app._open_local_path(self.app.logs_dir, "Open Log Folder"))
+        self.open_data_button.clicked.connect(lambda: self.app._open_local_path(DATA_DIR(), "Open Data Folder"))
+        self.close_button.clicked.connect(self.accept)
+        self.checks_list.currentRowChanged.connect(self._show_selected_check)
+
+        self.refresh()
+
+    def refresh(self):
+        report = self.app._build_diagnostics_report()
+        for key, value in report["environment"].items():
+            label = self.environment_labels.get(key)
+            if label is not None:
+                label.setText(value)
+        self._sync_environment_label_metrics()
+
+        self._checks = list(report["checks"])
+        self.checks_list.blockSignals(True)
+        self.checks_list.clear()
+        for check in self._checks:
+            status = check["status"].upper()
+            self.checks_list.addItem(f"[{status}] {check['title']}: {check['summary']}")
+        self.checks_list.blockSignals(False)
+
+        if self._checks:
+            self.checks_list.setCurrentRow(0)
+            self._show_selected_check(0)
+        else:
+            self.details_edit.setPlainText("No diagnostics are available for the current profile.")
+            self._update_repair_buttons(None)
+
+    def _show_selected_check(self, row: int):
+        if row < 0 or row >= len(self._checks):
+            self.details_edit.setPlainText("")
+            self._update_repair_buttons(None)
+            return
+        check = self._checks[row]
+        text = f"{check['title']}\nStatus: {check['status']}\n\n{check['details']}"
+        self.details_edit.setPlainText(text)
+        self._update_repair_buttons(check)
+
+    def _sync_environment_label_metrics(self):
+        available_width = max(460, self.environment_group.width() - 280)
+        for key, label in self.environment_labels.items():
+            label.setFixedWidth(available_width)
+            label.adjustSize()
+            label.setMinimumHeight(max(label.sizeHint().height(), label.fontMetrics().height() + 8))
+            name_label = self.environment_name_labels.get(key)
+            if name_label is not None:
+                name_label.setMinimumHeight(label.minimumHeight())
+
+    def _update_repair_buttons(self, check: dict | None):
+        repairable = bool(check and check.get("repair_key"))
+        self.preview_repair_button.setEnabled(repairable)
+        self.repair_button.setEnabled(repairable)
+
+    def _selected_check(self) -> dict | None:
+        row = self.checks_list.currentRow()
+        if row < 0 or row >= len(self._checks):
+            return None
+        return self._checks[row]
+
+    def _preview_selected_repair(self):
+        check = self._selected_check()
+        if not check or not check.get("repair_key"):
+            return
+        preview_text = self.app._preview_diagnostics_repair(check["repair_key"], check)
+        base = self.details_edit.toPlainText().rstrip()
+        self.details_edit.setPlainText(f"{base}\n\nRepair Preview\n\n{preview_text}")
+
+    def _run_selected_repair(self):
+        check = self._selected_check()
+        if not check or not check.get("repair_key"):
+            return
+        label = check.get("repair_label") or "Repair Issue"
+        preview_text = self.app._preview_diagnostics_repair(check["repair_key"], check)
+        if (
+            QMessageBox.question(
+                self,
+                label,
+                f"{preview_text}\n\nContinue?",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            != QMessageBox.Yes
+        ):
+            return
+        try:
+            result_text = self.app._run_diagnostics_repair(check["repair_key"], check)
+        except Exception as exc:
+            QMessageBox.critical(self, "Repair Failed", str(exc))
+            return
+        QMessageBox.information(self, "Repair Complete", result_text)
+        self.refresh()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._sync_environment_label_metrics()
+
+
+class AboutDialog(QDialog):
+    def __init__(self, app, parent=None):
+        super().__init__(parent or app)
+        self.app = app
+        self.setObjectName("aboutDialog")
+        self.setWindowTitle("About ISRC Catalog Manager")
+        self.resize(680, 420)
+        self.setMinimumSize(620, 380)
+        self.setStyleSheet(
+            """
+            QDialog#aboutDialog QLabel#aboutTitle {
+                font-size: 30px;
+                font-weight: 700;
+            }
+            QDialog#aboutDialog QLabel#aboutBody {
+                font-size: 15px;
+            }
+            QDialog#aboutDialog QGroupBox {
+                font-size: 16px;
+                font-weight: 600;
+                margin-top: 8px;
+            }
+            QDialog#aboutDialog QGroupBox::title {
+                left: 10px;
+                padding: 0 6px;
+            }
+            """
+        )
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(14)
+
+        top_row = QHBoxLayout()
+        top_row.setSpacing(16)
+
+        icon_label = QLabel()
+        icon_label.setFixedSize(96, 96)
+        pixmap = app.windowIcon().pixmap(96, 96)
+        if not pixmap.isNull():
+            icon_label.setPixmap(pixmap)
+        top_row.addWidget(icon_label, 0, Qt.AlignTop)
+
+        intro_layout = QVBoxLayout()
+        intro_layout.setSpacing(8)
+        title = QLabel("ISRC Catalog Manager")
+        title.setObjectName("aboutTitle")
+        intro_layout.addWidget(title)
+
+        version_label = QLabel(f"Version {app._app_version_text()}")
+        version_label.setStyleSheet("color: #475569; font-size: 16px;")
+        intro_layout.addWidget(version_label)
+
+        body = QLabel(
+            "Local-first desktop catalog management for tracks, licensing, custom metadata, snapshots, and export workflows."
+        )
+        body.setObjectName("aboutBody")
+        body.setWordWrap(True)
+        intro_layout.addWidget(body)
+
+        body2 = QLabel(
+            "Everything stays on your machine: profile databases, managed media, logs, backups, and history."
+        )
+        body2.setObjectName("aboutBody")
+        body2.setWordWrap(True)
+        intro_layout.addWidget(body2)
+        intro_layout.addStretch(1)
+        top_row.addLayout(intro_layout, 1)
+        root.addLayout(top_row)
+
+        details_group = QGroupBox("Current Workspace")
+        details_layout = QFormLayout(details_group)
+        details_layout.setContentsMargins(14, 18, 14, 14)
+        details_layout.setHorizontalSpacing(18)
+        details_layout.setVerticalSpacing(10)
+        details_layout.setLabelAlignment(Qt.AlignRight | Qt.AlignTop)
+
+        details = {
+            "Window title": app.windowTitle() or DEFAULT_WINDOW_TITLE,
+            "Current profile": Path(app.current_db_path).name if getattr(app, "current_db_path", "") else "(none)",
+            "Database path": str(app.current_db_path) if getattr(app, "current_db_path", "") else "(none)",
+            "Data folder": str(DATA_DIR()),
+            "Log folder": str(app.logs_dir),
+            "Schema version": str(app._get_db_version()),
+        }
+        for key, value in details.items():
+            label = QLabel(value)
+            label.setWordWrap(True)
+            label.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+            details_layout.addRow(key, label)
+        root.addWidget(details_group)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok, Qt.Horizontal, self)
+        buttons.accepted.connect(self.accept)
+        root.addWidget(buttons)
 
 
 # =============================================================================
@@ -2161,7 +2669,9 @@ class App(QMainWindow):
 
         self.logs_dir = DATA_DIR() / "logs"
         self.logs_dir.mkdir(parents=True, exist_ok=True)
-        self.log_path = self.logs_dir / "app.log"
+        today_stamp = datetime.now().strftime("%Y-%m-%d")
+        self.log_path = self.logs_dir / f"isrc_manager_{today_stamp}.log"
+        self.trace_log_path = self.logs_dir / f"isrc_manager_trace_{today_stamp}.jsonl"
 
         self.backups_dir = DATA_DIR() / "backups"
         self.backups_dir.mkdir(parents=True, exist_ok=True)
@@ -2176,20 +2686,17 @@ class App(QMainWindow):
         # default DB file (used if no previous DB is selected)
         DB_PATH = self.database_dir / "default.db"
 
-        # --- Logging setup (rotating file handler) ---
+        # --- Logging setup (daily human log + structured trace log) ---
         self.logger = logging.getLogger("ISRCManager")
-        self.logger.setLevel(logging.INFO)
-        if not self.logger.handlers:
-            h = RotatingFileHandler(self.log_path, maxBytes=1_000_000, backupCount=5, encoding="utf-8")
-            fmt = logging.Formatter("%(asctime)s | %(levelname)s | %(name)s | %(message)s")
-            h.setFormatter(fmt)
-            self.logger.addHandler(h)
-            sh = logging.StreamHandler()
-            sh.setLevel(logging.WARNING)
-            sh.setFormatter(fmt)
-            self.logger.addHandler(sh)
-
-        self.logger.info("Application start")
+        self.trace_logger = logging.getLogger("ISRCManager.trace")
+        self._configure_logging()
+        self._log_event(
+            "app.start",
+            "Application start",
+            data_dir=DATA_DIR(),
+            log_path=self.log_path,
+            trace_log_path=self.trace_log_path,
+        )
 
         # --- Settings / identity ---
         ini_path = Path(QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)) / "settings.ini"
@@ -2229,17 +2736,6 @@ class App(QMainWindow):
         # ----- Menus -----
         self.menu_bar = QMenuBar(self)
         self.setMenuBar(self.menu_bar)
-
-        def _open_logs():
-            try:
-                if sys.platform.startswith("win"):
-                    os.startfile(self.logs_dir)
-                elif sys.platform == "darwin":
-                    os.system(f'open "{self.logs_dir}"')
-                else:
-                    os.system(f'xdg-open "{self.logs_dir}"')
-            except Exception as e:
-                QMessageBox.warning(self, "Open Logs", f"Could not open logs folder:\n{e}")
 
         try:
             movable = self.settings.value(f"{self._table_settings_prefix()}/columns_movable", False, bool)
@@ -2492,18 +2988,41 @@ class App(QMainWindow):
         # Help menu
         help_menu = self.menu_bar.addMenu("Help")
         self.view_info_action = self._create_action(
-            "App Summary…",
+            "About ISRC Catalog Manager…",
             slot=self.show_settings_summary,
             shortcuts=("F1",),
         )
         help_menu.addAction(self.view_info_action)
 
+        self.diagnostics_action = self._create_action(
+            "Diagnostics…",
+            slot=self.open_diagnostics_dialog,
+            shortcuts=("Ctrl+Alt+D", "Meta+Alt+D"),
+        )
+        help_menu.addAction(self.diagnostics_action)
+
+        self.application_log_action = self._create_action(
+            "Application Log…",
+            slot=self.open_application_log_dialog,
+            shortcuts=("Ctrl+Alt+L", "Meta+Alt+L"),
+        )
+        help_menu.addAction(self.application_log_action)
+
+        help_menu.addSeparator()
+
         self.open_logs_action = self._create_action(
             "Open Logs Folder…",
-            slot=_open_logs,
+            slot=lambda: self._open_local_path(self.logs_dir, "Open Log Folder"),
             shortcuts=("Ctrl+Shift+L", "Meta+Shift+L"),
         )
         help_menu.addAction(self.open_logs_action)
+
+        self.open_data_folder_action = self._create_action(
+            "Open Data Folder…",
+            slot=lambda: self._open_local_path(DATA_DIR(), "Open Data Folder"),
+            shortcuts=("Ctrl+Alt+Shift+L", "Meta+Alt+Shift+L"),
+        )
+        help_menu.addAction(self.open_data_folder_action)
 
         # ----- Profiles toolbar (quick DB switch)
         self.toolbar = QToolBar("Profiles", self)
@@ -2792,6 +3311,85 @@ class App(QMainWindow):
         self.logger.info("Settings synced to disk")
         super().closeEvent(e)
 
+    def _configure_logging(self) -> None:
+        app_formatter = logging.Formatter(
+            "%(asctime)s | %(levelname)-8s | %(message)s",
+            "%Y-%m-%d %H:%M:%S",
+        )
+        trace_formatter = _JsonLogFormatter()
+
+        for logger in (self.logger, self.trace_logger):
+            logger.setLevel(logging.INFO)
+            logger.propagate = False
+            for handler in list(logger.handlers):
+                logger.removeHandler(handler)
+                try:
+                    handler.close()
+                except Exception:
+                    pass
+
+        app_handler = RotatingFileHandler(self.log_path, maxBytes=1_000_000, backupCount=7, encoding="utf-8")
+        app_handler.setLevel(logging.INFO)
+        app_handler.setFormatter(app_formatter)
+        self.logger.addHandler(app_handler)
+
+        trace_handler = RotatingFileHandler(
+            self.trace_log_path,
+            maxBytes=2_000_000,
+            backupCount=10,
+            encoding="utf-8",
+        )
+        trace_handler.setLevel(logging.INFO)
+        trace_handler.setFormatter(trace_formatter)
+        self.trace_logger.addHandler(trace_handler)
+
+        stream_handler = logging.StreamHandler()
+        stream_handler.setLevel(logging.WARNING)
+        stream_handler.setFormatter(app_formatter)
+        self.logger.addHandler(stream_handler)
+
+    @staticmethod
+    def _normalize_log_value(value):
+        if isinstance(value, Path):
+            return str(value)
+        if isinstance(value, (list, tuple, set)):
+            return [App._normalize_log_value(item) for item in value]
+        if isinstance(value, dict):
+            return {str(key): App._normalize_log_value(val) for key, val in value.items()}
+        return value
+
+    def _trace_context(self, **fields) -> dict:
+        payload = {
+            "profile": Path(self.current_db_path).name if getattr(self, "current_db_path", "") else None,
+            "db_path": str(self.current_db_path) if getattr(self, "current_db_path", "") else None,
+        }
+        payload.update(fields)
+        return {
+            key: self._normalize_log_value(value)
+            for key, value in payload.items()
+            if value not in (None, "", [], {}, ())
+        }
+
+    def _log_trace(self, event: str, *, message: str | None = None, level: int = logging.INFO, **fields) -> None:
+        if not hasattr(self, "trace_logger") or self.trace_logger is None:
+            return
+        extra = {"event": event}
+        extra.update(self._trace_context(**fields))
+        self.trace_logger.log(level, message or event, extra=extra)
+
+    def _log_event(self, event: str, message: str, *, level: int = logging.INFO, **fields) -> None:
+        summary_parts = []
+        for key, value in fields.items():
+            if value in (None, "", [], {}, ()):
+                continue
+            normalized = self._normalize_log_value(value)
+            if isinstance(normalized, list):
+                normalized = ", ".join(str(item) for item in normalized)
+            summary_parts.append(f"{key}={normalized}")
+        line = message if not summary_parts else f"{message} | " + " | ".join(summary_parts)
+        self.logger.log(level, line)
+        self._log_trace(event, message=message, level=level, **fields)
+
     def _create_action(
         self,
         text: str,
@@ -2818,6 +3416,504 @@ class App(QMainWindow):
             action.toggled.connect(toggled_slot)
         self.addAction(action)
         return action
+
+    def _app_version_text(self) -> str:
+        for package_name in ("isrc-catalog-manager", APP_NAME):
+            try:
+                return metadata.version(package_name)
+            except metadata.PackageNotFoundError:
+                continue
+            except Exception:
+                break
+        return "0.1.0"
+
+    def _open_local_path(self, path: str | Path, action_label: str = "Open") -> bool:
+        target = Path(path)
+        if not target.exists():
+            QMessageBox.warning(self, action_label, f"Path does not exist:\n{target}")
+            return False
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(target))):
+            QMessageBox.warning(self, action_label, f"Could not open:\n{target}")
+            return False
+        return True
+
+    def _available_log_files(self) -> list[Path]:
+        if not self.logs_dir.exists():
+            return []
+        return sorted(
+            (
+                path
+                for path in self.logs_dir.iterdir()
+                if path.is_file() and (".log" in path.name or ".jsonl" in path.name)
+            ),
+            key=lambda item: (item.stat().st_mtime, item.name.lower()),
+            reverse=True,
+        )
+
+    def _read_log_for_viewer(self, path: Path) -> str:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except Exception as exc:
+            return f"Could not read log file:\n{exc}"
+
+        if ".jsonl" not in path.name:
+            return text
+
+        rendered = []
+        for line in text.splitlines():
+            raw = line.strip()
+            if not raw:
+                continue
+            try:
+                payload = json.loads(raw)
+            except Exception:
+                rendered.append(raw)
+                continue
+
+            timestamp = payload.get("timestamp", "?")
+            level = str(payload.get("level", "INFO")).upper()
+            event = payload.get("event", payload.get("logger", "trace"))
+            message = payload.get("message", "")
+            rendered.append(f"[{timestamp}] {level} {event}")
+            if message:
+                rendered.append(f"  {message}")
+
+            for key, value in payload.items():
+                if key in {"timestamp", "level", "logger", "event", "message"}:
+                    continue
+                rendered.append(f"  {key}: {value}")
+            rendered.append("")
+
+        return "\n".join(rendered).strip() or "(No trace entries found.)"
+
+    def _history_snapshot_summary(self) -> str:
+        if self.conn is None:
+            return "History unavailable"
+        try:
+            count_row = self.conn.execute("SELECT COUNT(*) FROM HistorySnapshots").fetchone()
+            total = int(count_row[0] or 0) if count_row else 0
+            latest = self.conn.execute(
+                "SELECT label, created_at FROM HistorySnapshots ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            if not latest:
+                return "0 snapshot(s)"
+            latest_label = latest[0] or "Unnamed snapshot"
+            latest_time = latest[1] or "unknown time"
+            return f"{total} snapshot(s), latest: {latest_label} @ {latest_time}"
+        except Exception:
+            return "Snapshot history unavailable"
+
+    def _custom_value_field_column_name(self) -> str | None:
+        if self.conn is None:
+            return None
+        try:
+            columns = {
+                row[1]
+                for row in self.conn.execute("PRAGMA table_info(CustomFieldValues)").fetchall()
+            }
+        except Exception:
+            return None
+        if "field_def_id" in columns:
+            return "field_def_id"
+        if "custom_field_id" in columns:
+            return "custom_field_id"
+        return None
+
+    def _count_orphaned_custom_values(self) -> int:
+        if self.conn is None:
+            return 0
+        field_column = self._custom_value_field_column_name()
+        if field_column is None:
+            return 0
+        row = self.conn.execute(
+            f"""
+            SELECT COUNT(*)
+            FROM CustomFieldValues cfv
+            LEFT JOIN CustomFieldDefs cfd ON cfd.id = cfv.{field_column}
+            LEFT JOIN Tracks t ON t.id = cfv.track_id
+            WHERE cfd.id IS NULL OR t.id IS NULL
+            """
+        ).fetchone()
+        return int(row[0] or 0) if row else 0
+
+    def _preview_diagnostics_repair(self, repair_key: str, check: dict | None = None) -> str:
+        if repair_key == "schema_migrate":
+            return "This will re-run the schema bootstrap and migrations for the current profile."
+        if repair_key == "custom_value_cleanup":
+            count = None
+            if check is not None:
+                count = check.get("orphan_count")
+            if count is None:
+                count = self._count_orphaned_custom_values()
+            return (
+                f"This will delete {int(count)} orphaned custom value row(s) that no longer point to a valid "
+                "track or custom field definition."
+            )
+        raise ValueError(f"Unknown diagnostics repair: {repair_key}")
+
+    def _run_diagnostics_repair(self, repair_key: str, check: dict | None = None) -> str:
+        if repair_key == "schema_migrate":
+            self.init_db()
+            self.migrate_schema()
+            self.active_custom_fields = self.load_active_custom_fields()
+            self.refresh_table_preserve_view()
+            self.populate_all_comboboxes()
+            self._audit("REPAIR", "Schema", ref_id=self.current_db_path, details="schema_migrate")
+            self._audit_commit()
+            self._log_event(
+                "diagnostics.repair.schema_migrate",
+                "Diagnostics repair applied",
+                repair_key=repair_key,
+                status="ok",
+            )
+            return "Schema bootstrap and migration completed successfully."
+
+        if repair_key == "custom_value_cleanup":
+            field_column = self._custom_value_field_column_name()
+            if field_column is None:
+                raise RuntimeError("Could not determine the custom field reference column.")
+            before_count = self._count_orphaned_custom_values()
+            with self.conn:
+                self.conn.execute(
+                    f"""
+                    DELETE FROM CustomFieldValues
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM CustomFieldDefs cfd WHERE cfd.id = CustomFieldValues.{field_column}
+                    )
+                    OR NOT EXISTS (
+                        SELECT 1 FROM Tracks t WHERE t.id = CustomFieldValues.track_id
+                    )
+                    """
+                )
+            after_count = self._count_orphaned_custom_values()
+            removed = max(0, before_count - after_count)
+            self._audit(
+                "REPAIR",
+                "CustomFieldValues",
+                ref_id="orphans",
+                details=f"removed={removed}; remaining={after_count}",
+            )
+            self._audit_commit()
+            self._log_event(
+                "diagnostics.repair.custom_value_cleanup",
+                "Diagnostics repair applied",
+                repair_key=repair_key,
+                removed=removed,
+                remaining=after_count,
+            )
+            return f"Removed {removed} orphaned custom value row(s)."
+
+        raise ValueError(f"Unknown diagnostics repair: {repair_key}")
+
+    def _build_diagnostics_report(self) -> dict[str, object]:
+        environment = {
+            "App version": self._app_version_text(),
+            "Schema version": str(self._get_db_version()),
+            "Current profile": Path(self.current_db_path).name if getattr(self, "current_db_path", "") else "(none)",
+            "Database path": str(self.current_db_path) if getattr(self, "current_db_path", "") else "(none)",
+            "Data folder": str(DATA_DIR()),
+            "Log folder": str(self.logs_dir),
+            "Restore points": self._history_snapshot_summary(),
+            "Platform": f"{platform.system()} {platform.release()}",
+            "Python": platform.python_version(),
+        }
+
+        checks = []
+
+        def add_check(
+            title: str,
+            status: str,
+            summary: str,
+            details: str,
+            *,
+            repair_key: str | None = None,
+            repair_label: str | None = None,
+            orphan_count: int | None = None,
+        ) -> None:
+            checks.append(
+                {
+                    "title": title,
+                    "status": status,
+                    "summary": summary,
+                    "details": details,
+                    "repair_key": repair_key,
+                    "repair_label": repair_label,
+                    "orphan_count": orphan_count,
+                }
+            )
+
+        db_version = self._get_db_version()
+        if db_version == SCHEMA_TARGET:
+            add_check(
+                "Schema version",
+                "ok",
+                f"Database is at schema {db_version}.",
+                f"Current user_version: {db_version}\nExpected schema target: {SCHEMA_TARGET}\n\nThe active profile matches the current app schema target.",
+            )
+        else:
+            level = "warning" if db_version < SCHEMA_TARGET else "error"
+            add_check(
+                "Schema version",
+                level,
+                f"Expected schema {SCHEMA_TARGET}, found {db_version}.",
+                f"Current user_version: {db_version}\nExpected schema target: {SCHEMA_TARGET}\n\nThis profile should be migrated before relying on the latest features.",
+                repair_key="schema_migrate",
+                repair_label="Run Schema Migration",
+            )
+
+        try:
+            table_names = {
+                row[0]
+                for row in self.conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            } if self.conn is not None else set()
+            required_tables = {
+                "Tracks",
+                "Artists",
+                "Albums",
+                "TrackArtists",
+                "CustomFieldDefs",
+                "CustomFieldValues",
+                "Licenses",
+                "Licensees",
+                "HistoryEntries",
+                "HistoryHead",
+                "HistorySnapshots",
+                "app_kv",
+            }
+            missing_tables = sorted(required_tables - table_names)
+
+            track_columns = {
+                row[1]
+                for row in self.conn.execute("PRAGMA table_info(Tracks)").fetchall()
+            } if self.conn is not None and "Tracks" in table_names else set()
+            required_track_columns = {
+                "id",
+                "isrc",
+                "isrc_compact",
+                "db_entry_date",
+                "audio_file_path",
+                "audio_file_mime_type",
+                "audio_file_size_bytes",
+                "track_title",
+                "catalog_number",
+                "album_art_path",
+                "album_art_mime_type",
+                "album_art_size_bytes",
+                "main_artist_id",
+                "buma_work_number",
+                "album_id",
+                "release_date",
+                "track_length_sec",
+                "iswc",
+                "upc",
+                "genre",
+            }
+            missing_columns = sorted(required_track_columns - track_columns)
+
+            if not missing_tables and not missing_columns:
+                add_check(
+                    "Schema layout",
+                    "ok",
+                    "Required tables and promoted columns are present.",
+                    "All expected core tables exist, and the Tracks table includes the current promoted standard columns and media fields.",
+                )
+            else:
+                details = [
+                    "The current database layout is missing expected schema elements.",
+                    "",
+                    f"Missing tables: {', '.join(missing_tables) if missing_tables else '(none)'}",
+                    f"Missing Tracks columns: {', '.join(missing_columns) if missing_columns else '(none)'}",
+                ]
+                add_check(
+                    "Schema layout",
+                    "error",
+                    "Database layout is incomplete for the current app version.",
+                    "\n".join(details),
+                    repair_key="schema_migrate",
+                    repair_label="Repair Schema Layout",
+                )
+        except Exception as exc:
+            add_check(
+                "Schema layout",
+                "error",
+                "Schema layout could not be inspected.",
+                f"An exception occurred while reading table metadata:\n{exc}",
+            )
+
+        try:
+            result = self.database_maintenance.verify_integrity(self.current_db_path)
+            status = "ok" if str(result).strip().lower() == "ok" else "error"
+            add_check(
+                "SQLite integrity",
+                status,
+                str(result),
+                f"PRAGMA integrity_check returned:\n{result}",
+            )
+        except Exception as exc:
+            add_check(
+                "SQLite integrity",
+                "error",
+                "Integrity check failed to run.",
+                f"An exception occurred while running PRAGMA integrity_check:\n{exc}",
+            )
+
+        try:
+            fk_rows = self.conn.execute("PRAGMA foreign_key_check").fetchall() if self.conn is not None else []
+            if not fk_rows:
+                add_check(
+                    "Foreign-key consistency",
+                    "ok",
+                    "0 issue(s) detected.",
+                    "PRAGMA foreign_key_check returned no rows.",
+                )
+            else:
+                preview = "\n".join(
+                    f"table={row[0]}, rowid={row[1]}, parent={row[2]}, fk_index={row[3]}"
+                    for row in fk_rows[:25]
+                )
+                add_check(
+                    "Foreign-key consistency",
+                    "error",
+                    f"{len(fk_rows)} issue(s) detected.",
+                    f"PRAGMA foreign_key_check returned {len(fk_rows)} row(s).\n\n{preview}",
+                )
+        except Exception as exc:
+            add_check(
+                "Foreign-key consistency",
+                "error",
+                "Foreign-key validation failed to run.",
+                f"An exception occurred while running PRAGMA foreign_key_check:\n{exc}",
+            )
+
+        try:
+            orphan_count = self._count_orphaned_custom_values()
+            if orphan_count == 0:
+                add_check(
+                    "Custom-value integrity",
+                    "ok",
+                    "0 orphaned custom value row(s) detected.",
+                    "Every CustomFieldValues row points to an existing field definition and track.",
+                )
+            else:
+                add_check(
+                    "Custom-value integrity",
+                    "warning",
+                    f"{orphan_count} orphaned custom value row(s) detected.",
+                    "Some CustomFieldValues rows reference a deleted track or custom field definition.",
+                    repair_key="custom_value_cleanup",
+                    repair_label="Delete Orphaned Custom Values",
+                    orphan_count=orphan_count,
+                )
+        except Exception as exc:
+            add_check(
+                "Custom-value integrity",
+                "error",
+                "Custom-value validation failed to run.",
+                f"An exception occurred while checking CustomFieldValues:\n{exc}",
+                repair_key="custom_value_cleanup",
+                repair_label="Delete Orphaned Custom Values",
+            )
+
+        try:
+            missing_files = []
+
+            if self.conn is not None:
+                media_rows = self.conn.execute(
+                    """
+                    SELECT id, track_title, audio_file_path, album_art_path
+                    FROM Tracks
+                    ORDER BY id
+                    """
+                ).fetchall()
+                for track_id, track_title, audio_path, art_path in media_rows:
+                    if audio_path:
+                        resolved = self.track_service.resolve_media_path(audio_path) if self.track_service else Path(audio_path)
+                        if resolved is not None and not resolved.exists():
+                            missing_files.append(f"Track #{track_id} '{track_title}': missing audio file -> {resolved}")
+                    if art_path:
+                        resolved = self.track_service.resolve_media_path(art_path) if self.track_service else Path(art_path)
+                        if resolved is not None and not resolved.exists():
+                            missing_files.append(f"Track #{track_id} '{track_title}': missing album art -> {resolved}")
+
+                license_rows = self.conn.execute(
+                    "SELECT id, filename, file_path FROM Licenses ORDER BY id"
+                ).fetchall()
+                for record_id, filename, file_path in license_rows:
+                    if not file_path:
+                        continue
+                    resolved = self.license_service.resolve_path(file_path) if self.license_service else Path(file_path)
+                    if not resolved.exists():
+                        missing_files.append(f"License #{record_id} '{filename or 'unnamed'}': missing file -> {resolved}")
+
+            if not missing_files:
+                add_check(
+                    "Managed files",
+                    "ok",
+                    "0 missing managed file(s) detected.",
+                    "All tracked audio files, album art files, and license PDFs that are referenced in the database are present on disk.",
+                )
+            else:
+                preview = "\n".join(missing_files[:25])
+                add_check(
+                    "Managed files",
+                    "warning",
+                    f"{len(missing_files)} missing managed file(s) detected.",
+                    f"Some database rows point to files that are no longer present on disk.\n\n{preview}",
+                )
+        except Exception as exc:
+            add_check(
+                "Managed files",
+                "error",
+                "Managed file validation failed to run.",
+                f"An exception occurred while checking managed media and license files:\n{exc}",
+            )
+
+        try:
+            if self.conn is None:
+                raise RuntimeError("No active database connection")
+            snapshot_rows = self.conn.execute(
+                "SELECT id, label, db_snapshot_path FROM HistorySnapshots ORDER BY id"
+            ).fetchall()
+            missing_snapshots = []
+            for snapshot_id, label, db_snapshot_path in snapshot_rows:
+                if not db_snapshot_path:
+                    continue
+                snapshot_path = Path(db_snapshot_path)
+                if not snapshot_path.exists():
+                    missing_snapshots.append(
+                        f"Snapshot #{snapshot_id} '{label or 'Unnamed snapshot'}' is missing its database snapshot file:\n{snapshot_path}"
+                    )
+            if not missing_snapshots:
+                add_check(
+                    "History snapshots",
+                    "ok",
+                    f"{len(snapshot_rows)} snapshot record(s) available.",
+                    "All registered history snapshots that reference a database snapshot file are available on disk.",
+                )
+            else:
+                add_check(
+                    "History snapshots",
+                    "warning",
+                    f"{len(missing_snapshots)} snapshot file(s) missing.",
+                    "\n\n".join(missing_snapshots[:20]),
+                )
+        except Exception as exc:
+            add_check(
+                "History snapshots",
+                "error",
+                "Snapshot storage could not be inspected.",
+                f"An exception occurred while checking HistorySnapshots:\n{exc}",
+            )
+
+        return {"environment": environment, "checks": checks}
+
+    def open_application_log_dialog(self):
+        ApplicationLogDialog(self, parent=self).exec()
+
+    def open_diagnostics_dialog(self):
+        DiagnosticsDialog(self, parent=self).exec()
 
     def _init_services(self):
         self.schema_service = (
@@ -3112,7 +4208,12 @@ class App(QMainWindow):
 
         previous_path = self.current_db_path
         self._activate_profile(path)
-        self.logger.info(f"Switched profile to: {path}")
+        self._log_event(
+            "profile.switch",
+            "Switched profile",
+            from_path=previous_path,
+            to_path=path,
+        )
         self._audit("PROFILE", "Database", ref_id=path, details="switch_profile")
         self._audit_commit()
         self.session_history_manager.record_profile_switch(
@@ -3134,7 +4235,12 @@ class App(QMainWindow):
             return
         self._clear_table_settings_for_path(new_path)
         self._activate_profile(new_path)
-        self.logger.info(f"Created new profile DB: {new_path}")
+        self._log_event(
+            "profile.create",
+            "Created new profile database",
+            previous_path=previous_path,
+            created_path=new_path,
+        )
         self._audit("PROFILE", "Database", ref_id=new_path, details="create_new_profile")
         self._audit_commit()
         self.session_history_manager.record_profile_create(
@@ -3150,7 +4256,12 @@ class App(QMainWindow):
             return
         previous_path = self.current_db_path
         self._activate_profile(path)
-        self.logger.info(f"Opened external profile DB via browse: {path}")
+        self._log_event(
+            "profile.browse",
+            "Opened external profile database",
+            previous_path=previous_path,
+            path=path,
+        )
         self._audit("PROFILE", "Database", ref_id=path, details="browse_profile")
         self._audit_commit()
         self.session_history_manager.record_profile_switch(
@@ -3198,7 +4309,14 @@ class App(QMainWindow):
 
             self.refresh_table_preserve_view()
             self.populate_all_comboboxes()
-            self.logger.warning(f"Removed profile DB from disk: {path}")
+            self._log_event(
+                "profile.remove",
+                "Removed profile database from disk",
+                level=logging.WARNING,
+                path=path,
+                deleting_current=result.deleting_current,
+                fallback_path=result.fallback_path,
+            )
             self._audit("PROFILE", "Database", ref_id=path, details="remove_profile")
             self._audit_commit()
             self.session_history_manager.record_profile_remove(
@@ -3255,7 +4373,12 @@ class App(QMainWindow):
 
         current_code = self.load_artist_code()
 
-        self.logger.info(f"Profile ISRC artist code active: '{current_code}'")
+        self._log_event(
+            "profile.open",
+            "Opened profile database",
+            path=path,
+            artist_code=current_code,
+        )
 
         self.database_session.remember_last_path(self.settings, path)
         self.logger.info("Settings synced to disk")
@@ -3274,7 +4397,6 @@ class App(QMainWindow):
         self.active_custom_fields = self.load_active_custom_fields()
 
         # now it's safe to write AuditLog
-        self.logger.info(f"Opened database: {path}")
         self._audit("PROFILE", "Database", ref_id=path, details="open_database()")
         self._audit_commit()
         self._refresh_history_actions()
@@ -3296,6 +4418,14 @@ class App(QMainWindow):
             self.cursor.execute(
                 "INSERT INTO AuditLog (user, action, entity, ref_id, details) VALUES (?, ?, ?, ?, ?)",
                 (user, action, entity, str(ref_id) if ref_id is not None else None, details)
+            )
+            self._log_trace(
+                "audit",
+                message=f"{action} {entity}",
+                action=action,
+                entity=entity,
+                ref_id=ref_id,
+                details=details,
             )
         except Exception as e:
             self.logger.exception(f"Failed to write AuditLog: {e}")
@@ -4116,13 +5246,13 @@ class App(QMainWindow):
         try:
             self._bind_header_state_signals()
         except Exception as e:
-            logging.warning("Failed to rebind sectionMoved: %s", e)
+            self.logger.warning("Failed to rebind sectionMoved: %s", e)
 
         # Then load header state (visual order + widths)
         try:
             self._load_header_state()
         except Exception as e:
-            logging.warning("Failed to load header state: %s", e)
+            self.logger.warning("Failed to load header state: %s", e)
 
         # Refresh data and restore view state
         self.refresh_table()
@@ -4235,7 +5365,13 @@ class App(QMainWindow):
                 additional_artists=self._parse_additional_artists(self.additional_artist_field.currentText()),
                 album_title=self.album_title_field.currentText().strip() or None,
             )
-            self.logger.info(f"About to insert ISRC iso={generated_iso} compact={comp}")
+            self._log_trace(
+                "track.create.prepare",
+                message="Preparing track insert",
+                isrc=generated_iso,
+                isrc_compact=comp,
+                track_title=self.track_title_field.text().strip(),
+            )
             track_id = self.track_service.create_track(
                 TrackCreatePayload(
                     isrc=generated_iso,
@@ -4254,7 +5390,13 @@ class App(QMainWindow):
                     album_art_source_path=(self.album_art_field.text().strip() or None),
                 )
             )
-            self.logger.info(f"Track created id={track_id} isrc={generated_iso}")
+            self._log_event(
+                "track.create",
+                "Track created",
+                track_id=track_id,
+                isrc=generated_iso,
+                track_title=self.track_title_field.text().strip(),
+            )
             self._audit("CREATE", "Track", ref_id=track_id, details=f"isrc={generated_iso}")
             self._audit_commit()
             self.history_manager.record_track_create(
@@ -4311,7 +5453,14 @@ class App(QMainWindow):
                 self.track_service.delete_track(row_id)
                 self.refresh_table_preserve_view()
                 self.populate_all_comboboxes()
-                self.logger.warning(f"Track deleted id={row_id}")
+                self._log_event(
+                    "track.delete",
+                    "Track deleted",
+                    level=logging.WARNING,
+                    track_id=row_id,
+                    isrc=before_snapshot.isrc,
+                    track_title=before_snapshot.track_title,
+                )
                 self._audit("DELETE", "Track", ref_id=row_id, details="delete_entry")
                 self._audit_commit()
                 self.history_manager.record_track_delete(before_snapshot=before_snapshot)
@@ -4423,7 +5572,12 @@ class App(QMainWindow):
                 payload=lambda count: {"path": path, "count": count},
             )
             QMessageBox.information(self, "Export", f"All data exported:\n{path}")
-            self.logger.info(f"Exported {exported} rows to {path}")
+            self._log_event(
+                "export.xml.all",
+                "Exported full library to XML",
+                path=path,
+                exported=exported,
+            )
             self._audit("EXPORT", "Tracks", ref_id=path, details=f"all rows incl. duration+customs count={exported}")
             self._audit_commit()
         except Exception as e:
@@ -4475,7 +5629,13 @@ class App(QMainWindow):
                 entity_id=out_path,
                 payload=lambda count: {"path": out_path, "count": count, "track_ids": track_ids},
             )
-            self.logger.info(f"Exported {exported} rows to XML (ids={track_ids}) -> {out_path}")
+            self._log_event(
+                "export.xml.selected",
+                "Exported selected tracks to XML",
+                path=out_path,
+                exported=exported,
+                track_ids=track_ids,
+            )
             QMessageBox.information(self, "Export Complete", f"Saved:\n{out_path}")
         except Exception as e:
             self.logger.exception(f"Export Selected failed: {e}")
@@ -4522,16 +5682,24 @@ class App(QMainWindow):
                     "Import aborted due to missing custom columns: %s",
                     inspection.missing_custom_fields,
                 )
+                self._log_trace(
+                    "import.xml.missing_custom_fields",
+                    message="Import aborted due to missing custom columns",
+                    path=file_path,
+                    details=inspection.missing_custom_fields,
+                )
                 QMessageBox.critical(self, "Import Error", msg + "\n\nNo changes were made.")
                 return
 
             # If dry-run, show summary then optionally proceed
             if dry:
-                self.logger.info(
-                    "Dry-run: would_insert=%s, dupes=%s, invalid=%s, errors=0",
-                    inspection.would_insert,
-                    inspection.duplicate_count,
-                    inspection.invalid_count,
+                self._log_event(
+                    "import.xml.dry_run",
+                    "XML import dry-run completed",
+                    path=file_path,
+                    would_insert=inspection.would_insert,
+                    duplicates=inspection.duplicate_count,
+                    invalid=inspection.invalid_count,
                 )
                 proceed = QMessageBox.question(
                     self, "Dry-run finished",
@@ -4576,13 +5744,14 @@ class App(QMainWindow):
             self.populate_all_comboboxes()
 
             mode = "Import finished" if not dry else "Import finished (after dry-run)"
-            self.logger.info(
-                "%s: inserted=%s, dupes=%s, invalid=%s, errors=%s",
+            self._log_event(
+                "import.xml.commit",
                 mode,
-                result.inserted,
-                result.duplicate_count,
-                result.invalid_count,
-                result.error_count,
+                path=file_path,
+                inserted=result.inserted,
+                duplicates=result.duplicate_count,
+                invalid=result.invalid_count,
+                errors=result.error_count,
             )
             self._audit(
                 "IMPORT",
@@ -4702,50 +5871,7 @@ class App(QMainWindow):
             QMessageBox.critical(self, "Error", f"Could not save BUMA IPI:\n{e}")
 
     def show_settings_summary(self):
-        """View-only summary dialog (no editing)."""
-        registration = self.settings_reads.load_registration_settings()
-        isrc = registration.isrc_prefix or "(not set)"
-        sena_txt = registration.sena_number or "(not set)"
-        btw_txt = registration.btw_number or "(not set)"
-        rel_txt = registration.buma_relatie_nummer or "(not set)"
-        ipi_txt = registration.buma_ipi or "(not set)"
-        db_ver   = self._get_db_version()
-
-        dlg = QDialog(self)
-        dlg.setWindowTitle("App Info")
-        lay = QVBoxLayout(dlg)
-
-        def add_label(text):
-            lbl = QLabel(text)
-            lbl.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
-            lay.addWidget(lbl)
-            return lbl
-
-        # Info labels
-        add_label(f"<b>Window Title:</b> {self.identity.get('window_title') or DEFAULT_WINDOW_TITLE}")
-        add_label(f"<b>Icon:</b> {self.identity.get('icon_path') or '(not set)'}")
-        add_label(f"<b>Current Database:</b> {self.current_db_path}")
-        add_label(f"<b>DB Schema Version:</b> {db_ver}")
-
-        # Horizontal line
-        line = QFrame()
-        line.setFrameShape(QFrame.HLine)
-        line.setFrameShadow(QFrame.Sunken)
-        lay.addWidget(line)
-
-        add_label("<b>Registration & Codes</b>")
-        add_label(f"ISRC Prefix: {isrc}")
-        add_label(f"Artist Code (AA): {self.load_artist_code() or '(not set)'}")
-        add_label(f"SENA Number: {sena_txt}")
-        add_label(f"BTW Number: {btw_txt}")
-        add_label(f"BUMA/STEMRA Relatie Nummer: {rel_txt}")
-        add_label(f"BUMA/STEMRA IPI: {ipi_txt}")
-
-        close_btn = QPushButton("Close")
-        close_btn.clicked.connect(dlg.accept)
-        lay.addWidget(close_btn, alignment=Qt.AlignRight)
-
-        dlg.exec()
+        AboutDialog(self, parent=self).exec()
 
     # =============================================================================
     # View settings (interactive resize + draggable hints)
@@ -5049,18 +6175,18 @@ class App(QMainWindow):
         try:
             self._bind_header_state_signals()
         except Exception as e:
-            logging.warning("Failed to rebind sectionMoved after custom fields change: %s", e)
+            self.logger.warning("Failed to rebind sectionMoved after custom fields change: %s", e)
 
         # Then load header state (visual order + widths)
         try:
             self._load_header_state()
         except Exception as e:
-            logging.warning("Failed to load header state after custom fields change: %s", e)
+            self.logger.warning("Failed to load header state after custom fields change: %s", e)
 
         try:
             self._save_header_state(record_history=False)
         except Exception as e:
-            logging.warning("Failed to save header state after custom fields change: %s", e)
+            self.logger.warning("Failed to save header state after custom fields change: %s", e)
 
         self.refresh_table()
         self._update_count_label()
@@ -5660,7 +6786,7 @@ class App(QMainWindow):
                 entity_id=f"{self._table_settings_prefix()}/columns_movable",
             )
         except Exception as e:
-            logging.warning("Exception while toggling columns movable: %s", e)
+            self.logger.warning("Exception while toggling columns movable: %s", e)
             pass
 
     def _hidden_columns_setting_key(self) -> str:
@@ -5909,7 +7035,12 @@ class App(QMainWindow):
             )
 
             QMessageBox.information(self, "Backup", f"Backup created:\n{result.backup_path}")
-            self.logger.info(f"Database backed up to {result.backup_path} using {result.method}")
+            self._log_event(
+                "db.backup",
+                "Database backup created",
+                path=result.backup_path,
+                method=result.method,
+            )
             try:
                 self._audit(
                     "BACKUP",
@@ -5950,7 +7081,12 @@ class App(QMainWindow):
         try:
             res = self.database_maintenance.verify_integrity(self.current_db_path)
             QMessageBox.information(self, "Integrity Check", f"Result: {res}")
-            self.logger.info(f"Integrity check: {res}")
+            self._log_event(
+                "db.verify",
+                "Database integrity check completed",
+                result=res,
+                path=self.current_db_path,
+            )
             self._audit("VERIFY", "DB", ref_id=self.current_db_path, details=res)
             self._audit_commit()
             self.history_manager.record_event(
@@ -5999,7 +7135,14 @@ class App(QMainWindow):
 
             self.refresh_table_preserve_view()
             QMessageBox.information(self, "Restore", "Database restored successfully (schema + data).")
-            self.logger.warning(f"Database restored from {path}")
+            self._log_event(
+                "db.restore",
+                "Database restored from backup",
+                level=logging.WARNING,
+                source_backup=path,
+                restored_path=result.restored_path,
+                safety_copy_path=result.safety_copy_path,
+            )
             try:
                 details = f"restored to {result.restored_path}"
                 if result.safety_copy_path is not None:
@@ -6822,7 +7965,13 @@ class EditDialog(QDialog):
             parent.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
             try:
-                parent.logger.info(f"Track updated id={row_id} isrc={iso_isrc}")
+                parent._log_event(
+                    "track.update",
+                    "Track updated",
+                    track_id=row_id,
+                    isrc=iso_isrc,
+                    track_title=new_track_title,
+                )
                 parent._audit("UPDATE", "Track", ref_id=row_id, details=f"isrc={iso_isrc}")
                 parent._audit_commit()
             except Exception as audit_err:
