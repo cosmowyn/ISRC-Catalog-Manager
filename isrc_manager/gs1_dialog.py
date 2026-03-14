@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QTabWidget,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -33,6 +34,7 @@ from .services import (
     GS1BatchValidationError,
     GS1DependencyError,
     GS1ExportPlan,
+    GS1MetadataGroup,
     GS1MetadataRecord,
     GS1TemplateVerificationError,
     GS1ValidationError,
@@ -53,87 +55,11 @@ def _safe_filename(text: str) -> str:
     return cleaned or "gs1_export"
 
 
-class GS1ExportPreviewDialog(QDialog):
-    """Shows the exact worksheet data that will be written before export continues."""
+class GS1MetadataEditorPage(QWidget):
+    """Reusable GS1 metadata form used for a single export product group."""
 
-    def __init__(self, plan: GS1ExportPlan, parent=None):
-        super().__init__(parent)
-        self.plan = plan
-        self.setWindowTitle("GS1 Export Preview")
-        self.setModal(True)
-        self.resize(1080, 680)
-        self.setMinimumSize(960, 560)
+    changed = Signal()
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(16, 16, 16, 16)
-        root.setSpacing(12)
-
-        summary_box = QGroupBox("Export Summary", self)
-        summary_layout = QVBoxLayout(summary_box)
-        summary_layout.setContentsMargins(14, 14, 14, 14)
-        summary_layout.setSpacing(8)
-        summary_label = QLabel("\n".join(plan.summary_lines))
-        summary_label.setWordWrap(True)
-        summary_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        summary_layout.addWidget(summary_label)
-        root.addWidget(summary_box)
-
-        if plan.warnings:
-            warning_box = QGroupBox("Warnings", self)
-            warning_layout = QVBoxLayout(warning_box)
-            warning_layout.setContentsMargins(14, 14, 14, 14)
-            warning_layout.setSpacing(8)
-            warning_label = QLabel("\n".join(f"- {line}" for line in plan.warnings))
-            warning_label.setWordWrap(True)
-            warning_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            warning_layout.addWidget(warning_label)
-            root.addWidget(warning_box)
-
-        preview_box = QGroupBox("Workbook Rows", self)
-        preview_layout = QVBoxLayout(preview_box)
-        preview_layout.setContentsMargins(14, 14, 14, 14)
-        preview_layout.setSpacing(8)
-        preview_help = QLabel(
-            f"Detected sheet: {plan.template_profile.sheet_name}. The table below shows the final values that will be written into the workbook."
-        )
-        preview_help.setWordWrap(True)
-        preview_layout.addWidget(preview_help)
-
-        table = QTableWidget(len(plan.preview.rows), len(plan.preview.headers), self)
-        table.setHorizontalHeaderLabels(list(plan.preview.headers))
-        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        table.setSelectionMode(QAbstractItemView.NoSelection)
-        table.setAlternatingRowColors(True)
-        table.verticalHeader().setVisible(False)
-        table.setWordWrap(False)
-        header = table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeToContents)
-        header.setStretchLastSection(True)
-        for row_index, row_values in enumerate(plan.preview.rows):
-            for column_index, value in enumerate(row_values):
-                item = QTableWidgetItem(str(value))
-                table.setItem(row_index, column_index, item)
-        table.resizeColumnsToContents()
-        preview_layout.addWidget(table, 1)
-        root.addWidget(preview_box, 1)
-
-        button_box = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok, parent=self)
-        ok_button = button_box.button(QDialogButtonBox.Ok)
-        if ok_button is not None:
-            ok_button.setText("Continue Export")
-            ok_button.setDefault(True)
-        cancel_button = button_box.button(QDialogButtonBox.Cancel)
-        if cancel_button is not None:
-            cancel_button.setAutoDefault(False)
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
-        root.addWidget(button_box)
-
-
-class GS1MetadataDialog(QDialog):
-    """Edits the canonical GS1 metadata stored against a catalog row."""
-
-    WINDOW_TITLE = "GS1 Metadata"
     ELEMENT_MARGIN = 2
     LABEL_MIN_WIDTH = 220
     FIELD_HEIGHT = 48
@@ -143,105 +69,24 @@ class GS1MetadataDialog(QDialog):
     WIDE_FIELD_MIN_WIDTH = 520
     NOTES_MIN_HEIGHT = 176
 
-    def __init__(self, *, app, track_id: int, batch_track_ids: list[int] | None = None, parent=None):
-        super().__init__(parent or app)
-        self.app = app
-        self.track_id = int(track_id)
-        self.batch_track_ids = self._normalize_track_ids(batch_track_ids or [self.track_id])
-        self.gs1_service = getattr(app, "gs1_integration_service", None)
-        if self.gs1_service is None:
-            raise RuntimeError("GS1 integration service is not available")
-
-        self._template_path_override = ""
-        self._template_profile = None
-        self._saved_record: GS1MetadataRecord | None = None
-        self._default_record: GS1MetadataRecord | None = None
+    def __init__(self, group: GS1MetadataGroup, parent=None):
+        super().__init__(parent)
+        self.group = group
+        self._saved_record = group.record.copy()
+        self._default_record = group.default_record.copy()
         self._loading_form = False
 
-        self.setWindowTitle(self.WINDOW_TITLE)
-        self.setModal(True)
-        self.resize(1040, 820)
-        self.setMinimumSize(980, 760)
-
-        self.record, self.context, _ = self.gs1_service.load_or_create_metadata(
-            self.track_id,
-            current_profile_path=self._current_profile_path(),
-            window_title=self._window_title(),
-        )
-        self._saved_record = self.record.copy()
-        self._default_record = self.gs1_service.build_default_metadata(
-            self.track_id,
-            current_profile_path=self._current_profile_path(),
-            window_title=self._window_title(),
-        )
-
         root = QVBoxLayout(self)
-        root.setContentsMargins(16, 16, 16, 16)
+        root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(12)
 
-        scroll_area = QScrollArea(self)
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll_content = QWidget(scroll_area)
-        scroll_content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
-        content_layout = QVBoxLayout(scroll_content)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(12)
-        scroll_area.setWidget(scroll_content)
-        root.addWidget(scroll_area, 1)
+        self.group_summary_label = QLabel(self._group_summary_text())
+        self.group_summary_label.setWordWrap(True)
+        self.group_summary_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        root.addWidget(self.group_summary_label)
 
-        summary_box = QGroupBox("Release / Product Context", self)
-        summary_layout = QVBoxLayout(summary_box)
-        summary_layout.setContentsMargins(14, 14, 14, 14)
-        summary_layout.setSpacing(6)
-        self.summary_label = QLabel(self._summary_text())
-        self.summary_label.setWordWrap(True)
-        self.summary_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        summary_layout.addWidget(self.summary_label)
-        content_layout.addWidget(summary_box)
-
-        template_box = QGroupBox("Official GS1 Workbook", self)
-        template_layout = QVBoxLayout(template_box)
-        template_layout.setContentsMargins(14, 14, 14, 14)
-        template_layout.setSpacing(8)
-        self.template_help_label = QLabel(
-            "GS1 export uses the official workbook from your GS1 portal or regional GS1 environment. "
-            "The app validates the workbook before writing any rows."
-        )
-        self.template_help_label.setWordWrap(True)
-        template_layout.addWidget(self.template_help_label)
-        self.template_status_label = QLabel("")
-        self.template_status_label.setWordWrap(True)
-        self.template_status_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        template_layout.addWidget(self.template_status_label)
-        template_button_row = QHBoxLayout()
-        self.choose_template_button = QPushButton("Choose Workbook…", self)
-        self.choose_template_button.setAutoDefault(False)
-        self.choose_template_button.clicked.connect(lambda: self._choose_template_path(prompt_message=None))
-        self.reverify_template_button = QPushButton("Re-verify", self)
-        self.reverify_template_button.setAutoDefault(False)
-        self.reverify_template_button.clicked.connect(lambda: self._refresh_template_status(prompt_if_missing=False))
-        self.settings_button = QPushButton("Open Settings…", self)
-        self.settings_button.setAutoDefault(False)
-        self.settings_button.clicked.connect(lambda: self.app.open_settings_dialog(initial_focus="gs1_template_path"))
-        template_button_row.setContentsMargins(
-            self.ELEMENT_MARGIN,
-            self.ELEMENT_MARGIN,
-            self.ELEMENT_MARGIN,
-            self.ELEMENT_MARGIN,
-        )
-        template_button_row.setSpacing(8)
-        template_button_row.addWidget(self.choose_template_button)
-        template_button_row.addWidget(self.reverify_template_button)
-        template_button_row.addWidget(self.settings_button)
-        template_button_row.addStretch(1)
-        template_layout.addLayout(template_button_row)
-        content_layout.addWidget(template_box)
-
-        form_box = QGroupBox("GS1 Metadata", self)
-        form_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        form_layout = QVBoxLayout(form_box)
-        form_layout.setContentsMargins(16, 14, 16, 14)
+        form_layout = QVBoxLayout()
+        form_layout.setContentsMargins(0, 0, 0, 0)
         form_layout.setSpacing(2)
 
         self.status_combo = self._combo(COMMON_STATUS_CHOICES)
@@ -282,102 +127,15 @@ class GS1MetadataDialog(QDialog):
         form_layout.addWidget(self._build_form_row("Image URL", self.image_url_edit))
         form_layout.addWidget(self._build_form_row("Export Enabled", self.export_enabled_row))
         form_layout.addWidget(self._build_form_row("Notes", self.notes_edit, top_aligned=True))
-        content_layout.addWidget(form_box)
-
-        info_box = QGroupBox("Export Readiness", self)
-        info_layout = QVBoxLayout(info_box)
-        info_layout.setContentsMargins(14, 14, 14, 14)
-        info_layout.setSpacing(8)
-        self.readiness_label = QLabel("")
-        self.readiness_label.setWordWrap(True)
-        info_layout.addWidget(self.readiness_label)
-        self.batch_note_label = QLabel(
-            "Batch export fills the GS1 code / GTIN request field with 1, 2, 3, ... in row order so GS1 can assign new GTIN-13 values during upload."
-        )
-        self.batch_note_label.setWordWrap(True)
-        info_layout.addWidget(self.batch_note_label)
-        content_layout.addWidget(info_box)
-        content_layout.addStretch(1)
-
-        button_row = QHBoxLayout()
-        button_row.setContentsMargins(
-            self.ELEMENT_MARGIN,
-            self.ELEMENT_MARGIN,
-            self.ELEMENT_MARGIN,
-            self.ELEMENT_MARGIN,
-        )
-        button_row.setSpacing(8)
-        self.revert_button = QPushButton("Revert", self)
-        self.revert_button.setAutoDefault(False)
-        self.revert_button.clicked.connect(self._revert_form)
-        self.reset_defaults_button = QPushButton("Reset to Defaults", self)
-        self.reset_defaults_button.setAutoDefault(False)
-        self.reset_defaults_button.clicked.connect(self._reset_to_defaults)
-        button_row.addWidget(self.revert_button)
-        button_row.addWidget(self.reset_defaults_button)
-        button_row.addStretch(1)
-
-        self.save_button = QPushButton("Save", self)
-        self.save_button.setDefault(True)
-        self.save_button.clicked.connect(lambda: self._save_current_record(show_confirmation=True))
-        self.export_current_button = QPushButton("Export Current…", self)
-        self.export_current_button.clicked.connect(self._export_current)
-        self.export_batch_button = QPushButton(self._batch_button_text(), self)
-        self.export_batch_button.clicked.connect(self._export_batch)
-        self.export_batch_button.setEnabled(len(self.batch_track_ids) > 1)
-        self.close_button = QPushButton("Close", self)
-        self.close_button.setAutoDefault(False)
-        self.close_button.clicked.connect(self.accept)
-        button_row.addWidget(self.save_button)
-        button_row.addWidget(self.export_current_button)
-        button_row.addWidget(self.export_batch_button)
-        button_row.addWidget(self.close_button)
-        root.addLayout(button_row)
+        root.addLayout(form_layout)
+        root.addStretch(1)
 
         self._connect_form_signals()
-        self._apply_record_to_form(self.record)
-        self._refresh_template_status(prompt_if_missing=True)
-        self._update_readiness()
+        self.apply_record_to_form(self._saved_record)
 
-    def _normalize_track_ids(self, track_ids: list[int]) -> list[int]:
-        normalized: list[int] = []
-        seen: set[int] = set()
-        for track_id in track_ids:
-            try:
-                clean_id = int(track_id)
-            except (TypeError, ValueError):
-                continue
-            if clean_id in seen:
-                continue
-            normalized.append(clean_id)
-            seen.add(clean_id)
-        if self.track_id in seen:
-            normalized = [self.track_id] + [track_id for track_id in normalized if track_id != self.track_id]
-        else:
-            normalized.insert(0, self.track_id)
-        return normalized
-
-    def _current_profile_path(self) -> str:
-        return str(getattr(self.app, "current_db_path", "") or "")
-
-    def _window_title(self) -> str:
-        identity = getattr(self.app, "identity", {}) or {}
-        return str(identity.get("window_title") or "")
-
-    def _summary_text(self) -> str:
-        parts = [
-            f"<b>Title:</b> {self.context.display_title}",
-            f"<b>Artist:</b> {self.context.artist_name or '(blank)'}",
-        ]
-        if self.context.album_title:
-            parts.append(f"<b>Album:</b> {self.context.album_title}")
-        if self.context.upc:
-            parts.append(f"<b>UPC/EAN:</b> {self.context.upc}")
-        if self.context.release_date:
-            parts.append(f"<b>Release Date:</b> {self.context.release_date}")
-        if self.context.profile_label:
-            parts.append(f"<b>Profile:</b> {self.context.profile_label}")
-        return "<br/>".join(parts)
+    @property
+    def is_loading(self) -> bool:
+        return self._loading_form
 
     @staticmethod
     def _combo(items) -> QComboBox:
@@ -471,30 +229,23 @@ class GS1MetadataDialog(QDialog):
         self._apply_combo_metrics(self.market_combo, min_width=self.STANDARD_FIELD_MIN_WIDTH)
         self._apply_combo_metrics(self.language_combo, min_width=240, max_width=320)
         self._apply_combo_metrics(self.unit_combo, min_width=200, max_width=240)
-
         self._apply_line_edit_metrics(self.description_edit, min_width=self.WIDE_FIELD_MIN_WIDTH)
         self._apply_line_edit_metrics(self.brand_edit, min_width=self.STANDARD_FIELD_MIN_WIDTH)
         self._apply_line_edit_metrics(self.subbrand_edit, min_width=self.STANDARD_FIELD_MIN_WIDTH)
-        self._apply_line_edit_metrics(
-            self.quantity_edit,
-            min_width=self.COMPACT_FIELD_MIN_WIDTH,
-            max_width=220,
-        )
+        self._apply_line_edit_metrics(self.quantity_edit, min_width=self.COMPACT_FIELD_MIN_WIDTH, max_width=220)
         self._apply_line_edit_metrics(self.image_url_edit, min_width=self.WIDE_FIELD_MIN_WIDTH)
-
         self.notes_edit.setMinimumWidth(self.WIDE_FIELD_MIN_WIDTH)
         self.notes_edit.setMinimumHeight(self.NOTES_MIN_HEIGHT)
 
     def _connect_form_signals(self) -> None:
-        line_edits = [
+        for edit in (
             self.description_edit,
             self.brand_edit,
             self.subbrand_edit,
             self.quantity_edit,
             self.image_url_edit,
-        ]
-        for edit in line_edits:
-            edit.textChanged.connect(self._update_readiness)
+        ):
+            edit.textChanged.connect(lambda *_args: self.changed.emit())
         for combo in (
             self.status_combo,
             self.classification_combo,
@@ -503,13 +254,48 @@ class GS1MetadataDialog(QDialog):
             self.language_combo,
             self.unit_combo,
         ):
-            combo.currentTextChanged.connect(self._update_readiness)
-            combo.editTextChanged.connect(self._update_readiness)
-        self.consumer_unit_check.toggled.connect(self._update_readiness)
-        self.export_enabled_check.toggled.connect(self._update_readiness)
-        self.notes_edit.textChanged.connect(self._update_readiness)
+            combo.currentTextChanged.connect(lambda *_args: self.changed.emit())
+            combo.editTextChanged.connect(lambda *_args: self.changed.emit())
+        self.consumer_unit_check.toggled.connect(lambda *_args: self.changed.emit())
+        self.export_enabled_check.toggled.connect(lambda *_args: self.changed.emit())
+        self.notes_edit.textChanged.connect(lambda: self.changed.emit())
 
-    def _apply_record_to_form(self, record: GS1MetadataRecord) -> None:
+    def _group_summary_text(self) -> str:
+        unique_upcs = [str(context.upc or "").strip() for context in self.group.contexts if str(context.upc or "").strip()]
+        unique_upcs = list(dict.fromkeys(unique_upcs))
+        source_tracks = ", ".join(
+            str(context.track_title or f"Track {context.track_id}").strip()
+            for context in self.group.contexts
+        )
+        parts = [
+            f"<b>Product:</b> {self.group.display_title}",
+            f"<b>Type:</b> {'Album product' if self.group.is_album_group else 'Single'}",
+            f"<b>Tracks in group:</b> {len(self.group.track_ids)}",
+            f"<b>Source tracks:</b> {source_tracks}",
+        ]
+        if self.group.is_album_group and self.group.representative_context.album_title:
+            parts.append(f"<b>Album:</b> {self.group.representative_context.album_title}")
+        if unique_upcs:
+            parts.append(f"<b>Existing UPC/EAN:</b> {', '.join(unique_upcs)}")
+        parts.append(
+            "<b>Save behavior:</b> "
+            + (
+                "Saving this tab applies the same GS1 metadata to every selected track in this album group."
+                if self.group.is_album_group and len(self.group.track_ids) > 1
+                else "Saving this tab stores metadata for this track."
+            )
+        )
+        parts.append(
+            "<b>Product naming:</b> "
+            + (
+                "Album groups export with the album title as the product name."
+                if self.group.is_album_group
+                else "Singles export with the track title plus ' - Single' as the product name."
+            )
+        )
+        return "<br/>".join(parts)
+
+    def apply_record_to_form(self, record: GS1MetadataRecord) -> None:
         self._loading_form = True
         try:
             self.status_combo.setCurrentText(record.status)
@@ -529,9 +315,9 @@ class GS1MetadataDialog(QDialog):
         finally:
             self._loading_form = False
 
-    def _record_from_form(self) -> GS1MetadataRecord:
-        base = self._saved_record.copy() if self._saved_record is not None else GS1MetadataRecord(track_id=self.track_id)
-        base.track_id = self.track_id
+    def record_from_form(self) -> GS1MetadataRecord:
+        base = self._saved_record.copy()
+        base.track_id = self.group.representative_context.track_id
         base.status = self.status_combo.currentText().strip()
         base.product_classification = self.classification_combo.currentText().strip()
         base.consumer_unit_flag = self.consumer_unit_check.isChecked()
@@ -547,6 +333,318 @@ class GS1MetadataDialog(QDialog):
         base.export_enabled = self.export_enabled_check.isChecked()
         base.notes = self.notes_edit.toPlainText().strip()
         return base
+
+    def set_saved_record(self, record: GS1MetadataRecord) -> None:
+        self._saved_record = record.copy()
+        self.apply_record_to_form(self._saved_record)
+
+    def set_default_record(self, record: GS1MetadataRecord) -> None:
+        self._default_record = record.copy()
+
+    def reset_to_defaults(self) -> None:
+        self.apply_record_to_form(self._default_record)
+
+    def revert_form(self) -> None:
+        self.apply_record_to_form(self._saved_record)
+
+
+class GS1ExportPreviewDialog(QDialog):
+    """Shows the exact worksheet data that will be written before export continues."""
+
+    def __init__(self, plan: GS1ExportPlan, parent=None):
+        super().__init__(parent)
+        self.plan = plan
+        self.setWindowTitle("GS1 Export Preview")
+        self.setModal(True)
+        self.resize(1080, 680)
+        self.setMinimumSize(960, 560)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(12)
+
+        summary_box = QGroupBox("Export Summary", self)
+        summary_layout = QVBoxLayout(summary_box)
+        summary_layout.setContentsMargins(14, 14, 14, 14)
+        summary_layout.setSpacing(8)
+        summary_label = QLabel("\n".join(plan.summary_lines))
+        summary_label.setWordWrap(True)
+        summary_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        summary_layout.addWidget(summary_label)
+        root.addWidget(summary_box)
+
+        if plan.warnings:
+            warning_box = QGroupBox("Warnings", self)
+            warning_layout = QVBoxLayout(warning_box)
+            warning_layout.setContentsMargins(14, 14, 14, 14)
+            warning_layout.setSpacing(8)
+            warning_label = QLabel("\n".join(f"- {line}" for line in plan.warnings))
+            warning_label.setWordWrap(True)
+            warning_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            warning_layout.addWidget(warning_label)
+            root.addWidget(warning_box)
+
+        preview_box = QGroupBox("Workbook Rows", self)
+        preview_layout = QVBoxLayout(preview_box)
+        preview_layout.setContentsMargins(14, 14, 14, 14)
+        preview_layout.setSpacing(8)
+        preview_help = QLabel(
+            f"Detected sheet: {plan.template_profile.sheet_name}. The table below shows the final values that will be written into the workbook."
+        )
+        preview_help.setWordWrap(True)
+        preview_layout.addWidget(preview_help)
+
+        table = QTableWidget(len(plan.preview.rows), len(plan.preview.headers), self)
+        table.setHorizontalHeaderLabels(list(plan.preview.headers))
+        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        table.setSelectionMode(QAbstractItemView.NoSelection)
+        table.setAlternatingRowColors(True)
+        table.verticalHeader().setVisible(False)
+        table.setWordWrap(False)
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeToContents)
+        header.setStretchLastSection(True)
+        for row_index, row_values in enumerate(plan.preview.rows):
+            for column_index, value in enumerate(row_values):
+                item = QTableWidgetItem(str(value))
+                table.setItem(row_index, column_index, item)
+        table.resizeColumnsToContents()
+        preview_layout.addWidget(table, 1)
+        root.addWidget(preview_box, 1)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok, parent=self)
+        ok_button = button_box.button(QDialogButtonBox.Ok)
+        if ok_button is not None:
+            ok_button.setText("Continue Export")
+            ok_button.setDefault(True)
+        cancel_button = button_box.button(QDialogButtonBox.Cancel)
+        if cancel_button is not None:
+            cancel_button.setAutoDefault(False)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        root.addWidget(button_box)
+
+
+class GS1MetadataDialog(QDialog):
+    """Edits GS1 metadata for one or more grouped products from the catalog selection."""
+
+    WINDOW_TITLE = "GS1 Metadata"
+    ELEMENT_MARGIN = 2
+
+    def __init__(self, *, app, track_id: int, batch_track_ids: list[int] | None = None, parent=None):
+        super().__init__(parent or app)
+        self.app = app
+        self.track_id = int(track_id)
+        self.batch_track_ids = self._normalize_track_ids(batch_track_ids or [self.track_id])
+        self.gs1_service = getattr(app, "gs1_integration_service", None)
+        if self.gs1_service is None:
+            raise RuntimeError("GS1 integration service is not available")
+
+        self._template_path_override = ""
+        self._template_profile = None
+        self._group_tabs: QTabWidget | None = None
+        self._groups = self.gs1_service.build_metadata_groups(
+            self.batch_track_ids,
+            current_profile_path=self._current_profile_path(),
+            window_title=self._window_title(),
+        )
+        if not self._groups:
+            raise ValueError("Could not determine the selected track.")
+        self._editor_pages: list[GS1MetadataEditorPage] = []
+
+        self.setWindowTitle(self.WINDOW_TITLE)
+        self.setModal(True)
+        self.resize(1120, 860)
+        self.setMinimumSize(1020, 780)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(12)
+
+        scroll_area = QScrollArea(self)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_content = QWidget(scroll_area)
+        scroll_content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+        content_layout = QVBoxLayout(scroll_content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(12)
+        scroll_area.setWidget(scroll_content)
+        root.addWidget(scroll_area, 1)
+
+        summary_box = QGroupBox("Release / Product Context", self)
+        summary_layout = QVBoxLayout(summary_box)
+        summary_layout.setContentsMargins(14, 14, 14, 14)
+        summary_layout.setSpacing(6)
+        self.summary_label = QLabel(self._selection_summary_text())
+        self.summary_label.setWordWrap(True)
+        self.summary_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        summary_layout.addWidget(self.summary_label)
+        content_layout.addWidget(summary_box)
+
+        template_box = QGroupBox("Official GS1 Workbook", self)
+        template_layout = QVBoxLayout(template_box)
+        template_layout.setContentsMargins(14, 14, 14, 14)
+        template_layout.setSpacing(8)
+        self.template_help_label = QLabel(
+            "GS1 export uses the official workbook from your GS1 portal or regional GS1 environment. "
+            "The app validates the workbook before writing any rows."
+        )
+        self.template_help_label.setWordWrap(True)
+        template_layout.addWidget(self.template_help_label)
+        self.template_status_label = QLabel("")
+        self.template_status_label.setWordWrap(True)
+        self.template_status_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        template_layout.addWidget(self.template_status_label)
+        template_button_row = QHBoxLayout()
+        template_button_row.setContentsMargins(self.ELEMENT_MARGIN, self.ELEMENT_MARGIN, self.ELEMENT_MARGIN, self.ELEMENT_MARGIN)
+        template_button_row.setSpacing(8)
+        self.choose_template_button = QPushButton("Choose Workbook…", self)
+        self.choose_template_button.setAutoDefault(False)
+        self.choose_template_button.clicked.connect(lambda: self._choose_template_path(prompt_message=None))
+        self.reverify_template_button = QPushButton("Re-verify", self)
+        self.reverify_template_button.setAutoDefault(False)
+        self.reverify_template_button.clicked.connect(lambda: self._refresh_template_status(prompt_if_missing=False))
+        self.settings_button = QPushButton("Open Settings…", self)
+        self.settings_button.setAutoDefault(False)
+        self.settings_button.clicked.connect(lambda: self.app.open_settings_dialog(initial_focus="gs1_template_path"))
+        template_button_row.addWidget(self.choose_template_button)
+        template_button_row.addWidget(self.reverify_template_button)
+        template_button_row.addWidget(self.settings_button)
+        template_button_row.addStretch(1)
+        template_layout.addLayout(template_button_row)
+        content_layout.addWidget(template_box)
+
+        editor_box = QGroupBox("GS1 Metadata", self)
+        editor_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        editor_layout = QVBoxLayout(editor_box)
+        editor_layout.setContentsMargins(16, 14, 16, 14)
+        editor_layout.setSpacing(10)
+        if len(self._groups) > 1:
+            tabs_help = QLabel(
+                "Each tab represents one final GS1 product row. Album tabs apply the same GS1 metadata to every selected track in that album group when you save."
+            )
+            tabs_help.setWordWrap(True)
+            editor_layout.addWidget(tabs_help)
+            self._group_tabs = QTabWidget(self)
+            self._group_tabs.currentChanged.connect(lambda *_args: self._update_readiness())
+            editor_layout.addWidget(self._group_tabs, 1)
+        for group in self._groups:
+            page = GS1MetadataEditorPage(group, self)
+            page.changed.connect(self._update_readiness)
+            self._editor_pages.append(page)
+            if self._group_tabs is not None:
+                self._group_tabs.addTab(page, group.tab_title)
+            else:
+                editor_layout.addWidget(page)
+        content_layout.addWidget(editor_box)
+
+        info_box = QGroupBox("Export Readiness", self)
+        info_layout = QVBoxLayout(info_box)
+        info_layout.setContentsMargins(14, 14, 14, 14)
+        info_layout.setSpacing(8)
+        self.readiness_label = QLabel("")
+        self.readiness_label.setWordWrap(True)
+        info_layout.addWidget(self.readiness_label)
+        self.batch_note_label = QLabel(
+            "Exports always produce a single workbook. Tracks with the same album title become one product row per album title, while singles export as separate rows."
+        )
+        self.batch_note_label.setWordWrap(True)
+        info_layout.addWidget(self.batch_note_label)
+        content_layout.addWidget(info_box)
+        content_layout.addStretch(1)
+
+        button_row = QHBoxLayout()
+        button_row.setContentsMargins(self.ELEMENT_MARGIN, self.ELEMENT_MARGIN, self.ELEMENT_MARGIN, self.ELEMENT_MARGIN)
+        button_row.setSpacing(8)
+        self.revert_button = QPushButton("Revert", self)
+        self.revert_button.setAutoDefault(False)
+        self.revert_button.clicked.connect(self._revert_form)
+        self.reset_defaults_button = QPushButton("Reset to Defaults", self)
+        self.reset_defaults_button.setAutoDefault(False)
+        self.reset_defaults_button.clicked.connect(self._reset_to_defaults)
+        button_row.addWidget(self.revert_button)
+        button_row.addWidget(self.reset_defaults_button)
+        button_row.addStretch(1)
+
+        self.save_button = QPushButton("Save", self)
+        self.save_button.setDefault(True)
+        self.save_button.clicked.connect(lambda: self._save_groups(self._groups, show_confirmation=True))
+        self.export_current_button = QPushButton("Export Current…", self)
+        self.export_current_button.clicked.connect(self._export_current)
+        self.export_batch_button = QPushButton(self._batch_button_text(), self)
+        self.export_batch_button.clicked.connect(self._export_batch)
+        self.export_batch_button.setEnabled(len(self._groups) > 1 or len(self.batch_track_ids) > 1)
+        self.close_button = QPushButton("Close", self)
+        self.close_button.setAutoDefault(False)
+        self.close_button.clicked.connect(self.accept)
+        button_row.addWidget(self.save_button)
+        button_row.addWidget(self.export_current_button)
+        button_row.addWidget(self.export_batch_button)
+        button_row.addWidget(self.close_button)
+        root.addLayout(button_row)
+
+        self._refresh_template_status(prompt_if_missing=True)
+        self._update_readiness()
+
+    def _normalize_track_ids(self, track_ids: list[int]) -> list[int]:
+        normalized: list[int] = []
+        seen: set[int] = set()
+        for track_id in track_ids:
+            try:
+                clean_id = int(track_id)
+            except (TypeError, ValueError):
+                continue
+            if clean_id <= 0 or clean_id in seen:
+                continue
+            normalized.append(clean_id)
+            seen.add(clean_id)
+        if self.track_id in seen:
+            normalized = [self.track_id] + [value for value in normalized if value != self.track_id]
+        else:
+            normalized.insert(0, self.track_id)
+        return normalized
+
+    def _current_profile_path(self) -> str:
+        return str(getattr(self.app, "current_db_path", "") or "")
+
+    def _window_title(self) -> str:
+        identity = getattr(self.app, "identity", {}) or {}
+        return str(identity.get("window_title") or "")
+
+    def _selection_summary_text(self) -> str:
+        lines = [
+            f"<b>Selected tracks:</b> {len(self.batch_track_ids)}",
+            f"<b>Export product groups:</b> {len(self._groups)}",
+        ]
+        if len(self._groups) > 1:
+            lines.append("<b>Editing mode:</b> One tab per final GS1 export product group.")
+        group_lines = []
+        for group in self._groups:
+            kind = "Album" if group.is_album_group else "Single"
+            group_lines.append(f"{kind}: {group.display_title} ({len(group.track_ids)} track{'s' if len(group.track_ids) != 1 else ''})")
+        if group_lines:
+            lines.append("<b>Groups:</b> " + " | ".join(group_lines))
+        return "<br/>".join(lines)
+
+    def _current_group(self) -> GS1MetadataGroup:
+        if self._group_tabs is None:
+            return self._groups[0]
+        return self._groups[self._group_tabs.currentIndex()]
+
+    def _current_page(self) -> GS1MetadataEditorPage:
+        if self._group_tabs is None:
+            return self._editor_pages[0]
+        return self._editor_pages[self._group_tabs.currentIndex()]
+
+    def _page_for_group(self, group: GS1MetadataGroup) -> GS1MetadataEditorPage:
+        index = self._groups.index(group)
+        return self._editor_pages[index]
+
+    def _focus_group(self, group: GS1MetadataGroup) -> None:
+        if self._group_tabs is None:
+            return
+        self._group_tabs.setCurrentIndex(self._groups.index(group))
 
     def _refresh_template_status(self, *, prompt_if_missing: bool) -> bool:
         template_path = self._template_path_override or self.app.gs1_settings_service.load_template_path()
@@ -634,89 +732,90 @@ class GS1MetadataDialog(QDialog):
         return True
 
     def _update_readiness(self) -> None:
-        if self._loading_form:
+        if any(page.is_loading for page in self._editor_pages):
             return
-        record = self._record_from_form()
-        validation = self.gs1_service.validate_metadata(record, for_export=False)
         lines: list[str] = []
-        if not validation.is_valid:
+        issues: list[str] = []
+        for group, page in zip(self._groups, self._editor_pages):
+            validation = self.gs1_service.validate_group_metadata(group, page.record_from_form(), for_export=False)
+            if validation.is_valid:
+                continue
+            issues.append(f"{group.tab_title}: " + "; ".join(validation.messages()))
+        if issues:
             lines.append("Metadata needs attention:")
-            lines.extend(f"- {message}" for message in validation.messages())
+            lines.extend(f"- {message}" for message in issues)
         else:
-            lines.append("Metadata is complete.")
+            lines.append(f"Metadata is complete for {len(self._groups)} product group(s).")
 
         if self._template_profile is None:
             lines.append("Export is blocked until a verified official GS1 workbook is selected.")
+        elif issues:
+            lines.append("Export validation still has blocking issues.")
         else:
-            export_validation = self.gs1_service.validate_metadata(record, for_export=True)
-            if export_validation.is_valid:
-                lines.append(
-                    f"Ready to export into '{self._template_profile.sheet_name}'."
-                )
-            else:
-                lines.append("Export validation still has blocking issues.")
+            lines.append(f"Ready to export into '{self._template_profile.sheet_name}'.")
         self.readiness_label.setText("\n".join(lines))
 
-    def _save_current_record(self, *, show_confirmation: bool) -> bool:
-        record = self._record_from_form()
-        try:
-            saved = self.gs1_service.save_metadata(record)
-        except GS1ValidationError as exc:
-            self.readiness_label.setText("Metadata needs attention:\n" + "\n".join(f"- {message}" for message in exc.result.messages()))
-            QMessageBox.warning(self, "GS1 Metadata", str(exc))
-            self._update_readiness()
-            return False
-        self.record = saved
-        self._saved_record = saved.copy()
+    def _save_groups(self, groups: list[GS1MetadataGroup], *, show_confirmation: bool) -> bool:
+        saved_track_count = 0
+        for group in groups:
+            page = self._page_for_group(group)
+            try:
+                saved_records = self.gs1_service.save_metadata_group(group, page.record_from_form())
+            except GS1ValidationError as exc:
+                self._focus_group(group)
+                self.readiness_label.setText("Metadata needs attention:\n" + "\n".join(f"- {message}" for message in exc.result.messages()))
+                QMessageBox.warning(self, "GS1 Metadata", str(exc))
+                self._update_readiness()
+                return False
+            representative = saved_records[0]
+            group.record = representative.copy()
+            page.group.record = representative.copy()
+            page.set_saved_record(representative)
+            saved_track_count += len(saved_records)
         self._update_readiness()
         if show_confirmation:
-            QMessageBox.information(self, "GS1 Metadata", "GS1 metadata saved.")
+            QMessageBox.information(
+                self,
+                "GS1 Metadata",
+                f"Saved GS1 metadata for {saved_track_count} track(s) across {len(groups)} product group(s).",
+            )
         return True
 
     def _reset_to_defaults(self) -> None:
-        self._default_record = self.gs1_service.build_default_metadata(
-            self.track_id,
+        group = self._current_group()
+        default_group = self.gs1_service.build_metadata_groups(
+            list(group.track_ids),
             current_profile_path=self._current_profile_path(),
             window_title=self._window_title(),
-        )
-        self._apply_record_to_form(self._default_record)
+        )[0]
+        group.default_record = default_group.default_record.copy()
+        page = self._current_page()
+        page.set_default_record(default_group.default_record)
+        page.reset_to_defaults()
         self._update_readiness()
 
     def _revert_form(self) -> None:
-        target = self._saved_record
-        if target is None:
-            target = self.gs1_service.build_default_metadata(
-                self.track_id,
-                current_profile_path=self._current_profile_path(),
-                window_title=self._window_title(),
-            )
-        self._apply_record_to_form(target)
+        self._current_page().revert_form()
         self._update_readiness()
 
     def _batch_button_text(self) -> str:
-        count = len(self.batch_track_ids)
-        if count <= 1:
-            return "Export Batch…"
-        return f"Export Batch ({count})…"
+        if len(self._groups) <= 1 and len(self.batch_track_ids) <= 1:
+            return "Export Selection…"
+        return f"Export Selection ({len(self._groups)})…"
 
     def _suggest_output_path(self, *, batch: bool) -> str:
-        base_name = self.context.display_title if not batch else f"batch_{len(self.batch_track_ids)}"
+        base_name = self._current_group().display_title if not batch else f"selection_{len(self._groups)}"
         suffix = Path(self._template_path_override or self.app.gs1_settings_service.load_template_path() or "template.xlsx").suffix
         if suffix.lower() not in {".xlsx", ".xlsm", ".xltx", ".xltm"}:
             suffix = ".xlsx"
-        if not batch:
-            filename = f"gs1_{_safe_filename(base_name)}{suffix}"
-        else:
-            filename = f"gs1_batch_{_safe_filename(base_name)}{suffix}"
+        filename = f"gs1_{_safe_filename(base_name)}{suffix}" if not batch else f"gs1_selection_{_safe_filename(base_name)}{suffix}"
         return str(self.app.exports_dir / filename)
 
     def _confirm_output_path(self, output_path: str) -> bool:
         if not output_path:
             return False
         selected_path = Path(output_path)
-        template_path_text = str(
-            self._template_path_override or self.app.gs1_settings_service.load_template_path() or ""
-        ).strip()
+        template_path_text = str(self._template_path_override or self.app.gs1_settings_service.load_template_path() or "").strip()
         if template_path_text and selected_path.resolve() == Path(template_path_text).resolve():
             return (
                 QMessageBox.question(
@@ -753,16 +852,16 @@ class GS1MetadataDialog(QDialog):
         return plan
 
     def _confirm_export_preview(self, plan: GS1ExportPlan) -> bool:
-        preview_dialog = GS1ExportPreviewDialog(plan, self)
-        return preview_dialog.exec() == QDialog.Accepted
+        return GS1ExportPreviewDialog(plan, self).exec() == QDialog.Accepted
 
     def _export_current(self) -> None:
-        if not self._save_current_record(show_confirmation=False):
+        current_group = self._current_group()
+        if not self._save_groups([current_group], show_confirmation=False):
             return
         if self._template_profile is None and not self._refresh_template_status(prompt_if_missing=True):
             self._update_readiness()
             return
-        plan = self._build_export_plan([self.track_id])
+        plan = self._build_export_plan(list(current_group.track_ids))
         if plan is None:
             return
         self._template_profile = plan.template_profile
@@ -787,7 +886,7 @@ class GS1MetadataDialog(QDialog):
                 payload=lambda export_result: {
                     "path": output_path,
                     "count": export_result.exported_count,
-                    "track_ids": [self.track_id],
+                    "track_ids": list(current_group.track_ids),
                     "sheet_name": export_result.sheet_name,
                 },
             )
@@ -804,10 +903,10 @@ class GS1MetadataDialog(QDialog):
         )
 
     def _export_batch(self) -> None:
-        if len(self.batch_track_ids) <= 1:
-            QMessageBox.information(self, "GS1 Export", "Select more than one catalog row to export a batch.")
+        if len(self.batch_track_ids) <= 1 and len(self._groups) <= 1:
+            QMessageBox.information(self, "GS1 Export", "Select more than one catalog row to export a grouped workbook.")
             return
-        if self.track_id in self.batch_track_ids and not self._save_current_record(show_confirmation=False):
+        if not self._save_groups(self._groups, show_confirmation=False):
             return
         if self._template_profile is None and not self._refresh_template_status(prompt_if_missing=True):
             self._update_readiness()
@@ -820,7 +919,7 @@ class GS1MetadataDialog(QDialog):
             return
         output_path, _ = QFileDialog.getSaveFileName(
             self,
-            "Export GS1 Batch Workbook",
+            "Export GS1 Selection Workbook",
             self._suggest_output_path(batch=True),
             "Excel Workbook (*.xlsx *.xlsm *.xltx *.xltm)",
         )
@@ -828,7 +927,7 @@ class GS1MetadataDialog(QDialog):
             return
         try:
             result = self.app._run_file_history_action(
-                action_label=lambda export_result: f"Export GS1 Batch: {export_result.exported_count} records",
+                action_label=lambda export_result: f"Export GS1 Selection: {export_result.exported_count} records",
                 action_type="file.export_gs1_batch",
                 target_path=output_path,
                 mutation=lambda: self.gs1_service.export_plan(plan, output_path=output_path),
@@ -850,5 +949,5 @@ class GS1MetadataDialog(QDialog):
         QMessageBox.information(
             self,
             "GS1 Export",
-            f"Saved GS1 batch workbook:\n{result.output_path}\n\nSheet: {result.sheet_name}\nRows: {', '.join(map(str, result.row_numbers))}",
+            f"Saved GS1 workbook:\n{result.output_path}\n\nSheet: {result.sheet_name}\nRows: {', '.join(map(str, result.row_numbers))}",
         )

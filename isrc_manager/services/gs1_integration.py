@@ -10,6 +10,7 @@ from .gs1_models import (
     GS1BatchValidationError,
     GS1BatchValidationIssue,
     GS1ExportPlan,
+    GS1MetadataGroup,
     GS1MetadataRecord,
     GS1PreparedRecord,
     GS1RecordContext,
@@ -127,8 +128,40 @@ class GS1IntegrationService:
             raise GS1ValidationError(validation)
         return self.repository.save(record)
 
+    def save_metadata_group(
+        self,
+        group: GS1MetadataGroup,
+        record: GS1MetadataRecord,
+    ) -> list[GS1MetadataRecord]:
+        normalized = self._normalized_group_record(group, record)
+        validation = self.validation_service.validate(normalized, for_export=False)
+        if not validation.is_valid:
+            raise GS1ValidationError(validation)
+
+        saved_records: list[GS1MetadataRecord] = []
+        for track_id in group.track_ids:
+            track_record = normalized.copy()
+            track_record.id = None
+            track_record.track_id = int(track_id)
+            track_record.created_at = None
+            track_record.updated_at = None
+            saved_records.append(self.repository.save(track_record))
+        return saved_records
+
     def validate_metadata(self, record: GS1MetadataRecord, *, for_export: bool = False):
         return self.validation_service.validate(record, for_export=for_export)
+
+    def normalize_group_record(self, group: GS1MetadataGroup, record: GS1MetadataRecord) -> GS1MetadataRecord:
+        return self._normalized_group_record(group, record)
+
+    def validate_group_metadata(
+        self,
+        group: GS1MetadataGroup,
+        record: GS1MetadataRecord,
+        *,
+        for_export: bool = False,
+    ):
+        return self.validation_service.validate(self._normalized_group_record(group, record), for_export=for_export)
 
     def load_template_profile(self, template_path: str | None = None) -> GS1TemplateProfile:
         resolved_path = str(template_path or "").strip() or self.settings_service.load_template_path()
@@ -141,6 +174,45 @@ class GS1IntegrationService:
     def save_template_path(self, template_path: str) -> str:
         return self.settings_service.set_template_path(template_path)
 
+    def build_metadata_groups(
+        self,
+        track_ids: list[int],
+        *,
+        current_profile_path: str = "",
+        window_title: str = "",
+    ) -> list[GS1MetadataGroup]:
+        loaded = self._load_export_entries(
+            track_ids,
+            current_profile_path=current_profile_path,
+            window_title=window_title,
+        )
+        groups: list[GS1MetadataGroup] = []
+        for index, group_entries in enumerate(self._group_loaded_entries(loaded), start=1):
+            representative_record, representative_context = group_entries[0]
+            display_title = self._group_product_name(group_entries)
+            default_record = self.build_default_metadata(
+                representative_context.track_id,
+                current_profile_path=current_profile_path,
+                window_title=window_title,
+            )
+            group_record = representative_record.copy()
+            group_record.product_description = display_title
+            default_record.product_description = display_title
+            mode = "album" if self._group_album_title(group_entries) else "single"
+            groups.append(
+                GS1MetadataGroup(
+                    group_id=f"group_{index}",
+                    tab_title=self._group_tab_title(group_entries),
+                    display_title=display_title,
+                    mode=mode,
+                    track_ids=tuple(context.track_id for _, context in group_entries),
+                    contexts=tuple(context for _, context in group_entries),
+                    record=group_record,
+                    default_record=default_record,
+                )
+            )
+        return groups
+
     def prepare_records_for_export(
         self,
         track_ids: list[int],
@@ -148,56 +220,27 @@ class GS1IntegrationService:
         current_profile_path: str = "",
         window_title: str = "",
     ) -> list[GS1PreparedRecord]:
-        loaded = self._load_export_entries(
+        groups = self.build_metadata_groups(
             track_ids,
             current_profile_path=current_profile_path,
             window_title=window_title,
         )
-        if not loaded:
+        if not groups:
             raise ValueError("At least one track must be selected for GS1 export.")
-
-        shared_album_title = self._shared_album_title([context for _, context in loaded])
         issues: list[GS1BatchValidationIssue] = []
-
-        if len(loaded) > 1 and shared_album_title:
-            representative_record, representative_context = loaded[0]
-            grouped_record = representative_record.copy()
-            grouped_record.product_description = shared_album_title
-            validation = self.validation_service.validate(grouped_record, for_export=True)
-            if not validation.is_valid:
-                raise GS1BatchValidationError(
-                    [
-                        GS1BatchValidationIssue(
-                            track_id=int(representative_context.track_id),
-                            track_label=representative_context.display_title,
-                            messages=validation.messages(),
-                        )
-                    ]
-                )
-            return [
-                GS1PreparedRecord(
-                    metadata=grouped_record,
-                    context=representative_context,
-                    source_track_ids=tuple(context.track_id for _, context in loaded),
-                    source_track_labels=tuple(self._source_track_label(context) for _, context in loaded),
-                    source_upc_values=tuple(str(context.upc or "").strip() for _, context in loaded),
-                )
-            ]
-
         prepared: list[GS1PreparedRecord] = []
-        for record, context in loaded:
-            export_record = record.copy()
-            if len(loaded) > 1:
-                export_record.product_description = self._single_product_name(context.track_title, context.track_id)
+        for group in groups:
+            export_record = self._normalized_group_record(group, group.record)
+            context = group.representative_context
             validation = self.validation_service.validate(export_record, for_export=True)
             if validation.is_valid:
                 prepared.append(
                     GS1PreparedRecord(
                         metadata=export_record,
                         context=context,
-                        source_track_ids=(context.track_id,),
-                        source_track_labels=(self._source_track_label(context),),
-                        source_upc_values=(str(context.upc or "").strip(),),
+                        source_track_ids=group.track_ids,
+                        source_track_labels=tuple(self._source_track_label(entry_context) for entry_context in group.contexts),
+                        source_upc_values=tuple(str(entry_context.upc or "").strip() for entry_context in group.contexts),
                     )
                 )
                 continue
@@ -227,9 +270,7 @@ class GS1IntegrationService:
             window_title=window_title,
         )
         preview = self.excel_export_service.build_preview(template_profile, prepared)
-        mode = self._export_mode(prepared, track_ids)
         summary_lines = self._build_export_summary(
-            mode=mode,
             track_ids=track_ids,
             prepared_records=prepared,
             template_profile=template_profile,
@@ -241,7 +282,7 @@ class GS1IntegrationService:
             preview=preview,
             warnings=tuple(warnings),
             summary_lines=tuple(summary_lines),
-            mode=mode,
+            mode=self._export_mode(prepared),
         )
 
     def export_plan(
@@ -359,14 +400,6 @@ class GS1IntegrationService:
         return loaded
 
     @staticmethod
-    def _shared_album_title(contexts: list[GS1RecordContext]) -> str:
-        album_titles = {str(context.album_title or "").strip() for context in contexts}
-        if len(album_titles) != 1:
-            return ""
-        shared_title = next(iter(album_titles)).strip()
-        return shared_title if shared_title else ""
-
-    @staticmethod
     def _source_track_label(context: GS1RecordContext) -> str:
         title = str(context.track_title or "").strip() or f"Track {context.track_id}"
         if context.album_title and context.album_title.strip() != title:
@@ -381,44 +414,55 @@ class GS1IntegrationService:
         return f"{clean_title} - Single"
 
     @staticmethod
-    def _export_mode(prepared: list[GS1PreparedRecord], track_ids: list[int]) -> str:
-        if len(prepared) == 1 and len(track_ids) > 1 and len(prepared[0].source_track_ids) > 1:
-            return "shared_album"
-        if len(prepared) > 1 and len(track_ids) > 1:
-            return "separate_singles"
+    def _export_mode(prepared: list[GS1PreparedRecord]) -> str:
+        if not prepared:
+            return "single"
+        album_groups = sum(1 for record in prepared if len(record.source_track_ids) > 1 or str(record.context.album_title or "").strip())
+        single_groups = sum(1 for record in prepared if not str(record.context.album_title or "").strip())
+        if len(prepared) == 1 and album_groups == 1:
+            return "album"
+        if album_groups and single_groups:
+            return "mixed_groups"
+        if album_groups and len(prepared) > 1:
+            return "album_groups"
+        if single_groups and len(prepared) > 1:
+            return "single_groups"
         return "single"
 
     def _build_export_summary(
         self,
         *,
-        mode: str,
         track_ids: list[int],
         prepared_records: list[GS1PreparedRecord],
         template_profile: GS1TemplateProfile,
     ) -> list[str]:
         lines = [
-            f"This export will write {len(prepared_records)} GS1 product row(s) into '{template_profile.sheet_name}'.",
+            f"This export will write {len(prepared_records)} GS1 product row(s) from {len(track_ids)} selected track(s) into '{template_profile.sheet_name}'.",
             "The GS1 request/code field will be filled with 1, 2, 3, ... in export order.",
         ]
         if not prepared_records:
             return lines
-        if mode == "shared_album":
-            album_title = prepared_records[0].metadata.product_description.strip() or prepared_records[0].context.display_title
+        album_titles = [
+            record.metadata.product_description.strip()
+            for record in prepared_records
+            if str(record.context.album_title or "").strip()
+        ]
+        single_count = sum(1 for record in prepared_records if not str(record.context.album_title or "").strip())
+        if album_titles:
             lines.insert(
                 1,
-                f"All {len(prepared_records[0].source_track_ids)} selected tracks share album '{album_title}', so they will be exported as one GS1 product.",
+                "Tracks with a non-empty album title are grouped into one GS1 product row per album title.",
             )
-            return lines
-        if mode == "separate_singles":
+        if single_count:
+            lines.insert(
+                2 if album_titles else 1,
+                "Tracks without an album title are exported as individual single rows so each single can receive its own UPC/GTIN assignment.",
+            )
+        if len(prepared_records) == 1:
             lines.insert(
                 1,
-                "Selected tracks do not all share one album title, so each track will be exported as a separate GS1 product named 'Track Title - Single'.",
+                f"Single-product export for '{prepared_records[0].metadata.product_description.strip() or prepared_records[0].context.display_title}'.",
             )
-            return lines
-        lines.insert(
-            1,
-            f"Single-product export for '{prepared_records[0].metadata.product_description.strip() or prepared_records[0].context.display_title}'.",
-        )
         return lines
 
     @staticmethod
@@ -450,3 +494,59 @@ class GS1IntegrationService:
                 "Multiple different UPC/EAN values are present in the selection. Confirm that the export grouping matches the product you want to register."
             )
         return warnings
+
+    def _normalized_group_record(self, group: GS1MetadataGroup, record: GS1MetadataRecord) -> GS1MetadataRecord:
+        normalized = record.copy()
+        normalized.track_id = int(group.representative_context.track_id)
+        normalized.product_description = group.display_title
+        return normalized
+
+    def _group_loaded_entries(
+        self,
+        loaded: list[tuple[GS1MetadataRecord, GS1RecordContext]],
+    ) -> list[list[tuple[GS1MetadataRecord, GS1RecordContext]]]:
+        grouped: list[list[tuple[GS1MetadataRecord, GS1RecordContext]]] = []
+        index_by_key: dict[str, int] = {}
+        for record, context in loaded:
+            album_title = str(context.album_title or "").strip()
+            if album_title:
+                group_key = f"album::{album_title.casefold()}"
+            else:
+                group_key = f"track::{int(context.track_id)}"
+            group_index = index_by_key.get(group_key)
+            if group_index is None:
+                index_by_key[group_key] = len(grouped)
+                grouped.append([(record, context)])
+                continue
+            grouped[group_index].append((record, context))
+        return grouped
+
+    def _group_product_name(
+        self,
+        group_entries: list[tuple[GS1MetadataRecord, GS1RecordContext]],
+    ) -> str:
+        album_title = self._group_album_title(group_entries)
+        if album_title:
+            return album_title
+        _, context = group_entries[0]
+        return self._single_product_name(context.track_title, context.track_id)
+
+    def _group_tab_title(
+        self,
+        group_entries: list[tuple[GS1MetadataRecord, GS1RecordContext]],
+    ) -> str:
+        album_title = self._group_album_title(group_entries)
+        if album_title:
+            if len(group_entries) > 1:
+                return f"{album_title} ({len(group_entries)})"
+            return album_title
+        _, context = group_entries[0]
+        return str(context.track_title or "").strip() or f"Track {context.track_id}"
+
+    @staticmethod
+    def _group_album_title(
+        group_entries: list[tuple[GS1MetadataRecord, GS1RecordContext]],
+    ) -> str:
+        if not group_entries:
+            return ""
+        return str(group_entries[0][1].album_title or "").strip()

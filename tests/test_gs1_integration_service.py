@@ -87,6 +87,14 @@ def make_conn():
         VALUES(3, 'NL-ABC-26-00003', 'NLABC2600003', 'Solar Flare', 1, 2, '2026-03-15', 195, NULL, '', 'Electronic')
         """
     )
+    conn.execute(
+        """
+        INSERT INTO Tracks(
+            id, isrc, isrc_compact, track_title, main_artist_id, album_id, release_date, track_length_sec, iswc, upc, genre
+        )
+        VALUES(4, 'NL-ABC-26-00004', 'NLABC2600004', 'Standalone Echo', 1, NULL, '2026-03-16', 205, NULL, '', 'Ambient')
+        """
+    )
     conn.commit()
     return conn
 
@@ -180,32 +188,68 @@ class GS1IntegrationServiceTests(unittest.TestCase):
         self.assertEqual(prepared[0].source_track_ids, (1, 2))
         self.assertEqual(prepared[0].source_track_labels, ("Orbit Release", "Orbit Reprise (Orbit Release)"))
 
-    def test_prepare_records_for_export_uses_single_titles_for_mixed_album_batch(self):
-        prepared = self.service.prepare_records_for_export(
-            [1, 3],
+    def test_build_metadata_groups_split_selection_into_album_groups_and_singles(self):
+        groups = self.service.build_metadata_groups(
+            [1, 2, 3, 4],
             current_profile_path="/tmp/Orbit_Label.db",
             window_title="Orbit Window",
         )
 
-        self.assertEqual(len(prepared), 2)
-        self.assertEqual(prepared[0].metadata.product_description, "Orbit Release - Single")
-        self.assertEqual(prepared[1].metadata.product_description, "Solar Flare - Single")
+        self.assertEqual([group.display_title for group in groups], ["Orbit Release", "Solar Release", "Standalone Echo - Single"])
+        self.assertEqual([group.track_ids for group in groups], [(1, 2), (3,), (4,)])
+        self.assertEqual([group.mode for group in groups], ["album", "album", "single"])
+
+    def test_prepare_records_for_export_groups_by_album_title_and_keeps_singles_separate(self):
+        prepared = self.service.prepare_records_for_export(
+            [1, 2, 3, 4],
+            current_profile_path="/tmp/Orbit_Label.db",
+            window_title="Orbit Window",
+        )
+
+        self.assertEqual(len(prepared), 3)
+        self.assertEqual(prepared[0].metadata.product_description, "Orbit Release")
+        self.assertEqual(prepared[1].metadata.product_description, "Solar Release")
+        self.assertEqual(prepared[2].metadata.product_description, "Standalone Echo - Single")
+        self.assertEqual(prepared[0].source_track_ids, (1, 2))
+        self.assertEqual(prepared[1].source_track_ids, (3,))
+        self.assertEqual(prepared[2].source_track_ids, (4,))
+
+    def test_save_metadata_group_applies_album_values_to_every_track_in_group(self):
+        group = self.service.build_metadata_groups(
+            [1, 2],
+            current_profile_path="/tmp/Orbit_Label.db",
+            window_title="Orbit Window",
+        )[0]
+        record = group.record.copy()
+        record.brand = "Unified Label"
+        record.subbrand = "Album Series"
+        record.target_market = "Worldwide"
+
+        saved_records = self.service.save_metadata_group(group, record)
+
+        self.assertEqual(len(saved_records), 2)
+        self.assertEqual(self.service.repository.fetch_by_track_id(1).brand, "Unified Label")
+        self.assertEqual(self.service.repository.fetch_by_track_id(2).brand, "Unified Label")
+        self.assertEqual(self.service.repository.fetch_by_track_id(1).product_description, "Orbit Release")
+        self.assertEqual(self.service.repository.fetch_by_track_id(2).product_description, "Orbit Release")
 
     def test_prepare_export_plan_includes_preview_and_upc_warning_details(self):
         template_path = Path(self.tmpdir.name) / "gs1-template.xlsx"
         build_template(template_path)
 
         plan = self.service.prepare_export_plan(
-            [1, 2],
+            [1, 2, 3, 4],
             template_path=str(template_path),
             current_profile_path="/tmp/Orbit_Label.db",
             window_title="Orbit Window",
         )
 
-        self.assertEqual(plan.mode, "shared_album")
+        self.assertEqual(plan.mode, "mixed_groups")
         self.assertEqual(plan.preview.headers[0], "GS1 Artikelcode (GTIN)")
         self.assertEqual(plan.preview.rows[0][0], "1")
         self.assertIn("Orbit Release", plan.preview.rows[0])
+        self.assertIn("Solar Release", plan.preview.rows[1])
+        self.assertIn("Standalone Echo - Single", plan.preview.rows[2])
         self.assertTrue(plan.warnings)
         self.assertIn("UPC/EAN", plan.warnings[0])
         self.assertIn("Orbit Release: 123456789012", plan.warnings[1])

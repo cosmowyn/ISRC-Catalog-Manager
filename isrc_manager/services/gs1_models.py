@@ -178,6 +178,26 @@ class GS1PreparedRecord:
 
 
 @dataclass(slots=True)
+class GS1MetadataGroup:
+    group_id: str
+    tab_title: str
+    display_title: str
+    mode: str
+    track_ids: tuple[int, ...]
+    contexts: tuple[GS1RecordContext, ...]
+    record: GS1MetadataRecord
+    default_record: GS1MetadataRecord
+
+    @property
+    def representative_context(self) -> GS1RecordContext:
+        return self.contexts[0]
+
+    @property
+    def is_album_group(self) -> bool:
+        return self.mode == "album"
+
+
+@dataclass(slots=True)
 class GS1ExportPreview:
     headers: tuple[str, ...]
     rows: tuple[tuple[str, ...], ...]
