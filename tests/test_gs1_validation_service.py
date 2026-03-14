@@ -68,6 +68,15 @@ class GS1ValidationServiceTests(unittest.TestCase):
         self.assertFalse(result.is_valid)
         self.assertIn("Export is disabled for this record.", result.messages())
 
+    def test_contract_number_is_required_for_export(self):
+        record = self._valid_record()
+        record.contract_number = ""
+
+        result = self.service.validate(record, for_export=True)
+
+        self.assertFalse(result.is_valid)
+        self.assertIn("Contract Number is required for export.", result.messages())
+
 
 if __name__ == "__main__":
     unittest.main()

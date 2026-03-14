@@ -5,7 +5,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QSettings
 
-from isrc_manager.services import GS1ProfileDefaults, GS1SettingsService
+from isrc_manager.services import GS1ContractEntry, GS1ProfileDefaults, GS1SettingsService
 
 
 def make_settings_conn():
@@ -48,6 +48,7 @@ class GS1SettingsServiceTests(unittest.TestCase):
     def test_profile_defaults_round_trip_through_app_kv(self):
         saved = self.service.set_profile_defaults(
             GS1ProfileDefaults(
+                contract_number="10070050",
                 target_market="Worldwide",
                 language="English",
                 brand="Orbit Label",
@@ -60,6 +61,7 @@ class GS1SettingsServiceTests(unittest.TestCase):
         self.assertEqual(
             saved,
             GS1ProfileDefaults(
+                contract_number="10070050",
                 target_market="Worldwide",
                 language="English",
                 brand="Orbit Label",
@@ -72,12 +74,40 @@ class GS1SettingsServiceTests(unittest.TestCase):
             key: value
             for key, value in self.conn.execute("SELECT key, value FROM app_kv").fetchall()
         }
+        self.assertEqual(rows["gs1/default_contract_number"], "10070050")
         self.assertEqual(rows["gs1/default_target_market"], "Worldwide")
         self.assertEqual(rows["gs1/default_language"], "English")
         self.assertEqual(rows["gs1/default_brand"], "Orbit Label")
         self.assertEqual(rows["gs1/default_subbrand"], "Digital Series")
         self.assertEqual(rows["gs1/default_packaging_type"], "Digital file")
         self.assertEqual(rows["gs1/default_product_classification"], "Audio")
+
+    def test_contracts_round_trip_through_app_kv(self):
+        saved = self.service.set_contracts(
+            (
+                GS1ContractEntry(
+                    contract_number="10064976",
+                    product="GS1 codepakket 10",
+                    company_number="87208927246",
+                    start_number="8720892724601",
+                    end_number="8720892724694",
+                    status="Actief",
+                ),
+                GS1ContractEntry(
+                    contract_number="10070050",
+                    product="GS1 codepakket 100",
+                    company_number="8721398389",
+                    start_number="8721398389004",
+                    end_number="8721398389998",
+                    status="Actief",
+                ),
+            ),
+            source_path="/tmp/contracts.csv",
+        )
+
+        self.assertEqual(len(saved), 2)
+        self.assertEqual(self.service.load_contracts_csv_path(), "/tmp/contracts.csv")
+        self.assertEqual([entry.contract_number for entry in self.service.load_contracts()], ["10064976", "10070050"])
 
 
 if __name__ == "__main__":

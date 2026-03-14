@@ -19,6 +19,7 @@ class GS1MetadataRepository:
             SELECT
                 id,
                 track_id,
+                contract_number,
                 status,
                 product_classification,
                 consumer_unit_flag,
@@ -45,22 +46,23 @@ class GS1MetadataRepository:
         return GS1MetadataRecord(
             id=int(row[0]),
             track_id=int(row[1]),
-            status=str(row[2] or "").strip(),
-            product_classification=str(row[3] or "").strip(),
-            consumer_unit_flag=bool(int(row[4] or 0)),
-            packaging_type=str(row[5] or "").strip(),
-            target_market=str(row[6] or "").strip(),
-            language=str(row[7] or "").strip(),
-            product_description=str(row[8] or "").strip(),
-            brand=str(row[9] or "").strip(),
-            subbrand=str(row[10] or "").strip(),
-            quantity=str(row[11] or "").strip(),
-            unit=str(row[12] or "").strip(),
-            image_url=str(row[13] or "").strip(),
-            notes=str(row[14] or "").strip(),
-            export_enabled=bool(int(row[15] or 0)),
-            created_at=str(row[16] or "").strip() or None,
-            updated_at=str(row[17] or "").strip() or None,
+            contract_number=str(row[2] or "").strip(),
+            status=str(row[3] or "").strip(),
+            product_classification=str(row[4] or "").strip(),
+            consumer_unit_flag=bool(int(row[5] or 0)),
+            packaging_type=str(row[6] or "").strip(),
+            target_market=str(row[7] or "").strip(),
+            language=str(row[8] or "").strip(),
+            product_description=str(row[9] or "").strip(),
+            brand=str(row[10] or "").strip(),
+            subbrand=str(row[11] or "").strip(),
+            quantity=str(row[12] or "").strip(),
+            unit=str(row[13] or "").strip(),
+            image_url=str(row[14] or "").strip(),
+            notes=str(row[15] or "").strip(),
+            export_enabled=bool(int(row[16] or 0)),
+            created_at=str(row[17] or "").strip() or None,
+            updated_at=str(row[18] or "").strip() or None,
         )
 
     def list_by_track_ids(self, track_ids: list[int]) -> dict[int, GS1MetadataRecord]:
@@ -87,6 +89,7 @@ class GS1MetadataRepository:
                 """
                 INSERT INTO GS1Metadata (
                     track_id,
+                    contract_number,
                     status,
                     product_classification,
                     consumer_unit_flag,
@@ -120,10 +123,12 @@ class GS1MetadataRepository:
                     ?,
                     ?,
                     ?,
+                    ?,
                     COALESCE((SELECT created_at FROM GS1Metadata WHERE track_id = ?), datetime('now')),
                     datetime('now')
                 )
                 ON CONFLICT(track_id) DO UPDATE SET
+                    contract_number=excluded.contract_number,
                     status=excluded.status,
                     product_classification=excluded.product_classification,
                     consumer_unit_flag=excluded.consumer_unit_flag,
@@ -142,6 +147,7 @@ class GS1MetadataRepository:
                 """,
                 (
                     int(record.track_id),
+                    record.contract_number.strip(),
                     record.status.strip(),
                     record.product_classification.strip(),
                     1 if bool(record.consumer_unit_flag) else 0,
@@ -163,4 +169,3 @@ class GS1MetadataRepository:
         if saved is None:
             raise RuntimeError(f"Failed to save GS1 metadata for track {record.track_id}")
         return saved
-

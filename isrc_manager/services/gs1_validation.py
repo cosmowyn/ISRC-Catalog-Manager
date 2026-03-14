@@ -15,6 +15,7 @@ class GS1ValidationService:
     MAX_IMAGE_URL_LENGTH = 500
     MAX_BRAND_LENGTH = 70
     MAX_SUBBRAND_LENGTH = 70
+    MAX_CONTRACT_NUMBER_LENGTH = 40
 
     def validate(self, record: GS1MetadataRecord, *, for_export: bool = False) -> GS1ValidationResult:
         issues: list[GS1ValidationIssue] = []
@@ -90,5 +91,21 @@ class GS1ValidationService:
                 )
             )
 
-        return GS1ValidationResult(issues=issues)
+        contract_number = record.contract_number.strip()
+        if contract_number and len(contract_number) > self.MAX_CONTRACT_NUMBER_LENGTH:
+            issues.append(
+                GS1ValidationIssue(
+                    field_name="contract_number",
+                    message=f"Contract Number must be {self.MAX_CONTRACT_NUMBER_LENGTH} characters or fewer.",
+                )
+            )
 
+        if for_export and not contract_number:
+            issues.append(
+                GS1ValidationIssue(
+                    field_name="contract_number",
+                    message="Contract Number is required for export.",
+                )
+            )
+
+        return GS1ValidationResult(issues=issues)

@@ -51,6 +51,7 @@ REQUIRED_GS1_METADATA_FIELDS = (
 
 @dataclass(slots=True)
 class GS1ProfileDefaults:
+    contract_number: str = ""
     target_market: str = ""
     language: str = ""
     brand: str = ""
@@ -86,6 +87,7 @@ class GS1RecordContext:
 class GS1MetadataRecord:
     track_id: int
     id: int | None = None
+    contract_number: str = ""
     status: str = "Concept"
     product_classification: str = ""
     consumer_unit_flag: bool = True
@@ -107,6 +109,7 @@ class GS1MetadataRecord:
         return GS1MetadataRecord(
             id=self.id,
             track_id=self.track_id,
+            contract_number=self.contract_number,
             status=self.status,
             product_classification=self.product_classification,
             consumer_unit_flag=bool(self.consumer_unit_flag),
@@ -155,6 +158,17 @@ class GS1TemplateCandidate:
 
 
 @dataclass(slots=True)
+class GS1TemplateSheetProfile:
+    sheet_name: str
+    header_row: int
+    column_map: dict[str, int]
+    matched_headers: dict[str, str]
+    score: float
+    missing_optional_fields: tuple[str, ...] = ()
+    field_options: dict[str, tuple[str, ...]] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class GS1TemplateProfile:
     workbook_path: Path
     sheet_name: str
@@ -166,6 +180,49 @@ class GS1TemplateProfile:
     locale_hint: str = "default"
     missing_optional_fields: tuple[str, ...] = ()
     field_options: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    sheet_profiles: dict[str, GS1TemplateSheetProfile] = field(default_factory=dict)
+
+    @property
+    def available_sheet_names(self) -> tuple[str, ...]:
+        if self.sheet_profiles:
+            return tuple(self.sheet_profiles.keys())
+        if self.sheet_name:
+            return (self.sheet_name,)
+        return ()
+
+    def sheet_profile(self, sheet_name: str) -> GS1TemplateSheetProfile:
+        clean_name = str(sheet_name or "").strip()
+        profile = self.sheet_profiles.get(clean_name)
+        if profile is not None:
+            return profile
+        if clean_name == self.sheet_name:
+            return GS1TemplateSheetProfile(
+                sheet_name=self.sheet_name,
+                header_row=self.header_row,
+                column_map=dict(self.column_map),
+                matched_headers=dict(self.matched_headers),
+                score=self.score,
+                missing_optional_fields=tuple(self.missing_optional_fields),
+                field_options=dict(self.field_options),
+            )
+        raise KeyError(clean_name)
+
+    def resolve_sheet_name(self, contract_number: str) -> str:
+        clean_contract = str(contract_number or "").strip()
+        if clean_contract:
+            if clean_contract in self.available_sheet_names:
+                return clean_contract
+            raise GS1TemplateVerificationError(
+                "The selected GS1 contract number does not match any writable sheet in the configured workbook:\n"
+                f"{clean_contract}\n\n"
+                "Choose a contract number that exists in the workbook or select the correct official workbook."
+            )
+        if len(self.available_sheet_names) == 1:
+            return self.available_sheet_names[0]
+        raise GS1TemplateVerificationError(
+            "This workbook contains multiple GS1 contract sheets. Choose an active contract number in Settings "
+            "or on the GS1 record before exporting."
+        )
 
 
 @dataclass(slots=True)
@@ -201,6 +258,7 @@ class GS1MetadataGroup:
 class GS1ExportPreview:
     headers: tuple[str, ...]
     rows: tuple[tuple[str, ...], ...]
+    row_sheet_names: tuple[str, ...] = ()
 
 
 @dataclass(slots=True)
@@ -226,6 +284,25 @@ class GS1ExportResult:
     exported_count: int
     sheet_name: str
     row_numbers: list[int]
+    sheet_row_numbers: dict[str, tuple[int, ...]] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class GS1ContractEntry:
+    contract_number: str
+    product: str = ""
+    company_number: str = ""
+    start_number: str = ""
+    end_number: str = ""
+    renewal_date: str = ""
+    end_date: str = ""
+    status: str = ""
+    tier: str = ""
+
+    @property
+    def is_active(self) -> bool:
+        normalized = str(self.status or "").strip().casefold()
+        return normalized in {"active", "actief"}
 
 
 class GS1Error(Exception):
@@ -234,6 +311,10 @@ class GS1Error(Exception):
 
 class GS1DependencyError(GS1Error):
     """Raised when the optional Excel dependency is unavailable."""
+
+
+class GS1ContractImportError(GS1Error):
+    """Raised when an imported GS1 contracts CSV cannot be parsed or yields no usable contracts."""
 
 
 class GS1TemplateVerificationError(GS1Error):

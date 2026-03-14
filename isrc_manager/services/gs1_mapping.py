@@ -10,6 +10,7 @@ from .gs1_models import CANONICAL_GS1_EXPORT_FIELDS, CORE_GS1_TEMPLATE_FIELDS
 
 
 GS1_FIELD_LABELS = {
+    "contract_number": "Contract Number",
     "gtin_request_number": "GS1 Article Code / GTIN",
     "status": "Status",
     "product_classification": "Product Classification",

@@ -34,6 +34,7 @@ class GS1MetadataRepositoryTests(unittest.TestCase):
         saved = self.repository.save(
             GS1MetadataRecord(
                 track_id=1,
+                contract_number="10070050",
                 status="Concept",
                 product_classification="Audio",
                 consumer_unit_flag=True,
@@ -57,11 +58,13 @@ class GS1MetadataRepositoryTests(unittest.TestCase):
         self.assertIsNotNone(saved.created_at)
         self.assertIsNotNone(saved.updated_at)
         self.assertEqual(fetched, saved)
+        self.assertEqual(fetched.contract_number, "10070050")
 
     def test_save_updates_existing_row_without_creating_duplicate(self):
         first = self.repository.save(
             GS1MetadataRecord(
                 track_id=1,
+                contract_number="10064976",
                 status="Concept",
                 product_classification="Audio",
                 consumer_unit_flag=True,
@@ -83,6 +86,7 @@ class GS1MetadataRepositoryTests(unittest.TestCase):
             GS1MetadataRecord(
                 id=first.id,
                 track_id=1,
+                contract_number="10070050",
                 status="Active",
                 product_classification="Audio",
                 consumer_unit_flag=False,
@@ -104,6 +108,7 @@ class GS1MetadataRepositoryTests(unittest.TestCase):
 
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM GS1Metadata").fetchone()[0], 1)
         self.assertEqual(updated.id, first.id)
+        self.assertEqual(updated.contract_number, "10070050")
         self.assertEqual(updated.product_description, "Updated title")
         self.assertEqual(updated.subbrand, "Series B")
         self.assertFalse(updated.consumer_unit_flag)

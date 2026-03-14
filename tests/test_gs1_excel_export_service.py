@@ -44,10 +44,20 @@ def build_template(path: Path):
     workbook.save(path)
 
 
-def prepared_record(track_id: int, title: str) -> GS1PreparedRecord:
+def build_multi_contract_template(path: Path):
+    workbook = Workbook()
+    workbook.remove(workbook.active)
+    workbook.create_sheet("Instructions")["A1"] = "GS1 article code (GTIN)"
+    workbook.create_sheet("10064976").append(HEADERS)
+    workbook.create_sheet("10070050").append(HEADERS)
+    workbook.save(path)
+
+
+def prepared_record(track_id: int, title: str, *, contract_number: str = "10070050") -> GS1PreparedRecord:
     return GS1PreparedRecord(
         metadata=GS1MetadataRecord(
             track_id=track_id,
+            contract_number=contract_number,
             status="Active",
             product_classification="Audio",
             consumer_unit_flag=True,
@@ -144,6 +154,31 @@ class GS1ExcelExportServiceTests(unittest.TestCase):
         self.assertEqual(preview.rows[0][8], "Orbit Label")
         self.assertEqual(preview.rows[0][9], "Series A")
         self.assertEqual(preview.rows[1][6], "Solar Release")
+
+    def test_export_routes_rows_by_contract_sheet_and_restarts_sequence_per_sheet(self):
+        self.template_path = self.root / "multi-contract-template.xlsx"
+        build_multi_contract_template(self.template_path)
+        self.template_profile = GS1TemplateVerificationService().verify(self.template_path)
+        output_path = self.root / "multi-contract-export.xlsx"
+        records = [
+            prepared_record(1, "Orbit Release", contract_number="10064976"),
+            prepared_record(2, "Solar Release", contract_number="10070050"),
+            prepared_record(3, "Lunar Release", contract_number="10064976"),
+        ]
+
+        result = self.service.export(self.template_profile, records, output_path)
+
+        self.assertEqual(result.sheet_row_numbers["10064976"], (2, 3))
+        self.assertEqual(result.sheet_row_numbers["10070050"], (2,))
+        workbook = load_workbook(output_path, data_only=False)
+        sheet_a = workbook["10064976"]
+        sheet_b = workbook["10070050"]
+        self.assertEqual(sheet_a["A2"].value, "1")
+        self.assertEqual(sheet_a["A3"].value, "2")
+        self.assertEqual(sheet_b["A2"].value, "1")
+        self.assertEqual(sheet_a["G2"].value, "Orbit Release")
+        self.assertEqual(sheet_a["G3"].value, "Lunar Release")
+        self.assertEqual(sheet_b["G2"].value, "Solar Release")
 
 
 if __name__ == "__main__":

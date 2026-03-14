@@ -380,6 +380,9 @@ class DatabaseSchemaService:
             elif version == 14:
                 self._apply_migration(14, self._mig_14_to_15)
                 version = 15
+            elif version == 15:
+                self._apply_migration(15, self._mig_15_to_16)
+                version = 16
             else:
                 self.logger.warning("Unknown migration path from version %s", version)
                 break
@@ -776,6 +779,9 @@ class DatabaseSchemaService:
     def _mig_14_to_15(self) -> None:
         self._ensure_gs1_metadata_table()
 
+    def _mig_15_to_16(self) -> None:
+        self._ensure_gs1_metadata_table()
+
     def _ensure_current_track_columns(self) -> None:
         cols = self._table_columns("Tracks")
         additions = (
@@ -808,6 +814,7 @@ class DatabaseSchemaService:
             CREATE TABLE IF NOT EXISTS GS1Metadata (
                 id INTEGER PRIMARY KEY,
                 track_id INTEGER NOT NULL UNIQUE,
+                contract_number TEXT,
                 status TEXT NOT NULL DEFAULT 'Concept',
                 product_classification TEXT,
                 consumer_unit_flag INTEGER NOT NULL DEFAULT 1,
@@ -828,10 +835,14 @@ class DatabaseSchemaService:
             )
             """
         )
+        cols = self._table_columns("GS1Metadata")
+        if "contract_number" not in cols:
+            self.cursor.execute("ALTER TABLE GS1Metadata ADD COLUMN contract_number TEXT")
         self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_gs1_metadata_track_id ON GS1Metadata(track_id)")
         self.cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_gs1_metadata_export_enabled ON GS1Metadata(export_enabled)"
         )
+        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_gs1_metadata_contract_number ON GS1Metadata(contract_number)")
 
     def _migrate_promoted_custom_fields(self) -> None:
         placeholders = ",".join("?" for _ in PROMOTED_CUSTOM_FIELDS)

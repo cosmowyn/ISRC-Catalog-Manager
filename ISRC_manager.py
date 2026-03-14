@@ -90,6 +90,8 @@ from isrc_manager.services import (
     DatabaseMaintenanceService,
     DatabaseSchemaService,
     DatabaseSessionService,
+    GS1ContractEntry,
+    GS1ContractImportError,
     GS1IntegrationService,
     GS1ProfileDefaults,
     GS1MetadataRepository,
@@ -533,6 +535,9 @@ class ApplicationSettingsDialog(QDialog):
         buma_relatie_nummer: str,
         buma_ipi: str,
         gs1_template_path: str,
+        gs1_contracts_csv_path: str,
+        gs1_contract_entries: tuple[GS1ContractEntry, ...] | list[GS1ContractEntry],
+        gs1_active_contract_number: str,
         gs1_target_market: str,
         gs1_language: str,
         gs1_brand: str,
@@ -562,6 +567,8 @@ class ApplicationSettingsDialog(QDialog):
         self.gs1_integration_service = getattr(parent, "gs1_integration_service", None)
         self._gs1_template_profile = None
         self._gs1_default_option_combos: dict[str, QComboBox] = {}
+        self._gs1_contract_entries = tuple(gs1_contract_entries or ())
+        self._gs1_contracts_csv_path = str(gs1_contracts_csv_path or "").strip()
 
         self.setStyleSheet(
             _compose_widget_stylesheet(
@@ -846,6 +853,61 @@ class ApplicationSettingsDialog(QDialog):
         )
         gs1_layout.addWidget(gs1_template_box)
 
+        gs1_contracts_box = QGroupBox("GTIN Contracts")
+        gs1_contracts_grid = QGridLayout(gs1_contracts_box)
+        self._configure_grid(gs1_contracts_grid)
+
+        self.gs1_contracts_csv_edit = QLineEdit(self._gs1_contracts_csv_path)
+        self.gs1_contracts_csv_edit.setClearButtonEnabled(True)
+        self.gs1_contracts_csv_edit.setPlaceholderText("GS1 contracts CSV export path")
+        self.gs1_contracts_csv_edit.setMinimumWidth(420)
+        gs1_contracts_browse_btn = QPushButton("Import CSV…")
+        gs1_contracts_browse_btn.setAutoDefault(False)
+        gs1_contracts_browse_btn.clicked.connect(self._browse_gs1_contracts_csv)
+        gs1_contracts_reload_btn = QPushButton("Reload")
+        gs1_contracts_reload_btn.setAutoDefault(False)
+        gs1_contracts_reload_btn.clicked.connect(self._reload_gs1_contracts_csv)
+        gs1_contracts_clear_btn = QPushButton("Clear")
+        gs1_contracts_clear_btn.setAutoDefault(False)
+        gs1_contracts_clear_btn.clicked.connect(self._clear_gs1_contracts)
+        gs1_contracts_widget = QWidget(self)
+        gs1_contracts_row = QHBoxLayout(gs1_contracts_widget)
+        gs1_contracts_row.setContentsMargins(0, 0, 0, 0)
+        gs1_contracts_row.setSpacing(8)
+        gs1_contracts_row.addWidget(self.gs1_contracts_csv_edit, 1)
+        gs1_contracts_row.addWidget(gs1_contracts_browse_btn)
+        gs1_contracts_row.addWidget(gs1_contracts_reload_btn)
+        gs1_contracts_row.addWidget(gs1_contracts_clear_btn)
+        self._add_row(
+            gs1_contracts_grid,
+            0,
+            "Contracts CSV",
+            gs1_contracts_widget,
+            "Import the contracts export from your GS1 portal. GTIN contract numbers from that file become available for defaults and export routing.",
+        )
+
+        self.gs1_active_contract_edit = self._create_gs1_contract_combo(initial_text=gs1_active_contract_number)
+        self._add_row(
+            gs1_contracts_grid,
+            1,
+            "Active Contract",
+            self.gs1_active_contract_edit,
+            "Default contract number used for new GS1 records. The export writes each row into the worksheet tab with this contract number.",
+        )
+
+        self.gs1_contracts_status_label = QLabel("")
+        self.gs1_contracts_status_label.setWordWrap(True)
+        self.gs1_contracts_status_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self._add_row(
+            gs1_contracts_grid,
+            2,
+            "Imported Contracts",
+            self.gs1_contracts_status_label,
+            "Only GTIN-capable contracts with numeric start and end ranges are imported from the CSV.",
+        )
+
+        gs1_layout.addWidget(gs1_contracts_box)
+
         gs1_defaults_box = QGroupBox("Profile Defaults")
         gs1_defaults_grid = QGridLayout(gs1_defaults_box)
         self._configure_grid(gs1_defaults_grid)
@@ -1084,6 +1146,8 @@ class ApplicationSettingsDialog(QDialog):
             "buma_relatie_nummer": (0, self.buma_relatie_edit),
             "buma_ipi": (0, self.buma_ipi_edit),
             "gs1_template_path": (1, self.gs1_template_path_edit),
+            "gs1_contracts_csv_path": (1, self.gs1_contracts_csv_edit),
+            "gs1_active_contract_number": (1, self.gs1_active_contract_edit),
             "gs1_target_market": (1, self.gs1_target_market_edit),
             "gs1_language": (1, self.gs1_language_edit),
             "gs1_brand": (1, self.gs1_brand_edit),
@@ -1101,6 +1165,7 @@ class ApplicationSettingsDialog(QDialog):
         initial_selected_theme = str(self._theme_settings.get("selected_name") or "").strip()
         self._set_theme_preset_selection(initial_selected_theme)
         self._update_theme_preset_actions()
+        self._configure_gs1_contract_combo()
         self._configure_gs1_default_option_combos()
         self._refresh_gs1_template_options(show_errors=False)
 
@@ -1192,6 +1257,19 @@ class ApplicationSettingsDialog(QDialog):
             line_edit.setPlaceholderText(placeholder)
         return combo
 
+    def _create_gs1_contract_combo(self, *, initial_text: str) -> QComboBox:
+        combo = FocusWheelComboBox(self)
+        combo.setEditable(True)
+        combo.setInsertPolicy(QComboBox.NoInsert)
+        combo.setMinimumWidth(320)
+        combo.setMaximumWidth(520)
+        combo.setCurrentText(str(initial_text or "").strip())
+        line_edit = combo.lineEdit()
+        if line_edit is not None:
+            line_edit.setClearButtonEnabled(True)
+            line_edit.setPlaceholderText("Choose or type a contract number")
+        return combo
+
     def _configure_gs1_default_option_combos(self) -> None:
         self._gs1_default_option_combos = {
             "target_market": self.gs1_target_market_edit,
@@ -1201,6 +1279,54 @@ class ApplicationSettingsDialog(QDialog):
             "packaging_type": self.gs1_packaging_type_edit,
             "product_classification": self.gs1_product_classification_edit,
         }
+
+    def _configure_gs1_contract_combo(self) -> None:
+        entries = tuple(self._gs1_contract_entries or ())
+        current_text = self.gs1_active_contract_edit.currentText().strip()
+        self.gs1_active_contract_edit.blockSignals(True)
+        self.gs1_active_contract_edit.clear()
+        self.gs1_active_contract_edit.addItem("")
+        for entry in entries:
+            self.gs1_active_contract_edit.addItem(entry.contract_number)
+            index = self.gs1_active_contract_edit.count() - 1
+            details = " | ".join(
+                part
+                for part in (
+                    entry.product,
+                    f"Status: {entry.status}" if entry.status else "",
+                    f"Range: {entry.start_number}-{entry.end_number}" if entry.start_number and entry.end_number else "",
+                )
+                if part
+            )
+            if details:
+                self.gs1_active_contract_edit.setItemData(index, details, Qt.ToolTipRole)
+        if current_text and self.gs1_active_contract_edit.findText(current_text, Qt.MatchFixedString) < 0:
+            self.gs1_active_contract_edit.addItem(current_text)
+        self.gs1_active_contract_edit.setCurrentText(current_text)
+        self.gs1_active_contract_edit.blockSignals(False)
+        self._refresh_gs1_contract_status()
+
+    def _refresh_gs1_contract_status(self) -> None:
+        entries = tuple(self._gs1_contract_entries or ())
+        if not entries:
+            self.gs1_contracts_status_label.setText(
+                "No GTIN contract list has been imported yet. Import the CSV export from your GS1 portal to populate contract choices."
+            )
+            return
+        previews = []
+        for entry in entries[:6]:
+            parts = [entry.contract_number]
+            if entry.product:
+                parts.append(entry.product)
+            if entry.status:
+                parts.append(entry.status)
+            previews.append(" - ".join(parts))
+        suffix = "" if len(entries) <= 6 else f"\n…and {len(entries) - 6} more."
+        self.gs1_contracts_status_label.setText(
+            f"Loaded {len(entries)} GTIN contract(s) from:\n{self.gs1_contracts_csv_edit.text().strip() or '(path not saved)'}\n\n"
+            + "\n".join(previews)
+            + suffix
+        )
 
     @staticmethod
     def _set_combo_items(combo: QComboBox, values, *, preserve_text: str = "") -> None:
@@ -1437,6 +1563,50 @@ class ApplicationSettingsDialog(QDialog):
             self.gs1_template_path_edit.setText(path)
             self._refresh_gs1_template_options(show_errors=True)
 
+    def _browse_gs1_contracts_csv(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import GS1 Contracts CSV",
+            self.gs1_contracts_csv_edit.text().strip() or "",
+            "CSV File (*.csv)",
+        )
+        if path:
+            self._import_gs1_contracts_csv(path, show_errors=True)
+
+    def _reload_gs1_contracts_csv(self):
+        path = self.gs1_contracts_csv_edit.text().strip()
+        if not path:
+            QMessageBox.information(self, "GS1 Contracts", "Choose a GS1 contracts CSV first.")
+            return
+        self._import_gs1_contracts_csv(path, show_errors=True)
+
+    def _import_gs1_contracts_csv(self, path: str, *, show_errors: bool) -> bool:
+        if self.gs1_integration_service is None:
+            return False
+        try:
+            entries = self.gs1_integration_service.contract_import_service.load_contracts(path)
+        except GS1ContractImportError as exc:
+            if show_errors:
+                QMessageBox.warning(self, "GS1 Contracts", str(exc))
+            return False
+        self._gs1_contract_entries = tuple(entries)
+        self._gs1_contracts_csv_path = str(path)
+        self.gs1_contracts_csv_edit.setText(str(path))
+        current_contract = self.gs1_active_contract_edit.currentText().strip()
+        if not current_contract:
+            active_entry = next((entry for entry in self._gs1_contract_entries if entry.is_active), None)
+            if active_entry is not None:
+                self.gs1_active_contract_edit.setCurrentText(active_entry.contract_number)
+        self._configure_gs1_contract_combo()
+        return True
+
+    def _clear_gs1_contracts(self):
+        self._gs1_contract_entries = ()
+        self._gs1_contracts_csv_path = ""
+        self.gs1_contracts_csv_edit.clear()
+        self.gs1_active_contract_edit.setCurrentText("")
+        self._configure_gs1_contract_combo()
+
     def focus_field(self, name: str | None):
         target = self._focus_map.get(name or "")
         if target is None:
@@ -1465,6 +1635,9 @@ class ApplicationSettingsDialog(QDialog):
             "buma_relatie_nummer": self.buma_relatie_edit.text().strip(),
             "buma_ipi": self.buma_ipi_edit.text().strip(),
             "gs1_template_path": self.gs1_template_path_edit.text().strip(),
+            "gs1_contracts_csv_path": self.gs1_contracts_csv_edit.text().strip(),
+            "gs1_contract_entries": tuple(self._gs1_contract_entries),
+            "gs1_active_contract_number": self.gs1_active_contract_edit.currentText().strip(),
             "gs1_target_market": self.gs1_target_market_edit.currentText().strip(),
             "gs1_language": self.gs1_language_edit.currentText().strip(),
             "gs1_brand": self.gs1_brand_edit.currentText().strip(),
@@ -1494,6 +1667,21 @@ class ApplicationSettingsDialog(QDialog):
             )
             self.focus_field("gs1_template_path")
             return
+        gs1_contracts_csv_path = str(values["gs1_contracts_csv_path"] or "").strip()
+        if gs1_contracts_csv_path and Path(gs1_contracts_csv_path).suffix.lower() != ".csv":
+            QMessageBox.warning(
+                self,
+                "Invalid GS1 Contracts File",
+                "GS1 contracts must be imported from a .csv export file.",
+            )
+            self.focus_field("gs1_contracts_csv_path")
+            return
+        if gs1_contracts_csv_path and (
+            gs1_contracts_csv_path != self._gs1_contracts_csv_path or not self._gs1_contract_entries
+        ):
+            if not self._import_gs1_contracts_csv(gs1_contracts_csv_path, show_errors=True):
+                self.focus_field("gs1_contracts_csv_path")
+                return
         for key, edit in self._theme_color_edits.items():
             color_text = edit.text().strip()
             if color_text and not QColor(color_text).isValid():
@@ -5808,6 +5996,7 @@ class App(QMainWindow):
         registration = self.settings_reads.load_registration_settings()
         auto_snapshot_enabled, auto_snapshot_interval_minutes = self._current_auto_snapshot_settings()
         gs1_defaults = self.gs1_settings_service.load_profile_defaults() if self.gs1_settings_service is not None else None
+        gs1_contracts = self.gs1_settings_service.load_contracts() if self.gs1_settings_service is not None else ()
         return {
             "window_title": self.identity.get("window_title") or DEFAULT_WINDOW_TITLE,
             "icon_path": self.identity.get("icon_path") or "",
@@ -5822,6 +6011,9 @@ class App(QMainWindow):
             "buma_relatie_nummer": registration.buma_relatie_nummer,
             "buma_ipi": registration.buma_ipi,
             "gs1_template_path": self.gs1_settings_service.load_template_path() if self.gs1_settings_service is not None else "",
+            "gs1_contracts_csv_path": self.gs1_settings_service.load_contracts_csv_path() if self.gs1_settings_service is not None else "",
+            "gs1_contract_entries": tuple(gs1_contracts),
+            "gs1_active_contract_number": gs1_defaults.contract_number if gs1_defaults is not None else "",
             "gs1_target_market": gs1_defaults.target_market if gs1_defaults is not None else "",
             "gs1_language": gs1_defaults.language if gs1_defaults is not None else "",
             "gs1_brand": gs1_defaults.brand if gs1_defaults is not None else "",
@@ -6037,6 +6229,7 @@ class App(QMainWindow):
                     changed_count += 1
 
                 before_gs1_defaults = GS1ProfileDefaults(
+                    contract_number=str(before_values.get("gs1_active_contract_number") or "").strip(),
                     target_market=str(before_values.get("gs1_target_market") or "").strip(),
                     language=str(before_values.get("gs1_language") or "").strip(),
                     brand=str(before_values.get("gs1_brand") or "").strip(),
@@ -6045,6 +6238,7 @@ class App(QMainWindow):
                     product_classification=str(before_values.get("gs1_product_classification") or "").strip(),
                 )
                 after_gs1_defaults = GS1ProfileDefaults(
+                    contract_number=str(after_values.get("gs1_active_contract_number") or "").strip(),
                     target_market=str(after_values.get("gs1_target_market") or "").strip(),
                     language=str(after_values.get("gs1_language") or "").strip(),
                     brand=str(after_values.get("gs1_brand") or "").strip(),
@@ -6052,11 +6246,28 @@ class App(QMainWindow):
                     packaging_type=str(after_values.get("gs1_packaging_type") or "").strip(),
                     product_classification=str(after_values.get("gs1_product_classification") or "").strip(),
                 )
+                before_contracts = tuple(before_values.get("gs1_contract_entries") or ())
+                after_contracts = tuple(after_values.get("gs1_contract_entries") or ())
+                before_contracts_csv = str(before_values.get("gs1_contracts_csv_path") or "").strip()
+                after_contracts_csv = str(after_values.get("gs1_contracts_csv_path") or "").strip()
+                if after_contracts != before_contracts or after_contracts_csv != before_contracts_csv:
+                    if after_contracts:
+                        self.gs1_settings_service.set_contracts(after_contracts, source_path=after_contracts_csv)
+                    else:
+                        self.gs1_settings_service.clear_contracts()
+                    self._log_event(
+                        "settings.gs1_contracts",
+                        "GS1 contract list updated",
+                        contract_count=len(after_contracts),
+                        csv_path=after_contracts_csv,
+                    )
+                    changed_count += 1
                 if after_gs1_defaults != before_gs1_defaults:
                     self.gs1_settings_service.set_profile_defaults(after_gs1_defaults)
                     self._log_event(
                         "settings.gs1_defaults",
                         "GS1 profile defaults updated",
+                        contract_number=after_gs1_defaults.contract_number,
                         target_market=after_gs1_defaults.target_market,
                         language=after_gs1_defaults.language,
                         brand=after_gs1_defaults.brand,
@@ -6092,6 +6303,9 @@ class App(QMainWindow):
             buma_relatie_nummer=before_values["buma_relatie_nummer"],
             buma_ipi=before_values["buma_ipi"],
             gs1_template_path=before_values["gs1_template_path"],
+            gs1_contracts_csv_path=before_values["gs1_contracts_csv_path"],
+            gs1_contract_entries=before_values["gs1_contract_entries"],
+            gs1_active_contract_number=before_values["gs1_active_contract_number"],
             gs1_target_market=before_values["gs1_target_market"],
             gs1_language=before_values["gs1_language"],
             gs1_brand=before_values["gs1_brand"],
@@ -7561,12 +7775,25 @@ class App(QMainWindow):
     def _selected_track_ids(self) -> list[int]:
         track_ids: list[int] = []
         seen: set[int] = set()
+        candidate_rows: list[int] = []
+
         sel_model = self.table.selectionModel()
-        selected_rows = sel_model.selectedRows() if sel_model is not None else []
-        if not selected_rows and self.table.currentRow() >= 0:
-            selected_rows = [self.table.model().index(self.table.currentRow(), 0)]
-        for index in selected_rows:
-            row_idx = index.row()
+        if sel_model is not None:
+            for index in sel_model.selectedRows():
+                row_idx = int(index.row())
+                if row_idx not in candidate_rows:
+                    candidate_rows.append(row_idx)
+
+        for selection_range in self.table.selectedRanges():
+            for row_idx in range(selection_range.topRow(), selection_range.bottomRow() + 1):
+                if row_idx not in candidate_rows:
+                    candidate_rows.append(int(row_idx))
+
+        current_row = self.table.currentRow()
+        if not candidate_rows and current_row >= 0:
+            candidate_rows.insert(0, int(current_row))
+
+        for row_idx in candidate_rows:
             track_id = self._track_id_for_table_row(row_idx)
             if track_id is None or track_id in seen:
                 continue

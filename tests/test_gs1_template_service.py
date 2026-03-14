@@ -119,6 +119,7 @@ class GS1TemplateVerificationServiceTests(unittest.TestCase):
         result = self.service.verify(workbook_path)
 
         self.assertEqual(result.sheet_name, "10070050")
+        self.assertEqual(result.available_sheet_names, ("10070050",))
         self.assertEqual(result.header_row, 1)
         self.assertEqual(result.column_map["gtin_request_number"], 1)
         self.assertEqual(result.column_map["quantity"], 11)

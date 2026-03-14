@@ -29,8 +29,14 @@ class DatabaseSchemaServiceTests(unittest.TestCase):
         track_columns = {
             row[1] for row in self.conn.execute("PRAGMA table_info(Tracks)").fetchall()
         }
+        gs1_columns = {
+            row[1] for row in self.conn.execute("PRAGMA table_info(GS1Metadata)").fetchall()
+        }
         track_indexes = {
             row[1] for row in self.conn.execute("PRAGMA index_list(Tracks)").fetchall()
+        }
+        gs1_indexes = {
+            row[1] for row in self.conn.execute("PRAGMA index_list(GS1Metadata)").fetchall()
         }
         triggers = {
             row[0] for row in self.conn.execute("SELECT name FROM sqlite_master WHERE type='trigger'").fetchall()
@@ -43,6 +49,7 @@ class DatabaseSchemaServiceTests(unittest.TestCase):
         self.assertIn("Licensees", tables)
         self.assertIn("GS1Metadata", tables)
         self.assertIn("vw_Licenses", tables)
+        self.assertIn("contract_number", gs1_columns)
         self.assertTrue({"blob_value", "mime_type", "size_bytes"} <= value_columns)
         self.assertTrue(
             {
@@ -60,12 +67,8 @@ class DatabaseSchemaServiceTests(unittest.TestCase):
         self.assertIn("idx_tracks_isrc_compact_unique", track_indexes)
         self.assertIn("idx_tracks_catalog_number", track_indexes)
         self.assertIn("idx_tracks_buma_work_number", track_indexes)
-        self.assertIn(
-            "idx_gs1_metadata_export_enabled",
-            {
-                row[1] for row in self.conn.execute("PRAGMA index_list(GS1Metadata)").fetchall()
-            },
-        )
+        self.assertIn("idx_gs1_metadata_export_enabled", gs1_indexes)
+        self.assertIn("idx_gs1_metadata_contract_number", gs1_indexes)
         self.assertIn("trg_auditlog_no_update", triggers)
 
     def test_migrate_12_to_13_promotes_default_custom_fields(self):

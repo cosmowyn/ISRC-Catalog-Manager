@@ -9,6 +9,7 @@ from isrc_manager.constants import DEFAULT_WINDOW_TITLE
 from .gs1_models import (
     GS1BatchValidationError,
     GS1BatchValidationIssue,
+    GS1ContractEntry,
     GS1ExportPlan,
     GS1MetadataGroup,
     GS1MetadataRecord,
@@ -18,6 +19,7 @@ from .gs1_models import (
     GS1TemplateVerificationError,
     GS1ValidationError,
 )
+from .gs1_contracts import GS1ContractImportService
 from .gs1_repository import GS1MetadataRepository
 from .gs1_settings import GS1SettingsService
 from .gs1_template import GS1TemplateVerificationService
@@ -35,6 +37,7 @@ class GS1IntegrationService:
         track_service,
         *,
         validation_service: GS1ValidationService | None = None,
+        contract_import_service: GS1ContractImportService | None = None,
         template_verification_service: GS1TemplateVerificationService | None = None,
         excel_export_service: GS1ExcelExportService | None = None,
     ):
@@ -42,6 +45,7 @@ class GS1IntegrationService:
         self.settings_service = settings_service
         self.track_service = track_service
         self.validation_service = validation_service or GS1ValidationService()
+        self.contract_import_service = contract_import_service or GS1ContractImportService()
         self.template_verification_service = template_verification_service or GS1TemplateVerificationService()
         self.excel_export_service = excel_export_service or GS1ExcelExportService()
 
@@ -106,6 +110,7 @@ class GS1IntegrationService:
 
         return GS1MetadataRecord(
             track_id=int(track_id),
+            contract_number=defaults.contract_number.strip(),
             status="Concept",
             product_classification=defaults.product_classification.strip() or "Audio",
             consumer_unit_flag=True,
@@ -121,6 +126,16 @@ class GS1IntegrationService:
             notes="",
             export_enabled=True,
         )
+
+    def load_imported_contracts(self) -> tuple[GS1ContractEntry, ...]:
+        return self.settings_service.load_contracts()
+
+    def load_contracts_csv_path(self) -> str:
+        return self.settings_service.load_contracts_csv_path()
+
+    def import_contracts_from_csv(self, csv_path: str | Path) -> tuple[GS1ContractEntry, ...]:
+        contracts = self.contract_import_service.load_contracts(csv_path)
+        return self.settings_service.set_contracts(contracts, source_path=str(csv_path))
 
     def save_metadata(self, record: GS1MetadataRecord) -> GS1MetadataRecord:
         validation = self.validation_service.validate(record, for_export=False)
@@ -270,10 +285,12 @@ class GS1IntegrationService:
             window_title=window_title,
         )
         preview = self.excel_export_service.build_preview(template_profile, prepared)
+        records_by_sheet = self._records_by_sheet(template_profile, prepared)
         summary_lines = self._build_export_summary(
             track_ids=track_ids,
             prepared_records=prepared,
             template_profile=template_profile,
+            records_by_sheet=records_by_sheet,
         )
         warnings = self._build_upc_warnings(prepared)
         return GS1ExportPlan(
@@ -332,9 +349,10 @@ class GS1IntegrationService:
         window_title: str,
     ) -> GS1MetadataRecord:
         defaults = self.settings_service.load_profile_defaults()
+        default_contract_number = defaults.contract_number.strip()
         default_brand = defaults.brand.strip()
         default_subbrand = defaults.subbrand.strip()
-        if not default_brand and not default_subbrand:
+        if not default_contract_number and not default_brand and not default_subbrand:
             return record
 
         profile_label = context.profile_label.strip()
@@ -354,6 +372,8 @@ class GS1IntegrationService:
         default_subbrand_key = self._normalize_identity_value(default_subbrand)
 
         repaired = record.copy()
+        if default_contract_number and not repaired.contract_number.strip():
+            repaired.contract_number = default_contract_number
         brand_looks_legacy = bool(current_brand_key) and current_brand_key in legacy_candidates
 
         if default_brand and (not current_brand_key or brand_looks_legacy):
@@ -402,8 +422,9 @@ class GS1IntegrationService:
     @staticmethod
     def _source_track_label(context: GS1RecordContext) -> str:
         title = str(context.track_title or "").strip() or f"Track {context.track_id}"
-        if context.album_title and context.album_title.strip() != title:
-            return f"{title} ({context.album_title.strip()})"
+        effective_album_title = GS1IntegrationService._effective_album_title(context.album_title)
+        if effective_album_title and effective_album_title != title:
+            return f"{title} ({effective_album_title})"
         return title
 
     @staticmethod
@@ -417,8 +438,16 @@ class GS1IntegrationService:
     def _export_mode(prepared: list[GS1PreparedRecord]) -> str:
         if not prepared:
             return "single"
-        album_groups = sum(1 for record in prepared if len(record.source_track_ids) > 1 or str(record.context.album_title or "").strip())
-        single_groups = sum(1 for record in prepared if not str(record.context.album_title or "").strip())
+        album_groups = sum(
+            1
+            for record in prepared
+            if len(record.source_track_ids) > 1 or GS1IntegrationService._effective_album_title(record.context.album_title)
+        )
+        single_groups = sum(
+            1
+            for record in prepared
+            if not GS1IntegrationService._effective_album_title(record.context.album_title)
+        )
         if len(prepared) == 1 and album_groups == 1:
             return "album"
         if album_groups and single_groups:
@@ -435,19 +464,32 @@ class GS1IntegrationService:
         track_ids: list[int],
         prepared_records: list[GS1PreparedRecord],
         template_profile: GS1TemplateProfile,
+        records_by_sheet: dict[str, list[GS1PreparedRecord]],
     ) -> list[str]:
+        sheet_names = list(records_by_sheet)
+        if len(sheet_names) == 1:
+            destination_text = f"into '{sheet_names[0]}'"
+        else:
+            destination_text = f"across {len(sheet_names)} contract sheets"
         lines = [
-            f"This export will write {len(prepared_records)} GS1 product row(s) from {len(track_ids)} selected track(s) into '{template_profile.sheet_name}'.",
-            "The GS1 request/code field will be filled with 1, 2, 3, ... in export order.",
+            f"This export will write {len(prepared_records)} GS1 product row(s) from {len(track_ids)} selected track(s) {destination_text}.",
         ]
+        if len(sheet_names) == 1:
+            lines.append("The GS1 request/code field will be filled with 1, 2, 3, ... in export order.")
+        else:
+            lines.append(
+                "The GS1 request/code field restarts at 1 on each contract sheet, so every selected contract receives its own 1, 2, 3, ... sequence."
+            )
+            for sheet_name, records in records_by_sheet.items():
+                lines.append(f"Sheet '{sheet_name}': {len(records)} product row(s).")
         if not prepared_records:
             return lines
         album_titles = [
             record.metadata.product_description.strip()
             for record in prepared_records
-            if str(record.context.album_title or "").strip()
+            if self._effective_album_title(record.context.album_title)
         ]
-        single_count = sum(1 for record in prepared_records if not str(record.context.album_title or "").strip())
+        single_count = sum(1 for record in prepared_records if not self._effective_album_title(record.context.album_title))
         if album_titles:
             lines.insert(
                 1,
@@ -464,6 +506,17 @@ class GS1IntegrationService:
                 f"Single-product export for '{prepared_records[0].metadata.product_description.strip() or prepared_records[0].context.display_title}'.",
             )
         return lines
+
+    @staticmethod
+    def _records_by_sheet(
+        template_profile: GS1TemplateProfile,
+        prepared_records: list[GS1PreparedRecord],
+    ) -> dict[str, list[GS1PreparedRecord]]:
+        grouped: dict[str, list[GS1PreparedRecord]] = {}
+        for prepared in prepared_records:
+            sheet_name = template_profile.resolve_sheet_name(prepared.metadata.contract_number)
+            grouped.setdefault(sheet_name, []).append(prepared)
+        return grouped
 
     @staticmethod
     def _build_upc_warnings(prepared_records: list[GS1PreparedRecord]) -> list[str]:
@@ -508,7 +561,7 @@ class GS1IntegrationService:
         grouped: list[list[tuple[GS1MetadataRecord, GS1RecordContext]]] = []
         index_by_key: dict[str, int] = {}
         for record, context in loaded:
-            album_title = str(context.album_title or "").strip()
+            album_title = self._effective_album_title(context.album_title)
             if album_title:
                 group_key = f"album::{album_title.casefold()}"
             else:
@@ -549,4 +602,11 @@ class GS1IntegrationService:
     ) -> str:
         if not group_entries:
             return ""
-        return str(group_entries[0][1].album_title or "").strip()
+        return GS1IntegrationService._effective_album_title(group_entries[0][1].album_title)
+
+    @staticmethod
+    def _effective_album_title(album_title: str | None) -> str:
+        clean_title = str(album_title or "").strip()
+        if clean_title.lower() == "single":
+            return ""
+        return clean_title

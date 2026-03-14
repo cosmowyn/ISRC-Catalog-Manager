@@ -13,7 +13,7 @@ from .gs1_mapping import (
     optional_template_fields,
     resolve_header_row,
 )
-from .gs1_models import GS1TemplateCandidate, GS1TemplateProfile, GS1TemplateVerificationError
+from .gs1_models import GS1TemplateCandidate, GS1TemplateProfile, GS1TemplateSheetProfile, GS1TemplateVerificationError
 
 
 def _load_openpyxl():
@@ -116,33 +116,94 @@ class GS1TemplateVerificationService:
                     "Choose the official workbook from your GS1 portal or environment."
                 )
 
-            best = max(
-                candidates,
-                key=lambda candidate: (
-                    candidate.score,
-                    self._sheet_name_priority(candidate.sheet_name),
-                    -candidate.header_row,
-                ),
-            )
-            missing_fields = missing_core_template_fields(best.column_map)
-            if missing_fields:
+            verified_candidates = [
+                candidate
+                for candidate in candidates
+                if not missing_core_template_fields(candidate.column_map)
+            ]
+            if not verified_candidates:
+                best = max(
+                    candidates,
+                    key=lambda candidate: (
+                        candidate.score,
+                        self._sheet_name_priority(candidate.sheet_name),
+                        -candidate.header_row,
+                    ),
+                )
+                missing_fields = missing_core_template_fields(best.column_map)
                 missing_text = ", ".join(field.replace("_", " ") for field in missing_fields)
                 raise GS1TemplateVerificationError(
                     "The workbook looks close to a GS1 template, but required export columns are missing: "
                     f"{missing_text}."
                 )
 
-            locale_hint = detect_template_locale(best.matched_headers, best.workbook_markers)
-            try:
-                field_options = self._extract_field_options(
-                    path,
-                    workbook,
-                    best.column_map,
-                    best.sheet_name,
-                    best.header_row,
+            best_by_sheet: dict[str, GS1TemplateCandidate] = {}
+            for candidate in verified_candidates:
+                current = best_by_sheet.get(candidate.sheet_name)
+                if current is None or (
+                    candidate.score,
+                    self._sheet_name_priority(candidate.sheet_name),
+                    -candidate.header_row,
+                ) > (
+                    current.score,
+                    self._sheet_name_priority(current.sheet_name),
+                    -current.header_row,
+                ):
+                    best_by_sheet[candidate.sheet_name] = candidate
+
+            non_placeholder_sheets = [
+                sheet_name
+                for sheet_name in best_by_sheet
+                if "{" not in sheet_name and "}" not in sheet_name
+            ]
+            if non_placeholder_sheets:
+                best_by_sheet = {
+                    sheet_name: candidate
+                    for sheet_name, candidate in best_by_sheet.items()
+                    if sheet_name in non_placeholder_sheets
+                }
+
+            sheet_profiles: dict[str, GS1TemplateSheetProfile] = {}
+            merged_field_options: dict[str, list[str]] = {}
+            for sheet_name, candidate in best_by_sheet.items():
+                try:
+                    sheet_field_options = self._extract_field_options(
+                        path,
+                        workbook,
+                        candidate.column_map,
+                        candidate.sheet_name,
+                        candidate.header_row,
+                    )
+                except Exception:
+                    sheet_field_options = {}
+                for field_name, values in sheet_field_options.items():
+                    bucket = merged_field_options.setdefault(field_name, [])
+                    for value in values:
+                        text = str(value or "").strip()
+                        if text and text not in bucket:
+                            bucket.append(text)
+                sheet_profiles[sheet_name] = GS1TemplateSheetProfile(
+                    sheet_name=candidate.sheet_name,
+                    header_row=candidate.header_row,
+                    column_map=dict(candidate.column_map),
+                    matched_headers=dict(candidate.matched_headers),
+                    score=candidate.score,
+                    missing_optional_fields=optional_template_fields(candidate.column_map),
+                    field_options=sheet_field_options,
                 )
-            except Exception:
-                field_options = {}
+
+            best = max(
+                sheet_profiles.values(),
+                key=lambda profile: (
+                    profile.score,
+                    self._sheet_name_priority(profile.sheet_name),
+                    -profile.header_row,
+                ),
+            )
+            locale_hint = detect_template_locale(
+                best.matched_headers,
+                workbook_markers,
+            )
             return GS1TemplateProfile(
                 workbook_path=path,
                 sheet_name=best.sheet_name,
@@ -150,10 +211,11 @@ class GS1TemplateVerificationService:
                 column_map=dict(best.column_map),
                 matched_headers=dict(best.matched_headers),
                 score=best.score,
-                workbook_markers=list(best.workbook_markers),
+                workbook_markers=list(workbook_markers),
                 locale_hint=locale_hint,
-                missing_optional_fields=optional_template_fields(best.column_map),
-                field_options=field_options,
+                missing_optional_fields=tuple(best.missing_optional_fields),
+                field_options={field_name: tuple(values) for field_name, values in merged_field_options.items() if values},
+                sheet_profiles=sheet_profiles,
             )
         finally:
             close = getattr(workbook, "close", None)

@@ -6,7 +6,7 @@ from copy import copy
 from pathlib import Path
 
 from .gs1_mapping import localize_export_value
-from .gs1_models import GS1ExportPreview, GS1ExportResult, GS1PreparedRecord, GS1TemplateProfile
+from .gs1_models import GS1ExportPreview, GS1ExportResult, GS1PreparedRecord, GS1TemplateProfile, GS1TemplateSheetProfile
 
 
 def _load_openpyxl():
@@ -31,21 +31,32 @@ class GS1ExcelExportService:
     ) -> GS1ExportPreview:
         headers: list[str] = []
         rows: list[tuple[str, ...]] = []
-        ordered_columns = self._ordered_export_columns(template_profile)
+        row_sheet_names: list[str] = []
+        ordered_columns = self._ordered_export_columns(template_profile.sheet_profile(template_profile.sheet_name))
         for field_name, _ in ordered_columns:
             headers.append(
                 str(template_profile.matched_headers.get(field_name) or field_name).strip()
             )
-        for sequence_number, record in enumerate(records, start=1):
+        sequence_by_sheet: dict[str, int] = {}
+        for record in records:
+            sheet_name = template_profile.resolve_sheet_name(record.metadata.contract_number)
+            sheet_profile = template_profile.sheet_profile(sheet_name)
+            sequence_number = sequence_by_sheet.get(sheet_name, 0) + 1
+            sequence_by_sheet[sheet_name] = sequence_number
             localized_values = self._localized_row_values(
-                template_profile,
+                locale_hint=template_profile.locale_hint,
                 prepared_record=record,
                 sequence_number=sequence_number,
             )
             rows.append(
                 tuple(str(localized_values.get(field_name, "")) for field_name, _ in ordered_columns)
             )
-        return GS1ExportPreview(headers=tuple(headers), rows=tuple(rows))
+            row_sheet_names.append(sheet_profile.sheet_name)
+        return GS1ExportPreview(
+            headers=tuple(headers),
+            rows=tuple(rows),
+            row_sheet_names=tuple(row_sheet_names),
+        )
 
     def export(
         self,
@@ -63,42 +74,62 @@ class GS1ExcelExportService:
             data_only=False,
             keep_vba=template_profile.workbook_path.suffix.lower() == ".xlsm",
         )
-        worksheet = workbook[template_profile.sheet_name]
-        start_row = self._find_start_row(worksheet, template_profile)
-        style_template_row = template_profile.header_row + 1 if worksheet.max_row >= template_profile.header_row + 1 else None
-
+        start_rows_by_sheet: dict[str, int] = {}
+        style_rows_by_sheet: dict[str, int | None] = {}
+        sequence_by_sheet: dict[str, int] = {}
         row_numbers: list[int] = []
-        for offset, record in enumerate(records, start=1):
-            row_number = start_row + offset - 1
+        sheet_row_numbers: dict[str, list[int]] = {}
+
+        for record in records:
+            sheet_name = template_profile.resolve_sheet_name(record.metadata.contract_number)
+            sheet_profile = template_profile.sheet_profile(sheet_name)
+            worksheet = workbook[sheet_name]
+            if sheet_name not in start_rows_by_sheet:
+                start_rows_by_sheet[sheet_name] = self._find_start_row(worksheet, sheet_profile)
+                style_rows_by_sheet[sheet_name] = (
+                    sheet_profile.header_row + 1 if worksheet.max_row >= sheet_profile.header_row + 1 else None
+                )
+            sequence_number = sequence_by_sheet.get(sheet_name, 0) + 1
+            sequence_by_sheet[sheet_name] = sequence_number
+            row_number = start_rows_by_sheet[sheet_name] + sequence_number - 1
+            style_template_row = style_rows_by_sheet[sheet_name]
             if style_template_row is not None and row_number > worksheet.max_row:
                 self._clone_row_style(worksheet, style_template_row, row_number)
             self._write_record_row(
                 worksheet,
                 row_number=row_number,
-                template_profile=template_profile,
+                sheet_profile=sheet_profile,
+                locale_hint=template_profile.locale_hint,
                 prepared_record=record,
-                sequence_number=offset,
+                sequence_number=sequence_number,
             )
             row_numbers.append(row_number)
+            sheet_row_numbers.setdefault(sheet_name, []).append(row_number)
 
         final_output_path = Path(output_path)
         final_output_path.parent.mkdir(parents=True, exist_ok=True)
         workbook.save(str(final_output_path))
+        ordered_sheet_names = list(sheet_row_numbers)
+        if len(ordered_sheet_names) == 1:
+            result_sheet_name = ordered_sheet_names[0]
+        else:
+            result_sheet_name = ", ".join(ordered_sheet_names)
         return GS1ExportResult(
             output_path=final_output_path,
             exported_count=len(records),
-            sheet_name=template_profile.sheet_name,
+            sheet_name=result_sheet_name,
             row_numbers=row_numbers,
+            sheet_row_numbers={sheet_name: tuple(values) for sheet_name, values in sheet_row_numbers.items()},
         )
 
-    def _find_start_row(self, worksheet, template_profile: GS1TemplateProfile) -> int:
-        mapped_columns = list(template_profile.column_map.values())
-        row_number = template_profile.header_row + 1
-        while row_number <= max(worksheet.max_row, template_profile.header_row + 1):
+    def _find_start_row(self, worksheet, sheet_profile: GS1TemplateSheetProfile) -> int:
+        mapped_columns = list(sheet_profile.column_map.values())
+        row_number = sheet_profile.header_row + 1
+        while row_number <= max(worksheet.max_row, sheet_profile.header_row + 1):
             if all(self._is_blank(worksheet.cell(row=row_number, column=column_index).value) for column_index in mapped_columns):
                 return row_number
             row_number += 1
-        return max(worksheet.max_row + 1, template_profile.header_row + 1)
+        return max(worksheet.max_row + 1, sheet_profile.header_row + 1)
 
     @staticmethod
     def _is_blank(value) -> bool:
@@ -134,16 +165,17 @@ class GS1ExcelExportService:
         worksheet,
         *,
         row_number: int,
-        template_profile: GS1TemplateProfile,
+        sheet_profile: GS1TemplateSheetProfile,
+        locale_hint: str,
         prepared_record: GS1PreparedRecord,
         sequence_number: int,
     ) -> None:
         localized_values = self._localized_row_values(
-            template_profile,
+            locale_hint=locale_hint,
             prepared_record=prepared_record,
             sequence_number=sequence_number,
         )
-        for field_name, column_index in template_profile.column_map.items():
+        for field_name, column_index in sheet_profile.column_map.items():
             if field_name not in localized_values:
                 continue
             worksheet.cell(
@@ -153,13 +185,13 @@ class GS1ExcelExportService:
             )
 
     @staticmethod
-    def _ordered_export_columns(template_profile: GS1TemplateProfile) -> list[tuple[str, int]]:
-        return sorted(template_profile.column_map.items(), key=lambda item: item[1])
+    def _ordered_export_columns(sheet_profile: GS1TemplateSheetProfile) -> list[tuple[str, int]]:
+        return sorted(sheet_profile.column_map.items(), key=lambda item: item[1])
 
     def _localized_row_values(
         self,
-        template_profile: GS1TemplateProfile,
         *,
+        locale_hint: str,
         prepared_record: GS1PreparedRecord,
         sequence_number: int,
     ) -> dict[str, str]:
@@ -180,6 +212,6 @@ class GS1ExcelExportService:
             "image_url": metadata.image_url,
         }
         return {
-            field_name: str(localize_export_value(field_name, value, template_profile.locale_hint) or "")
+            field_name: str(localize_export_value(field_name, value, locale_hint) or "")
             for field_name, value in raw_values.items()
         }

@@ -5,10 +5,13 @@ from .catalog_reads import CatalogReadService
 from .custom_fields import CustomFieldDefinitionService, CustomFieldValueService
 from .database_admin import BackupResult, DatabaseMaintenanceService, ProfileStoreService, RestoreResult
 from .exports import XMLExportService
+from .gs1_contracts import GS1ContractImportService
 from .gs1_excel import GS1ExcelExportService
 from .gs1_integration import GS1IntegrationService
 from .gs1_models import (
     GS1BatchValidationError,
+    GS1ContractEntry,
+    GS1ContractImportError,
     GS1DependencyError,
     GS1Error,
     GS1ExportPlan,
@@ -20,6 +23,7 @@ from .gs1_models import (
     GS1ProfileDefaults,
     GS1RecordContext,
     GS1TemplateProfile,
+    GS1TemplateSheetProfile,
     GS1TemplateVerificationError,
     GS1ValidationError,
     GS1ValidationIssue,
@@ -51,6 +55,9 @@ __all__ = [
     "DatabaseSchemaService",
     "DatabaseSessionService",
     "GS1BatchValidationError",
+    "GS1ContractEntry",
+    "GS1ContractImportError",
+    "GS1ContractImportService",
     "GS1DependencyError",
     "GS1Error",
     "GS1ExcelExportService",
@@ -66,6 +73,7 @@ __all__ = [
     "GS1RecordContext",
     "GS1SettingsService",
     "GS1TemplateProfile",
+    "GS1TemplateSheetProfile",
     "GS1TemplateVerificationError",
     "GS1TemplateVerificationService",
     "GS1ValidationError",
