@@ -29,7 +29,8 @@ from PySide6.QtCore import(QRegularExpression, Signal, QEvent,
     Qt, QDate, QPoint, QSettings, QStandardPaths, QByteArray, QUrl, QEvent, QTimer, QSortFilterProxyModel, )
 
 from PySide6.QtGui import (QDesktopServices, QCursor, QAction,
-    QIcon, QAction, QKeySequence, QImage, QPixmap, QStandardItemModel, QStandardItem
+    QIcon, QAction, QKeySequence, QImage, QPixmap, QStandardItemModel, QStandardItem,
+    QColor, QFont, QPalette
 )
 from PySide6.QtWidgets import ( QListView, QMenuBar, QListWidget, QListWidgetItem, 
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QMessageBox,
@@ -37,6 +38,7 @@ from PySide6.QtWidgets import ( QListView, QMenuBar, QListWidget, QListWidgetIte
     QHeaderView, QDialog, QMainWindow, QSizePolicy, QComboBox, QCompleter, QListWidget,
     QListWidgetItem, QFileDialog, QToolBar, QFrame, QSpinBox, QScrollArea, QSlider, QAbstractItemView, QAbstractScrollArea,
     QFormLayout, QTableView, QTabWidget, QDialogButtonBox, QGridLayout, QGroupBox, QPlainTextEdit, QCheckBox,
+    QColorDialog, QFontComboBox,
     QDockWidget
 )
 
@@ -129,6 +131,32 @@ class _JsonLogFormatter(logging.Formatter):
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)
         return json.dumps(payload, ensure_ascii=True, default=str)
+
+
+def _find_theme_owner(widget: QWidget | None):
+    current = widget
+    while current is not None:
+        getter = getattr(current, "_active_custom_qss", None)
+        if callable(getter):
+            return current
+        current = current.parentWidget()
+    return None
+
+
+def _compose_widget_stylesheet(widget: QWidget | None, base_qss: str) -> str:
+    qss = (base_qss or "").strip()
+    owner = _find_theme_owner(widget)
+    extra_qss = ""
+    if owner is not None:
+        try:
+            extra_qss = (owner._active_custom_qss() or "").strip()
+        except Exception:
+            extra_qss = ""
+    if extra_qss:
+        if qss:
+            return f"{qss}\n\n/* User custom QSS */\n{extra_qss}\n"
+        return extra_qss
+    return qss
 
 
 # =============================================================================
@@ -424,6 +452,20 @@ class DatePickerDialog(QDialog):
 # Consolidated Application Settings Dialog
 # =============================================================================
 class ApplicationSettingsDialog(QDialog):
+    COLOR_FIELD_SPECS = (
+        ("window_bg", "Window Background", "Base background for the main window, dialogs, menus, and dock areas."),
+        ("window_fg", "Window Text", "Primary text color used across labels, menus, and general content."),
+        ("accent", "Accent", "Used for highlights, active states, and focus styling."),
+        ("selection_bg", "Selection Background", "Used for selected rows, highlighted text, and active list items."),
+        ("selection_fg", "Selection Text", "Text color used on top of the selection background."),
+        ("button_bg", "Button Background", "Background color for push buttons and button-like controls."),
+        ("button_fg", "Button Text", "Text color used for buttons."),
+        ("input_bg", "Input Background", "Background for line edits, combo boxes, spin boxes, and editors."),
+        ("input_fg", "Input Text", "Text color used inside editable controls."),
+        ("table_bg", "Table Background", "Background for tables and list views."),
+        ("table_fg", "Table Text", "Text color used inside tables and list views."),
+    )
+
     def __init__(
         self,
         *,
@@ -437,6 +479,7 @@ class ApplicationSettingsDialog(QDialog):
         btw_number: str,
         buma_relatie_nummer: str,
         buma_ipi: str,
+        theme_settings: dict[str, object] | None,
         current_profile_path: str,
         parent=None,
     ):
@@ -444,30 +487,51 @@ class ApplicationSettingsDialog(QDialog):
         self.setObjectName("applicationSettingsDialog")
         self.setWindowTitle("Application Settings")
         self.setModal(True)
-        self.setMinimumSize(1040, 620)
+        self.setMinimumSize(1160, 820)
+        self.resize(1220, 860)
+        self._theme_settings = dict(theme_settings or {})
+        self._theme_color_edits = {}
+        self._theme_color_swatches = {}
 
         self.setStyleSheet(
-            """
-            QDialog#applicationSettingsDialog QLabel#settingsTitle {
-                font-size: 18px;
-                font-weight: 600;
-            }
-            QDialog#applicationSettingsDialog QLabel#settingsSubtitle {
-                color: #5f6b76;
-            }
-            QDialog#applicationSettingsDialog QLabel[role="hint"] {
-                color: #6b7280;
-            }
-            QDialog#applicationSettingsDialog QGroupBox {
-                font-weight: 600;
-                margin-top: 10px;
-            }
-            QDialog#applicationSettingsDialog QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 4px;
-            }
-            """
+            _compose_widget_stylesheet(
+                self,
+                """
+                QDialog#applicationSettingsDialog QLabel#settingsTitle {
+                    font-size: 18px;
+                    font-weight: 600;
+                }
+                QDialog#applicationSettingsDialog QLabel#settingsSubtitle {
+                    color: #5f6b76;
+                }
+                QDialog#applicationSettingsDialog QLabel[role="hint"] {
+                    color: #6b7280;
+                }
+                QDialog#applicationSettingsDialog QLabel[role="sectionHelp"] {
+                    color: #52606d;
+                }
+                QDialog#applicationSettingsDialog QLabel[role="themeNote"] {
+                    color: #52606d;
+                }
+                QDialog#applicationSettingsDialog QGroupBox {
+                    font-weight: 600;
+                    margin-top: 10px;
+                }
+                QDialog#applicationSettingsDialog QGroupBox::title {
+                    subcontrol-origin: margin;
+                    left: 10px;
+                    padding: 0 4px;
+                }
+                QDialog#applicationSettingsDialog QLabel[role="colorSwatch"] {
+                    border: 1px solid palette(mid);
+                    border-radius: 5px;
+                    min-width: 28px;
+                    max-width: 28px;
+                    min-height: 22px;
+                    max-height: 22px;
+                }
+                """,
+            )
         )
 
         root = QVBoxLayout(self)
@@ -479,11 +543,20 @@ class ApplicationSettingsDialog(QDialog):
         root.addWidget(title_lbl)
 
         subtitle_lbl = QLabel(
-            "Edit application identity and profile-specific registration settings in one place."
+            "Edit application identity, theme styling, and profile-specific registration settings in one place."
         )
         subtitle_lbl.setObjectName("settingsSubtitle")
         subtitle_lbl.setWordWrap(True)
         root.addWidget(subtitle_lbl)
+
+        self.tabs = QTabWidget(self)
+        self.tabs.setDocumentMode(True)
+        root.addWidget(self.tabs, 1)
+
+        general_page = QWidget(self)
+        general_layout = QVBoxLayout(general_page)
+        general_layout.setContentsMargins(10, 10, 10, 10)
+        general_layout.setSpacing(14)
 
         profile_box = QGroupBox("Current Profile")
         profile_grid = QGridLayout(profile_box)
@@ -503,17 +576,18 @@ class ApplicationSettingsDialog(QDialog):
         profile_grid.addWidget(profile_name_lbl, 0, 1)
         profile_grid.addWidget(self._make_label("Path"), 1, 0)
         profile_grid.addWidget(profile_path_lbl, 1, 1)
-        root.addWidget(profile_box)
+        general_layout.addWidget(profile_box)
 
         app_box = QGroupBox("Application")
         app_grid = QGridLayout(app_box)
         self._configure_grid(app_grid)
-        root.addWidget(app_box)
+        general_layout.addWidget(app_box)
 
         self.window_title_edit = QLineEdit(window_title or DEFAULT_WINDOW_TITLE)
         self.window_title_edit.setClearButtonEnabled(True)
         self.window_title_edit.setPlaceholderText(DEFAULT_WINDOW_TITLE)
-        self.window_title_edit.setMinimumWidth(360)
+        self.window_title_edit.setMinimumWidth(320)
+        self.window_title_edit.setMaximumWidth(460)
         self._add_row(
             app_grid,
             0,
@@ -525,7 +599,7 @@ class ApplicationSettingsDialog(QDialog):
         self.icon_path_edit = QLineEdit(icon_path or "")
         self.icon_path_edit.setClearButtonEnabled(True)
         self.icon_path_edit.setPlaceholderText("Optional icon path")
-        self.icon_path_edit.setMinimumWidth(460)
+        self.icon_path_edit.setMinimumWidth(360)
         browse_btn = QPushButton("Browse…")
         browse_btn.setAutoDefault(False)
         browse_btn.clicked.connect(self._browse_icon)
@@ -552,13 +626,14 @@ class ApplicationSettingsDialog(QDialog):
         registration_box = QGroupBox("Registration & Codes")
         registration_grid = QGridLayout(registration_box)
         self._configure_grid(registration_grid)
-        root.addWidget(registration_box)
+        general_layout.addWidget(registration_box)
 
         self.isrc_prefix_edit = QLineEdit((isrc_prefix or "").upper().strip())
         self.isrc_prefix_edit.setClearButtonEnabled(True)
         self.isrc_prefix_edit.setMaxLength(5)
         self.isrc_prefix_edit.setPlaceholderText("Example: NLABC")
-        self.isrc_prefix_edit.setMinimumWidth(220)
+        self.isrc_prefix_edit.setMinimumWidth(180)
+        self.isrc_prefix_edit.setMaximumWidth(260)
         self._add_row(
             registration_grid,
             0,
@@ -571,7 +646,8 @@ class ApplicationSettingsDialog(QDialog):
         self.artist_code_edit.setClearButtonEnabled(True)
         self.artist_code_edit.setMaxLength(2)
         self.artist_code_edit.setPlaceholderText("00")
-        self.artist_code_edit.setMinimumWidth(220)
+        self.artist_code_edit.setMinimumWidth(180)
+        self.artist_code_edit.setMaximumWidth(260)
         self._add_row(
             registration_grid,
             1,
@@ -582,17 +658,20 @@ class ApplicationSettingsDialog(QDialog):
 
         self.sena_number_edit = QLineEdit((sena_number or "").strip())
         self.sena_number_edit.setClearButtonEnabled(True)
-        self.sena_number_edit.setMinimumWidth(220)
+        self.sena_number_edit.setMinimumWidth(180)
+        self.sena_number_edit.setMaximumWidth(320)
         self._add_row(registration_grid, 2, "SENA Number", self.sena_number_edit)
 
         self.btw_number_edit = QLineEdit((btw_number or "").strip())
         self.btw_number_edit.setClearButtonEnabled(True)
-        self.btw_number_edit.setMinimumWidth(220)
+        self.btw_number_edit.setMinimumWidth(180)
+        self.btw_number_edit.setMaximumWidth(320)
         self._add_row(registration_grid, 3, "VAT / BTW Number", self.btw_number_edit)
 
         self.buma_relatie_edit = QLineEdit((buma_relatie_nummer or "").strip())
         self.buma_relatie_edit.setClearButtonEnabled(True)
-        self.buma_relatie_edit.setMinimumWidth(220)
+        self.buma_relatie_edit.setMinimumWidth(180)
+        self.buma_relatie_edit.setMaximumWidth(320)
         self._add_row(
             registration_grid,
             4,
@@ -602,7 +681,8 @@ class ApplicationSettingsDialog(QDialog):
 
         self.buma_ipi_edit = QLineEdit((buma_ipi or "").strip())
         self.buma_ipi_edit.setClearButtonEnabled(True)
-        self.buma_ipi_edit.setMinimumWidth(220)
+        self.buma_ipi_edit.setMinimumWidth(180)
+        self.buma_ipi_edit.setMaximumWidth(320)
         self._add_row(
             registration_grid,
             5,
@@ -610,21 +690,10 @@ class ApplicationSettingsDialog(QDialog):
             self.buma_ipi_edit,
         )
 
-        root.addStretch(1)
-
-        self.button_box = QDialogButtonBox(
-            QDialogButtonBox.Save | QDialogButtonBox.Cancel,
-            Qt.Horizontal,
-            self,
-        )
-        self.button_box.accepted.connect(self._accept_if_valid)
-        self.button_box.rejected.connect(self.reject)
-        root.addWidget(self.button_box)
-
         snapshots_box = QGroupBox("Snapshots")
         snapshots_grid = QGridLayout(snapshots_box)
         self._configure_grid(snapshots_grid)
-        root.insertWidget(root.count() - 2, snapshots_box)
+        general_layout.addWidget(snapshots_box)
 
         self.auto_snapshot_enabled_check = QCheckBox("Create snapshots automatically")
         self.auto_snapshot_enabled_check.setChecked(bool(auto_snapshot_enabled))
@@ -650,6 +719,7 @@ class ApplicationSettingsDialog(QDialog):
         )
         self.auto_snapshot_interval_spin.setSuffix(" min")
         self.auto_snapshot_interval_spin.setMinimumWidth(180)
+        self.auto_snapshot_interval_spin.setMaximumWidth(220)
         self._add_row(
             snapshots_grid,
             1,
@@ -660,25 +730,145 @@ class ApplicationSettingsDialog(QDialog):
         self.auto_snapshot_enabled_check.toggled.connect(self.auto_snapshot_interval_spin.setEnabled)
         self.auto_snapshot_interval_spin.setEnabled(self.auto_snapshot_enabled_check.isChecked())
 
+        general_layout.addStretch(1)
+        self.tabs.addTab(self._wrap_tab_page(general_page), "General")
+
+        theme_page = QWidget(self)
+        theme_layout = QVBoxLayout(theme_page)
+        theme_layout.setContentsMargins(10, 10, 10, 10)
+        theme_layout.setSpacing(14)
+
+        typography_box = QGroupBox("Typography")
+        typography_grid = QGridLayout(typography_box)
+        self._configure_grid(typography_grid)
+
+        self.theme_font_family_combo = FocusWheelFontComboBox(self)
+        self.theme_font_family_combo.setMinimumWidth(260)
+        self.theme_font_family_combo.setMaximumWidth(360)
+        font_family = str(self._theme_settings.get("font_family") or "").strip()
+        if font_family:
+            self.theme_font_family_combo.setCurrentFont(QFont(font_family))
+        self._add_row(
+            typography_grid,
+            0,
+            "Application Font",
+            self.theme_font_family_combo,
+            "Used across menus, dialogs, inputs, tables, and labels unless overridden by advanced QSS.",
+        )
+
+        self.theme_font_size_spin = FocusWheelSpinBox(self)
+        self.theme_font_size_spin.setRange(8, 36)
+        self.theme_font_size_spin.setValue(max(8, min(36, int(self._theme_settings.get("font_size") or 10))))
+        self.theme_font_size_spin.setSuffix(" pt")
+        self.theme_font_size_spin.setMinimumWidth(160)
+        self.theme_font_size_spin.setMaximumWidth(220)
+        self._add_row(
+            typography_grid,
+            1,
+            "Base Font Size",
+            self.theme_font_size_spin,
+            "Applies as the default point size across the application.",
+        )
+
+        self.theme_auto_contrast_check = QCheckBox("Auto-fix unreadable text colors")
+        self.theme_auto_contrast_check.setChecked(bool(self._theme_settings.get("auto_contrast_enabled", True)))
+        self._add_row(
+            typography_grid,
+            2,
+            "Text Contrast Guard",
+            self.theme_auto_contrast_check,
+            "Keeps foreground colors readable against their backgrounds. Turn this off to fully override colors yourself.",
+        )
+        theme_layout.addWidget(typography_box)
+
+        color_columns = QHBoxLayout()
+        color_columns.setSpacing(14)
+        theme_layout.addLayout(color_columns)
+
+        app_colors_box = QGroupBox("Application Colors")
+        app_colors_grid = QGridLayout(app_colors_box)
+        self._configure_grid(app_colors_grid)
+        color_columns.addWidget(app_colors_box, 1)
+
+        control_colors_box = QGroupBox("Controls & Tables")
+        control_colors_grid = QGridLayout(control_colors_box)
+        self._configure_grid(control_colors_grid)
+        color_columns.addWidget(control_colors_box, 1)
+
+        left_keys = {"window_bg", "window_fg", "accent", "selection_bg", "selection_fg"}
+        left_row = 0
+        right_row = 0
+        for key, label_text, hint_text in self.COLOR_FIELD_SPECS:
+            editor = self._create_color_editor(key, str(self._theme_settings.get(key) or ""))
+            if key in left_keys:
+                self._add_row(app_colors_grid, left_row, label_text, editor, hint_text)
+                left_row += 1
+            else:
+                self._add_row(control_colors_grid, right_row, label_text, editor, hint_text)
+                right_row += 1
+
+        advanced_box = QGroupBox("Advanced QSS")
+        advanced_layout = QVBoxLayout(advanced_box)
+        advanced_layout.setContentsMargins(14, 18, 14, 14)
+        advanced_layout.setSpacing(10)
+        advanced_note = QLabel(
+            "All visible controls receive object names automatically, so you can target specific widgets here. "
+            "Attribute-backed widgets use their attribute name when available; other widgets receive generated names."
+        )
+        advanced_note.setProperty("role", "themeNote")
+        advanced_note.setWordWrap(True)
+        advanced_layout.addWidget(advanced_note)
+
+        qss_help = QLabel(
+            "Example selectors: `QPushButton`, `QLineEdit`, `QDockWidget::title`, or `#profilesToolbar QPushButton`."
+        )
+        qss_help.setProperty("role", "hint")
+        qss_help.setWordWrap(True)
+        advanced_layout.addWidget(qss_help)
+
+        self.theme_custom_qss_edit = QPlainTextEdit(self)
+        self.theme_custom_qss_edit.setPlaceholderText(
+            "/* Advanced QSS */\nQPushButton#saveButton {\n    font-weight: 600;\n}\n"
+        )
+        self.theme_custom_qss_edit.setMinimumHeight(220)
+        self.theme_custom_qss_edit.setPlainText(str(self._theme_settings.get("custom_qss") or ""))
+        advanced_layout.addWidget(self.theme_custom_qss_edit, 1)
+        theme_layout.addWidget(advanced_box, 1)
+
+        theme_layout.addStretch(1)
+        self.tabs.addTab(self._wrap_tab_page(theme_page), "Theme")
+
+        self.button_box = QDialogButtonBox(
+            QDialogButtonBox.Save | QDialogButtonBox.Cancel,
+            Qt.Horizontal,
+            self,
+        )
+        self.button_box.accepted.connect(self._accept_if_valid)
+        self.button_box.rejected.connect(self.reject)
+        root.addWidget(self.button_box)
+
         self._focus_map = {
-            "window_title": self.window_title_edit,
-            "icon_path": self.icon_path_edit,
-            "isrc_prefix": self.isrc_prefix_edit,
-            "artist_code": self.artist_code_edit,
-            "auto_snapshot_enabled": self.auto_snapshot_enabled_check,
-            "auto_snapshot_interval_minutes": self.auto_snapshot_interval_spin,
-            "sena_number": self.sena_number_edit,
-            "btw_number": self.btw_number_edit,
-            "buma_relatie_nummer": self.buma_relatie_edit,
-            "buma_ipi": self.buma_ipi_edit,
+            "window_title": (0, self.window_title_edit),
+            "icon_path": (0, self.icon_path_edit),
+            "isrc_prefix": (0, self.isrc_prefix_edit),
+            "artist_code": (0, self.artist_code_edit),
+            "auto_snapshot_enabled": (0, self.auto_snapshot_enabled_check),
+            "auto_snapshot_interval_minutes": (0, self.auto_snapshot_interval_spin),
+            "sena_number": (0, self.sena_number_edit),
+            "btw_number": (0, self.btw_number_edit),
+            "buma_relatie_nummer": (0, self.buma_relatie_edit),
+            "buma_ipi": (0, self.buma_ipi_edit),
+            "theme_font_family": (1, self.theme_font_family_combo),
+            "theme_font_size": (1, self.theme_font_size_spin),
+            "theme_custom_qss": (1, self.theme_custom_qss_edit),
         }
 
     @staticmethod
     def _configure_grid(grid: QGridLayout):
-        grid.setColumnMinimumWidth(0, 280)
-        grid.setColumnMinimumWidth(1, 340)
+        grid.setColumnMinimumWidth(0, 250)
+        grid.setColumnMinimumWidth(1, 360)
         grid.setColumnStretch(1, 1)
-        grid.setColumnMinimumWidth(2, 260)
+        grid.setColumnMinimumWidth(2, 280)
         grid.setColumnStretch(2, 1)
         grid.setHorizontalSpacing(16)
         grid.setVerticalSpacing(12)
@@ -686,7 +876,7 @@ class ApplicationSettingsDialog(QDialog):
     @staticmethod
     def _make_label(text: str) -> QLabel:
         label = QLabel(text)
-        label.setMinimumWidth(280)
+        label.setMinimumWidth(250)
         label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         return label
 
@@ -697,11 +887,88 @@ class ApplicationSettingsDialog(QDialog):
         hint.setProperty("role", "hint")
         return hint
 
+    @staticmethod
+    def _wrap_tab_page(content: QWidget) -> QScrollArea:
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setWidget(content)
+        return scroll
+
     def _add_row(self, grid: QGridLayout, row: int, label: str, editor: QWidget, hint: str | None = None):
         grid.addWidget(self._make_label(label), row, 0)
         grid.addWidget(editor, row, 1)
         if hint:
             grid.addWidget(self._make_hint(hint), row, 2)
+
+    def _create_color_editor(self, key: str, value: str) -> QWidget:
+        row = QWidget(self)
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        swatch = QLabel(row)
+        swatch.setProperty("role", "colorSwatch")
+        swatch.setObjectName(f"{key}Swatch")
+        swatch.setFixedSize(30, 24)
+        swatch.setAlignment(Qt.AlignCenter)
+
+        edit = QLineEdit(value.strip())
+        edit.setClearButtonEnabled(True)
+        edit.setPlaceholderText("Default")
+        edit.setMinimumWidth(170)
+        edit.setMaximumWidth(230)
+
+        pick_btn = QPushButton("Pick…", row)
+        pick_btn.setAutoDefault(False)
+        clear_btn = QPushButton("Default", row)
+        clear_btn.setAutoDefault(False)
+
+        layout.addWidget(swatch)
+        layout.addWidget(edit)
+        layout.addWidget(pick_btn)
+        layout.addWidget(clear_btn)
+        layout.addStretch(1)
+
+        self._theme_color_edits[key] = edit
+        self._theme_color_swatches[key] = swatch
+        edit.textChanged.connect(lambda _text, name=key: self._sync_color_swatch(name))
+        pick_btn.clicked.connect(lambda *_args, name=key: self._pick_theme_color(name))
+        clear_btn.clicked.connect(edit.clear)
+        self._sync_color_swatch(key)
+        return row
+
+    def _sync_color_swatch(self, key: str) -> None:
+        edit = self._theme_color_edits[key]
+        swatch = self._theme_color_swatches[key]
+        color_text = edit.text().strip()
+        palette = swatch.palette()
+        if not color_text:
+            palette.setColor(QPalette.Window, QColor("#d1d5db"))
+            palette.setColor(QPalette.WindowText, QColor("#111827"))
+            swatch.setText("D")
+            swatch.setToolTip("Using the default theme color for this slot.")
+        else:
+            color = QColor(color_text)
+            if color.isValid():
+                palette.setColor(QPalette.Window, color)
+                palette.setColor(QPalette.WindowText, QColor("#111827") if color.lightnessF() >= 0.55 else QColor("#f9fafb"))
+                swatch.setText("")
+                swatch.setToolTip(color.name().upper())
+            else:
+                palette.setColor(QPalette.Window, QColor("#f87171"))
+                palette.setColor(QPalette.WindowText, QColor("#111827"))
+                swatch.setText("!")
+                swatch.setToolTip("Invalid color. Use values like #112233, #abc, or named Qt colors.")
+        swatch.setAutoFillBackground(True)
+        swatch.setPalette(palette)
+
+    def _pick_theme_color(self, key: str) -> None:
+        current_text = self._theme_color_edits[key].text().strip()
+        initial = QColor(current_text) if current_text else QColor("#ffffff")
+        color = QColorDialog.getColor(initial, self, f"Choose {key.replace('_', ' ').title()}")
+        if color.isValid():
+            self._theme_color_edits[key].setText(color.name().upper())
 
     def _browse_icon(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -714,14 +981,24 @@ class ApplicationSettingsDialog(QDialog):
             self.icon_path_edit.setText(path)
 
     def focus_field(self, name: str | None):
-        widget = self._focus_map.get(name or "")
-        if widget is None:
+        target = self._focus_map.get(name or "")
+        if target is None:
             return
+        tab_index, widget = target
+        self.tabs.setCurrentIndex(tab_index)
         widget.setFocus(Qt.OtherFocusReason)
         if isinstance(widget, QLineEdit):
             widget.selectAll()
 
-    def values(self) -> dict[str, str]:
+    def values(self) -> dict[str, object]:
+        theme_values = {
+            "font_family": self.theme_font_family_combo.currentFont().family().strip(),
+            "font_size": int(self.theme_font_size_spin.value()),
+            "auto_contrast_enabled": self.theme_auto_contrast_check.isChecked(),
+            "custom_qss": self.theme_custom_qss_edit.toPlainText(),
+        }
+        for key in self._theme_color_edits:
+            theme_values[key] = self._theme_color_edits[key].text().strip()
         return {
             "window_title": self.window_title_edit.text().strip() or DEFAULT_WINDOW_TITLE,
             "icon_path": self.icon_path_edit.text().strip(),
@@ -733,6 +1010,7 @@ class ApplicationSettingsDialog(QDialog):
             "btw_number": self.btw_number_edit.text().strip(),
             "buma_relatie_nummer": self.buma_relatie_edit.text().strip(),
             "buma_ipi": self.buma_ipi_edit.text().strip(),
+            "theme_settings": theme_values,
         }
 
     def _accept_if_valid(self):
@@ -745,6 +1023,18 @@ class ApplicationSettingsDialog(QDialog):
             QMessageBox.warning(self, "Invalid Artist Code", "ISRC Artist Code must be exactly two digits (00–99).")
             self.focus_field("artist_code")
             return
+        for key, edit in self._theme_color_edits.items():
+            color_text = edit.text().strip()
+            if color_text and not QColor(color_text).isValid():
+                QMessageBox.warning(
+                    self,
+                    "Invalid Theme Color",
+                    f"{key.replace('_', ' ').title()} must be a valid color value like #112233, #abc, or a named Qt color.",
+                )
+                self.tabs.setCurrentIndex(1)
+                edit.setFocus(Qt.OtherFocusReason)
+                edit.selectAll()
+                return
         self.accept()
 
 
@@ -757,28 +1047,31 @@ class ApplicationLogDialog(QDialog):
         self.resize(860, 700)
         self.setMinimumSize(720, 560)
         self.setStyleSheet(
-            """
-            QDialog#applicationLogDialog QLabel#logTitle {
-                font-size: 28px;
-                font-weight: 700;
-            }
-            QDialog#applicationLogDialog QLabel#logSubtitle {
-                color: #64748b;
-                font-size: 15px;
-            }
-            QDialog#applicationLogDialog QGroupBox {
-                font-size: 16px;
-                font-weight: 600;
-                margin-top: 8px;
-            }
-            QDialog#applicationLogDialog QGroupBox::title {
-                left: 10px;
-                padding: 0 6px;
-            }
-            QDialog#applicationLogDialog QLabel[role="meta"] {
-                color: #475569;
-            }
-            """
+            _compose_widget_stylesheet(
+                self,
+                """
+                QDialog#applicationLogDialog QLabel#logTitle {
+                    font-size: 28px;
+                    font-weight: 700;
+                }
+                QDialog#applicationLogDialog QLabel#logSubtitle {
+                    color: #64748b;
+                    font-size: 15px;
+                }
+                QDialog#applicationLogDialog QGroupBox {
+                    font-size: 16px;
+                    font-weight: 600;
+                    margin-top: 8px;
+                }
+                QDialog#applicationLogDialog QGroupBox::title {
+                    left: 10px;
+                    padding: 0 6px;
+                }
+                QDialog#applicationLogDialog QLabel[role="meta"] {
+                    color: #475569;
+                }
+                """,
+            )
         )
 
         root = QVBoxLayout(self)
@@ -909,25 +1202,28 @@ class DiagnosticsDialog(QDialog):
         self.resize(1080, 780)
         self.setMinimumSize(980, 680)
         self.setStyleSheet(
-            """
-            QDialog#diagnosticsDialog QLabel#diagnosticsTitle {
-                font-size: 28px;
-                font-weight: 700;
-            }
-            QDialog#diagnosticsDialog QLabel#diagnosticsSubtitle {
-                color: #64748b;
-                font-size: 15px;
-            }
-            QDialog#diagnosticsDialog QGroupBox {
-                font-size: 16px;
-                font-weight: 600;
-                margin-top: 8px;
-            }
-            QDialog#diagnosticsDialog QGroupBox::title {
-                left: 10px;
-                padding: 0 6px;
-            }
-            """
+            _compose_widget_stylesheet(
+                self,
+                """
+                QDialog#diagnosticsDialog QLabel#diagnosticsTitle {
+                    font-size: 28px;
+                    font-weight: 700;
+                }
+                QDialog#diagnosticsDialog QLabel#diagnosticsSubtitle {
+                    color: #64748b;
+                    font-size: 15px;
+                }
+                QDialog#diagnosticsDialog QGroupBox {
+                    font-size: 16px;
+                    font-weight: 600;
+                    margin-top: 8px;
+                }
+                QDialog#diagnosticsDialog QGroupBox::title {
+                    left: 10px;
+                    padding: 0 6px;
+                }
+                """,
+            )
         )
 
         root = QVBoxLayout(self)
@@ -1131,24 +1427,27 @@ class AboutDialog(QDialog):
         self.resize(680, 420)
         self.setMinimumSize(620, 380)
         self.setStyleSheet(
-            """
-            QDialog#aboutDialog QLabel#aboutTitle {
-                font-size: 30px;
-                font-weight: 700;
-            }
-            QDialog#aboutDialog QLabel#aboutBody {
-                font-size: 15px;
-            }
-            QDialog#aboutDialog QGroupBox {
-                font-size: 16px;
-                font-weight: 600;
-                margin-top: 8px;
-            }
-            QDialog#aboutDialog QGroupBox::title {
-                left: 10px;
-                padding: 0 6px;
-            }
-            """
+            _compose_widget_stylesheet(
+                self,
+                """
+                QDialog#aboutDialog QLabel#aboutTitle {
+                    font-size: 30px;
+                    font-weight: 700;
+                }
+                QDialog#aboutDialog QLabel#aboutBody {
+                    font-size: 15px;
+                }
+                QDialog#aboutDialog QGroupBox {
+                    font-size: 16px;
+                    font-weight: 600;
+                    margin-top: 8px;
+                }
+                QDialog#aboutDialog QGroupBox::title {
+                    left: 10px;
+                    padding: 0 6px;
+                }
+                """,
+            )
         )
 
         root = QVBoxLayout(self)
@@ -1172,7 +1471,7 @@ class AboutDialog(QDialog):
         intro_layout.addWidget(title)
 
         version_label = QLabel(f"Version {app._app_version_text()}")
-        version_label.setStyleSheet("color: #475569; font-size: 16px;")
+        version_label.setProperty("role", "secondary")
         intro_layout.addWidget(version_label)
 
         body = QLabel(
@@ -1278,6 +1577,12 @@ class FocusWheelComboBox(_WheelIntentMixin, QComboBox):
 
 
 class FocusWheelSpinBox(_WheelIntentMixin, QSpinBox):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setFocusPolicy(Qt.StrongFocus)
+
+
+class FocusWheelFontComboBox(_WheelIntentMixin, QFontComboBox):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.setFocusPolicy(Qt.StrongFocus)
@@ -2755,24 +3060,27 @@ class CatalogManagersDialog(QDialog):
         self.resize(1180, 760)
 
         self.setStyleSheet(
-            """
-            QDialog#catalogManagersDialog QLabel#catalogTitle {
-                font-size: 18px;
-                font-weight: 600;
-            }
-            QDialog#catalogManagersDialog QLabel#catalogSubtitle {
-                color: #5f6b76;
-            }
-            QDialog#catalogManagersDialog QGroupBox {
-                font-weight: 600;
-                margin-top: 10px;
-            }
-            QDialog#catalogManagersDialog QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 4px;
-            }
-            """
+            _compose_widget_stylesheet(
+                self,
+                """
+                QDialog#catalogManagersDialog QLabel#catalogTitle {
+                    font-size: 18px;
+                    font-weight: 600;
+                }
+                QDialog#catalogManagersDialog QLabel#catalogSubtitle {
+                    color: #5f6b76;
+                }
+                QDialog#catalogManagersDialog QGroupBox {
+                    font-weight: 600;
+                    margin-top: 10px;
+                }
+                QDialog#catalogManagersDialog QGroupBox::title {
+                    subcontrol-origin: margin;
+                    left: 10px;
+                    padding: 0 4px;
+                }
+                """,
+            )
         )
 
         root = QVBoxLayout(self)
@@ -2818,6 +3126,7 @@ class App(QMainWindow):
 
     def __init__(self):
         super().__init__()
+        self.setObjectName("mainWindow")
 
         # --- File system: per-user writable dirs (cross-platform) ---
         self.database_dir = DATA_DIR() / "Database"
@@ -2863,6 +3172,7 @@ class App(QMainWindow):
         self.settings.setFallbacksEnabled(False)
 
         self.identity = self._load_identity()
+        self.theme_settings = self._load_theme_settings()
         self._apply_identity()
 
         # --- Choose DB (last used or default) ---
@@ -3252,16 +3562,13 @@ class App(QMainWindow):
         self.add_data_header_layout.setSpacing(4)
 
         self.add_data_title = QLabel("Add Track")
-        add_data_title_font = self.add_data_title.font()
-        add_data_title_font.setBold(True)
-        add_data_title_font.setPointSize(add_data_title_font.pointSize() + 3)
-        self.add_data_title.setFont(add_data_title_font)
+        self.add_data_title.setProperty("role", "sectionTitle")
 
         self.add_data_subtitle = QLabel(
             "Create a new catalog entry with all core metadata, release details, and managed media in one place."
         )
         self.add_data_subtitle.setWordWrap(True)
-        self.add_data_subtitle.setStyleSheet("color: #667085;")
+        self.add_data_subtitle.setProperty("role", "secondary")
 
         self.add_data_header_layout.addWidget(self.add_data_title)
         self.add_data_header_layout.addWidget(self.add_data_subtitle)
@@ -3501,11 +3808,11 @@ class App(QMainWindow):
         self.count_label = QLabel("showing: 0 records")
         self.count_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self.count_label.setMinimumWidth(160)
-        self.count_label.setStyleSheet("color: #666;")
+        self.count_label.setProperty("role", "secondary")
         self.duration_label = QLabel("total: 00:00:00")
         self.duration_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self.duration_label.setMinimumWidth(180)
-        self.duration_label.setStyleSheet("color: #666;")
+        self.duration_label.setProperty("role", "secondary")
 
         # Wire up search actions
         self.search_field.textChanged.connect(self.apply_search_filter)
@@ -3602,6 +3909,11 @@ class App(QMainWindow):
         self.populate_all_comboboxes()
         self.resize(1280, 800)
         self._refresh_history_actions()
+        app_instance = QApplication.instance()
+        if app_instance is not None:
+            app_instance.installEventFilter(self)
+        self._ensure_widget_object_names(self)
+        self._apply_theme()
 
 
     def closeEvent(self, e):
@@ -4271,6 +4583,325 @@ class App(QMainWindow):
             except Exception:
                 pass
 
+    @staticmethod
+    def _theme_setting_defaults() -> dict[str, object]:
+        app = QApplication.instance()
+        palette = app.palette() if app is not None else QApplication.palette()
+        font = app.font() if app is not None else QFont()
+        return {
+            "font_family": font.family(),
+            "font_size": max(8, int(font.pointSize() or 10)),
+            "auto_contrast_enabled": True,
+            "window_bg": palette.color(QPalette.Window).name().upper(),
+            "window_fg": palette.color(QPalette.WindowText).name().upper(),
+            "accent": palette.color(QPalette.Highlight).name().upper(),
+            "selection_bg": palette.color(QPalette.Highlight).name().upper(),
+            "selection_fg": palette.color(QPalette.HighlightedText).name().upper(),
+            "button_bg": palette.color(QPalette.Button).name().upper(),
+            "button_fg": palette.color(QPalette.ButtonText).name().upper(),
+            "input_bg": palette.color(QPalette.Base).name().upper(),
+            "input_fg": palette.color(QPalette.Text).name().upper(),
+            "table_bg": palette.color(QPalette.Base).name().upper(),
+            "table_fg": palette.color(QPalette.Text).name().upper(),
+            "custom_qss": "",
+        }
+
+    @classmethod
+    def _theme_setting_keys(cls) -> tuple[str, ...]:
+        return tuple(cls._theme_setting_defaults().keys())
+
+    @staticmethod
+    def _normalize_theme_string(value) -> str:
+        return str(value or "").strip()
+
+    @staticmethod
+    def _normalize_theme_color(value) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        color = QColor(text)
+        if not color.isValid():
+            return ""
+        return color.name().upper()
+
+    def _load_theme_settings(self) -> dict[str, object]:
+        defaults = self._theme_setting_defaults()
+        loaded: dict[str, object] = {}
+        for key, default in defaults.items():
+            settings_key = f"theme/{key}"
+            if isinstance(default, bool):
+                loaded[key] = self.settings.value(settings_key, default, bool)
+            elif isinstance(default, int):
+                loaded[key] = int(self.settings.value(settings_key, default, int))
+            else:
+                loaded[key] = self.settings.value(settings_key, default, str) if self.settings.contains(settings_key) else default
+        return self._normalize_theme_settings(loaded)
+
+    def _normalize_theme_settings(self, values: dict[str, object] | None) -> dict[str, object]:
+        defaults = self._theme_setting_defaults()
+        source = dict(values or {})
+        normalized: dict[str, object] = {}
+        for key, default in defaults.items():
+            value = source.get(key, default)
+            if isinstance(default, bool):
+                normalized[key] = bool(value)
+            elif isinstance(default, int):
+                try:
+                    normalized[key] = max(8, min(36, int(value)))
+                except Exception:
+                    normalized[key] = int(default)
+            elif key == "custom_qss":
+                normalized[key] = str(value or "")
+            elif key == "font_family":
+                normalized[key] = self._normalize_theme_string(value) or str(default)
+            else:
+                normalized[key] = self._normalize_theme_color(value)
+        return normalized
+
+    @staticmethod
+    def _color_relative_luminance(color_value: str) -> float:
+        color = QColor(color_value)
+        if not color.isValid():
+            return 0.0
+
+        def _channel(value: float) -> float:
+            if value <= 0.03928:
+                return value / 12.92
+            return ((value + 0.055) / 1.055) ** 2.4
+
+        red = _channel(color.redF())
+        green = _channel(color.greenF())
+        blue = _channel(color.blueF())
+        return (0.2126 * red) + (0.7152 * green) + (0.0722 * blue)
+
+    @classmethod
+    def _contrast_ratio(cls, fg_value: str, bg_value: str) -> float:
+        fg_l = cls._color_relative_luminance(fg_value)
+        bg_l = cls._color_relative_luminance(bg_value)
+        lighter = max(fg_l, bg_l)
+        darker = min(fg_l, bg_l)
+        return (lighter + 0.05) / (darker + 0.05)
+
+    @classmethod
+    def _pick_contrasting_color(cls, bg_value: str) -> str:
+        black = "#111827"
+        white = "#F9FAFB"
+        if cls._contrast_ratio(black, bg_value) >= cls._contrast_ratio(white, bg_value):
+            return black
+        return white
+
+    @staticmethod
+    def _shift_color(color_value: str, factor: int) -> str:
+        color = QColor(color_value)
+        if not color.isValid():
+            return color_value
+        shifted = color.lighter(factor) if factor >= 100 else color.darker(max(1, 200 - factor))
+        return shifted.name().upper()
+
+    def _effective_theme_settings(self, raw_values: dict[str, object] | None = None) -> dict[str, object]:
+        defaults = self._theme_setting_defaults()
+        normalized = self._normalize_theme_settings(raw_values or self.theme_settings)
+        effective: dict[str, object] = dict(defaults)
+        for key, value in normalized.items():
+            if isinstance(value, str):
+                effective[key] = value or defaults[key]
+            else:
+                effective[key] = value
+
+        if effective.get("auto_contrast_enabled", True):
+            for bg_key, fg_key in (
+                ("window_bg", "window_fg"),
+                ("button_bg", "button_fg"),
+                ("input_bg", "input_fg"),
+                ("table_bg", "table_fg"),
+                ("selection_bg", "selection_fg"),
+            ):
+                background = str(effective.get(bg_key) or defaults[bg_key])
+                foreground = str(effective.get(fg_key) or defaults[fg_key])
+                if self._contrast_ratio(foreground, background) < 4.5:
+                    effective[fg_key] = self._pick_contrasting_color(background)
+        return effective
+
+    def _save_theme_settings(self, values: dict[str, object]) -> dict[str, object]:
+        normalized = self._normalize_theme_settings(values)
+        for key in self._theme_setting_keys():
+            self.settings.setValue(f"theme/{key}", normalized.get(key))
+        self.settings.sync()
+        self.theme_settings = normalized
+        return normalized
+
+    def _active_custom_qss(self) -> str:
+        return str((self.theme_settings or {}).get("custom_qss") or "")
+
+    def _build_theme_stylesheet(self, raw_values: dict[str, object] | None = None) -> str:
+        theme = self._effective_theme_settings(raw_values)
+        window_bg = str(theme["window_bg"])
+        window_fg = str(theme["window_fg"])
+        accent = str(theme["accent"])
+        selection_bg = str(theme["selection_bg"])
+        selection_fg = str(theme["selection_fg"])
+        button_bg = str(theme["button_bg"])
+        button_fg = str(theme["button_fg"])
+        input_bg = str(theme["input_bg"])
+        input_fg = str(theme["input_fg"])
+        table_bg = str(theme["table_bg"])
+        table_fg = str(theme["table_fg"])
+
+        border_color = self._shift_color(window_bg, 88 if QColor(window_bg).lightnessF() >= 0.5 else 118)
+        panel_bg = self._shift_color(window_bg, 104 if QColor(window_bg).lightnessF() < 0.5 else 98)
+        button_border = self._shift_color(button_bg, 86 if QColor(button_bg).lightnessF() >= 0.5 else 118)
+        input_border = self._shift_color(input_bg, 86 if QColor(input_bg).lightnessF() >= 0.5 else 118)
+        header_bg = self._shift_color(window_bg, 108 if QColor(window_bg).lightnessF() < 0.5 else 92)
+        secondary_text = self._shift_color(window_fg, 140 if QColor(window_fg).lightnessF() < 0.5 else 72)
+        accent_text = self._pick_contrasting_color(accent)
+        selection_text = str(selection_fg)
+        custom_qss = str(theme.get("custom_qss") or "").strip()
+        font_family_css = str(theme["font_family"]).replace('"', '\\"')
+
+        stylesheet = f"""
+        QWidget {{
+            color: {window_fg};
+            font-family: "{font_family_css}";
+            font-size: {int(theme['font_size'])}pt;
+        }}
+        QMainWindow, QDialog, QWidget#dockPlaceholder, QMenuBar, QMenu, QToolBar, QDockWidget, QGroupBox, QScrollArea, QWidget[role="panel"] {{
+            background-color: {window_bg};
+            color: {window_fg};
+        }}
+        QMenuBar {{
+            border-bottom: 1px solid {border_color};
+        }}
+        QMenuBar::item:selected, QMenu::item:selected, QTabBar::tab:selected, QToolButton:checked, QPushButton:pressed {{
+            background-color: {accent};
+            color: {accent_text};
+        }}
+        QMenu {{
+            border: 1px solid {border_color};
+        }}
+        QGroupBox {{
+            border: 1px solid {border_color};
+            border-radius: 8px;
+            margin-top: 12px;
+            padding-top: 10px;
+            background-color: {panel_bg};
+        }}
+        QDockWidget {{
+            border: 1px solid {border_color};
+        }}
+        QDockWidget::title, QHeaderView::section {{
+            background-color: {header_bg};
+            color: {window_fg};
+            padding: 6px 8px;
+            border: 1px solid {border_color};
+        }}
+        QPushButton, QToolButton, QDialogButtonBox QPushButton {{
+            background-color: {button_bg};
+            color: {button_fg};
+            border: 1px solid {button_border};
+            border-radius: 6px;
+            padding: 6px 12px;
+        }}
+        QPushButton:hover, QToolButton:hover {{
+            border-color: {accent};
+        }}
+        QLineEdit, QPlainTextEdit, QComboBox, QSpinBox, QListWidget, QListView, QTableWidget, QTableView, QCalendarWidget QWidget {{
+            background-color: {input_bg};
+            color: {input_fg};
+            selection-background-color: {selection_bg};
+            selection-color: {selection_text};
+        }}
+        QLineEdit, QPlainTextEdit, QComboBox, QSpinBox, QCalendarWidget, QListWidget, QListView, QTableWidget, QTableView {{
+            border: 1px solid {input_border};
+            border-radius: 6px;
+            padding: 4px 6px;
+        }}
+        QTableWidget, QTableView, QListWidget, QListView {{
+            background-color: {table_bg};
+            color: {table_fg};
+            alternate-background-color: {self._shift_color(table_bg, 104 if QColor(table_bg).lightnessF() < 0.5 else 97)};
+            gridline-color: {border_color};
+        }}
+        QAbstractItemView {{
+            selection-background-color: {selection_bg};
+            selection-color: {selection_text};
+        }}
+        QLabel[role="hint"], QLabel[role="secondary"], QLabel[role="sectionHelp"], QLabel[role="themeNote"] {{
+            color: {secondary_text};
+        }}
+        QLabel[role="sectionTitle"] {{
+            font-size: {int(theme['font_size']) + 3}pt;
+            font-weight: 700;
+        }}
+        QLabel[role="overlayHint"] {{
+            background-color: rgba(0, 0, 0, 0.75);
+            color: #FFFFFF;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 11px;
+        }}
+        """
+        if custom_qss:
+            stylesheet = f"{stylesheet}\n\n/* Advanced QSS */\n{custom_qss}\n"
+        return stylesheet
+
+    def _apply_theme(self, raw_values: dict[str, object] | None = None) -> None:
+        app = QApplication.instance()
+        if app is None:
+            return
+        effective = self._effective_theme_settings(raw_values)
+        font = QFont(str(effective["font_family"]))
+        font.setPointSize(int(effective["font_size"]))
+        app.setFont(font)
+        app.setStyleSheet(self._build_theme_stylesheet(raw_values))
+
+    @staticmethod
+    def _root_object_name(widget: QWidget) -> str:
+        name = (widget.objectName() or "").strip()
+        if name:
+            return name
+        class_name = widget.metaObject().className() or "widget"
+        base = class_name[0].lower() + class_name[1:] if class_name else "widget"
+        widget.setObjectName(base)
+        return base
+
+    def _ensure_widget_object_names(self, root: QWidget | None) -> bool:
+        if root is None:
+            return False
+        changed = False
+        root_name = self._root_object_name(root)
+
+        for attr_name, value in getattr(root, "__dict__", {}).items():
+            if isinstance(value, QWidget) and value.objectName() == "":
+                value.setObjectName(attr_name)
+                changed = True
+
+        counters: dict[str, int] = {}
+        for child in root.findChildren(QWidget):
+            if child.objectName():
+                continue
+            for attr_name, value in getattr(child, "__dict__", {}).items():
+                if isinstance(value, QWidget) and value.objectName() == "":
+                    value.setObjectName(attr_name)
+                    changed = True
+            if child.objectName():
+                continue
+            class_name = child.metaObject().className() or "widget"
+            base = class_name[0].lower() + class_name[1:] if class_name else "widget"
+            counters[base] = counters.get(base, 0) + 1
+            child.setObjectName(f"{root_name}_{base}_{counters[base]}")
+            changed = True
+        return changed
+
+    @staticmethod
+    def _repolish_widget_tree(root: QWidget | None) -> None:
+        if root is None:
+            return
+        root.style().unpolish(root)
+        root.style().polish(root)
+        for child in root.findChildren(QWidget):
+            child.style().unpolish(child)
+            child.style().polish(child)
+
     def _current_auto_snapshot_settings(self) -> tuple[bool, int]:
         if self.settings_reads is None:
             return DEFAULT_AUTO_SNAPSHOT_ENABLED, DEFAULT_AUTO_SNAPSHOT_INTERVAL_MINUTES
@@ -4349,6 +4980,7 @@ class App(QMainWindow):
         return {
             "window_title": self.identity.get("window_title") or DEFAULT_WINDOW_TITLE,
             "icon_path": self.identity.get("icon_path") or "",
+            "theme_settings": dict(self.theme_settings or self._load_theme_settings()),
             "artist_code": self.load_artist_code(),
             "auto_snapshot_enabled": auto_snapshot_enabled,
             "auto_snapshot_interval_minutes": auto_snapshot_interval_minutes,
@@ -4392,6 +5024,27 @@ class App(QMainWindow):
                         label="Update Branding & Identity",
                         before_value=before_identity,
                         after_value=self.identity,
+                    )
+                changed_count += 1
+
+            before_theme = self._normalize_theme_settings(before_values.get("theme_settings"))
+            after_theme = self._normalize_theme_settings(after_values.get("theme_settings"))
+            if after_theme != before_theme:
+                self._save_theme_settings(after_theme)
+                self._apply_theme()
+                self.logger.info("Theme settings updated")
+                self._log_event(
+                    "settings.theme",
+                    "Theme settings updated",
+                    font_family=after_theme.get("font_family"),
+                    font_size=after_theme.get("font_size"),
+                )
+                if self.history_manager is not None:
+                    self.history_manager.record_setting_change(
+                        key="theme_settings",
+                        label="Update Theme Settings",
+                        before_value=before_theme,
+                        after_value=after_theme,
                     )
                 changed_count += 1
 
@@ -4534,6 +5187,7 @@ class App(QMainWindow):
             btw_number=before_values["btw_number"],
             buma_relatie_nummer=before_values["buma_relatie_nummer"],
             buma_ipi=before_values["buma_ipi"],
+            theme_settings=before_values["theme_settings"],
             current_profile_path=getattr(self, "current_db_path", ""),
             parent=self,
         )
@@ -4871,7 +5525,9 @@ class App(QMainWindow):
 
     def _refresh_after_history_change(self):
         self.identity = self._load_identity()
+        self.theme_settings = self._load_theme_settings()
         self._apply_identity()
+        self._apply_theme()
         self.active_custom_fields = self.load_active_custom_fields()
         self._rebuild_table_headers()
         try:
@@ -6504,9 +7160,7 @@ class App(QMainWindow):
         if self.col_hint_label is None:
             self.col_hint_label = DraggableLabel(self, settings_key="display/col_hint_pos")
             self.col_hint_label.setObjectName("colHint")
-            self.col_hint_label.setStyleSheet(
-                "QLabel#colHint { background: rgba(0,0,0,0.75); color: white; padding: 4px 8px; border-radius: 6px; font: 11px 'Segoe UI'; }"
-            )
+            self.col_hint_label.setProperty("role", "overlayHint")
             s = self.settings
             pos = s.value("display/col_hint_pos", type=QPoint)
             if pos:
@@ -6517,9 +7171,7 @@ class App(QMainWindow):
         if self.row_hint_label is None:
             self.row_hint_label = DraggableLabel(self, settings_key="display/row_hint_pos")
             self.row_hint_label.setObjectName("rowHint")
-            self.row_hint_label.setStyleSheet(
-                "QLabel#rowHint { background: rgba(0,0,0,0.75); color: white; padding: 4px 8px; border-radius: 6px; font: 11px 'Segoe UI'; }"
-            )
+            self.row_hint_label.setProperty("role", "overlayHint")
             s = self.settings
             pos = s.value("display/row_hint_pos", type=QPoint)
             if pos:
@@ -7784,7 +8436,14 @@ class App(QMainWindow):
 
     def eventFilter(self, source, event):
         """Ensure we return a bool. Handle table key events here."""
-        if source is self.table and event.type() == QEvent.KeyPress:
+        if event.type() == QEvent.Show and isinstance(source, QWidget):
+            root = source.window() if hasattr(source, "window") else source
+            if isinstance(root, QWidget):
+                if self._ensure_widget_object_names(root):
+                    self._repolish_widget_tree(root)
+            return super().eventFilter(source, event)
+
+        if source is getattr(self, "table", None) and event.type() == QEvent.KeyPress:
             if event.key() == Qt.Key_Space:
                 idx = self.table.currentIndex()
                 if idx.isValid():

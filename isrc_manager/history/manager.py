@@ -816,6 +816,29 @@ class HistoryManager:
             self.settings_mutations.set_auto_snapshot_enabled(bool(value))
         elif key == "auto_snapshot_interval_minutes":
             self.settings_mutations.set_auto_snapshot_interval_minutes(int(value))
+        elif key == "theme_settings":
+            if not isinstance(value, dict):
+                raise ValueError("Theme settings payload must be a dict")
+            theme_keys = (
+                "font_family",
+                "font_size",
+                "auto_contrast_enabled",
+                "window_bg",
+                "window_fg",
+                "accent",
+                "selection_bg",
+                "selection_fg",
+                "button_bg",
+                "button_fg",
+                "input_bg",
+                "input_fg",
+                "table_bg",
+                "table_fg",
+                "custom_qss",
+            )
+            for theme_key in theme_keys:
+                self.settings.setValue(f"theme/{theme_key}", value.get(theme_key))
+            self.settings.sync()
         elif key == "isrc_prefix":
             self.settings_mutations.set_isrc_prefix(str(value))
         elif key == "sena_number":
