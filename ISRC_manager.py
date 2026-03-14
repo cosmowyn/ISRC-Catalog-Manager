@@ -73,6 +73,12 @@ from isrc_manager.domain.codes import (
 )
 from isrc_manager.domain.standard_fields import standard_field_spec_for_label, standard_media_specs_by_label
 from isrc_manager.domain.timecode import hms_to_seconds, parse_hms_text, seconds_to_hms
+from isrc_manager.services.gs1_mapping import (
+    COMMON_CLASSIFICATION_CHOICES,
+    COMMON_LANGUAGE_CHOICES,
+    COMMON_MARKET_CHOICES,
+    COMMON_PACKAGING_CHOICES,
+)
 from isrc_manager.help_content import HELP_CHAPTERS, HELP_CHAPTERS_BY_ID, help_topic_title, render_help_html
 from isrc_manager.paths import DATA_DIR
 from isrc_manager.gs1_dialog import GS1MetadataDialog
@@ -553,6 +559,9 @@ class ApplicationSettingsDialog(QDialog):
         self._theme_color_edits = {}
         self._theme_color_swatches = {}
         self._theme_change_tracking_enabled = True
+        self.gs1_integration_service = getattr(parent, "gs1_integration_service", None)
+        self._gs1_template_profile = None
+        self._gs1_default_option_combos: dict[str, QComboBox] = {}
 
         self.setStyleSheet(
             _compose_widget_stylesheet(
@@ -812,12 +821,14 @@ class ApplicationSettingsDialog(QDialog):
         self.gs1_template_path_edit.setClearButtonEnabled(True)
         self.gs1_template_path_edit.setPlaceholderText("Official GS1 workbook path")
         self.gs1_template_path_edit.setMinimumWidth(420)
+        self.gs1_template_path_edit.editingFinished.connect(lambda: self._refresh_gs1_template_options(show_errors=False))
         gs1_browse_btn = QPushButton("Browse…")
         gs1_browse_btn.setAutoDefault(False)
         gs1_browse_btn.clicked.connect(self._browse_gs1_template)
         gs1_clear_btn = QPushButton("Clear")
         gs1_clear_btn.setAutoDefault(False)
         gs1_clear_btn.clicked.connect(self.gs1_template_path_edit.clear)
+        gs1_clear_btn.clicked.connect(lambda: self._refresh_gs1_template_options(show_errors=False))
         gs1_template_widget = QWidget(self)
         gs1_template_row = QHBoxLayout(gs1_template_widget)
         gs1_template_row.setContentsMargins(0, 0, 0, 0)
@@ -825,20 +836,13 @@ class ApplicationSettingsDialog(QDialog):
         gs1_template_row.addWidget(self.gs1_template_path_edit, 1)
         gs1_template_row.addWidget(gs1_browse_btn)
         gs1_template_row.addWidget(gs1_clear_btn)
-        experimental_note = QLabel(
-            "Experimental: the GS1 workflow is available for testing, but it is not yet fully implemented. "
-            "Review exported workbooks before upload."
-        )
-        experimental_note.setWordWrap(True)
-        experimental_note.setProperty("role", "sectionHelp")
-        gs1_layout.addWidget(experimental_note)
         self._add_row(
             gs1_template_grid,
             0,
             "Template Workbook",
             gs1_template_widget,
             "Choose the official Excel workbook from your GS1 portal or regional GS1 environment. "
-            "The app validates this workbook before export. This workflow is still experimental.",
+            "The app validates this workbook before export.",
         )
         gs1_layout.addWidget(gs1_template_box)
 
@@ -846,8 +850,10 @@ class ApplicationSettingsDialog(QDialog):
         gs1_defaults_grid = QGridLayout(gs1_defaults_box)
         self._configure_grid(gs1_defaults_grid)
 
-        self.gs1_target_market_edit = QLineEdit((gs1_target_market or "").strip())
-        self.gs1_target_market_edit.setClearButtonEnabled(True)
+        self.gs1_target_market_edit = self._create_gs1_default_combo(
+            initial_text=gs1_target_market,
+            placeholder="Choose or type a target market",
+        )
         self._add_row(
             gs1_defaults_grid,
             0,
@@ -856,8 +862,10 @@ class ApplicationSettingsDialog(QDialog):
             "Default market or region used for new GS1 records.",
         )
 
-        self.gs1_language_edit = QLineEdit((gs1_language or "").strip())
-        self.gs1_language_edit.setClearButtonEnabled(True)
+        self.gs1_language_edit = self._create_gs1_default_combo(
+            initial_text=gs1_language,
+            placeholder="Choose or type a language",
+        )
         self._add_row(
             gs1_defaults_grid,
             1,
@@ -866,8 +874,10 @@ class ApplicationSettingsDialog(QDialog):
             "Default language used for new GS1 records.",
         )
 
-        self.gs1_brand_edit = QLineEdit((gs1_brand or "").strip())
-        self.gs1_brand_edit.setClearButtonEnabled(True)
+        self.gs1_brand_edit = self._create_gs1_default_combo(
+            initial_text=gs1_brand,
+            placeholder="Choose or type a brand",
+        )
         self._add_row(
             gs1_defaults_grid,
             2,
@@ -876,8 +886,10 @@ class ApplicationSettingsDialog(QDialog):
             "Default brand for new GS1 records.",
         )
 
-        self.gs1_subbrand_edit = QLineEdit((gs1_subbrand or "").strip())
-        self.gs1_subbrand_edit.setClearButtonEnabled(True)
+        self.gs1_subbrand_edit = self._create_gs1_default_combo(
+            initial_text=gs1_subbrand,
+            placeholder="Choose or type a subbrand",
+        )
         self._add_row(
             gs1_defaults_grid,
             3,
@@ -886,8 +898,10 @@ class ApplicationSettingsDialog(QDialog):
             "Optional default subbrand for new GS1 records.",
         )
 
-        self.gs1_packaging_type_edit = QLineEdit((gs1_packaging_type or "").strip())
-        self.gs1_packaging_type_edit.setClearButtonEnabled(True)
+        self.gs1_packaging_type_edit = self._create_gs1_default_combo(
+            initial_text=gs1_packaging_type,
+            placeholder="Choose or type a packaging type",
+        )
         self._add_row(
             gs1_defaults_grid,
             4,
@@ -896,8 +910,10 @@ class ApplicationSettingsDialog(QDialog):
             "Default packaging type used when a new GS1 record is created.",
         )
 
-        self.gs1_product_classification_edit = QLineEdit((gs1_product_classification or "").strip())
-        self.gs1_product_classification_edit.setClearButtonEnabled(True)
+        self.gs1_product_classification_edit = self._create_gs1_default_combo(
+            initial_text=gs1_product_classification,
+            placeholder="Choose or type a product classification",
+        )
         self._add_row(
             gs1_defaults_grid,
             5,
@@ -908,7 +924,7 @@ class ApplicationSettingsDialog(QDialog):
 
         gs1_layout.addWidget(gs1_defaults_box)
         gs1_layout.addStretch(1)
-        self.tabs.addTab(self._wrap_tab_page(gs1_page), "GS1 (Experimental)")
+        self.tabs.addTab(self._wrap_tab_page(gs1_page), "GS1")
 
         theme_page = QWidget(self)
         theme_layout = QVBoxLayout(theme_page)
@@ -1085,6 +1101,8 @@ class ApplicationSettingsDialog(QDialog):
         initial_selected_theme = str(self._theme_settings.get("selected_name") or "").strip()
         self._set_theme_preset_selection(initial_selected_theme)
         self._update_theme_preset_actions()
+        self._configure_gs1_default_option_combos()
+        self._refresh_gs1_template_options(show_errors=False)
 
     @staticmethod
     def _configure_grid(grid: QGridLayout):
@@ -1160,6 +1178,84 @@ class ApplicationSettingsDialog(QDialog):
         clear_btn.clicked.connect(edit.clear)
         self._sync_color_swatch(key)
         return row
+
+    def _create_gs1_default_combo(self, *, initial_text: str, placeholder: str) -> QComboBox:
+        combo = FocusWheelComboBox(self)
+        combo.setEditable(True)
+        combo.setInsertPolicy(QComboBox.NoInsert)
+        combo.setMinimumWidth(320)
+        combo.setMaximumWidth(520)
+        combo.setCurrentText(str(initial_text or "").strip())
+        line_edit = combo.lineEdit()
+        if line_edit is not None:
+            line_edit.setClearButtonEnabled(True)
+            line_edit.setPlaceholderText(placeholder)
+        return combo
+
+    def _configure_gs1_default_option_combos(self) -> None:
+        self._gs1_default_option_combos = {
+            "target_market": self.gs1_target_market_edit,
+            "language": self.gs1_language_edit,
+            "brand": self.gs1_brand_edit,
+            "subbrand": self.gs1_subbrand_edit,
+            "packaging_type": self.gs1_packaging_type_edit,
+            "product_classification": self.gs1_product_classification_edit,
+        }
+
+    @staticmethod
+    def _set_combo_items(combo: QComboBox, values, *, preserve_text: str = "") -> None:
+        clean_values: list[str] = []
+        for value in values:
+            text = str(value or "").strip()
+            if text and text not in clean_values:
+                clean_values.append(text)
+        current_text = str(preserve_text or combo.currentText() or "").strip()
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem("")
+        combo.addItems(clean_values)
+        if current_text and combo.findText(current_text, Qt.MatchFixedString) < 0:
+            combo.addItem(current_text)
+        combo.setCurrentText(current_text)
+        completer = QCompleter(clean_values)
+        completer.setCaseSensitivity(Qt.CaseInsensitive)
+        combo.setCompleter(completer)
+        combo.blockSignals(False)
+
+    def _refresh_gs1_template_options(self, *, show_errors: bool) -> None:
+        template_path = self.gs1_template_path_edit.text().strip()
+        self._gs1_template_profile = None
+        options_by_field: dict[str, tuple[str, ...]] = {}
+        if template_path and self.gs1_integration_service is not None:
+            try:
+                self._gs1_template_profile = self.gs1_integration_service.load_template_profile(template_path)
+                options_by_field = dict(self._gs1_template_profile.field_options)
+            except Exception as exc:
+                if show_errors:
+                    QMessageBox.warning(self, "GS1 Workbook", str(exc))
+        builtin_options = {
+            "target_market": COMMON_MARKET_CHOICES,
+            "language": COMMON_LANGUAGE_CHOICES,
+            "packaging_type": COMMON_PACKAGING_CHOICES,
+            "product_classification": COMMON_CLASSIFICATION_CHOICES,
+        }
+        for field_name, combo in self._gs1_default_option_combos.items():
+            merged_values: list[str] = []
+            if field_name == "target_market":
+                for value in builtin_options.get(field_name, ()):
+                    text = str(value or "").strip()
+                    if text and text not in merged_values:
+                        merged_values.append(text)
+            for value in options_by_field.get(field_name, ()):
+                text = str(value or "").strip()
+                if text and text not in merged_values:
+                    merged_values.append(text)
+            if field_name != "target_market":
+                for value in builtin_options.get(field_name, ()):
+                    text = str(value or "").strip()
+                    if text and text not in merged_values:
+                        merged_values.append(text)
+            self._set_combo_items(combo, merged_values, preserve_text=combo.currentText())
 
     def _bind_theme_field_change_tracking(self) -> None:
         self.theme_font_family_combo.currentFontChanged.connect(self._mark_theme_selection_custom)
@@ -1339,6 +1435,7 @@ class ApplicationSettingsDialog(QDialog):
         )
         if path:
             self.gs1_template_path_edit.setText(path)
+            self._refresh_gs1_template_options(show_errors=True)
 
     def focus_field(self, name: str | None):
         target = self._focus_map.get(name or "")
@@ -1349,6 +1446,10 @@ class ApplicationSettingsDialog(QDialog):
         widget.setFocus(Qt.OtherFocusReason)
         if isinstance(widget, QLineEdit):
             widget.selectAll()
+        elif isinstance(widget, QComboBox):
+            line_edit = widget.lineEdit()
+            if line_edit is not None:
+                line_edit.selectAll()
 
     def values(self) -> dict[str, object]:
         theme_values = self._theme_value_payload()
@@ -1364,12 +1465,12 @@ class ApplicationSettingsDialog(QDialog):
             "buma_relatie_nummer": self.buma_relatie_edit.text().strip(),
             "buma_ipi": self.buma_ipi_edit.text().strip(),
             "gs1_template_path": self.gs1_template_path_edit.text().strip(),
-            "gs1_target_market": self.gs1_target_market_edit.text().strip(),
-            "gs1_language": self.gs1_language_edit.text().strip(),
-            "gs1_brand": self.gs1_brand_edit.text().strip(),
-            "gs1_subbrand": self.gs1_subbrand_edit.text().strip(),
-            "gs1_packaging_type": self.gs1_packaging_type_edit.text().strip(),
-            "gs1_product_classification": self.gs1_product_classification_edit.text().strip(),
+            "gs1_target_market": self.gs1_target_market_edit.currentText().strip(),
+            "gs1_language": self.gs1_language_edit.currentText().strip(),
+            "gs1_brand": self.gs1_brand_edit.currentText().strip(),
+            "gs1_subbrand": self.gs1_subbrand_edit.currentText().strip(),
+            "gs1_packaging_type": self.gs1_packaging_type_edit.currentText().strip(),
+            "gs1_product_classification": self.gs1_product_classification_edit.currentText().strip(),
             "theme_settings": theme_values,
             "theme_library": dict(self._stored_themes),
         }
@@ -3996,7 +4097,7 @@ class App(QMainWindow):
         )
         catalog_menu.addAction(self.catalog_managers_action)
         self.gs1_metadata_action = self._create_action(
-            "GS1 Metadata (Experimental)…",
+            "GS1 Metadata…",
             slot=self.open_gs1_dialog,
             shortcuts=("Ctrl+Shift+G", "Meta+Shift+G"),
         )
@@ -7479,7 +7580,7 @@ class App(QMainWindow):
             if not selected_ids:
                 QMessageBox.information(
                     self,
-                    "GS1 Metadata (Experimental)",
+                    "GS1 Metadata",
                     "Select a catalog row first, then open the GS1 metadata dialog.",
                 )
                 return
@@ -7495,7 +7596,7 @@ class App(QMainWindow):
                 if not selected_ids:
                     QMessageBox.warning(
                         self,
-                        "GS1 Metadata (Experimental)",
+                        "GS1 Metadata",
                         "Could not determine the selected track. Select a catalog row and try again.",
                     )
                     return
@@ -7506,14 +7607,14 @@ class App(QMainWindow):
         if int(track_id) <= 0:
             QMessageBox.warning(
                 self,
-                "GS1 Metadata (Experimental)",
+                "GS1 Metadata",
                 "Could not determine the selected track. Select a catalog row and try again.",
             )
             return
         try:
             dlg = GS1MetadataDialog(app=self, track_id=track_id, batch_track_ids=batch_ids, parent=self)
         except ValueError as exc:
-            QMessageBox.warning(self, "GS1 Metadata (Experimental)", str(exc))
+            QMessageBox.warning(self, "GS1 Metadata", str(exc))
             return
         dlg.exec()
 
@@ -8429,7 +8530,7 @@ class App(QMainWindow):
         act_edit.triggered.connect(lambda: self.edit_entry(self.table.item(row, col)))
         menu.addAction(act_edit)
 
-        act_gs1 = QAction("GS1 Metadata (Experimental)…", self)
+        act_gs1 = QAction("GS1 Metadata…", self)
         act_gs1.triggered.connect(lambda: self.open_gs1_dialog(self._track_id_for_table_row(row)))
         menu.addAction(act_gs1)
 
@@ -9954,7 +10055,7 @@ class EditDialog(QDialog):
         main_layout.addWidget(scroll, 1)
 
         btns = QHBoxLayout()
-        gs1_btn = QPushButton("GS1 Metadata (Experimental)…")
+        gs1_btn = QPushButton("GS1 Metadata…")
         gs1_btn.setAutoDefault(False)
         gs1_btn.clicked.connect(lambda: self.parent.open_gs1_dialog(self.track_id))
         btns.addWidget(gs1_btn)

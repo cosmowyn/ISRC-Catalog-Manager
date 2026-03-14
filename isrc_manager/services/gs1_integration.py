@@ -53,7 +53,7 @@ class GS1IntegrationService:
         context = self.build_context(track_id, current_profile_path=current_profile_path)
         existing = self.repository.fetch_by_track_id(track_id)
         if existing is not None:
-            return existing, context, True
+            return self._apply_legacy_default_repairs(existing, context, window_title=window_title), context, True
         return self.build_default_metadata(track_id, current_profile_path=current_profile_path, window_title=window_title), context, False
 
     def build_context(self, track_id: int, *, current_profile_path: str = "") -> GS1RecordContext:
@@ -196,3 +196,49 @@ class GS1IntegrationService:
         if stem.lower() in {"default", "catalog", "profile"}:
             return ""
         return stem.replace("_", " ").strip()
+
+    def _apply_legacy_default_repairs(
+        self,
+        record: GS1MetadataRecord,
+        context: GS1RecordContext,
+        *,
+        window_title: str,
+    ) -> GS1MetadataRecord:
+        defaults = self.settings_service.load_profile_defaults()
+        default_brand = defaults.brand.strip()
+        default_subbrand = defaults.subbrand.strip()
+        if not default_brand and not default_subbrand:
+            return record
+
+        profile_label = context.profile_label.strip()
+        artist_name = context.artist_name.strip()
+        clean_window_title = str(window_title or "").strip()
+        if clean_window_title == DEFAULT_WINDOW_TITLE:
+            clean_window_title = ""
+
+        legacy_candidates = {
+            self._normalize_identity_value(value)
+            for value in (profile_label, artist_name, clean_window_title, "UNBRANDED")
+            if value
+        }
+        current_brand_key = self._normalize_identity_value(record.brand)
+        current_subbrand_key = self._normalize_identity_value(record.subbrand)
+        default_brand_key = self._normalize_identity_value(default_brand)
+        default_subbrand_key = self._normalize_identity_value(default_subbrand)
+
+        repaired = record.copy()
+        brand_looks_legacy = bool(current_brand_key) and current_brand_key in legacy_candidates
+
+        if default_brand and (not current_brand_key or brand_looks_legacy):
+            repaired.brand = default_brand
+            current_brand_key = default_brand_key
+
+        if default_subbrand and not current_subbrand_key:
+            if brand_looks_legacy or (default_brand_key and current_brand_key == default_brand_key):
+                repaired.subbrand = default_subbrand
+
+        return repaired
+
+    @staticmethod
+    def _normalize_identity_value(value: str) -> str:
+        return "".join(ch.lower() for ch in str(value or "").strip() if ch.isalnum())

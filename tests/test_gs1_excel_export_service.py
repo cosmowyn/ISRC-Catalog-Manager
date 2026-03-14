@@ -106,6 +106,8 @@ class GS1ExcelExportServiceTests(unittest.TestCase):
         self.assertEqual(target_sheet["D2"].value, "Ja")
         self.assertEqual(target_sheet["G2"].value, "Orbit Release")
         self.assertEqual(target_sheet["H2"].value, "Engels")
+        self.assertEqual(target_sheet["I2"].value, "Orbit Label")
+        self.assertEqual(target_sheet["J2"].value, "Series A")
         self.assertEqual(target_sheet["L2"].value, "Aantal")
 
     def test_batch_export_smoke_and_sequence_regression(self):

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -165,6 +165,7 @@ class GS1TemplateProfile:
     workbook_markers: list[str]
     locale_hint: str = "default"
     missing_optional_fields: tuple[str, ...] = ()
+    field_options: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -218,4 +219,3 @@ class GS1BatchValidationError(GS1Error):
             title = issue.track_label or f"Track {issue.track_id}"
             lines.append(f"{title}: " + "; ".join(issue.messages))
         super().__init__("\n".join(lines) or "One or more GS1 records are invalid.")
-

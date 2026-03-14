@@ -127,7 +127,20 @@ GS1_HEADER_ALIASES = {
 
 COMMON_STATUS_CHOICES = ("Concept", "Active", "Inactive")
 COMMON_PACKAGING_CHOICES = ("Digital file", "Digital", "Download", "Other")
-COMMON_MARKET_CHOICES = ("Worldwide", "Global", "Netherlands", "United States")
+COMMON_MARKET_CHOICES = (
+    "Worldwide",
+    "Global Market",
+    "European Union",
+    "Non-EU",
+    "Developing Countries Support",
+    "Wereldwijd",
+    "Europese Unie",
+    "Niet EU",
+    "Ontwikkelingslanden ondersteuning",
+    "Global",
+    "Netherlands",
+    "United States",
+)
 COMMON_LANGUAGE_CHOICES = ("English", "Dutch", "German", "French", "Spanish")
 COMMON_CLASSIFICATION_CHOICES = ("Audio", "Music", "Digital audio release", "Digital goods")
 COMMON_UNIT_CHOICES = ("Each", "EA", "Count")
@@ -171,9 +184,16 @@ _SIMPLE_LOCALIZED_VALUES = {
     },
     "target_market": {
         "global": {"default": "Worldwide", "nl": "Wereldwijd"},
+        "global market": {"default": "Global Market", "nl": "Global Market"},
         "worldwide": {"default": "Worldwide", "nl": "Wereldwijd"},
         "werelwijd": {"default": "Worldwide", "nl": "Wereldwijd"},
         "wereldwijd": {"default": "Worldwide", "nl": "Wereldwijd"},
+        "european union": {"default": "European Union", "nl": "Europese Unie"},
+        "europese unie": {"default": "European Union", "nl": "Europese Unie"},
+        "non eu": {"default": "Non-EU", "nl": "Niet EU"},
+        "niet eu": {"default": "Non-EU", "nl": "Niet EU"},
+        "developing countries support": {"default": "Developing Countries Support", "nl": "Ontwikkelingslanden ondersteuning"},
+        "ontwikkelingslanden ondersteuning": {"default": "Developing Countries Support", "nl": "Ontwikkelingslanden ondersteuning"},
     },
     "unit": {
         "ea": {"default": "Each", "nl": "Aantal"},
@@ -316,4 +336,3 @@ def localize_export_value(field_name: str, value, locale_hint: str) -> str:
         if localized is not None:
             return localized.get(locale_key, localized["default"])
     return clean_value
-

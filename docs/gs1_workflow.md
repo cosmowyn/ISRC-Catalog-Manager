@@ -1,9 +1,5 @@
 # GS1 Workflow Notes
 
-## Status
-
-The GS1 workflow is currently experimental. The dialog, template verification, persistence, and Excel export path are available, but the feature is not yet fully implemented and exported workbooks should be reviewed before upload.
-
 ## Where the feature lives
 
 - UI dialog: `isrc_manager/gs1_dialog.py`

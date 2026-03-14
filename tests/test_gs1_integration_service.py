@@ -7,6 +7,8 @@ from PySide6.QtCore import QSettings
 
 from isrc_manager.services import (
     DatabaseSchemaService,
+    GS1MetadataRecord,
+    GS1ProfileDefaults,
     GS1IntegrationService,
     GS1MetadataRepository,
     GS1SettingsService,
@@ -19,6 +21,14 @@ def make_conn():
     schema = DatabaseSchemaService(conn)
     schema.init_db()
     schema.migrate_schema()
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS app_kv (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+        """
+    )
     conn.execute("INSERT INTO Artists(id, name) VALUES (1, 'Main Artist')")
     conn.execute("INSERT INTO Albums(id, title) VALUES (1, 'Orbit Release')")
     conn.execute(
@@ -67,6 +77,48 @@ class GS1IntegrationServiceTests(unittest.TestCase):
         self.assertEqual(context.artist_name, "Main Artist")
         self.assertEqual(context.upc, "123456789012")
         self.assertEqual(context.profile_label, "Orbit Label")
+
+    def test_load_or_create_metadata_repairs_legacy_brand_subbrand_defaults(self):
+        self.service.settings_service.set_profile_defaults(
+            GS1ProfileDefaults(
+                target_market="Global Market",
+                language="English",
+                brand="Orbit Label Group",
+                subbrand="Orbit Series",
+                packaging_type="Digital file",
+                product_classification="Audio",
+            )
+        )
+        self.service.repository.save(
+            GS1MetadataRecord(
+                track_id=1,
+                status="Concept",
+                product_classification="Audio",
+                consumer_unit_flag=True,
+                packaging_type="Digital file",
+                target_market="Worldwide",
+                language="English",
+                product_description="Orbit Release",
+                brand="Orbit Label",
+                subbrand="",
+                quantity="1",
+                unit="Each",
+                image_url="",
+                notes="",
+                export_enabled=True,
+            )
+        )
+
+        record, context, exists = self.service.load_or_create_metadata(
+            1,
+            current_profile_path="/tmp/Orbit_Label.db",
+            window_title="Orbit Window",
+        )
+
+        self.assertTrue(exists)
+        self.assertEqual(context.profile_label, "Orbit Label")
+        self.assertEqual(record.brand, "Orbit Label Group")
+        self.assertEqual(record.subbrand, "Orbit Series")
 
 
 if __name__ == "__main__":
