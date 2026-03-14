@@ -4520,7 +4520,7 @@ class App(QMainWindow):
                 continue
             except Exception:
                 break
-        return "0.1.0"
+        return "1.0.0"
 
     def _help_html(self) -> str:
         return render_help_html("ISRC Catalog Manager", self._app_version_text())

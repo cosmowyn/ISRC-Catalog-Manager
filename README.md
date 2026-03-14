@@ -4,6 +4,46 @@ Created by **M. van de Kleut**
 
 ---
 
+ISRC Manager is a local-first desktop catalog application for managing track metadata, generated ISRCs, managed media, licenses, backups, snapshots, and XML exchange workflows from one workspace.
+
+## Preview
+
+<p align="center">
+  <img src="docs/screenshots/workspace-overview.png" alt="Workspace overview with docked add-data form and populated catalog table" width="48%" />
+  <img src="docs/screenshots/catalog-managers.png" alt="Catalog managers dialog with fictional licensee data" width="48%" />
+</p>
+<p align="center">
+  <img src="docs/screenshots/history-and-snapshots.png" alt="Persistent undo history and snapshot browser" width="48%" />
+  <img src="docs/screenshots/help-browser.png" alt="Searchable in-app help manual" width="48%" />
+</p>
+
+## Demo Workspace
+
+The repository now includes reproducible demo tooling under [`demo/`](demo/) so you can generate a clean showcase workspace and refresh the README screenshots without using any real catalog data.
+
+All demo data is fictional:
+- fictional artist names
+- fictional track titles
+- fictional artwork
+- fictional license PDFs
+- no personal or customer information
+
+Create the demo workspace:
+
+```bash
+python demo/build_demo_workspace.py
+```
+
+Refresh the screenshots:
+
+```bash
+python demo/capture_demo_screenshots.py
+```
+
+The generated demo workspace is written to `demo/.runtime/` and is excluded from git. The committed screenshots live in `docs/screenshots/`.
+
+---
+
 # IMPORTANT LEGAL NOTICE
 
 To legally generate and assign industry-standard registration codes, you must first acquire the correct registrant prefixes and identifiers from the relevant authorities. These codes are part of international systems for music identification and royalty collection.
@@ -62,6 +102,10 @@ The application provides:
 - Metadata management with customizable fields  
 - Audio and image preview capabilities  
 - Multiple profile support  
+- Persistent undo/redo history with manual and automatic snapshots  
+- Dockable views for the add-data form and catalog table  
+- Searchable in-app help with contextual help buttons  
+- Theme customization with saved presets and advanced QSS  
 - Full audit logging and backup system  
 - Import/export tools for XML metadata  
 - A built-in license management system  
@@ -81,7 +125,7 @@ The application provides:
 ## Metadata Management
 - Supports standard and custom metadata fields.  
 - Built-in support for text, date, checkbox, dropdown, image blob, and audio blob fields.  
-- Audio and image data may be stored directly in the database (up to 256 MB per file).
+- Audio and image files are managed alongside the catalog database with tracked metadata, preview, export, and restore support.
 
 ## Database & Profile Handling
 - Independent ISRC sequences per profile.  
@@ -94,8 +138,8 @@ The application provides:
 - Spacebar quick preview shortcut.
 
 ## Auditing, Backups, and Logging
-- Automatic timestamped backups in `/Database/backups/`.  
-- Full action logs stored in `/Database/logs/`.  
+- Automatic timestamped backups in the app data `backups/` folder.  
+- Daily human-readable logs plus structured trace logs in the app data `logs/` folder.  
 - Pre-restore backup creation before applying imported data.
 
 ## Import/Export
