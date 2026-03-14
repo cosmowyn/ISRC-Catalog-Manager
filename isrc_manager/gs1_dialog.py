@@ -7,11 +7,14 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QCheckBox,
     QComboBox,
     QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QGroupBox,
+    QHeaderView,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -20,6 +23,8 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -27,6 +32,7 @@ from PySide6.QtWidgets import (
 from .services import (
     GS1BatchValidationError,
     GS1DependencyError,
+    GS1ExportPlan,
     GS1MetadataRecord,
     GS1TemplateVerificationError,
     GS1ValidationError,
@@ -45,6 +51,83 @@ def _safe_filename(text: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", str(text or "").strip())
     cleaned = cleaned.strip("._")
     return cleaned or "gs1_export"
+
+
+class GS1ExportPreviewDialog(QDialog):
+    """Shows the exact worksheet data that will be written before export continues."""
+
+    def __init__(self, plan: GS1ExportPlan, parent=None):
+        super().__init__(parent)
+        self.plan = plan
+        self.setWindowTitle("GS1 Export Preview")
+        self.setModal(True)
+        self.resize(1080, 680)
+        self.setMinimumSize(960, 560)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(12)
+
+        summary_box = QGroupBox("Export Summary", self)
+        summary_layout = QVBoxLayout(summary_box)
+        summary_layout.setContentsMargins(14, 14, 14, 14)
+        summary_layout.setSpacing(8)
+        summary_label = QLabel("\n".join(plan.summary_lines))
+        summary_label.setWordWrap(True)
+        summary_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        summary_layout.addWidget(summary_label)
+        root.addWidget(summary_box)
+
+        if plan.warnings:
+            warning_box = QGroupBox("Warnings", self)
+            warning_layout = QVBoxLayout(warning_box)
+            warning_layout.setContentsMargins(14, 14, 14, 14)
+            warning_layout.setSpacing(8)
+            warning_label = QLabel("\n".join(f"- {line}" for line in plan.warnings))
+            warning_label.setWordWrap(True)
+            warning_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            warning_layout.addWidget(warning_label)
+            root.addWidget(warning_box)
+
+        preview_box = QGroupBox("Workbook Rows", self)
+        preview_layout = QVBoxLayout(preview_box)
+        preview_layout.setContentsMargins(14, 14, 14, 14)
+        preview_layout.setSpacing(8)
+        preview_help = QLabel(
+            f"Detected sheet: {plan.template_profile.sheet_name}. The table below shows the final values that will be written into the workbook."
+        )
+        preview_help.setWordWrap(True)
+        preview_layout.addWidget(preview_help)
+
+        table = QTableWidget(len(plan.preview.rows), len(plan.preview.headers), self)
+        table.setHorizontalHeaderLabels(list(plan.preview.headers))
+        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        table.setSelectionMode(QAbstractItemView.NoSelection)
+        table.setAlternatingRowColors(True)
+        table.verticalHeader().setVisible(False)
+        table.setWordWrap(False)
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeToContents)
+        header.setStretchLastSection(True)
+        for row_index, row_values in enumerate(plan.preview.rows):
+            for column_index, value in enumerate(row_values):
+                item = QTableWidgetItem(str(value))
+                table.setItem(row_index, column_index, item)
+        table.resizeColumnsToContents()
+        preview_layout.addWidget(table, 1)
+        root.addWidget(preview_box, 1)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok, parent=self)
+        ok_button = button_box.button(QDialogButtonBox.Ok)
+        if ok_button is not None:
+            ok_button.setText("Continue Export")
+            ok_button.setDefault(True)
+        cancel_button = button_box.button(QDialogButtonBox.Cancel)
+        if cancel_button is not None:
+            cancel_button.setAutoDefault(False)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        root.addWidget(button_box)
 
 
 class GS1MetadataDialog(QDialog):
@@ -268,7 +351,9 @@ class GS1MetadataDialog(QDialog):
                 continue
             normalized.append(clean_id)
             seen.add(clean_id)
-        if self.track_id not in seen:
+        if self.track_id in seen:
+            normalized = [self.track_id] + [track_id for track_id in normalized if track_id != self.track_id]
+        else:
             normalized.insert(0, self.track_id)
         return normalized
 
@@ -654,11 +739,34 @@ class GS1MetadataDialog(QDialog):
             )
         return True
 
+    def _build_export_plan(self, track_ids: list[int]) -> GS1ExportPlan | None:
+        try:
+            plan = self.gs1_service.prepare_export_plan(
+                track_ids,
+                template_path=self._template_path_override,
+                current_profile_path=self._current_profile_path(),
+                window_title=self._window_title(),
+            )
+        except (GS1BatchValidationError, GS1DependencyError, GS1TemplateVerificationError) as exc:
+            QMessageBox.warning(self, "GS1 Export", str(exc))
+            return None
+        return plan
+
+    def _confirm_export_preview(self, plan: GS1ExportPlan) -> bool:
+        preview_dialog = GS1ExportPreviewDialog(plan, self)
+        return preview_dialog.exec() == QDialog.Accepted
+
     def _export_current(self) -> None:
         if not self._save_current_record(show_confirmation=False):
             return
         if self._template_profile is None and not self._refresh_template_status(prompt_if_missing=True):
             self._update_readiness()
+            return
+        plan = self._build_export_plan([self.track_id])
+        if plan is None:
+            return
+        self._template_profile = plan.template_profile
+        if not self._confirm_export_preview(plan):
             return
         output_path, _ = QFileDialog.getSaveFileName(
             self,
@@ -673,13 +781,7 @@ class GS1MetadataDialog(QDialog):
                 action_label=lambda export_result: f"Export GS1: {export_result.exported_count} record",
                 action_type="file.export_gs1_single",
                 target_path=output_path,
-                mutation=lambda: self.gs1_service.export_records(
-                    [self.track_id],
-                    output_path=output_path,
-                    template_path=self._template_path_override,
-                    current_profile_path=self._current_profile_path(),
-                    window_title=self._window_title(),
-                ),
+                mutation=lambda: self.gs1_service.export_plan(plan, output_path=output_path),
                 entity_type="Export",
                 entity_id=output_path,
                 payload=lambda export_result: {
@@ -710,6 +812,12 @@ class GS1MetadataDialog(QDialog):
         if self._template_profile is None and not self._refresh_template_status(prompt_if_missing=True):
             self._update_readiness()
             return
+        plan = self._build_export_plan(self.batch_track_ids)
+        if plan is None:
+            return
+        self._template_profile = plan.template_profile
+        if not self._confirm_export_preview(plan):
+            return
         output_path, _ = QFileDialog.getSaveFileName(
             self,
             "Export GS1 Batch Workbook",
@@ -723,13 +831,7 @@ class GS1MetadataDialog(QDialog):
                 action_label=lambda export_result: f"Export GS1 Batch: {export_result.exported_count} records",
                 action_type="file.export_gs1_batch",
                 target_path=output_path,
-                mutation=lambda: self.gs1_service.export_records(
-                    self.batch_track_ids,
-                    output_path=output_path,
-                    template_path=self._template_path_override,
-                    current_profile_path=self._current_profile_path(),
-                    window_title=self._window_title(),
-                ),
+                mutation=lambda: self.gs1_service.export_plan(plan, output_path=output_path),
                 entity_type="Export",
                 entity_id=output_path,
                 payload=lambda export_result: {

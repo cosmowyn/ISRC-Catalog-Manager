@@ -172,6 +172,25 @@ class GS1TemplateProfile:
 class GS1PreparedRecord:
     metadata: GS1MetadataRecord
     context: GS1RecordContext
+    source_track_ids: tuple[int, ...] = ()
+    source_track_labels: tuple[str, ...] = ()
+    source_upc_values: tuple[str, ...] = ()
+
+
+@dataclass(slots=True)
+class GS1ExportPreview:
+    headers: tuple[str, ...]
+    rows: tuple[tuple[str, ...], ...]
+
+
+@dataclass(slots=True)
+class GS1ExportPlan:
+    template_profile: GS1TemplateProfile
+    prepared_records: tuple[GS1PreparedRecord, ...]
+    preview: GS1ExportPreview
+    warnings: tuple[str, ...] = ()
+    summary_lines: tuple[str, ...] = ()
+    mode: str = "single"
 
 
 @dataclass(slots=True)

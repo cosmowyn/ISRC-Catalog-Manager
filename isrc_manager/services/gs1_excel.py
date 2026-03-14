@@ -6,7 +6,7 @@ from copy import copy
 from pathlib import Path
 
 from .gs1_mapping import localize_export_value
-from .gs1_models import GS1ExportResult, GS1PreparedRecord, GS1TemplateProfile
+from .gs1_models import GS1ExportPreview, GS1ExportResult, GS1PreparedRecord, GS1TemplateProfile
 
 
 def _load_openpyxl():
@@ -23,6 +23,29 @@ def _load_openpyxl():
 
 class GS1ExcelExportService:
     """Writes canonical GS1 data into the detected export sheet of an official workbook."""
+
+    def build_preview(
+        self,
+        template_profile: GS1TemplateProfile,
+        records: list[GS1PreparedRecord],
+    ) -> GS1ExportPreview:
+        headers: list[str] = []
+        rows: list[tuple[str, ...]] = []
+        ordered_columns = self._ordered_export_columns(template_profile)
+        for field_name, _ in ordered_columns:
+            headers.append(
+                str(template_profile.matched_headers.get(field_name) or field_name).strip()
+            )
+        for sequence_number, record in enumerate(records, start=1):
+            localized_values = self._localized_row_values(
+                template_profile,
+                prepared_record=record,
+                sequence_number=sequence_number,
+            )
+            rows.append(
+                tuple(str(localized_values.get(field_name, "")) for field_name, _ in ordered_columns)
+            )
+        return GS1ExportPreview(headers=tuple(headers), rows=tuple(rows))
 
     def export(
         self,
@@ -115,8 +138,33 @@ class GS1ExcelExportService:
         prepared_record: GS1PreparedRecord,
         sequence_number: int,
     ) -> None:
+        localized_values = self._localized_row_values(
+            template_profile,
+            prepared_record=prepared_record,
+            sequence_number=sequence_number,
+        )
+        for field_name, column_index in template_profile.column_map.items():
+            if field_name not in localized_values:
+                continue
+            worksheet.cell(
+                row=row_number,
+                column=column_index,
+                value=localized_values[field_name],
+            )
+
+    @staticmethod
+    def _ordered_export_columns(template_profile: GS1TemplateProfile) -> list[tuple[str, int]]:
+        return sorted(template_profile.column_map.items(), key=lambda item: item[1])
+
+    def _localized_row_values(
+        self,
+        template_profile: GS1TemplateProfile,
+        *,
+        prepared_record: GS1PreparedRecord,
+        sequence_number: int,
+    ) -> dict[str, str]:
         metadata = prepared_record.metadata
-        values = {
+        raw_values = {
             "gtin_request_number": str(sequence_number),
             "status": metadata.status,
             "product_classification": metadata.product_classification,
@@ -131,12 +179,7 @@ class GS1ExcelExportService:
             "unit": metadata.unit,
             "image_url": metadata.image_url,
         }
-        for field_name, column_index in template_profile.column_map.items():
-            if field_name not in values:
-                continue
-            worksheet.cell(
-                row=row_number,
-                column=column_index,
-                value=localize_export_value(field_name, values[field_name], template_profile.locale_hint),
-            )
-
+        return {
+            field_name: str(localize_export_value(field_name, value, template_profile.locale_hint) or "")
+            for field_name, value in raw_values.items()
+        }

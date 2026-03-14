@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from openpyxl import Workbook
 from PySide6.QtCore import QSettings
 
 from isrc_manager.services import (
@@ -14,6 +15,36 @@ from isrc_manager.services import (
     GS1SettingsService,
     TrackService,
 )
+
+
+HEADERS = [
+    "GS1 Artikelcode (GTIN)",
+    "Status",
+    "Productclassificatie",
+    "Gaat naar de consument",
+    "Verpakkings type",
+    "Landen of Regio's",
+    "Productomschrijving (max 300 tekens)",
+    "Taal",
+    "Merk",
+    "Submerk",
+    "Aantal",
+    "Eenheid",
+    "Afbeelding (max 500 tekens)",
+]
+
+
+def build_template(path: Path):
+    workbook = Workbook()
+    workbook.remove(workbook.active)
+    instructions = workbook.create_sheet("Instructions")
+    instructions["A1"] = "GS1 article code (GTIN)"
+    instructions["A2"] = "Use 1, 2, 3 in the first column to request new GTINs."
+    placeholder = workbook.create_sheet("{ContractNr}")
+    placeholder.append(HEADERS)
+    target = workbook.create_sheet("10070050")
+    target.append(HEADERS)
+    workbook.save(path)
 
 
 def make_conn():
@@ -31,12 +62,29 @@ def make_conn():
     )
     conn.execute("INSERT INTO Artists(id, name) VALUES (1, 'Main Artist')")
     conn.execute("INSERT INTO Albums(id, title) VALUES (1, 'Orbit Release')")
+    conn.execute("INSERT INTO Albums(id, title) VALUES (2, 'Solar Release')")
     conn.execute(
         """
         INSERT INTO Tracks(
             id, isrc, isrc_compact, track_title, main_artist_id, album_id, release_date, track_length_sec, iswc, upc, genre
         )
         VALUES(1, 'NL-ABC-26-00001', 'NLABC2600001', 'Orbit Release', 1, 1, '2026-03-14', 180, NULL, '123456789012', 'Pop')
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO Tracks(
+            id, isrc, isrc_compact, track_title, main_artist_id, album_id, release_date, track_length_sec, iswc, upc, genre
+        )
+        VALUES(2, 'NL-ABC-26-00002', 'NLABC2600002', 'Orbit Reprise', 1, 1, '2026-03-14', 210, NULL, '999999999999', 'Pop')
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO Tracks(
+            id, isrc, isrc_compact, track_title, main_artist_id, album_id, release_date, track_length_sec, iswc, upc, genre
+        )
+        VALUES(3, 'NL-ABC-26-00003', 'NLABC2600003', 'Solar Flare', 1, 2, '2026-03-15', 195, NULL, '', 'Electronic')
         """
     )
     conn.commit()
@@ -119,6 +167,49 @@ class GS1IntegrationServiceTests(unittest.TestCase):
         self.assertEqual(context.profile_label, "Orbit Label")
         self.assertEqual(record.brand, "Orbit Label Group")
         self.assertEqual(record.subbrand, "Orbit Series")
+
+    def test_prepare_records_for_export_collapses_same_album_selection_to_one_product(self):
+        prepared = self.service.prepare_records_for_export(
+            [1, 2],
+            current_profile_path="/tmp/Orbit_Label.db",
+            window_title="Orbit Window",
+        )
+
+        self.assertEqual(len(prepared), 1)
+        self.assertEqual(prepared[0].metadata.product_description, "Orbit Release")
+        self.assertEqual(prepared[0].source_track_ids, (1, 2))
+        self.assertEqual(prepared[0].source_track_labels, ("Orbit Release", "Orbit Reprise (Orbit Release)"))
+
+    def test_prepare_records_for_export_uses_single_titles_for_mixed_album_batch(self):
+        prepared = self.service.prepare_records_for_export(
+            [1, 3],
+            current_profile_path="/tmp/Orbit_Label.db",
+            window_title="Orbit Window",
+        )
+
+        self.assertEqual(len(prepared), 2)
+        self.assertEqual(prepared[0].metadata.product_description, "Orbit Release - Single")
+        self.assertEqual(prepared[1].metadata.product_description, "Solar Flare - Single")
+
+    def test_prepare_export_plan_includes_preview_and_upc_warning_details(self):
+        template_path = Path(self.tmpdir.name) / "gs1-template.xlsx"
+        build_template(template_path)
+
+        plan = self.service.prepare_export_plan(
+            [1, 2],
+            template_path=str(template_path),
+            current_profile_path="/tmp/Orbit_Label.db",
+            window_title="Orbit Window",
+        )
+
+        self.assertEqual(plan.mode, "shared_album")
+        self.assertEqual(plan.preview.headers[0], "GS1 Artikelcode (GTIN)")
+        self.assertEqual(plan.preview.rows[0][0], "1")
+        self.assertIn("Orbit Release", plan.preview.rows[0])
+        self.assertTrue(plan.warnings)
+        self.assertIn("UPC/EAN", plan.warnings[0])
+        self.assertIn("Orbit Release: 123456789012", plan.warnings[1])
+        self.assertIn("Orbit Reprise (Orbit Release): 999999999999", plan.warnings[1])
 
 
 if __name__ == "__main__":

@@ -130,6 +130,21 @@ class GS1ExcelExportServiceTests(unittest.TestCase):
         self.assertEqual(target_sheet["G3"].value, "Solar Release")
         self.assertEqual(target_sheet["G4"].value, "Lunar Release")
 
+    def test_build_preview_matches_final_sheet_values(self):
+        preview = self.service.build_preview(
+            self.template_profile,
+            [prepared_record(1, "Orbit Release"), prepared_record(2, "Solar Release")],
+        )
+
+        self.assertEqual(preview.headers[0], "GS1 Artikelcode (GTIN)")
+        self.assertEqual(preview.headers[8], "Merk")
+        self.assertEqual(preview.rows[0][0], "1")
+        self.assertEqual(preview.rows[1][0], "2")
+        self.assertEqual(preview.rows[0][1], "Actief")
+        self.assertEqual(preview.rows[0][8], "Orbit Label")
+        self.assertEqual(preview.rows[0][9], "Series A")
+        self.assertEqual(preview.rows[1][6], "Solar Release")
+
 
 if __name__ == "__main__":
     unittest.main()
