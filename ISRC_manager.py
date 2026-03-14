@@ -30,7 +30,7 @@ from PySide6.QtCore import(QRegularExpression, Signal, QEvent,
 
 from PySide6.QtGui import (QDesktopServices, QCursor, QAction,
     QIcon, QAction, QKeySequence, QImage, QPixmap, QStandardItemModel, QStandardItem,
-    QColor, QFont, QPalette
+    QColor, QFont, QPalette, QTextCursor, QTextDocument
 )
 from PySide6.QtWidgets import ( QListView, QMenuBar, QListWidget, QListWidgetItem, 
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QMessageBox,
@@ -38,7 +38,7 @@ from PySide6.QtWidgets import ( QListView, QMenuBar, QListWidget, QListWidgetIte
     QHeaderView, QDialog, QMainWindow, QSizePolicy, QComboBox, QCompleter, QListWidget,
     QListWidgetItem, QFileDialog, QToolBar, QFrame, QSpinBox, QScrollArea, QSlider, QAbstractItemView, QAbstractScrollArea,
     QFormLayout, QTableView, QTabWidget, QDialogButtonBox, QGridLayout, QGroupBox, QPlainTextEdit, QCheckBox,
-    QColorDialog, QFontComboBox,
+    QColorDialog, QFontComboBox, QTextBrowser, QToolButton, QSplitter,
     QDockWidget
 )
 
@@ -73,6 +73,7 @@ from isrc_manager.domain.codes import (
 )
 from isrc_manager.domain.standard_fields import standard_field_spec_for_label, standard_media_specs_by_label
 from isrc_manager.domain.timecode import hms_to_seconds, parse_hms_text, seconds_to_hms
+from isrc_manager.help_content import HELP_CHAPTERS, HELP_CHAPTERS_BY_ID, help_topic_title, render_help_html
 from isrc_manager.paths import DATA_DIR
 from isrc_manager.services import (
     CatalogAdminService,
@@ -159,6 +160,38 @@ def _compose_widget_stylesheet(widget: QWidget | None, base_qss: str) -> str:
     return qss
 
 
+def _resolve_help_host(widget: QWidget | None):
+    current = widget
+    while current is not None:
+        open_help = getattr(current, "open_help_dialog", None)
+        if callable(open_help):
+            return current
+        app = getattr(current, "app", None)
+        if app is not None and callable(getattr(app, "open_help_dialog", None)):
+            return app
+        current = current.parentWidget()
+    return None
+
+
+def _create_round_help_button(owner: QWidget, topic_id: str, tooltip: str | None = None) -> QToolButton:
+    button = QToolButton(owner)
+    button.setText("?")
+    button.setCursor(Qt.PointingHandCursor)
+    button.setAutoRaise(False)
+    button.setFixedSize(28, 28)
+    button.setProperty("role", "helpButton")
+    button.setToolTip(tooltip or f"Open help for {help_topic_title(topic_id)}")
+    button.setObjectName(f"{topic_id.replace('-', '_')}HelpButton")
+
+    def _open():
+        host = _resolve_help_host(owner)
+        if host is not None:
+            host.open_help_dialog(topic_id=topic_id, parent=owner)
+
+    button.clicked.connect(_open)
+    return button
+
+
 # =============================================================================
 # Custom Columns Dialog (with type + options)
 # =============================================================================
@@ -179,6 +212,10 @@ class CustomColumnsDialog(QDialog):
         self.fields = [dict(f) for f in fields]
 
         layout = QVBoxLayout(self)
+        help_row = QHBoxLayout()
+        help_row.addStretch(1)
+        help_row.addWidget(_create_round_help_button(self, "custom-columns"))
+        layout.addLayout(help_row)
 
         self.listw = QListWidget()
         layout.addWidget(self.listw)
@@ -413,6 +450,10 @@ class DatePickerDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(title)
         lay = QVBoxLayout(self)
+        help_row = QHBoxLayout()
+        help_row.addStretch(1)
+        help_row.addWidget(_create_round_help_button(self, "metadata-dates"))
+        lay.addLayout(help_row)
 
         self.calendar = FocusWheelCalendarWidget()
         if initial_iso_date:
@@ -545,6 +586,11 @@ class ApplicationSettingsDialog(QDialog):
         root = QVBoxLayout(self)
         root.setContentsMargins(18, 18, 18, 18)
         root.setSpacing(14)
+
+        help_row = QHBoxLayout()
+        help_row.addStretch(1)
+        help_row.addWidget(_create_round_help_button(self, "settings"))
+        root.addLayout(help_row)
 
         title_lbl = QLabel("Application Settings")
         title_lbl.setObjectName("settingsTitle")
@@ -1246,6 +1292,11 @@ class ApplicationLogDialog(QDialog):
         root.setContentsMargins(18, 18, 18, 18)
         root.setSpacing(14)
 
+        help_row = QHBoxLayout()
+        help_row.addStretch(1)
+        help_row.addWidget(_create_round_help_button(self, "application-log"))
+        root.addLayout(help_row)
+
         title = QLabel("Application Log")
         title.setObjectName("logTitle")
         subtitle = QLabel("Review the live application logs, open archived log files, and jump straight to the log folder.")
@@ -1397,6 +1448,11 @@ class DiagnosticsDialog(QDialog):
         root = QVBoxLayout(self)
         root.setContentsMargins(18, 18, 18, 18)
         root.setSpacing(14)
+
+        help_row = QHBoxLayout()
+        help_row.addStretch(1)
+        help_row.addWidget(_create_round_help_button(self, "diagnostics"))
+        root.addLayout(help_row)
 
         title = QLabel("Diagnostics")
         title.setObjectName("diagnosticsTitle")
@@ -1622,6 +1678,11 @@ class AboutDialog(QDialog):
         root.setContentsMargins(18, 18, 18, 18)
         root.setSpacing(14)
 
+        help_row = QHBoxLayout()
+        help_row.addStretch(1)
+        help_row.addWidget(_create_round_help_button(self, "about"))
+        root.addLayout(help_row)
+
         top_row = QHBoxLayout()
         top_row.setSpacing(16)
 
@@ -1684,6 +1745,208 @@ class AboutDialog(QDialog):
         buttons = QDialogButtonBox(QDialogButtonBox.Ok, Qt.Horizontal, self)
         buttons.accepted.connect(self.accept)
         root.addWidget(buttons)
+
+
+class HelpContentsDialog(QDialog):
+    def __init__(self, app, parent=None):
+        super().__init__(parent or app)
+        self.app = app
+        self.setObjectName("helpContentsDialog")
+        self.setWindowTitle("Help Contents")
+        self.resize(1180, 820)
+        self.setMinimumSize(980, 680)
+        self._current_topic_id = "overview"
+        self._help_html = ""
+
+        self.setStyleSheet(
+            _compose_widget_stylesheet(
+                self,
+                """
+                QDialog#helpContentsDialog QLabel#helpTitle {
+                    font-size: 28px;
+                    font-weight: 700;
+                }
+                QDialog#helpContentsDialog QLabel#helpSubtitle {
+                    color: #64748b;
+                    font-size: 15px;
+                }
+                QDialog#helpContentsDialog QListWidget#helpChapterList {
+                    min-width: 280px;
+                }
+                """,
+            )
+        )
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(14)
+
+        title_row = QHBoxLayout()
+        title_row.setSpacing(10)
+        title = QLabel("Help Contents")
+        title.setObjectName("helpTitle")
+        title_row.addWidget(title)
+        title_row.addStretch(1)
+        root.addLayout(title_row)
+
+        subtitle = QLabel(
+            "Search the local help manual, browse indexed chapters, and jump directly to the section that matches the current window."
+        )
+        subtitle.setObjectName("helpSubtitle")
+        subtitle.setWordWrap(True)
+        root.addWidget(subtitle)
+
+        search_row = QHBoxLayout()
+        search_row.setSpacing(8)
+        self.search_field = QLineEdit(self)
+        self.search_field.setPlaceholderText("Search help...")
+        self.search_field.setMinimumWidth(320)
+        self.search_prev_button = QPushButton("Previous Match")
+        self.search_next_button = QPushButton("Next Match")
+        self.open_file_button = QPushButton("Open Help File")
+        self.close_button = QPushButton("Close")
+        search_row.addWidget(self.search_field, 1)
+        search_row.addWidget(self.search_prev_button)
+        search_row.addWidget(self.search_next_button)
+        search_row.addStretch(1)
+        search_row.addWidget(self.open_file_button)
+        search_row.addWidget(self.close_button)
+        root.addLayout(search_row)
+
+        splitter = QSplitter(Qt.Horizontal, self)
+        root.addWidget(splitter, 1)
+
+        self.chapter_list = QListWidget(self)
+        self.chapter_list.setObjectName("helpChapterList")
+        splitter.addWidget(self.chapter_list)
+
+        self.browser = QTextBrowser(self)
+        self.browser.setOpenExternalLinks(True)
+        self.browser.setOpenLinks(False)
+        splitter.addWidget(self.browser)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+
+        self.match_status_label = QLabel("Type to search or select a chapter from the index.")
+        self.match_status_label.setProperty("role", "secondary")
+        self.match_status_label.setWordWrap(True)
+        root.addWidget(self.match_status_label)
+
+        self.search_field.textChanged.connect(self._filter_chapters)
+        self.search_field.returnPressed.connect(self.find_next)
+        self.search_prev_button.clicked.connect(self.find_previous)
+        self.search_next_button.clicked.connect(self.find_next)
+        self.open_file_button.clicked.connect(self._open_help_file)
+        self.close_button.clicked.connect(self.close)
+        self.chapter_list.currentItemChanged.connect(self._on_chapter_selection_changed)
+        self.browser.anchorClicked.connect(self._on_anchor_clicked)
+
+        self.refresh_help_source()
+
+    def refresh_help_source(self) -> None:
+        help_path = self.app._ensure_help_file()
+        try:
+            self._help_html = help_path.read_text(encoding="utf-8")
+        except Exception:
+            self._help_html = self.app._help_html()
+        self.browser.setHtml(self._help_html)
+        self._rebuild_chapter_index()
+        self.open_topic(self._current_topic_id or "overview", focus_search=False)
+
+    def _rebuild_chapter_index(self, query: str = "") -> None:
+        needle = (query or "").strip().lower()
+        self.chapter_list.blockSignals(True)
+        self.chapter_list.clear()
+        for chapter in HELP_CHAPTERS:
+            haystack = " ".join((chapter.title, chapter.summary, " ".join(chapter.keywords))).lower()
+            if needle and needle not in haystack:
+                continue
+            item = QListWidgetItem(chapter.title)
+            item.setData(Qt.UserRole, chapter.chapter_id)
+            item.setToolTip(f"{chapter.summary}\n\nKeywords: {', '.join(chapter.keywords)}")
+            self.chapter_list.addItem(item)
+        self.chapter_list.blockSignals(False)
+
+        if self.chapter_list.count():
+            for idx in range(self.chapter_list.count()):
+                item = self.chapter_list.item(idx)
+                if item.data(Qt.UserRole) == self._current_topic_id:
+                    self.chapter_list.setCurrentRow(idx)
+                    break
+            else:
+                self.chapter_list.setCurrentRow(0)
+
+    def _on_chapter_selection_changed(self, current, _previous) -> None:
+        if current is None:
+            return
+        topic_id = str(current.data(Qt.UserRole) or "")
+        if topic_id:
+            self.open_topic(topic_id, focus_search=False)
+
+    def _on_anchor_clicked(self, url: QUrl) -> None:
+        fragment = (url.fragment() or "").strip()
+        if fragment:
+            self.open_topic(fragment, focus_search=False)
+
+    def _move_search_to_start(self) -> None:
+        cursor = self.browser.textCursor()
+        cursor.movePosition(QTextCursor.Start)
+        self.browser.setTextCursor(cursor)
+
+    def _move_search_to_end(self) -> None:
+        cursor = self.browser.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        self.browser.setTextCursor(cursor)
+
+    def _search_document(self, *, backward: bool) -> bool:
+        text = self.search_field.text().strip()
+        if not text:
+            self.match_status_label.setText("Type text into the search field to search within the help file.")
+            return False
+        flags = QTextDocument.FindBackward if backward else None
+        found = self.browser.find(text, flags) if flags is not None else self.browser.find(text)
+        if not found:
+            if backward:
+                self._move_search_to_end()
+            else:
+                self._move_search_to_start()
+            found = self.browser.find(text, flags) if flags is not None else self.browser.find(text)
+        self.match_status_label.setText(
+            f"Searching for: {text}" if found else f"No matches found for: {text}"
+        )
+        return found
+
+    def find_next(self) -> None:
+        self._search_document(backward=False)
+
+    def find_previous(self) -> None:
+        self._search_document(backward=True)
+
+    def _filter_chapters(self, text: str) -> None:
+        self._rebuild_chapter_index(text)
+        if text.strip():
+            self.find_next()
+        else:
+            self.match_status_label.setText("Type to search or select a chapter from the index.")
+
+    def open_topic(self, topic_id: str, *, focus_search: bool = False) -> None:
+        chapter_id = topic_id if topic_id in HELP_CHAPTERS_BY_ID else "overview"
+        self._current_topic_id = chapter_id
+        for idx in range(self.chapter_list.count()):
+            item = self.chapter_list.item(idx)
+            if item.data(Qt.UserRole) == chapter_id:
+                self.chapter_list.blockSignals(True)
+                self.chapter_list.setCurrentRow(idx)
+                self.chapter_list.blockSignals(False)
+                break
+        self.browser.scrollToAnchor(chapter_id)
+        self.match_status_label.setText(HELP_CHAPTERS_BY_ID[chapter_id].summary)
+        if focus_search:
+            self.search_field.setFocus(Qt.OtherFocusReason)
+            self.search_field.selectAll()
+
+    def _open_help_file(self) -> None:
+        self.app._open_local_path(self.app._ensure_help_file(), "Open Help File")
 
 
 # =============================================================================
@@ -1845,6 +2108,10 @@ class _ManageArtistsDialog(QDialog):
         self.catalog_service = parent.catalog_service
 
         v = QVBoxLayout(self)
+        help_row = QHBoxLayout()
+        help_row.addStretch(1)
+        help_row.addWidget(_create_round_help_button(self, "catalog-managers"))
+        v.addLayout(help_row)
         v.addWidget(QLabel("Only artists with 0 references can be deleted."))
 
         self.tbl = QTableWidget(0, 5, self)
@@ -1944,6 +2211,10 @@ class _ManageAlbumsDialog(QDialog):
         self.catalog_service = parent.catalog_service
 
         v = QVBoxLayout(self)
+        help_row = QHBoxLayout()
+        help_row.addStretch(1)
+        help_row.addWidget(_create_round_help_button(self, "catalog-managers"))
+        v.addLayout(help_row)
         v.addWidget(QLabel("Only albums with 0 references can be deleted."))
 
         self.tbl = QTableWidget(0, 3, self)
@@ -2085,6 +2356,10 @@ class LicenseUploadDialog(QDialog):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(16, 16, 16, 16)
         main_layout.setSpacing(12)
+        help_row = QHBoxLayout()
+        help_row.addStretch(1)
+        help_row.addWidget(_create_round_help_button(self, "licenses"))
+        main_layout.addLayout(help_row)
         main_layout.addLayout(form)
         main_layout.addLayout(file_row)
         main_layout.addStretch(1)  # push content up/left
@@ -2187,6 +2462,11 @@ class LicensesBrowserDialog(QDialog):
         self.filter_edit = QLineEdit()
         self.filter_edit.setPlaceholderText("Fuzzy filter…")
         self.filter_edit.textChanged.connect(self._apply_filter)
+        self.filter_row = QHBoxLayout()
+        self.filter_row.setContentsMargins(0, 0, 0, 0)
+        self.filter_row.setSpacing(8)
+        self.filter_row.addWidget(self.filter_edit, 1)
+        self.filter_row.addWidget(_create_round_help_button(self, "licenses"))
 
         # --- actions (single instances, reused in menu + context) ---
         self.act_preview = QAction("Preview (Space)", self)
@@ -2213,7 +2493,7 @@ class LicensesBrowserDialog(QDialog):
         # --- layout ---
         v = QVBoxLayout(self)
         v.setMenuBar(mbar)
-        v.addWidget(self.filter_edit)
+        v.addLayout(self.filter_row)
         v.addWidget(tabs)
 
         # --- init/load ---
@@ -2316,6 +2596,10 @@ class LicensesBrowserDialog(QDialog):
             view.setPageMode(QPdfView.PageMode.SinglePage)
 
             layout = QVBoxLayout(dlg)
+            help_row = QHBoxLayout()
+            help_row.addStretch(1)
+            help_row.addWidget(_create_round_help_button(dlg, "licenses"))
+            layout.addLayout(help_row)
             layout.addWidget(view)
 
             from PySide6.QtCore import QTimer
@@ -2389,6 +2673,10 @@ class LicensesBrowserDialog(QDialog):
         btn_cancel = QPushButton("Cancel")
         btn_cancel.clicked.connect(lambda: d.reject())
         f = QFormLayout(d)
+        help_row = QHBoxLayout()
+        help_row.addStretch(1)
+        help_row.addWidget(_create_round_help_button(d, "licenses"))
+        f.addRow(help_row)
         f.addRow(track_lbl)
         f.addRow("Licensee", lic_combo)
         h = QHBoxLayout()
@@ -2512,6 +2800,8 @@ class LicenseeManagerDialog(QDialog):
         h.addWidget(btn_add)
         h.addWidget(btn_ren)
         h.addWidget(btn_del)
+        h.addStretch(1)
+        h.addWidget(_create_round_help_button(self, "licenses"))
         v = QVBoxLayout(self)
         v.addWidget(self.list)
         v.addLayout(h)
@@ -3255,6 +3545,11 @@ class CatalogManagersDialog(QDialog):
         root.setContentsMargins(18, 18, 18, 18)
         root.setSpacing(14)
 
+        help_row = QHBoxLayout()
+        help_row.addStretch(1)
+        help_row.addWidget(_create_round_help_button(self, "catalog-managers"))
+        root.addLayout(help_row)
+
         title_label = QLabel("Catalog Managers")
         title_label.setObjectName("catalogTitle")
         root.addWidget(title_label)
@@ -3313,6 +3608,9 @@ class App(QMainWindow):
         self.backups_dir.mkdir(parents=True, exist_ok=True)
         self.history_dir = DATA_DIR() / "history"
         self.history_dir.mkdir(parents=True, exist_ok=True)
+        self.help_dir = DATA_DIR() / "help"
+        self.help_dir.mkdir(parents=True, exist_ok=True)
+        self.help_file_path = self.help_dir / "isrc_catalog_manager_help.html"
         self.database_session = DatabaseSessionService()
         self.profile_store = ProfileStoreService(self.database_dir)
         self.profile_workflows = ProfileWorkflowService(self.database_dir, self.profile_store)
@@ -3353,6 +3651,8 @@ class App(QMainWindow):
         self.history_manager = None
         self.session_history_manager = SessionHistoryManager(self.history_dir)
         self.history_dialog = None
+        self.help_dialog = None
+        self._ensure_help_file()
         self.auto_snapshot_timer = QTimer(self)
         self.auto_snapshot_timer.setSingleShot(False)
         self.auto_snapshot_timer.timeout.connect(self._on_auto_snapshot_timer)
@@ -3638,10 +3938,16 @@ class App(QMainWindow):
 
         # Help menu
         help_menu = self.menu_bar.addMenu("Help")
+        self.help_contents_action = self._create_action(
+            "Help Contents…",
+            slot=lambda: self.open_help_dialog(topic_id="overview", parent=self),
+            shortcuts=("F1",),
+        )
+        help_menu.addAction(self.help_contents_action)
+
         self.view_info_action = self._create_action(
             "About ISRC Catalog Manager…",
             slot=self.show_settings_summary,
-            shortcuts=("F1",),
         )
         help_menu.addAction(self.view_info_action)
 
@@ -3702,6 +4008,8 @@ class App(QMainWindow):
         btn_remove = QPushButton("Remove…")
         btn_remove.clicked.connect(self.remove_selected_profile)
         self.toolbar.addWidget(btn_remove)
+        self.toolbar.addSeparator()
+        self.toolbar.addWidget(_create_round_help_button(self, "profiles", "Open help for profiles and databases"))
 
         # ----- Central dock layout -----
         self.setDockNestingEnabled(True)
@@ -3729,6 +4037,10 @@ class App(QMainWindow):
         self.add_data_header_layout.setContentsMargins(0, 0, 0, 0)
         self.add_data_header_layout.setSpacing(4)
 
+        self.add_data_title_row = QHBoxLayout()
+        self.add_data_title_row.setContentsMargins(0, 0, 0, 0)
+        self.add_data_title_row.setSpacing(8)
+
         self.add_data_title = QLabel("Add Track")
         self.add_data_title.setProperty("role", "sectionTitle")
 
@@ -3738,7 +4050,10 @@ class App(QMainWindow):
         self.add_data_subtitle.setWordWrap(True)
         self.add_data_subtitle.setProperty("role", "secondary")
 
-        self.add_data_header_layout.addWidget(self.add_data_title)
+        self.add_data_title_row.addWidget(self.add_data_title)
+        self.add_data_title_row.addStretch(1)
+        self.add_data_title_row.addWidget(_create_round_help_button(self, "add-data", "Open help for the Add Data panel"))
+        self.add_data_header_layout.addLayout(self.add_data_title_row)
         self.add_data_header_layout.addWidget(self.add_data_subtitle)
         self.left_panel.addWidget(self.add_data_header)
 
@@ -3991,6 +4306,7 @@ class App(QMainWindow):
         self.search_layout.addWidget(self.count_label, 1)
         self.search_layout.addWidget(self.duration_label)
         self.search_layout.addWidget(self.search_button)
+        self.search_layout.addWidget(_create_round_help_button(self, "catalog-table", "Open help for the catalog table"))
         right_panel.addLayout(self.search_layout)
 
         self.table = QTableWidget()
@@ -4205,6 +4521,30 @@ class App(QMainWindow):
             except Exception:
                 break
         return "0.1.0"
+
+    def _help_html(self) -> str:
+        return render_help_html("ISRC Catalog Manager", self._app_version_text())
+
+    def _ensure_help_file(self) -> Path:
+        self.help_dir.mkdir(parents=True, exist_ok=True)
+        html_text = self._help_html()
+        try:
+            current_text = self.help_file_path.read_text(encoding="utf-8")
+        except Exception:
+            current_text = None
+        if current_text != html_text:
+            self.help_file_path.write_text(html_text, encoding="utf-8")
+        return self.help_file_path
+
+    def open_help_dialog(self, topic_id: str | None = None, parent=None):
+        self._ensure_help_file()
+        if self.help_dialog is None:
+            self.help_dialog = HelpContentsDialog(self, parent=self)
+        self.help_dialog.refresh_help_source()
+        self.help_dialog.open_topic(topic_id or "overview", focus_search=False)
+        self.help_dialog.show()
+        self.help_dialog.raise_()
+        self.help_dialog.activateWindow()
 
     def _open_local_path(self, path: str | Path, action_label: str = "Open") -> bool:
         target = Path(path)
@@ -5002,16 +5342,28 @@ class App(QMainWindow):
             border-radius: 6px;
             padding: 6px 12px;
         }}
+        QToolButton[role="helpButton"] {{
+            min-width: 28px;
+            max-width: 28px;
+            min-height: 28px;
+            max-height: 28px;
+            border-radius: 14px;
+            padding: 0;
+            font-weight: 700;
+            background-color: {accent};
+            color: {accent_text};
+            border: 1px solid {button_border};
+        }}
         QPushButton:hover, QToolButton:hover {{
             border-color: {accent};
         }}
-        QLineEdit, QPlainTextEdit, QComboBox, QSpinBox, QListWidget, QListView, QTableWidget, QTableView, QCalendarWidget QWidget {{
+        QLineEdit, QPlainTextEdit, QTextBrowser, QComboBox, QSpinBox, QListWidget, QListView, QTableWidget, QTableView, QCalendarWidget QWidget {{
             background-color: {input_bg};
             color: {input_fg};
             selection-background-color: {selection_bg};
             selection-color: {selection_text};
         }}
-        QLineEdit, QPlainTextEdit, QComboBox, QSpinBox, QCalendarWidget, QListWidget, QListView, QTableWidget, QTableView {{
+        QLineEdit, QPlainTextEdit, QTextBrowser, QComboBox, QSpinBox, QCalendarWidget, QListWidget, QListView, QTableWidget, QTableView {{
             border: 1px solid {input_border};
             border-radius: 6px;
             padding: 4px 6px;
@@ -8052,6 +8404,7 @@ class App(QMainWindow):
         zoom_value_lbl = QLabel("")
         zoom_row.addWidget(zoom_slider, 1)
         zoom_row.addWidget(zoom_value_lbl)
+        zoom_row.addWidget(_create_round_help_button(dlg, "media-preview"))
         layout.addLayout(zoom_row)
 
         # Image area
@@ -9120,6 +9473,11 @@ class EditDialog(QDialog):
         main_layout.setContentsMargins(8, 8, 8, 8)
         main_layout.setSpacing(8)
 
+        help_row = QHBoxLayout()
+        help_row.addStretch(1)
+        help_row.addWidget(_create_round_help_button(self, "edit-entry"))
+        main_layout.addLayout(help_row)
+
         self._form_container = QWidget(self)
         form_layout = QVBoxLayout()
         form_layout.setContentsMargins(6, 6, 6, 6)
@@ -9459,6 +9817,11 @@ class _AudioPreviewDialog(QDialog):
 
 
         v = QVBoxLayout(self)
+
+        help_row = QHBoxLayout()
+        help_row.addStretch(1)
+        help_row.addWidget(_create_round_help_button(self, "media-preview"))
+        v.addLayout(help_row)
 
         # --- waveform ---
         self.wave = WaveformWidget(self)

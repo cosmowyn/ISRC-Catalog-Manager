@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
+    QToolButton,
     QVBoxLayout,
 )
 
@@ -66,6 +67,14 @@ class HistoryDialog(QDialog):
             self.close_btn,
         ):
             buttons.addWidget(button)
+        buttons.addStretch(1)
+        self.help_btn = QToolButton(self)
+        self.help_btn.setText("?")
+        self.help_btn.setFixedSize(28, 28)
+        self.help_btn.setProperty("role", "helpButton")
+        self.help_btn.setToolTip("Open help for history and snapshots")
+        self.help_btn.clicked.connect(lambda: self.app.open_help_dialog(topic_id="history", parent=self))
+        buttons.addWidget(self.help_btn)
         layout.addLayout(buttons)
 
         self.refresh_data()
