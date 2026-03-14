@@ -1,0 +1,221 @@
+"""Canonical GS1 models shared across the UI, persistence, and export layers."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+
+
+CANONICAL_GS1_EXPORT_FIELDS = (
+    "gtin_request_number",
+    "status",
+    "product_classification",
+    "consumer_unit_flag",
+    "packaging_type",
+    "target_market",
+    "product_description",
+    "language",
+    "brand",
+    "subbrand",
+    "quantity",
+    "unit",
+    "image_url",
+)
+
+CORE_GS1_TEMPLATE_FIELDS = (
+    "gtin_request_number",
+    "status",
+    "product_classification",
+    "consumer_unit_flag",
+    "packaging_type",
+    "target_market",
+    "product_description",
+    "language",
+    "brand",
+    "quantity",
+    "unit",
+)
+
+REQUIRED_GS1_METADATA_FIELDS = (
+    "status",
+    "product_classification",
+    "packaging_type",
+    "target_market",
+    "product_description",
+    "language",
+    "brand",
+    "quantity",
+    "unit",
+)
+
+
+@dataclass(slots=True)
+class GS1ProfileDefaults:
+    target_market: str = ""
+    language: str = ""
+    brand: str = ""
+    subbrand: str = ""
+    packaging_type: str = ""
+    product_classification: str = ""
+
+
+@dataclass(slots=True)
+class GS1RecordContext:
+    track_id: int
+    track_title: str = ""
+    album_title: str = ""
+    artist_name: str = ""
+    upc: str = ""
+    release_date: str = ""
+    catalog_number: str = ""
+    profile_label: str = ""
+
+    @property
+    def release_title(self) -> str:
+        return (self.album_title or self.track_title or "").strip()
+
+    @property
+    def display_title(self) -> str:
+        title = self.release_title
+        if title:
+            return title
+        return f"Track {self.track_id}"
+
+
+@dataclass(slots=True)
+class GS1MetadataRecord:
+    track_id: int
+    id: int | None = None
+    status: str = "Concept"
+    product_classification: str = ""
+    consumer_unit_flag: bool = True
+    packaging_type: str = ""
+    target_market: str = ""
+    language: str = ""
+    product_description: str = ""
+    brand: str = ""
+    subbrand: str = ""
+    quantity: str = "1"
+    unit: str = ""
+    image_url: str = ""
+    notes: str = ""
+    export_enabled: bool = True
+    created_at: str | None = None
+    updated_at: str | None = None
+
+    def copy(self) -> "GS1MetadataRecord":
+        return GS1MetadataRecord(
+            id=self.id,
+            track_id=self.track_id,
+            status=self.status,
+            product_classification=self.product_classification,
+            consumer_unit_flag=bool(self.consumer_unit_flag),
+            packaging_type=self.packaging_type,
+            target_market=self.target_market,
+            language=self.language,
+            product_description=self.product_description,
+            brand=self.brand,
+            subbrand=self.subbrand,
+            quantity=self.quantity,
+            unit=self.unit,
+            image_url=self.image_url,
+            notes=self.notes,
+            export_enabled=bool(self.export_enabled),
+            created_at=self.created_at,
+            updated_at=self.updated_at,
+        )
+
+
+@dataclass(slots=True)
+class GS1ValidationIssue:
+    field_name: str
+    message: str
+
+
+@dataclass(slots=True)
+class GS1ValidationResult:
+    issues: list[GS1ValidationIssue]
+
+    @property
+    def is_valid(self) -> bool:
+        return not self.issues
+
+    def messages(self) -> list[str]:
+        return [issue.message for issue in self.issues]
+
+
+@dataclass(slots=True)
+class GS1TemplateCandidate:
+    sheet_name: str
+    header_row: int
+    column_map: dict[str, int]
+    matched_headers: dict[str, str]
+    score: float
+    workbook_markers: list[str]
+
+
+@dataclass(slots=True)
+class GS1TemplateProfile:
+    workbook_path: Path
+    sheet_name: str
+    header_row: int
+    column_map: dict[str, int]
+    matched_headers: dict[str, str]
+    score: float
+    workbook_markers: list[str]
+    locale_hint: str = "default"
+    missing_optional_fields: tuple[str, ...] = ()
+
+
+@dataclass(slots=True)
+class GS1PreparedRecord:
+    metadata: GS1MetadataRecord
+    context: GS1RecordContext
+
+
+@dataclass(slots=True)
+class GS1BatchValidationIssue:
+    track_id: int
+    track_label: str
+    messages: list[str]
+
+
+@dataclass(slots=True)
+class GS1ExportResult:
+    output_path: Path
+    exported_count: int
+    sheet_name: str
+    row_numbers: list[int]
+
+
+class GS1Error(Exception):
+    """Base class for GS1 workflow failures."""
+
+
+class GS1DependencyError(GS1Error):
+    """Raised when the optional Excel dependency is unavailable."""
+
+
+class GS1TemplateVerificationError(GS1Error):
+    """Raised when a workbook is missing, unreadable, or not recognized."""
+
+
+class GS1ValidationError(GS1Error):
+    """Raised when one record fails GS1 validation."""
+
+    def __init__(self, result: GS1ValidationResult):
+        self.result = result
+        super().__init__("\n".join(result.messages()) or "GS1 metadata is invalid.")
+
+
+class GS1BatchValidationError(GS1Error):
+    """Raised when one or more records cannot be exported."""
+
+    def __init__(self, issues: list[GS1BatchValidationIssue]):
+        self.issues = issues
+        lines = []
+        for issue in issues:
+            title = issue.track_label or f"Track {issue.track_id}"
+            lines.append(f"{title}: " + "; ".join(issue.messages))
+        super().__init__("\n".join(lines) or "One or more GS1 records are invalid.")
+

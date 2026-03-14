@@ -75,6 +75,7 @@ from isrc_manager.domain.standard_fields import standard_field_spec_for_label, s
 from isrc_manager.domain.timecode import hms_to_seconds, parse_hms_text, seconds_to_hms
 from isrc_manager.help_content import HELP_CHAPTERS, HELP_CHAPTERS_BY_ID, help_topic_title, render_help_html
 from isrc_manager.paths import DATA_DIR
+from isrc_manager.gs1_dialog import GS1MetadataDialog
 from isrc_manager.services import (
     CatalogAdminService,
     CatalogReadService,
@@ -83,6 +84,10 @@ from isrc_manager.services import (
     DatabaseMaintenanceService,
     DatabaseSchemaService,
     DatabaseSessionService,
+    GS1IntegrationService,
+    GS1ProfileDefaults,
+    GS1MetadataRepository,
+    GS1SettingsService,
     XMLExportService,
     XMLImportService,
     LicenseService,
@@ -521,6 +526,13 @@ class ApplicationSettingsDialog(QDialog):
         btw_number: str,
         buma_relatie_nummer: str,
         buma_ipi: str,
+        gs1_template_path: str,
+        gs1_target_market: str,
+        gs1_language: str,
+        gs1_brand: str,
+        gs1_subbrand: str,
+        gs1_packaging_type: str,
+        gs1_product_classification: str,
         theme_settings: dict[str, object] | None,
         stored_themes: dict[str, dict[str, object]] | None,
         current_profile_path: str,
@@ -787,6 +799,117 @@ class ApplicationSettingsDialog(QDialog):
         general_layout.addStretch(1)
         self.tabs.addTab(self._wrap_tab_page(general_page), "General")
 
+        gs1_page = QWidget(self)
+        gs1_layout = QVBoxLayout(gs1_page)
+        gs1_layout.setContentsMargins(10, 10, 10, 10)
+        gs1_layout.setSpacing(14)
+
+        gs1_template_box = QGroupBox("Official Workbook")
+        gs1_template_grid = QGridLayout(gs1_template_box)
+        self._configure_grid(gs1_template_grid)
+
+        self.gs1_template_path_edit = QLineEdit((gs1_template_path or "").strip())
+        self.gs1_template_path_edit.setClearButtonEnabled(True)
+        self.gs1_template_path_edit.setPlaceholderText("Official GS1 workbook path")
+        self.gs1_template_path_edit.setMinimumWidth(420)
+        gs1_browse_btn = QPushButton("Browse…")
+        gs1_browse_btn.setAutoDefault(False)
+        gs1_browse_btn.clicked.connect(self._browse_gs1_template)
+        gs1_clear_btn = QPushButton("Clear")
+        gs1_clear_btn.setAutoDefault(False)
+        gs1_clear_btn.clicked.connect(self.gs1_template_path_edit.clear)
+        gs1_template_widget = QWidget(self)
+        gs1_template_row = QHBoxLayout(gs1_template_widget)
+        gs1_template_row.setContentsMargins(0, 0, 0, 0)
+        gs1_template_row.setSpacing(8)
+        gs1_template_row.addWidget(self.gs1_template_path_edit, 1)
+        gs1_template_row.addWidget(gs1_browse_btn)
+        gs1_template_row.addWidget(gs1_clear_btn)
+        experimental_note = QLabel(
+            "Experimental: the GS1 workflow is available for testing, but it is not yet fully implemented. "
+            "Review exported workbooks before upload."
+        )
+        experimental_note.setWordWrap(True)
+        experimental_note.setProperty("role", "sectionHelp")
+        gs1_layout.addWidget(experimental_note)
+        self._add_row(
+            gs1_template_grid,
+            0,
+            "Template Workbook",
+            gs1_template_widget,
+            "Choose the official Excel workbook from your GS1 portal or regional GS1 environment. "
+            "The app validates this workbook before export. This workflow is still experimental.",
+        )
+        gs1_layout.addWidget(gs1_template_box)
+
+        gs1_defaults_box = QGroupBox("Profile Defaults")
+        gs1_defaults_grid = QGridLayout(gs1_defaults_box)
+        self._configure_grid(gs1_defaults_grid)
+
+        self.gs1_target_market_edit = QLineEdit((gs1_target_market or "").strip())
+        self.gs1_target_market_edit.setClearButtonEnabled(True)
+        self._add_row(
+            gs1_defaults_grid,
+            0,
+            "Target Market",
+            self.gs1_target_market_edit,
+            "Default market or region used for new GS1 records.",
+        )
+
+        self.gs1_language_edit = QLineEdit((gs1_language or "").strip())
+        self.gs1_language_edit.setClearButtonEnabled(True)
+        self._add_row(
+            gs1_defaults_grid,
+            1,
+            "Language",
+            self.gs1_language_edit,
+            "Default language used for new GS1 records.",
+        )
+
+        self.gs1_brand_edit = QLineEdit((gs1_brand or "").strip())
+        self.gs1_brand_edit.setClearButtonEnabled(True)
+        self._add_row(
+            gs1_defaults_grid,
+            2,
+            "Brand",
+            self.gs1_brand_edit,
+            "Default brand for new GS1 records.",
+        )
+
+        self.gs1_subbrand_edit = QLineEdit((gs1_subbrand or "").strip())
+        self.gs1_subbrand_edit.setClearButtonEnabled(True)
+        self._add_row(
+            gs1_defaults_grid,
+            3,
+            "Subbrand",
+            self.gs1_subbrand_edit,
+            "Optional default subbrand for new GS1 records.",
+        )
+
+        self.gs1_packaging_type_edit = QLineEdit((gs1_packaging_type or "").strip())
+        self.gs1_packaging_type_edit.setClearButtonEnabled(True)
+        self._add_row(
+            gs1_defaults_grid,
+            4,
+            "Packaging Type",
+            self.gs1_packaging_type_edit,
+            "Default packaging type used when a new GS1 record is created.",
+        )
+
+        self.gs1_product_classification_edit = QLineEdit((gs1_product_classification or "").strip())
+        self.gs1_product_classification_edit.setClearButtonEnabled(True)
+        self._add_row(
+            gs1_defaults_grid,
+            5,
+            "Product Classification",
+            self.gs1_product_classification_edit,
+            "Default product classification used when a new GS1 record is created.",
+        )
+
+        gs1_layout.addWidget(gs1_defaults_box)
+        gs1_layout.addStretch(1)
+        self.tabs.addTab(self._wrap_tab_page(gs1_page), "GS1 (Experimental)")
+
         theme_page = QWidget(self)
         theme_layout = QVBoxLayout(theme_page)
         theme_layout.setContentsMargins(10, 10, 10, 10)
@@ -944,10 +1067,17 @@ class ApplicationSettingsDialog(QDialog):
             "btw_number": (0, self.btw_number_edit),
             "buma_relatie_nummer": (0, self.buma_relatie_edit),
             "buma_ipi": (0, self.buma_ipi_edit),
-            "theme_font_family": (1, self.theme_font_family_combo),
-            "theme_font_size": (1, self.theme_font_size_spin),
-            "theme_custom_qss": (1, self.theme_custom_qss_edit),
-            "theme_preset": (1, self.theme_preset_combo),
+            "gs1_template_path": (1, self.gs1_template_path_edit),
+            "gs1_target_market": (1, self.gs1_target_market_edit),
+            "gs1_language": (1, self.gs1_language_edit),
+            "gs1_brand": (1, self.gs1_brand_edit),
+            "gs1_subbrand": (1, self.gs1_subbrand_edit),
+            "gs1_packaging_type": (1, self.gs1_packaging_type_edit),
+            "gs1_product_classification": (1, self.gs1_product_classification_edit),
+            "theme_font_family": (2, self.theme_font_family_combo),
+            "theme_font_size": (2, self.theme_font_size_spin),
+            "theme_custom_qss": (2, self.theme_custom_qss_edit),
+            "theme_preset": (2, self.theme_preset_combo),
         }
 
         self._bind_theme_field_change_tracking()
@@ -1200,6 +1330,16 @@ class ApplicationSettingsDialog(QDialog):
         if path:
             self.icon_path_edit.setText(path)
 
+    def _browse_gs1_template(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Choose Official GS1 Workbook",
+            "",
+            "Excel Workbook (*.xlsx *.xlsm *.xltx *.xltm)",
+        )
+        if path:
+            self.gs1_template_path_edit.setText(path)
+
     def focus_field(self, name: str | None):
         target = self._focus_map.get(name or "")
         if target is None:
@@ -1223,6 +1363,13 @@ class ApplicationSettingsDialog(QDialog):
             "btw_number": self.btw_number_edit.text().strip(),
             "buma_relatie_nummer": self.buma_relatie_edit.text().strip(),
             "buma_ipi": self.buma_ipi_edit.text().strip(),
+            "gs1_template_path": self.gs1_template_path_edit.text().strip(),
+            "gs1_target_market": self.gs1_target_market_edit.text().strip(),
+            "gs1_language": self.gs1_language_edit.text().strip(),
+            "gs1_brand": self.gs1_brand_edit.text().strip(),
+            "gs1_subbrand": self.gs1_subbrand_edit.text().strip(),
+            "gs1_packaging_type": self.gs1_packaging_type_edit.text().strip(),
+            "gs1_product_classification": self.gs1_product_classification_edit.text().strip(),
             "theme_settings": theme_values,
             "theme_library": dict(self._stored_themes),
         }
@@ -1237,6 +1384,15 @@ class ApplicationSettingsDialog(QDialog):
             QMessageBox.warning(self, "Invalid Artist Code", "ISRC Artist Code must be exactly two digits (00–99).")
             self.focus_field("artist_code")
             return
+        gs1_template_path = str(values["gs1_template_path"] or "").strip()
+        if gs1_template_path and Path(gs1_template_path).suffix.lower() not in {".xlsx", ".xlsm", ".xltx", ".xltm"}:
+            QMessageBox.warning(
+                self,
+                "Invalid GS1 Workbook",
+                "GS1 Template Workbook must be an Excel file with one of these extensions: .xlsx, .xlsm, .xltx, or .xltm.",
+            )
+            self.focus_field("gs1_template_path")
+            return
         for key, edit in self._theme_color_edits.items():
             color_text = edit.text().strip()
             if color_text and not QColor(color_text).isValid():
@@ -1245,7 +1401,7 @@ class ApplicationSettingsDialog(QDialog):
                     "Invalid Theme Color",
                     f"{key.replace('_', ' ').title()} must be a valid color value like #112233, #abc, or a named Qt color.",
                 )
-                self.tabs.setCurrentIndex(1)
+                self.tabs.setCurrentIndex(2)
                 edit.setFocus(Qt.OtherFocusReason)
                 edit.selectAll()
                 return
@@ -3665,6 +3821,8 @@ class App(QMainWindow):
         self.track_service = None
         self.settings_reads = None
         self.settings_mutations = None
+        self.gs1_settings_service = None
+        self.gs1_integration_service = None
         self.catalog_service = None
         self.catalog_reads = None
         self.license_service = None
@@ -3837,6 +3995,12 @@ class App(QMainWindow):
             shortcuts=("Ctrl+Alt+G", "Meta+Alt+G"),
         )
         catalog_menu.addAction(self.catalog_managers_action)
+        self.gs1_metadata_action = self._create_action(
+            "GS1 Metadata (Experimental)…",
+            slot=self.open_gs1_dialog,
+            shortcuts=("Ctrl+Shift+G", "Meta+Shift+G"),
+        )
+        catalog_menu.addAction(self.gs1_metadata_action)
 
         # Settings menu
         settings_menu = self.menu_bar.addMenu("Settings")
@@ -5056,6 +5220,9 @@ class App(QMainWindow):
         self.settings_mutations = (
             SettingsMutationService(self.conn, self.settings) if self.conn is not None else None
         )
+        self.gs1_settings_service = (
+            GS1SettingsService(self.conn, self.settings) if self.conn is not None else None
+        )
         self.catalog_service = CatalogAdminService(self.conn) if self.conn is not None else None
         self.catalog_reads = CatalogReadService(self.conn) if self.conn is not None else None
         self.license_service = LicenseService(self.conn, DATA_DIR()) if self.conn is not None else None
@@ -5070,6 +5237,15 @@ class App(QMainWindow):
         self.xml_import_service = (
             XMLImportService(self.conn, self.track_service, self.custom_field_definitions)
             if self.conn is not None
+            else None
+        )
+        self.gs1_integration_service = (
+            GS1IntegrationService(
+                GS1MetadataRepository(self.conn),
+                self.gs1_settings_service,
+                self.track_service,
+            )
+            if self.conn is not None and self.gs1_settings_service is not None and self.track_service is not None
             else None
         )
 
@@ -5530,6 +5706,7 @@ class App(QMainWindow):
     def _current_settings_values(self) -> dict[str, object]:
         registration = self.settings_reads.load_registration_settings()
         auto_snapshot_enabled, auto_snapshot_interval_minutes = self._current_auto_snapshot_settings()
+        gs1_defaults = self.gs1_settings_service.load_profile_defaults() if self.gs1_settings_service is not None else None
         return {
             "window_title": self.identity.get("window_title") or DEFAULT_WINDOW_TITLE,
             "icon_path": self.identity.get("icon_path") or "",
@@ -5543,6 +5720,13 @@ class App(QMainWindow):
             "btw_number": registration.btw_number,
             "buma_relatie_nummer": registration.buma_relatie_nummer,
             "buma_ipi": registration.buma_ipi,
+            "gs1_template_path": self.gs1_settings_service.load_template_path() if self.gs1_settings_service is not None else "",
+            "gs1_target_market": gs1_defaults.target_market if gs1_defaults is not None else "",
+            "gs1_language": gs1_defaults.language if gs1_defaults is not None else "",
+            "gs1_brand": gs1_defaults.brand if gs1_defaults is not None else "",
+            "gs1_subbrand": gs1_defaults.subbrand if gs1_defaults is not None else "",
+            "gs1_packaging_type": gs1_defaults.packaging_type if gs1_defaults is not None else "",
+            "gs1_product_classification": gs1_defaults.product_classification if gs1_defaults is not None else "",
         }
 
     def _apply_settings_changes(
@@ -5736,6 +5920,50 @@ class App(QMainWindow):
                         after_value=after_values["buma_ipi"],
                     )
                 changed_count += 1
+
+            if self.gs1_settings_service is not None:
+                before_template_path = str(before_values.get("gs1_template_path") or "").strip()
+                after_template_path = str(after_values.get("gs1_template_path") or "").strip()
+                if after_template_path != before_template_path:
+                    if after_template_path and self.gs1_integration_service is not None:
+                        self.gs1_integration_service.load_template_profile(after_template_path)
+                    self.gs1_settings_service.set_template_path(after_template_path)
+                    self._log_event(
+                        "settings.gs1_template_path",
+                        "GS1 template workbook updated",
+                        template_path=after_template_path,
+                    )
+                    changed_count += 1
+
+                before_gs1_defaults = GS1ProfileDefaults(
+                    target_market=str(before_values.get("gs1_target_market") or "").strip(),
+                    language=str(before_values.get("gs1_language") or "").strip(),
+                    brand=str(before_values.get("gs1_brand") or "").strip(),
+                    subbrand=str(before_values.get("gs1_subbrand") or "").strip(),
+                    packaging_type=str(before_values.get("gs1_packaging_type") or "").strip(),
+                    product_classification=str(before_values.get("gs1_product_classification") or "").strip(),
+                )
+                after_gs1_defaults = GS1ProfileDefaults(
+                    target_market=str(after_values.get("gs1_target_market") or "").strip(),
+                    language=str(after_values.get("gs1_language") or "").strip(),
+                    brand=str(after_values.get("gs1_brand") or "").strip(),
+                    subbrand=str(after_values.get("gs1_subbrand") or "").strip(),
+                    packaging_type=str(after_values.get("gs1_packaging_type") or "").strip(),
+                    product_classification=str(after_values.get("gs1_product_classification") or "").strip(),
+                )
+                if after_gs1_defaults != before_gs1_defaults:
+                    self.gs1_settings_service.set_profile_defaults(after_gs1_defaults)
+                    self._log_event(
+                        "settings.gs1_defaults",
+                        "GS1 profile defaults updated",
+                        target_market=after_gs1_defaults.target_market,
+                        language=after_gs1_defaults.language,
+                        brand=after_gs1_defaults.brand,
+                        subbrand=after_gs1_defaults.subbrand,
+                        packaging_type=after_gs1_defaults.packaging_type,
+                        product_classification=after_gs1_defaults.product_classification,
+                    )
+                    changed_count += 1
         except Exception:
             if self.conn is not None:
                 self.conn.rollback()
@@ -5762,6 +5990,13 @@ class App(QMainWindow):
             btw_number=before_values["btw_number"],
             buma_relatie_nummer=before_values["buma_relatie_nummer"],
             buma_ipi=before_values["buma_ipi"],
+            gs1_template_path=before_values["gs1_template_path"],
+            gs1_target_market=before_values["gs1_target_market"],
+            gs1_language=before_values["gs1_language"],
+            gs1_brand=before_values["gs1_brand"],
+            gs1_subbrand=before_values["gs1_subbrand"],
+            gs1_packaging_type=before_values["gs1_packaging_type"],
+            gs1_product_classification=before_values["gs1_product_classification"],
             theme_settings=before_values["theme_settings"],
             stored_themes=before_values["theme_library"],
             current_profile_path=getattr(self, "current_db_path", ""),
@@ -5999,6 +6234,9 @@ class App(QMainWindow):
         self.history_manager = None
         self.profile_kv = None
         self.settings_reads = None
+        self.settings_mutations = None
+        self.gs1_settings_service = None
+        self.gs1_integration_service = None
 
     # -------------------------------------------------------------------------
     # DB: open/init helpers + MIGRATIONS
@@ -7207,6 +7445,78 @@ class App(QMainWindow):
         dlg.exec()
         self.populate_all_comboboxes()
 
+    def _track_id_for_table_row(self, row_idx: int) -> int | None:
+        row_id_item = self.table.item(int(row_idx), 0)
+        if row_id_item is None:
+            return None
+        text = (row_id_item.text() or "").strip()
+        if not text.isdigit():
+            return None
+        track_id = int(text)
+        if track_id <= 0:
+            return None
+        return track_id
+
+    def _selected_track_ids(self) -> list[int]:
+        track_ids: list[int] = []
+        seen: set[int] = set()
+        sel_model = self.table.selectionModel()
+        selected_rows = sel_model.selectedRows() if sel_model is not None else []
+        if not selected_rows and self.table.currentRow() >= 0:
+            selected_rows = [self.table.model().index(self.table.currentRow(), 0)]
+        for index in selected_rows:
+            row_idx = index.row()
+            track_id = self._track_id_for_table_row(row_idx)
+            if track_id is None or track_id in seen:
+                continue
+            seen.add(track_id)
+            track_ids.append(track_id)
+        return track_ids
+
+    def open_gs1_dialog(self, track_id: int | None = None):
+        if track_id is None:
+            selected_ids = self._selected_track_ids()
+            if not selected_ids:
+                QMessageBox.information(
+                    self,
+                    "GS1 Metadata (Experimental)",
+                    "Select a catalog row first, then open the GS1 metadata dialog.",
+                )
+                return
+            track_id = selected_ids[0]
+            batch_ids = selected_ids
+        else:
+            try:
+                track_id = int(track_id)
+            except (TypeError, ValueError):
+                track_id = 0
+            if track_id <= 0:
+                selected_ids = self._selected_track_ids()
+                if not selected_ids:
+                    QMessageBox.warning(
+                        self,
+                        "GS1 Metadata (Experimental)",
+                        "Could not determine the selected track. Select a catalog row and try again.",
+                    )
+                    return
+                track_id = selected_ids[0]
+            batch_ids = self._selected_track_ids()
+            if track_id not in batch_ids:
+                batch_ids.insert(0, track_id)
+        if int(track_id) <= 0:
+            QMessageBox.warning(
+                self,
+                "GS1 Metadata (Experimental)",
+                "Could not determine the selected track. Select a catalog row and try again.",
+            )
+            return
+        try:
+            dlg = GS1MetadataDialog(app=self, track_id=track_id, batch_track_ids=batch_ids, parent=self)
+        except ValueError as exc:
+            QMessageBox.warning(self, "GS1 Metadata (Experimental)", str(exc))
+            return
+        dlg.exec()
+
     def delete_entry(self):
         current_row = self.table.currentRow()
         if current_row == -1:
@@ -8118,6 +8428,10 @@ class App(QMainWindow):
         act_edit = QAction("Edit Entry", self)
         act_edit.triggered.connect(lambda: self.edit_entry(self.table.item(row, col)))
         menu.addAction(act_edit)
+
+        act_gs1 = QAction("GS1 Metadata (Experimental)…", self)
+        act_gs1.triggered.connect(lambda: self.open_gs1_dialog(self._track_id_for_table_row(row)))
+        menu.addAction(act_gs1)
 
         act_delete = QAction("Delete Entry", self)
         act_delete.triggered.connect(self.delete_entry)
@@ -9640,6 +9954,10 @@ class EditDialog(QDialog):
         main_layout.addWidget(scroll, 1)
 
         btns = QHBoxLayout()
+        gs1_btn = QPushButton("GS1 Metadata (Experimental)…")
+        gs1_btn.setAutoDefault(False)
+        gs1_btn.clicked.connect(lambda: self.parent.open_gs1_dialog(self.track_id))
+        btns.addWidget(gs1_btn)
         btns.addStretch(1)
         save_btn = QPushButton("Save Changes")
         save_btn.setDefault(True)

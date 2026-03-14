@@ -266,6 +266,8 @@ class DatabaseSchemaService:
             "INSERT OR IGNORE INTO HistoryHead (id, current_entry_id) VALUES (1, NULL)"
         )
 
+        self._ensure_gs1_metadata_table()
+
         self.conn.commit()
 
     def get_db_version(self) -> int:
@@ -375,6 +377,9 @@ class DatabaseSchemaService:
             elif version == 13:
                 self._apply_migration(13, self._mig_13_to_14)
                 version = 14
+            elif version == 14:
+                self._apply_migration(14, self._mig_14_to_15)
+                version = 15
             else:
                 self.logger.warning("Unknown migration path from version %s", version)
                 break
@@ -768,6 +773,9 @@ class DatabaseSchemaService:
         self._ensure_current_track_columns()
         self._migrate_promoted_custom_fields()
 
+    def _mig_14_to_15(self) -> None:
+        self._ensure_gs1_metadata_table()
+
     def _ensure_current_track_columns(self) -> None:
         cols = self._table_columns("Tracks")
         additions = (
@@ -793,6 +801,37 @@ class DatabaseSchemaService:
                 self.cursor.execute("UPDATE Tracks SET isrc_compact=? WHERE id=?", (to_compact_isrc(isrc), track_id))
         self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_catalog_number ON Tracks(catalog_number)")
         self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_buma_work_number ON Tracks(buma_work_number)")
+
+    def _ensure_gs1_metadata_table(self) -> None:
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS GS1Metadata (
+                id INTEGER PRIMARY KEY,
+                track_id INTEGER NOT NULL UNIQUE,
+                status TEXT NOT NULL DEFAULT 'Concept',
+                product_classification TEXT,
+                consumer_unit_flag INTEGER NOT NULL DEFAULT 1,
+                packaging_type TEXT,
+                target_market TEXT,
+                language TEXT,
+                product_description TEXT,
+                brand TEXT,
+                subbrand TEXT,
+                quantity TEXT NOT NULL DEFAULT '1',
+                unit TEXT,
+                image_url TEXT,
+                notes TEXT,
+                export_enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (track_id) REFERENCES Tracks(id) ON DELETE CASCADE
+            )
+            """
+        )
+        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_gs1_metadata_track_id ON GS1Metadata(track_id)")
+        self.cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_gs1_metadata_export_enabled ON GS1Metadata(export_enabled)"
+        )
 
     def _migrate_promoted_custom_fields(self) -> None:
         placeholders = ",".join("?" for _ in PROMOTED_CUSTOM_FIELDS)

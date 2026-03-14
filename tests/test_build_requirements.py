@@ -17,8 +17,8 @@ class EnsureRequirementsTests(unittest.TestCase):
         self.assertIn("pyinstaller==6.15.0", contents)
         self.assertIn("audioread==3.0.1", contents)
         self.assertIn("pillow==12.0.0", contents)
+        self.assertIn("openpyxl==3.1.5", contents)
 
 
 if __name__ == "__main__":
     unittest.main()
-

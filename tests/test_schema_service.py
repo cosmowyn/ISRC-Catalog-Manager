@@ -41,6 +41,7 @@ class DatabaseSchemaServiceTests(unittest.TestCase):
         self.assertIn("HistorySnapshots", tables)
         self.assertIn("HistoryHead", tables)
         self.assertIn("Licensees", tables)
+        self.assertIn("GS1Metadata", tables)
         self.assertIn("vw_Licenses", tables)
         self.assertTrue({"blob_value", "mime_type", "size_bytes"} <= value_columns)
         self.assertTrue(
@@ -59,6 +60,12 @@ class DatabaseSchemaServiceTests(unittest.TestCase):
         self.assertIn("idx_tracks_isrc_compact_unique", track_indexes)
         self.assertIn("idx_tracks_catalog_number", track_indexes)
         self.assertIn("idx_tracks_buma_work_number", track_indexes)
+        self.assertIn(
+            "idx_gs1_metadata_export_enabled",
+            {
+                row[1] for row in self.conn.execute("PRAGMA index_list(GS1Metadata)").fetchall()
+            },
+        )
         self.assertIn("trg_auditlog_no_update", triggers)
 
     def test_migrate_12_to_13_promotes_default_custom_fields(self):
