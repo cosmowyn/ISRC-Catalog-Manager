@@ -452,6 +452,7 @@ class DatePickerDialog(QDialog):
 # Consolidated Application Settings Dialog
 # =============================================================================
 class ApplicationSettingsDialog(QDialog):
+    CUSTOM_THEME_LABEL = "Custom Theme"
     COLOR_FIELD_SPECS = (
         ("window_bg", "Window Background", "Base background for the main window, dialogs, menus, and dock areas."),
         ("window_fg", "Window Text", "Primary text color used across labels, menus, and general content."),
@@ -480,6 +481,7 @@ class ApplicationSettingsDialog(QDialog):
         buma_relatie_nummer: str,
         buma_ipi: str,
         theme_settings: dict[str, object] | None,
+        stored_themes: dict[str, dict[str, object]] | None,
         current_profile_path: str,
         parent=None,
     ):
@@ -490,8 +492,14 @@ class ApplicationSettingsDialog(QDialog):
         self.setMinimumSize(1160, 820)
         self.resize(1220, 860)
         self._theme_settings = dict(theme_settings or {})
+        self._stored_themes = {
+            str(name): dict(values or {})
+            for name, values in dict(stored_themes or {}).items()
+            if str(name).strip()
+        }
         self._theme_color_edits = {}
         self._theme_color_swatches = {}
+        self._theme_change_tracking_enabled = True
 
         self.setStyleSheet(
             _compose_widget_stylesheet(
@@ -742,6 +750,38 @@ class ApplicationSettingsDialog(QDialog):
         typography_grid = QGridLayout(typography_box)
         self._configure_grid(typography_grid)
 
+        theme_library_box = QGroupBox("Saved Themes")
+        theme_library_grid = QGridLayout(theme_library_box)
+        self._configure_grid(theme_library_grid)
+
+        self.theme_preset_combo = FocusWheelComboBox(self)
+        self.theme_preset_combo.setMinimumWidth(240)
+        self.theme_preset_combo.setMaximumWidth(340)
+        self.theme_load_button = QPushButton("Load Selected")
+        self.theme_load_button.setAutoDefault(False)
+        self.theme_save_button = QPushButton("Save Theme…")
+        self.theme_save_button.setAutoDefault(False)
+        self.theme_delete_button = QPushButton("Delete Theme")
+        self.theme_delete_button.setAutoDefault(False)
+
+        theme_preset_widget = QWidget(self)
+        theme_preset_row = QHBoxLayout(theme_preset_widget)
+        theme_preset_row.setContentsMargins(0, 0, 0, 0)
+        theme_preset_row.setSpacing(8)
+        theme_preset_row.addWidget(self.theme_preset_combo)
+        theme_preset_row.addWidget(self.theme_load_button)
+        theme_preset_row.addWidget(self.theme_save_button)
+        theme_preset_row.addWidget(self.theme_delete_button)
+        theme_preset_row.addStretch(1)
+        self._add_row(
+            theme_library_grid,
+            0,
+            "Theme Library",
+            theme_preset_widget,
+            "Load a stored theme, save the current styling as a reusable preset, or remove presets you no longer need.",
+        )
+        theme_layout.addWidget(theme_library_box)
+
         self.theme_font_family_combo = FocusWheelFontComboBox(self)
         self.theme_font_family_combo.setMinimumWidth(260)
         self.theme_font_family_combo.setMaximumWidth(360)
@@ -861,7 +901,14 @@ class ApplicationSettingsDialog(QDialog):
             "theme_font_family": (1, self.theme_font_family_combo),
             "theme_font_size": (1, self.theme_font_size_spin),
             "theme_custom_qss": (1, self.theme_custom_qss_edit),
+            "theme_preset": (1, self.theme_preset_combo),
         }
+
+        self._bind_theme_field_change_tracking()
+        self._refresh_theme_preset_combo()
+        initial_selected_theme = str(self._theme_settings.get("selected_name") or "").strip()
+        self._set_theme_preset_selection(initial_selected_theme)
+        self._update_theme_preset_actions()
 
     @staticmethod
     def _configure_grid(grid: QGridLayout):
@@ -938,6 +985,133 @@ class ApplicationSettingsDialog(QDialog):
         self._sync_color_swatch(key)
         return row
 
+    def _bind_theme_field_change_tracking(self) -> None:
+        self.theme_font_family_combo.currentFontChanged.connect(self._mark_theme_selection_custom)
+        self.theme_font_size_spin.valueChanged.connect(self._mark_theme_selection_custom)
+        self.theme_auto_contrast_check.toggled.connect(self._mark_theme_selection_custom)
+        self.theme_custom_qss_edit.textChanged.connect(self._mark_theme_selection_custom)
+        for edit in self._theme_color_edits.values():
+            edit.textChanged.connect(self._mark_theme_selection_custom)
+        self.theme_preset_combo.currentIndexChanged.connect(self._update_theme_preset_actions)
+        self.theme_load_button.clicked.connect(self._load_selected_theme_preset)
+        self.theme_save_button.clicked.connect(self._save_current_theme_preset)
+        self.theme_delete_button.clicked.connect(self._delete_selected_theme_preset)
+
+    def _theme_value_payload(self) -> dict[str, object]:
+        values = {
+            "font_family": self.theme_font_family_combo.currentFont().family().strip(),
+            "font_size": int(self.theme_font_size_spin.value()),
+            "auto_contrast_enabled": self.theme_auto_contrast_check.isChecked(),
+            "custom_qss": self.theme_custom_qss_edit.toPlainText(),
+            "selected_name": self._current_theme_preset_name(),
+        }
+        for key in self._theme_color_edits:
+            values[key] = self._theme_color_edits[key].text().strip()
+        return values
+
+    def _apply_theme_values_to_fields(self, theme_values: dict[str, object], *, selected_name: str = "") -> None:
+        self._theme_change_tracking_enabled = False
+        try:
+            font_family = str(theme_values.get("font_family") or "").strip()
+            if font_family:
+                self.theme_font_family_combo.setCurrentFont(QFont(font_family))
+            self.theme_font_size_spin.setValue(max(8, min(36, int(theme_values.get("font_size") or 10))))
+            self.theme_auto_contrast_check.setChecked(bool(theme_values.get("auto_contrast_enabled", True)))
+            self.theme_custom_qss_edit.setPlainText(str(theme_values.get("custom_qss") or ""))
+            for key, edit in self._theme_color_edits.items():
+                edit.setText(str(theme_values.get(key) or "").strip())
+            self._set_theme_preset_selection(selected_name)
+        finally:
+            self._theme_change_tracking_enabled = True
+        self._update_theme_preset_actions()
+
+    def _refresh_theme_preset_combo(self) -> None:
+        current_name = self._current_theme_preset_name()
+        self.theme_preset_combo.blockSignals(True)
+        self.theme_preset_combo.clear()
+        self.theme_preset_combo.addItem(self.CUSTOM_THEME_LABEL, "")
+        for name in sorted(self._stored_themes):
+            self.theme_preset_combo.addItem(name, name)
+        self.theme_preset_combo.blockSignals(False)
+        self._set_theme_preset_selection(current_name)
+
+    def _set_theme_preset_selection(self, theme_name: str) -> None:
+        clean_name = str(theme_name or "").strip()
+        index = self.theme_preset_combo.findData(clean_name)
+        if index < 0:
+            index = 0
+        self.theme_preset_combo.blockSignals(True)
+        self.theme_preset_combo.setCurrentIndex(index)
+        self.theme_preset_combo.blockSignals(False)
+        self._update_theme_preset_actions()
+
+    def _current_theme_preset_name(self) -> str:
+        return str(self.theme_preset_combo.currentData() or "").strip()
+
+    def _update_theme_preset_actions(self, *_args) -> None:
+        has_named_theme = bool(self._current_theme_preset_name())
+        self.theme_load_button.setEnabled(has_named_theme)
+        self.theme_delete_button.setEnabled(has_named_theme)
+
+    def _mark_theme_selection_custom(self, *_args) -> None:
+        if not self._theme_change_tracking_enabled:
+            return
+        if self._current_theme_preset_name():
+            self._set_theme_preset_selection("")
+
+    def _load_selected_theme_preset(self) -> None:
+        selected_name = self._current_theme_preset_name()
+        if not selected_name:
+            return
+        theme_values = self._stored_themes.get(selected_name)
+        if not theme_values:
+            QMessageBox.warning(self, "Theme Not Found", "The selected theme preset is no longer available.")
+            self._set_theme_preset_selection("")
+            return
+        self._apply_theme_values_to_fields(theme_values, selected_name=selected_name)
+
+    def _save_current_theme_preset(self) -> None:
+        suggested_name = self._current_theme_preset_name() or "My Theme"
+        name, ok = QInputDialog.getText(self, "Save Theme", "Theme name:", text=suggested_name)
+        if not ok:
+            return
+        clean_name = str(name or "").strip()
+        if not clean_name:
+            QMessageBox.warning(self, "Theme Name Required", "Please enter a name for the saved theme.")
+            return
+        if clean_name in self._stored_themes:
+            answer = QMessageBox.question(
+                self,
+                "Overwrite Theme",
+                f"A saved theme named '{clean_name}' already exists.\n\nOverwrite it?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if answer != QMessageBox.Yes:
+                return
+        theme_values = dict(self._theme_value_payload())
+        theme_values["selected_name"] = ""
+        self._stored_themes[clean_name] = theme_values
+        self._refresh_theme_preset_combo()
+        self._set_theme_preset_selection(clean_name)
+
+    def _delete_selected_theme_preset(self) -> None:
+        selected_name = self._current_theme_preset_name()
+        if not selected_name:
+            return
+        answer = QMessageBox.question(
+            self,
+            "Delete Theme",
+            f"Remove the saved theme '{selected_name}'?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        self._stored_themes.pop(selected_name, None)
+        self._refresh_theme_preset_combo()
+        self._set_theme_preset_selection("")
+
     def _sync_color_swatch(self, key: str) -> None:
         edit = self._theme_color_edits[key]
         swatch = self._theme_color_swatches[key]
@@ -991,14 +1165,7 @@ class ApplicationSettingsDialog(QDialog):
             widget.selectAll()
 
     def values(self) -> dict[str, object]:
-        theme_values = {
-            "font_family": self.theme_font_family_combo.currentFont().family().strip(),
-            "font_size": int(self.theme_font_size_spin.value()),
-            "auto_contrast_enabled": self.theme_auto_contrast_check.isChecked(),
-            "custom_qss": self.theme_custom_qss_edit.toPlainText(),
-        }
-        for key in self._theme_color_edits:
-            theme_values[key] = self._theme_color_edits[key].text().strip()
+        theme_values = self._theme_value_payload()
         return {
             "window_title": self.window_title_edit.text().strip() or DEFAULT_WINDOW_TITLE,
             "icon_path": self.icon_path_edit.text().strip(),
@@ -1011,6 +1178,7 @@ class ApplicationSettingsDialog(QDialog):
             "buma_relatie_nummer": self.buma_relatie_edit.text().strip(),
             "buma_ipi": self.buma_ipi_edit.text().strip(),
             "theme_settings": theme_values,
+            "theme_library": dict(self._stored_themes),
         }
 
     def _accept_if_valid(self):
@@ -4603,6 +4771,7 @@ class App(QMainWindow):
             "input_fg": palette.color(QPalette.Text).name().upper(),
             "table_bg": palette.color(QPalette.Base).name().upper(),
             "table_fg": palette.color(QPalette.Text).name().upper(),
+            "selected_name": "",
             "custom_qss": "",
         }
 
@@ -4652,11 +4821,43 @@ class App(QMainWindow):
                     normalized[key] = int(default)
             elif key == "custom_qss":
                 normalized[key] = str(value or "")
+            elif key == "selected_name":
+                normalized[key] = self._normalize_theme_string(value)
             elif key == "font_family":
                 normalized[key] = self._normalize_theme_string(value) or str(default)
             else:
                 normalized[key] = self._normalize_theme_color(value)
         return normalized
+
+    def _stored_theme_payload(self, values: dict[str, object] | None) -> dict[str, object]:
+        payload = self._normalize_theme_settings(values)
+        payload["selected_name"] = ""
+        return payload
+
+    def _sanitize_theme_library(self, library: dict[str, object] | None) -> dict[str, dict[str, object]]:
+        sanitized: dict[str, dict[str, object]] = {}
+        for raw_name, raw_values in dict(library or {}).items():
+            name = str(raw_name or "").strip()
+            if not name:
+                continue
+            sanitized[name] = self._stored_theme_payload(dict(raw_values or {}))
+        return sanitized
+
+    def _load_theme_library(self) -> dict[str, dict[str, object]]:
+        raw_value = self.settings.value("theme/library_json", "{}", str)
+        try:
+            parsed = json.loads(raw_value or "{}")
+        except Exception:
+            parsed = {}
+        if not isinstance(parsed, dict):
+            parsed = {}
+        return self._sanitize_theme_library(parsed)
+
+    def _save_theme_library(self, library: dict[str, object] | None) -> dict[str, dict[str, object]]:
+        sanitized = self._sanitize_theme_library(library)
+        self.settings.setValue("theme/library_json", json.dumps(sanitized, sort_keys=True))
+        self.settings.sync()
+        return sanitized
 
     @staticmethod
     def _color_relative_luminance(color_value: str) -> float:
@@ -4981,6 +5182,7 @@ class App(QMainWindow):
             "window_title": self.identity.get("window_title") or DEFAULT_WINDOW_TITLE,
             "icon_path": self.identity.get("icon_path") or "",
             "theme_settings": dict(self.theme_settings or self._load_theme_settings()),
+            "theme_library": self._load_theme_library(),
             "artist_code": self.load_artist_code(),
             "auto_snapshot_enabled": auto_snapshot_enabled,
             "auto_snapshot_interval_minutes": auto_snapshot_interval_minutes,
@@ -5027,8 +5229,29 @@ class App(QMainWindow):
                     )
                 changed_count += 1
 
+            before_theme_library = self._sanitize_theme_library(before_values.get("theme_library"))
+            after_theme_library = self._sanitize_theme_library(after_values.get("theme_library"))
+            if after_theme_library != before_theme_library:
+                self._save_theme_library(after_theme_library)
+                self.logger.info("Theme library updated")
+                self._log_event(
+                    "settings.theme_library",
+                    "Theme library updated",
+                    stored_themes=len(after_theme_library),
+                )
+                if self.history_manager is not None:
+                    self.history_manager.record_setting_change(
+                        key="theme_library",
+                        label="Update Saved Themes",
+                        before_value=before_theme_library,
+                        after_value=after_theme_library,
+                    )
+                changed_count += 1
+
             before_theme = self._normalize_theme_settings(before_values.get("theme_settings"))
             after_theme = self._normalize_theme_settings(after_values.get("theme_settings"))
+            if after_theme.get("selected_name") and after_theme["selected_name"] not in after_theme_library:
+                after_theme["selected_name"] = ""
             if after_theme != before_theme:
                 self._save_theme_settings(after_theme)
                 self._apply_theme()
@@ -5188,6 +5411,7 @@ class App(QMainWindow):
             buma_relatie_nummer=before_values["buma_relatie_nummer"],
             buma_ipi=before_values["buma_ipi"],
             theme_settings=before_values["theme_settings"],
+            stored_themes=before_values["theme_library"],
             current_profile_path=getattr(self, "current_db_path", ""),
             parent=self,
         )

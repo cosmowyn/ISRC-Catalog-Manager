@@ -834,10 +834,14 @@ class HistoryManager:
                 "input_fg",
                 "table_bg",
                 "table_fg",
+                "selected_name",
                 "custom_qss",
             )
             for theme_key in theme_keys:
                 self.settings.setValue(f"theme/{theme_key}", value.get(theme_key))
+            self.settings.sync()
+        elif key == "theme_library":
+            self.settings.setValue("theme/library_json", json.dumps(value or {}, sort_keys=True))
             self.settings.sync()
         elif key == "isrc_prefix":
             self.settings_mutations.set_isrc_prefix(str(value))
