@@ -1,8 +1,9 @@
 import unittest
 
 from PySide6.QtCore import QCoreApplication, QEventLoop, QTimer
+from PySide6.QtWidgets import QApplication, QListView
 
-from isrc_manager.quality.dialogs import _QualityScanThread
+from isrc_manager.quality.dialogs import _QualityScanThread, _create_filter_combo
 from isrc_manager.quality.models import QualityIssue, QualityScanResult
 
 
@@ -42,6 +43,18 @@ class QualityDialogThreadTests(unittest.TestCase):
         self.assertNotIn("failed", captured)
         self.assertIn("result", captured)
         self.assertEqual(captured["result"].issues[0].issue_type, "missing_isrc")
+
+
+class QualityDialogFilterComboTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
+    def test_filter_combo_uses_qt_list_popup(self):
+        combo = _create_filter_combo(minimum_contents_length=12)
+        self.assertIsInstance(combo.view(), QListView)
+        self.assertEqual(combo.minimumContentsLength(), 12)
+        self.assertEqual(combo.maxVisibleItems(), 18)
 
 
 if __name__ == "__main__":

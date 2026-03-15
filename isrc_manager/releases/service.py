@@ -36,6 +36,48 @@ class ReleaseService:
             return "other"
         return clean
 
+    @staticmethod
+    def _normalize_release_identity_text(value: str | None) -> str:
+        return " ".join(str(value or "").split()).casefold()
+
+    @staticmethod
+    def _normalize_track_placements(
+        placements: Iterable[ReleaseTrackPlacement],
+    ) -> list[ReleaseTrackPlacement]:
+        clean_placements: list[ReleaseTrackPlacement] = []
+        seen_track_ids: set[int] = set()
+        used_disc_track_slots: set[tuple[int, int]] = set()
+        max_track_number_by_disc: dict[int, int] = {}
+
+        for sequence_number, placement in enumerate(placements, start=1):
+            track_id = int(placement.track_id)
+            if track_id <= 0 or track_id in seen_track_ids:
+                continue
+            seen_track_ids.add(track_id)
+
+            disc_number = max(1, int(placement.disc_number or 1))
+            track_number = max(1, int(placement.track_number or sequence_number))
+            slot = (disc_number, track_number)
+            if slot in used_disc_track_slots:
+                track_number = max(track_number, max_track_number_by_disc.get(disc_number, 0) + 1)
+                while (disc_number, track_number) in used_disc_track_slots:
+                    track_number += 1
+
+            used_disc_track_slots.add((disc_number, track_number))
+            max_track_number_by_disc[disc_number] = max(
+                max_track_number_by_disc.get(disc_number, 0),
+                track_number,
+            )
+            clean_placements.append(
+                ReleaseTrackPlacement(
+                    track_id=track_id,
+                    disc_number=disc_number,
+                    track_number=track_number,
+                    sequence_number=sequence_number,
+                )
+            )
+        return clean_placements
+
     def _write_artwork_file(self, source_path: str | Path) -> tuple[str, str, int]:
         source = Path(source_path)
         if not source.exists():
@@ -141,9 +183,15 @@ class ReleaseService:
             if release_id is not None:
                 sql += " AND id != ?"
                 params.append(int(release_id))
-            sql += " ORDER BY id LIMIT 1"
-            duplicate = cur.execute(sql, params).fetchone()
-            if duplicate:
+            sql += " ORDER BY id"
+            duplicates = cur.execute(sql, params).fetchall()
+            duplicate = duplicates[0] if duplicates else None
+            normalized_title = self._normalize_release_identity_text(payload.title)
+            has_conflicting_duplicate = any(
+                self._normalize_release_identity_text(row[1]) != normalized_title
+                for row in duplicates
+            )
+            if duplicate and has_conflicting_duplicate:
                 issues.append(
                     ReleaseValidationIssue(
                         "warning",
@@ -415,21 +463,7 @@ class ReleaseService:
         cursor: sqlite3.Cursor | None = None,
     ) -> None:
         cur = cursor or self.conn.cursor()
-        clean_placements: list[ReleaseTrackPlacement] = []
-        seen_track_ids: set[int] = set()
-        for sequence_number, placement in enumerate(placements, start=1):
-            track_id = int(placement.track_id)
-            if track_id <= 0 or track_id in seen_track_ids:
-                continue
-            seen_track_ids.add(track_id)
-            clean_placements.append(
-                ReleaseTrackPlacement(
-                    track_id=track_id,
-                    disc_number=max(1, int(placement.disc_number or 1)),
-                    track_number=max(1, int(placement.track_number or sequence_number)),
-                    sequence_number=max(1, int(placement.sequence_number or sequence_number)),
-                )
-            )
+        clean_placements = self._normalize_track_placements(placements)
 
         cur.execute("DELETE FROM ReleaseTracks WHERE release_id=?", (int(release_id),))
         for placement in clean_placements:

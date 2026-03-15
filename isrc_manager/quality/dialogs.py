@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QListView,
     QMessageBox,
     QPushButton,
     QPlainTextEdit,
@@ -37,6 +38,19 @@ class _QualityScanThread(QThread):
             self.finished_result.emit(self.scan_callback())
         except Exception as exc:  # pragma: no cover - defensive UI path
             self.failed.emit(str(exc))
+
+
+def _create_filter_combo(parent=None, *, minimum_contents_length: int = 14) -> QComboBox:
+    combo = QComboBox(parent)
+    combo.setView(QListView(combo))
+    combo.setMinimumContentsLength(max(8, int(minimum_contents_length)))
+    combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+    combo.setMaxVisibleItems(18)
+    popup = combo.view()
+    if isinstance(popup, QListView):
+        popup.setUniformItemSizes(True)
+        popup.setSpacing(0)
+    return combo
 
 
 class QualityDashboardDialog(QDialog):
@@ -90,20 +104,20 @@ class QualityDashboardDialog(QDialog):
         filter_row = QHBoxLayout()
         filter_row.setContentsMargins(0, 0, 0, 0)
         filter_row.setSpacing(8)
-        self.severity_combo = QComboBox()
+        self.severity_combo = _create_filter_combo(self, minimum_contents_length=13)
         self.severity_combo.addItems(["All severities", "error", "warning", "info"])
         self.severity_combo.currentIndexChanged.connect(self._populate_issue_table)
         filter_row.addWidget(self.severity_combo)
-        self.issue_type_combo = QComboBox()
+        self.issue_type_combo = _create_filter_combo(self, minimum_contents_length=15)
         self.issue_type_combo.addItem("All issue types", "")
         self.issue_type_combo.currentIndexChanged.connect(self._populate_issue_table)
         filter_row.addWidget(self.issue_type_combo)
-        self.entity_combo = QComboBox()
+        self.entity_combo = _create_filter_combo(self, minimum_contents_length=11)
         self.entity_combo.addItem("All entities", "")
         self.entity_combo.addItems(["track", "release", "license"])
         self.entity_combo.currentIndexChanged.connect(self._populate_issue_table)
         filter_row.addWidget(self.entity_combo)
-        self.release_combo = QComboBox()
+        self.release_combo = _create_filter_combo(self, minimum_contents_length=13)
         self.release_combo.addItem("All releases", 0)
         self.release_combo.currentIndexChanged.connect(self._populate_issue_table)
         filter_row.addWidget(self.release_combo)

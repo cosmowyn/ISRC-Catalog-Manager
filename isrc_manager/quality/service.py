@@ -48,6 +48,10 @@ class QualityDashboardService:
             counts_by_type=dict(counts_by_type),
         )
 
+    @staticmethod
+    def _normalize_release_identity_text(value: str | None) -> str:
+        return " ".join(str(value or "").split()).casefold()
+
     def _track_metadata_issues(self) -> list[QualityIssue]:
         issues: list[QualityIssue] = []
         rows = self.conn.execute(
@@ -326,21 +330,41 @@ class QualityDashboardService:
 
         duplicate_upc_rows = self.conn.execute(
             """
-            SELECT upc, GROUP_CONCAT(id, ',')
+            SELECT
+                upc,
+                GROUP_CONCAT(id, ','),
+                GROUP_CONCAT(COALESCE(title, ''), char(31))
             FROM Releases
             WHERE upc IS NOT NULL AND trim(upc) != ''
             GROUP BY upc
             HAVING COUNT(*) > 1
             """
         ).fetchall()
-        for upc, ids in duplicate_upc_rows:
-            for release_id in [int(value) for value in str(ids or "").split(",") if value]:
+        for upc, ids, titles in duplicate_upc_rows:
+            release_ids = [int(value) for value in str(ids or "").split(",") if value]
+            release_titles = str(titles or "").split(chr(31))
+            normalized_titles = {
+                self._normalize_release_identity_text(title)
+                for title in release_titles
+                if self._normalize_release_identity_text(title)
+            }
+            shared_release_family = len(normalized_titles) == 1 and bool(normalized_titles)
+            issue_type = "shared_release_upc" if shared_release_family else "duplicate_release_upc"
+            severity = "info" if shared_release_family else "error"
+            issue_title = "Shared Release UPC/EAN" if shared_release_family else "Duplicate Release UPC/EAN"
+            details = (
+                f"UPC/EAN {upc} is shared across multiple release rows for the same titled release. "
+                "This is often intentional for remix packages, compilations, or other multi-artist editions."
+                if shared_release_family
+                else f"UPC/EAN {upc} is used by multiple releases."
+            )
+            for release_id in release_ids:
                 issues.append(
                     QualityIssue(
-                        "duplicate_release_upc",
-                        "error",
-                        "Duplicate Release UPC/EAN",
-                        f"UPC/EAN {upc} is used by multiple releases.",
+                        issue_type,
+                        severity,
+                        issue_title,
+                        details,
                         "release",
                         release_id,
                         release_id=release_id,

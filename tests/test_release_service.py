@@ -86,6 +86,27 @@ class ReleaseServiceTests(unittest.TestCase):
         placements = self.release_service.list_release_tracks(release_id)
         self.assertEqual([placement.track_number for placement in placements], [1, 2, 3])
 
+    def test_replace_release_tracks_renumbers_conflicting_disc_track_positions(self):
+        track_a = self._create_track(isrc="NL-ABC-26-00021", title="Track A", album="Release Album")
+        track_b = self._create_track(isrc="NL-ABC-26-00022", title="Track B", album="Release Album")
+
+        release_id = self.release_service.create_release(
+            ReleasePayload(
+                title="Release Album",
+                primary_artist="Release Artist",
+                placements=[
+                    ReleaseTrackPlacement(track_id=track_a, disc_number=1, track_number=1, sequence_number=1),
+                    ReleaseTrackPlacement(track_id=track_b, disc_number=1, track_number=1, sequence_number=2),
+                ],
+            )
+        )
+
+        placements = self.release_service.list_release_tracks(release_id)
+        self.assertEqual([placement.track_id for placement in placements], [track_a, track_b])
+        self.assertEqual([placement.disc_number for placement in placements], [1, 1])
+        self.assertEqual([placement.track_number for placement in placements], [1, 2])
+        self.assertEqual([placement.sequence_number for placement in placements], [1, 2])
+
     def test_duplicate_upc_is_reported_as_warning_and_save_still_possible(self):
         first_release = self.release_service.create_release(
             ReleasePayload(
@@ -114,6 +135,25 @@ class ReleaseServiceTests(unittest.TestCase):
             )
         )
         self.assertGreater(second_release, 0)
+
+    def test_same_title_duplicate_upc_is_not_reported_as_warning(self):
+        self.release_service.create_release(
+            ReleasePayload(
+                title="Remix Package",
+                primary_artist="Artist One",
+                upc="036000291452",
+            )
+        )
+
+        issues = self.release_service.validate_release(
+            ReleasePayload(
+                title="Remix Package",
+                primary_artist="Artist Two",
+                upc="036000291452",
+            )
+        )
+
+        self.assertFalse(any(issue.field_name == "upc" and issue.severity == "warning" for issue in issues))
 
     def test_schema_migration_allows_duplicate_upc_across_inferred_releases(self):
         conn = sqlite3.connect(":memory:")

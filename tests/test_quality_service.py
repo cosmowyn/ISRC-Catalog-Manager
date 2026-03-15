@@ -157,6 +157,51 @@ class QualityDashboardServiceTests(unittest.TestCase):
         self.assertEqual(row[2], "CAT-777")
         self.assertIsNotNone(row[3])
 
+    def test_same_title_duplicate_upc_is_reported_as_info_not_error(self):
+        self.release_service.create_release(
+            ReleasePayload(
+                title="Journeys Beyond the Finite",
+                primary_artist="Artist One",
+                upc="8720892724625",
+            )
+        )
+        self.release_service.create_release(
+            ReleasePayload(
+                title="Journeys Beyond the Finite",
+                primary_artist="Artist Two",
+                upc="8720892724625",
+            )
+        )
+
+        result = self.service.scan()
+        shared_upc_issues = [issue for issue in result.issues if issue.issue_type == "shared_release_upc"]
+
+        self.assertEqual(len(shared_upc_issues), 2)
+        self.assertTrue(all(issue.severity == "info" for issue in shared_upc_issues))
+        self.assertFalse(any(issue.issue_type == "duplicate_release_upc" for issue in result.issues))
+
+    def test_different_title_duplicate_upc_remains_error(self):
+        self.release_service.create_release(
+            ReleasePayload(
+                title="Release One",
+                primary_artist="Artist One",
+                upc="8720892724625",
+            )
+        )
+        self.release_service.create_release(
+            ReleasePayload(
+                title="Release Two",
+                primary_artist="Artist Two",
+                upc="8720892724625",
+            )
+        )
+
+        result = self.service.scan()
+        duplicate_upc_issues = [issue for issue in result.issues if issue.issue_type == "duplicate_release_upc"]
+
+        self.assertEqual(len(duplicate_upc_issues), 2)
+        self.assertTrue(all(issue.severity == "error" for issue in duplicate_upc_issues))
+
 
 if __name__ == "__main__":
     unittest.main()

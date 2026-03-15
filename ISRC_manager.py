@@ -92,6 +92,7 @@ from isrc_manager.quality.service import QualityDashboardService
 from isrc_manager.releases import ReleasePayload, ReleaseRecord, ReleaseService, ReleaseTrackPlacement
 from isrc_manager.releases.dialogs import ReleaseBrowserDialog, ReleaseEditorDialog
 from isrc_manager.services.bulk_edit import MIXED_VALUE, shared_bulk_value, should_apply_bulk_change
+from isrc_manager.services.sqlite_utils import safe_wal_checkpoint
 from isrc_manager.services import (
     CatalogAdminService,
     CatalogReadService,
@@ -9463,7 +9464,12 @@ class App(QMainWindow):
     ) -> list[int]:
         if self.release_service is None:
             return []
-        cur = cursor or self.conn.cursor()
+        if cursor is None:
+            with self.conn:
+                cur = self.conn.cursor()
+                return self._sync_releases_for_tracks(track_ids, cursor=cur)
+
+        cur = cursor
         created_or_updated: list[int] = []
         processed_group_keys: set[tuple[int, ...]] = set()
 
@@ -13375,7 +13381,7 @@ class AlbumEntryDialog(QDialog):
             except Exception as audit_err:
                 self.app.logger.warning(f"Album create audit failed: {audit_err}")
 
-            self.app.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            safe_wal_checkpoint(self.app.conn, logger=self.app.logger)
             return list(created_track_ids)
 
         try:
@@ -14187,7 +14193,7 @@ class EditDialog(QDialog):
                         )
                         parent._sync_releases_for_tracks([row_id, *propagated_track_ids], cursor=cur)
 
-                    parent.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                    safe_wal_checkpoint(parent.conn, logger=parent.logger)
                     try:
                         parent._log_event(
                             "track.update",
@@ -14240,7 +14246,7 @@ class EditDialog(QDialog):
                     parent.track_service.update_track(source_payload, cursor=cur)
                     parent._sync_releases_for_tracks([row_id], cursor=cur)
 
-                parent.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                safe_wal_checkpoint(parent.conn, logger=parent.logger)
                 try:
                     parent._log_event(
                         "track.update",
@@ -14388,7 +14394,7 @@ class EditDialog(QDialog):
                 )
             parent._sync_releases_for_tracks(self.batch_track_ids)
 
-            parent.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            safe_wal_checkpoint(parent.conn, logger=parent.logger)
             try:
                 parent._log_event(
                     "track.bulk_update",
