@@ -10248,12 +10248,29 @@ class App(QMainWindow):
             return
         dlg = QualityDashboardDialog(
             service=self.quality_service,
+            scan_callback=self._scan_quality_dashboard_in_background,
             release_choices_provider=self._release_choices,
             apply_fix_callback=self._apply_quality_fix,
             open_issue_callback=self._open_issue_from_dashboard,
             parent=self,
         )
         dlg.exec()
+
+    def _scan_quality_dashboard_in_background(self):
+        db_path = str(getattr(self, "current_db_path", "") or "").strip()
+        if not db_path:
+            raise ValueError("Open a profile first.")
+        session = DatabaseSessionService().open(db_path)
+        try:
+            quality_service = QualityDashboardService(
+                session.conn,
+                track_service=TrackService(session.conn, DATA_DIR()),
+                release_service=ReleaseService(session.conn, DATA_DIR()),
+                data_root=DATA_DIR(),
+            )
+            return quality_service.scan()
+        finally:
+            DatabaseSessionService.close(session.conn)
 
     def _apply_quality_fix(self, fix_key: str) -> str:
         def mutation():

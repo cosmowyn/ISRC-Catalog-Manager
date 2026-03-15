@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -28,13 +28,13 @@ class _QualityScanThread(QThread):
     finished_result = Signal(object)
     failed = Signal(str)
 
-    def __init__(self, service):
+    def __init__(self, scan_callback):
         super().__init__()
-        self.service = service
+        self.scan_callback = scan_callback
 
     def run(self) -> None:
         try:
-            self.finished_result.emit(self.service.scan())
+            self.finished_result.emit(self.scan_callback())
         except Exception as exc:  # pragma: no cover - defensive UI path
             self.failed.emit(str(exc))
 
@@ -46,6 +46,7 @@ class QualityDashboardDialog(QDialog):
         self,
         *,
         service,
+        scan_callback=None,
         release_choices_provider,
         apply_fix_callback,
         open_issue_callback,
@@ -53,6 +54,7 @@ class QualityDashboardDialog(QDialog):
     ):
         super().__init__(parent)
         self.service = service
+        self.scan_callback = scan_callback or service.scan
         self.release_choices_provider = release_choices_provider
         self.apply_fix_callback = apply_fix_callback
         self.open_issue_callback = open_issue_callback
@@ -157,7 +159,7 @@ class QualityDashboardDialog(QDialog):
         self.refresh_button.setEnabled(False)
         self.details.setPlainText("Scanning the current profile...")
         self.issue_table.setRowCount(0)
-        self._scan_thread = _QualityScanThread(self.service)
+        self._scan_thread = _QualityScanThread(self.scan_callback)
         self._scan_thread.finished_result.connect(self._finish_scan)
         self._scan_thread.failed.connect(self._fail_scan)
         self._scan_thread.finished.connect(lambda: self.refresh_button.setEnabled(True))
