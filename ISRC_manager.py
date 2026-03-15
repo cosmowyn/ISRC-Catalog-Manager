@@ -1034,10 +1034,10 @@ class ApplicationSettingsDialog(QDialog):
 
         profile_box = QGroupBox("Current Profile")
         profile_grid = QGridLayout(profile_box)
-        profile_grid.setColumnMinimumWidth(0, 180)
+        profile_grid.setColumnMinimumWidth(0, 0)
         profile_grid.setColumnStretch(1, 1)
-        profile_grid.setHorizontalSpacing(12)
-        profile_grid.setVerticalSpacing(10)
+        profile_grid.setHorizontalSpacing(10)
+        profile_grid.setVerticalSpacing(8)
 
         profile_name = Path(current_profile_path).name if current_profile_path else "(not connected)"
         profile_name_lbl = QLabel(profile_name)
@@ -1559,18 +1559,23 @@ class ApplicationSettingsDialog(QDialog):
 
     @staticmethod
     def _configure_grid(grid: QGridLayout):
-        grid.setColumnMinimumWidth(0, 250)
-        grid.setColumnMinimumWidth(1, 360)
-        grid.setColumnStretch(1, 1)
-        grid.setColumnMinimumWidth(2, 280)
+        grid.setColumnMinimumWidth(0, 0)
+        grid.setColumnMinimumWidth(1, 300)
+        grid.setColumnStretch(1, 2)
+        grid.setColumnMinimumWidth(2, 240)
         grid.setColumnStretch(2, 1)
-        grid.setHorizontalSpacing(16)
-        grid.setVerticalSpacing(12)
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(10)
 
     @staticmethod
     def _make_label(text: str) -> QLabel:
         label = QLabel(text)
-        label.setMinimumWidth(250)
+        label.setWordWrap(True)
+        padding = label.fontMetrics().horizontalAdvance("  ")
+        min_width = label.fontMetrics().horizontalAdvance("M" * 10)
+        max_width = label.fontMetrics().horizontalAdvance("M" * 18)
+        label_width = max(min_width, min(max_width, label.sizeHint().width() + padding))
+        label.setFixedWidth(label_width)
         label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         return label
 
