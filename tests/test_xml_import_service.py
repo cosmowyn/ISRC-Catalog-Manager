@@ -165,6 +165,34 @@ class XMLImportServiceTests(unittest.TestCase):
         inspection = self.service.inspect_file(file_path)
 
         self.assertEqual(inspection.missing_custom_fields, [("Energy", "text")])
+        self.assertEqual(inspection.conflicting_custom_fields, [])
+
+    def test_inspect_reports_conflicting_custom_field_types(self):
+        file_path = self._write_xml(
+            "conflicting-fields.xml",
+            """
+            <ISRCExport>
+              <Tracks>
+                <Track>
+                  <ISRC>NL-ABC-26-00002</ISRC>
+                  <Title>New Song</Title>
+                  <MainArtist>New Artist</MainArtist>
+                  <TrackLength>00:03:15</TrackLength>
+                  <CustomFields>
+                    <Field name="Mood" type="text">
+                      <Value>High</Value>
+                    </Field>
+                  </CustomFields>
+                </Track>
+              </Tracks>
+            </ISRCExport>
+            """,
+        )
+
+        inspection = self.service.inspect_file(file_path)
+
+        self.assertEqual(inspection.missing_custom_fields, [])
+        self.assertEqual(inspection.conflicting_custom_fields, [("Mood", "text", "dropdown")])
 
     def test_execute_import_inserts_tracks_artists_and_custom_values(self):
         file_path = self._write_xml(
@@ -255,6 +283,47 @@ class XMLImportServiceTests(unittest.TestCase):
         )
         self.assertEqual([name for (name,) in extras], ["Guest One", "Guest Two"])
         self.assertEqual(custom, ("Calm",))
+
+    def test_execute_import_can_create_missing_custom_fields(self):
+        file_path = self._write_xml(
+            "create-fields.xml",
+            """
+            <ISRCExport>
+              <Tracks>
+                <Track>
+                  <ISRC>NL-ABC-26-00003</ISRC>
+                  <Title>Created Field Song</Title>
+                  <MainArtist>New Artist</MainArtist>
+                  <TrackLength>00:03:15</TrackLength>
+                  <CustomFields>
+                    <Field name="Energy" type="dropdown">
+                      <Value>High</Value>
+                    </Field>
+                  </CustomFields>
+                </Track>
+              </Tracks>
+            </ISRCExport>
+            """,
+        )
+
+        result = self.service.execute_import(file_path, create_missing_custom_fields=True)
+
+        self.assertEqual((result.inserted, result.duplicate_count, result.invalid_count, result.error_count), (1, 0, 0, 0))
+        field_row = self.conn.execute(
+            "SELECT field_type, options FROM CustomFieldDefs WHERE name='Energy'"
+        ).fetchone()
+        custom_row = self.conn.execute(
+            """
+            SELECT cfv.value
+            FROM CustomFieldValues cfv
+            JOIN Tracks t ON t.id = cfv.track_id
+            JOIN CustomFieldDefs cfd ON cfd.id = cfv.field_def_id
+            WHERE t.isrc_compact='NLABC2600003' AND cfd.name='Energy'
+            """
+        ).fetchone()
+
+        self.assertEqual(field_row, ("dropdown", '["High"]'))
+        self.assertEqual(custom_row, ("High",))
 
 
 if __name__ == "__main__":

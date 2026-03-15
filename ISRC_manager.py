@@ -8475,6 +8475,7 @@ class App(QMainWindow):
                 return
 
             before_snapshot = None
+            create_missing_custom_fields = False
 
             dry = QMessageBox.question(
                 self, "Dry Run?",
@@ -8488,22 +8489,50 @@ class App(QMainWindow):
                 QMessageBox.critical(self, "Import Error", str(e))
                 return
 
-            if inspection.missing_custom_fields:
-                msg = "Missing custom columns (name : type):\n" + "\n".join(
-                    f"- {name} : {field_type}" for name, field_type in inspection.missing_custom_fields
+            if inspection.conflicting_custom_fields:
+                msg = "Custom columns already exist with a different type:\n" + "\n".join(
+                    f"- {name} : XML={import_type}, profile={existing_type}"
+                    for name, import_type, existing_type in inspection.conflicting_custom_fields
                 )
                 self.logger.warning(
-                    "Import aborted due to missing custom columns: %s",
-                    inspection.missing_custom_fields,
+                    "Import aborted due to custom column type conflicts: %s",
+                    inspection.conflicting_custom_fields,
                 )
                 self._log_trace(
-                    "import.xml.missing_custom_fields",
-                    message="Import aborted due to missing custom columns",
+                    "import.xml.custom_field_conflicts",
+                    message="Import aborted due to custom column type conflicts",
                     path=file_path,
-                    details=inspection.missing_custom_fields,
+                    details=inspection.conflicting_custom_fields,
                 )
                 QMessageBox.critical(self, "Import Error", msg + "\n\nNo changes were made.")
                 return
+
+            if inspection.missing_custom_fields:
+                msg = "This XML uses custom columns that do not exist in the current profile:\n\n" + "\n".join(
+                    f"- {name} : {field_type}" for name, field_type in inspection.missing_custom_fields
+                )
+                create_missing_custom_fields = (
+                    QMessageBox.question(
+                        self,
+                        "Create Missing Custom Columns?",
+                        msg + "\n\nCreate these custom columns now and continue with the import?",
+                        QMessageBox.Yes | QMessageBox.No,
+                        QMessageBox.Yes,
+                    )
+                    == QMessageBox.Yes
+                )
+                if not create_missing_custom_fields:
+                    self.logger.info(
+                        "Import canceled because custom columns were not created: %s",
+                        inspection.missing_custom_fields,
+                    )
+                    self._log_trace(
+                        "import.xml.missing_custom_fields_aborted",
+                        message="Import canceled because missing custom columns were not created",
+                        path=file_path,
+                        details=inspection.missing_custom_fields,
+                    )
+                    return
 
             # If dry-run, show summary then optionally proceed
             if dry:
@@ -8520,7 +8549,13 @@ class App(QMainWindow):
                     f"Would insert: {inspection.would_insert}\n"
                     f"Skipped (duplicates): {inspection.duplicate_count}\n"
                     f"Skipped (invalid): {inspection.invalid_count}\n"
-                    f"Errors: 0\n\n"
+                    f"Errors: 0\n"
+                    + (
+                        f"Will create custom columns: {len(inspection.missing_custom_fields)}\n"
+                        if create_missing_custom_fields
+                        else ""
+                    )
+                    + "\n"
                     f"Proceed with import now?",
                     QMessageBox.Yes | QMessageBox.No
                 ) == QMessageBox.Yes
@@ -8542,7 +8577,10 @@ class App(QMainWindow):
                     kind="pre_import",
                     label=f"Before Import XML: {Path(file_path).name}",
                 )
-                result = self.xml_import_service.execute_import(file_path)
+                result = self.xml_import_service.execute_import(
+                    file_path,
+                    create_missing_custom_fields=create_missing_custom_fields,
+                )
             except Exception as e:
                 if before_snapshot is not None:
                     try:

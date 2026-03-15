@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 import xml.etree.ElementTree as ET
@@ -50,6 +51,7 @@ class ImportInspection:
     duplicate_count: int
     invalid_count: int
     missing_custom_fields: list[tuple[str, str]]
+    conflicting_custom_fields: list[tuple[str, str, str]]
 
     @property
     def would_insert(self) -> int:
@@ -74,7 +76,7 @@ class XMLImportService:
 
     def inspect_file(self, file_path: str) -> ImportInspection:
         schema, records, invalid_count = self._parse_file(file_path)
-        missing = self._find_missing_custom_fields(records)
+        missing_specs, conflicting = self._inspect_custom_field_requirements(records)
         duplicate_count = sum(1 for record in records if self.track_service.is_isrc_taken_normalized(record.iso_isrc))
         return ImportInspection(
             file_path=file_path,
@@ -82,18 +84,17 @@ class XMLImportService:
             records=records,
             duplicate_count=duplicate_count,
             invalid_count=invalid_count,
-            missing_custom_fields=missing,
+            missing_custom_fields=[(field["name"], field["field_type"]) for field in missing_specs],
+            conflicting_custom_fields=conflicting,
         )
 
-    def execute_import(self, file_path: str) -> ImportExecutionResult:
+    def execute_import(self, file_path: str, *, create_missing_custom_fields: bool = False) -> ImportExecutionResult:
         inspection = self.inspect_file(file_path)
+        if inspection.conflicting_custom_fields:
+            raise ValueError(f"Custom column type conflicts: {inspection.conflicting_custom_fields}")
         if inspection.missing_custom_fields:
-            raise ValueError(f"Missing custom columns: {inspection.missing_custom_fields}")
-
-        name_to_id = {
-            (field["name"], field["field_type"]): field["id"]
-            for field in self.custom_fields.list_active_fields()
-        }
+            if not create_missing_custom_fields:
+                raise ValueError(f"Missing custom columns: {inspection.missing_custom_fields}")
 
         inserted = 0
         duplicate_count = 0
@@ -101,6 +102,15 @@ class XMLImportService:
 
         self.conn.execute("BEGIN")
         try:
+            cur = self.conn.cursor()
+            if create_missing_custom_fields:
+                self.ensure_missing_custom_fields(inspection, cursor=cur)
+
+            name_to_id = {
+                (field["name"], field["field_type"]): field["id"]
+                for field in self.custom_fields.list_active_fields()
+            }
+
             for record in inspection.records:
                 if self.track_service.is_isrc_taken_normalized(record.iso_isrc):
                     duplicate_count += 1
@@ -108,7 +118,6 @@ class XMLImportService:
 
                 self.conn.execute("SAVEPOINT row_import")
                 try:
-                    cur = self.conn.cursor()
                     main_artist_id = self.track_service.get_or_create_artist(record.artist, cursor=cur)
                     album_id = self.track_service.get_or_create_album(record.album, cursor=cur)
                     cur.execute(
@@ -299,23 +308,74 @@ class XMLImportService:
 
         return schema, parsed_records, invalid_count
 
-    def _find_missing_custom_fields(self, records: list[ImportRecord]) -> list[tuple[str, str]]:
-        required = {
-            (custom["name"], custom["type"])
-            for record in records
-            for custom in record.custom_fields
-            if (
-                custom["name"]
-                and custom["type"]
-                and custom["type"] not in ("blob_image", "blob_audio")
-                and custom["name"].strip().lower() not in PROMOTED_TEXT_CUSTOM_FIELDS
-            )
-        }
-        if not required:
+    def ensure_missing_custom_fields(
+        self,
+        inspection_or_records: ImportInspection | list[ImportRecord],
+        *,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> list[dict]:
+        records = (
+            inspection_or_records.records
+            if isinstance(inspection_or_records, ImportInspection)
+            else inspection_or_records
+        )
+        missing_specs, conflicting = self._inspect_custom_field_requirements(records)
+        if conflicting:
+            raise ValueError(f"Custom column type conflicts: {conflicting}")
+        if not missing_specs:
             return []
+        return self.custom_fields.ensure_fields(missing_specs, cursor=cursor)
 
-        existing = {(field["name"], field["field_type"]) for field in self.custom_fields.list_active_fields()}
-        return [(name, field_type) for name, field_type in sorted(required) if (name, field_type) not in existing]
+    def _inspect_custom_field_requirements(
+        self,
+        records: list[ImportRecord],
+    ) -> tuple[list[dict], list[tuple[str, str, str]]]:
+        required: dict[tuple[str, str], set[str]] = {}
+        for record in records:
+            for custom in record.custom_fields:
+                name = (custom.get("name") or "").strip()
+                field_type = (custom.get("type") or "").strip()
+                if (
+                    not name
+                    or not field_type
+                    or field_type in ("blob_image", "blob_audio")
+                    or name.lower() in PROMOTED_TEXT_CUSTOM_FIELDS
+                ):
+                    continue
+                value = (custom.get("value") or "").strip()
+                required.setdefault((name, field_type), set())
+                if field_type == "dropdown" and value:
+                    required[(name, field_type)].add(value)
+
+        if not required:
+            return [], []
+
+        existing_by_name = {
+            str(field["name"]): str(field.get("field_type") or "text")
+            for field in self.custom_fields.list_active_fields()
+            if field.get("name")
+        }
+        missing_specs: list[dict] = []
+        conflicts: list[tuple[str, str, str]] = []
+
+        for name, field_type in sorted(required):
+            existing_type = existing_by_name.get(name)
+            if existing_type is None:
+                options = None
+                if field_type == "dropdown" and required[(name, field_type)]:
+                    options = json.dumps(sorted(required[(name, field_type)]))
+                missing_specs.append(
+                    {
+                        "name": name,
+                        "field_type": field_type,
+                        "options": options,
+                    }
+                )
+                continue
+            if existing_type != field_type:
+                conflicts.append((name, field_type, existing_type))
+
+        return missing_specs, conflicts
 
     @classmethod
     def _parse_custom_fields(cls, record) -> list[dict]:

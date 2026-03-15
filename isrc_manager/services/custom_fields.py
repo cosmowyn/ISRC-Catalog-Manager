@@ -66,6 +66,107 @@ class CustomFieldDefinitionService:
                     )
                 order += 1
 
+    def ensure_fields(self, fields: list[dict], *, cursor: sqlite3.Cursor | None = None) -> list[dict]:
+        normalized_fields: list[dict] = []
+        seen: set[tuple[str, str]] = set()
+        for field in fields:
+            name = (field.get("name") or "").strip()
+            field_type = (field.get("field_type") or "text").strip()
+            if not name:
+                continue
+            key = (name, field_type)
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized_fields.append(
+                {
+                    "name": name,
+                    "field_type": field_type,
+                    "options": field.get("options"),
+                }
+            )
+        if not normalized_fields:
+            return []
+
+        def _apply(cur: sqlite3.Cursor) -> list[dict]:
+            rows = cur.execute(
+                """
+                SELECT id, name, active, sort_order, field_type, options
+                FROM CustomFieldDefs
+                ORDER BY COALESCE(sort_order, 999999), id
+                """
+            ).fetchall()
+            by_name = {
+                str(row[1]): {
+                    "id": int(row[0]),
+                    "active": int(row[2] or 0),
+                    "sort_order": row[3],
+                    "field_type": row[4] or "text",
+                    "options": row[5],
+                }
+                for row in rows
+                if row[1]
+            }
+            max_sort = cur.execute("SELECT COALESCE(MAX(sort_order), -1) FROM CustomFieldDefs").fetchone()
+            next_sort_order = int(max_sort[0] if max_sort and max_sort[0] is not None else -1)
+            ensured: list[dict] = []
+
+            for field in normalized_fields:
+                existing = by_name.get(field["name"])
+                if existing is None:
+                    next_sort_order += 1
+                    cur.execute(
+                        """
+                        INSERT INTO CustomFieldDefs (name, active, sort_order, field_type, options)
+                        VALUES (?, 1, ?, ?, ?)
+                        """,
+                        (field["name"], next_sort_order, field["field_type"], field.get("options")),
+                    )
+                    ensured.append(
+                        {
+                            "id": int(cur.lastrowid),
+                            "name": field["name"],
+                            "field_type": field["field_type"],
+                            "options": field.get("options"),
+                            "created": True,
+                        }
+                    )
+                    continue
+
+                existing_type = str(existing["field_type"] or "text")
+                if existing_type != field["field_type"]:
+                    raise ValueError(
+                        f"Custom field '{field['name']}' already exists as type '{existing_type}', "
+                        f"not '{field['field_type']}'"
+                    )
+
+                merged_options = existing["options"] if existing["options"] not in (None, "") else field.get("options")
+                if int(existing["active"]) != 1 or merged_options != existing["options"]:
+                    cur.execute(
+                        """
+                        UPDATE CustomFieldDefs
+                        SET active=1, options=?
+                        WHERE id=?
+                        """,
+                        (merged_options, int(existing["id"])),
+                    )
+                ensured.append(
+                    {
+                        "id": int(existing["id"]),
+                        "name": field["name"],
+                        "field_type": field["field_type"],
+                        "options": merged_options,
+                        "created": False,
+                    }
+                )
+            return ensured
+
+        if cursor is not None:
+            return _apply(cursor)
+
+        with self.conn:
+            return _apply(self.conn.cursor())
+
     def update_dropdown_options(self, field_def_id: int, options: list[str]) -> None:
         with self.conn:
             self.conn.execute(
