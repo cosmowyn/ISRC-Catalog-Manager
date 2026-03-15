@@ -88,12 +88,12 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         summary="How to enter shared album metadata once and create multiple track rows from one dialog.",
         keywords=("add album", "album dialog", "multi track", "album entry", "track sections", "shared metadata"),
         content_html="""
-        <p>The <strong>Add Album</strong> dialog is designed for building a full release in one pass. It starts with shared album metadata at the top, followed by a stack of track-specific sections that you can add to or remove from as needed.</p>
+        <p>The <strong>Add Album</strong> dialog is designed for building a full release in one pass. It starts with shared album metadata at the top, followed by a tabbed track workspace so each track gets its own dedicated page.</p>
         <ul>
           <li><strong>Album Overview</strong>: album title, UPC/EAN, genre, catalog number, album art, and the release-year rule used when auto-generating blank ISRC values.</li>
-          <li><strong>Track Sections</strong>: each section stores one track title, main artist, additional artists, release date, track length, optional ISRC, optional ISWC, optional BUMA work number, and an audio file.</li>
-          <li><strong>Dynamic layout</strong>: the dialog opens with two track sections by default, but you can add more or remove extras at any time.</li>
-          <li><strong>Blank-section handling</strong>: completely unused track sections are ignored when you save, so you do not need to delete every spare section before closing the dialog.</li>
+          <li><strong>Track Tabs</strong>: each tab stores one track title, main artist, additional artists, release date, track length, optional ISRC, optional ISWC, optional BUMA work number, and an audio file.</li>
+          <li><strong>Dynamic layout</strong>: the dialog opens with two track tabs by default, but you can add more or remove the current tab at any time.</li>
+          <li><strong>Blank-tab handling</strong>: completely unused track tabs are ignored when you save, so you do not need to delete every spare tab before closing the dialog.</li>
           <li><strong>Shared album art</strong>: the selected album art is stored once and linked across the saved album tracks automatically.</li>
         </ul>
         <p>If a valid ISRC prefix is configured, leaving a track ISRC blank lets the dialog auto-generate it during save. If no prefix is configured, blank ISRC values remain blank and the tracks are still created successfully.</p>

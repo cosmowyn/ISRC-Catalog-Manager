@@ -2005,7 +2005,7 @@ class ApplicationSettingsDialog(QDialog):
 
     def _accept_if_valid(self):
         values = self.values()
-        if not re.fullmatch(r"[A-Z]{2}[A-Z0-9]{3}", values["isrc_prefix"]):
+        if values["isrc_prefix"] and not re.fullmatch(r"[A-Z]{2}[A-Z0-9]{3}", values["isrc_prefix"]):
             QMessageBox.warning(self, "Invalid Prefix", "ISRC Prefix must be 5 characters: CC + 3 letters/numbers.")
             self.focus_field("isrc_prefix")
             return
@@ -9330,7 +9330,7 @@ class App(QMainWindow):
             return
 
         pref = (prefix or "").strip().upper()
-        if not re.fullmatch(r"[A-Z]{2}[A-Z0-9]{3}", pref):
+        if pref and not re.fullmatch(r"[A-Z]{2}[A-Z0-9]{3}", pref):
             QMessageBox.warning(self, "Invalid Prefix", "Prefix must be CC+XXX (5 chars).")
             return
         try:
@@ -11328,38 +11328,35 @@ class App(QMainWindow):
         LicensesBrowserDialog(self.license_service, track_filter_id=track_filter_id, parent=self).exec()
 
 
-class _AlbumTrackSection(QGroupBox):
+class _AlbumTrackSection(QWidget):
     """Reusable track-entry section for the Add Album dialog."""
 
     def __init__(self, dialog: "AlbumEntryDialog", number: int):
         super().__init__(dialog)
         self.dialog = dialog
         self.app = dialog.app
+        self._display_title = ""
         self.setProperty("role", "albumTrackSection")
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(14, 18, 14, 14)
+        root.setContentsMargins(6, 8, 6, 10)
         root.setSpacing(12)
 
-        top_row = QHBoxLayout()
-        top_row.setContentsMargins(0, 0, 0, 0)
-        top_row.setSpacing(8)
         self.track_note = QLabel("Track-specific metadata, timing, codes, and managed audio.")
         self.track_note.setProperty("role", "secondary")
         self.track_note.setWordWrap(True)
-        top_row.addWidget(self.track_note, 1)
-        self.remove_button = QPushButton("Remove Track")
-        self.remove_button.setAutoDefault(False)
-        self.remove_button.clicked.connect(lambda: self.dialog.remove_track_section(self))
-        top_row.addWidget(self.remove_button, 0, Qt.AlignTop)
-        root.addLayout(top_row)
+        root.addWidget(self.track_note)
 
         details_box, details_layout = _create_standard_section(self, "Track Details")
         codes_box, codes_layout = _create_standard_section(self, "Track Codes & Media")
+        for section_layout in (details_layout, codes_layout):
+            section_layout.setContentsMargins(14, 18, 14, 14)
+            section_layout.setSpacing(10)
 
         self.track_title = QLineEdit()
         self.track_title.setPlaceholderText("Track title")
+        self.dialog._apply_input_height(self.track_title)
         self._add_labeled_widget(details_layout, "Track Title", self.track_title)
 
         self.artist_name = self.dialog._build_artist_combo(allow_empty=True)
@@ -11373,6 +11370,7 @@ class _AlbumTrackSection(QGroupBox):
         self.release_date = QLineEdit()
         self.release_date.setReadOnly(True)
         self.release_date.setPlaceholderText("No release date selected")
+        self.dialog._apply_input_height(self.release_date)
         release_row = QWidget(self)
         release_layout = QHBoxLayout(release_row)
         release_layout.setContentsMargins(0, 0, 0, 0)
@@ -11380,14 +11378,17 @@ class _AlbumTrackSection(QGroupBox):
         release_layout.addWidget(self.release_date, 1)
         self.release_date_pick_button = QPushButton("Pick…")
         self.release_date_pick_button.setAutoDefault(False)
+        self.dialog._apply_button_height(self.release_date_pick_button)
         self.release_date_pick_button.clicked.connect(self._pick_release_date)
         self.release_date_today_button = QPushButton("Today")
         self.release_date_today_button.setAutoDefault(False)
+        self.dialog._apply_button_height(self.release_date_today_button)
         self.release_date_today_button.clicked.connect(
             lambda: self.set_release_date_iso(QDate.currentDate().toString("yyyy-MM-dd"))
         )
         self.release_date_clear_button = QPushButton("Clear")
         self.release_date_clear_button.setAutoDefault(False)
+        self.dialog._apply_button_height(self.release_date_clear_button)
         self.release_date_clear_button.clicked.connect(lambda: self.set_release_date_iso(None))
         release_layout.addWidget(self.release_date_pick_button)
         release_layout.addWidget(self.release_date_today_button)
@@ -11421,6 +11422,7 @@ class _AlbumTrackSection(QGroupBox):
             self.isrc.setPlaceholderText("Leave blank to auto-generate on save")
         else:
             self.isrc.setPlaceholderText("Leave blank if this track has no ISRC yet")
+        self.dialog._apply_input_height(self.isrc)
         self._add_labeled_widget(codes_layout, "ISRC", self.isrc)
 
         isrc_note = QLabel(self.dialog.isrc_help_text)
@@ -11430,15 +11432,18 @@ class _AlbumTrackSection(QGroupBox):
 
         self.iswc = QLineEdit()
         self.iswc.setPlaceholderText("Optional ISWC")
+        self.dialog._apply_input_height(self.iswc)
         self._add_labeled_widget(codes_layout, "ISWC", self.iswc)
 
         self.buma_work_number = QLineEdit()
         self.buma_work_number.setPlaceholderText("Optional BUMA work number")
+        self.dialog._apply_input_height(self.buma_work_number)
         self._add_labeled_widget(codes_layout, "BUMA Wnr.", self.buma_work_number)
 
         self.audio_file = QLineEdit()
         self.audio_file.setReadOnly(True)
         self.audio_file.setPlaceholderText("No audio file selected")
+        self.dialog._apply_input_height(self.audio_file)
         audio_row = QWidget(self)
         audio_layout = QHBoxLayout(audio_row)
         audio_layout.setContentsMargins(0, 0, 0, 0)
@@ -11446,11 +11451,13 @@ class _AlbumTrackSection(QGroupBox):
         audio_layout.addWidget(self.audio_file, 1)
         self.audio_browse_button = QPushButton("Browse…")
         self.audio_browse_button.setAutoDefault(False)
+        self.dialog._apply_button_height(self.audio_browse_button)
         self.audio_browse_button.clicked.connect(
             lambda: self.app._choose_media_into_line_edit("audio_file", self.audio_file, parent_widget=self.dialog)
         )
         self.audio_clear_button = QPushButton("Clear")
         self.audio_clear_button.setAutoDefault(False)
+        self.dialog._apply_button_height(self.audio_clear_button)
         self.audio_clear_button.clicked.connect(self.audio_file.clear)
         audio_layout.addWidget(self.audio_browse_button)
         audio_layout.addWidget(self.audio_clear_button)
@@ -11458,20 +11465,24 @@ class _AlbumTrackSection(QGroupBox):
 
         root.addWidget(details_box)
         root.addWidget(codes_box)
+        root.addStretch(1)
         self.set_track_number(number)
 
     @staticmethod
     def _add_labeled_widget(layout: QVBoxLayout, label_text: str, widget: QWidget) -> None:
         row = QVBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(4)
+        row.setContentsMargins(0, 0, 0, 4)
+        row.setSpacing(6)
         label = QLabel(label_text)
         row.addWidget(label)
         row.addWidget(widget)
         layout.addLayout(row)
 
     def set_track_number(self, number: int) -> None:
-        self.setTitle(f"Track {int(number):02d}")
+        self._display_title = f"Track {int(number):02d}"
+
+    def title(self) -> str:
+        return self._display_title
 
     def set_release_date_iso(self, iso_date: str | None) -> None:
         clean_value = str(iso_date or "").strip()
@@ -11512,11 +11523,59 @@ class _AlbumTrackSection(QGroupBox):
 class AlbumEntryDialog(QDialog):
     """Creates multiple tracks for a shared album from one structured dialog."""
 
+    EXTRA_QSS = """
+    QDialog#albumEntryDialog QCheckBox {
+        spacing: 6px;
+    }
+    QDialog#albumEntryDialog QTabWidget#albumEntryPrimaryTabs::pane,
+    QDialog#albumEntryDialog QTabWidget#albumEntryTrackTabs::pane {
+        margin-top: 8px;
+    }
+    QDialog#albumEntryDialog QTabBar::tab {
+        min-width: 104px;
+        padding: 7px 14px;
+    }
+    QDialog#albumEntryDialog QTabBar::tab:selected {
+        font-weight: 600;
+    }
+    QDialog#albumEntryDialog QScrollArea {
+        background: transparent;
+    }
+    """
+
+    @staticmethod
+    def _create_tab_page(owner: QWidget) -> tuple[QWidget, QVBoxLayout]:
+        page = QWidget(owner)
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 10, 0, 0)
+        layout.setSpacing(14)
+        return page, layout
+
+    @staticmethod
+    def _scaled_control_height(widget: QWidget, *, extra_padding: int) -> int:
+        hint_height = 0
+        try:
+            hint_height = int(widget.sizeHint().height())
+        except Exception:
+            hint_height = 0
+        try:
+            font_height = int(widget.fontMetrics().height())
+        except Exception:
+            font_height = 0
+        return max(hint_height, font_height + extra_padding)
+
+    def _apply_input_height(self, widget: QWidget) -> None:
+        widget.setMinimumHeight(self._scaled_control_height(widget, extra_padding=6))
+
+    def _apply_button_height(self, widget: QWidget) -> None:
+        widget.setMinimumHeight(self._scaled_control_height(widget, extra_padding=8))
+
     def __init__(self, app: App):
         super().__init__(app)
         self.app = app
         self.created_track_ids: list[int] = []
         self._track_sections: list[_AlbumTrackSection] = []
+        self._track_pages: dict[_AlbumTrackSection, QWidget] = {}
 
         state, state_message = self.app._isrc_generation_state()
         self.auto_isrc_enabled = state == "ready"
@@ -11528,9 +11587,9 @@ class AlbumEntryDialog(QDialog):
 
         self.setWindowTitle("Add Album")
         self.setModal(True)
-        self.resize(920, 940)
-        self.setMinimumSize(760, 720)
-        _apply_standard_dialog_chrome(self, "albumEntryDialog")
+        self.resize(960, 960)
+        self.setMinimumSize(820, 760)
+        _apply_standard_dialog_chrome(self, "albumEntryDialog", extra_qss=self.EXTRA_QSS)
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(18, 18, 18, 18)
@@ -11540,14 +11599,25 @@ class AlbumEntryDialog(QDialog):
             self,
             title="Add Album",
             subtitle=(
-                "Capture shared album metadata once, then add as many track-specific sections as needed. "
-                "Blank track sections are ignored when you save."
+                "Capture shared album metadata once, then use the Tracks tab to work through one tab per track. "
+                "Blank track tabs are ignored when you save."
             ),
             help_topic_id="album-entry",
         )
 
+        self.primary_tabs = QTabWidget(self)
+        self.primary_tabs.setObjectName("albumEntryPrimaryTabs")
+        self.primary_tabs.setDocumentMode(False)
+        self.primary_tabs.setUsesScrollButtons(False)
+        main_layout.addWidget(self.primary_tabs, 1)
+
+        self.album_details_tab, album_details_layout = self._create_tab_page(self.primary_tabs)
+        self.track_workspace_tab, track_workspace_layout = self._create_tab_page(self.primary_tabs)
+        self.primary_tabs.addTab(self.album_details_tab, "Album Details")
+        self.primary_tabs.addTab(self.track_workspace_tab, "Tracks")
+
         summary_box, summary_layout = _create_standard_section(
-            self,
+            self.album_details_tab,
             "Workflow Notes",
             "Album-level values apply to every saved track in this dialog, while each track section keeps its own metadata and audio file.",
         )
@@ -11558,9 +11628,10 @@ class AlbumEntryDialog(QDialog):
         summary_label.setWordWrap(True)
         summary_label.setProperty("role", "supportingText")
         summary_layout.addWidget(summary_label)
-        main_layout.addWidget(summary_box)
+        album_details_layout.addWidget(summary_box)
 
-        overview_box, overview_layout = _create_standard_section(self, "Album Overview")
+        overview_box, overview_layout = _create_standard_section(self.album_details_tab, "Album Overview")
+        overview_layout.setSpacing(10)
         self.album_title = self._build_album_combo()
         self._add_labeled_widget(overview_layout, "Album Title", self.album_title)
 
@@ -11572,11 +11643,13 @@ class AlbumEntryDialog(QDialog):
 
         self.catalog_number = QLineEdit()
         self.catalog_number.setPlaceholderText("Optional catalog number")
+        self._apply_input_height(self.catalog_number)
         self._add_labeled_widget(overview_layout, "Catalog#", self.catalog_number)
 
         self.album_art = QLineEdit()
         self.album_art.setReadOnly(True)
         self.album_art.setPlaceholderText("No album art selected")
+        self._apply_input_height(self.album_art)
         art_row = QWidget(self)
         art_layout = QHBoxLayout(art_row)
         art_layout.setContentsMargins(0, 0, 0, 0)
@@ -11584,11 +11657,13 @@ class AlbumEntryDialog(QDialog):
         art_layout.addWidget(self.album_art, 1)
         self.album_art_browse_button = QPushButton("Browse…")
         self.album_art_browse_button.setAutoDefault(False)
+        self._apply_button_height(self.album_art_browse_button)
         self.album_art_browse_button.clicked.connect(
             lambda: self.app._choose_media_into_line_edit("album_art", self.album_art, parent_widget=self)
         )
         self.album_art_clear_button = QPushButton("Clear")
         self.album_art_clear_button.setAutoDefault(False)
+        self._apply_button_height(self.album_art_clear_button)
         self.album_art_clear_button.clicked.connect(self.album_art.clear)
         art_layout.addWidget(self.album_art_browse_button)
         art_layout.addWidget(self.album_art_clear_button)
@@ -11598,13 +11673,16 @@ class AlbumEntryDialog(QDialog):
         self.use_release_year.setChecked(False)
         self.use_release_year.setEnabled(self.auto_isrc_enabled)
         self.use_release_year.setToolTip(self.isrc_help_text)
+        self.use_release_year.setContentsMargins(0, 4, 0, 0)
         overview_layout.addWidget(self.use_release_year)
-        main_layout.addWidget(overview_box)
+        overview_layout.addStretch(1)
+        album_details_layout.addWidget(overview_box)
+        album_details_layout.addStretch(1)
 
         tracks_box, tracks_box_layout = _create_standard_section(
-            self,
+            self.track_workspace_tab,
             "Tracks",
-            "Start with two track sections, add more whenever needed, and remove any extras you do not want to save.",
+            "Start with two track tabs, add more whenever needed, and remove the current tab when you no longer need it.",
         )
         controls_row = QHBoxLayout()
         controls_row.setContentsMargins(0, 0, 0, 0)
@@ -11615,22 +11693,24 @@ class AlbumEntryDialog(QDialog):
         controls_row.addStretch(1)
         self.add_track_button = QPushButton("Add Track")
         self.add_track_button.setAutoDefault(False)
+        self._apply_button_height(self.add_track_button)
         self.add_track_button.clicked.connect(self.add_track_section)
         controls_row.addWidget(self.add_track_button)
+        self.remove_track_button = QPushButton("Remove Current Track")
+        self.remove_track_button.setAutoDefault(False)
+        self._apply_button_height(self.remove_track_button)
+        self.remove_track_button.clicked.connect(self.remove_current_track_section)
+        controls_row.addWidget(self.remove_track_button)
         tracks_box_layout.addLayout(controls_row)
+        tracks_box_layout.addSpacing(6)
 
-        self.track_container = QWidget(self)
-        self.track_layout = QVBoxLayout(self.track_container)
-        self.track_layout.setContentsMargins(0, 0, 0, 0)
-        self.track_layout.setSpacing(12)
-        self.track_layout.addStretch(1)
-
-        self.track_scroll = QScrollArea(self)
-        self.track_scroll.setWidgetResizable(True)
-        self.track_scroll.setFrameShape(QFrame.NoFrame)
-        self.track_scroll.setWidget(self.track_container)
-        tracks_box_layout.addWidget(self.track_scroll, 1)
-        main_layout.addWidget(tracks_box, 1)
+        self.track_tabs = QTabWidget(self.track_workspace_tab)
+        self.track_tabs.setObjectName("albumEntryTrackTabs")
+        self.track_tabs.setDocumentMode(False)
+        self.track_tabs.setUsesScrollButtons(True)
+        self.track_tabs.setElideMode(Qt.ElideRight)
+        tracks_box_layout.addWidget(self.track_tabs, 1)
+        track_workspace_layout.addWidget(tracks_box, 1)
 
         for _ in range(2):
             self.add_track_section()
@@ -11641,8 +11721,10 @@ class AlbumEntryDialog(QDialog):
         buttons.addStretch(1)
         self.save_button = QPushButton("Save Album")
         self.save_button.setDefault(True)
+        self._apply_button_height(self.save_button)
         self.save_button.clicked.connect(self.save_album)
         self.cancel_button = QPushButton("Cancel")
+        self._apply_button_height(self.cancel_button)
         self.cancel_button.clicked.connect(self.reject)
         buttons.addWidget(self.save_button)
         buttons.addWidget(self.cancel_button)
@@ -11662,6 +11744,7 @@ class AlbumEntryDialog(QDialog):
         completer = QCompleter(values)
         completer.setCaseSensitivity(Qt.CaseInsensitive)
         combo.setCompleter(completer)
+        self._apply_input_height(combo)
         return combo
 
     def _build_artist_combo(self, *, allow_empty: bool) -> FocusWheelComboBox:
@@ -11691,7 +11774,7 @@ class AlbumEntryDialog(QDialog):
     @staticmethod
     def _add_labeled_widget(layout: QVBoxLayout, label_text: str, widget: QWidget) -> None:
         row = QVBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
+        row.setContentsMargins(0, 0, 0, 2)
         row.setSpacing(4)
         label = QLabel(label_text)
         row.addWidget(label)
@@ -11701,37 +11784,78 @@ class AlbumEntryDialog(QDialog):
     def _refresh_track_section_titles(self) -> None:
         for index, section in enumerate(self._track_sections, start=1):
             section.set_track_number(index)
+            page = self._track_pages.get(section)
+            tab_index = self.track_tabs.indexOf(page) if page is not None else -1
+            if tab_index >= 0:
+                tab_title = section.title()
+                self.track_tabs.setTabText(tab_index, tab_title)
+                self.track_tabs.setTabToolTip(tab_index, tab_title)
         track_count = len(self._track_sections)
         self.track_count_label.setText(
-            f"{track_count} track section{'s' if track_count != 1 else ''} available"
+            f"{track_count} track tab{'s' if track_count != 1 else ''} available"
         )
-        allow_remove = track_count > 1
-        for section in self._track_sections:
-            section.remove_button.setEnabled(allow_remove)
+        self.remove_track_button.setEnabled(track_count > 1)
 
     def add_track_section(self) -> None:
         section = _AlbumTrackSection(self, len(self._track_sections) + 1)
         self._track_sections.append(section)
-        self.track_layout.insertWidget(self.track_layout.count() - 1, section)
+        page = QWidget(self.track_tabs)
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 6, 0, 0)
+        page_layout.setSpacing(0)
+        scroll = QScrollArea(page)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setWidget(section)
+        page_layout.addWidget(scroll)
+        self._track_pages[section] = page
+        self.track_tabs.addTab(page, "")
         self._refresh_track_section_titles()
-        QTimer.singleShot(0, lambda: self.track_scroll.ensureWidgetVisible(section, 0, 24))
+        self.track_tabs.setCurrentWidget(page)
+        self.primary_tabs.setCurrentWidget(self.track_workspace_tab)
+
+    def _focus_track_section(self, section: _AlbumTrackSection) -> None:
+        page = self._track_pages.get(section)
+        if page is None:
+            return
+        self.primary_tabs.setCurrentWidget(self.track_workspace_tab)
+        self.track_tabs.setCurrentWidget(page)
+
+    def remove_current_track_section(self) -> None:
+        current_page = self.track_tabs.currentWidget()
+        if current_page is None:
+            return
+        for section, page in list(self._track_pages.items()):
+            if page is current_page:
+                self.remove_track_section(section)
+                break
 
     def remove_track_section(self, section: _AlbumTrackSection) -> None:
         if section not in self._track_sections or len(self._track_sections) <= 1:
             return
+        page = self._track_pages.pop(section, None)
+        current_index = self.track_tabs.indexOf(page) if page is not None else -1
         self._track_sections.remove(section)
+        if current_index >= 0:
+            self.track_tabs.removeTab(current_index)
         section.setParent(None)
         section.deleteLater()
+        if page is not None:
+            page.deleteLater()
         self._refresh_track_section_titles()
+        if self.track_tabs.count() > 0:
+            self.track_tabs.setCurrentIndex(max(0, min(current_index, self.track_tabs.count() - 1)))
 
     def _build_track_payloads(self) -> list[TrackCreatePayload] | None:
         album_title = self.album_title.currentText().strip()
         if is_blank(album_title):
+            self.primary_tabs.setCurrentWidget(self.album_details_tab)
             QMessageBox.warning(self, "Missing Album Title", "Album Title is required when using Add Album.")
             return None
 
         upc_raw = self.upc.currentText().strip()
         if upc_raw and not valid_upc_ean(upc_raw):
+            self.primary_tabs.setCurrentWidget(self.album_details_tab)
             QMessageBox.warning(self, "Invalid UPC/EAN", "UPC/EAN must be 12 or 13 digits (or leave empty).")
             return None
 
@@ -11742,6 +11866,7 @@ class AlbumEntryDialog(QDialog):
 
         active_sections = [section for section in self._track_sections if not section.is_effectively_blank()]
         if not active_sections:
+            self.primary_tabs.setCurrentWidget(self.track_workspace_tab)
             QMessageBox.warning(self, "No Tracks", "Add at least one track before saving the album.")
             return None
 
@@ -11752,6 +11877,7 @@ class AlbumEntryDialog(QDialog):
             track_title = (section.track_title.text() or "").strip()
             artist_name = section.artist_name.currentText().strip()
             if is_blank(track_title) or is_blank(artist_name):
+                self._focus_track_section(section)
                 QMessageBox.warning(
                     self,
                     "Missing Track Data",
@@ -11766,6 +11892,7 @@ class AlbumEntryDialog(QDialog):
                 iso_isrc = to_iso_isrc(raw_isrc)
                 compact_isrc = to_compact_isrc(iso_isrc)
                 if not compact_isrc or not is_valid_isrc_compact_or_iso(iso_isrc):
+                    self._focus_track_section(section)
                     QMessageBox.warning(
                         self,
                         "Invalid ISRC",
@@ -11781,6 +11908,7 @@ class AlbumEntryDialog(QDialog):
                 )
                 compact_isrc = to_compact_isrc(iso_isrc)
                 if not compact_isrc:
+                    self._focus_track_section(section)
                     QMessageBox.warning(
                         self,
                         "ISRC Exhausted",
@@ -11790,6 +11918,7 @@ class AlbumEntryDialog(QDialog):
 
             if compact_isrc:
                 if compact_isrc in reserved_compacts or self.app.is_isrc_taken_normalized(iso_isrc):
+                    self._focus_track_section(section)
                     QMessageBox.warning(
                         self,
                         "Duplicate ISRC",
@@ -11803,6 +11932,7 @@ class AlbumEntryDialog(QDialog):
             if raw_iswc:
                 iso_iswc = to_iso_iswc(raw_iswc)
                 if not iso_iswc or not is_valid_iswc_any(iso_iswc):
+                    self._focus_track_section(section)
                     QMessageBox.warning(
                         self,
                         "Invalid ISWC",
