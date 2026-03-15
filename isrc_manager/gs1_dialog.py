@@ -62,9 +62,9 @@ class GS1MetadataEditorPage(QWidget):
     changed = Signal()
 
     ELEMENT_MARGIN = 2
-    LABEL_MIN_WIDTH = 220
     FIELD_HEIGHT = 48
     CHECKBOX_ROW_HEIGHT = 48
+    INLINE_FIELD_MIN_WIDTH = 260
     COMPACT_FIELD_MIN_WIDTH = 180
     STANDARD_FIELD_MIN_WIDTH = 380
     WIDE_FIELD_MIN_WIDTH = 520
@@ -81,15 +81,6 @@ class GS1MetadataEditorPage(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(12)
-
-        self.group_summary_label = QLabel(self._group_summary_text())
-        self.group_summary_label.setWordWrap(True)
-        self.group_summary_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        root.addWidget(self.group_summary_label)
-
-        form_layout = QVBoxLayout()
-        form_layout.setContentsMargins(0, 0, 0, 0)
-        form_layout.setSpacing(2)
 
         self.contract_combo = self._combo(())
         self.status_combo = self._combo(COMMON_STATUS_CHOICES)
@@ -117,22 +108,51 @@ class GS1MetadataEditorPage(QWidget):
         self._apply_form_metrics()
         self.set_contract_entries(self._contract_entries)
 
-        form_layout.addWidget(self._build_form_row("Contract Number", self.contract_combo))
-        form_layout.addWidget(self._build_form_row("Status", self.status_combo))
-        form_layout.addWidget(self._build_form_row("Product Classification", self.classification_combo))
-        form_layout.addWidget(self._build_form_row("Consumer Unit", self.consumer_unit_row))
-        form_layout.addWidget(self._build_form_row("Packaging Type", self.packaging_combo))
-        form_layout.addWidget(self._build_form_row("Target Market", self.market_combo))
-        form_layout.addWidget(self._build_form_row("Language", self.language_combo))
-        form_layout.addWidget(self._build_form_row("Product Description", self.description_edit))
-        form_layout.addWidget(self._build_form_row("Brand", self.brand_edit))
-        form_layout.addWidget(self._build_form_row("Subbrand", self.subbrand_edit))
-        form_layout.addWidget(self._build_form_row("Quantity", self.quantity_edit))
-        form_layout.addWidget(self._build_form_row("Unit", self.unit_combo))
-        form_layout.addWidget(self._build_form_row("Image URL", self.image_url_edit))
-        form_layout.addWidget(self._build_form_row("Export Enabled", self.export_enabled_row))
-        form_layout.addWidget(self._build_form_row("Notes", self.notes_edit, top_aligned=True))
-        root.addLayout(form_layout)
+        self.group_summary_label = QLabel(self._group_summary_text())
+        self.group_summary_label.setWordWrap(True)
+        self.group_summary_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        summary_box, summary_layout = self._create_section_box("Product Group")
+        summary_layout.addWidget(self.group_summary_label)
+        root.addWidget(summary_box)
+
+        workflow_box, workflow_layout = self._create_section_box(
+            "Workflow & Export",
+            "Controls that decide contract routing, export eligibility, and how this product is classified.",
+        )
+        root.addWidget(workflow_box)
+        workflow_layout.addWidget(self._build_form_pair("Contract Number", self.contract_combo, "Status", self.status_combo))
+        workflow_layout.addWidget(self._build_form_row("Product Classification", self.classification_combo))
+        workflow_layout.addWidget(self._build_form_pair("Consumer Unit", self.consumer_unit_row, "Export Enabled", self.export_enabled_row))
+
+        identity_box, identity_layout = self._create_section_box(
+            "Product Identity",
+            "Core naming and branding fields that define the GS1 product itself.",
+        )
+        root.addWidget(identity_box)
+        identity_layout.addWidget(self._build_form_row("Product Description", self.description_edit))
+        identity_layout.addWidget(self._build_form_pair("Brand", self.brand_edit, "Subbrand", self.subbrand_edit))
+
+        quantity_unit_row = QWidget(self)
+        quantity_unit_row.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        quantity_unit_row.setMinimumHeight(self.FIELD_HEIGHT)
+        quantity_unit_layout = QHBoxLayout(quantity_unit_row)
+        quantity_unit_layout.setContentsMargins(0, 0, 0, 0)
+        quantity_unit_layout.setSpacing(8)
+        quantity_unit_layout.addWidget(self.quantity_edit, 1)
+        quantity_unit_layout.addWidget(self.unit_combo, 1)
+
+        market_box, market_layout = self._create_section_box(
+            "Packaging & Market",
+            "Commercial delivery details, territories, and optional product imagery.",
+        )
+        root.addWidget(market_box)
+        market_layout.addWidget(self._build_form_pair("Packaging Type", self.packaging_combo, "Target Market", self.market_combo))
+        market_layout.addWidget(self._build_form_pair("Language", self.language_combo, "Quantity & Unit", quantity_unit_row))
+        market_layout.addWidget(self._build_form_row("Image URL", self.image_url_edit))
+
+        notes_box, notes_layout = self._create_section_box("Internal Notes")
+        root.addWidget(notes_box)
+        notes_layout.addWidget(self._build_form_row("Notes", self.notes_edit, top_aligned=True))
         root.addStretch(1)
 
         self._connect_form_signals()
@@ -155,28 +175,52 @@ class GS1MetadataEditorPage(QWidget):
     @classmethod
     def _form_label(cls, text: str) -> QLabel:
         label = QLabel(text)
-        label.setMinimumWidth(cls.LABEL_MIN_WIDTH)
-        label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         return label
+
+    def _create_section_box(self, title: str, description: str | None = None) -> tuple[QGroupBox, QVBoxLayout]:
+        box = QGroupBox(title, self)
+        box_layout = QVBoxLayout(box)
+        box_layout.setContentsMargins(12, 10, 12, 12)
+        box_layout.setSpacing(8)
+        if description:
+            desc = QLabel(description, box)
+            desc.setWordWrap(True)
+            desc.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            box_layout.addWidget(desc)
+        return box, box_layout
 
     def _build_form_row(self, label_text: str, widget: QWidget, *, top_aligned: bool = False) -> QWidget:
         row = QWidget(self)
         row.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed if not top_aligned else QSizePolicy.MinimumExpanding)
-        row_layout = QHBoxLayout(row)
+        row_layout = QVBoxLayout(row)
         row_layout.setContentsMargins(
             self.ELEMENT_MARGIN,
             self.ELEMENT_MARGIN,
             self.ELEMENT_MARGIN,
             self.ELEMENT_MARGIN,
         )
-        row_layout.setSpacing(14)
+        row_layout.setSpacing(4)
         label = self._form_label(label_text)
-        label.setAlignment(Qt.AlignRight | (Qt.AlignTop if top_aligned else Qt.AlignVCenter))
         if widget.sizePolicy().horizontalPolicy() == QSizePolicy.Preferred:
             widget.setSizePolicy(QSizePolicy.Expanding, widget.sizePolicy().verticalPolicy())
-        row_layout.addWidget(label, 0, Qt.AlignTop if top_aligned else Qt.AlignVCenter)
-        row_layout.addWidget(widget, 1, Qt.AlignTop if top_aligned else Qt.AlignVCenter)
-        row.setMinimumHeight(max(widget.minimumHeight(), widget.sizeHint().height()) + (self.ELEMENT_MARGIN * 2))
+        row_layout.addWidget(label)
+        row_layout.addWidget(widget, 1 if top_aligned else 0, Qt.AlignTop if top_aligned else Qt.AlignVCenter)
+        row.setMinimumHeight(widget.minimumHeight() + label.sizeHint().height() + (self.ELEMENT_MARGIN * 2) + 6)
+        return row
+
+    def _build_form_pair(self, left_label: str, left_widget: QWidget, right_label: str, right_widget: QWidget) -> QWidget:
+        row = QWidget(self)
+        row.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(12)
+        left_row = self._build_form_row(left_label, left_widget)
+        right_row = self._build_form_row(right_label, right_widget)
+        left_row.setMinimumWidth(self.INLINE_FIELD_MIN_WIDTH)
+        right_row.setMinimumWidth(self.INLINE_FIELD_MIN_WIDTH)
+        row_layout.addWidget(left_row, 1)
+        row_layout.addWidget(right_row, 1)
         return row
 
     def _checkbox_row(self, checkbox: QCheckBox) -> QWidget:
@@ -234,7 +278,7 @@ class GS1MetadataEditorPage(QWidget):
         self._apply_combo_metrics(self.packaging_combo, min_width=self.STANDARD_FIELD_MIN_WIDTH)
         self._apply_combo_metrics(self.market_combo, min_width=self.STANDARD_FIELD_MIN_WIDTH)
         self._apply_combo_metrics(self.language_combo, min_width=240, max_width=320)
-        self._apply_combo_metrics(self.unit_combo, min_width=200, max_width=240)
+        self._apply_combo_metrics(self.unit_combo, min_width=180, max_width=220)
         self._apply_line_edit_metrics(self.description_edit, min_width=self.WIDE_FIELD_MIN_WIDTH)
         self._apply_line_edit_metrics(self.brand_edit, min_width=self.STANDARD_FIELD_MIN_WIDTH)
         self._apply_line_edit_metrics(self.subbrand_edit, min_width=self.STANDARD_FIELD_MIN_WIDTH)
@@ -521,7 +565,7 @@ class GS1MetadataDialog(QDialog):
         scroll_area.setWidget(scroll_content)
         root.addWidget(scroll_area, 1)
 
-        summary_box = QGroupBox("Release / Product Context", self)
+        summary_box = QGroupBox("Selection Overview", self)
         summary_layout = QVBoxLayout(summary_box)
         summary_layout.setContentsMargins(14, 14, 14, 14)
         summary_layout.setSpacing(6)
@@ -531,7 +575,7 @@ class GS1MetadataDialog(QDialog):
         summary_layout.addWidget(self.summary_label)
         content_layout.addWidget(summary_box)
 
-        template_box = QGroupBox("Official GS1 Workbook", self)
+        template_box = QGroupBox("Official Workbook", self)
         template_layout = QVBoxLayout(template_box)
         template_layout.setContentsMargins(14, 14, 14, 14)
         template_layout.setSpacing(8)
@@ -564,7 +608,7 @@ class GS1MetadataDialog(QDialog):
         template_layout.addLayout(template_button_row)
         content_layout.addWidget(template_box)
 
-        editor_box = QGroupBox("GS1 Metadata", self)
+        editor_box = QGroupBox("Product Metadata", self)
         editor_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         editor_layout = QVBoxLayout(editor_box)
         editor_layout.setContentsMargins(16, 14, 16, 14)
@@ -607,16 +651,19 @@ class GS1MetadataDialog(QDialog):
 
         button_row = QHBoxLayout()
         button_row.setContentsMargins(self.ELEMENT_MARGIN, self.ELEMENT_MARGIN, self.ELEMENT_MARGIN, self.ELEMENT_MARGIN)
-        button_row.setSpacing(8)
+        button_row.setSpacing(12)
         self.revert_button = QPushButton("Revert", self)
         self.revert_button.setAutoDefault(False)
         self.revert_button.clicked.connect(self._revert_form)
         self.reset_defaults_button = QPushButton("Reset to Defaults", self)
         self.reset_defaults_button.setAutoDefault(False)
         self.reset_defaults_button.clicked.connect(self._reset_to_defaults)
-        button_row.addWidget(self.revert_button)
-        button_row.addWidget(self.reset_defaults_button)
-        button_row.addStretch(1)
+        form_actions = QHBoxLayout()
+        form_actions.setContentsMargins(0, 0, 0, 0)
+        form_actions.setSpacing(8)
+        form_actions.addWidget(self.revert_button)
+        form_actions.addWidget(self.reset_defaults_button)
+        form_actions.addStretch(1)
 
         self.save_button = QPushButton("Save", self)
         self.save_button.setDefault(True)
@@ -629,10 +676,16 @@ class GS1MetadataDialog(QDialog):
         self.close_button = QPushButton("Close", self)
         self.close_button.setAutoDefault(False)
         self.close_button.clicked.connect(self.accept)
-        button_row.addWidget(self.save_button)
-        button_row.addWidget(self.export_current_button)
-        button_row.addWidget(self.export_batch_button)
-        button_row.addWidget(self.close_button)
+        primary_actions = QHBoxLayout()
+        primary_actions.setContentsMargins(0, 0, 0, 0)
+        primary_actions.setSpacing(8)
+        primary_actions.addWidget(self.save_button)
+        primary_actions.addWidget(self.export_current_button)
+        primary_actions.addWidget(self.export_batch_button)
+        primary_actions.addWidget(self.close_button)
+
+        button_row.addLayout(form_actions, 1)
+        button_row.addLayout(primary_actions, 0)
         root.addLayout(button_row)
 
         self._refresh_template_status(prompt_if_missing=True)

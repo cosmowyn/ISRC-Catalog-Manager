@@ -101,6 +101,16 @@ class TrackService:
     """Centralizes track mutations and related catalog row creation."""
 
     MEDIA_FIELDS = _build_media_fields()
+    ALBUM_SHARED_FIELD_NAMES = frozenset(
+        {
+            "artist_name",
+            "album_title",
+            "release_date",
+            "upc",
+            "genre",
+            "catalog_number",
+        }
+    )
 
     def __init__(self, conn: sqlite3.Connection, data_root: str | Path | None = None):
         self.conn = conn
@@ -304,6 +314,31 @@ class TrackService:
         if row and row[0]:
             return str(row[0])
         return f"track_{track_id}"
+
+    def list_album_group_track_ids(self, track_id: int, *, cursor: sqlite3.Cursor | None = None) -> list[int]:
+        cur = cursor or self.conn.cursor()
+        row = cur.execute(
+            """
+            SELECT t.album_id, COALESCE(al.title, '')
+            FROM Tracks t
+            LEFT JOIN Albums al ON al.id = t.album_id
+            WHERE t.id=?
+            """,
+            (int(track_id),),
+        ).fetchone()
+        if not row:
+            return []
+
+        album_id = row[0]
+        album_title = (row[1] or "").strip()
+        if album_id is None or is_blank(album_title) or album_title.casefold() == "single":
+            return []
+
+        rows = cur.execute(
+            "SELECT id FROM Tracks WHERE album_id=? ORDER BY id",
+            (int(album_id),),
+        ).fetchall()
+        return [int(group_track_id) for (group_track_id,) in rows]
 
     def fetch_track_snapshot(self, track_id: int, *, cursor: sqlite3.Cursor | None = None) -> TrackSnapshot | None:
         cur = cursor or self.conn.cursor()
@@ -539,75 +574,161 @@ class TrackService:
             self.replace_additional_artists(track_id, payload.additional_artists, cursor=cur)
             return track_id
 
-    def update_track(self, payload: TrackUpdatePayload) -> None:
+    def _update_track_row(self, payload: TrackUpdatePayload, *, cursor: sqlite3.Cursor) -> None:
+        main_artist_id = self.get_or_create_artist(payload.artist_name, cursor=cursor)
+        album_id = self.get_or_create_album(payload.album_title, cursor=cursor)
+        compact_isrc = to_compact_isrc(payload.isrc)
+        current_audio = self.get_media_meta(payload.track_id, "audio_file", cursor=cursor)
+        current_art = self.get_media_meta(payload.track_id, "album_art", cursor=cursor)
+        audio_path = current_audio["path"] or None
+        audio_mime = current_audio["mime_type"] or None
+        audio_size = int(current_audio["size_bytes"] or 0)
+        album_art_path = current_art["path"] or None
+        album_art_mime = current_art["mime_type"] or None
+        album_art_size = int(current_art["size_bytes"] or 0)
+
+        if payload.clear_audio_file:
+            audio_path = None
+            audio_mime = None
+            audio_size = 0
+        elif payload.audio_file_source_path:
+            audio_meta = self.set_media_path(payload.track_id, "audio_file", payload.audio_file_source_path, cursor=cursor)
+            audio_path = str(audio_meta["path"] or "") or None
+            audio_mime = str(audio_meta["mime_type"] or "") or None
+            audio_size = int(audio_meta["size_bytes"] or 0)
+
+        if payload.clear_album_art:
+            album_art_path = None
+            album_art_mime = None
+            album_art_size = 0
+        elif payload.album_art_source_path:
+            art_meta = self.set_media_path(payload.track_id, "album_art", payload.album_art_source_path, cursor=cursor)
+            album_art_path = str(art_meta["path"] or "") or None
+            album_art_mime = str(art_meta["mime_type"] or "") or None
+            album_art_size = int(art_meta["size_bytes"] or 0)
+
+        cursor.execute(
+            """
+            UPDATE Tracks SET
+                isrc=?, isrc_compact=?,
+                audio_file_path=?, audio_file_mime_type=?, audio_file_size_bytes=?,
+                track_title=?, catalog_number=?,
+                album_art_path=?, album_art_mime_type=?, album_art_size_bytes=?,
+                main_artist_id=?, buma_work_number=?, album_id=?, release_date=?,
+                track_length_sec=?, iswc=?, upc=?, genre=?
+            WHERE id=?
+            """,
+            (
+                payload.isrc,
+                compact_isrc,
+                audio_path,
+                audio_mime,
+                int(audio_size),
+                payload.track_title.strip(),
+                payload.catalog_number,
+                album_art_path,
+                album_art_mime,
+                int(album_art_size),
+                main_artist_id,
+                payload.buma_work_number,
+                album_id,
+                payload.release_date,
+                int(payload.track_length_sec or 0),
+                payload.iswc,
+                payload.upc,
+                payload.genre,
+                payload.track_id,
+            ),
+        )
+        self.replace_additional_artists(payload.track_id, payload.additional_artists, cursor=cursor)
+
+    def update_track(self, payload: TrackUpdatePayload, *, cursor: sqlite3.Cursor | None = None) -> None:
+        if cursor is not None:
+            self._update_track_row(payload, cursor=cursor)
+            return
+
         with self.conn:
             cur = self.conn.cursor()
-            main_artist_id = self.get_or_create_artist(payload.artist_name, cursor=cur)
-            album_id = self.get_or_create_album(payload.album_title, cursor=cur)
-            compact_isrc = to_compact_isrc(payload.isrc)
-            current_audio = self.get_media_meta(payload.track_id, "audio_file", cursor=cur)
-            current_art = self.get_media_meta(payload.track_id, "album_art", cursor=cur)
-            audio_path = current_audio["path"] or None
-            audio_mime = current_audio["mime_type"] or None
-            audio_size = int(current_audio["size_bytes"] or 0)
-            album_art_path = current_art["path"] or None
-            album_art_mime = current_art["mime_type"] or None
-            album_art_size = int(current_art["size_bytes"] or 0)
+            self._update_track_row(payload, cursor=cur)
 
-            if payload.clear_audio_file:
-                audio_path = None
-                audio_mime = None
-                audio_size = 0
-            elif payload.audio_file_source_path:
-                audio_meta = self.set_media_path(payload.track_id, "audio_file", payload.audio_file_source_path, cursor=cur)
-                audio_path = str(audio_meta["path"] or "") or None
-                audio_mime = str(audio_meta["mime_type"] or "") or None
-                audio_size = int(audio_meta["size_bytes"] or 0)
+    def apply_album_metadata_to_tracks(
+        self,
+        track_ids: Iterable[int],
+        *,
+        field_updates: dict[str, object],
+        album_art_source_path: str | None = None,
+        clear_album_art: bool = False,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> list[int]:
+        normalized_track_ids: list[int] = []
+        seen: set[int] = set()
+        for track_id in track_ids:
+            value = int(track_id)
+            if value <= 0 or value in seen:
+                continue
+            seen.add(value)
+            normalized_track_ids.append(value)
 
-            if payload.clear_album_art:
-                album_art_path = None
-                album_art_mime = None
-                album_art_size = 0
-            elif payload.album_art_source_path:
-                art_meta = self.set_media_path(payload.track_id, "album_art", payload.album_art_source_path, cursor=cur)
-                album_art_path = str(art_meta["path"] or "") or None
-                album_art_mime = str(art_meta["mime_type"] or "") or None
-                album_art_size = int(art_meta["size_bytes"] or 0)
+        if not normalized_track_ids:
+            return []
 
-            cur.execute(
-                """
-                UPDATE Tracks SET
-                    isrc=?, isrc_compact=?,
-                    audio_file_path=?, audio_file_mime_type=?, audio_file_size_bytes=?,
-                    track_title=?, catalog_number=?,
-                    album_art_path=?, album_art_mime_type=?, album_art_size_bytes=?,
-                    main_artist_id=?, buma_work_number=?, album_id=?, release_date=?,
-                    track_length_sec=?, iswc=?, upc=?, genre=?
-                WHERE id=?
-                """,
-                (
-                    payload.isrc,
-                    compact_isrc,
-                    audio_path,
-                    audio_mime,
-                    int(audio_size),
-                    payload.track_title.strip(),
-                    payload.catalog_number,
-                    album_art_path,
-                    album_art_mime,
-                    int(album_art_size),
-                    main_artist_id,
-                    payload.buma_work_number,
-                    album_id,
-                    payload.release_date,
-                    int(payload.track_length_sec or 0),
-                    payload.iswc,
-                    payload.upc,
-                    payload.genre,
-                    payload.track_id,
-                ),
-            )
-            self.replace_additional_artists(payload.track_id, payload.additional_artists, cursor=cur)
+        invalid_fields = sorted(set(field_updates) - set(self.ALBUM_SHARED_FIELD_NAMES))
+        if invalid_fields:
+            raise ValueError(f"Unsupported album metadata field(s): {', '.join(invalid_fields)}")
+
+        apply_album_art = bool(album_art_source_path or clear_album_art)
+
+        def _apply(cur: sqlite3.Cursor) -> list[int]:
+            updated_track_ids: list[int] = []
+            for track_id in normalized_track_ids:
+                snapshot = self.fetch_track_snapshot(track_id, cursor=cur)
+                if snapshot is None:
+                    raise ValueError(f"Track {track_id} not found")
+                self._update_track_row(
+                    TrackUpdatePayload(
+                        track_id=snapshot.track_id,
+                        isrc=snapshot.isrc,
+                        track_title=snapshot.track_title,
+                        artist_name=(
+                            str(field_updates["artist_name"]).strip()
+                            if "artist_name" in field_updates
+                            else snapshot.artist_name
+                        ),
+                        additional_artists=list(snapshot.additional_artists),
+                        album_title=(
+                            field_updates["album_title"]
+                            if "album_title" in field_updates
+                            else snapshot.album_title
+                        ),
+                        release_date=(
+                            field_updates["release_date"]
+                            if "release_date" in field_updates
+                            else snapshot.release_date
+                        ),
+                        track_length_sec=int(snapshot.track_length_sec or 0),
+                        iswc=snapshot.iswc,
+                        upc=field_updates["upc"] if "upc" in field_updates else snapshot.upc,
+                        genre=field_updates["genre"] if "genre" in field_updates else snapshot.genre,
+                        catalog_number=(
+                            field_updates["catalog_number"]
+                            if "catalog_number" in field_updates
+                            else snapshot.catalog_number
+                        ),
+                        buma_work_number=snapshot.buma_work_number,
+                        album_art_source_path=album_art_source_path if apply_album_art and not clear_album_art else None,
+                        clear_album_art=bool(apply_album_art and clear_album_art and not album_art_source_path),
+                    ),
+                    cursor=cur,
+                )
+                updated_track_ids.append(track_id)
+            return updated_track_ids
+
+        if cursor is not None:
+            return _apply(cursor)
+
+        with self.conn:
+            cur = self.conn.cursor()
+            return _apply(cur)
 
     def delete_track(self, track_id: int) -> None:
         with self.conn:

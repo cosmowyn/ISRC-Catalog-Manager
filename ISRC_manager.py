@@ -9175,6 +9175,29 @@ class App(QMainWindow):
             QDialog.resizeEvent(dlg, e)
         dlg.resizeEvent = on_resize
 
+        detected_mime = self._detect_mime(data) or "image/png"
+        button_row = QHBoxLayout()
+        button_row.addStretch(1)
+        export_btn = QPushButton("Export Image…")
+        export_btn.clicked.connect(
+            lambda: self._export_bytes_with_picker(
+                data,
+                mime=detected_mime,
+                suggested_basename=title,
+                parent_widget=dlg,
+                action_label="Export Image Preview: {filename}",
+                action_type="file.export_image_preview",
+                entity_type="Preview",
+                entity_id=self._sanitize_filename(title),
+                payload={"title": title, "mime_type": detected_mime},
+            )
+        )
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dlg.accept)
+        button_row.addWidget(export_btn)
+        button_row.addWidget(close_btn)
+        layout.addLayout(button_row)
+
         dlg.exec()
 
 
@@ -9845,31 +9868,73 @@ class App(QMainWindow):
             self.logger.exception(f"Preview {media_key} failed: {e}")
             QMessageBox.critical(self, "Track Media Error", f"Failed to preview file:\n{e}")
 
+    def _export_bytes_with_picker(
+        self,
+        data,
+        *,
+        mime: str,
+        suggested_basename: str,
+        parent_widget=None,
+        action_label: str,
+        action_type: str,
+        entity_type: str | None = None,
+        entity_id: str | None = None,
+        payload: dict | None = None,
+        dialog_title: str = "Export file",
+    ) -> None:
+        if isinstance(data, memoryview):
+            data = data.tobytes()
+        elif isinstance(data, bytearray):
+            data = bytes(data)
+
+        ext = mimetypes.guess_extension(mime or "")
+        if ext == ".jpe":
+            ext = ".jpg"
+        if not ext:
+            if mime.startswith("image/"):
+                ext = ".png"
+            elif mime.startswith("audio/"):
+                ext = ".wav"
+            else:
+                ext = ".bin"
+
+        default_filename = f"{self._sanitize_filename(suggested_basename)}{ext}"
+        dest_path, _ = QFileDialog.getSaveFileName(parent_widget or self, dialog_title, default_filename, "All files (*)")
+        if not dest_path:
+            return
+
+        try:
+            self._run_file_history_action(
+                action_label=action_label.format(filename=Path(dest_path).name),
+                action_type=action_type,
+                target_path=dest_path,
+                mutation=lambda: Path(dest_path).write_bytes(data),
+                entity_type=entity_type,
+                entity_id=entity_id,
+                payload={"path": str(dest_path), **(payload or {})},
+            )
+            QMessageBox.information(parent_widget or self, "Export", f"Saved:\n{dest_path}")
+        except Exception as e:
+            QMessageBox.critical(parent_widget or self, "Export failed", str(e))
+
     def _export_standard_media_for_track(self, track_id: int, media_key: str, suggested_basename: str | None = None):
         try:
             data, mime = self.track_fetch_media(track_id, media_key)
         except Exception as e:
             QMessageBox.critical(self, "Export failed", str(e))
             return
-        ext = mimetypes.guess_extension(mime or "") or (".wav" if media_key == "audio_file" else ".png")
         default_basename = suggested_basename or self._sanitize_filename(self._get_track_title(track_id))
-        default_filename = f"{default_basename}{ext}"
-        dest_path, _ = QFileDialog.getSaveFileName(self, "Export file", default_filename, "All files (*)")
-        if not dest_path:
-            return
-        try:
-            self._run_file_history_action(
-                action_label=f"Export {media_key.replace('_', ' ').title()}: {Path(dest_path).name}",
-                action_type=f"file.export_{media_key}",
-                target_path=dest_path,
-                mutation=lambda: Path(dest_path).write_bytes(data),
-                entity_type="Track",
-                entity_id=str(track_id),
-                payload={"path": str(dest_path), "track_id": track_id, "media_key": media_key},
-            )
-            QMessageBox.information(self, "Export", f"Saved:\n{dest_path}")
-        except Exception as e:
-            QMessageBox.critical(self, "Export failed", str(e))
+        self._export_bytes_with_picker(
+            data,
+            mime=mime or "",
+            suggested_basename=default_basename,
+            parent_widget=self,
+            action_label=f"Export {media_key.replace('_', ' ').title()}: {{filename}}",
+            action_type=f"file.export_{media_key}",
+            entity_type="Track",
+            entity_id=str(track_id),
+            payload={"track_id": track_id, "media_key": media_key},
+        )
 
     # ---------------------- BLOB CF helpers (DB IO + export) ----------------------
     def cf_get_field_type(self, field_def_id: int) -> str:
@@ -9920,32 +9985,19 @@ class App(QMainWindow):
         except Exception as e:
             QMessageBox.critical(parent_widget or None, "Export failed", str(e))
             return
-        # choose extension
-        ext = None
-        if mime:
-            import mimetypes as _m
-            ext = _m.guess_extension(mime) or None
-        if not ext:
-            ext = ".png" if (mime and mime.startswith("image/")) else (".wav" if (mime and mime.startswith("audio/")) else ".bin")
         if suggested_basename is None:
             suggested_basename = self.custom_field_definitions.get_field_name(field_def_id)
-        default_filename = f"{suggested_basename}{ext}"
-        dest_path, _ = QFileDialog.getSaveFileName(parent_widget or None, "Export file", default_filename, "All files (*)")
-        if not dest_path:
-            return
-        try:
-            self._run_file_history_action(
-                action_label=f"Export Custom File: {Path(dest_path).name}",
-                action_type="file.export_custom_blob",
-                target_path=dest_path,
-                mutation=lambda: Path(dest_path).write_bytes(data),
-                entity_type="CustomFieldValue",
-                entity_id=f"{track_id}:{field_def_id}",
-                payload={"path": str(dest_path), "track_id": track_id, "field_id": field_def_id},
-            )
-            QMessageBox.information(parent_widget or None, "Export", f"Saved:\n{dest_path}")
-        except Exception as e:
-            QMessageBox.critical(parent_widget or None, "Export failed", str(e))
+        self._export_bytes_with_picker(
+            data,
+            mime=mime or "",
+            suggested_basename=suggested_basename,
+            parent_widget=parent_widget or self,
+            action_label="Export Custom File: {filename}",
+            action_type="file.export_custom_blob",
+            entity_type="CustomFieldValue",
+            entity_id=f"{track_id}:{field_def_id}",
+            payload={"track_id": track_id, "field_id": field_def_id},
+        )
 
     def cf_delete_blob(self, track_id: int, field_def_id: int):
         self.custom_field_values.delete_blob(track_id, field_def_id)
@@ -10172,6 +10224,15 @@ class EditDialog(QDialog):
 
     BULK_MIXED_TEXT = "{Multiple values}"
     BULK_VIEW_ONLY_FIELDS = {"isrc", "iswc", "track_title", "audio_file", "track_length_sec", "buma_work_number"}
+    SINGLE_EDIT_ALBUM_SHARED_FIELDS = {
+        "artist_name": "Artist",
+        "album_title": "Album Title",
+        "release_date": "Release Date",
+        "upc": "UPC/EAN",
+        "genre": "Genre",
+        "catalog_number": "Catalog#",
+        "album_art": "Album Art",
+    }
     BULK_MIXED_TOOLTIP = (
         "Selected records currently have different values. Replace this field to update every selected record."
     )
@@ -10221,17 +10282,27 @@ class EditDialog(QDialog):
         self._form_container = QWidget(self)
         form_layout = QVBoxLayout()
         form_layout.setContentsMargins(6, 6, 6, 6)
-        form_layout.setSpacing(8)
+        form_layout.setSpacing(10)
         self._form_container.setLayout(form_layout)
 
-        def add_row(label_text, widget):
+        def create_section(title: str):
+            box = QGroupBox(title, self._form_container)
+            box_layout = QVBoxLayout(box)
+            box_layout.setContentsMargins(12, 10, 12, 12)
+            box_layout.setSpacing(8)
+            form_layout.addWidget(box)
+            return box_layout
+
+        def add_row(target_layout, label_text, widget):
             row = QVBoxLayout()
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(4)
             lbl = QLabel(label_text)
             row.addWidget(lbl)
             row.addWidget(widget)
-            form_layout.addLayout(row)
+            target_layout.addLayout(row)
 
-        def combo(label, field_name, value, source_query, allow_empty=True):
+        def combo(target_layout, label, field_name, value, source_query, allow_empty=True):
             cb = FocusWheelComboBox()
             cb.setEditable(True)
             items = [r[0] for r in self.parent.cursor.execute(source_query).fetchall()]
@@ -10242,19 +10313,25 @@ class EditDialog(QDialog):
             comp.setCaseSensitivity(Qt.CaseInsensitive)
             cb.setCompleter(comp)
             self._configure_combo_field(cb, field_name, value)
-            add_row(label, cb)
+            add_row(target_layout, label, cb)
             return cb
+
+        core_layout = create_section("Core Details")
+        album_release_layout = create_section("Album & Release")
+        codes_layout = create_section("Codes & Registration")
+        media_layout = create_section("Managed Media")
 
         self.isrc_field = QLineEdit()
         self._configure_text_field(self.isrc_field, "isrc", self.snapshot.isrc, lock_in_bulk=True)
-        add_row("ISRC", self.isrc_field)
+        add_row(codes_layout, "ISRC", self.isrc_field)
 
         row_isrc_btns = QHBoxLayout()
         self.btn_isrc_copy_iso = QPushButton("Copy ISO")
         self.btn_isrc_copy_compact = QPushButton("Copy compact")
         row_isrc_btns.addWidget(self.btn_isrc_copy_iso)
         row_isrc_btns.addWidget(self.btn_isrc_copy_compact)
-        form_layout.addLayout(row_isrc_btns)
+        row_isrc_btns.addStretch(1)
+        codes_layout.addLayout(row_isrc_btns)
         self.btn_isrc_copy_iso.clicked.connect(self._copy_isrc_iso)
         self.btn_isrc_copy_iso.setDefault(False)
         self.btn_isrc_copy_compact.clicked.connect(self._copy_isrc_compact)
@@ -10267,13 +10344,13 @@ class EditDialog(QDialog):
             read_only=True,
             track_changes=False,
         )
-        add_row("Entry Date", self.entry_date_field)
 
         self.track_title = QLineEdit()
         self._configure_text_field(self.track_title, "track_title", self.snapshot.track_title)
-        add_row("Track Title", self.track_title)
+        add_row(core_layout, "Track Title", self.track_title)
 
         self.artist_name = combo(
+            core_layout,
             "Artist",
             "artist_name",
             self.snapshot.artist_name,
@@ -10281,18 +10358,21 @@ class EditDialog(QDialog):
             allow_empty=False,
         )
         self.additional_artist = combo(
+            core_layout,
             "Additional Artist(s)",
             "additional_artists",
             ", ".join(self.snapshot.additional_artists),
             "SELECT DISTINCT name FROM Artists ORDER BY name",
         )
         self.album_title = combo(
+            album_release_layout,
             "Album Title",
             "album_title",
             self.snapshot.album_title or "",
             "SELECT DISTINCT title FROM Albums ORDER BY title",
         )
         self.genre = combo(
+            core_layout,
             "Genre",
             "genre",
             self.snapshot.genre or "",
@@ -10324,7 +10404,7 @@ class EditDialog(QDialog):
             btn_audio_clear.setEnabled(False)
         audio_layout.addWidget(btn_audio_browse)
         audio_layout.addWidget(btn_audio_clear)
-        add_row("Audio File", audio_row)
+        add_row(media_layout, "Audio File", audio_row)
 
         self.album_art = QLineEdit()
         self._configure_text_field(
@@ -10348,11 +10428,10 @@ class EditDialog(QDialog):
         )
         art_layout.addWidget(btn_art_browse)
         art_layout.addWidget(btn_art_clear)
-        add_row("Album Art", art_row)
+        add_row(media_layout, "Album Art", art_row)
 
         self.catalog_number = QLineEdit()
         self._configure_text_field(self.catalog_number, "catalog_number", self.snapshot.catalog_number or "")
-        add_row("Catalog#", self.catalog_number)
 
         self.buma_work_number = QLineEdit()
         self._configure_text_field(
@@ -10360,7 +10439,6 @@ class EditDialog(QDialog):
             "buma_work_number",
             self.snapshot.buma_work_number or "",
         )
-        add_row("BUMA Wnr.", self.buma_work_number)
 
         self.release_date = FocusWheelCalendarWidget()
         self.release_date.setVerticalHeaderFormat(QCalendarWidget.NoVerticalHeader)
@@ -10388,7 +10466,7 @@ class EditDialog(QDialog):
         )
         if release_note is not None:
             release_layout.addWidget(release_note)
-        add_row("Release Date", release_widget)
+        add_row(album_release_layout, "Release Date", release_widget)
 
         self.len_h = TwoDigitSpinBox()
         self.len_h.setRange(0, 99)
@@ -10445,27 +10523,31 @@ class EditDialog(QDialog):
             self.len_h.setEnabled(False)
             self.len_m.setEnabled(False)
             self.len_s.setEnabled(False)
-        add_row("Track Length (hh:mm:ss)", tlw)
+        add_row(album_release_layout, "Track Length (hh:mm:ss)", tlw)
 
         self.iswc = QLineEdit()
         self._configure_text_field(self.iswc, "iswc", self.snapshot.iswc or "", lock_in_bulk=True)
-        add_row("ISWC", self.iswc)
+        add_row(codes_layout, "ISWC", self.iswc)
 
         row_iswc_btns = QHBoxLayout()
         self.btn_iswc_copy_iso = QPushButton("Copy ISO")
         self.btn_iswc_copy_compact = QPushButton("Copy compact")
         row_iswc_btns.addWidget(self.btn_iswc_copy_iso)
         row_iswc_btns.addWidget(self.btn_iswc_copy_compact)
-        form_layout.addLayout(row_iswc_btns)
+        row_iswc_btns.addStretch(1)
+        codes_layout.addLayout(row_iswc_btns)
         self.btn_iswc_copy_iso.clicked.connect(self._copy_iswc_iso)
         self.btn_iswc_copy_iso.setDefault(False)
         self.btn_iswc_copy_compact.clicked.connect(self._copy_iswc_compact)
 
         self.upc = QLineEdit()
         self._configure_text_field(self.upc, "upc", self.snapshot.upc or "")
-        add_row("UPC/EAN", self.upc)
+        add_row(codes_layout, "UPC/EAN", self.upc)
+        add_row(codes_layout, "Catalog#", self.catalog_number)
+        add_row(codes_layout, "BUMA Wnr.", self.buma_work_number)
+        add_row(codes_layout, "Entry Date", self.entry_date_field)
 
-        add_row("Genre", self.genre)
+        form_layout.addStretch(1)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -10740,6 +10822,44 @@ class EditDialog(QDialog):
             return True
         return (final_path or "") != initial_path
 
+    def _single_edit_album_field_updates(
+        self,
+        before_snapshot: TrackSnapshot,
+        *,
+        artist_name: str,
+        album_title: str | None,
+        release_date: str | None,
+        upc: str | None,
+        genre: str | None,
+        catalog_number: str | None,
+    ) -> dict[str, object]:
+        updates: dict[str, object] = {}
+        if artist_name != before_snapshot.artist_name:
+            updates["artist_name"] = artist_name
+        if album_title != before_snapshot.album_title:
+            updates["album_title"] = album_title
+        if release_date != before_snapshot.release_date:
+            updates["release_date"] = release_date
+        if upc != before_snapshot.upc:
+            updates["upc"] = upc
+        if genre != before_snapshot.genre:
+            updates["genre"] = genre
+        if catalog_number != before_snapshot.catalog_number:
+            updates["catalog_number"] = catalog_number
+        return updates
+
+    def _single_edit_album_art_changed(self, album_art_source_path: str | None) -> bool:
+        clear_requested = bool(self._clear_album_art and not album_art_source_path)
+        return bool(clear_requested or album_art_source_path)
+
+    def _display_album_shared_field_names(self, field_names: list[str]) -> list[str]:
+        labels: list[str] = []
+        for field_name in field_names:
+            label = self.SINGLE_EDIT_ALBUM_SHARED_FIELDS.get(field_name)
+            if label and label not in labels:
+                labels.append(label)
+        return labels
+
     def save_changes(self):
         if self._is_bulk_edit:
             self._save_bulk_changes()
@@ -10752,6 +10872,11 @@ class EditDialog(QDialog):
         new_upc_raw = (self.upc.currentText() if hasattr(self.upc, "currentText") else self.upc.text()).strip()
         new_genre = (self.genre.currentText() if hasattr(self.genre, "currentText") else self.genre.text()).strip()
         new_track_title = (self.track_title.text() or "").strip()
+        new_artist_name = self.artist_name.currentText().strip()
+        new_album_title = self.album_title.currentText().strip() or None
+        new_release_date = self.release_date.selectedDate().toString("yyyy-MM-dd")
+        new_catalog_number = self.catalog_number.text().strip() or None
+        new_buma_work_number = self.buma_work_number.text().strip() or None
         new_additional_artist = self.parent._parse_additional_artists(
             (
                 self.additional_artist.currentText()
@@ -10777,7 +10902,7 @@ class EditDialog(QDialog):
                 )
                 return
 
-        if is_blank(self.track_title.text()) or is_blank(self.artist_name.currentText()):
+        if is_blank(self.track_title.text()) or is_blank(new_artist_name):
             QMessageBox.warning(self, "Missing data", "Track Title and Artist are required.")
             return
 
@@ -10801,38 +10926,111 @@ class EditDialog(QDialog):
                 QMessageBox.critical(self, "Duplicate ISRC", "Another record already uses this ISRC.")
                 return
 
-            cleanup_artist_names, cleanup_album_titles = parent._collect_catalog_cleanup_targets(
-                artist_name=self.artist_name.currentText(),
-                additional_artists=new_additional_artist,
-                album_title=self.album_title.currentText().strip() or None,
-            )
             audio_source_path = (self.audio_file.text() or "").strip()
             album_art_source_path = (self.album_art.text() or "").strip()
             if audio_source_path == self._existing_audio_display_path:
                 audio_source_path = None
             if album_art_source_path == self._existing_album_art_display_path:
                 album_art_source_path = None
-            parent.track_service.update_track(
-                TrackUpdatePayload(
-                    track_id=row_id,
-                    isrc=iso_isrc,
-                    track_title=new_track_title,
-                    artist_name=self.artist_name.currentText(),
-                    additional_artists=new_additional_artist,
-                    album_title=self.album_title.currentText().strip() or None,
-                    release_date=self.release_date.selectedDate().toString("yyyy-MM-dd"),
-                    track_length_sec=hms_to_seconds(self.len_h.value(), self.len_m.value(), self.len_s.value()),
-                    iswc=(iso_iswc or None),
-                    upc=(new_upc_raw or None),
-                    genre=(new_genre or None),
-                    catalog_number=(self.catalog_number.text().strip() or None),
-                    buma_work_number=(self.buma_work_number.text().strip() or None),
-                    audio_file_source_path=audio_source_path,
-                    album_art_source_path=album_art_source_path,
-                    clear_audio_file=bool(self._clear_audio_file and not audio_source_path),
-                    clear_album_art=bool(self._clear_album_art and not album_art_source_path),
-                )
+            source_payload = TrackUpdatePayload(
+                track_id=row_id,
+                isrc=iso_isrc,
+                track_title=new_track_title,
+                artist_name=new_artist_name,
+                additional_artists=new_additional_artist,
+                album_title=new_album_title,
+                release_date=new_release_date,
+                track_length_sec=hms_to_seconds(self.len_h.value(), self.len_m.value(), self.len_s.value()),
+                iswc=(iso_iswc or None),
+                upc=(new_upc_raw or None),
+                genre=(new_genre or None),
+                catalog_number=new_catalog_number,
+                buma_work_number=new_buma_work_number,
+                audio_file_source_path=audio_source_path,
+                album_art_source_path=album_art_source_path,
+                clear_audio_file=bool(self._clear_audio_file and not audio_source_path),
+                clear_album_art=bool(self._clear_album_art and not album_art_source_path),
             )
+
+            album_field_updates = self._single_edit_album_field_updates(
+                before_snapshot,
+                artist_name=new_artist_name,
+                album_title=new_album_title,
+                release_date=new_release_date,
+                upc=(new_upc_raw or None),
+                genre=(new_genre or None),
+                catalog_number=new_catalog_number,
+            )
+            album_art_changed = self._single_edit_album_art_changed(album_art_source_path)
+            album_group_track_ids = parent.track_service.list_album_group_track_ids(row_id)
+            propagated_track_ids = [track_id for track_id in album_group_track_ids if track_id != row_id]
+            album_shared_fields_changed = list(album_field_updates.keys())
+            if album_art_changed:
+                album_shared_fields_changed.append("album_art")
+
+            if propagated_track_ids and album_shared_fields_changed:
+                propagated_field_labels = self._display_album_shared_field_names(album_shared_fields_changed)
+
+                def mutation():
+                    with parent.conn:
+                        cur = parent.conn.cursor()
+                        parent.track_service.update_track(source_payload, cursor=cur)
+                        parent.track_service.apply_album_metadata_to_tracks(
+                            propagated_track_ids,
+                            field_updates=album_field_updates,
+                            album_art_source_path=album_art_source_path if not self._clear_album_art else None,
+                            clear_album_art=bool(self._clear_album_art and not album_art_source_path),
+                            cursor=cur,
+                        )
+
+                    parent.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                    try:
+                        parent._log_event(
+                            "track.update",
+                            "Track updated with album-level propagation",
+                            track_id=row_id,
+                            isrc=iso_isrc,
+                            track_title=new_track_title,
+                            propagated_track_ids=propagated_track_ids,
+                            propagated_fields=propagated_field_labels,
+                        )
+                        parent._audit(
+                            "UPDATE",
+                            "Track",
+                            ref_id=row_id,
+                            details=(
+                                f"isrc={iso_isrc}; "
+                                f"propagated_track_ids={','.join(str(track_id) for track_id in propagated_track_ids)}; "
+                                f"propagated_fields={','.join(propagated_field_labels)}"
+                            ),
+                        )
+                        parent._audit_commit()
+                    except Exception as audit_err:
+                        parent.logger.warning(f"Audit failed: {audit_err}")
+
+                parent._run_snapshot_history_action(
+                    action_label=f"Update Album Metadata: {new_track_title}",
+                    action_type="track.update_album_metadata",
+                    entity_type="Track",
+                    entity_id=row_id,
+                    payload={
+                        "track_id": row_id,
+                        "track_title": new_track_title,
+                        "propagated_track_ids": propagated_track_ids,
+                        "propagated_fields": propagated_field_labels,
+                    },
+                    mutation=mutation,
+                )
+                parent.refresh_table_preserve_view(focus_id=row_id)
+                self.accept()
+                return
+
+            cleanup_artist_names, cleanup_album_titles = parent._collect_catalog_cleanup_targets(
+                artist_name=new_artist_name,
+                additional_artists=new_additional_artist,
+                album_title=new_album_title,
+            )
+            parent.track_service.update_track(source_payload)
             parent.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
             try:
