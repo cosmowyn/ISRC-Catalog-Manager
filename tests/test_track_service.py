@@ -43,6 +43,10 @@ def make_track_conn():
             iswc TEXT,
             upc TEXT,
             genre TEXT,
+            composer TEXT,
+            publisher TEXT,
+            comments TEXT,
+            lyrics TEXT,
             FOREIGN KEY (main_artist_id) REFERENCES Artists(id) ON DELETE RESTRICT,
             FOREIGN KEY (album_id) REFERENCES Albums(id) ON DELETE SET NULL
         );

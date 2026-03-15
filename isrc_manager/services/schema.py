@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Callable
 
 from isrc_manager.constants import PROMOTED_CUSTOM_FIELDS, SCHEMA_BASELINE, SCHEMA_TARGET
-from isrc_manager.domain.codes import to_compact_isrc
+from isrc_manager.domain.codes import barcode_validation_status, to_compact_isrc
 
 
 class DatabaseSchemaService:
@@ -84,6 +84,10 @@ class DatabaseSchemaService:
                 iswc TEXT,
                 upc TEXT,
                 genre TEXT,
+                composer TEXT,
+                publisher TEXT,
+                comments TEXT,
+                lyrics TEXT,
                 FOREIGN KEY (main_artist_id) REFERENCES Artists(id) ON DELETE RESTRICT,
                 FOREIGN KEY (album_id) REFERENCES Albums(id) ON DELETE SET NULL
             )
@@ -266,6 +270,7 @@ class DatabaseSchemaService:
         )
 
         self._ensure_gs1_metadata_table()
+        self._ensure_release_tables()
 
         self.conn.commit()
 
@@ -388,6 +393,9 @@ class DatabaseSchemaService:
             elif version == 17:
                 self._apply_migration(17, self._mig_17_to_18)
                 version = 18
+            elif version == 18:
+                self._apply_migration(18, self._mig_18_to_19)
+                version = 19
             else:
                 self.logger.warning("Unknown migration path from version %s", version)
                 break
@@ -793,6 +801,11 @@ class DatabaseSchemaService:
     def _mig_17_to_18(self) -> None:
         self._ensure_optional_isrc_constraints()
 
+    def _mig_18_to_19(self) -> None:
+        self._ensure_current_track_columns()
+        self._ensure_release_tables()
+        self._migrate_legacy_releases()
+
     def _ensure_current_track_columns(self) -> None:
         cols = self._table_columns("Tracks")
         additions = (
@@ -807,6 +820,10 @@ class DatabaseSchemaService:
             ("album_art_mime_type", "TEXT"),
             ("album_art_size_bytes", "INTEGER NOT NULL DEFAULT 0"),
             ("buma_work_number", "TEXT"),
+            ("composer", "TEXT"),
+            ("publisher", "TEXT"),
+            ("comments", "TEXT"),
+            ("lyrics", "TEXT"),
         )
         for column_name, column_sql in additions:
             if column_name not in cols:
@@ -941,6 +958,256 @@ class DatabaseSchemaService:
             "CREATE INDEX IF NOT EXISTS idx_gs1_metadata_export_enabled ON GS1Metadata(export_enabled)"
         )
         self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_gs1_metadata_contract_number ON GS1Metadata(contract_number)")
+
+    def _ensure_release_tables(self) -> None:
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS Releases (
+                id INTEGER PRIMARY KEY,
+                title TEXT NOT NULL,
+                version_subtitle TEXT,
+                primary_artist TEXT,
+                album_artist TEXT,
+                release_type TEXT NOT NULL DEFAULT 'album',
+                release_date TEXT,
+                original_release_date TEXT,
+                label TEXT,
+                sublabel TEXT,
+                catalog_number TEXT,
+                upc TEXT,
+                barcode_validation_status TEXT NOT NULL DEFAULT 'missing',
+                territory TEXT,
+                explicit_flag INTEGER NOT NULL DEFAULT 0,
+                release_notes TEXT,
+                artwork_path TEXT,
+                artwork_mime_type TEXT,
+                artwork_size_bytes INTEGER NOT NULL DEFAULT 0,
+                profile_name TEXT
+            )
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ReleaseTracks (
+                release_id INTEGER NOT NULL,
+                track_id INTEGER NOT NULL,
+                disc_number INTEGER NOT NULL DEFAULT 1,
+                track_number INTEGER NOT NULL DEFAULT 1,
+                sequence_number INTEGER NOT NULL DEFAULT 1,
+                PRIMARY KEY (release_id, track_id),
+                FOREIGN KEY (release_id) REFERENCES Releases(id) ON DELETE CASCADE,
+                FOREIGN KEY (track_id) REFERENCES Tracks(id) ON DELETE CASCADE
+            )
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_release_tracks_order_unique
+            ON ReleaseTracks(release_id, disc_number, track_number)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_release_tracks_track
+            ON ReleaseTracks(track_id)
+            """
+        )
+        # Older builds enforced release UPC uniqueness at the DB level, which makes
+        # legacy migrations fail when historical data legitimately reuses a UPC.
+        # Keep UPC indexed for lookups, but detect duplicates in validation/dashboard
+        # instead of aborting schema upgrades.
+        self.cursor.execute("DROP INDEX IF EXISTS idx_releases_upc_unique")
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_releases_upc
+            ON Releases(upc)
+            WHERE upc IS NOT NULL AND trim(upc) != ''
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_releases_catalog_number
+            ON Releases(catalog_number)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_releases_release_date
+            ON Releases(release_date)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_releases_title
+            ON Releases(title)
+            """
+        )
+
+    def _migrate_legacy_releases(self) -> None:
+        tables = {
+            row[0]
+            for row in self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
+        if "Tracks" not in tables or "Artists" not in tables:
+            return
+        existing = self.cursor.execute("SELECT COUNT(*) FROM Releases").fetchone()
+        if existing and int(existing[0] or 0) > 0:
+            return
+
+        rows = self.cursor.execute(
+            """
+            SELECT
+                t.id,
+                t.track_title,
+                COALESCE(a.name, '') AS artist_name,
+                COALESCE(al.id, 0) AS album_id,
+                COALESCE(al.title, '') AS album_title,
+                COALESCE(t.release_date, '') AS release_date,
+                COALESCE(t.upc, '') AS upc,
+                COALESCE(t.catalog_number, '') AS catalog_number,
+                COALESCE(al.album_art_path, '') AS album_art_path,
+                COALESCE(al.album_art_mime_type, '') AS album_art_mime_type,
+                COALESCE(al.album_art_size_bytes, 0) AS album_art_size_bytes,
+                COALESCE(t.album_art_path, '') AS track_album_art_path,
+                COALESCE(t.album_art_mime_type, '') AS track_album_art_mime_type,
+                COALESCE(t.album_art_size_bytes, 0) AS track_album_art_size_bytes
+            FROM Tracks t
+            LEFT JOIN Artists a ON a.id = t.main_artist_id
+            LEFT JOIN Albums al ON al.id = t.album_id
+            ORDER BY t.id
+            """
+        ).fetchall()
+        if not rows:
+            return
+
+        grouped: dict[tuple[str, str, str, str, str], list[tuple]] = {}
+        single_rows: list[tuple] = []
+        for row in rows:
+            clean_album_title = str(row[4] or "").strip()
+            if clean_album_title and clean_album_title.casefold() != "single":
+                group_key = (
+                    str(row[3] or 0),
+                    clean_album_title.casefold(),
+                    str(row[2] or "").strip().casefold(),
+                    str(row[6] or "").strip(),
+                    str(row[7] or "").strip(),
+                )
+                grouped.setdefault(group_key, []).append(row)
+            elif str(row[6] or "").strip() or str(row[7] or "").strip() or str(row[5] or "").strip():
+                single_rows.append(row)
+
+        for group_rows in grouped.values():
+            first = group_rows[0]
+            title = str(first[4] or "").strip()
+            artist_name = str(first[2] or "").strip() or None
+            upc = str(first[6] or "").strip() or None
+            catalog_number = str(first[7] or "").strip() or None
+            release_date = str(first[5] or "").strip() or None
+            artwork_path = str(first[8] or "").strip() or str(first[11] or "").strip() or None
+            artwork_mime = str(first[9] or "").strip() or str(first[12] or "").strip() or None
+            artwork_size = int(first[10] or 0) or int(first[13] or 0)
+            track_count = len(group_rows)
+            release_type = "album" if track_count >= 7 else ("ep" if track_count >= 2 else "single")
+            self.cursor.execute(
+                """
+                INSERT INTO Releases (
+                    title,
+                    primary_artist,
+                    album_artist,
+                    release_type,
+                    release_date,
+                    catalog_number,
+                    upc,
+                    barcode_validation_status,
+                    artwork_path,
+                    artwork_mime_type,
+                    artwork_size_bytes
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    title,
+                    artist_name,
+                    artist_name,
+                    release_type,
+                    release_date,
+                    catalog_number,
+                    upc,
+                    barcode_validation_status(upc),
+                    artwork_path,
+                    artwork_mime,
+                    artwork_size,
+                ),
+            )
+            release_id = int(self.cursor.lastrowid)
+            for sequence_number, group_row in enumerate(group_rows, start=1):
+                self.cursor.execute(
+                    """
+                    INSERT OR IGNORE INTO ReleaseTracks (
+                        release_id,
+                        track_id,
+                        disc_number,
+                        track_number,
+                        sequence_number
+                    )
+                    VALUES (?, ?, 1, ?, ?)
+                    """,
+                    (release_id, int(group_row[0]), sequence_number, sequence_number),
+                )
+
+        for row in single_rows:
+            title = str(row[4] or "").strip() or str(row[1] or "").strip()
+            artist_name = str(row[2] or "").strip() or None
+            upc = str(row[6] or "").strip() or None
+            catalog_number = str(row[7] or "").strip() or None
+            release_date = str(row[5] or "").strip() or None
+            artwork_path = str(row[11] or "").strip() or str(row[8] or "").strip() or None
+            artwork_mime = str(row[12] or "").strip() or str(row[9] or "").strip() or None
+            artwork_size = int(row[13] or 0) or int(row[10] or 0)
+            self.cursor.execute(
+                """
+                INSERT INTO Releases (
+                    title,
+                    primary_artist,
+                    album_artist,
+                    release_type,
+                    release_date,
+                    catalog_number,
+                    upc,
+                    barcode_validation_status,
+                    artwork_path,
+                    artwork_mime_type,
+                    artwork_size_bytes
+                )
+                VALUES (?, ?, ?, 'single', ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    title,
+                    artist_name,
+                    artist_name,
+                    release_date,
+                    catalog_number,
+                    upc,
+                    barcode_validation_status(upc),
+                    artwork_path,
+                    artwork_mime,
+                    artwork_size,
+                ),
+            )
+            release_id = int(self.cursor.lastrowid)
+            self.cursor.execute(
+                """
+                INSERT OR IGNORE INTO ReleaseTracks (
+                    release_id,
+                    track_id,
+                    disc_number,
+                    track_number,
+                    sequence_number
+                )
+                VALUES (?, ?, 1, 1, 1)
+                """,
+                (release_id, int(row[0])),
+            )
 
     def _migrate_promoted_custom_fields(self) -> None:
         placeholders = ",".join("?" for _ in PROMOTED_CUSTOM_FIELDS)

@@ -45,6 +45,10 @@ class TrackCreatePayload:
     genre: str | None
     catalog_number: str | None = None
     buma_work_number: str | None = None
+    composer: str | None = None
+    publisher: str | None = None
+    comments: str | None = None
+    lyrics: str | None = None
     audio_file_source_path: str | None = None
     album_art_source_path: str | None = None
 
@@ -64,6 +68,10 @@ class TrackUpdatePayload:
     genre: str | None
     catalog_number: str | None = None
     buma_work_number: str | None = None
+    composer: str | None = None
+    publisher: str | None = None
+    comments: str | None = None
+    lyrics: str | None = None
     audio_file_source_path: str | None = None
     album_art_source_path: str | None = None
     clear_audio_file: bool = False
@@ -86,6 +94,10 @@ class TrackSnapshot:
     genre: str | None
     catalog_number: str | None
     buma_work_number: str | None
+    composer: str | None
+    publisher: str | None
+    comments: str | None
+    lyrics: str | None
     audio_file_path: str | None
     audio_file_mime_type: str | None
     audio_file_size_bytes: int
@@ -690,7 +702,11 @@ class TrackService:
                 t.track_length_sec,
                 t.iswc,
                 t.upc,
-                t.genre
+                t.genre,
+                t.composer,
+                t.publisher,
+                t.comments,
+                t.lyrics
             FROM Tracks t
             JOIN Artists main_artist ON main_artist.id = t.main_artist_id
             LEFT JOIN Albums album ON album.id = t.album_id
@@ -726,6 +742,10 @@ class TrackService:
             iswc=row[16],
             upc=row[17],
             genre=row[18],
+            composer=row[19],
+            publisher=row[20],
+            comments=row[21],
+            lyrics=row[22],
             catalog_number=row[7],
             buma_work_number=row[12],
             audio_file_path=row[3],
@@ -764,7 +784,11 @@ class TrackService:
                     track_length_sec=?,
                     iswc=?,
                     upc=?,
-                    genre=?
+                    genre=?,
+                    composer=?,
+                    publisher=?,
+                    comments=?,
+                    lyrics=?
                 WHERE id=?
                 """,
                 (
@@ -787,6 +811,10 @@ class TrackService:
                     snapshot.iswc,
                     snapshot.upc,
                     snapshot.genre,
+                    snapshot.composer,
+                    snapshot.publisher,
+                    snapshot.comments,
+                    snapshot.lyrics,
                     int(snapshot.track_id),
                 ),
             )
@@ -799,9 +827,10 @@ class TrackService:
                     track_title, catalog_number,
                     album_art_path, album_art_mime_type, album_art_size_bytes,
                     main_artist_id, buma_work_number, album_id,
-                    release_date, track_length_sec, iswc, upc, genre
+                    release_date, track_length_sec, iswc, upc, genre,
+                    composer, publisher, comments, lyrics
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     int(snapshot.track_id),
@@ -824,6 +853,10 @@ class TrackService:
                     snapshot.iswc,
                     snapshot.upc,
                     snapshot.genre,
+                    snapshot.composer,
+                    snapshot.publisher,
+                    snapshot.comments,
+                    snapshot.lyrics,
                 ),
             )
         if self._album_supports_shared_art(album_id, snapshot.album_title):
@@ -902,9 +935,10 @@ class TrackService:
                     track_title, catalog_number,
                     album_art_path, album_art_mime_type, album_art_size_bytes,
                     main_artist_id, buma_work_number, album_id,
-                    release_date, track_length_sec, iswc, upc, genre
+                    release_date, track_length_sec, iswc, upc, genre,
+                    composer, publisher, comments, lyrics
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     clean_isrc,
@@ -925,6 +959,10 @@ class TrackService:
                     payload.iswc,
                     payload.upc,
                     payload.genre,
+                    payload.composer,
+                    payload.publisher,
+                    payload.comments,
+                    payload.lyrics,
                 ),
             )
             track_id = int(cur.lastrowid)
@@ -953,7 +991,7 @@ class TrackService:
                 track_title=?, catalog_number=?,
                 album_art_path=?, album_art_mime_type=?, album_art_size_bytes=?,
                 main_artist_id=?, buma_work_number=?, album_id=?, release_date=?,
-                track_length_sec=?, iswc=?, upc=?, genre=?
+                track_length_sec=?, iswc=?, upc=?, genre=?, composer=?, publisher=?, comments=?, lyrics=?
             WHERE id=?
             """,
             (
@@ -983,6 +1021,10 @@ class TrackService:
                 payload.iswc,
                 payload.upc,
                 payload.genre,
+                payload.composer,
+                payload.publisher,
+                payload.comments,
+                payload.lyrics,
                 payload.track_id,
             ),
         )
@@ -1095,6 +1137,10 @@ class TrackService:
                             else snapshot.catalog_number
                         ),
                         buma_work_number=snapshot.buma_work_number,
+                        composer=snapshot.composer,
+                        publisher=snapshot.publisher,
+                        comments=snapshot.comments,
+                        lyrics=snapshot.lyrics,
                         album_art_source_path=album_art_source_path if apply_album_art and not clear_album_art else None,
                         clear_album_art=bool(apply_album_art and clear_album_art and not album_art_source_path),
                     ),

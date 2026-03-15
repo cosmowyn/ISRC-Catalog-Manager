@@ -36,6 +36,15 @@ from .gs1_validation import GS1ValidationService
 from .imports import ImportExecutionResult, ImportInspection, ImportRecord, XMLImportService
 from .licenses import LicenseRecord, LicenseRow, LicenseService
 from .profiles import ProfileChoice, ProfileRemovalResult, ProfileWorkflowService
+from isrc_manager.releases import (
+    RELEASE_TYPE_CHOICES,
+    ReleasePayload,
+    ReleaseRecord,
+    ReleaseService,
+    ReleaseSummary,
+    ReleaseTrackPlacement,
+    ReleaseValidationIssue,
+)
 from .schema import DatabaseSchemaService
 from .settings_reads import AutoSnapshotSettings, RegistrationSettings, SettingsReadService
 from .session import DatabaseSessionService, OpenDatabaseSession, ProfileKVService
@@ -94,7 +103,14 @@ __all__ = [
     "ProfileRemovalResult",
     "ProfileStoreService",
     "ProfileWorkflowService",
+    "RELEASE_TYPE_CHOICES",
     "RegistrationSettings",
+    "ReleasePayload",
+    "ReleaseRecord",
+    "ReleaseService",
+    "ReleaseSummary",
+    "ReleaseTrackPlacement",
+    "ReleaseValidationIssue",
     "RestoreResult",
     "SettingsReadService",
     "SettingsMutationService",

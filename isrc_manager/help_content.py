@@ -18,20 +18,23 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         chapter_id="overview",
         title="Overview",
         summary="What the app does, how the workspace is organized, and the main workflows you will use every day.",
-        keywords=("overview", "introduction", "menus", "workflow", "catalog", "tracks", "album entry", "licenses", "gs1", "bulk edit", "action ribbon", "quick actions"),
+        keywords=("overview", "introduction", "menus", "workflow", "catalog", "tracks", "album entry", "licenses", "gs1", "bulk edit", "action ribbon", "quick actions", "releases", "audio tags", "csv", "json", "xlsx", "quality dashboard"),
         content_html="""
-        <p><strong>ISRC Catalog Manager</strong> is a local-first desktop application for managing track metadata, generated ISRC values, licensing files, GS1 workbook metadata, custom metadata columns, backups, snapshots, and exports from one workspace.</p>
+        <p><strong>ISRC Catalog Manager</strong> is a local-first desktop application for managing track metadata, first-class releases, optional or generated ISRC values, licensing files, GS1 workbook metadata, custom metadata columns, backups, snapshots, audio tag workflows, exchange formats, and quality checks from one workspace.</p>
         <p>The app is organized around a few core ideas:</p>
         <ul>
           <li><strong>Profiles</strong>: each profile is a separate catalog database.</li>
           <li><strong>Add Data</strong>: the dockable form used to create new tracks.</li>
           <li><strong>Add Album</strong>: a structured dialog for entering shared album metadata once and then saving multiple track rows in one pass.</li>
+          <li><strong>Releases</strong>: a first-class release/product layer that keeps UPC/EAN, catalog numbers, release artwork, release order, and product-level metadata together.</li>
           <li><strong>Catalog Table</strong>: the searchable table used to browse, preview, single-edit, and bulk-edit existing tracks.</li>
+          <li><strong>Exchange</strong>: CSV, XLSX, JSON, XML, and packaged exports for sharing or archiving the catalog safely.</li>
+          <li><strong>Quality Dashboard</strong>: an actionable scan view for missing metadata, duplicate codes, broken media links, and other export-readiness issues.</li>
           <li><strong>Action Ribbon</strong>: a customizable top-row quick-action bar built from your preferred menu actions.</li>
           <li><strong>Settings</strong>: application identity, registration settings, snapshots, and themes.</li>
           <li><strong>History</strong>: undo, redo, manual snapshots, and restore points.</li>
         </ul>
-        <p>The menu bar mirrors those workflows. <strong>File</strong> handles profiles and import/export tasks, <strong>Edit</strong> handles direct track actions, <strong>Catalog</strong> handles reusable catalog data such as artists, albums, and licensees, <strong>Settings</strong> handles app and profile configuration, <strong>View</strong> controls layout and columns, <strong>History</strong> manages undo/snapshots, and <strong>Help</strong> provides diagnostics, logs, and this manual.</p>
+        <p>The menu bar mirrors those workflows. <strong>File</strong> handles profiles and import/export tasks, <strong>Edit</strong> handles direct track actions, <strong>Catalog</strong> now includes releases, tag import, GS1 metadata, quality checks, and reusable catalog data such as artists, albums, and licensees, <strong>Settings</strong> handles app and profile configuration, <strong>View</strong> controls layout and columns, <strong>History</strong> manages undo/snapshots, and <strong>Help</strong> provides diagnostics, logs, and this manual.</p>
         """,
     ),
     HelpChapter(
@@ -135,7 +138,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         chapter_id="edit-entry",
         title="Edit Entry",
         summary="How the full track editor works for existing rows, including standard metadata, media replacement, and validation.",
-        keywords=("edit entry", "track editor", "edit track", "iswc", "upc", "catalog number", "buma", "bulk edit", "gs1 metadata"),
+        keywords=("edit entry", "track editor", "edit track", "iswc", "upc", "catalog number", "buma", "bulk edit", "gs1 metadata", "release sync"),
         content_html="""
         <p>The Edit Entry dialog opens the full editor for an existing track. When multiple table rows are selected, the same dialog switches into <strong>bulk edit</strong> mode and shows mixed-value placeholders where the selected records do not match.</p>
         <ul>
@@ -146,7 +149,78 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>GS1 handoff</strong>: the <strong>GS1 Metadata…</strong> button opens the GS1 dialog for the same current track or selected batch.</li>
           <li><strong>Validation</strong>: duplicate ISRCs, invalid ISWC values, and invalid UPC/EAN values are blocked before save.</li>
         </ul>
-        <p>Saving changes updates the current row, records the change in history, and keeps related catalog references such as artists and albums synchronized.</p>
+        <p>Saving changes updates the current row, records the change in history, and keeps related catalog references such as artists, albums, and first-class release metadata synchronized where the edited values are shared at release level.</p>
+        """,
+    ),
+    HelpChapter(
+        chapter_id="audio-tags",
+        title="Audio Tags",
+        summary="Import embedded tags from supported audio files and write catalog metadata back to exported copies.",
+        keywords=("audio tags", "id3", "flac", "vorbis", "m4a", "mp4", "wav", "aiff", "import tags", "write tags"),
+        content_html="""
+        <p>The app can read and write embedded audio metadata so the catalog and exported audio files stay aligned.</p>
+        <ul>
+          <li><strong>Supported read/write families</strong>: MP3/ID3, FLAC/Vorbis comments, OGG Vorbis/Opus comments, M4A/MP4 atoms, and WAV/AIFF where ID3-style metadata is available.</li>
+          <li><strong>Mapped fields</strong>: title, artist, album, album artist, track number, disc number, genre, composer, publisher/label, release date, ISRC, UPC/EAN, comments, lyrics, and artwork.</li>
+          <li><strong>Import Tags From Audio…</strong>: open it from the Catalog menu or the table context menu to preview conflicts before catalog values are changed.</li>
+          <li><strong>Conflict policy</strong>: choose whether file tags should fill blanks only, override database values, or defer to the existing catalog data.</li>
+          <li><strong>Write Tags To Exported Audio…</strong>: exports tagged audio copies to a folder without touching the managed source files in place.</li>
+        </ul>
+        <p>The app preserves the original audio data when writing tags to exported copies. Unsupported or malformed tags are skipped with warnings instead of crashing the workflow.</p>
+        """,
+    ),
+    HelpChapter(
+        chapter_id="releases",
+        title="Releases",
+        summary="How first-class release records work, how they connect to tracks, and how to browse or edit them.",
+        keywords=("releases", "release browser", "product", "upc", "catalog number", "disc number", "track number"),
+        content_html="""
+        <p>The app now stores releases as first-class records instead of treating album-style metadata only as repeated track fields. A release can store product-level metadata and a separate ordered track list.</p>
+        <ul>
+          <li><strong>Release fields</strong>: title, subtitle/version, primary artist, album artist, release type, release dates, label, sublabel, catalog number, UPC/EAN, barcode validation status, territory, explicit flag, notes, and release artwork.</li>
+          <li><strong>Release order</strong>: releases store disc number, track number, and sequence separately from the track metadata itself.</li>
+          <li><strong>Add Album integration</strong>: saving a grouped album entry automatically creates or updates a real release and attaches the created tracks.</li>
+          <li><strong>Release Browser…</strong>: browse releases, inspect the ordered track list, duplicate releases, add the current track selection, and filter the main catalog table to a chosen release.</li>
+          <li><strong>Single-track workflows</strong>: saving the Add Data panel or the Edit Entry dialog also keeps the corresponding release record synchronized when release-level fields change.</li>
+        </ul>
+        <p>Older databases are migrated automatically. Existing album-like track groups remain usable, and the migration infers release records from stored album/release metadata where possible without deleting old track data.</p>
+        """,
+    ),
+    HelpChapter(
+        chapter_id="exchange-formats",
+        title="Exchange Formats",
+        summary="CSV, XLSX, JSON, XML, and packaged export/import workflows.",
+        keywords=("csv", "xlsx", "json", "xml", "package", "zip", "column mapping", "dry run", "import report"),
+        content_html="""
+        <p>Beyond XML and the GS1 workbook workflow, the app now supports broader catalog exchange formats for local-first sharing and archive workflows.</p>
+        <ul>
+          <li><strong>Export formats</strong>: CSV, XLSX, JSON, XML, and ZIP packages containing a JSON manifest plus copied media references.</li>
+          <li><strong>Import formats</strong>: CSV, XLSX, JSON, and XML.</li>
+          <li><strong>Import preview</strong>: CSV and XLSX imports open a mapping dialog so you can confirm how source columns map to standard or custom fields before running the import.</li>
+          <li><strong>Saved mapping presets</strong>: frequently used column mappings can be saved per format and reused later.</li>
+          <li><strong>Import modes</strong>: dry-run validation, create new rows, merge into existing matches, update existing matches only, or insert-new-when-duplicate-exists.</li>
+          <li><strong>Matching options</strong>: internal ID, ISRC, UPC/EAN plus title, and optional title/artist heuristics.</li>
+          <li><strong>JSON schema versioning</strong>: exported JSON includes an explicit schema version so future migrations stay manageable.</li>
+        </ul>
+        <p>Binary media is exported by file reference in plain tabular formats. ZIP package exports also copy referenced media into the package so the export remains portable without embedding raw blobs into CSV or XLSX.</p>
+        """,
+    ),
+    HelpChapter(
+        chapter_id="quality-dashboard",
+        title="Quality Dashboard",
+        summary="Scan the profile for metadata, release, media, and integrity issues, then export or fix them.",
+        keywords=("quality dashboard", "issues", "validation", "duplicates", "broken media", "fixes", "export readiness"),
+        content_html="""
+        <p>The <strong>Data Quality Dashboard</strong> scans the active profile for actionable issues and groups them by severity and rule type.</p>
+        <ul>
+          <li><strong>Headline counts</strong>: total issues plus error, warning, and informational totals.</li>
+          <li><strong>Rule coverage</strong>: missing or duplicate ISRCs, missing or duplicate release UPC/EANs, invalid barcode checksums, missing titles/artists/dates, missing artwork, broken media references, ordering issues, orphaned licenses, and required custom-field gaps where rules exist.</li>
+          <li><strong>Filters</strong>: narrow the current issue list by severity, issue type, entity type, or release.</li>
+          <li><strong>Open Record</strong>: jump directly to the affected track or release editor from the selected issue row.</li>
+          <li><strong>Suggested fixes</strong>: regenerate derived values, normalize date formats, relink missing media by filename, or fill blank track values from linked release metadata where appropriate.</li>
+          <li><strong>Export</strong>: save the current issue list to CSV or JSON for reporting or offline cleanup planning.</li>
+        </ul>
+        <p>Quality scans run on demand and are designed to surface practical export-readiness issues instead of generic diagnostics only.</p>
         """,
     ),
     HelpChapter(

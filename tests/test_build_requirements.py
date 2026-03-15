@@ -18,6 +18,7 @@ class EnsureRequirementsTests(unittest.TestCase):
         self.assertIn("audioread==3.0.1", contents)
         self.assertIn("pillow==12.0.0", contents)
         self.assertIn("openpyxl==3.1.5", contents)
+        self.assertIn("mutagen==1.47.0", contents)
 
 
 if __name__ == "__main__":

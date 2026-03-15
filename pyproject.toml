@@ -16,6 +16,7 @@ dependencies = [
   "audioread==3.0.1",
   "pillow==12.0.0",
   "openpyxl==3.1.5",
+  "mutagen==1.47.0",
 ]
 
 [project.optional-dependencies]
@@ -31,7 +32,11 @@ py-modules = ["ISRC_manager"]
 packages = [
   "isrc_manager",
   "isrc_manager.domain",
+  "isrc_manager.exchange",
   "isrc_manager.history",
   "isrc_manager.media",
+  "isrc_manager.quality",
+  "isrc_manager.releases",
   "isrc_manager.services",
+  "isrc_manager.tags",
 ]

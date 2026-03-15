@@ -19,7 +19,7 @@ MAX_AUTO_SNAPSHOT_INTERVAL_MINUTES = 1440
 FIELD_TYPE_CHOICES = ["text", "dropdown", "checkbox", "date", "blob_image", "blob_audio"]
 
 SCHEMA_BASELINE = 1
-SCHEMA_TARGET = 18
+SCHEMA_TARGET = 19
 
 DEFAULT_BASE_HEADERS = default_base_headers()
 

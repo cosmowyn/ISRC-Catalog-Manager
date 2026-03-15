@@ -4,7 +4,7 @@ Created by **M. van de Kleut**
 
 ---
 
-ISRC Manager is a local-first desktop catalog application for managing track metadata, optional or generated ISRCs, managed media, licenses, backups, snapshots, and XML exchange workflows from one workspace.
+ISRC Manager is a local-first desktop catalog application for managing tracks, first-class releases, optional or generated ISRCs, managed media, audio tag workflows, licenses, backups, snapshots, quality scans, and multi-format exchange workflows from one workspace.
 
 ## Preview
 
@@ -102,7 +102,11 @@ The application provides:
 - Optional blank-ISRC workflows for artists who rely on distributor-assigned or later-imported codes  
 - Metadata management with customizable fields  
 - A grouped Add Album dialog for entering shared album data once and creating multiple tracks in one pass  
+- A first-class release/product layer with release browsing, ordered track placements, UPC/EAN validation, release artwork, and release-level metadata  
 - Bulk editing for selected catalog rows with field-by-field updates  
+- Audio metadata tag import and export for managed audio files, with preview-based conflict resolution  
+- CSV, XLSX, JSON, XML, and packaged ZIP exchange workflows  
+- A data-quality dashboard with actionable validation checks and safe repair tools  
 - Audio and image preview capabilities  
 - Multiple profile support  
 - Persistent undo/redo history with manual and automatic snapshots  
@@ -133,6 +137,21 @@ The application provides:
 - Audio and image files are managed alongside the catalog database with tracked metadata, preview, export, and restore support.
 - The Add Album dialog starts with shared album metadata and dynamic track sections so you can add or remove tracks as needed without leaving the main workflow.
 - Selected rows can be bulk edited from the catalog table. Mixed values stay untouched unless you explicitly replace them, and protected fields such as ISRC, ISWC, Track Title, Audio File, Track Length, and BUMA work number remain view-only during bulk edit.
+- Editing shared album/release fields from the track editor keeps the corresponding release record synchronized where appropriate.
+
+## Audio Metadata Tags
+- Reads embedded metadata from MP3/ID3, FLAC, OGG Vorbis/Opus, M4A/MP4, WAV, and AIFF where the format supports tags in practice.
+- Maps catalog fields to tags including title, artist, album, album artist, track/disc number, genre, composer, publisher/label, release date, ISRC, UPC/EAN, comments, lyrics, and artwork.
+- `Catalog > Import Tags From Audio…` previews tag-to-catalog conflicts before applying changes.
+- `File > Export > Write Tags to Exported Audio…` writes catalog metadata to exported audio copies without modifying the managed source files in place.
+- The default conflict policy is configurable per application profile and can be changed at import time.
+
+## Releases and Products
+- Releases are now stored as first-class records instead of only repeated track fields.
+- Each release keeps title, subtitle/version, primary artist, album artist, release type, release dates, label, sublabel, catalog number, UPC/EAN, barcode validation status, territory, explicit flag, notes, and release artwork.
+- Track placements are stored separately with disc number, track number, and sequence order.
+- `Catalog > Release Browser…` lets you browse releases, inspect track order, duplicate a release, add the current track selection, and filter the main catalog table to a release.
+- `Add Album` and normal track-save/edit flows automatically create or update release records when release-level metadata is present.
 
 ## GS1 Metadata Workflow
 - Open GS1 metadata from the Catalog menu, the table context menu, or directly from the bulk edit dialog.
@@ -161,6 +180,17 @@ The application provides:
 - Detailed import result report with pass/fail breakdown.  
 - If the XML includes unknown custom fields, the app can offer to create those definitions before continuing with import.
 - Blank ISRC values in imported XML are accepted, matching the optional-ISRC workflow used in the main entry forms.
+- Export selected catalog rows to CSV, XLSX, JSON, or a ZIP package containing a JSON manifest plus referenced media copies.
+- Import CSV and XLSX through a column-mapping dialog with reusable mapping presets.
+- JSON exchange uses an explicit schema version and includes release data, custom fields, and media references.
+- Import modes now include dry run, create, merge, update existing matches only, and insert-new-when-duplicate-exists.
+- Match detection can use internal IDs, ISRC, UPC/EAN plus title, and optional title/artist heuristics.
+
+## Data Quality Dashboard
+- `Catalog > Data Quality Dashboard…` scans the active profile for metadata, release, media, and integrity issues.
+- Checks include missing or duplicate ISRCs, missing or duplicate release UPC/EANs, invalid barcode checksums, missing release titles/dates/artwork, missing audio files, broken media references, ordering problems, orphaned licenses, and required custom-field gaps where rules exist.
+- Suggested fixes include regenerating derived values, normalizing dates, relinking missing media by filename, and filling blank track fields from linked release metadata.
+- Issue lists can be exported to CSV or JSON for reporting or cleanup planning.
 
 ---
 
@@ -318,9 +348,35 @@ Logs are stored in:
 - `/Database/logs/`  
 
 ## Import/Export
-- Export to XML in SENA-compatible format  
-- Import XML with optional dry-run  
-- Import will validate field structure and warn about mismatches  
+- Export to XML, CSV, XLSX, JSON, or a packaged ZIP archive  
+- Import XML, CSV, XLSX, and JSON with preview/mapping where applicable  
+- Import validates field structure, reports warnings/skips/failures, and can update or merge existing rows  
+
+## Releases
+- Use `Catalog > Release Browser…` to browse or edit release/product records directly.
+- Saving `Add Album` creates a first-class release and ordered release-track rows automatically.
+- Single-track save/edit workflows also keep release-level values such as release title, UPC/EAN, release date, and artwork synchronized when possible.
+
+## Audio Tag Workflows
+- Use `Catalog > Import Tags From Audio…` to read embedded tags from the managed audio attached to the current selection.
+- Right-click a track row to import tags, open the linked release, or export tagged audio copies from the context menu.
+- Exporting an audio file from the standard media context menu now offers a tagged export path by default, while still allowing a raw file export when needed.
+
+## Quality Dashboard
+- Use `Catalog > Data Quality Dashboard…` to scan the current profile and jump directly to affected tracks or releases.
+- Export the current issue list to CSV or JSON from the dashboard.
+
+## Automatic Migration
+- Existing profile databases are migrated automatically on open.
+- Older album-style metadata is preserved and used to infer release records safely where possible.
+- Older track rows remain valid and usable; the migration does not destroy legacy data.
+
+## Runtime Dependencies
+- `PySide6`: GUI framework
+- `audioread`: legacy waveform/audio decode fallback
+- `openpyxl`: XLSX exchange and official GS1 workbook handling
+- `pillow`: image processing and icon tooling
+- `mutagen`: audio metadata tag read/write across common formats
 
 ---
 

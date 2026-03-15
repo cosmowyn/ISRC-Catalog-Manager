@@ -73,3 +73,25 @@ def valid_upc_ean(s: str) -> bool:
         return True
     return bool(_UPC_EAN_RE.match(s.strip()))
 
+
+def upc_ean_checksum_valid(s: str) -> bool:
+    text = str(s or "").strip()
+    if not _UPC_EAN_RE.match(text):
+        return False
+    digits = [int(char) for char in text]
+    check_digit = digits.pop()
+    total = 0
+    reverse_digits = list(reversed(digits))
+    for index, digit in enumerate(reverse_digits):
+        total += digit * (3 if index % 2 == 0 else 1)
+    return ((10 - (total % 10)) % 10) == check_digit
+
+
+def barcode_validation_status(s: str) -> str:
+    if is_blank(s):
+        return "missing"
+    if not valid_upc_ean(s):
+        return "invalid_format"
+    if not upc_ean_checksum_valid(s):
+        return "invalid_checksum"
+    return "valid"

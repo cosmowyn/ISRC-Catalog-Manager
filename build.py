@@ -739,7 +739,8 @@ def ensure_requirements(project_dir: Path) -> Path:
             "pyinstaller==6.15.0\n"
             "audioread==3.0.1\n"
             "pillow==12.0.0\n"
-            "openpyxl==3.1.5\n",
+            "openpyxl==3.1.5\n"
+            "mutagen==1.47.0\n",
             encoding="utf-8",
         )
         print(f"[setup] Created default requirements.txt at {req}")

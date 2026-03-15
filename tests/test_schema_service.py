@@ -51,6 +51,8 @@ class DatabaseSchemaServiceTests(unittest.TestCase):
         self.assertIn("HistoryHead", tables)
         self.assertIn("Licensees", tables)
         self.assertIn("GS1Metadata", tables)
+        self.assertIn("Releases", tables)
+        self.assertIn("ReleaseTracks", tables)
         self.assertIn("vw_Licenses", tables)
         self.assertIn("contract_number", gs1_columns)
         self.assertTrue({"blob_value", "mime_type", "size_bytes"} <= value_columns)
@@ -72,6 +74,10 @@ class DatabaseSchemaServiceTests(unittest.TestCase):
                 "album_art_mime_type",
                 "album_art_size_bytes",
                 "buma_work_number",
+                "composer",
+                "publisher",
+                "comments",
+                "lyrics",
             }
             <= track_columns
         )
