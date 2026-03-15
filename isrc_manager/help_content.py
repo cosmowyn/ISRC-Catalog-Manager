@@ -18,14 +18,16 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         chapter_id="overview",
         title="Overview",
         summary="What the app does, how the workspace is organized, and the main workflows you will use every day.",
-        keywords=("overview", "introduction", "menus", "workflow", "catalog", "tracks", "licenses", "gs1", "bulk edit"),
+        keywords=("overview", "introduction", "menus", "workflow", "catalog", "tracks", "album entry", "licenses", "gs1", "bulk edit", "action ribbon", "quick actions"),
         content_html="""
         <p><strong>ISRC Catalog Manager</strong> is a local-first desktop application for managing track metadata, generated ISRC values, licensing files, GS1 workbook metadata, custom metadata columns, backups, snapshots, and exports from one workspace.</p>
         <p>The app is organized around a few core ideas:</p>
         <ul>
           <li><strong>Profiles</strong>: each profile is a separate catalog database.</li>
           <li><strong>Add Data</strong>: the dockable form used to create new tracks.</li>
+          <li><strong>Add Album</strong>: a structured dialog for entering shared album metadata once and then saving multiple track rows in one pass.</li>
           <li><strong>Catalog Table</strong>: the searchable table used to browse, preview, single-edit, and bulk-edit existing tracks.</li>
+          <li><strong>Action Ribbon</strong>: a customizable top-row quick-action bar built from your preferred menu actions.</li>
           <li><strong>Settings</strong>: application identity, registration settings, snapshots, and themes.</li>
           <li><strong>History</strong>: undo, redo, manual snapshots, and restore points.</li>
         </ul>
@@ -36,10 +38,11 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         chapter_id="main-window",
         title="Main Window",
         summary="The main application window, dock layout, top toolbar, and general navigation.",
-        keywords=("main window", "toolbar", "profiles", "dock", "layout", "window"),
+        keywords=("main window", "toolbar", "profiles", "dock", "layout", "window", "action ribbon", "quick actions"),
         content_html="""
         <p>The main window is built from dockable panes. By default, the left side contains the <strong>Add Data</strong> form and the right side contains the <strong>Catalog Table</strong>.</p>
         <ul>
+          <li><strong>Action ribbon</strong>: a customizable quick-action toolbar at the top of the window. Use <strong>View &gt; Customize Action Ribbon…</strong> to choose which actions appear and in what order.</li>
           <li><strong>Profiles toolbar</strong>: switch between databases, create a new profile, browse to an external database, reload the profile list, or remove the selected profile.</li>
           <li><strong>Dockable panes</strong>: the Add Data view and Catalog Table view can be shown, hidden, floated, and re-docked from the <strong>View</strong> menu.</li>
           <li><strong>Saved layout</strong>: column layout, dock layout, and visibility preferences are remembered and participate in history where supported.</li>
@@ -67,7 +70,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         chapter_id="add-data",
         title="Add Data Panel",
         summary="How to create a track, fill in standard metadata, generate ISRC values, and attach managed media.",
-        keywords=("add data", "add track", "save track", "audio file", "album art", "release date", "isrc"),
+        keywords=("add data", "add track", "save track", "audio file", "album art", "release date", "isrc", "prefix", "dsp"),
         content_html="""
         <p>The Add Data panel is the primary entry form for new tracks. It is grouped into sections:</p>
         <ul>
@@ -76,7 +79,24 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Release &amp; Codes</strong>: release date, track length, ISWC, UPC/EAN, catalog number, and BUMA work number.</li>
           <li><strong>Managed Media</strong>: attach a local audio file and album art image that the app manages for the selected track.</li>
         </ul>
-        <p>Use <strong>Save Track</strong> to create the row, or <strong>Reset Form</strong> to clear the current entry form. The generated ISRC preview updates from the current ISRC prefix, artist code, and release-date year rules.</p>
+        <p>Use <strong>Save Track</strong> to create the row, or <strong>Reset Form</strong> to clear the current entry form. If a valid ISRC prefix is configured, the generated ISRC preview updates from the current prefix, artist code, and release-date year rules. If no prefix is configured, the form still saves normally and leaves ISRC blank until you set or import one later.</p>
+        """,
+    ),
+    HelpChapter(
+        chapter_id="album-entry",
+        title="Add Album Dialog",
+        summary="How to enter shared album metadata once and create multiple track rows from one dialog.",
+        keywords=("add album", "album dialog", "multi track", "album entry", "track sections", "shared metadata"),
+        content_html="""
+        <p>The <strong>Add Album</strong> dialog is designed for building a full release in one pass. It starts with shared album metadata at the top, followed by a stack of track-specific sections that you can add to or remove from as needed.</p>
+        <ul>
+          <li><strong>Album Overview</strong>: album title, UPC/EAN, genre, catalog number, album art, and the release-year rule used when auto-generating blank ISRC values.</li>
+          <li><strong>Track Sections</strong>: each section stores one track title, main artist, additional artists, release date, track length, optional ISRC, optional ISWC, optional BUMA work number, and an audio file.</li>
+          <li><strong>Dynamic layout</strong>: the dialog opens with two track sections by default, but you can add more or remove extras at any time.</li>
+          <li><strong>Blank-section handling</strong>: completely unused track sections are ignored when you save, so you do not need to delete every spare section before closing the dialog.</li>
+          <li><strong>Shared album art</strong>: the selected album art is stored once and linked across the saved album tracks automatically.</li>
+        </ul>
+        <p>If a valid ISRC prefix is configured, leaving a track ISRC blank lets the dialog auto-generate it during save. If no prefix is configured, blank ISRC values remain blank and the tracks are still created successfully.</p>
         """,
     ),
     HelpChapter(

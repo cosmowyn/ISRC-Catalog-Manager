@@ -892,7 +892,8 @@ class TrackService:
             cur = self.conn.cursor()
             main_artist_id = self.get_or_create_artist(payload.artist_name, cursor=cur)
             album_id = self.get_or_create_album(payload.album_title, cursor=cur)
-            compact_isrc = to_compact_isrc(payload.isrc)
+            clean_isrc = str(payload.isrc or "").strip()
+            compact_isrc = to_compact_isrc(clean_isrc)
             cur.execute(
                 """
                 INSERT INTO Tracks (
@@ -906,7 +907,7 @@ class TrackService:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    payload.isrc,
+                    clean_isrc,
                     compact_isrc,
                     None,
                     None,
@@ -937,7 +938,8 @@ class TrackService:
     def _update_track_row(self, payload: TrackUpdatePayload, *, cursor: sqlite3.Cursor) -> None:
         main_artist_id = self.get_or_create_artist(payload.artist_name, cursor=cursor)
         album_id = self.get_or_create_album(payload.album_title, cursor=cursor)
-        compact_isrc = to_compact_isrc(payload.isrc)
+        clean_isrc = str(payload.isrc or "").strip()
+        compact_isrc = to_compact_isrc(clean_isrc)
         current_audio = self._get_track_row_media_meta(payload.track_id, "audio_file", cursor=cursor)
         current_track_art = self._get_track_row_media_meta(payload.track_id, "album_art", cursor=cursor)
         current_effective_art = self.get_media_meta(payload.track_id, "album_art", cursor=cursor)
@@ -955,7 +957,7 @@ class TrackService:
             WHERE id=?
             """,
             (
-                payload.isrc,
+                clean_isrc,
                 compact_isrc,
                 str(current_audio.get("path") or "") or None,
                 str(current_audio.get("mime_type") or "") or None,

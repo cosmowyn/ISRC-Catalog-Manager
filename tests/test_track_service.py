@@ -205,6 +205,43 @@ class TrackServiceTests(unittest.TestCase):
         self.assertTrue(self.service.is_isrc_taken_normalized("nlabc2600002"))
         self.assertFalse(self.service.is_isrc_taken_normalized("NL-ABC-26-99999"))
 
+    def test_create_track_allows_blank_isrc(self):
+        first_track = self.service.create_track(
+            TrackCreatePayload(
+                isrc="",
+                track_title="Unassigned Song One",
+                artist_name="Main Artist",
+                additional_artists=[],
+                album_title="Indie Release",
+                release_date=None,
+                track_length_sec=0,
+                iswc=None,
+                upc=None,
+                genre=None,
+            )
+        )
+        second_track = self.service.create_track(
+            TrackCreatePayload(
+                isrc="",
+                track_title="Unassigned Song Two",
+                artist_name="Main Artist",
+                additional_artists=[],
+                album_title="Indie Release",
+                release_date=None,
+                track_length_sec=0,
+                iswc=None,
+                upc=None,
+                genre=None,
+            )
+        )
+
+        rows = self.conn.execute(
+            "SELECT id, isrc, isrc_compact FROM Tracks WHERE id IN (?, ?) ORDER BY id",
+            (first_track, second_track),
+        ).fetchall()
+        self.assertEqual(rows, [(first_track, "", ""), (second_track, "", "")])
+        self.assertFalse(self.service.is_isrc_taken_normalized(""))
+
     def test_list_album_group_track_ids_skips_blank_and_single_groups(self):
         album_track_a = self.service.create_track(
             TrackCreatePayload(

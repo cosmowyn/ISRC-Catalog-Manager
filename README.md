@@ -4,7 +4,7 @@ Created by **M. van de Kleut**
 
 ---
 
-ISRC Manager is a local-first desktop catalog application for managing track metadata, generated ISRCs, managed media, licenses, backups, snapshots, and XML exchange workflows from one workspace.
+ISRC Manager is a local-first desktop catalog application for managing track metadata, optional or generated ISRCs, managed media, licenses, backups, snapshots, and XML exchange workflows from one workspace.
 
 ## Preview
 
@@ -99,7 +99,9 @@ It is designed for independent artists, producers, and small labels who require 
 
 The application provides:
 - Automatic ISRC generation in ISO 3901 format  
+- Optional blank-ISRC workflows for artists who rely on distributor-assigned or later-imported codes  
 - Metadata management with customizable fields  
+- A grouped Add Album dialog for entering shared album data once and creating multiple tracks in one pass  
 - Bulk editing for selected catalog rows with field-by-field updates  
 - Audio and image preview capabilities  
 - Multiple profile support  
@@ -123,11 +125,13 @@ The application provides:
 - Tracks last-used designation codes per profile.  
 - Automatically assigns ISRC year based on creation date.  
 - Allows reuse of the original ISRC year when importing older releases.
+- If no ISRC prefix is configured, the app no longer blocks data entry: auto-generation is simply disabled and tracks can be saved with blank ISRC values until codes are available.
 
 ## Metadata Management
 - Supports standard and custom metadata fields.  
 - Built-in support for text, date, checkbox, dropdown, image blob, and audio blob fields.  
 - Audio and image files are managed alongside the catalog database with tracked metadata, preview, export, and restore support.
+- The Add Album dialog starts with shared album metadata and dynamic track sections so you can add or remove tracks as needed without leaving the main workflow.
 - Selected rows can be bulk edited from the catalog table. Mixed values stay untouched unless you explicitly replace them, and protected fields such as ISRC, ISWC, Track Title, Audio File, Track Length, and BUMA work number remain view-only during bulk edit.
 
 ## GS1 Metadata Workflow
@@ -155,7 +159,8 @@ The application provides:
 - Export metadata to XML for distribution or archival.  
 - Import XML catalogs with an optional dry-run validation mode.  
 - Detailed import result report with pass/fail breakdown.  
-- If the XML includes unknown custom fields, the import will stop and log the missing field definitions.
+- If the XML includes unknown custom fields, the app can offer to create those definitions before continuing with import.
+- Blank ISRC values in imported XML are accepted, matching the optional-ISRC workflow used in the main entry forms.
 
 ---
 
@@ -283,9 +288,11 @@ Each profile maintains:
 Switch between profiles at any time.
 
 ## Adding Records
-- Add a track to automatically receive an ISRC  
-- Modify metadata fields as needed  
-- Attach audio or artwork directly to the record if desired  
+- Use the Add Data panel to create a single track. If a valid ISRC prefix is configured, the form previews and auto-generates the next code on save.
+- If no ISRC prefix is configured, the form still saves normally and leaves ISRC blank until you set or import one later.
+- Use `Edit > Add Album…`, the Add Album button, or the action ribbon to open the grouped album-entry dialog.
+- In Add Album, enter shared album fields once, then add or remove track sections as needed. Leaving a track ISRC blank will auto-generate it only when ISRC generation is configured.
+- Attach audio or artwork directly to the record if desired.
 
 ## Editing Existing Records
 - Double-click a standard row in the catalog table to open the full editor for a single track.

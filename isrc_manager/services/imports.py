@@ -261,11 +261,15 @@ class XMLImportService:
                 catalog_number = self._get_any(child_map, "catalognumber")
                 buma_work_number = self._get_any(child_map, "bumaworknumber")
 
-            iso_isrc = to_iso_isrc(isrc_raw)
-            comp_isrc = to_compact_isrc(iso_isrc)
-            if not comp_isrc or not is_valid_isrc_compact_or_iso(iso_isrc):
-                invalid_count += 1
-                continue
+            raw_isrc = str(isrc_raw or "").strip()
+            iso_isrc = ""
+            comp_isrc = ""
+            if raw_isrc:
+                iso_isrc = to_iso_isrc(raw_isrc)
+                comp_isrc = to_compact_isrc(iso_isrc)
+                if not comp_isrc or not is_valid_isrc_compact_or_iso(iso_isrc):
+                    invalid_count += 1
+                    continue
             if is_blank(title) or is_blank(artist):
                 invalid_count += 1
                 continue

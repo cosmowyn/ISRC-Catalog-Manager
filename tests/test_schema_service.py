@@ -197,6 +197,29 @@ class DatabaseSchemaServiceTests(unittest.TestCase):
             finally:
                 conn.close()
 
+    def test_current_schema_allows_multiple_blank_isrc_rows(self):
+        self.service.init_db()
+        self.service.migrate_schema()
+
+        self.conn.execute("INSERT INTO Artists(id, name) VALUES (1, 'Schema Artist')")
+        self.conn.execute(
+            """
+            INSERT INTO Tracks (isrc, isrc_compact, track_title, main_artist_id, track_length_sec)
+            VALUES ('', '', 'Blank ISRC One', 1, 0)
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO Tracks (isrc, isrc_compact, track_title, main_artist_id, track_length_sec)
+            VALUES ('', '', 'Blank ISRC Two', 1, 0)
+            """
+        )
+
+        rows = self.conn.execute(
+            "SELECT isrc, isrc_compact FROM Tracks ORDER BY id"
+        ).fetchall()
+        self.assertEqual(rows, [("", ""), ("", "")])
+
     def test_migrate_13_to_14_reconciles_leftover_promoted_custom_fields(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             conn = sqlite3.connect(":memory:")

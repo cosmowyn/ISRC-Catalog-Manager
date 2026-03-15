@@ -91,12 +91,7 @@ class DatabaseSchemaService:
         )
         self._ensure_current_track_columns()
         track_columns = self._table_columns("Tracks")
-        if "isrc" in track_columns:
-            self.cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_tracks_isrc_unique ON Tracks(isrc)")
-        if "isrc_compact" in track_columns:
-            self.cursor.execute(
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_tracks_isrc_compact_unique ON Tracks(isrc_compact)"
-            )
+        self._ensure_optional_isrc_constraints()
         if "track_title" in track_columns:
             self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_title ON Tracks(track_title)")
         if "upc" in track_columns:
@@ -390,6 +385,9 @@ class DatabaseSchemaService:
             elif version == 16:
                 self._apply_migration(16, self._mig_16_to_17)
                 version = 17
+            elif version == 17:
+                self._apply_migration(17, self._mig_17_to_18)
+                version = 18
             else:
                 self.logger.warning("Unknown migration path from version %s", version)
                 break
@@ -792,6 +790,9 @@ class DatabaseSchemaService:
     def _mig_16_to_17(self) -> None:
         self._ensure_current_album_columns()
 
+    def _mig_17_to_18(self) -> None:
+        self._ensure_optional_isrc_constraints()
+
     def _ensure_current_track_columns(self) -> None:
         cols = self._table_columns("Tracks")
         additions = (
@@ -817,6 +818,71 @@ class DatabaseSchemaService:
                 self.cursor.execute("UPDATE Tracks SET isrc_compact=? WHERE id=?", (to_compact_isrc(isrc), track_id))
         self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_catalog_number ON Tracks(catalog_number)")
         self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_buma_work_number ON Tracks(buma_work_number)")
+
+    def _ensure_optional_isrc_constraints(self) -> None:
+        self.cursor.execute("DROP INDEX IF EXISTS idx_tracks_isrc_unique")
+        self.cursor.execute("DROP INDEX IF EXISTS idx_tracks_isrc_compact_unique")
+        self.cursor.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_tracks_isrc_unique
+            ON Tracks(isrc)
+            WHERE isrc IS NOT NULL AND trim(isrc) != ''
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_tracks_isrc_compact_unique
+            ON Tracks(isrc_compact)
+            WHERE isrc_compact IS NOT NULL AND trim(isrc_compact) != ''
+            """
+        )
+        self._ensure_optional_isrc_validation_triggers()
+
+    def _ensure_optional_isrc_validation_triggers(self) -> None:
+        self.cursor.execute("DROP TRIGGER IF EXISTS trg_tracks_isrc_validate_ins")
+        self.cursor.execute("DROP TRIGGER IF EXISTS trg_tracks_isrc_validate_upd")
+
+        self.cursor.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS trg_tracks_isrc_validate_ins
+            BEFORE INSERT ON Tracks
+            FOR EACH ROW
+            WHEN (
+                COALESCE(trim(NEW.isrc), '') <> ''
+                OR COALESCE(trim(NEW.isrc_compact), '') <> ''
+            )
+            AND NOT (
+                length(replace(replace(upper(NEW.isrc),'-',''),' ','')) = 12
+                AND replace(replace(upper(NEW.isrc),'-',''),' ','') GLOB
+                    '[A-Z][A-Z][A-Z0-9][A-Z0-9][A-Z0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
+                AND upper(COALESCE(NEW.isrc_compact, '')) = replace(replace(upper(NEW.isrc),'-',''),' ','')
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'ISRC validation failed');
+            END
+            """
+        )
+
+        self.cursor.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS trg_tracks_isrc_validate_upd
+            BEFORE UPDATE ON Tracks
+            FOR EACH ROW
+            WHEN (
+                COALESCE(trim(NEW.isrc), '') <> ''
+                OR COALESCE(trim(NEW.isrc_compact), '') <> ''
+            )
+            AND NOT (
+                length(replace(replace(upper(NEW.isrc),'-',''),' ','')) = 12
+                AND replace(replace(upper(NEW.isrc),'-',''),' ','') GLOB
+                    '[A-Z][A-Z][A-Z0-9][A-Z0-9][A-Z0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
+                AND upper(COALESCE(NEW.isrc_compact, '')) = replace(replace(upper(NEW.isrc),'-',''),' ','')
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'ISRC validation failed');
+            END
+            """
+        )
 
     def _ensure_current_album_columns(self) -> None:
         self.cursor.execute(

@@ -284,6 +284,36 @@ class XMLImportServiceTests(unittest.TestCase):
         self.assertEqual([name for (name,) in extras], ["Guest One", "Guest Two"])
         self.assertEqual(custom, ("Calm",))
 
+    def test_execute_import_allows_blank_isrc_rows(self):
+        file_path = self._write_xml(
+            "blank-isrc.xml",
+            """
+            <ISRCExport>
+              <Tracks>
+                <Track>
+                  <ISRC></ISRC>
+                  <Title>No Code Yet</Title>
+                  <MainArtist>New Artist</MainArtist>
+                  <Album>Indie Album</Album>
+                  <TrackLength>00:03:15</TrackLength>
+                </Track>
+              </Tracks>
+            </ISRCExport>
+            """,
+        )
+
+        result = self.service.execute_import(file_path)
+
+        self.assertEqual((result.inserted, result.duplicate_count, result.invalid_count, result.error_count), (1, 0, 0, 0))
+        row = self.conn.execute(
+            """
+            SELECT isrc, isrc_compact, track_title
+            FROM Tracks
+            WHERE track_title = 'No Code Yet'
+            """
+        ).fetchone()
+        self.assertEqual(row, ("", "", "No Code Yet"))
+
     def test_execute_import_can_create_missing_custom_fields(self):
         file_path = self._write_xml(
             "create-fields.xml",

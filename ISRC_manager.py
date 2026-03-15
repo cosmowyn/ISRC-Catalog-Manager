@@ -514,6 +514,232 @@ class CustomColumnsDialog(QDialog):
     def get_fields(self):
         return self.fields
 
+
+class ActionRibbonDialog(QDialog):
+    """Pick which existing app actions appear in the top quick-action ribbon."""
+
+    def __init__(
+        self,
+        available_actions: list[dict],
+        selected_action_ids: list[str],
+        *,
+        ribbon_visible: bool,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle("Customize Action Ribbon")
+        self.setModal(True)
+        self.resize(980, 620)
+        self.setMinimumSize(860, 560)
+        _apply_standard_dialog_chrome(self, "actionRibbonDialog")
+
+        self.available_actions = [dict(spec) for spec in available_actions]
+        self.available_by_id = {str(spec["id"]): spec for spec in self.available_actions}
+        self.default_action_ids = [str(spec["id"]) for spec in self.available_actions if spec.get("default")]
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(14)
+        _add_standard_dialog_header(
+            layout,
+            self,
+            title="Customize Action Ribbon",
+            subtitle=(
+                "Choose which existing menu actions appear in the top quick-action ribbon, "
+                "then reorder them to match your workflow."
+            ),
+            help_topic_id="main-window",
+        )
+
+        visibility_box, visibility_layout = _create_standard_section(
+            self,
+            "Ribbon Visibility",
+            "Hide the ribbon completely or keep it visible with your chosen quick actions.",
+        )
+        self.show_ribbon_checkbox = QCheckBox("Show action ribbon")
+        self.show_ribbon_checkbox.setChecked(bool(ribbon_visible))
+        visibility_layout.addWidget(self.show_ribbon_checkbox)
+        layout.addWidget(visibility_box)
+
+        content_row = QHBoxLayout()
+        content_row.setSpacing(14)
+
+        available_box, available_layout = _create_standard_section(
+            self,
+            "Available Actions",
+            "Pick from the app's existing menu and quick actions. Double-click an action to add it.",
+        )
+        self.available_list = QListWidget()
+        self.available_list.setAlternatingRowColors(True)
+        self.available_list.setMinimumWidth(360)
+        available_layout.addWidget(self.available_list, 1)
+        content_row.addWidget(available_box, 1)
+
+        middle_col = QVBoxLayout()
+        middle_col.setSpacing(8)
+        middle_col.addStretch(1)
+        self.btn_add = QPushButton("Add ->")
+        self.btn_remove = QPushButton("<- Remove")
+        self.btn_up = QPushButton("Move Up")
+        self.btn_down = QPushButton("Move Down")
+        self.btn_reset = QPushButton("Reset Defaults")
+        middle_col.addWidget(self.btn_add)
+        middle_col.addWidget(self.btn_remove)
+        middle_col.addSpacing(8)
+        middle_col.addWidget(self.btn_up)
+        middle_col.addWidget(self.btn_down)
+        middle_col.addSpacing(8)
+        middle_col.addWidget(self.btn_reset)
+        middle_col.addStretch(1)
+        content_row.addLayout(middle_col)
+
+        selected_box, selected_layout = _create_standard_section(
+            self,
+            "Ribbon Order",
+            "These actions appear left to right in the ribbon. Drag to reorder or use the move buttons.",
+        )
+        self.selected_list = QListWidget()
+        self.selected_list.setAlternatingRowColors(True)
+        self.selected_list.setDragDropMode(QAbstractItemView.InternalMove)
+        self.selected_list.setDefaultDropAction(Qt.MoveAction)
+        self.selected_list.setSelectionMode(QAbstractItemView.SingleSelection)
+        selected_layout.addWidget(self.selected_list, 1)
+        content_row.addWidget(selected_box, 1)
+
+        layout.addLayout(content_row, 1)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, Qt.Horizontal, self)
+        ok = buttons.button(QDialogButtonBox.Ok)
+        cancel = buttons.button(QDialogButtonBox.Cancel)
+        if ok is not None:
+            ok.setDefault(True)
+        if cancel is not None:
+            cancel.setAutoDefault(False)
+        layout.addWidget(buttons)
+
+        self.btn_add.clicked.connect(self._add_current_available_action)
+        self.btn_remove.clicked.connect(self._remove_current_selected_action)
+        self.btn_up.clicked.connect(lambda: self._move_selected_action(-1))
+        self.btn_down.clicked.connect(lambda: self._move_selected_action(1))
+        self.btn_reset.clicked.connect(self._reset_defaults)
+        self.available_list.itemDoubleClicked.connect(lambda *_args: self._add_current_available_action())
+        self.selected_list.itemDoubleClicked.connect(lambda *_args: self._remove_current_selected_action())
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+        self._populate_selected_list(selected_action_ids)
+        self._refresh_available_list()
+
+    def _selected_action_ids(self) -> list[str]:
+        return [
+            str(self.selected_list.item(row).data(Qt.UserRole))
+            for row in range(self.selected_list.count())
+            if self.selected_list.item(row) is not None and self.selected_list.item(row).data(Qt.UserRole)
+        ]
+
+    def _populate_selected_list(self, action_ids: list[str]) -> None:
+        self.selected_list.clear()
+        seen: set[str] = set()
+        for action_id in action_ids:
+            clean_id = str(action_id)
+            if clean_id in seen or clean_id not in self.available_by_id:
+                continue
+            seen.add(clean_id)
+            spec = self.available_by_id[clean_id]
+            item = QListWidgetItem(str(spec["label"]))
+            item.setData(Qt.UserRole, clean_id)
+            item.setToolTip(self._tooltip_for_spec(spec))
+            self.selected_list.addItem(item)
+
+    def _tooltip_for_spec(self, spec: dict) -> str:
+        shortcut_text = str(spec.get("shortcut") or "").strip()
+        description = str(spec.get("description") or "").strip()
+        parts = [str(spec.get("category") or "Action"), description]
+        if shortcut_text:
+            parts.append(f"Shortcut: {shortcut_text}")
+        return "\n".join(part for part in parts if part)
+
+    def _refresh_available_list(self) -> None:
+        current_action_id = None
+        current_item = self.available_list.currentItem()
+        if current_item is not None and current_item.data(Qt.UserRole):
+            current_action_id = str(current_item.data(Qt.UserRole))
+
+        selected_ids = set(self._selected_action_ids())
+        self.available_list.clear()
+        for spec in self.available_actions:
+            action_id = str(spec["id"])
+            label = f"{spec['category']} / {spec['label']}"
+            shortcut_text = str(spec.get("shortcut") or "").strip()
+            if shortcut_text:
+                label += f"  [{shortcut_text}]"
+            if action_id in selected_ids:
+                label += "  (Added)"
+            item = QListWidgetItem(label)
+            item.setData(Qt.UserRole, action_id)
+            item.setToolTip(self._tooltip_for_spec(spec))
+            self.available_list.addItem(item)
+            if action_id == current_action_id:
+                self.available_list.setCurrentItem(item)
+
+    def _add_current_available_action(self) -> None:
+        current_item = self.available_list.currentItem()
+        if current_item is None:
+            return
+        action_id = str(current_item.data(Qt.UserRole) or "")
+        if not action_id or action_id in set(self._selected_action_ids()):
+            return
+        spec = self.available_by_id.get(action_id)
+        if spec is None:
+            return
+        item = QListWidgetItem(str(spec["label"]))
+        item.setData(Qt.UserRole, action_id)
+        item.setToolTip(self._tooltip_for_spec(spec))
+        self.selected_list.addItem(item)
+        self.selected_list.setCurrentItem(item)
+        self._refresh_available_list()
+
+    def _remove_current_selected_action(self) -> None:
+        current_row = self.selected_list.currentRow()
+        if current_row < 0:
+            return
+        removed_item = self.selected_list.takeItem(current_row)
+        removed_action_id = str(removed_item.data(Qt.UserRole) or "") if removed_item is not None else ""
+        del removed_item
+        if self.selected_list.count():
+            self.selected_list.setCurrentRow(min(current_row, self.selected_list.count() - 1))
+        self._refresh_available_list()
+        if removed_action_id:
+            for row in range(self.available_list.count()):
+                item = self.available_list.item(row)
+                if item is not None and str(item.data(Qt.UserRole) or "") == removed_action_id:
+                    self.available_list.setCurrentRow(row)
+                    break
+
+    def _move_selected_action(self, delta: int) -> None:
+        current_row = self.selected_list.currentRow()
+        if current_row < 0:
+            return
+        target_row = current_row + int(delta)
+        if target_row < 0 or target_row >= self.selected_list.count():
+            return
+        item = self.selected_list.takeItem(current_row)
+        self.selected_list.insertItem(target_row, item)
+        self.selected_list.setCurrentRow(target_row)
+
+    def _reset_defaults(self) -> None:
+        self._populate_selected_list(self.default_action_ids)
+        if self.selected_list.count():
+            self.selected_list.setCurrentRow(0)
+        self._refresh_available_list()
+
+    def selected_action_ids(self) -> list[str]:
+        return self._selected_action_ids()
+
+    def ribbon_visible(self) -> bool:
+        return self.show_ribbon_checkbox.isChecked()
+
+
 # =============================================================================
 # Floating Hint bubble with pixel values for rows and columns (draggable)
 # =============================================================================
@@ -4468,6 +4694,11 @@ class App(QMainWindow):
             slot=self.save,
             standard_key=QKeySequence.Save,
         )
+        self.add_album_action = self._create_action(
+            "Add Album…",
+            slot=self.open_add_album_dialog,
+            shortcuts=("Ctrl+Alt+A", "Meta+Alt+A"),
+        )
         self.edit_selected_action = self._create_action(
             "Edit Selected…",
             slot=self.open_selected_editor,
@@ -4577,6 +4808,7 @@ class App(QMainWindow):
         edit_menu.addAction(self.redo_action)
         edit_menu.addSeparator()
         edit_menu.addAction(self.save_entry_action)
+        edit_menu.addAction(self.add_album_action)
         edit_menu.addAction(self.edit_selected_action)
         edit_menu.addAction(self.delete_entry_action)
         edit_menu.addAction(self.reset_form_action)
@@ -4659,6 +4891,22 @@ class App(QMainWindow):
             shortcuts=("Ctrl+Shift+T", "Meta+Shift+T"),
         )
         view_menu.addAction(self.catalog_table_action)
+
+        self.action_ribbon_visibility_action = self._create_action(
+            "Show Action Ribbon",
+            checkable=True,
+            checked=True,
+            toggled_slot=self._on_toggle_action_ribbon,
+            shortcuts=("Ctrl+Alt+R", "Meta+Alt+R"),
+        )
+        view_menu.addAction(self.action_ribbon_visibility_action)
+
+        self.customize_action_ribbon_action = self._create_action(
+            "Customize Action Ribbon…",
+            slot=self.open_action_ribbon_customizer,
+            shortcuts=("Ctrl+Shift+R", "Meta+Shift+R"),
+        )
+        view_menu.addAction(self.customize_action_ribbon_action)
         view_menu.addSeparator()
 
         table_view_menu = view_menu.addMenu("Table Layout")
@@ -4750,10 +4998,24 @@ class App(QMainWindow):
         )
         help_menu.addAction(self.open_data_folder_action)
 
+        self._initialize_action_ribbon_registry()
+
+        # ----- Action ribbon toolbar (custom quick actions)
+        self.action_ribbon_toolbar = QToolBar("Action Ribbon", self)
+        self.action_ribbon_toolbar.setObjectName("actionRibbonToolbar")
+        self.action_ribbon_toolbar.setAllowedAreas(Qt.TopToolBarArea)
+        self.action_ribbon_toolbar.setMovable(False)
+        self.action_ribbon_toolbar.setFloatable(False)
+        self.action_ribbon_toolbar.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self.action_ribbon_toolbar.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.action_ribbon_toolbar.customContextMenuRequested.connect(self._open_action_ribbon_context_menu)
+        self.addToolBar(Qt.TopToolBarArea, self.action_ribbon_toolbar)
+        self.addToolBarBreak(Qt.TopToolBarArea)
+
         # ----- Profiles toolbar (quick DB switch)
         self.toolbar = QToolBar("Profiles", self)
         self.toolbar.setObjectName("profilesToolbar")
-        self.addToolBar(self.toolbar)
+        self.addToolBar(Qt.TopToolBarArea, self.toolbar)
         self.toolbar.setMovable(True)
         self.toolbar.addWidget(QLabel("Profile: "))
         self.profile_combo = FocusWheelComboBox()
@@ -4779,6 +5041,9 @@ class App(QMainWindow):
         self.toolbar.addWidget(btn_remove)
         self.toolbar.addSeparator()
         self.toolbar.addWidget(_create_round_help_button(self, "profiles", "Open help for profiles and databases"))
+
+        self._action_ribbon_action_ids = []
+        self._rebuild_action_ribbon_toolbar()
 
         # ----- Central dock layout -----
         self.setDockNestingEnabled(True)
@@ -4991,6 +5256,9 @@ class App(QMainWindow):
         self.cancel_button = QPushButton("Reset Form")
         self.cancel_button.clicked.connect(self.clear_form_fields)
         self.cancel_button.setMinimumHeight(32)
+        self.add_album_button = QPushButton("Add Album…")
+        self.add_album_button.clicked.connect(self.open_add_album_dialog)
+        self.add_album_button.setMinimumHeight(32)
         self.edit_button = QPushButton("Edit Selected")
         self.edit_button.clicked.connect(self.open_selected_editor)
         self.edit_button.setMinimumHeight(32)
@@ -5004,6 +5272,7 @@ class App(QMainWindow):
         self.delete_button.setMinimumHeight(32)
         self.delete_button.setToolTip("Delete the currently selected track from the table.")
         btn_row.addWidget(self.cancel_button)
+        btn_row.addWidget(self.add_album_button)
         btn_row.addStretch(1)
         btn_row.addWidget(self.edit_button)
         btn_row.addWidget(self.delete_button)
@@ -7167,6 +7436,361 @@ class App(QMainWindow):
             if enabled:
                 dock.raise_()
 
+    @staticmethod
+    def _action_shortcut_text(action: QAction | None) -> str:
+        if action is None:
+            return ""
+        shortcuts = [seq.toString(QKeySequence.NativeText) for seq in action.shortcuts() if not seq.isEmpty()]
+        if shortcuts:
+            return ", ".join(shortcuts)
+        shortcut = action.shortcut()
+        if shortcut.isEmpty():
+            return ""
+        return shortcut.toString(QKeySequence.NativeText)
+
+    def _initialize_action_ribbon_registry(self):
+        specs = [
+            {
+                "id": "save_entry",
+                "label": "Save Entry",
+                "category": "Edit",
+                "description": "Create a new catalog row from the Add Data form.",
+                "action": self.save_entry_action,
+                "default": True,
+            },
+            {
+                "id": "add_album",
+                "label": "Add Album",
+                "category": "Edit",
+                "description": "Open the structured album-entry dialog with dynamic track sections.",
+                "action": self.add_album_action,
+                "default": True,
+            },
+            {
+                "id": "edit_selected",
+                "label": "Edit Selected",
+                "category": "Edit",
+                "description": "Open the current selected row or batch in the full editor.",
+                "action": self.edit_selected_action,
+                "default": True,
+            },
+            {
+                "id": "delete_entry",
+                "label": "Delete Selected",
+                "category": "Edit",
+                "description": "Delete the current selected row or rows after confirmation.",
+                "action": self.delete_entry_action,
+                "default": True,
+            },
+            {
+                "id": "undo",
+                "label": "Undo",
+                "category": "Edit",
+                "description": "Undo the latest reversible action from session or profile history.",
+                "action": self.undo_action,
+                "default": True,
+            },
+            {
+                "id": "redo",
+                "label": "Redo",
+                "category": "Edit",
+                "description": "Redo the next available history action.",
+                "action": self.redo_action,
+                "default": True,
+            },
+            {
+                "id": "copy",
+                "label": "Copy",
+                "category": "Edit",
+                "description": "Copy the current table selection.",
+                "action": self.copy_action,
+            },
+            {
+                "id": "copy_with_headers",
+                "label": "Copy with Headers",
+                "category": "Edit",
+                "description": "Copy the current table selection with header labels.",
+                "action": self.copy_with_headers_action,
+            },
+            {
+                "id": "reset_form",
+                "label": "Reset Form and Search",
+                "category": "Edit",
+                "description": "Clear the Add Data form and reset the current search filter.",
+                "action": self.reset_form_action,
+            },
+            {
+                "id": "new_profile",
+                "label": "New Profile",
+                "category": "File",
+                "description": "Create a new profile database.",
+                "action": self.new_profile_action,
+            },
+            {
+                "id": "open_profile",
+                "label": "Open Profile",
+                "category": "File",
+                "description": "Browse to and open an existing profile database.",
+                "action": self.open_profile_action,
+            },
+            {
+                "id": "reload_profiles",
+                "label": "Reload Profile List",
+                "category": "File",
+                "description": "Refresh the known profile list from disk.",
+                "action": self.reload_profiles_action,
+            },
+            {
+                "id": "remove_profile",
+                "label": "Remove Selected Profile",
+                "category": "File",
+                "description": "Remove the currently selected profile from the workspace list or disk.",
+                "action": self.remove_profile_action,
+            },
+            {
+                "id": "import_xml",
+                "label": "Import XML",
+                "category": "File",
+                "description": "Import catalog data from a supported XML file.",
+                "action": self.import_xml_action,
+                "default": True,
+            },
+            {
+                "id": "export_selected",
+                "label": "Export Selected to XML",
+                "category": "File",
+                "description": "Export the current selected batch to XML.",
+                "action": self.export_selected_action,
+                "default": True,
+            },
+            {
+                "id": "export_all",
+                "label": "Export Entire Library to XML",
+                "category": "File",
+                "description": "Export the full active profile library to XML.",
+                "action": self.export_all_action,
+            },
+            {
+                "id": "backup",
+                "label": "Backup Database",
+                "category": "File",
+                "description": "Create a safety backup of the current profile database.",
+                "action": self.backup_action,
+            },
+            {
+                "id": "restore",
+                "label": "Restore from Backup",
+                "category": "File",
+                "description": "Restore the current profile from a chosen backup.",
+                "action": self.restore_action,
+            },
+            {
+                "id": "verify",
+                "label": "Verify Integrity",
+                "category": "File",
+                "description": "Run integrity checks against the current profile database.",
+                "action": self.verify_action,
+            },
+            {
+                "id": "license_browser",
+                "label": "License Browser",
+                "category": "Catalog",
+                "description": "Browse, preview, edit, and export stored license PDFs.",
+                "action": self.license_browser_action,
+            },
+            {
+                "id": "catalog_managers",
+                "label": "Catalog Managers",
+                "category": "Catalog",
+                "description": "Open the artists, albums, and licensees manager dialog.",
+                "action": self.catalog_managers_action,
+            },
+            {
+                "id": "gs1_metadata",
+                "label": "GS1 Metadata",
+                "category": "Catalog",
+                "description": "Open GS1 metadata for the current selected track or batch.",
+                "action": self.gs1_metadata_action,
+                "default": True,
+            },
+            {
+                "id": "settings",
+                "label": "Application Settings",
+                "category": "Settings",
+                "description": "Open the consolidated application and profile settings dialog.",
+                "action": self.settings_action,
+                "default": True,
+            },
+            {
+                "id": "add_custom_column",
+                "label": "Add Custom Column",
+                "category": "View",
+                "description": "Create a new custom metadata column definition.",
+                "action": self.add_custom_column_action,
+            },
+            {
+                "id": "manage_fields",
+                "label": "Manage Custom Columns",
+                "category": "View",
+                "description": "Rename, reorder, or update existing custom columns.",
+                "action": self.manage_fields_action,
+            },
+            {
+                "id": "show_add_data",
+                "label": "Show Add Data Panel",
+                "category": "View",
+                "description": "Toggle the Add Data dock panel.",
+                "action": self.add_data_action,
+            },
+            {
+                "id": "show_catalog_table",
+                "label": "Show Catalog Table",
+                "category": "View",
+                "description": "Toggle the Catalog Table dock panel.",
+                "action": self.catalog_table_action,
+            },
+            {
+                "id": "show_history",
+                "label": "Show Undo History",
+                "category": "History",
+                "description": "Open the persistent history browser.",
+                "action": self.show_history_action,
+                "default": True,
+            },
+            {
+                "id": "create_snapshot",
+                "label": "Create Snapshot",
+                "category": "History",
+                "description": "Create a manual snapshot restore point for the current profile.",
+                "action": self.create_snapshot_action,
+                "default": True,
+            },
+            {
+                "id": "help_contents",
+                "label": "Help Contents",
+                "category": "Help",
+                "description": "Open the in-app help browser.",
+                "action": self.help_contents_action,
+            },
+            {
+                "id": "diagnostics",
+                "label": "Diagnostics",
+                "category": "Help",
+                "description": "Open diagnostics and repair information for the current profile.",
+                "action": self.diagnostics_action,
+            },
+            {
+                "id": "application_log",
+                "label": "Application Log",
+                "category": "Help",
+                "description": "Browse the human-readable and structured log views.",
+                "action": self.application_log_action,
+            },
+        ]
+
+        for spec in specs:
+            spec["shortcut"] = self._action_shortcut_text(spec.get("action"))
+
+        self._action_ribbon_specs = specs
+        self._action_ribbon_specs_by_id = {str(spec["id"]): spec for spec in specs}
+        self._action_ribbon_default_ids = [str(spec["id"]) for spec in specs if spec.get("default")]
+
+    def _action_ribbon_setting_keys(self) -> list[str]:
+        return [
+            "display/action_ribbon_visible",
+            "display/action_ribbon_actions_json",
+        ]
+
+    def _normalize_action_ribbon_ids(self, action_ids) -> list[str]:
+        if not hasattr(self, "_action_ribbon_specs_by_id"):
+            return []
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for action_id in action_ids or []:
+            clean_id = str(action_id or "").strip()
+            if not clean_id or clean_id in seen or clean_id not in self._action_ribbon_specs_by_id:
+                continue
+            seen.add(clean_id)
+            normalized.append(clean_id)
+        return normalized
+
+    def _load_saved_action_ribbon_action_ids(self) -> list[str]:
+        setting_key = "display/action_ribbon_actions_json"
+        if not self.settings.contains(setting_key):
+            return list(getattr(self, "_action_ribbon_default_ids", []))
+
+        raw_value = self.settings.value(setting_key, "[]")
+        parsed_ids = raw_value
+        if isinstance(raw_value, str):
+            try:
+                parsed_ids = json.loads(raw_value)
+            except Exception:
+                return list(getattr(self, "_action_ribbon_default_ids", []))
+        elif not isinstance(raw_value, list):
+            parsed_ids = []
+        normalized_ids = self._normalize_action_ribbon_ids(parsed_ids)
+        if not normalized_ids and parsed_ids:
+            return list(getattr(self, "_action_ribbon_default_ids", []))
+        return normalized_ids
+
+    def _action_ribbon_button_tooltip(self, spec: dict) -> str:
+        parts = [str(spec.get("label") or "").strip()]
+        description = str(spec.get("description") or "").strip()
+        shortcut_text = str(spec.get("shortcut") or "").strip()
+        if description:
+            parts.append(description)
+        if shortcut_text:
+            parts.append(f"Shortcut: {shortcut_text}")
+        return "\n".join(part for part in parts if part)
+
+    def _rebuild_action_ribbon_toolbar(self):
+        toolbar = getattr(self, "action_ribbon_toolbar", None)
+        if toolbar is None:
+            return
+
+        toolbar.clear()
+        action_ids = self._normalize_action_ribbon_ids(getattr(self, "_action_ribbon_action_ids", []))
+        self._action_ribbon_action_ids = action_ids
+
+        for action_id in action_ids:
+            spec = self._action_ribbon_specs_by_id.get(action_id)
+            if spec is None:
+                continue
+            toolbar.addAction(spec["action"])
+            widget = toolbar.widgetForAction(spec["action"])
+            if widget is not None:
+                widget.setProperty("role", "actionRibbonButton")
+                widget.setToolTip(self._action_ribbon_button_tooltip(spec))
+
+        spacer = QWidget(toolbar)
+        spacer.setObjectName("actionRibbonSpacer")
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        toolbar.addWidget(spacer)
+
+        toolbar.addAction(self.customize_action_ribbon_action)
+        customize_widget = toolbar.widgetForAction(self.customize_action_ribbon_action)
+        if customize_widget is not None:
+            customize_widget.setProperty("role", "actionRibbonButton")
+            customize_widget.setToolTip("Choose which quick actions appear in the top action ribbon.")
+
+    def _apply_action_ribbon_configuration(self, action_ids: list[str], visible: bool):
+        self._action_ribbon_action_ids = self._normalize_action_ribbon_ids(action_ids)
+        self._rebuild_action_ribbon_toolbar()
+        if hasattr(self, "action_ribbon_visibility_action"):
+            self._set_action_checked_silently(self.action_ribbon_visibility_action, bool(visible))
+        if hasattr(self, "action_ribbon_toolbar") and self.action_ribbon_toolbar is not None:
+            self.action_ribbon_toolbar.setVisible(bool(visible))
+
+    def _open_action_ribbon_context_menu(self, pos):
+        toolbar = getattr(self, "action_ribbon_toolbar", None)
+        if toolbar is None:
+            return
+        menu = QMenu(toolbar)
+        menu.addAction(self.customize_action_ribbon_action)
+        menu.addSeparator()
+        menu.addAction(self.action_ribbon_visibility_action)
+        menu.exec(toolbar.mapToGlobal(pos))
+
     def _apply_saved_view_preferences(self):
         previous_suspend_state = self._suspend_layout_history
         self._suspend_layout_history = True
@@ -7176,18 +7800,22 @@ class App(QMainWindow):
             row_height_enabled = self.settings.value("display/interactive_row_height", False, bool)
             add_data_enabled = self.settings.value("display/add_data_panel", False, bool)
             catalog_table_enabled = self.settings.value("display/catalog_table_panel", True, bool)
+            action_ribbon_visible = self.settings.value("display/action_ribbon_visible", True, bool)
+            action_ribbon_ids = self._load_saved_action_ribbon_action_ids()
 
             self._set_action_checked_silently(self.act_reorder_columns, columns_movable)
             self._set_action_checked_silently(self.col_width_action, col_width_enabled)
             self._set_action_checked_silently(self.row_height_action, row_height_enabled)
             self._set_action_checked_silently(self.add_data_action, add_data_enabled)
             self._set_action_checked_silently(self.catalog_table_action, catalog_table_enabled)
+            self._set_action_checked_silently(self.action_ribbon_visibility_action, action_ribbon_visible)
 
             self._apply_columns_movable_state(columns_movable)
             self._apply_col_width_mode(col_width_enabled)
             self._apply_row_height_mode(row_height_enabled)
             self._apply_add_data_panel_state(add_data_enabled)
             self._apply_catalog_table_panel_state(catalog_table_enabled)
+            self._apply_action_ribbon_configuration(action_ribbon_ids, action_ribbon_visible)
         finally:
             self._suspend_layout_history = previous_suspend_state
 
@@ -7533,6 +8161,62 @@ class App(QMainWindow):
     def load_active_custom_fields(self):
         return self.custom_field_definitions.list_active_fields()
 
+    def _isrc_generation_state(self) -> tuple[str, str]:
+        prefix = (self.load_isrc_prefix() or "").upper().strip()
+        if not prefix:
+            return (
+                "disabled",
+                "No ISRC prefix is configured. Tracks can still be saved, but ISRC auto-generation stays disabled until you add one in Settings.",
+            )
+        if not re.fullmatch(r"[A-Z]{2}[A-Z0-9]{3}", prefix):
+            return (
+                "error",
+                "The saved ISRC prefix is invalid. Fix it in Settings to re-enable auto-generation.",
+            )
+
+        artist_code = self.load_artist_code()
+        if not re.fullmatch(r"\d{2}", artist_code or ""):
+            return (
+                "error",
+                "The saved ISRC artist code is invalid. Fix it in Settings to re-enable auto-generation.",
+            )
+
+        return ("ready", "")
+
+    def _next_generated_isrc(
+        self,
+        *,
+        release_date: QDate | None = None,
+        use_release_year: bool = False,
+        reserved_compacts: set[str] | None = None,
+    ) -> str:
+        if self.conn is None or self.cursor is None:
+            return ""
+        state, _message = self._isrc_generation_state()
+        if state != "ready":
+            return ""
+
+        prefix = (self.load_isrc_prefix() or "").upper().strip()
+        artist_code = self.load_artist_code()
+        year = datetime.now().year % 100
+        if use_release_year and isinstance(release_date, QDate) and release_date.isValid():
+            year = release_date.year() % 100
+        yy = f"{year:02d}"
+
+        claimed_compacts = {str(code or "").strip().upper() for code in (reserved_compacts or set()) if str(code or "").strip()}
+        for seq in range(1, 1000):
+            sss = f"{seq:03d}"
+            candidate_compact = f"{prefix}{yy}{artist_code}{sss}"
+            if candidate_compact in claimed_compacts:
+                continue
+            candidate = f"{prefix[0:2]}-{prefix[2:5]}-{yy}-{artist_code}{sss}"
+            try:
+                if not self.is_isrc_taken_normalized(candidate):
+                    return candidate
+            except Exception:
+                return candidate
+        return ""
+
     # =============================================================================
     # UI helpers
     # =============================================================================
@@ -7574,34 +8258,18 @@ class App(QMainWindow):
         return row
 
     def _preview_generated_isrc(self) -> str:
-        if self.conn is None or self.cursor is None:
-            return ""
-
-        prefix = (self.load_isrc_prefix() or "").upper().strip()
-        if not re.fullmatch(r"[A-Z]{2}[A-Z0-9]{3}", prefix or ""):
-            return ""
-
-        artist_code = self.load_artist_code()
-        if not re.fullmatch(r"\d{2}", artist_code or ""):
-            return ""
-
-        year = datetime.now().year % 100
-        if hasattr(self, "prev_release_toggle") and self.prev_release_toggle.isChecked():
+        release_date = None
+        if hasattr(self, "release_date_field"):
             try:
-                year = self.release_date_field.selectedDate().year() % 100
+                release_date = self.release_date_field.selectedDate()
             except Exception:
-                pass
-        yy = f"{year:02d}"
-
-        for seq in range(1, 1000):
-            sss = f"{seq:03d}"
-            candidate = f"{prefix[0:2]}-{prefix[2:5]}-{yy}-{artist_code}{sss}"
-            try:
-                if not self.is_isrc_taken_normalized(candidate):
-                    return candidate
-            except Exception:
-                return candidate
-        return ""
+                release_date = None
+        return self._next_generated_isrc(
+            release_date=release_date,
+            use_release_year=bool(
+                hasattr(self, "prev_release_toggle") and self.prev_release_toggle.isChecked()
+            ),
+        )
 
     def _update_add_data_generated_fields(self) -> None:
         if hasattr(self, "record_id_field"):
@@ -7611,16 +8279,28 @@ class App(QMainWindow):
         if not hasattr(self, "generated_isrc_field"):
             return
 
+        state, message = self._isrc_generation_state()
         preview = self._preview_generated_isrc()
         self.generated_isrc_field.setText(preview)
+        if hasattr(self, "prev_release_toggle"):
+            self.prev_release_toggle.setEnabled(state == "ready")
+
         if preview:
+            self.generated_isrc_field.setPlaceholderText("Generated automatically using the current ISRC settings.")
             self.generated_isrc_field.setToolTip(
                 "Next available ISRC based on the current release date and ISRC settings."
             )
-        else:
+        elif state == "ready":
+            self.generated_isrc_field.setPlaceholderText("No free ISRC sequence is currently available.")
             self.generated_isrc_field.setToolTip(
-                "Configure a valid ISRC prefix and artist code in Settings to preview the generated ISRC."
+                "ISRC auto-generation is enabled, but no free sequence is currently available for the active year and artist code."
             )
+        elif state == "disabled":
+            self.generated_isrc_field.setPlaceholderText("Auto-generation disabled until an ISRC prefix is set.")
+            self.generated_isrc_field.setToolTip(message)
+        else:
+            self.generated_isrc_field.setPlaceholderText("Fix ISRC settings to re-enable auto-generation.")
+            self.generated_isrc_field.setToolTip(message)
 
     def _make_item(self, col_idx, text, *, custom_def=None):
             it = _SortItem("" if text is None else str(text))
@@ -8016,18 +8696,29 @@ class App(QMainWindow):
                     )
                     return
 
-            # ISRC (generated)
-            generated_iso = self.generate_isrc()  # ISO-hyphenated or '' if missing settings
-            if not generated_iso:
-                return
-            comp = to_compact_isrc(generated_iso)
-            if not comp or not is_valid_isrc_compact_or_iso(generated_iso):
-                QMessageBox.critical(self, "ISRC Error", "Generated ISRC is invalid. Check prefix/artist code settings.")
-                return
+            generated_iso = ""
+            comp = ""
+            if self._isrc_generation_state()[0] == "ready":
+                generated_iso = self.generate_isrc()
+                if not generated_iso:
+                    QMessageBox.critical(
+                        self,
+                        "ISRC Error",
+                        "No free ISRC sequence is currently available for the active year and artist code.",
+                    )
+                    return
+                comp = to_compact_isrc(generated_iso)
+                if not comp or not is_valid_isrc_compact_or_iso(generated_iso):
+                    QMessageBox.critical(
+                        self,
+                        "ISRC Error",
+                        "Generated ISRC is invalid. Check prefix and artist-code settings.",
+                    )
+                    return
 
-            if self.is_isrc_taken_normalized(generated_iso):
-                QMessageBox.critical(self, "ISRC Error", "A track with this ISRC already exists.")
-                return
+                if self.is_isrc_taken_normalized(generated_iso):
+                    QMessageBox.critical(self, "ISRC Error", "A track with this ISRC already exists.")
+                    return
 
             release_date_sql = self.release_date_field.selectedDate().toString("yyyy-MM-dd")
 
@@ -8090,6 +8781,10 @@ class App(QMainWindow):
             self.conn.rollback()
             self.logger.exception(f"Save failed: {e}")
             QMessageBox.critical(self, "Save Error", f"Failed to save record:\n{e}")
+
+    def open_add_album_dialog(self):
+        dlg = AlbumEntryDialog(self)
+        dlg.exec()
 
     def open_selected_editor(self, track_id: int | None = None):
         if isinstance(track_id, bool):
@@ -8312,48 +9007,10 @@ class App(QMainWindow):
     # ISRC generation (YY + AA + SSS) with strict ISO compliance
     # =============================================================================
     def generate_isrc(self) -> str:
-        prefix = (self.load_isrc_prefix() or "").upper().strip()
-        if not re.fullmatch(r"[A-Z]{2}[A-Z0-9]{3}", prefix or ""):
-            QMessageBox.warning(
-                self, "ISRC Prefix Required",
-                "Set a valid 5-char ISRC prefix (CC+XXX), e.g., 'XXX0Y'."
-            )
-            return ""
-
-        # YY = assignment year (or album year if 'previous release' checked)
-        year = datetime.now().year % 100
-        if self.prev_release_toggle.isChecked():
-            year = self.release_date_field.selectedDate().year() % 100
-        yy = f"{year:02d}"
-
-        # AA = 2-digit artist code (00–99)
-        artist_code = self.load_artist_code()
-        if not re.fullmatch(r"\d{2}", artist_code or ""):
-            QMessageBox.warning(
-                self, "Artist Code Required",
-                "Set a 2-digit ISRC artist code (00–99) in Settings."
-            )
-            return ""
-
-        # We sub-allocate NNNNN as AA(2) + SSS(3). Build compact stem CCXXXYYAA.
-        stem_compact = f"{prefix}{yy}{artist_code}"
-
-        # Find next free SSS in 001..999
-        for seq in range(1, 1000):
-            sss = f"{seq:03d}"
-            candidate_compact = f"{stem_compact}{sss}"  # CCXXXYYAASSS (12 chars)
-            # Uniqueness check using compact column
-            row = self.cursor.execute(
-                "SELECT 1 FROM Tracks WHERE isrc_compact=? LIMIT 1",
-                (candidate_compact,)
-            ).fetchone()
-            if not row:
-                # Return ISO-hyphenated form for storage/export consistency
-                return f"{prefix[0:2]}-{prefix[2:5]}-{yy}-{artist_code}{sss}"
-
-        QMessageBox.critical(self, "ISRC Exhausted",
-                             "No free sequence (001–999) left for this artist/year.")
-        return ""
+        return self._next_generated_isrc(
+            release_date=self.release_date_field.selectedDate(),
+            use_release_year=bool(self.prev_release_toggle.isChecked()),
+        )
 
     # =============================================================================
     # Export / Import (with location picker, overwrite confirm, dry-run option)
@@ -8801,6 +9458,60 @@ class App(QMainWindow):
             setting_keys=["display/catalog_table_panel"],
             mutation=mutation,
             entity_id="display/catalog_table_panel",
+        )
+
+    def _on_toggle_action_ribbon(self, enabled: bool):
+        enabled = bool(enabled)
+
+        def mutation():
+            self._apply_action_ribbon_configuration(
+                getattr(self, "_action_ribbon_action_ids", []),
+                enabled,
+            )
+            self.settings.setValue("display/action_ribbon_visible", enabled)
+            self.settings.sync()
+
+        self._run_setting_bundle_history_action(
+            action_label="Toggle Action Ribbon",
+            setting_keys=self._action_ribbon_setting_keys(),
+            mutation=mutation,
+            entity_id="display/action_ribbon",
+        )
+
+    def open_action_ribbon_customizer(self):
+        available_actions = [dict(spec) for spec in getattr(self, "_action_ribbon_specs", [])]
+        dlg = ActionRibbonDialog(
+            available_actions,
+            list(getattr(self, "_action_ribbon_action_ids", [])),
+            ribbon_visible=bool(
+                getattr(self, "action_ribbon_toolbar", None) is not None and self.action_ribbon_toolbar.isVisible()
+            ),
+            parent=self,
+        )
+        if dlg.exec() != QDialog.Accepted:
+            return
+
+        new_action_ids = self._normalize_action_ribbon_ids(dlg.selected_action_ids())
+        new_visible = bool(dlg.ribbon_visible())
+        current_action_ids = self._normalize_action_ribbon_ids(getattr(self, "_action_ribbon_action_ids", []))
+        current_visible = bool(
+            getattr(self, "action_ribbon_toolbar", None) is not None and self.action_ribbon_toolbar.isVisible()
+        )
+
+        if new_action_ids == current_action_ids and new_visible == current_visible:
+            return
+
+        def mutation():
+            self.settings.setValue("display/action_ribbon_actions_json", json.dumps(new_action_ids))
+            self.settings.setValue("display/action_ribbon_visible", new_visible)
+            self.settings.sync()
+            self._apply_action_ribbon_configuration(new_action_ids, new_visible)
+
+        self._run_setting_bundle_history_action(
+            action_label="Customize Action Ribbon",
+            setting_keys=self._action_ribbon_setting_keys(),
+            mutation=mutation,
+            entity_id="display/action_ribbon",
         )
 
 
@@ -10617,6 +11328,569 @@ class App(QMainWindow):
         LicensesBrowserDialog(self.license_service, track_filter_id=track_filter_id, parent=self).exec()
 
 
+class _AlbumTrackSection(QGroupBox):
+    """Reusable track-entry section for the Add Album dialog."""
+
+    def __init__(self, dialog: "AlbumEntryDialog", number: int):
+        super().__init__(dialog)
+        self.dialog = dialog
+        self.app = dialog.app
+        self.setProperty("role", "albumTrackSection")
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(14, 18, 14, 14)
+        root.setSpacing(12)
+
+        top_row = QHBoxLayout()
+        top_row.setContentsMargins(0, 0, 0, 0)
+        top_row.setSpacing(8)
+        self.track_note = QLabel("Track-specific metadata, timing, codes, and managed audio.")
+        self.track_note.setProperty("role", "secondary")
+        self.track_note.setWordWrap(True)
+        top_row.addWidget(self.track_note, 1)
+        self.remove_button = QPushButton("Remove Track")
+        self.remove_button.setAutoDefault(False)
+        self.remove_button.clicked.connect(lambda: self.dialog.remove_track_section(self))
+        top_row.addWidget(self.remove_button, 0, Qt.AlignTop)
+        root.addLayout(top_row)
+
+        details_box, details_layout = _create_standard_section(self, "Track Details")
+        codes_box, codes_layout = _create_standard_section(self, "Track Codes & Media")
+
+        self.track_title = QLineEdit()
+        self.track_title.setPlaceholderText("Track title")
+        self._add_labeled_widget(details_layout, "Track Title", self.track_title)
+
+        self.artist_name = self.dialog._build_artist_combo(allow_empty=True)
+        self.artist_name.setCurrentText("")
+        self._add_labeled_widget(details_layout, "Main Artist", self.artist_name)
+
+        self.additional_artists = self.dialog._build_artist_combo(allow_empty=True)
+        self.additional_artists.setCurrentText("")
+        self._add_labeled_widget(details_layout, "Additional Artists", self.additional_artists)
+
+        self.release_date = QLineEdit()
+        self.release_date.setReadOnly(True)
+        self.release_date.setPlaceholderText("No release date selected")
+        release_row = QWidget(self)
+        release_layout = QHBoxLayout(release_row)
+        release_layout.setContentsMargins(0, 0, 0, 0)
+        release_layout.setSpacing(8)
+        release_layout.addWidget(self.release_date, 1)
+        self.release_date_pick_button = QPushButton("Pick…")
+        self.release_date_pick_button.setAutoDefault(False)
+        self.release_date_pick_button.clicked.connect(self._pick_release_date)
+        self.release_date_today_button = QPushButton("Today")
+        self.release_date_today_button.setAutoDefault(False)
+        self.release_date_today_button.clicked.connect(
+            lambda: self.set_release_date_iso(QDate.currentDate().toString("yyyy-MM-dd"))
+        )
+        self.release_date_clear_button = QPushButton("Clear")
+        self.release_date_clear_button.setAutoDefault(False)
+        self.release_date_clear_button.clicked.connect(lambda: self.set_release_date_iso(None))
+        release_layout.addWidget(self.release_date_pick_button)
+        release_layout.addWidget(self.release_date_today_button)
+        release_layout.addWidget(self.release_date_clear_button)
+        self._add_labeled_widget(details_layout, "Release Date", release_row)
+
+        self.len_h = TwoDigitSpinBox()
+        self.len_h.setRange(0, 99)
+        self.len_h.setFixedWidth(60)
+        self.len_m = TwoDigitSpinBox()
+        self.len_m.setRange(0, 59)
+        self.len_m.setFixedWidth(50)
+        self.len_s = TwoDigitSpinBox()
+        self.len_s.setRange(0, 59)
+        self.len_s.setFixedWidth(50)
+        length_group = QFrame(self)
+        length_group.setProperty("role", "compactControlGroup")
+        length_group.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        length_layout = QHBoxLayout(length_group)
+        length_layout.setContentsMargins(10, 8, 10, 8)
+        length_layout.setSpacing(6)
+        length_layout.addWidget(self.len_h)
+        length_layout.addWidget(QLabel(":"))
+        length_layout.addWidget(self.len_m)
+        length_layout.addWidget(QLabel(":"))
+        length_layout.addWidget(self.len_s)
+        self._add_labeled_widget(details_layout, "Track Length (hh:mm:ss)", length_group)
+
+        self.isrc = QLineEdit()
+        if self.dialog.auto_isrc_enabled:
+            self.isrc.setPlaceholderText("Leave blank to auto-generate on save")
+        else:
+            self.isrc.setPlaceholderText("Leave blank if this track has no ISRC yet")
+        self._add_labeled_widget(codes_layout, "ISRC", self.isrc)
+
+        isrc_note = QLabel(self.dialog.isrc_help_text)
+        isrc_note.setProperty("role", "secondary")
+        isrc_note.setWordWrap(True)
+        codes_layout.addWidget(isrc_note)
+
+        self.iswc = QLineEdit()
+        self.iswc.setPlaceholderText("Optional ISWC")
+        self._add_labeled_widget(codes_layout, "ISWC", self.iswc)
+
+        self.buma_work_number = QLineEdit()
+        self.buma_work_number.setPlaceholderText("Optional BUMA work number")
+        self._add_labeled_widget(codes_layout, "BUMA Wnr.", self.buma_work_number)
+
+        self.audio_file = QLineEdit()
+        self.audio_file.setReadOnly(True)
+        self.audio_file.setPlaceholderText("No audio file selected")
+        audio_row = QWidget(self)
+        audio_layout = QHBoxLayout(audio_row)
+        audio_layout.setContentsMargins(0, 0, 0, 0)
+        audio_layout.setSpacing(8)
+        audio_layout.addWidget(self.audio_file, 1)
+        self.audio_browse_button = QPushButton("Browse…")
+        self.audio_browse_button.setAutoDefault(False)
+        self.audio_browse_button.clicked.connect(
+            lambda: self.app._choose_media_into_line_edit("audio_file", self.audio_file, parent_widget=self.dialog)
+        )
+        self.audio_clear_button = QPushButton("Clear")
+        self.audio_clear_button.setAutoDefault(False)
+        self.audio_clear_button.clicked.connect(self.audio_file.clear)
+        audio_layout.addWidget(self.audio_browse_button)
+        audio_layout.addWidget(self.audio_clear_button)
+        self._add_labeled_widget(codes_layout, "Audio File", audio_row)
+
+        root.addWidget(details_box)
+        root.addWidget(codes_box)
+        self.set_track_number(number)
+
+    @staticmethod
+    def _add_labeled_widget(layout: QVBoxLayout, label_text: str, widget: QWidget) -> None:
+        row = QVBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(4)
+        label = QLabel(label_text)
+        row.addWidget(label)
+        row.addWidget(widget)
+        layout.addLayout(row)
+
+    def set_track_number(self, number: int) -> None:
+        self.setTitle(f"Track {int(number):02d}")
+
+    def set_release_date_iso(self, iso_date: str | None) -> None:
+        clean_value = str(iso_date or "").strip()
+        self.release_date.setText(clean_value)
+
+    def release_date_iso(self) -> str | None:
+        clean_value = (self.release_date.text() or "").strip()
+        return clean_value or None
+
+    def track_length_seconds(self) -> int:
+        return hms_to_seconds(self.len_h.value(), self.len_m.value(), self.len_s.value())
+
+    def is_effectively_blank(self) -> bool:
+        return all(
+            (
+                not (self.track_title.text() or "").strip(),
+                not self.artist_name.currentText().strip(),
+                not self.additional_artists.currentText().strip(),
+                not self.release_date_iso(),
+                self.track_length_seconds() == 0,
+                not (self.isrc.text() or "").strip(),
+                not (self.iswc.text() or "").strip(),
+                not (self.buma_work_number.text() or "").strip(),
+                not (self.audio_file.text() or "").strip(),
+            )
+        )
+
+    def _pick_release_date(self) -> None:
+        dlg = DatePickerDialog(
+            self.dialog,
+            initial_iso_date=self.release_date_iso(),
+            title=f"Pick Release Date for {self.title()}",
+        )
+        if dlg.exec() == QDialog.Accepted:
+            self.set_release_date_iso(dlg.selected_iso())
+
+
+class AlbumEntryDialog(QDialog):
+    """Creates multiple tracks for a shared album from one structured dialog."""
+
+    def __init__(self, app: App):
+        super().__init__(app)
+        self.app = app
+        self.created_track_ids: list[int] = []
+        self._track_sections: list[_AlbumTrackSection] = []
+
+        state, state_message = self.app._isrc_generation_state()
+        self.auto_isrc_enabled = state == "ready"
+        self.isrc_help_text = (
+            "Leave ISRC blank to auto-generate it on save using the current prefix, artist code, and track release-year rule."
+            if self.auto_isrc_enabled
+            else state_message
+        )
+
+        self.setWindowTitle("Add Album")
+        self.setModal(True)
+        self.resize(920, 940)
+        self.setMinimumSize(760, 720)
+        _apply_standard_dialog_chrome(self, "albumEntryDialog")
+
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(18, 18, 18, 18)
+        main_layout.setSpacing(14)
+        _add_standard_dialog_header(
+            main_layout,
+            self,
+            title="Add Album",
+            subtitle=(
+                "Capture shared album metadata once, then add as many track-specific sections as needed. "
+                "Blank track sections are ignored when you save."
+            ),
+            help_topic_id="album-entry",
+        )
+
+        summary_box, summary_layout = _create_standard_section(
+            self,
+            "Workflow Notes",
+            "Album-level values apply to every saved track in this dialog, while each track section keeps its own metadata and audio file.",
+        )
+        summary_label = QLabel(
+            "Album Title, UPC/EAN, Genre, Catalog#, and Album Art are shared across the new album tracks. "
+            + self.isrc_help_text
+        )
+        summary_label.setWordWrap(True)
+        summary_label.setProperty("role", "supportingText")
+        summary_layout.addWidget(summary_label)
+        main_layout.addWidget(summary_box)
+
+        overview_box, overview_layout = _create_standard_section(self, "Album Overview")
+        self.album_title = self._build_album_combo()
+        self._add_labeled_widget(overview_layout, "Album Title", self.album_title)
+
+        self.upc = self._build_upc_combo()
+        self._add_labeled_widget(overview_layout, "UPC / EAN", self.upc)
+
+        self.genre = self._build_genre_combo()
+        self._add_labeled_widget(overview_layout, "Genre", self.genre)
+
+        self.catalog_number = QLineEdit()
+        self.catalog_number.setPlaceholderText("Optional catalog number")
+        self._add_labeled_widget(overview_layout, "Catalog#", self.catalog_number)
+
+        self.album_art = QLineEdit()
+        self.album_art.setReadOnly(True)
+        self.album_art.setPlaceholderText("No album art selected")
+        art_row = QWidget(self)
+        art_layout = QHBoxLayout(art_row)
+        art_layout.setContentsMargins(0, 0, 0, 0)
+        art_layout.setSpacing(8)
+        art_layout.addWidget(self.album_art, 1)
+        self.album_art_browse_button = QPushButton("Browse…")
+        self.album_art_browse_button.setAutoDefault(False)
+        self.album_art_browse_button.clicked.connect(
+            lambda: self.app._choose_media_into_line_edit("album_art", self.album_art, parent_widget=self)
+        )
+        self.album_art_clear_button = QPushButton("Clear")
+        self.album_art_clear_button.setAutoDefault(False)
+        self.album_art_clear_button.clicked.connect(self.album_art.clear)
+        art_layout.addWidget(self.album_art_browse_button)
+        art_layout.addWidget(self.album_art_clear_button)
+        self._add_labeled_widget(overview_layout, "Album Art", art_row)
+
+        self.use_release_year = QCheckBox("Use each track release year when auto-generating blank ISRC values")
+        self.use_release_year.setChecked(False)
+        self.use_release_year.setEnabled(self.auto_isrc_enabled)
+        self.use_release_year.setToolTip(self.isrc_help_text)
+        overview_layout.addWidget(self.use_release_year)
+        main_layout.addWidget(overview_box)
+
+        tracks_box, tracks_box_layout = _create_standard_section(
+            self,
+            "Tracks",
+            "Start with two track sections, add more whenever needed, and remove any extras you do not want to save.",
+        )
+        controls_row = QHBoxLayout()
+        controls_row.setContentsMargins(0, 0, 0, 0)
+        controls_row.setSpacing(8)
+        self.track_count_label = QLabel()
+        self.track_count_label.setProperty("role", "meta")
+        controls_row.addWidget(self.track_count_label)
+        controls_row.addStretch(1)
+        self.add_track_button = QPushButton("Add Track")
+        self.add_track_button.setAutoDefault(False)
+        self.add_track_button.clicked.connect(self.add_track_section)
+        controls_row.addWidget(self.add_track_button)
+        tracks_box_layout.addLayout(controls_row)
+
+        self.track_container = QWidget(self)
+        self.track_layout = QVBoxLayout(self.track_container)
+        self.track_layout.setContentsMargins(0, 0, 0, 0)
+        self.track_layout.setSpacing(12)
+        self.track_layout.addStretch(1)
+
+        self.track_scroll = QScrollArea(self)
+        self.track_scroll.setWidgetResizable(True)
+        self.track_scroll.setFrameShape(QFrame.NoFrame)
+        self.track_scroll.setWidget(self.track_container)
+        tracks_box_layout.addWidget(self.track_scroll, 1)
+        main_layout.addWidget(tracks_box, 1)
+
+        for _ in range(2):
+            self.add_track_section()
+
+        buttons = QHBoxLayout()
+        buttons.setContentsMargins(0, 0, 0, 0)
+        buttons.setSpacing(8)
+        buttons.addStretch(1)
+        self.save_button = QPushButton("Save Album")
+        self.save_button.setDefault(True)
+        self.save_button.clicked.connect(self.save_album)
+        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.clicked.connect(self.reject)
+        buttons.addWidget(self.save_button)
+        buttons.addWidget(self.cancel_button)
+        main_layout.addLayout(buttons)
+
+    def _combo_from_query(self, query: str, *, allow_empty: bool = True) -> FocusWheelComboBox:
+        combo = FocusWheelComboBox()
+        combo.setEditable(True)
+        values = [
+            str(row[0] or "").strip()
+            for row in self.app.cursor.execute(query).fetchall()
+            if str(row[0] or "").strip()
+        ]
+        if allow_empty:
+            combo.addItem("")
+        combo.addItems(values)
+        completer = QCompleter(values)
+        completer.setCaseSensitivity(Qt.CaseInsensitive)
+        combo.setCompleter(completer)
+        return combo
+
+    def _build_artist_combo(self, *, allow_empty: bool) -> FocusWheelComboBox:
+        return self._combo_from_query(
+            "SELECT DISTINCT name FROM Artists WHERE name IS NOT NULL AND name != '' ORDER BY name",
+            allow_empty=allow_empty,
+        )
+
+    def _build_album_combo(self) -> FocusWheelComboBox:
+        return self._combo_from_query(
+            "SELECT DISTINCT title FROM Albums WHERE title IS NOT NULL AND title != '' ORDER BY title",
+            allow_empty=True,
+        )
+
+    def _build_upc_combo(self) -> FocusWheelComboBox:
+        return self._combo_from_query(
+            "SELECT DISTINCT upc FROM Tracks WHERE upc IS NOT NULL AND upc != '' ORDER BY upc",
+            allow_empty=True,
+        )
+
+    def _build_genre_combo(self) -> FocusWheelComboBox:
+        return self._combo_from_query(
+            "SELECT DISTINCT genre FROM Tracks WHERE genre IS NOT NULL AND genre != '' ORDER BY genre",
+            allow_empty=True,
+        )
+
+    @staticmethod
+    def _add_labeled_widget(layout: QVBoxLayout, label_text: str, widget: QWidget) -> None:
+        row = QVBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(4)
+        label = QLabel(label_text)
+        row.addWidget(label)
+        row.addWidget(widget)
+        layout.addLayout(row)
+
+    def _refresh_track_section_titles(self) -> None:
+        for index, section in enumerate(self._track_sections, start=1):
+            section.set_track_number(index)
+        track_count = len(self._track_sections)
+        self.track_count_label.setText(
+            f"{track_count} track section{'s' if track_count != 1 else ''} available"
+        )
+        allow_remove = track_count > 1
+        for section in self._track_sections:
+            section.remove_button.setEnabled(allow_remove)
+
+    def add_track_section(self) -> None:
+        section = _AlbumTrackSection(self, len(self._track_sections) + 1)
+        self._track_sections.append(section)
+        self.track_layout.insertWidget(self.track_layout.count() - 1, section)
+        self._refresh_track_section_titles()
+        QTimer.singleShot(0, lambda: self.track_scroll.ensureWidgetVisible(section, 0, 24))
+
+    def remove_track_section(self, section: _AlbumTrackSection) -> None:
+        if section not in self._track_sections or len(self._track_sections) <= 1:
+            return
+        self._track_sections.remove(section)
+        section.setParent(None)
+        section.deleteLater()
+        self._refresh_track_section_titles()
+
+    def _build_track_payloads(self) -> list[TrackCreatePayload] | None:
+        album_title = self.album_title.currentText().strip()
+        if is_blank(album_title):
+            QMessageBox.warning(self, "Missing Album Title", "Album Title is required when using Add Album.")
+            return None
+
+        upc_raw = self.upc.currentText().strip()
+        if upc_raw and not valid_upc_ean(upc_raw):
+            QMessageBox.warning(self, "Invalid UPC/EAN", "UPC/EAN must be 12 or 13 digits (or leave empty).")
+            return None
+
+        genre = self.genre.currentText().strip() or None
+        catalog_number = self.catalog_number.text().strip() or None
+        album_art_source_path = self.album_art.text().strip() or None
+        use_release_year = bool(self.use_release_year.isChecked())
+
+        active_sections = [section for section in self._track_sections if not section.is_effectively_blank()]
+        if not active_sections:
+            QMessageBox.warning(self, "No Tracks", "Add at least one track before saving the album.")
+            return None
+
+        payloads: list[TrackCreatePayload] = []
+        reserved_compacts: set[str] = set()
+
+        for index, section in enumerate(active_sections, start=1):
+            track_title = (section.track_title.text() or "").strip()
+            artist_name = section.artist_name.currentText().strip()
+            if is_blank(track_title) or is_blank(artist_name):
+                QMessageBox.warning(
+                    self,
+                    "Missing Track Data",
+                    f"{section.title()} needs both a Track Title and a Main Artist.",
+                )
+                return None
+
+            raw_isrc = (section.isrc.text() or "").strip()
+            iso_isrc = ""
+            compact_isrc = ""
+            if raw_isrc:
+                iso_isrc = to_iso_isrc(raw_isrc)
+                compact_isrc = to_compact_isrc(iso_isrc)
+                if not compact_isrc or not is_valid_isrc_compact_or_iso(iso_isrc):
+                    QMessageBox.warning(
+                        self,
+                        "Invalid ISRC",
+                        f"{section.title()} has an invalid ISRC. Use CC-XXX-YY-NNNNN or leave it blank.",
+                    )
+                    return None
+            elif self.auto_isrc_enabled:
+                release_qdate = QDate.fromString(section.release_date_iso() or "", "yyyy-MM-dd")
+                iso_isrc = self.app._next_generated_isrc(
+                    release_date=release_qdate if release_qdate.isValid() else None,
+                    use_release_year=use_release_year,
+                    reserved_compacts=reserved_compacts,
+                )
+                compact_isrc = to_compact_isrc(iso_isrc)
+                if not compact_isrc:
+                    QMessageBox.warning(
+                        self,
+                        "ISRC Exhausted",
+                        f"{section.title()} could not get a new ISRC. No free sequence is available right now.",
+                    )
+                    return None
+
+            if compact_isrc:
+                if compact_isrc in reserved_compacts or self.app.is_isrc_taken_normalized(iso_isrc):
+                    QMessageBox.warning(
+                        self,
+                        "Duplicate ISRC",
+                        f"{section.title()} uses an ISRC that already exists in the current album batch or profile.",
+                    )
+                    return None
+                reserved_compacts.add(compact_isrc)
+
+            raw_iswc = (section.iswc.text() or "").strip()
+            iso_iswc = None
+            if raw_iswc:
+                iso_iswc = to_iso_iswc(raw_iswc)
+                if not iso_iswc or not is_valid_iswc_any(iso_iswc):
+                    QMessageBox.warning(
+                        self,
+                        "Invalid ISWC",
+                        f"{section.title()} has an invalid ISWC. Use T-123.456.789-0 or leave it blank.",
+                    )
+                    return None
+
+            payloads.append(
+                TrackCreatePayload(
+                    isrc=iso_isrc,
+                    track_title=track_title,
+                    artist_name=artist_name,
+                    additional_artists=self.app._parse_additional_artists(section.additional_artists.currentText()),
+                    album_title=album_title,
+                    release_date=section.release_date_iso(),
+                    track_length_sec=section.track_length_seconds(),
+                    iswc=(iso_iswc or None),
+                    upc=(upc_raw or None),
+                    genre=genre,
+                    catalog_number=catalog_number,
+                    buma_work_number=(section.buma_work_number.text().strip() or None),
+                    audio_file_source_path=(section.audio_file.text().strip() or None),
+                    album_art_source_path=album_art_source_path if index == 1 else None,
+                )
+            )
+
+        return payloads
+
+    def save_album(self) -> None:
+        payloads = self._build_track_payloads()
+        if payloads is None:
+            return
+
+        created_track_ids: list[int] = []
+        album_title = payloads[0].album_title or "Album"
+
+        def mutation():
+            nonlocal created_track_ids
+            created_track_ids = []
+            for payload in payloads:
+                created_track_ids.append(self.app.track_service.create_track(payload))
+
+            try:
+                self.app._log_event(
+                    "album.create",
+                    "Album created",
+                    album_title=album_title,
+                    track_ids=created_track_ids,
+                    track_count=len(created_track_ids),
+                )
+                for track_id, payload in zip(created_track_ids, payloads):
+                    self.app._audit("CREATE", "Track", ref_id=track_id, details=f"isrc={payload.isrc}")
+                self.app._audit_commit()
+            except Exception as audit_err:
+                self.app.logger.warning(f"Album create audit failed: {audit_err}")
+
+            self.app.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            return list(created_track_ids)
+
+        try:
+            result_ids = self.app._run_snapshot_history_action(
+                action_label=f"Add Album: {album_title}",
+                action_type="album.create",
+                entity_type="Album",
+                entity_id=album_title,
+                payload={
+                    "album_title": album_title,
+                    "track_count": len(payloads),
+                },
+                mutation=mutation,
+            )
+        except Exception as exc:
+            self.app.logger.exception(f"Album create failed: {exc}")
+            QMessageBox.critical(self, "Save Album", f"Could not save the album:\n{exc}")
+            return
+
+        self.created_track_ids = list(result_ids or created_track_ids)
+        focus_id = self.created_track_ids[0] if self.created_track_ids else None
+        self.app.refresh_table_preserve_view(focus_id=focus_id)
+        self.app.populate_all_comboboxes()
+        if hasattr(self.app, "statusBar"):
+            self.app.statusBar().showMessage(
+                f"Saved album '{album_title}' with {len(self.created_track_ids)} track{'s' if len(self.created_track_ids) != 1 else ''}.",
+                5000,
+            )
+        self.accept()
+
+
 class EditDialog(QDialog):
     """Edits one or more Track rows, including promoted standard fields."""
 
@@ -11296,11 +12570,13 @@ class EditDialog(QDialog):
             ).strip()
         )
 
-        iso_isrc = to_iso_isrc(new_isrc_raw)
-        comp = to_compact_isrc(iso_isrc)
-        if not comp or not is_valid_isrc_compact_or_iso(iso_isrc):
-            QMessageBox.warning(self, "Invalid ISRC", "ISRC must look like CCXXXYYNNNNN or CC-XXX-YY-NNNNN.")
-            return
+        iso_isrc = ""
+        if new_isrc_raw:
+            iso_isrc = to_iso_isrc(new_isrc_raw)
+            comp = to_compact_isrc(iso_isrc)
+            if not comp or not is_valid_isrc_compact_or_iso(iso_isrc):
+                QMessageBox.warning(self, "Invalid ISRC", "ISRC must look like CCXXXYYNNNNN or CC-XXX-YY-NNNNN.")
+                return
 
         iso_iswc = None
         if new_iswc_raw:
@@ -11333,7 +12609,7 @@ class EditDialog(QDialog):
                 QMessageBox.warning(self, "Update Error", "Could not load the selected track.")
                 return
 
-            if parent.is_isrc_taken_normalized(iso_isrc, exclude_track_id=row_id):
+            if iso_isrc and parent.is_isrc_taken_normalized(iso_isrc, exclude_track_id=row_id):
                 QMessageBox.critical(self, "Duplicate ISRC", "Another record already uses this ISRC.")
                 return
 
