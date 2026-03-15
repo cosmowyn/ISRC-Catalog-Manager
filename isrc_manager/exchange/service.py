@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import sqlite3
 from dataclasses import asdict
@@ -173,6 +174,34 @@ class ExchangeService:
             license_map.setdefault(int(track_id), []).append(str(filename or ""))
         return {track_id: "; ".join(values) for track_id, values in license_map.items()}
 
+    def _effective_track_media_paths(self, track_id: int) -> tuple[str, str]:
+        audio_meta = self.track_service.get_media_meta(int(track_id), "audio_file")
+        artwork_meta = self.track_service.get_media_meta(int(track_id), "album_art")
+        return (
+            str(audio_meta.get("path") or "").strip(),
+            str(artwork_meta.get("path") or "").strip(),
+        )
+
+    def _resolve_packaged_media_source(self, stored_path: str) -> Path | None:
+        clean_path = str(stored_path or "").strip()
+        if not clean_path:
+            return None
+        path = Path(clean_path)
+        if path.is_absolute():
+            return path
+        if self.data_root is None:
+            return None
+        return self.data_root / path
+
+    @staticmethod
+    def _package_media_arcname(stored_path: str) -> str:
+        clean_path = str(stored_path or "").strip()
+        path = Path(clean_path)
+        if path.is_absolute():
+            digest = hashlib.sha1(clean_path.encode("utf-8")).hexdigest()[:12]
+            return f"media/external/{digest}_{path.name}"
+        return f"media/{path.as_posix()}"
+
     def export_rows(self, track_ids: list[int] | None = None) -> tuple[list[str], list[dict[str, object]]]:
         where_clause = ""
         params: list[object] = []
@@ -226,6 +255,7 @@ class ExchangeService:
         exported_rows: list[dict[str, object]] = []
         for row in rows:
             track_id = int(row[0])
+            effective_audio_path, effective_album_art_path = self._effective_track_media_paths(track_id)
             base = {
                 "track_id": track_id,
                 "isrc": row[1] or "",
@@ -245,8 +275,8 @@ class ExchangeService:
                 "publisher": row[14] or "",
                 "comments": row[15] or "",
                 "lyrics": row[16] or "",
-                "audio_file_path": row[17] or "",
-                "album_art_path": row[18] or "",
+                "audio_file_path": effective_audio_path,
+                "album_art_path": effective_album_art_path,
                 "license_files": license_map.get(track_id, ""),
             }
             placements = release_map.get(track_id) or [
@@ -335,14 +365,20 @@ class ExchangeService:
         with ZipFile(zip_path, "w", compression=ZIP_DEFLATED) as archive:
             archive.writestr("manifest.json", json.dumps(payload, indent=2, ensure_ascii=False))
             if self.data_root is not None:
+                written_media: set[str] = set()
                 for row in rows:
                     for key in ("audio_file_path", "album_art_path", "release_artwork_path"):
                         rel_path = str(row.get(key) or "").strip()
                         if not rel_path:
                             continue
-                        abs_path = self.data_root / rel_path
-                        if abs_path.exists():
-                            archive.write(abs_path, arcname=f"media/{rel_path}")
+                        abs_path = self._resolve_packaged_media_source(rel_path)
+                        if abs_path is None or not abs_path.exists():
+                            continue
+                        arcname = self._package_media_arcname(rel_path)
+                        if arcname in written_media:
+                            continue
+                        archive.write(abs_path, arcname=arcname)
+                        written_media.add(arcname)
         return len(rows)
 
     def inspect_csv(self, path: str | Path, *, delimiter: str = ",") -> ExchangeInspection:

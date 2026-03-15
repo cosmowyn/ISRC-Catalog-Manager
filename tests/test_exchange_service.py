@@ -151,6 +151,76 @@ class ExchangeServiceTests(unittest.TestCase):
             manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
         self.assertEqual(manifest["schema_version"], 1)
         self.assertTrue(manifest["packaged_media"])
+        self.assertTrue(any(str(row.get("audio_file_path") or "").strip() for row in manifest["rows"]))
+
+    def test_package_export_includes_shared_album_art_once(self):
+        artwork_path = self.data_root / "cover.png"
+        artwork_path.write_bytes(
+            bytes.fromhex(
+                "89504E470D0A1A0A"
+                "0000000D49484452000000010000000108060000001F15C489"
+                "0000000D49444154789C63F8FFFF3F0005FE02FEA7D6059F"
+                "0000000049454E44AE426082"
+            )
+        )
+        track_a = self.track_service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00021",
+                track_title="Remix A",
+                artist_name="Cosmowyn",
+                additional_artists=[],
+                album_title="Shared Release",
+                release_date="2026-03-15",
+                track_length_sec=180,
+                iswc=None,
+                upc="036000291452",
+                genre="Ambient",
+                catalog_number="CAT-002",
+                album_art_source_path=str(artwork_path),
+            )
+        )
+        track_b = self.track_service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00022",
+                track_title="Remix B",
+                artist_name="Cosmowyn",
+                additional_artists=[],
+                album_title="Shared Release",
+                release_date="2026-03-15",
+                track_length_sec=180,
+                iswc=None,
+                upc="036000291452",
+                genre="Ambient",
+                catalog_number="CAT-002",
+            )
+        )
+        self.release_service.create_release(
+            ReleasePayload(
+                title="Shared Release",
+                primary_artist="Cosmowyn",
+                album_artist="Cosmowyn",
+                release_type="album",
+                release_date="2026-03-15",
+                upc="036000291452",
+                placements=[
+                    ReleaseTrackPlacement(track_id=track_a, disc_number=1, track_number=1, sequence_number=1),
+                    ReleaseTrackPlacement(track_id=track_b, disc_number=1, track_number=2, sequence_number=2),
+                ],
+            )
+        )
+
+        package_path = self.data_root / "shared-package.zip"
+        self.service.export_package(package_path)
+
+        with ZipFile(package_path, "r") as archive:
+            media_entries = [name for name in archive.namelist() if name.startswith("media/")]
+            manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+
+        self.assertEqual(len(media_entries), 1)
+        self.assertTrue(media_entries[0].startswith("media/track_media/images/"))
+        art_paths = [str(row.get("album_art_path") or "").strip() for row in manifest["rows"]]
+        self.assertEqual(len([path for path in art_paths if path]), 2)
+        self.assertEqual(len({path for path in art_paths if path}), 1)
 
     def test_inspect_csv_suggests_known_headers(self):
         csv_path = self.data_root / "headers.csv"
