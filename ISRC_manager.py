@@ -26,7 +26,7 @@ from datetime import datetime
 from logging.handlers import RotatingFileHandler
 
 from PySide6.QtCore import(QRegularExpression, Signal, QEvent,
-    Qt, QDate, QPoint, QSettings, QStandardPaths, QByteArray, QUrl, QEvent, QTimer, QSortFilterProxyModel,
+    Qt, QDate, QPoint, QSettings, QStandardPaths, QByteArray, QUrl, QEvent, QTimer, QEventLoop, QSortFilterProxyModel,
     QItemSelectionModel, )
 
 from PySide6.QtGui import (QDesktopServices, QCursor, QAction,
@@ -43,7 +43,7 @@ from PySide6.QtWidgets import ( QListView, QMenuBar, QListWidget, QListWidgetIte
     QDockWidget
 )
 
-from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput, QAudioDecoder, QAudioFormat
 
 from isrc_manager.history import HistoryManager, SessionHistoryManager
 from isrc_manager.history.dialogs import HistoryDialog
@@ -11270,13 +11270,147 @@ def load_wav_peaks(path: str, width_px: int):
     Build min/max peaks for drawing a waveform.
     - Fast path: RIFF/WAVE (16, 24, 32-bit PCM) via `wave`.
     - Generic path: decode any compressed format to mono s16le via ffmpeg (if present),
-      else fallback to `audioread` (pure-Python wrapper over system decoders).
+      else fallback to QtMultimedia's decoder, then `audioread` as a last resort.
     Returns: list[(lo, hi)] in [-1.0, 1.0].
     """
     import os, struct, shutil, subprocess
 
     width_px = max(1, int(width_px))
     buckets = width_px * 4  # ~4 samples/bucket for smooth lines
+
+    def _clamp_peak(value: float) -> float:
+        if value < -1.0:
+            return -1.0
+        if value > 1.0:
+            return 1.0
+        return value
+
+    def _append_pending_peak(peaks, lo: float, hi: float) -> None:
+        peaks.append((_clamp_peak(lo), _clamp_peak(hi)))
+
+    def _load_peaks_via_qt_decoder():
+        decoder = QAudioDecoder()
+        if not decoder.isSupported():
+            return None
+
+        state = {
+            "peaks": [],
+            "sample_rate": 44100,
+            "target_step": None,
+            "need": None,
+            "lo": 1.0,
+            "hi": -1.0,
+            "had_buffer": False,
+            "timed_out": False,
+            "decode_error": None,
+        }
+        loop = QEventLoop()
+        timeout = QTimer()
+        timeout.setSingleShot(True)
+
+        def _sample_value(raw: bytes, offset: int, sample_format) -> float | None:
+            if sample_format == QAudioFormat.SampleFormat.UInt8:
+                return (raw[offset] - 128.0) / 128.0
+            if sample_format == QAudioFormat.SampleFormat.Int16:
+                return struct.unpack_from("<h", raw, offset)[0] / 32768.0
+            if sample_format == QAudioFormat.SampleFormat.Int32:
+                return struct.unpack_from("<i", raw, offset)[0] / 2147483648.0
+            if sample_format == QAudioFormat.SampleFormat.Float:
+                return _clamp_peak(struct.unpack_from("<f", raw, offset)[0])
+            return None
+
+        def _finish_pending_peak() -> None:
+            if state["lo"] <= state["hi"]:
+                _append_pending_peak(state["peaks"], state["lo"], state["hi"])
+                state["lo"], state["hi"] = 1.0, -1.0
+
+        def _on_buffer_ready() -> None:
+            buf = decoder.read()
+            if not buf.isValid():
+                return
+
+            fmt = buf.format()
+            frame_bytes = fmt.bytesPerFrame()
+            if frame_bytes <= 0:
+                bytes_per_sample = fmt.bytesPerSample()
+                channels = max(1, fmt.channelCount())
+                frame_bytes = bytes_per_sample * channels
+            if frame_bytes <= 0:
+                return
+
+            sample_format = fmt.sampleFormat()
+            if sample_format not in (
+                QAudioFormat.SampleFormat.UInt8,
+                QAudioFormat.SampleFormat.Int16,
+                QAudioFormat.SampleFormat.Int32,
+                QAudioFormat.SampleFormat.Float,
+            ):
+                return
+
+            if state["target_step"] is None:
+                sample_rate = fmt.sampleRate() or 44100
+                duration_ms = decoder.duration()
+                total_samples = int((sample_rate * duration_ms) / 1000) if duration_ms and duration_ms > 0 else None
+                state["sample_rate"] = sample_rate
+                state["target_step"] = max(1, (total_samples // buckets) if total_samples else (sample_rate // 100))
+                state["need"] = state["target_step"]
+
+            raw = bytes(buf.data())
+            frame_count = len(raw) // frame_bytes
+            if frame_count <= 0:
+                return
+
+            state["had_buffer"] = True
+            for frame_index in range(frame_count):
+                offset = frame_index * frame_bytes
+                value = _sample_value(raw, offset, sample_format)
+                if value is None:
+                    continue
+                if value < state["lo"]:
+                    state["lo"] = value
+                if value > state["hi"]:
+                    state["hi"] = value
+                state["need"] -= 1
+                if state["need"] == 0:
+                    _finish_pending_peak()
+                    state["need"] = state["target_step"]
+
+        def _on_finished() -> None:
+            loop.quit()
+
+        def _on_error(*_args) -> None:
+            state["decode_error"] = decoder.errorString() or "QtMultimedia decode failed"
+            loop.quit()
+
+        def _on_timeout() -> None:
+            state["timed_out"] = True
+            try:
+                decoder.stop()
+            finally:
+                loop.quit()
+
+        decoder.bufferReady.connect(_on_buffer_ready)
+        decoder.finished.connect(_on_finished)
+        decoder.error.connect(_on_error)
+        timeout.timeout.connect(_on_timeout)
+
+        decoder.setSource(QUrl.fromLocalFile(os.fspath(path)))
+        decoder.start()
+        timeout.start(5000)
+        loop.exec()
+        timeout.stop()
+
+        _finish_pending_peak()
+        if state["peaks"]:
+            return state["peaks"]
+
+        if state["had_buffer"]:
+            return [(-0.0, 0.0)]
+
+        if state["decode_error"] or state["timed_out"]:
+            return None
+
+        return None
 
     # --- helper: best-effort find a binary on common paths ---
     def _which(name: str):
@@ -11458,7 +11592,17 @@ def load_wav_peaks(path: str, width_px: int):
         except Exception:
             pass  # fall through to audioread
 
-    # --- Generic path B: audioread fallback (pip install audioread) ----------
+    # --- Generic path B: QtMultimedia decoder fallback -----------------------
+    try:
+        peaks = _load_peaks_via_qt_decoder()
+        if peaks:
+            return peaks
+    except Exception:
+        pass
+
+    # --- Generic path C: audioread fallback (pip install audioread) ----------
+    # audioread 3.0.1 still imports stdlib `aifc` via rawread, which breaks on
+    # Python 3.13. Keep it only as a legacy fallback behind the Qt path.
     try:
         import audioread, struct as _st
         peaks = []

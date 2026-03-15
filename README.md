@@ -142,7 +142,7 @@ The application provides:
 - SQLite backend for stability and portability.
 
 ## Media Previews
-- Built-in audio preview window with waveform (macOS fully supported; Windows waveform display is a known limitation).  
+- Built-in audio preview window with waveform on macOS and Windows via the app's Qt multimedia decoder stack.  
 - Image preview window for artwork and promotional assets.  
 - Spacebar quick preview shortcut.
 
