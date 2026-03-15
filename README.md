@@ -100,10 +100,12 @@ It is designed for independent artists, producers, and small labels who require 
 The application provides:
 - Automatic ISRC generation in ISO 3901 format  
 - Metadata management with customizable fields  
+- Bulk editing for selected catalog rows with field-by-field updates  
 - Audio and image preview capabilities  
 - Multiple profile support  
 - Persistent undo/redo history with manual and automatic snapshots  
 - Dockable views for the add-data form and catalog table  
+- GS1 metadata editing and grouped workbook export using the official GS1 template workflow  
 - Searchable in-app help with contextual help buttons  
 - Theme customization with saved presets and advanced QSS  
 - Full audit logging and backup system  
@@ -126,6 +128,13 @@ The application provides:
 - Supports standard and custom metadata fields.  
 - Built-in support for text, date, checkbox, dropdown, image blob, and audio blob fields.  
 - Audio and image files are managed alongside the catalog database with tracked metadata, preview, export, and restore support.
+- Selected rows can be bulk edited from the catalog table. Mixed values stay untouched unless you explicitly replace them, and protected fields such as ISRC, ISWC, Track Title, Audio File, Track Length, and BUMA work number remain view-only during bulk edit.
+
+## GS1 Metadata Workflow
+- Open GS1 metadata from the Catalog menu, the table context menu, or directly from the bulk edit dialog.
+- Works with single tracks and multi-track selections, including grouped album-style GS1 export rows where applicable.
+- Uses the official GS1 workbook template from your GS1 environment and validates the workbook structure before export.
+- Requires the `openpyxl` dependency from `requirements.txt` in the same Python environment that launches the app.
 
 ## Database & Profile Handling
 - Independent ISRC sequences per profile.  
@@ -277,6 +286,12 @@ Switch between profiles at any time.
 - Add a track to automatically receive an ISRC  
 - Modify metadata fields as needed  
 - Attach audio or artwork directly to the record if desired  
+
+## Editing Existing Records
+- Double-click a standard row in the catalog table to open the full editor for a single track.
+- Select multiple rows and use `Edit Selected`, the Edit menu, or the table context menu to open the bulk edit dialog.
+- Right-clicking inside an existing multi-row selection keeps that selection intact so bulk actions stay available from the context menu.
+- Use the `GS1 Metadata…` button from the edit dialog or bulk edit dialog to continue directly into the GS1 workflow for the same selected tracks.
 
 ## Custom Fields
 Available field types:

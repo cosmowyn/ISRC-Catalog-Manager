@@ -26,7 +26,8 @@ from datetime import datetime
 from logging.handlers import RotatingFileHandler
 
 from PySide6.QtCore import(QRegularExpression, Signal, QEvent,
-    Qt, QDate, QPoint, QSettings, QStandardPaths, QByteArray, QUrl, QEvent, QTimer, QSortFilterProxyModel, )
+    Qt, QDate, QPoint, QSettings, QStandardPaths, QByteArray, QUrl, QEvent, QTimer, QSortFilterProxyModel,
+    QItemSelectionModel, )
 
 from PySide6.QtGui import (QDesktopServices, QCursor, QAction,
     QIcon, QAction, QKeySequence, QImage, QPixmap, QStandardItemModel, QStandardItem,
@@ -82,6 +83,7 @@ from isrc_manager.services.gs1_mapping import (
 from isrc_manager.help_content import HELP_CHAPTERS, HELP_CHAPTERS_BY_ID, help_topic_title, render_help_html
 from isrc_manager.paths import DATA_DIR
 from isrc_manager.gs1_dialog import GS1MetadataDialog
+from isrc_manager.services.bulk_edit import MIXED_VALUE, shared_bulk_value, should_apply_bulk_change
 from isrc_manager.services import (
     CatalogAdminService,
     CatalogReadService,
@@ -4157,6 +4159,10 @@ class App(QMainWindow):
             slot=self.save,
             standard_key=QKeySequence.Save,
         )
+        self.edit_selected_action = self._create_action(
+            "Edit Selected…",
+            slot=self.open_selected_editor,
+        )
         self.delete_entry_action = self._create_action(
             "Delete Selected Entry",
             slot=self.delete_entry,
@@ -4262,6 +4268,7 @@ class App(QMainWindow):
         edit_menu.addAction(self.redo_action)
         edit_menu.addSeparator()
         edit_menu.addAction(self.save_entry_action)
+        edit_menu.addAction(self.edit_selected_action)
         edit_menu.addAction(self.delete_entry_action)
         edit_menu.addAction(self.reset_form_action)
         edit_menu.addSeparator()
@@ -4675,6 +4682,10 @@ class App(QMainWindow):
         self.cancel_button = QPushButton("Reset Form")
         self.cancel_button.clicked.connect(self.clear_form_fields)
         self.cancel_button.setMinimumHeight(32)
+        self.edit_button = QPushButton("Edit Selected")
+        self.edit_button.clicked.connect(self.open_selected_editor)
+        self.edit_button.setMinimumHeight(32)
+        self.edit_button.setToolTip("Open the selected table row, or bulk edit when multiple rows are selected.")
         self.save_button = QPushButton("Save Track")
         self.save_button.clicked.connect(self.save)
         self.save_button.setMinimumHeight(32)
@@ -4685,6 +4696,7 @@ class App(QMainWindow):
         self.delete_button.setToolTip("Delete the currently selected track from the table.")
         btn_row.addWidget(self.cancel_button)
         btn_row.addStretch(1)
+        btn_row.addWidget(self.edit_button)
         btn_row.addWidget(self.delete_button)
         btn_row.addWidget(self.save_button)
         self.button_row_widget = QWidget()
@@ -4765,6 +4777,8 @@ class App(QMainWindow):
         self.table = QTableWidget()
         self._rebuild_table_headers()
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setStretchLastSection(True)
@@ -7750,24 +7764,65 @@ class App(QMainWindow):
             self.logger.exception(f"Save failed: {e}")
             QMessageBox.critical(self, "Save Error", f"Failed to save record:\n{e}")
 
-    def edit_entry(self, item):
-        row_idx = item.row()
-        row_id_item = self.table.item(row_idx, 0)
-        if row_id_item is None:
-            QMessageBox.warning(self, "Edit Entry", "Could not determine the selected track.")
+    def open_selected_editor(self, track_id: int | None = None):
+        if isinstance(track_id, bool):
+            track_id = None
+        if track_id is None:
+            selected_ids = self._selected_track_ids()
+            if not selected_ids:
+                QMessageBox.warning(
+                    self,
+                    "Edit Entry",
+                    "Could not determine the selected track. Select one or more catalog rows and try again.",
+                )
+                return
+            track_id = selected_ids[0]
+            batch_ids = selected_ids
+        else:
+            try:
+                track_id = int(track_id)
+            except (TypeError, ValueError):
+                track_id = 0
+            if track_id <= 0:
+                QMessageBox.warning(
+                    self,
+                    "Edit Entry",
+                    "Could not determine the selected track. Select one or more catalog rows and try again.",
+                )
+                return
+            batch_ids = self._selected_track_ids()
+            if track_id not in batch_ids:
+                batch_ids = [track_id]
+
+        try:
+            dlg = EditDialog(int(track_id), self, batch_track_ids=batch_ids)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Edit Entry", str(exc))
             return
-        dlg = EditDialog(int(row_id_item.text()), self)
         dlg.exec()
         self.populate_all_comboboxes()
 
+    def edit_entry(self, item):
+        row_idx = item.row()
+        track_id = self._track_id_for_table_row(row_idx)
+        if track_id is None:
+            QMessageBox.warning(self, "Edit Entry", "Could not determine the selected track.")
+            return
+        self.open_selected_editor(track_id)
+
     def _track_id_for_table_row(self, row_idx: int) -> int | None:
-        row_id_item = self.table.item(int(row_idx), 0)
-        if row_id_item is None:
-            return None
-        text = (row_id_item.text() or "").strip()
-        if not text.isdigit():
-            return None
-        track_id = int(text)
+        try:
+            track_id = self._get_row_pk(int(row_idx))
+        except Exception:
+            track_id = None
+        if track_id is None:
+            row_id_item = self.table.item(int(row_idx), 0)
+            if row_id_item is None:
+                return None
+            text = (row_id_item.text() or "").strip()
+            if not text.isdigit():
+                return None
+            track_id = int(text)
         if track_id <= 0:
             return None
         return track_id
@@ -7789,6 +7844,18 @@ class App(QMainWindow):
                 if row_idx not in candidate_rows:
                     candidate_rows.append(int(row_idx))
 
+        selected_items = self.table.selectedItems()
+        for item in selected_items:
+            row_idx = int(item.row())
+            if row_idx not in candidate_rows:
+                candidate_rows.append(row_idx)
+
+        if sel_model is not None:
+            for index in sel_model.selectedIndexes():
+                row_idx = int(index.row())
+                if row_idx not in candidate_rows:
+                    candidate_rows.append(row_idx)
+
         current_row = self.table.currentRow()
         if not candidate_rows and current_row >= 0:
             candidate_rows.insert(0, int(current_row))
@@ -7802,6 +7869,8 @@ class App(QMainWindow):
         return track_ids
 
     def open_gs1_dialog(self, track_id: int | None = None):
+        if isinstance(track_id, bool):
+            track_id = None
         if track_id is None:
             selected_ids = self._selected_track_ids()
             if not selected_ids:
@@ -8750,11 +8819,26 @@ class App(QMainWindow):
             return
         row = index.row()
         col = index.column()
-        self.table.setCurrentCell(row, col)
+        sel_model = self.table.selectionModel()
+        if sel_model is not None:
+            selected_rows = {selected.row() for selected in sel_model.selectedRows()}
+            if not selected_rows:
+                selected_rows = {selected.row() for selected in sel_model.selectedIndexes()}
+            if row in selected_rows:
+                sel_model.setCurrentIndex(index, QItemSelectionModel.NoUpdate)
+            else:
+                sel_model.select(index, QItemSelectionModel.ClearAndSelect | QItemSelectionModel.Rows)
+                sel_model.setCurrentIndex(index, QItemSelectionModel.NoUpdate)
+        else:
+            self.table.setCurrentCell(row, col)
 
         menu = QMenu(self)
-        act_edit = QAction("Edit Entry", self)
-        act_edit.triggered.connect(lambda: self.edit_entry(self.table.item(row, col)))
+        track_id = self._track_id_for_table_row(row)
+        selected_ids = self._selected_track_ids()
+        bulk_count = len(selected_ids) if track_id is not None and track_id in selected_ids else 1
+        edit_label = "Edit Entry" if bulk_count <= 1 else f"Bulk Edit {bulk_count} Selected Entries…"
+        act_edit = QAction(edit_label, self)
+        act_edit.triggered.connect(lambda: self.open_selected_editor(track_id))
         menu.addAction(act_edit)
 
         act_gs1 = QAction("GS1 Metadata…", self)
@@ -8767,11 +8851,6 @@ class App(QMainWindow):
             
         menu.addSeparator()
         # Licenses actions
-        try:
-            id_item = self.table.item(row, 0)
-            track_id = int(id_item.text()) if id_item else None
-        except Exception:
-            track_id = None
         if track_id:
             act_add_license = QAction("Add License to this Track…", self)
             act_add_license.triggered.connect(lambda: self.open_license_upload(preselect_track_id=track_id))
@@ -10089,26 +10168,36 @@ class App(QMainWindow):
 
 
 class EditDialog(QDialog):
-    """Edits a single Track row, including promoted standard fields."""
+    """Edits one or more Track rows, including promoted standard fields."""
 
-    def __init__(self, track_id: int, parent: App):
+    BULK_MIXED_TEXT = "{Multiple values}"
+    BULK_VIEW_ONLY_FIELDS = {"isrc", "iswc", "track_title", "audio_file", "track_length_sec", "buma_work_number"}
+    BULK_MIXED_TOOLTIP = (
+        "Selected records currently have different values. Replace this field to update every selected record."
+    )
+
+    def __init__(self, track_id: int, parent: App, batch_track_ids: list[int] | None = None):
         super().__init__(parent)
         self.parent = parent
         self.track_id = int(track_id)
-        self.snapshot = self.parent.track_service.fetch_track_snapshot(self.track_id)
-        if self.snapshot is None:
-            raise ValueError(f"Track {track_id} not found")
+        self.batch_track_ids = self._normalize_batch_track_ids(track_id, batch_track_ids)
+        self._is_bulk_edit = len(self.batch_track_ids) > 1
+        self._bulk_loading = True
+        self._bulk_field_state: dict[str, dict[str, object]] = {}
+        self._bulk_focus_targets: dict[object, str] = {}
 
-        self._existing_audio_display_path = str(
-            self.parent.track_service.resolve_media_path(self.snapshot.audio_file_path) or ""
-        )
-        self._existing_album_art_display_path = str(
-            self.parent.track_service.resolve_media_path(self.snapshot.album_art_path) or ""
-        )
+        self._bulk_snapshots = self._load_bulk_snapshots()
+        self.snapshot = next(snapshot for snapshot in self._bulk_snapshots if snapshot.track_id == self.track_id)
+        self._build_bulk_field_states()
+
+        self._existing_audio_display_path = self._resolve_snapshot_media_display(self.snapshot.audio_file_path)
+        self._existing_album_art_display_path = self._resolve_snapshot_media_display(self.snapshot.album_art_path)
         self._clear_audio_file = False
         self._clear_album_art = False
 
-        self.setWindowTitle("Edit Entry")
+        self.setWindowTitle(
+            f"Bulk Edit {len(self.batch_track_ids)} Entries" if self._is_bulk_edit else "Edit Entry"
+        )
         self.setModal(True)
 
         main_layout = QVBoxLayout(self)
@@ -10119,6 +10208,15 @@ class EditDialog(QDialog):
         help_row.addStretch(1)
         help_row.addWidget(_create_round_help_button(self, "edit-entry"))
         main_layout.addLayout(help_row)
+
+        if self._is_bulk_edit:
+            bulk_notice = QLabel(
+                f"Bulk editing {len(self.batch_track_ids)} selected tracks. "
+                f"Fields showing {self.BULK_MIXED_TEXT} stay unchanged unless you replace them. "
+                "ISRC, ISWC, Track Title, Audio File, Track Length, and BUMA Wnr. are view-only in this window."
+            )
+            bulk_notice.setWordWrap(True)
+            main_layout.addWidget(bulk_notice)
 
         self._form_container = QWidget(self)
         form_layout = QVBoxLayout()
@@ -10133,64 +10231,81 @@ class EditDialog(QDialog):
             row.addWidget(widget)
             form_layout.addLayout(row)
 
-        def combo(label, value, source_query, allow_empty=True):
+        def combo(label, field_name, value, source_query, allow_empty=True):
             cb = FocusWheelComboBox()
             cb.setEditable(True)
             items = [r[0] for r in self.parent.cursor.execute(source_query).fetchall()]
             if allow_empty:
                 cb.addItem("")
             cb.addItems(items)
-            cb.setCurrentText(value or "")
             comp = QCompleter(items)
             comp.setCaseSensitivity(Qt.CaseInsensitive)
             cb.setCompleter(comp)
+            self._configure_combo_field(cb, field_name, value)
             add_row(label, cb)
             return cb
 
-        self.isrc_field = QLineEdit(self.snapshot.isrc)
+        self.isrc_field = QLineEdit()
+        self._configure_text_field(self.isrc_field, "isrc", self.snapshot.isrc, lock_in_bulk=True)
         add_row("ISRC", self.isrc_field)
 
         row_isrc_btns = QHBoxLayout()
-        btn_isrc_copy_iso = QPushButton("Copy ISO")
-        btn_isrc_copy_compact = QPushButton("Copy compact")
-        row_isrc_btns.addWidget(btn_isrc_copy_iso)
-        row_isrc_btns.addWidget(btn_isrc_copy_compact)
+        self.btn_isrc_copy_iso = QPushButton("Copy ISO")
+        self.btn_isrc_copy_compact = QPushButton("Copy compact")
+        row_isrc_btns.addWidget(self.btn_isrc_copy_iso)
+        row_isrc_btns.addWidget(self.btn_isrc_copy_compact)
         form_layout.addLayout(row_isrc_btns)
-        btn_isrc_copy_iso.clicked.connect(self._copy_isrc_iso)
-        btn_isrc_copy_iso.setDefault(False)
-        btn_isrc_copy_compact.clicked.connect(self._copy_isrc_compact)
+        self.btn_isrc_copy_iso.clicked.connect(self._copy_isrc_iso)
+        self.btn_isrc_copy_iso.setDefault(False)
+        self.btn_isrc_copy_compact.clicked.connect(self._copy_isrc_compact)
 
-        self.entry_date_field = QLineEdit(self.snapshot.db_entry_date or "")
-        self.entry_date_field.setReadOnly(True)
+        self.entry_date_field = QLineEdit()
+        self._configure_text_field(
+            self.entry_date_field,
+            "db_entry_date",
+            self.snapshot.db_entry_date or "",
+            read_only=True,
+            track_changes=False,
+        )
         add_row("Entry Date", self.entry_date_field)
 
-        self.track_title = QLineEdit(self.snapshot.track_title)
+        self.track_title = QLineEdit()
+        self._configure_text_field(self.track_title, "track_title", self.snapshot.track_title)
         add_row("Track Title", self.track_title)
 
         self.artist_name = combo(
             "Artist",
+            "artist_name",
             self.snapshot.artist_name,
             "SELECT DISTINCT name FROM Artists ORDER BY name",
             allow_empty=False,
         )
         self.additional_artist = combo(
             "Additional Artist(s)",
+            "additional_artists",
             ", ".join(self.snapshot.additional_artists),
             "SELECT DISTINCT name FROM Artists ORDER BY name",
         )
         self.album_title = combo(
             "Album Title",
+            "album_title",
             self.snapshot.album_title or "",
             "SELECT DISTINCT title FROM Albums ORDER BY title",
         )
         self.genre = combo(
             "Genre",
+            "genre",
             self.snapshot.genre or "",
             "SELECT DISTINCT genre FROM Tracks WHERE genre IS NOT NULL AND genre != '' ORDER BY genre",
         )
 
-        self.audio_file = QLineEdit(self._existing_audio_display_path)
-        self.audio_file.setReadOnly(True)
+        self.audio_file = QLineEdit()
+        self._configure_text_field(
+            self.audio_file,
+            "audio_file",
+            self._existing_audio_display_path,
+            read_only=True,
+        )
         audio_row = QWidget(self)
         audio_layout = QHBoxLayout(audio_row)
         audio_layout.setContentsMargins(0, 0, 0, 0)
@@ -10204,12 +10319,20 @@ class EditDialog(QDialog):
         btn_audio_clear.clicked.connect(
             lambda: self._clear_track_media(self.audio_file, clear_attr="_clear_audio_file")
         )
+        if self._is_bulk_edit and self._is_bulk_locked_field("audio_file"):
+            btn_audio_browse.setEnabled(False)
+            btn_audio_clear.setEnabled(False)
         audio_layout.addWidget(btn_audio_browse)
         audio_layout.addWidget(btn_audio_clear)
         add_row("Audio File", audio_row)
 
-        self.album_art = QLineEdit(self._existing_album_art_display_path)
-        self.album_art.setReadOnly(True)
+        self.album_art = QLineEdit()
+        self._configure_text_field(
+            self.album_art,
+            "album_art",
+            self._existing_album_art_display_path,
+            read_only=True,
+        )
         art_row = QWidget(self)
         art_layout = QHBoxLayout(art_row)
         art_layout.setContentsMargins(0, 0, 0, 0)
@@ -10227,23 +10350,59 @@ class EditDialog(QDialog):
         art_layout.addWidget(btn_art_clear)
         add_row("Album Art", art_row)
 
-        self.catalog_number = QLineEdit(self.snapshot.catalog_number or "")
+        self.catalog_number = QLineEdit()
+        self._configure_text_field(self.catalog_number, "catalog_number", self.snapshot.catalog_number or "")
         add_row("Catalog#", self.catalog_number)
 
-        self.buma_work_number = QLineEdit(self.snapshot.buma_work_number or "")
+        self.buma_work_number = QLineEdit()
+        self._configure_text_field(
+            self.buma_work_number,
+            "buma_work_number",
+            self.snapshot.buma_work_number or "",
+        )
         add_row("BUMA Wnr.", self.buma_work_number)
 
         self.release_date = FocusWheelCalendarWidget()
-        self.release_date.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-        self.release_date.setMaximumHeight(320)
-        release_qdate = QDate.fromString(self.snapshot.release_date or "", "yyyy-MM-dd")
+        self.release_date.setVerticalHeaderFormat(QCalendarWidget.NoVerticalHeader)
+        self.release_date.setHorizontalHeaderFormat(QCalendarWidget.ShortDayNames)
+        self.release_date.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        release_iso = self.snapshot.release_date or ""
+        if self._is_bulk_edit and not self._bulk_field_is_mixed("release_date"):
+            release_iso = str(self._bulk_field_initial("release_date") or "")
+        release_qdate = QDate.fromString(release_iso, "yyyy-MM-dd")
         self.release_date.setSelectedDate(release_qdate if release_qdate.isValid() else QDate.currentDate())
-        add_row("Release Date", self.release_date)
+        calendar_width = max(420, self.release_date.sizeHint().width())
+        calendar_height = max(320, self.release_date.sizeHint().height())
+        self.release_date.setFixedSize(calendar_width, calendar_height)
+        if self._is_bulk_edit:
+            self.release_date.selectionChanged.connect(lambda: self._mark_bulk_field_modified("release_date"))
+            self.release_date.clicked.connect(lambda _date: self._mark_bulk_field_modified("release_date"))
+        release_widget = QWidget(self)
+        release_layout = QVBoxLayout(release_widget)
+        release_layout.setContentsMargins(0, 0, 0, 0)
+        release_layout.setSpacing(6)
+        release_layout.addWidget(self.release_date, 0, Qt.AlignLeft)
+        release_note = self._create_bulk_note(
+            "release_date",
+            "Selected tracks currently use different release dates. Pick a date to replace them all.",
+        )
+        if release_note is not None:
+            release_layout.addWidget(release_note)
+        add_row("Release Date", release_widget)
 
-        self.len_h = TwoDigitSpinBox(); self.len_h.setRange(0, 99); self.len_h.setFixedWidth(60)
-        self.len_m = TwoDigitSpinBox(); self.len_m.setRange(0, 59); self.len_m.setFixedWidth(50)
-        self.len_s = TwoDigitSpinBox(); self.len_s.setRange(0, 59); self.len_s.setFixedWidth(50)
-        current_length = seconds_to_hms(int(self.snapshot.track_length_sec or 0))
+        self.len_h = TwoDigitSpinBox()
+        self.len_h.setRange(0, 99)
+        self.len_h.setFixedWidth(60)
+        self.len_m = TwoDigitSpinBox()
+        self.len_m.setRange(0, 59)
+        self.len_m.setFixedWidth(50)
+        self.len_s = TwoDigitSpinBox()
+        self.len_s.setRange(0, 59)
+        self.len_s.setFixedWidth(50)
+        current_length_seconds = int(self.snapshot.track_length_sec or 0)
+        if self._is_bulk_edit and not self._bulk_field_is_mixed("track_length_sec"):
+            current_length_seconds = int(self._bulk_field_initial("track_length_sec") or 0)
+        current_length = seconds_to_hms(current_length_seconds)
         try:
             parts = current_length.split(":")
             self.len_h.setValue(int(parts[0]))
@@ -10251,27 +10410,59 @@ class EditDialog(QDialog):
             self.len_s.setValue(int(parts[2]))
         except Exception:
             pass
-        tl = QHBoxLayout()
-        tl.addWidget(self.len_h); tl.addWidget(QLabel(":"))
-        tl.addWidget(self.len_m); tl.addWidget(QLabel(":"))
+        if self._is_bulk_edit:
+            self.len_h.valueChanged.connect(lambda _value: self._mark_bulk_field_modified("track_length_sec"))
+            self.len_m.valueChanged.connect(lambda _value: self._mark_bulk_field_modified("track_length_sec"))
+            self.len_s.valueChanged.connect(lambda _value: self._mark_bulk_field_modified("track_length_sec"))
+        tl_group = QFrame(self)
+        tl_group.setFrameShape(QFrame.StyledPanel)
+        tl_group.setFrameShadow(QFrame.Raised)
+        tl_group.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        tl = QHBoxLayout(tl_group)
+        tl.setContentsMargins(10, 8, 10, 8)
+        tl.setSpacing(6)
+        tl.addWidget(self.len_h)
+        tl.addWidget(QLabel(":"))
+        tl.addWidget(self.len_m)
+        tl.addWidget(QLabel(":"))
         tl.addWidget(self.len_s)
-        tlw = QWidget(); tlw.setLayout(tl)
+        tlw = QWidget()
+        tlw_layout = QVBoxLayout(tlw)
+        tlw_layout.setContentsMargins(0, 0, 0, 0)
+        tlw_layout.setSpacing(6)
+        tlw_layout.addWidget(tl_group, 0, Qt.AlignLeft)
+        length_note = self._create_bulk_note(
+            "track_length_sec",
+            "Track Length is view-only during bulk edit. Selected tracks currently use different lengths.",
+        )
+        if length_note is not None:
+            tlw_layout.addWidget(length_note)
+        elif self._is_bulk_edit and self._is_bulk_locked_field("track_length_sec"):
+            locked_length_note = QLabel("Track Length is view-only during bulk edit.")
+            locked_length_note.setWordWrap(True)
+            tlw_layout.addWidget(locked_length_note)
+        if self._is_bulk_edit and self._is_bulk_locked_field("track_length_sec"):
+            self.len_h.setEnabled(False)
+            self.len_m.setEnabled(False)
+            self.len_s.setEnabled(False)
         add_row("Track Length (hh:mm:ss)", tlw)
 
-        self.iswc = QLineEdit(self.snapshot.iswc or "")
+        self.iswc = QLineEdit()
+        self._configure_text_field(self.iswc, "iswc", self.snapshot.iswc or "", lock_in_bulk=True)
         add_row("ISWC", self.iswc)
 
         row_iswc_btns = QHBoxLayout()
-        btn_iswc_copy_iso = QPushButton("Copy ISO")
-        btn_iswc_copy_compact = QPushButton("Copy compact")
-        row_iswc_btns.addWidget(btn_iswc_copy_iso)
-        row_iswc_btns.addWidget(btn_iswc_copy_compact)
+        self.btn_iswc_copy_iso = QPushButton("Copy ISO")
+        self.btn_iswc_copy_compact = QPushButton("Copy compact")
+        row_iswc_btns.addWidget(self.btn_iswc_copy_iso)
+        row_iswc_btns.addWidget(self.btn_iswc_copy_compact)
         form_layout.addLayout(row_iswc_btns)
-        btn_iswc_copy_iso.clicked.connect(self._copy_iswc_iso)
-        btn_iswc_copy_iso.setDefault(False)
-        btn_iswc_copy_compact.clicked.connect(self._copy_iswc_compact)
+        self.btn_iswc_copy_iso.clicked.connect(self._copy_iswc_iso)
+        self.btn_iswc_copy_iso.setDefault(False)
+        self.btn_iswc_copy_compact.clicked.connect(self._copy_iswc_compact)
 
-        self.upc = QLineEdit(self.snapshot.upc or "")
+        self.upc = QLineEdit()
+        self._configure_text_field(self.upc, "upc", self.snapshot.upc or "")
         add_row("UPC/EAN", self.upc)
 
         add_row("Genre", self.genre)
@@ -10284,10 +10475,12 @@ class EditDialog(QDialog):
         btns = QHBoxLayout()
         gs1_btn = QPushButton("GS1 Metadata…")
         gs1_btn.setAutoDefault(False)
-        gs1_btn.clicked.connect(lambda: self.parent.open_gs1_dialog(self.track_id))
+        gs1_btn.clicked.connect(self._open_gs1_metadata)
+        if self._is_bulk_edit:
+            gs1_btn.setToolTip("Open GS1 metadata for the same selected tracks shown in this bulk edit window.")
         btns.addWidget(gs1_btn)
         btns.addStretch(1)
-        save_btn = QPushButton("Save Changes")
+        save_btn = QPushButton("Apply Changes" if self._is_bulk_edit else "Save Changes")
         save_btn.setDefault(True)
         save_btn.clicked.connect(self.save_changes)
         cancel_btn = QPushButton("Cancel")
@@ -10296,7 +10489,187 @@ class EditDialog(QDialog):
         btns.addWidget(cancel_btn)
         main_layout.addLayout(btns)
 
-        self.resize(480, 760)
+        if self._is_bulk_edit:
+            self.btn_isrc_copy_iso.setEnabled(False)
+            self.btn_isrc_copy_compact.setEnabled(False)
+            self.btn_iswc_copy_iso.setEnabled(False)
+            self.btn_iswc_copy_compact.setEnabled(False)
+
+        self._bulk_loading = False
+        self.resize(520, 800 if self._is_bulk_edit else 760)
+
+    @staticmethod
+    def _normalize_batch_track_ids(track_id: int, batch_track_ids: list[int] | None) -> list[int]:
+        normalized: list[int] = []
+        seen: set[int] = set()
+        candidates = [track_id]
+        if batch_track_ids:
+            candidates.extend(batch_track_ids)
+        for candidate in candidates:
+            try:
+                value = int(candidate)
+            except (TypeError, ValueError):
+                continue
+            if value <= 0 or value in seen:
+                continue
+            seen.add(value)
+            normalized.append(value)
+        if not normalized:
+            normalized.append(int(track_id))
+        return normalized
+
+    def _load_bulk_snapshots(self) -> list[TrackSnapshot]:
+        snapshots: list[TrackSnapshot] = []
+        for candidate_id in self.batch_track_ids:
+            snapshot = self.parent.track_service.fetch_track_snapshot(candidate_id)
+            if snapshot is None:
+                raise ValueError(f"Track {candidate_id} not found")
+            snapshots.append(snapshot)
+        return snapshots
+
+    def _resolve_snapshot_media_display(self, stored_path: str | None) -> str:
+        return str(self.parent.track_service.resolve_media_path(stored_path) or "")
+
+    def _build_bulk_field_states(self) -> None:
+        if not self._is_bulk_edit:
+            return
+        snapshots = self._bulk_snapshots
+        self._set_bulk_field_state("isrc", [snapshot.isrc or "" for snapshot in snapshots])
+        self._set_bulk_field_state("db_entry_date", [snapshot.db_entry_date or "" for snapshot in snapshots])
+        self._set_bulk_field_state("track_title", [snapshot.track_title or "" for snapshot in snapshots])
+        self._set_bulk_field_state("artist_name", [snapshot.artist_name or "" for snapshot in snapshots])
+        self._set_bulk_field_state(
+            "additional_artists",
+            [tuple(snapshot.additional_artists or []) for snapshot in snapshots],
+        )
+        self._set_bulk_field_state("album_title", [snapshot.album_title or "" for snapshot in snapshots])
+        self._set_bulk_field_state("genre", [snapshot.genre or "" for snapshot in snapshots])
+        self._set_bulk_field_state(
+            "audio_file",
+            [self._resolve_snapshot_media_display(snapshot.audio_file_path) for snapshot in snapshots],
+        )
+        self._set_bulk_field_state(
+            "album_art",
+            [self._resolve_snapshot_media_display(snapshot.album_art_path) for snapshot in snapshots],
+        )
+        self._set_bulk_field_state("catalog_number", [snapshot.catalog_number or "" for snapshot in snapshots])
+        self._set_bulk_field_state("buma_work_number", [snapshot.buma_work_number or "" for snapshot in snapshots])
+        self._set_bulk_field_state("release_date", [snapshot.release_date or "" for snapshot in snapshots])
+        self._set_bulk_field_state("track_length_sec", [int(snapshot.track_length_sec or 0) for snapshot in snapshots])
+        self._set_bulk_field_state("iswc", [snapshot.iswc or "" for snapshot in snapshots])
+        self._set_bulk_field_state("upc", [snapshot.upc or "" for snapshot in snapshots])
+
+    def _set_bulk_field_state(self, field_name: str, values) -> None:
+        shared_value = shared_bulk_value(values)
+        self._bulk_field_state[field_name] = {
+            "mixed": shared_value is MIXED_VALUE,
+            "initial": None if shared_value is MIXED_VALUE else shared_value,
+            "modified": False,
+        }
+
+    @staticmethod
+    def _display_value(value) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, (list, tuple)):
+            return ", ".join(str(part) for part in value if str(part).strip())
+        return str(value)
+
+    def _is_bulk_locked_field(self, field_name: str) -> bool:
+        return self._is_bulk_edit and field_name in self.BULK_VIEW_ONLY_FIELDS
+
+    def _bulk_field_is_mixed(self, field_name: str) -> bool:
+        return bool(self._bulk_field_state.get(field_name, {}).get("mixed"))
+
+    def _bulk_field_initial(self, field_name: str):
+        return self._bulk_field_state.get(field_name, {}).get("initial")
+
+    def _bulk_field_modified(self, field_name: str) -> bool:
+        return bool(self._bulk_field_state.get(field_name, {}).get("modified"))
+
+    def _mark_bulk_field_modified(self, field_name: str) -> None:
+        if not self._is_bulk_edit or self._bulk_loading:
+            return
+        state = self._bulk_field_state.get(field_name)
+        if state is None:
+            return
+        state["modified"] = True
+
+    def _register_bulk_focus_target(self, widget, field_name: str) -> None:
+        if not self._is_bulk_edit:
+            return
+        self._bulk_focus_targets[widget] = field_name
+        widget.installEventFilter(self)
+
+    def _display_value_for_field(self, field_name: str, single_value) -> str:
+        if not self._is_bulk_edit or field_name not in self._bulk_field_state:
+            return self._display_value(single_value)
+        if self._bulk_field_is_mixed(field_name):
+            return self.BULK_MIXED_TEXT
+        return self._display_value(self._bulk_field_initial(field_name))
+
+    def _set_bulk_hint(self, widget, field_name: str) -> None:
+        if not self._is_bulk_edit:
+            return
+        tips = []
+        if self._is_bulk_locked_field(field_name):
+            tips.append("This field is view-only during bulk edit.")
+        if self._bulk_field_is_mixed(field_name):
+            tips.append(self.BULK_MIXED_TOOLTIP)
+        if tips:
+            widget.setToolTip(" ".join(tips))
+
+    def _configure_text_field(
+        self,
+        widget: QLineEdit,
+        field_name: str,
+        single_value,
+        *,
+        read_only: bool = False,
+        lock_in_bulk: bool = False,
+        track_changes: bool = True,
+    ) -> None:
+        widget.setText(self._display_value_for_field(field_name, single_value))
+        widget.setReadOnly(read_only or lock_in_bulk or self._is_bulk_locked_field(field_name))
+        self._set_bulk_hint(widget, field_name)
+        if self._is_bulk_edit and track_changes and not lock_in_bulk:
+            widget.textChanged.connect(lambda _text, name=field_name: self._mark_bulk_field_modified(name))
+            if not widget.isReadOnly():
+                self._register_bulk_focus_target(widget, field_name)
+
+    def _configure_combo_field(self, combo: QComboBox, field_name: str, single_value) -> None:
+        combo.setCurrentText(self._display_value_for_field(field_name, single_value))
+        self._set_bulk_hint(combo, field_name)
+        if self._is_bulk_edit:
+            combo.currentTextChanged.connect(lambda _text, name=field_name: self._mark_bulk_field_modified(name))
+            line_edit = combo.lineEdit()
+            if line_edit is not None:
+                self._set_bulk_hint(line_edit, field_name)
+                self._register_bulk_focus_target(line_edit, field_name)
+
+    def _create_bulk_note(self, field_name: str, text: str) -> QLabel | None:
+        if not self._is_bulk_edit or not self._bulk_field_is_mixed(field_name):
+            return None
+        label = QLabel(text)
+        label.setWordWrap(True)
+        return label
+
+    def eventFilter(self, source, event):
+        if (
+            self._is_bulk_edit
+            and event.type() == QEvent.FocusIn
+            and source in self._bulk_focus_targets
+        ):
+            field_name = self._bulk_focus_targets[source]
+            if (
+                self._bulk_field_is_mixed(field_name)
+                and not self._bulk_field_modified(field_name)
+                and hasattr(source, "text")
+                and source.text() == self.BULK_MIXED_TEXT
+                and hasattr(source, "selectAll")
+            ):
+                QTimer.singleShot(0, source.selectAll)
+        return super().eventFilter(source, event)
 
     def _choose_track_media(self, media_key: str, line_edit: QLineEdit, *, clear_attr: str) -> None:
         path = self.parent._browse_track_media_file(media_key, parent_widget=self)
@@ -10329,15 +10702,63 @@ class EditDialog(QDialog):
         compact = normalize_iswc(txt)
         QApplication.clipboard().setText(compact)
 
+    def _open_gs1_metadata(self):
+        try:
+            dlg = GS1MetadataDialog(
+                app=self.parent,
+                track_id=self.track_id,
+                batch_track_ids=list(self.batch_track_ids),
+                parent=self,
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "GS1 Metadata", str(exc))
+            return
+        dlg.exec()
+
+    def _bulk_field_should_apply(self, field_name: str, final_value) -> bool:
+        if self._is_bulk_locked_field(field_name):
+            return False
+        return should_apply_bulk_change(
+            mixed=self._bulk_field_is_mixed(field_name),
+            modified=self._bulk_field_modified(field_name),
+            initial_value=self._bulk_field_initial(field_name),
+            final_value=final_value,
+        )
+
+    def _bulk_media_should_apply(self, field_name: str, final_path: str, *, clear_attr: str) -> bool:
+        if self._is_bulk_locked_field(field_name):
+            return False
+        clear_requested = bool(getattr(self, clear_attr) and not final_path)
+        if not self._is_bulk_edit:
+            return bool(clear_requested or final_path)
+        if not self._bulk_field_modified(field_name) and not clear_requested:
+            return False
+        if self._bulk_field_is_mixed(field_name):
+            return True
+        initial_path = self._display_value(self._bulk_field_initial(field_name))
+        if clear_requested:
+            return True
+        return (final_path or "") != initial_path
 
     def save_changes(self):
+        if self._is_bulk_edit:
+            self._save_bulk_changes()
+            return
+        self._save_single_changes()
+
+    def _save_single_changes(self):
         new_isrc_raw = (self.isrc_field.text() or "").strip()
         new_iswc_raw = (self.iswc.currentText() if hasattr(self.iswc, "currentText") else self.iswc.text()).strip()
-        new_upc_raw  = (self.upc.currentText() if hasattr(self.upc, "currentText") else self.upc.text()).strip()
-        new_genre    = (self.genre.currentText() if hasattr(self.genre, "currentText") else self.genre.text()).strip()
+        new_upc_raw = (self.upc.currentText() if hasattr(self.upc, "currentText") else self.upc.text()).strip()
+        new_genre = (self.genre.currentText() if hasattr(self.genre, "currentText") else self.genre.text()).strip()
         new_track_title = (self.track_title.text() or "").strip()
-        new_additional_artist = self.parent._parse_additional_artists((self.additional_artist.currentText() if hasattr(self.additional_artist, "currentText") else self.additional_artist.text()).strip())
-
+        new_additional_artist = self.parent._parse_additional_artists(
+            (
+                self.additional_artist.currentText()
+                if hasattr(self.additional_artist, "currentText")
+                else self.additional_artist.text()
+            ).strip()
+        )
 
         iso_isrc = to_iso_isrc(new_isrc_raw)
         comp = to_compact_isrc(iso_isrc)
@@ -10350,8 +10771,9 @@ class EditDialog(QDialog):
             iso_iswc = to_iso_iswc(new_iswc_raw)
             if not iso_iswc or not is_valid_iswc_any(iso_iswc):
                 QMessageBox.warning(
-                    self, "Invalid ISWC",
-                    "ISWC must be like T-123.456.789-0 or T1234567890 (checksum 0–9 or X), or leave empty."
+                    self,
+                    "Invalid ISWC",
+                    "ISWC must be like T-123.456.789-0 or T1234567890 (checksum 0–9 or X), or leave empty.",
                 )
                 return
 
@@ -10364,7 +10786,7 @@ class EditDialog(QDialog):
             return
 
         try:
-            parent = self.parentWidget() 
+            parent = self.parentWidget()
             if parent is None:
                 QMessageBox.critical(self, "Update Error", "No parent window set.")
                 return
@@ -10411,7 +10833,6 @@ class EditDialog(QDialog):
                     clear_album_art=bool(self._clear_album_art and not album_art_source_path),
                 )
             )
-            # --- patched: ensure WAL contents are flushed to the main db file ---
             parent.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
             try:
@@ -10443,6 +10864,154 @@ class EditDialog(QDialog):
                 parent.conn.rollback()
                 parent.logger.exception(f"Update failed: {e}")
             QMessageBox.critical(self, "Update Error", f"Failed to update record:\n{e}")
+
+    def _save_bulk_changes(self):
+        parent = self.parentWidget()
+        if parent is None:
+            QMessageBox.critical(self, "Update Error", "No parent window set.")
+            return
+
+        new_track_title = (self.track_title.text() or "").strip()
+        new_artist_name = self.artist_name.currentText().strip()
+        new_additional_artist = self.parent._parse_additional_artists(self.additional_artist.currentText().strip())
+        new_album_title = self.album_title.currentText().strip()
+        new_genre = self.genre.currentText().strip()
+        new_upc_raw = (self.upc.currentText() if hasattr(self.upc, "currentText") else self.upc.text()).strip()
+        new_catalog_number = (self.catalog_number.text() or "").strip()
+        new_buma_work_number = (self.buma_work_number.text() or "").strip()
+        new_release_date = self.release_date.selectedDate().toString("yyyy-MM-dd")
+        new_track_length_sec = hms_to_seconds(self.len_h.value(), self.len_m.value(), self.len_s.value())
+        new_audio_path = (self.audio_file.text() or "").strip()
+        new_album_art_path = (self.album_art.text() or "").strip()
+
+        apply_track_title = self._bulk_field_should_apply("track_title", new_track_title)
+        apply_artist_name = self._bulk_field_should_apply("artist_name", new_artist_name)
+        apply_additional_artist = self._bulk_field_should_apply("additional_artists", tuple(new_additional_artist))
+        apply_album_title = self._bulk_field_should_apply("album_title", new_album_title)
+        apply_genre = self._bulk_field_should_apply("genre", new_genre)
+        apply_release_date = self._bulk_field_should_apply("release_date", new_release_date)
+        apply_track_length = self._bulk_field_should_apply("track_length_sec", new_track_length_sec)
+        apply_upc = self._bulk_field_should_apply("upc", new_upc_raw)
+        apply_catalog_number = self._bulk_field_should_apply("catalog_number", new_catalog_number)
+        apply_buma_work_number = self._bulk_field_should_apply("buma_work_number", new_buma_work_number)
+        apply_audio = self._bulk_media_should_apply("audio_file", new_audio_path, clear_attr="_clear_audio_file")
+        apply_album_art = self._bulk_media_should_apply("album_art", new_album_art_path, clear_attr="_clear_album_art")
+
+        if apply_track_title and is_blank(new_track_title):
+            QMessageBox.warning(self, "Missing data", "Track Title cannot be blank when bulk editing.")
+            return
+        if apply_artist_name and is_blank(new_artist_name):
+            QMessageBox.warning(self, "Missing data", "Artist cannot be blank when bulk editing.")
+            return
+        if apply_upc and new_upc_raw and not valid_upc_ean(new_upc_raw):
+            QMessageBox.warning(self, "Invalid UPC/EAN", "UPC/EAN must be 12 or 13 digits (or leave empty).")
+            return
+
+        changed_fields = []
+        if apply_track_title:
+            changed_fields.append("Track Title")
+        if apply_artist_name:
+            changed_fields.append("Artist")
+        if apply_additional_artist:
+            changed_fields.append("Additional Artist(s)")
+        if apply_album_title:
+            changed_fields.append("Album Title")
+        if apply_genre:
+            changed_fields.append("Genre")
+        if apply_release_date:
+            changed_fields.append("Release Date")
+        if apply_track_length:
+            changed_fields.append("Track Length")
+        if apply_upc:
+            changed_fields.append("UPC/EAN")
+        if apply_catalog_number:
+            changed_fields.append("Catalog#")
+        if apply_buma_work_number:
+            changed_fields.append("BUMA Wnr.")
+        if apply_audio:
+            changed_fields.append("Audio File")
+        if apply_album_art:
+            changed_fields.append("Album Art")
+
+        if not changed_fields:
+            QMessageBox.information(self, "Bulk Edit", "No editable fields were changed.")
+            return
+
+        def mutation():
+            for snapshot in self._bulk_snapshots:
+                parent.track_service.update_track(
+                    TrackUpdatePayload(
+                        track_id=snapshot.track_id,
+                        isrc=snapshot.isrc,
+                        track_title=new_track_title if apply_track_title else snapshot.track_title,
+                        artist_name=new_artist_name if apply_artist_name else snapshot.artist_name,
+                        additional_artists=(
+                            new_additional_artist if apply_additional_artist else list(snapshot.additional_artists)
+                        ),
+                        album_title=(
+                            new_album_title or None
+                        ) if apply_album_title else snapshot.album_title,
+                        release_date=new_release_date if apply_release_date else snapshot.release_date,
+                        track_length_sec=(
+                            new_track_length_sec if apply_track_length else int(snapshot.track_length_sec or 0)
+                        ),
+                        iswc=snapshot.iswc,
+                        upc=(new_upc_raw or None) if apply_upc else snapshot.upc,
+                        genre=(new_genre or None) if apply_genre else snapshot.genre,
+                        catalog_number=(
+                            new_catalog_number or None
+                        ) if apply_catalog_number else snapshot.catalog_number,
+                        buma_work_number=(
+                            new_buma_work_number or None
+                        ) if apply_buma_work_number else snapshot.buma_work_number,
+                        audio_file_source_path=(
+                            (new_audio_path or None) if apply_audio and not self._clear_audio_file else None
+                        ),
+                        album_art_source_path=(
+                            (new_album_art_path or None) if apply_album_art and not self._clear_album_art else None
+                        ),
+                        clear_audio_file=bool(apply_audio and self._clear_audio_file and not new_audio_path),
+                        clear_album_art=bool(apply_album_art and self._clear_album_art and not new_album_art_path),
+                    )
+                )
+
+            parent.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            try:
+                parent._log_event(
+                    "track.bulk_update",
+                    "Bulk updated tracks",
+                    track_ids=self.batch_track_ids,
+                    changed_fields=changed_fields,
+                )
+                parent._audit(
+                    "UPDATE",
+                    "Track",
+                    ref_id="batch",
+                    details=(
+                        f"track_ids={','.join(str(track_id) for track_id in self.batch_track_ids)}; "
+                        f"fields={','.join(changed_fields)}"
+                    ),
+                )
+                parent._audit_commit()
+            except Exception as audit_err:
+                parent.logger.warning(f"Audit failed: {audit_err}")
+
+        try:
+            parent._run_snapshot_history_action(
+                action_label=f"Bulk Edit Tracks ({len(self.batch_track_ids)})",
+                action_type="track.bulk_update",
+                entity_type="Track",
+                entity_id="batch",
+                payload={"track_ids": self.batch_track_ids, "fields": changed_fields},
+                mutation=mutation,
+            )
+            parent.refresh_table_preserve_view(focus_id=self.batch_track_ids[0])
+            self.accept()
+        except Exception as e:
+            if hasattr(parent, "conn"):
+                parent.conn.rollback()
+                parent.logger.exception(f"Bulk update failed: {e}")
+            QMessageBox.critical(self, "Update Error", f"Failed to update selected records:\n{e}")
 
 
 class _AudioPreviewDialog(QDialog):

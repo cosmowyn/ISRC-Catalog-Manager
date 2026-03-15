@@ -18,14 +18,14 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         chapter_id="overview",
         title="Overview",
         summary="What the app does, how the workspace is organized, and the main workflows you will use every day.",
-        keywords=("overview", "introduction", "menus", "workflow", "catalog", "tracks", "licenses"),
+        keywords=("overview", "introduction", "menus", "workflow", "catalog", "tracks", "licenses", "gs1", "bulk edit"),
         content_html="""
-        <p><strong>ISRC Catalog Manager</strong> is a local-first desktop application for managing track metadata, generated ISRC values, licensing files, custom metadata columns, backups, snapshots, and exports from one workspace.</p>
+        <p><strong>ISRC Catalog Manager</strong> is a local-first desktop application for managing track metadata, generated ISRC values, licensing files, GS1 workbook metadata, custom metadata columns, backups, snapshots, and exports from one workspace.</p>
         <p>The app is organized around a few core ideas:</p>
         <ul>
           <li><strong>Profiles</strong>: each profile is a separate catalog database.</li>
           <li><strong>Add Data</strong>: the dockable form used to create new tracks.</li>
-          <li><strong>Catalog Table</strong>: the searchable table used to browse, preview, and edit existing tracks.</li>
+          <li><strong>Catalog Table</strong>: the searchable table used to browse, preview, single-edit, and bulk-edit existing tracks.</li>
           <li><strong>Settings</strong>: application identity, registration settings, snapshots, and themes.</li>
           <li><strong>History</strong>: undo, redo, manual snapshots, and restore points.</li>
         </ul>
@@ -83,14 +83,15 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         chapter_id="catalog-table",
         title="Catalog Table",
         summary="Search, preview, sort, hide columns, and work with existing tracks from the main table view.",
-        keywords=("catalog table", "search", "columns", "preview", "double click", "table", "records"),
+        keywords=("catalog table", "search", "columns", "preview", "double click", "table", "records", "bulk edit", "context menu", "multi selection"),
         content_html="""
         <p>The Catalog Table shows all saved track rows. It supports sorting, filtering, column visibility, header layout persistence, and media preview shortcuts.</p>
         <ul>
           <li><strong>Search controls</strong>: choose a target column or search all columns, then enter search text to filter the list.</li>
           <li><strong>Column visibility</strong>: use <strong>View &gt; Columns</strong> to show or hide visible columns without deleting them.</li>
           <li><strong>Double click</strong>: edit a standard row, or open file pickers directly for standard media columns such as Audio File and Album Art.</li>
-          <li><strong>Context menu and shortcuts</strong>: preview media, copy values, export selections, and edit/delete the selected track.</li>
+          <li><strong>Multi-row selection</strong>: select multiple rows and open <strong>Edit Selected</strong> or the context menu to launch bulk edit for the current batch.</li>
+          <li><strong>Context menu and shortcuts</strong>: preview media, copy values, open GS1 metadata, and edit/delete the current selection. Right-clicking inside an existing multi-row selection keeps that batch selected.</li>
         </ul>
         <p>Table layout, column widths, row-height mode, and column ordering can be saved and restored. Those preferences can also be reset or customized from the View menu.</p>
         """,
@@ -114,15 +115,34 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         chapter_id="edit-entry",
         title="Edit Entry",
         summary="How the full track editor works for existing rows, including standard metadata, media replacement, and validation.",
-        keywords=("edit entry", "track editor", "edit track", "iswc", "upc", "catalog number", "buma"),
+        keywords=("edit entry", "track editor", "edit track", "iswc", "upc", "catalog number", "buma", "bulk edit", "gs1 metadata"),
         content_html="""
-        <p>The Edit Entry dialog opens the full editor for an existing track. It includes the standard core fields, promoted media fields, release-date calendar, track length, and code fields.</p>
+        <p>The Edit Entry dialog opens the full editor for an existing track. When multiple table rows are selected, the same dialog switches into <strong>bulk edit</strong> mode and shows mixed-value placeholders where the selected records do not match.</p>
         <ul>
           <li><strong>Copy buttons</strong>: copy ISO or compact forms of ISRC and ISWC values.</li>
           <li><strong>Media replacement</strong>: browse for new audio or album art files, or clear the currently stored media.</li>
+          <li><strong>Bulk edit safeguards</strong>: only fields you actually change are written back to every selected row.</li>
+          <li><strong>Bulk edit locked fields</strong>: ISRC, ISWC, Track Title, Audio File, Track Length, and BUMA work number remain view-only during multi-row editing.</li>
+          <li><strong>GS1 handoff</strong>: the <strong>GS1 Metadata…</strong> button opens the GS1 dialog for the same current track or selected batch.</li>
           <li><strong>Validation</strong>: duplicate ISRCs, invalid ISWC values, and invalid UPC/EAN values are blocked before save.</li>
         </ul>
         <p>Saving changes updates the current row, records the change in history, and keeps related catalog references such as artists and albums synchronized.</p>
+        """,
+    ),
+    HelpChapter(
+        chapter_id="gs1-metadata",
+        title="GS1 Metadata",
+        summary="How GS1 metadata editing works for single tracks, grouped releases, and official workbook export.",
+        keywords=("gs1", "gs1 metadata", "workbook", "template", "export", "album groups", "official workbook"),
+        content_html="""
+        <p>The GS1 Metadata dialog can be opened for one track or for a selected batch of tracks. The dialog groups the current selection into one or more final GS1 product rows, depending on the release context.</p>
+        <ul>
+          <li><strong>Single track or batch</strong>: launch it from the Catalog menu, the table context menu, or the edit and bulk edit dialogs.</li>
+          <li><strong>Grouped editing</strong>: album-style selections can appear as grouped GS1 product tabs, while singles remain separate export rows.</li>
+          <li><strong>Official workbook</strong>: choose the official GS1 workbook from your GS1 environment. The app validates headers and sheet structure before export.</li>
+          <li><strong>Python dependency</strong>: GS1 workbook validation and export require the <code>openpyxl</code> package in the same Python environment that starts the app.</li>
+        </ul>
+        <p>Use <strong>Save</strong> to store GS1 metadata in the catalog, <strong>Export Current…</strong> to export the active product row, or <strong>Export Batch…</strong> to write the full selected batch to one workbook.</p>
         """,
     ),
     HelpChapter(
