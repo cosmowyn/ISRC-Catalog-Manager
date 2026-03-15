@@ -142,8 +142,8 @@ The application provides:
 ## Audio Metadata Tags
 - Reads embedded metadata from MP3/ID3, FLAC, OGG Vorbis/Opus, M4A/MP4, WAV, and AIFF where the format supports tags in practice.
 - Maps catalog fields to tags including title, artist, album, album artist, track/disc number, genre, composer, publisher/label, release date, ISRC, UPC/EAN, comments, lyrics, and artwork.
-- `Catalog > Import Tags From Audio…` previews tag-to-catalog conflicts before applying changes.
-- `File > Export > Write Tags to Exported Audio…` writes catalog metadata to exported audio copies without modifying the managed source files in place.
+- `Catalog > Import Tags from Audio…` previews tag-to-catalog conflicts before applying changes.
+- `Catalog > Write Tags to Exported Audio…` writes catalog metadata to exported audio copies without modifying the managed source files in place.
 - The default conflict policy is configurable per application profile and can be changed at import time.
 
 ## Releases and Products
@@ -360,7 +360,7 @@ Logs are stored in:
 ## Audio Tag Workflows
 - Use `Catalog > Import Tags From Audio…` to read embedded tags from the managed audio attached to the current selection.
 - Right-click a track row to import tags, open the linked release, or export tagged audio copies from the context menu.
-- Exporting an audio file from the standard media context menu now offers a tagged export path by default, while still allowing a raw file export when needed.
+- Tagged audio export is available directly from `Catalog > Write Tags to Exported Audio…` and from the main table context menu for tracks that already have managed audio attached.
 
 ## Quality Dashboard
 - Use `Catalog > Data Quality Dashboard…` to scan the current profile and jump directly to affected tracks or releases.

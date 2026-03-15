@@ -83,6 +83,14 @@ from isrc_manager.services.gs1_mapping import (
 from isrc_manager.help_content import HELP_CHAPTERS, HELP_CHAPTERS_BY_ID, help_topic_title, render_help_html
 from isrc_manager.paths import DATA_DIR
 from isrc_manager.gs1_dialog import GS1MetadataDialog
+from isrc_manager.exchange.dialogs import ExchangeImportDialog
+from isrc_manager.exchange.models import ExchangeImportReport
+from isrc_manager.exchange.service import ExchangeService
+from isrc_manager.quality.dialogs import QualityDashboardDialog
+from isrc_manager.quality.models import QualityIssue
+from isrc_manager.quality.service import QualityDashboardService
+from isrc_manager.releases import ReleasePayload, ReleaseRecord, ReleaseService, ReleaseTrackPlacement
+from isrc_manager.releases.dialogs import ReleaseBrowserDialog, ReleaseEditorDialog
 from isrc_manager.services.bulk_edit import MIXED_VALUE, shared_bulk_value, should_apply_bulk_change
 from isrc_manager.services import (
     CatalogAdminService,
@@ -112,6 +120,9 @@ from isrc_manager.services import (
     TrackUpdatePayload,
 )
 from isrc_manager.settings import enforce_single_instance, init_settings
+from isrc_manager.tags import AudioTagService, TaggedAudioExportService, catalog_metadata_to_tags, merge_imported_tags
+from isrc_manager.tags.dialogs import TagPreviewDialog
+from isrc_manager.tags.models import ArtworkPayload
 
 
 class _JsonLogFormatter(logging.Formatter):
@@ -4679,6 +4690,13 @@ class App(QMainWindow):
         self.custom_field_values = None
         self.xml_export_service = None
         self.xml_import_service = None
+        self.release_service = None
+        self.audio_tag_service = None
+        self.tagged_audio_export_service = None
+        self.exchange_service = None
+        self.quality_service = None
+        self.release_browser_dialog = None
+        self._explicit_row_filter_track_ids = None
         self.open_database(last_db)
 
         # ----- Menus -----
@@ -4777,6 +4795,24 @@ class App(QMainWindow):
         )
         file_menu.addAction(self.import_xml_action)
 
+        import_exchange_menu = file_menu.addMenu("Import Exchange")
+        self.import_csv_action = self._create_action(
+            "Import CSV…",
+            slot=lambda: self.import_exchange_file("csv"),
+            shortcuts=("Ctrl+Alt+I", "Meta+Alt+I"),
+        )
+        import_exchange_menu.addAction(self.import_csv_action)
+        self.import_xlsx_action = self._create_action(
+            "Import XLSX…",
+            slot=lambda: self.import_exchange_file("xlsx"),
+        )
+        import_exchange_menu.addAction(self.import_xlsx_action)
+        self.import_json_action = self._create_action(
+            "Import JSON…",
+            slot=lambda: self.import_exchange_file("json"),
+        )
+        import_exchange_menu.addAction(self.import_json_action)
+
         export_submenu = file_menu.addMenu("Export")
         self.export_selected_action = self._create_action(
             "Export Selected to XML…",
@@ -4791,6 +4827,49 @@ class App(QMainWindow):
             shortcuts=("Ctrl+Shift+E", "Meta+Shift+E"),
         )
         export_submenu.addAction(self.export_all_action)
+
+        exchange_export_menu = export_submenu.addMenu("Exchange Formats")
+        self.export_selected_csv_action = self._create_action(
+            "Export Selected to CSV…",
+            slot=lambda: self.export_exchange_file("csv", selected_only=True),
+        )
+        exchange_export_menu.addAction(self.export_selected_csv_action)
+        self.export_selected_xlsx_action = self._create_action(
+            "Export Selected to XLSX…",
+            slot=lambda: self.export_exchange_file("xlsx", selected_only=True),
+        )
+        exchange_export_menu.addAction(self.export_selected_xlsx_action)
+        self.export_selected_json_action = self._create_action(
+            "Export Selected to JSON…",
+            slot=lambda: self.export_exchange_file("json", selected_only=True),
+        )
+        exchange_export_menu.addAction(self.export_selected_json_action)
+        self.export_selected_package_action = self._create_action(
+            "Export Selected to ZIP Package…",
+            slot=lambda: self.export_exchange_file("package", selected_only=True),
+        )
+        exchange_export_menu.addAction(self.export_selected_package_action)
+        exchange_export_menu.addSeparator()
+        self.export_all_csv_action = self._create_action(
+            "Export Entire Library to CSV…",
+            slot=lambda: self.export_exchange_file("csv", selected_only=False),
+        )
+        exchange_export_menu.addAction(self.export_all_csv_action)
+        self.export_all_xlsx_action = self._create_action(
+            "Export Entire Library to XLSX…",
+            slot=lambda: self.export_exchange_file("xlsx", selected_only=False),
+        )
+        exchange_export_menu.addAction(self.export_all_xlsx_action)
+        self.export_all_json_action = self._create_action(
+            "Export Entire Library to JSON…",
+            slot=lambda: self.export_exchange_file("json", selected_only=False),
+        )
+        exchange_export_menu.addAction(self.export_all_json_action)
+        self.export_all_package_action = self._create_action(
+            "Export Entire Library to ZIP Package…",
+            slot=lambda: self.export_exchange_file("package", selected_only=False),
+        )
+        exchange_export_menu.addAction(self.export_all_package_action)
 
         file_menu.addSeparator()
 
@@ -4854,6 +4933,41 @@ class App(QMainWindow):
             shortcuts=("Ctrl+Alt+G", "Meta+Alt+G"),
         )
         catalog_menu.addAction(self.catalog_managers_action)
+        self.release_browser_action = self._create_action(
+            "Release Browser…",
+            slot=self.open_release_browser,
+            shortcuts=("Ctrl+Alt+Shift+R", "Meta+Alt+Shift+R"),
+        )
+        catalog_menu.addAction(self.release_browser_action)
+        self.create_release_action = self._create_action(
+            "Create Release from Selection…",
+            slot=self.create_release_from_selection,
+        )
+        catalog_menu.addAction(self.create_release_action)
+        self.add_selected_to_release_action = self._create_action(
+            "Add Selected Tracks to Release…",
+            slot=self.add_selected_tracks_to_release,
+        )
+        catalog_menu.addAction(self.add_selected_to_release_action)
+        catalog_menu.addSeparator()
+        self.import_tags_action = self._create_action(
+            "Import Tags from Audio…",
+            slot=self.import_tags_from_audio,
+            shortcuts=("Ctrl+Alt+T", "Meta+Alt+T"),
+        )
+        catalog_menu.addAction(self.import_tags_action)
+        self.write_tags_to_exported_audio_action = self._create_action(
+            "Write Tags to Exported Audio…",
+            slot=self.write_tags_to_exported_audio,
+        )
+        catalog_menu.addAction(self.write_tags_to_exported_audio_action)
+        self.quality_dashboard_action = self._create_action(
+            "Data Quality Dashboard…",
+            slot=self.open_quality_dashboard,
+            shortcuts=("Ctrl+Shift+Q", "Meta+Shift+Q"),
+        )
+        catalog_menu.addAction(self.quality_dashboard_action)
+        catalog_menu.addSeparator()
         self.gs1_metadata_action = self._create_action(
             "GS1 Metadata…",
             slot=self.open_gs1_dialog,
@@ -6158,6 +6272,43 @@ class App(QMainWindow):
         self.xml_import_service = (
             XMLImportService(self.conn, self.track_service, self.custom_field_definitions)
             if self.conn is not None
+            else None
+        )
+        self.release_service = (
+            ReleaseService(self.conn, DATA_DIR())
+            if self.conn is not None
+            else None
+        )
+        self.audio_tag_service = AudioTagService() if self.conn is not None else None
+        self.tagged_audio_export_service = (
+            TaggedAudioExportService(self.audio_tag_service)
+            if self.audio_tag_service is not None
+            else None
+        )
+        self.exchange_service = (
+            ExchangeService(
+                self.conn,
+                self.track_service,
+                self.release_service,
+                self.custom_field_definitions,
+                DATA_DIR(),
+            )
+            if (
+                self.conn is not None
+                and self.track_service is not None
+                and self.release_service is not None
+                and self.custom_field_definitions is not None
+            )
+            else None
+        )
+        self.quality_service = (
+            QualityDashboardService(
+                self.conn,
+                track_service=self.track_service,
+                release_service=self.release_service,
+                data_root=DATA_DIR(),
+            )
+            if self.conn is not None and self.track_service is not None and self.release_service is not None
             else None
         )
         self.gs1_integration_service = (
@@ -7585,6 +7736,27 @@ class App(QMainWindow):
                 "default": True,
             },
             {
+                "id": "import_csv",
+                "label": "Import CSV",
+                "category": "File",
+                "description": "Import tracks, releases, and custom-field data from CSV.",
+                "action": self.import_csv_action,
+            },
+            {
+                "id": "import_xlsx",
+                "label": "Import XLSX",
+                "category": "File",
+                "description": "Import tracks, releases, and custom-field data from XLSX.",
+                "action": self.import_xlsx_action,
+            },
+            {
+                "id": "import_json",
+                "label": "Import JSON",
+                "category": "File",
+                "description": "Import versioned exchange data from JSON.",
+                "action": self.import_json_action,
+            },
+            {
                 "id": "export_selected",
                 "label": "Export Selected to XML",
                 "category": "File",
@@ -7598,6 +7770,27 @@ class App(QMainWindow):
                 "category": "File",
                 "description": "Export the full active profile library to XML.",
                 "action": self.export_all_action,
+            },
+            {
+                "id": "export_selected_csv",
+                "label": "Export Selected to CSV",
+                "category": "File",
+                "description": "Export the current selected batch to CSV.",
+                "action": self.export_selected_csv_action,
+            },
+            {
+                "id": "export_selected_json",
+                "label": "Export Selected to JSON",
+                "category": "File",
+                "description": "Export the current selected batch to JSON.",
+                "action": self.export_selected_json_action,
+            },
+            {
+                "id": "export_package",
+                "label": "Export ZIP Package",
+                "category": "File",
+                "description": "Create a ZIP package with JSON metadata and referenced media copies.",
+                "action": self.export_selected_package_action,
             },
             {
                 "id": "backup",
@@ -7633,6 +7826,50 @@ class App(QMainWindow):
                 "category": "Catalog",
                 "description": "Open the artists, albums, and licensees manager dialog.",
                 "action": self.catalog_managers_action,
+            },
+            {
+                "id": "release_browser",
+                "label": "Release Browser",
+                "category": "Catalog",
+                "description": "Browse, edit, duplicate, and attach tracks to first-class releases.",
+                "action": self.release_browser_action,
+                "default": True,
+            },
+            {
+                "id": "create_release",
+                "label": "Create Release",
+                "category": "Catalog",
+                "description": "Create a release using the current selected track batch.",
+                "action": self.create_release_action,
+            },
+            {
+                "id": "add_selected_to_release",
+                "label": "Add Selected to Release",
+                "category": "Catalog",
+                "description": "Attach the current selected tracks to an existing release.",
+                "action": self.add_selected_to_release_action,
+            },
+            {
+                "id": "import_tags",
+                "label": "Import Tags from Audio",
+                "category": "Catalog",
+                "description": "Read embedded metadata from managed audio files into the catalog.",
+                "action": self.import_tags_action,
+            },
+            {
+                "id": "write_tags_audio",
+                "label": "Write Tags to Exported Audio",
+                "category": "Catalog",
+                "description": "Export audio copies with catalog metadata written into the file tags.",
+                "action": self.write_tags_to_exported_audio_action,
+            },
+            {
+                "id": "quality_dashboard",
+                "label": "Quality Dashboard",
+                "category": "Catalog",
+                "description": "Scan the profile for metadata, release, media, and integrity issues.",
+                "action": self.quality_dashboard_action,
+                "default": True,
             },
             {
                 "id": "gs1_metadata",
@@ -8446,6 +8683,7 @@ class App(QMainWindow):
     def apply_search_filter(self):
         text = self.search_field.text().lower()
         col_sel = self.search_column_combo.currentData()  # -1 = all
+        explicit_track_ids = getattr(self, "_explicit_row_filter_track_ids", None)
         for row  in range(self.table.rowCount()):
             if col_sel == -1:
                 match = any(
@@ -8455,6 +8693,9 @@ class App(QMainWindow):
             else:
                 it = self.table.item(row, int(col_sel))
                 match = bool(it and text in it.text().lower())
+            if explicit_track_ids is not None:
+                row_track_id = self._track_id_for_table_row(row)
+                match = bool(match and row_track_id in explicit_track_ids)
             self.table.setRowHidden(row, not match)
         self._update_count_label()
 
@@ -8477,6 +8718,7 @@ class App(QMainWindow):
 
 
     def reset_search(self):
+        self._explicit_row_filter_track_ids = None
         self.search_field.clear()
         idx = self.search_column_combo.findData(-1)  # “All columns”
         self.search_column_combo.setCurrentIndex(idx if idx != -1 else 0)
@@ -8752,11 +8994,6 @@ class App(QMainWindow):
             release_date_sql = self.release_date_field.selectedDate().toString("yyyy-MM-dd")
 
             track_seconds = hms_to_seconds(self.track_len_h.value(), self.track_len_m.value(), self.track_len_s.value())
-            cleanup_artist_names, cleanup_album_titles = self._collect_catalog_cleanup_targets(
-                artist_name=self.artist_field.currentText(),
-                additional_artists=self._parse_additional_artists(self.additional_artist_field.currentText()),
-                album_title=self.album_title_field.currentText().strip() or None,
-            )
             self._log_trace(
                 "track.create.prepare",
                 message="Preparing track insert",
@@ -8764,23 +9001,39 @@ class App(QMainWindow):
                 isrc_compact=comp,
                 track_title=self.track_title_field.text().strip(),
             )
-            track_id = self.track_service.create_track(
-                TrackCreatePayload(
-                    isrc=generated_iso,
-                    track_title=self.track_title_field.text().strip(),
-                    artist_name=self.artist_field.currentText(),
-                    additional_artists=self._parse_additional_artists(self.additional_artist_field.currentText()),
-                    album_title=self.album_title_field.currentText().strip() or None,
-                    release_date=release_date_sql,
-                    track_length_sec=track_seconds,
-                    iswc=(iso_iswc or None),
-                    upc=(self.upc_field.currentText().strip() or None),
-                    genre=(self.genre_field.currentText().strip() or None),
-                    catalog_number=(self.catalog_number_field.text().strip() or None),
-                    buma_work_number=(self.buma_work_number_field.text().strip() or None),
-                    audio_file_source_path=(self.audio_file_field.text().strip() or None),
-                    album_art_source_path=(self.album_art_field.text().strip() or None),
-                )
+            payload = TrackCreatePayload(
+                isrc=generated_iso,
+                track_title=self.track_title_field.text().strip(),
+                artist_name=self.artist_field.currentText(),
+                additional_artists=self._parse_additional_artists(self.additional_artist_field.currentText()),
+                album_title=self.album_title_field.currentText().strip() or None,
+                release_date=release_date_sql,
+                track_length_sec=track_seconds,
+                iswc=(iso_iswc or None),
+                upc=(self.upc_field.currentText().strip() or None),
+                genre=(self.genre_field.currentText().strip() or None),
+                catalog_number=(self.catalog_number_field.text().strip() or None),
+                buma_work_number=(self.buma_work_number_field.text().strip() or None),
+                audio_file_source_path=(self.audio_file_field.text().strip() or None),
+                album_art_source_path=(self.album_art_field.text().strip() or None),
+            )
+
+            def mutation():
+                created_track_id = self.track_service.create_track(payload)
+                release_ids = self._sync_releases_for_tracks([created_track_id])
+                return created_track_id, release_ids
+
+            track_id, release_ids = self._run_snapshot_history_action(
+                action_label=f"Create Track: {payload.track_title}",
+                action_type="track.create",
+                entity_type="Track",
+                entity_id=payload.track_title,
+                payload={
+                    "track_title": payload.track_title,
+                    "artist_name": payload.artist_name,
+                    "album_title": payload.album_title,
+                },
+                mutation=mutation,
             )
             self._log_event(
                 "track.create",
@@ -8788,14 +9041,10 @@ class App(QMainWindow):
                 track_id=track_id,
                 isrc=generated_iso,
                 track_title=self.track_title_field.text().strip(),
+                release_ids=release_ids,
             )
             self._audit("CREATE", "Track", ref_id=track_id, details=f"isrc={generated_iso}")
             self._audit_commit()
-            self.history_manager.record_track_create(
-                track_id=track_id,
-                cleanup_artist_names=cleanup_artist_names,
-                cleanup_album_titles=cleanup_album_titles,
-            )
 
             self.refresh_table_preserve_view(focus_id=track_id)
             self.populate_all_comboboxes()
@@ -8964,6 +9213,1077 @@ class App(QMainWindow):
             QMessageBox.warning(self, "GS1 Metadata", str(exc))
             return
         dlg.exec()
+
+    def _current_profile_name(self) -> str | None:
+        path = str(getattr(self, "current_db_path", "") or "").strip()
+        return Path(path).name if path else None
+
+    @staticmethod
+    def _normalize_track_ids(track_ids) -> list[int]:
+        normalized: list[int] = []
+        seen: set[int] = set()
+        for value in track_ids or []:
+            try:
+                track_id = int(value)
+            except (TypeError, ValueError):
+                continue
+            if track_id <= 0 or track_id in seen:
+                continue
+            seen.add(track_id)
+            normalized.append(track_id)
+        return normalized
+
+    @staticmethod
+    def _first_non_blank(*values):
+        for value in values:
+            if isinstance(value, str):
+                text = value.strip()
+                if text:
+                    return text
+            elif value not in (None, "", [], {}, ()):
+                return value
+        return None
+
+    def _selected_or_visible_track_ids(self) -> list[int]:
+        row_count = self.table.rowCount()
+        visible_ids: list[int] = []
+        if any(self.table.isRowHidden(row) for row in range(row_count)):
+            for row in range(row_count):
+                if self.table.isRowHidden(row):
+                    continue
+                track_id = self._track_id_for_table_row(row)
+                if track_id is not None:
+                    visible_ids.append(track_id)
+            return self._normalize_track_ids(visible_ids)
+        return self._normalize_track_ids(self._selected_track_ids())
+
+    def _set_explicit_track_filter(self, track_ids: list[int] | None, *, source_label: str | None = None) -> None:
+        normalized_ids = self._normalize_track_ids(track_ids)
+        self._explicit_row_filter_track_ids = set(normalized_ids) if normalized_ids else None
+        self.apply_search_filter()
+        if source_label:
+            count = len(normalized_ids)
+            message = (
+                f"Filtered catalog to {count} track{'s' if count != 1 else ''} from {source_label}."
+                if normalized_ids
+                else f"Cleared explicit filter from {source_label}."
+            )
+            if self.statusBar() is not None:
+                self.statusBar().showMessage(message, 5000)
+
+    def _release_choices(self) -> list[tuple[int, str]]:
+        if self.release_service is None:
+            return []
+        choices: list[tuple[int, str]] = []
+        for release in self.release_service.list_releases():
+            label = release.title
+            if release.primary_artist:
+                label = f"{label} — {release.primary_artist}"
+            choices.append((release.id, label))
+        return choices
+
+    def _release_context_for_track(self, track_id: int) -> tuple[ReleaseRecord | None, ReleaseTrackPlacement | None]:
+        if self.release_service is None:
+            return None, None
+        release = self.release_service.find_primary_release_for_track(track_id)
+        if release is None:
+            return None, None
+        summary = self.release_service.fetch_release_summary(release.id)
+        if summary is None:
+            return release, None
+        for placement in summary.tracks:
+            if placement.track_id == int(track_id):
+                return summary.release, placement
+        return summary.release, None
+
+    def _effective_artwork_payload_for_track(
+        self,
+        track_id: int,
+        *,
+        snapshot: TrackSnapshot | None = None,
+    ) -> ArtworkPayload | None:
+        try:
+            source_snapshot = snapshot or self.track_service.fetch_track_snapshot(track_id)
+            if source_snapshot is None or not source_snapshot.album_art_path:
+                return None
+            data, mime_type = self.track_service.fetch_media_bytes(track_id, "album_art")
+            return ArtworkPayload(data=data, mime_type=mime_type or "image/jpeg")
+        except Exception:
+            return None
+
+    @staticmethod
+    def _display_tag_value(value) -> str:
+        if isinstance(value, ArtworkPayload):
+            return f"<Artwork {value.mime_type or 'image'}>"
+        if value is None:
+            return ""
+        if isinstance(value, bytes):
+            return f"<{len(value)} bytes>"
+        return str(value)
+
+    def _catalog_tag_data_for_track(self, track_id: int, *, snapshot: TrackSnapshot | None = None):
+        source_snapshot = snapshot or self.track_service.fetch_track_snapshot(track_id)
+        if source_snapshot is None:
+            raise ValueError(f"Track {track_id} not found")
+        release, placement = self._release_context_for_track(track_id)
+        track_values = {
+            "track_title": source_snapshot.track_title,
+            "artist_name": source_snapshot.artist_name,
+            "album_title": source_snapshot.album_title,
+            "genre": source_snapshot.genre,
+            "composer": source_snapshot.composer,
+            "publisher": source_snapshot.publisher,
+            "release_date": source_snapshot.release_date,
+            "isrc": source_snapshot.isrc,
+            "upc": source_snapshot.upc,
+            "comments": source_snapshot.comments,
+            "lyrics": source_snapshot.lyrics,
+        }
+        release_values = release.to_dict() if release is not None else {}
+        placement_values = (
+            {
+                "track_number": placement.track_number,
+                "disc_number": placement.disc_number,
+            }
+            if placement is not None
+            else {}
+        )
+        artwork = self._effective_artwork_payload_for_track(track_id, snapshot=source_snapshot)
+        return catalog_metadata_to_tags(
+            track_values=track_values,
+            release_values=release_values,
+            placement_values=placement_values,
+            artwork=artwork,
+        )
+
+    def _release_payload_for_track_ids(
+        self,
+        track_ids: list[int],
+        *,
+        existing_release: ReleaseRecord | None = None,
+        existing_summary=None,
+        artwork_source_path: str | None = None,
+        clear_artwork: bool = False,
+    ) -> ReleasePayload:
+        normalized_ids = self._normalize_track_ids(track_ids)
+        snapshots = [
+            snapshot
+            for track_id in normalized_ids
+            if (snapshot := self.track_service.fetch_track_snapshot(track_id)) is not None
+        ]
+        if not snapshots:
+            raise ValueError("No valid tracks were available to build release metadata.")
+
+        title = self._first_non_blank(
+            *[snapshot.album_title for snapshot in snapshots],
+            existing_release.title if existing_release is not None else None,
+            snapshots[0].track_title,
+        )
+        clean_title = str(title or "").strip()
+        is_single = len(snapshots) == 1 and (
+            not clean_title or clean_title.casefold() == "single" or not snapshots[0].album_title
+        )
+        placements: list[ReleaseTrackPlacement] = []
+        existing_placements = {
+            placement.track_id: placement
+            for placement in ((existing_summary.tracks if existing_summary is not None else []) or [])
+        }
+        for sequence_number, snapshot in enumerate(snapshots, start=1):
+            existing = existing_placements.get(snapshot.track_id)
+            placements.append(
+                ReleaseTrackPlacement(
+                    track_id=snapshot.track_id,
+                    disc_number=int(existing.disc_number if existing is not None else 1),
+                    track_number=int(existing.track_number if existing is not None else sequence_number),
+                    sequence_number=sequence_number,
+                )
+            )
+
+        derived_artwork_source = artwork_source_path
+        if not clear_artwork and not derived_artwork_source and (existing_release is None or not existing_release.artwork_path):
+            for snapshot in snapshots:
+                resolved = self.track_service.resolve_media_path(snapshot.album_art_path)
+                if resolved is not None and resolved.exists():
+                    derived_artwork_source = str(resolved)
+                    break
+
+        return ReleasePayload(
+            title=clean_title or f"Release {snapshots[0].track_id}",
+            version_subtitle=existing_release.version_subtitle if existing_release is not None else None,
+            primary_artist=self._first_non_blank(
+                existing_release.primary_artist if existing_release is not None else None,
+                *[snapshot.artist_name for snapshot in snapshots],
+            ),
+            album_artist=self._first_non_blank(
+                existing_release.album_artist if existing_release is not None else None,
+                *[snapshot.artist_name for snapshot in snapshots],
+            ),
+            release_type=(
+                existing_release.release_type
+                if existing_release is not None and existing_release.release_type
+                else ("single" if is_single else "album")
+            ),
+            release_date=self._first_non_blank(
+                existing_release.release_date if existing_release is not None else None,
+                *[snapshot.release_date for snapshot in snapshots],
+            ),
+            original_release_date=existing_release.original_release_date if existing_release is not None else None,
+            label=self._first_non_blank(
+                existing_release.label if existing_release is not None else None,
+                *[snapshot.publisher for snapshot in snapshots],
+            ),
+            sublabel=existing_release.sublabel if existing_release is not None else None,
+            catalog_number=self._first_non_blank(
+                existing_release.catalog_number if existing_release is not None else None,
+                *[snapshot.catalog_number for snapshot in snapshots],
+            ),
+            upc=self._first_non_blank(
+                existing_release.upc if existing_release is not None else None,
+                *[snapshot.upc for snapshot in snapshots],
+            ),
+            territory=existing_release.territory if existing_release is not None else None,
+            explicit_flag=existing_release.explicit_flag if existing_release is not None else False,
+            notes=existing_release.notes if existing_release is not None else None,
+            artwork_source_path=derived_artwork_source,
+            clear_artwork=bool(clear_artwork),
+            profile_name=self._current_profile_name(),
+            placements=placements,
+        )
+
+    def _sync_releases_for_tracks(
+        self,
+        track_ids,
+        *,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> list[int]:
+        if self.release_service is None:
+            return []
+        cur = cursor or self.conn.cursor()
+        created_or_updated: list[int] = []
+        processed_group_keys: set[tuple[int, ...]] = set()
+
+        for track_id in self._normalize_track_ids(track_ids):
+            group_track_ids = self.track_service.list_album_group_track_ids(track_id, cursor=cur)
+            if not group_track_ids:
+                group_track_ids = [track_id]
+            group_key = tuple(self._normalize_track_ids(group_track_ids))
+            if not group_key or group_key in processed_group_keys:
+                continue
+            processed_group_keys.add(group_key)
+
+            existing_release = self.release_service.find_primary_release_for_track(track_id)
+            existing_summary = (
+                self.release_service.fetch_release_summary(existing_release.id)
+                if existing_release is not None
+                else None
+            )
+            existing_track_ids = {
+                placement.track_id for placement in (existing_summary.tracks if existing_summary is not None else [])
+            }
+            if existing_summary is not None and len(existing_track_ids) > 1 and existing_track_ids != set(group_key):
+                existing_release = None
+                existing_summary = None
+
+            payload = self._release_payload_for_track_ids(
+                list(group_key),
+                existing_release=existing_release,
+                existing_summary=existing_summary,
+            )
+            if existing_release is None:
+                release_id = self.release_service.create_release(payload, cursor=cur)
+            else:
+                release_id = self.release_service.update_release(existing_release.id, payload, cursor=cur)
+            created_or_updated.append(int(release_id))
+
+        return self._normalize_track_ids(created_or_updated)
+
+    def open_release_browser(self):
+        if self.release_service is None:
+            QMessageBox.warning(self, "Release Browser", "Open a profile first.")
+            return
+        dlg = ReleaseBrowserDialog(
+            release_service=self.release_service,
+            track_title_resolver=self._get_track_title,
+            parent=self,
+        )
+        dlg.filter_requested.connect(lambda track_ids: self._set_explicit_track_filter(track_ids, source_label="release"))
+        dlg.open_track_requested.connect(self.open_selected_editor)
+        dlg.edit_release_requested.connect(self.open_release_editor)
+        dlg.duplicate_release_requested.connect(self.duplicate_release)
+        dlg.add_selected_tracks_requested.connect(self.add_selected_tracks_to_specific_release)
+        dlg.create_release_requested.connect(self.create_release_from_selection)
+        self.release_browser_dialog = dlg
+        dlg.exec()
+
+    def open_release_editor(self, release_id: int | None = None):
+        if self.release_service is None:
+            QMessageBox.warning(self, "Release Editor", "Open a profile first.")
+            return
+        summary = self.release_service.fetch_release_summary(int(release_id)) if release_id else None
+        dlg = ReleaseEditorDialog(
+            release_service=self.release_service,
+            track_title_resolver=self._get_track_title,
+            selected_track_ids_provider=self._selected_track_ids,
+            release=summary.release if summary is not None else None,
+            placements=list(summary.tracks) if summary is not None else None,
+            profile_name=self._current_profile_name(),
+            parent=self,
+        )
+        if dlg.exec() != QDialog.Accepted:
+            return
+        payload = dlg.payload()
+
+        def mutation():
+            if summary is None:
+                return self.release_service.create_release(payload)
+            return self.release_service.update_release(summary.release.id, payload)
+
+        action_label = f"Create Release: {payload.title}" if summary is None else f"Update Release: {payload.title}"
+        action_type = "release.create" if summary is None else "release.update"
+        entity_id = payload.title if summary is None else summary.release.id
+        try:
+            release_pk = self._run_snapshot_history_action(
+                action_label=action_label,
+                action_type=action_type,
+                entity_type="Release",
+                entity_id=entity_id,
+                payload={
+                    "title": payload.title,
+                    "track_count": len(payload.placements),
+                    "release_id": summary.release.id if summary is not None else None,
+                },
+                mutation=mutation,
+            )
+            self._log_event(
+                action_type,
+                action_label,
+                release_id=release_pk,
+                title=payload.title,
+                track_count=len(payload.placements),
+            )
+            self._audit(
+                "UPDATE" if summary is not None else "CREATE",
+                "Release",
+                ref_id=release_pk,
+                details=f"title={payload.title}; tracks={len(payload.placements)}",
+            )
+            self._audit_commit()
+            self.refresh_table_preserve_view(
+                focus_id=payload.placements[0].track_id if payload.placements else None
+            )
+        except Exception as exc:
+            self.conn.rollback()
+            self.logger.exception(f"Release save failed: {exc}")
+            QMessageBox.critical(self, "Release Editor", f"Could not save the release:\n{exc}")
+            return
+
+        if self.release_browser_dialog is not None and self.release_browser_dialog.isVisible():
+            self.release_browser_dialog.refresh()
+
+    def create_release_from_selection(self):
+        selected_ids = self._selected_track_ids()
+        if not selected_ids:
+            QMessageBox.information(
+                self,
+                "Create Release",
+                "Select one or more tracks first, then create the release from that selection.",
+            )
+            return
+        self.open_release_editor()
+
+    def _prompt_for_release_choice(self, *, title: str, prompt: str) -> int | None:
+        choices = self._release_choices()
+        if not choices:
+            QMessageBox.information(self, title, "No releases exist yet. Create one first.")
+            return None
+        labels = [label for _, label in choices]
+        selected_label, ok = QInputDialog.getItem(self, title, prompt, labels, 0, False)
+        if not ok or not selected_label:
+            return None
+        for release_id, label in choices:
+            if label == selected_label:
+                return int(release_id)
+        return None
+
+    def add_selected_tracks_to_release(self):
+        release_id = self._prompt_for_release_choice(
+            title="Add Selected Tracks to Release",
+            prompt="Choose the release that should receive the current selection:",
+        )
+        if release_id is None:
+            return
+        self.add_selected_tracks_to_specific_release(release_id)
+
+    def add_selected_tracks_to_specific_release(self, release_id: int):
+        if self.release_service is None:
+            QMessageBox.warning(self, "Release Browser", "Open a profile first.")
+            return
+        selected_ids = self._selected_track_ids()
+        if not selected_ids:
+            QMessageBox.information(self, "Release Browser", "Select one or more tracks first.")
+            return
+        summary = self.release_service.fetch_release_summary(int(release_id))
+        if summary is None:
+            QMessageBox.warning(self, "Release Browser", "The chosen release could not be loaded.")
+            return
+
+        def mutation():
+            return self.release_service.add_tracks_to_release(int(release_id), selected_ids)
+
+        try:
+            added_track_ids = self._run_snapshot_history_action(
+                action_label=f"Add Tracks to Release: {summary.release.title}",
+                action_type="release.add_tracks",
+                entity_type="Release",
+                entity_id=release_id,
+                payload={"release_id": release_id, "track_ids": selected_ids},
+                mutation=mutation,
+            )
+            self._log_event(
+                "release.add_tracks",
+                "Added selected tracks to release",
+                release_id=release_id,
+                title=summary.release.title,
+                track_ids=added_track_ids,
+            )
+            self._audit(
+                "UPDATE",
+                "Release",
+                ref_id=release_id,
+                details=f"add_tracks={','.join(str(track_id) for track_id in (added_track_ids or []))}",
+            )
+            self._audit_commit()
+        except Exception as exc:
+            self.conn.rollback()
+            self.logger.exception(f"Add tracks to release failed: {exc}")
+            QMessageBox.critical(self, "Release Browser", f"Could not add the selected tracks:\n{exc}")
+            return
+
+        if self.release_browser_dialog is not None and self.release_browser_dialog.isVisible():
+            self.release_browser_dialog.refresh()
+        QMessageBox.information(
+            self,
+            "Release Browser",
+            f"Added {len(added_track_ids or [])} track{'s' if len(added_track_ids or []) != 1 else ''} to '{summary.release.title}'.",
+        )
+
+    def duplicate_release(self, release_id: int):
+        if self.release_service is None:
+            return
+        summary = self.release_service.fetch_release_summary(int(release_id))
+        if summary is None:
+            QMessageBox.warning(self, "Duplicate Release", "The selected release could not be loaded.")
+            return
+        try:
+            new_release_id = self._run_snapshot_history_action(
+                action_label=f"Duplicate Release: {summary.release.title}",
+                action_type="release.duplicate",
+                entity_type="Release",
+                entity_id=release_id,
+                payload={"release_id": release_id, "title": summary.release.title},
+                mutation=lambda: self.release_service.duplicate_release(int(release_id)),
+            )
+            self._log_event(
+                "release.duplicate",
+                "Release duplicated",
+                source_release_id=release_id,
+                new_release_id=new_release_id,
+                title=summary.release.title,
+            )
+            self._audit(
+                "CREATE",
+                "Release",
+                ref_id=new_release_id,
+                details=f"duplicated_from={release_id}",
+            )
+            self._audit_commit()
+        except Exception as exc:
+            self.conn.rollback()
+            self.logger.exception(f"Duplicate release failed: {exc}")
+            QMessageBox.critical(self, "Duplicate Release", f"Could not duplicate the release:\n{exc}")
+            return
+        if self.release_browser_dialog is not None and self.release_browser_dialog.isVisible():
+            self.release_browser_dialog.refresh()
+
+    def _build_tag_preview_rows(
+        self,
+        *,
+        track_id: int,
+        source_path: str,
+        database_values: dict[str, object],
+        file_tags,
+        chosen_values: dict[str, object],
+    ) -> list[dict[str, object]]:
+        rows: list[dict[str, object]] = []
+        for field_name, chosen_value in chosen_values.items():
+            database_value = database_values.get(field_name)
+            file_value = getattr(file_tags, field_name, None)
+            if database_value == file_value and not isinstance(chosen_value, ArtworkPayload):
+                continue
+            rows.append(
+                {
+                    "track": self._get_track_title(track_id),
+                    "field": field_name.replace("_", " ").title(),
+                    "database": self._display_tag_value(database_value),
+                    "file": self._display_tag_value(file_value),
+                    "chosen": self._display_tag_value(chosen_value),
+                    "source": source_path,
+                }
+            )
+        return rows
+
+    def _apply_tag_patch_to_track(
+        self,
+        track_id: int,
+        values: dict[str, object],
+        *,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> None:
+        snapshot = self.track_service.fetch_track_snapshot(track_id, cursor=cursor)
+        if snapshot is None:
+            raise ValueError(f"Track {track_id} not found")
+        artwork = values.get("artwork")
+        temp_artwork_path = None
+        current_artwork = self._effective_artwork_payload_for_track(track_id, snapshot=snapshot)
+        if isinstance(artwork, ArtworkPayload) and artwork != current_artwork:
+            suffix = mimetypes.guess_extension(artwork.mime_type or "image/jpeg") or ".img"
+            handle = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+            try:
+                handle.write(artwork.data)
+                temp_artwork_path = handle.name
+            finally:
+                handle.close()
+
+        try:
+            payload = TrackUpdatePayload(
+                track_id=track_id,
+                isrc=str(values.get("isrc") or snapshot.isrc or "").strip(),
+                track_title=str(values.get("title") or snapshot.track_title or "").strip(),
+                artist_name=str(values.get("artist") or snapshot.artist_name or "").strip(),
+                additional_artists=list(snapshot.additional_artists),
+                album_title=str(values.get("album") or snapshot.album_title or "").strip() or None,
+                release_date=str(values.get("release_date") or snapshot.release_date or "").strip() or None,
+                track_length_sec=int(snapshot.track_length_sec or 0),
+                iswc=snapshot.iswc,
+                upc=str(values.get("upc") or snapshot.upc or "").strip() or None,
+                genre=str(values.get("genre") or snapshot.genre or "").strip() or None,
+                catalog_number=snapshot.catalog_number,
+                buma_work_number=snapshot.buma_work_number,
+                composer=str(values.get("composer") or snapshot.composer or "").strip() or None,
+                publisher=str(values.get("publisher") or snapshot.publisher or "").strip() or None,
+                comments=str(values.get("comments") or snapshot.comments or "").strip() or None,
+                lyrics=str(values.get("lyrics") or snapshot.lyrics or "").strip() or None,
+                audio_file_source_path=None,
+                album_art_source_path=temp_artwork_path,
+                clear_audio_file=False,
+                clear_album_art=False,
+            )
+            self.track_service.update_track(payload, cursor=cursor)
+        finally:
+            if temp_artwork_path:
+                Path(temp_artwork_path).unlink(missing_ok=True)
+
+    def import_tags_from_audio(self, track_ids: list[int] | None = None):
+        if self.audio_tag_service is None or self.track_service is None:
+            QMessageBox.warning(self, "Import Tags", "Open a profile first.")
+            return
+        selected_ids = self._normalize_track_ids(track_ids or self._selected_track_ids())
+        if not selected_ids:
+            QMessageBox.information(self, "Import Tags", "Select one or more tracks with attached audio first.")
+            return
+
+        policy = str(self.settings.value("audio_tags/import_policy", "merge_blanks", str) or "merge_blanks")
+        prepared: list[tuple[int, str, object, dict[str, object]]] = []
+        preview_rows: list[dict[str, object]] = []
+        warnings: list[str] = []
+
+        for track_id in selected_ids:
+            snapshot = self.track_service.fetch_track_snapshot(track_id)
+            if snapshot is None:
+                warnings.append(f"Track {track_id} could not be loaded.")
+                continue
+            resolved = self.track_service.resolve_media_path(snapshot.audio_file_path)
+            if resolved is None or not resolved.exists():
+                warnings.append(f"{snapshot.track_title}: no managed audio file is attached.")
+                continue
+            try:
+                file_tags = self.audio_tag_service.read_tags(resolved)
+            except Exception as exc:
+                warnings.append(f"{snapshot.track_title}: {exc}")
+                continue
+            database_values = self._catalog_tag_data_for_track(track_id, snapshot=snapshot).to_dict()
+            preview = merge_imported_tags(
+                database_values=database_values,
+                file_tags=file_tags,
+                policy=policy,
+            )
+            prepared.append((track_id, str(resolved), file_tags, database_values))
+            preview_rows.extend(
+                self._build_tag_preview_rows(
+                    track_id=track_id,
+                    source_path=str(resolved),
+                    database_values=database_values,
+                    file_tags=file_tags,
+                    chosen_values=preview.patch.values,
+                )
+            )
+
+        if not prepared:
+            QMessageBox.information(
+                self,
+                "Import Tags",
+                "No readable managed audio files were available for the selected tracks."
+                + (f"\n\nWarnings:\n- " + "\n- ".join(warnings[:12]) if warnings else ""),
+            )
+            return
+
+        dlg = TagPreviewDialog(
+            title="Import Tags from Audio",
+            intro=(
+                "Review how embedded file tags map onto the selected catalog records. "
+                "Choose the conflict policy you want to apply before importing."
+            ),
+            rows=preview_rows,
+            initial_policy=policy,
+            allow_policy_change=True,
+            parent=self,
+        )
+        if dlg.exec() != QDialog.Accepted:
+            return
+        policy = dlg.selected_policy()
+        self.settings.setValue("audio_tags/import_policy", policy)
+        self.settings.sync()
+
+        updated_track_ids: list[int] = []
+
+        def mutation():
+            with self.conn:
+                cur = self.conn.cursor()
+                for track_id, _, file_tags, database_values in prepared:
+                    preview = merge_imported_tags(
+                        database_values=database_values,
+                        file_tags=file_tags,
+                        policy=policy,
+                    )
+                    self._apply_tag_patch_to_track(track_id, preview.patch.values, cursor=cur)
+                    updated_track_ids.append(track_id)
+                self._sync_releases_for_tracks(updated_track_ids, cursor=cur)
+            return list(updated_track_ids)
+
+        try:
+            changed_ids = self._run_snapshot_history_action(
+                action_label=f"Import Audio Tags ({len(prepared)} tracks)",
+                action_type="tags.import",
+                entity_type="Track",
+                entity_id="batch",
+                payload={"track_ids": [track_id for track_id, _, _, _ in prepared], "policy": policy},
+                mutation=mutation,
+            )
+            self._log_event(
+                "tags.import",
+                "Imported embedded tags from audio",
+                track_ids=changed_ids,
+                policy=policy,
+                warnings=warnings,
+            )
+            self._audit(
+                "IMPORT",
+                "AudioTags",
+                ref_id="batch",
+                details=f"track_ids={','.join(str(track_id) for track_id in changed_ids)}; policy={policy}",
+            )
+            self._audit_commit()
+            self.refresh_table_preserve_view(focus_id=changed_ids[0] if changed_ids else None)
+            self.populate_all_comboboxes()
+            QMessageBox.information(
+                self,
+                "Import Tags",
+                f"Imported tags for {len(changed_ids or [])} track{'s' if len(changed_ids or []) != 1 else ''}."
+                + (f"\n\nWarnings:\n- " + "\n- ".join(warnings[:12]) if warnings else ""),
+            )
+        except Exception as exc:
+            self.conn.rollback()
+            self.logger.exception(f"Audio tag import failed: {exc}")
+            QMessageBox.critical(self, "Import Tags", f"Could not import audio tags:\n{exc}")
+
+    def write_tags_to_exported_audio(self, track_ids: list[int] | None = None):
+        if self.tagged_audio_export_service is None or self.track_service is None:
+            QMessageBox.warning(self, "Write Tags to Exported Audio", "Open a profile first.")
+            return
+        selected_ids = self._normalize_track_ids(track_ids or self._selected_or_visible_track_ids())
+        if not selected_ids:
+            QMessageBox.information(
+                self,
+                "Write Tags to Exported Audio",
+                "Select one or more tracks or apply a filter first.",
+            )
+            return
+
+        exports: list[tuple[str, str, object]] = []
+        preview_rows: list[dict[str, object]] = []
+        warnings: list[str] = []
+        for track_id in selected_ids:
+            snapshot = self.track_service.fetch_track_snapshot(track_id)
+            if snapshot is None:
+                warnings.append(f"Track {track_id} could not be loaded.")
+                continue
+            resolved = self.track_service.resolve_media_path(snapshot.audio_file_path)
+            if resolved is None or not resolved.exists():
+                warnings.append(f"{snapshot.track_title}: no managed audio file is attached.")
+                continue
+            tag_data = self._catalog_tag_data_for_track(track_id, snapshot=snapshot)
+            safe_title = re.sub(r"[^A-Za-z0-9._-]+", "_", snapshot.track_title or f"track_{track_id}").strip("_")
+            suggested_name = f"{track_id:05d}_{safe_title or 'track'}"
+            exports.append((str(resolved), suggested_name, tag_data))
+            for field_name, value in tag_data.to_dict().items():
+                if field_name == "raw_fields" or field_name == "warnings":
+                    continue
+                if value in (None, "", [], {}, ()):
+                    continue
+                preview_rows.append(
+                    {
+                        "track": snapshot.track_title,
+                        "field": field_name.replace("_", " ").title(),
+                        "database": self._display_tag_value(value),
+                        "file": "",
+                        "chosen": self._display_tag_value(value),
+                        "source": str(resolved),
+                    }
+                )
+
+        if not exports:
+            QMessageBox.information(
+                self,
+                "Write Tags to Exported Audio",
+                "No exportable managed audio files were available for the selected tracks."
+                + (f"\n\nWarnings:\n- " + "\n- ".join(warnings[:12]) if warnings else ""),
+            )
+            return
+
+        dlg = TagPreviewDialog(
+            title="Write Tags to Exported Audio",
+            intro=(
+                "Preview the catalog metadata that will be written into exported audio copies. "
+                "The original managed audio files are left untouched."
+            ),
+            rows=preview_rows,
+            initial_policy="prefer_database",
+            allow_policy_change=False,
+            parent=self,
+        )
+        if dlg.exec() != QDialog.Accepted:
+            return
+
+        output_dir = QFileDialog.getExistingDirectory(
+            self,
+            "Choose Export Folder for Tagged Audio Copies",
+            str(self.exports_dir / "tagged_audio"),
+        )
+        if not output_dir:
+            return
+
+        try:
+            result = self.tagged_audio_export_service.export_copies(output_dir=output_dir, exports=exports)
+            all_warnings = warnings + list(result.warnings)
+            self._log_event(
+                "tags.export_audio",
+                "Exported tagged audio copies",
+                output_dir=output_dir,
+                exported=result.exported,
+                skipped=result.skipped,
+                warnings=all_warnings,
+            )
+            self._audit(
+                "EXPORT",
+                "AudioTags",
+                ref_id=output_dir,
+                details=f"exported={result.exported}; skipped={result.skipped}",
+            )
+            self._audit_commit()
+            QMessageBox.information(
+                self,
+                "Write Tags to Exported Audio",
+                f"Exported {result.exported} tagged audio cop{'y' if result.exported == 1 else 'ies'} to:\n{output_dir}"
+                f"\n\nSkipped: {result.skipped}"
+                + (f"\n\nWarnings:\n- " + "\n- ".join(all_warnings[:12]) if all_warnings else ""),
+            )
+        except Exception as exc:
+            self.logger.exception(f"Tagged audio export failed: {exc}")
+            QMessageBox.critical(self, "Write Tags to Exported Audio", f"Could not export tagged audio copies:\n{exc}")
+
+    def import_exchange_file(self, format_name: str):
+        if self.exchange_service is None:
+            QMessageBox.warning(self, "Import Exchange", "Open a profile first.")
+            return
+        normalized_format = str(format_name or "").strip().lower()
+        filters = {
+            "csv": "CSV Files (*.csv)",
+            "xlsx": "Excel Workbook (*.xlsx)",
+            "json": "JSON Files (*.json)",
+        }
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            f"Import {normalized_format.upper()}",
+            "",
+            filters.get(normalized_format, "All files (*)"),
+        )
+        if not path:
+            return
+
+        try:
+            if normalized_format == "csv":
+                inspection = self.exchange_service.inspect_csv(path)
+            elif normalized_format == "xlsx":
+                inspection = self.exchange_service.inspect_xlsx(path)
+            elif normalized_format == "json":
+                inspection = self.exchange_service.inspect_json(path)
+            else:
+                raise ValueError(f"Unsupported exchange format: {normalized_format}")
+        except Exception as exc:
+            self.logger.exception(f"Exchange inspection failed: {exc}")
+            QMessageBox.critical(self, "Import Exchange", f"Could not inspect the selected file:\n{exc}")
+            return
+
+        supported_headers = list(self.exchange_service.BASE_EXPORT_COLUMNS)
+        for field in self.custom_field_definitions.list_active_fields():
+            if field.get("field_type") in {"blob_audio", "blob_image"}:
+                continue
+            supported_headers.append(f"custom::{field['name']}")
+
+        dlg = ExchangeImportDialog(
+            inspection=inspection,
+            supported_headers=supported_headers,
+            settings=self.settings,
+            parent=self,
+        )
+        if dlg.exec() != QDialog.Accepted:
+            return
+
+        mapping = dlg.mapping()
+        options = dlg.import_options()
+        before_snapshot = None
+        if options.mode != "dry_run" and self.history_manager is not None:
+            before_snapshot = self.history_manager.capture_snapshot(
+                kind=f"pre_import_{normalized_format}",
+                label=f"Before Import {normalized_format.upper()}: {Path(path).name}",
+            )
+
+        try:
+            if normalized_format == "csv":
+                report = self.exchange_service.import_csv(path, mapping=mapping, options=options)
+            elif normalized_format == "xlsx":
+                report = self.exchange_service.import_xlsx(path, mapping=mapping, options=options)
+            else:
+                report = self.exchange_service.import_json(path, options=options)
+        except Exception as exc:
+            if before_snapshot is not None:
+                try:
+                    self.history_manager.delete_snapshot(before_snapshot.snapshot_id)
+                except Exception:
+                    pass
+            self.conn.rollback()
+            self.logger.exception(f"Exchange import failed: {exc}")
+            QMessageBox.critical(self, "Import Exchange", f"Could not complete the import:\n{exc}")
+            return
+
+        changed = bool(report.created_tracks or report.updated_tracks)
+        if changed and before_snapshot is not None:
+            after_snapshot = self.history_manager.capture_snapshot(
+                kind=f"post_import_{normalized_format}",
+                label=f"After Import {normalized_format.upper()}: {Path(path).name}",
+            )
+            self.history_manager.record_snapshot_action(
+                label=f"Import {normalized_format.upper()}: {report.passed} rows",
+                action_type=f"import.{normalized_format}",
+                entity_type="Import",
+                entity_id=path,
+                payload={
+                    "path": path,
+                    "mode": options.mode,
+                    "passed": report.passed,
+                    "failed": report.failed,
+                    "skipped": report.skipped,
+                },
+                snapshot_before_id=before_snapshot.snapshot_id,
+                snapshot_after_id=after_snapshot.snapshot_id,
+            )
+            self._refresh_history_actions()
+
+        if changed:
+            self.refresh_table_preserve_view(
+                focus_id=(report.created_tracks or report.updated_tracks or [None])[0]
+            )
+            self.populate_all_comboboxes()
+
+        self._log_event(
+            f"import.{normalized_format}",
+            f"Imported {normalized_format.upper()} exchange data",
+            path=path,
+            mode=options.mode,
+            passed=report.passed,
+            failed=report.failed,
+            skipped=report.skipped,
+            warnings=report.warnings,
+            duplicates=report.duplicates,
+            unknown_fields=report.unknown_fields,
+        )
+        self._audit(
+            "IMPORT",
+            normalized_format.upper(),
+            ref_id=path,
+            details=(
+                f"mode={options.mode}; passed={report.passed}; failed={report.failed}; "
+                f"skipped={report.skipped}; duplicates={len(report.duplicates)}"
+            ),
+        )
+        self._audit_commit()
+        self._show_exchange_import_report(path, report)
+
+    def _show_exchange_import_report(self, path: str, report: ExchangeImportReport) -> None:
+        lines = [
+            f"Format: {report.format_name.upper()}",
+            f"Passed: {report.passed}",
+            f"Failed: {report.failed}",
+            f"Skipped: {report.skipped}",
+        ]
+        if report.duplicates:
+            lines.append(f"Duplicates: {len(report.duplicates)}")
+        if report.unknown_fields:
+            lines.append("Unknown fields: " + ", ".join(report.unknown_fields[:8]))
+        if report.warnings:
+            lines.append("")
+            lines.append("Warnings:")
+            lines.extend(f"- {warning}" for warning in report.warnings[:12])
+        QMessageBox.information(
+            self,
+            f"Import {report.format_name.upper()}",
+            "\n".join(lines) + f"\n\nSource:\n{path}",
+        )
+
+    def export_exchange_file(self, format_name: str, *, selected_only: bool):
+        if self.exchange_service is None:
+            QMessageBox.warning(self, "Export Exchange", "Open a profile first.")
+            return
+        normalized_format = str(format_name or "").strip().lower()
+        track_ids = self._selected_or_visible_track_ids() if selected_only else None
+        if selected_only and not track_ids:
+            QMessageBox.information(
+                self,
+                "Export Exchange",
+                "Select one or more rows or apply a filter first.",
+            )
+            return
+
+        extension_map = {
+            "csv": ("CSV Files (*.csv)", ".csv"),
+            "xlsx": ("Excel Workbooks (*.xlsx)", ".xlsx"),
+            "json": ("JSON Files (*.json)", ".json"),
+            "package": ("ZIP Packages (*.zip)", ".zip"),
+        }
+        file_filter, suffix = extension_map.get(normalized_format, ("All files (*)", ""))
+        default_name = (
+            f"{'selected' if selected_only else 'full'}_{normalized_format}_{datetime.now().strftime('%Y%m%d_%H%M%S')}{suffix}"
+        )
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            f"Export {normalized_format.upper()}",
+            str(self.exports_dir / default_name),
+            file_filter,
+        )
+        if not path:
+            return
+
+        def mutation():
+            if normalized_format == "csv":
+                return self.exchange_service.export_csv(path, track_ids)
+            if normalized_format == "xlsx":
+                return self.exchange_service.export_xlsx(path, track_ids)
+            if normalized_format == "json":
+                return self.exchange_service.export_json(path, track_ids)
+            if normalized_format == "package":
+                return self.exchange_service.export_package(path, track_ids)
+            raise ValueError(f"Unsupported exchange format: {normalized_format}")
+
+        try:
+            exported = self._run_file_history_action(
+                action_label=lambda count: f"Export {normalized_format.upper()}: {count} rows",
+                action_type=f"file.export_{normalized_format}",
+                target_path=path,
+                mutation=mutation,
+                entity_type="Export",
+                entity_id=path,
+                payload=lambda count: {
+                    "path": path,
+                    "format": normalized_format,
+                    "selected_only": bool(selected_only),
+                    "count": count,
+                },
+            )
+            self._log_event(
+                f"export.{normalized_format}",
+                f"Exported {normalized_format.upper()} exchange data",
+                path=path,
+                exported=exported,
+                selected_only=selected_only,
+            )
+            self._audit(
+                "EXPORT",
+                normalized_format.upper(),
+                ref_id=path,
+                details=f"count={exported}; selected_only={int(bool(selected_only))}",
+            )
+            self._audit_commit()
+            QMessageBox.information(
+                self,
+                "Export Exchange",
+                f"Exported {exported} row{'s' if exported != 1 else ''} to:\n{path}",
+            )
+        except Exception as exc:
+            self.logger.exception(f"Exchange export failed: {exc}")
+            QMessageBox.critical(self, "Export Exchange", f"Could not export the selected data:\n{exc}")
+
+    def open_quality_dashboard(self):
+        if self.quality_service is None:
+            QMessageBox.warning(self, "Data Quality Dashboard", "Open a profile first.")
+            return
+        dlg = QualityDashboardDialog(
+            service=self.quality_service,
+            release_choices_provider=self._release_choices,
+            apply_fix_callback=self._apply_quality_fix,
+            open_issue_callback=self._open_issue_from_dashboard,
+            parent=self,
+        )
+        dlg.exec()
+
+    def _apply_quality_fix(self, fix_key: str) -> str:
+        def mutation():
+            return self.quality_service.apply_fix(fix_key)
+
+        message = self._run_snapshot_history_action(
+            action_label=f"Quality Fix: {fix_key}",
+            action_type="quality.fix",
+            entity_type="QualityIssue",
+            entity_id=fix_key,
+            payload={"fix_key": fix_key},
+            mutation=mutation,
+        )
+        self._log_event("quality.fix", "Applied quality fix", fix_key=fix_key, message_text=message)
+        self._audit("REPAIR", "QualityIssue", ref_id=fix_key, details=message)
+        self._audit_commit()
+        self.refresh_table_preserve_view()
+        self.populate_all_comboboxes()
+        return str(message)
+
+    def _open_issue_from_dashboard(self, issue: QualityIssue) -> None:
+        if issue.entity_type == "track" and issue.track_id:
+            self.open_selected_editor(issue.track_id)
+            return
+        if issue.entity_type == "release" and issue.release_id:
+            self.open_release_editor(issue.release_id)
+            return
+        if issue.entity_type == "license":
+            self.open_licenses_browser(track_filter_id=None)
+            return
 
     def delete_entry(self):
         current_row = self.table.currentRow()
@@ -9941,6 +11261,7 @@ class App(QMainWindow):
         track_id = self._track_id_for_table_row(row)
         selected_ids = self._selected_track_ids()
         bulk_count = len(selected_ids) if track_id is not None and track_id in selected_ids else 1
+        track_title = self._get_track_title(track_id) if track_id else ""
         edit_label = "Edit Entry" if bulk_count <= 1 else f"Bulk Edit {bulk_count} Selected Entries…"
         act_edit = QAction(edit_label, self)
         act_edit.triggered.connect(lambda: self.open_selected_editor(track_id))
@@ -9949,6 +11270,13 @@ class App(QMainWindow):
         act_gs1 = QAction("GS1 Metadata…", self)
         act_gs1.triggered.connect(lambda: self.open_gs1_dialog(self._track_id_for_table_row(row)))
         menu.addAction(act_gs1)
+
+        if track_id and self.release_service is not None:
+            release = self.release_service.find_primary_release_for_track(track_id)
+            if release is not None:
+                act_release = QAction("Open Primary Release…", self)
+                act_release.triggered.connect(lambda: self.open_release_editor(release.id))
+                menu.addAction(act_release)
 
         act_delete = QAction("Delete Entry", self)
         act_delete.triggered.connect(self.delete_entry)
@@ -9964,6 +11292,15 @@ class App(QMainWindow):
             act_view_licenses = QAction("View Licenses for this Track…", self)
             act_view_licenses.triggered.connect(lambda: self.open_licenses_browser(track_filter_id=track_id))
             menu.addAction(act_view_licenses)
+
+            if self.track_has_media(track_id, "audio_file"):
+                act_import_tags = QAction("Import Tags from Audio…", self)
+                act_import_tags.triggered.connect(lambda: self.import_tags_from_audio([track_id]))
+                menu.addAction(act_import_tags)
+
+                act_write_tags = QAction("Write Tags to Exported Audio…", self)
+                act_write_tags.triggered.connect(lambda: self.write_tags_to_exported_audio([track_id]))
+                menu.addAction(act_write_tags)
 
 
         cell_item = self.table.item(row, col)
@@ -9988,10 +11325,6 @@ class App(QMainWindow):
         header_text = header_item.text() if header_item is not None else ""
         standard_media_key = self._standard_media_key_for_header(header_text)
         if track_id and standard_media_key:
-            track_title_col = self._column_index_by_header("Track Title")
-            title_item = self.table.item(row, track_title_col) if track_title_col >= 0 else None
-            track_title = title_item.text() if title_item else self._get_track_title(track_id)
-
             if self.track_has_media(track_id, standard_media_key):
                 act_prev = QAction("Preview File…", self)
                 act_prev.triggered.connect(
@@ -12003,6 +13336,7 @@ class AlbumEntryDialog(QDialog):
             created_track_ids = []
             for payload in payloads:
                 created_track_ids.append(self.app.track_service.create_track(payload))
+            release_ids = self.app._sync_releases_for_tracks(created_track_ids)
 
             try:
                 self.app._log_event(
@@ -12011,6 +13345,7 @@ class AlbumEntryDialog(QDialog):
                     album_title=album_title,
                     track_ids=created_track_ids,
                     track_count=len(created_track_ids),
+                    release_ids=release_ids,
                 )
                 for track_id, payload in zip(created_track_ids, payloads):
                     self.app._audit("CREATE", "Track", ref_id=track_id, details=f"isrc={payload.isrc}")
@@ -12828,6 +14163,7 @@ class EditDialog(QDialog):
                             clear_album_art=bool(self._clear_album_art and not album_art_source_path),
                             cursor=cur,
                         )
+                        parent._sync_releases_for_tracks([row_id, *propagated_track_ids], cursor=cur)
 
                     parent.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
                     try:
@@ -12876,29 +14212,39 @@ class EditDialog(QDialog):
                 additional_artists=new_additional_artist,
                 album_title=new_album_title,
             )
-            parent.track_service.update_track(source_payload)
-            parent.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            def mutation():
+                with parent.conn:
+                    cur = parent.conn.cursor()
+                    parent.track_service.update_track(source_payload, cursor=cur)
+                    parent._sync_releases_for_tracks([row_id], cursor=cur)
 
-            try:
-                parent._log_event(
-                    "track.update",
-                    "Track updated",
-                    track_id=row_id,
-                    isrc=iso_isrc,
-                    track_title=new_track_title,
-                )
-                parent._audit("UPDATE", "Track", ref_id=row_id, details=f"isrc={iso_isrc}")
-                parent._audit_commit()
-            except Exception as audit_err:
-                parent.logger.warning(f"Audit failed: {audit_err}")
+                parent.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                try:
+                    parent._log_event(
+                        "track.update",
+                        "Track updated",
+                        track_id=row_id,
+                        isrc=iso_isrc,
+                        track_title=new_track_title,
+                    )
+                    parent._audit("UPDATE", "Track", ref_id=row_id, details=f"isrc={iso_isrc}")
+                    parent._audit_commit()
+                except Exception as audit_err:
+                    parent.logger.warning(f"Audit failed: {audit_err}")
 
-            parent.history_manager.record_track_update(
-                before_snapshot=before_snapshot,
-                cleanup_artist_names=cleanup_artist_names,
-                cleanup_album_titles=cleanup_album_titles,
+            parent._run_snapshot_history_action(
+                action_label=f"Update Track: {new_track_title}",
+                action_type="track.update",
+                entity_type="Track",
+                entity_id=row_id,
+                payload={
+                    "track_id": row_id,
+                    "track_title": new_track_title,
+                    "cleanup_artist_names": cleanup_artist_names,
+                    "cleanup_album_titles": cleanup_album_titles,
+                },
+                mutation=mutation,
             )
-            parent._refresh_history_actions()
-
             parent.refresh_table_preserve_view(focus_id=row_id)
             self.accept()
 
@@ -13018,6 +14364,7 @@ class EditDialog(QDialog):
                         clear_album_art=bool(apply_album_art and self._clear_album_art and not new_album_art_path),
                     )
                 )
+            parent._sync_releases_for_tracks(self.batch_track_ids)
 
             parent.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
             try:
