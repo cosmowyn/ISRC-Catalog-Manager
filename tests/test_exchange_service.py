@@ -152,6 +152,8 @@ class ExchangeServiceTests(unittest.TestCase):
         self.assertEqual(manifest["schema_version"], 1)
         self.assertTrue(manifest["packaged_media"])
         self.assertTrue(any(str(row.get("audio_file_path") or "").strip() for row in manifest["rows"]))
+        self.assertTrue(isinstance(manifest.get("packaged_media_index"), dict))
+        self.assertTrue(manifest["packaged_media_index"])
 
     def test_package_export_includes_shared_album_art_once(self):
         artwork_path = self.data_root / "cover.png"
@@ -221,6 +223,183 @@ class ExchangeServiceTests(unittest.TestCase):
         art_paths = [str(row.get("album_art_path") or "").strip() for row in manifest["rows"]]
         self.assertEqual(len([path for path in art_paths if path]), 2)
         self.assertEqual(len({path for path in art_paths if path}), 1)
+
+    def test_inspect_package_reads_manifest_preview(self):
+        track_id = self._create_track(isrc="NL-ABC-26-00023", title="Comet", audio=True)
+        self._create_release(track_id)
+        package_path = self.data_root / "inspect-package.zip"
+        self.service.export_package(package_path)
+
+        inspection = self.service.inspect_package(package_path)
+
+        self.assertEqual(inspection.format_name, "package")
+        self.assertIn("track_title", inspection.headers)
+        self.assertTrue(inspection.preview_rows)
+        self.assertTrue(any("Packaged media entries detected:" in warning for warning in inspection.warnings))
+
+    def test_package_import_round_trip_restores_media_and_release_artwork(self):
+        audio_path = self.data_root / "Pulse.wav"
+        audio_path.write_bytes(b"RIFFdemo")
+        artwork_path = self.data_root / "pulse.png"
+        artwork_path.write_bytes(
+            bytes.fromhex(
+                "89504E470D0A1A0A"
+                "0000000D49484452000000010000000108060000001F15C489"
+                "0000000D49444154789C63F8FFFF3F0005FE02FEA7D6059F"
+                "0000000049454E44AE426082"
+            )
+        )
+        track_id = self.track_service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00024",
+                track_title="Pulse",
+                artist_name="Cosmowyn",
+                additional_artists=[],
+                album_title="Pulse Release",
+                release_date="2026-03-15",
+                track_length_sec=180,
+                iswc=None,
+                upc="036000291452",
+                genre="Ambient",
+                catalog_number="CAT-003",
+                audio_file_source_path=str(audio_path),
+                album_art_source_path=str(artwork_path),
+            )
+        )
+        self.release_service.create_release(
+            ReleasePayload(
+                title="Pulse Release",
+                primary_artist="Cosmowyn",
+                album_artist="Cosmowyn",
+                release_type="album",
+                release_date="2026-03-15",
+                upc="036000291452",
+                artwork_source_path=str(artwork_path),
+                placements=[ReleaseTrackPlacement(track_id=track_id, disc_number=1, track_number=1, sequence_number=1)],
+            )
+        )
+
+        package_path = self.data_root / "roundtrip-package.zip"
+        self.service.export_package(package_path)
+
+        new_root = self.data_root / "imported"
+        new_root.mkdir(parents=True, exist_ok=True)
+        new_conn = sqlite3.connect(":memory:")
+        try:
+            DatabaseSchemaService(new_conn, data_root=new_root).init_db()
+            DatabaseSchemaService(new_conn, data_root=new_root).migrate_schema()
+            new_service = ExchangeService(
+                new_conn,
+                TrackService(new_conn, new_root),
+                ReleaseService(new_conn, new_root),
+                CustomFieldDefinitionService(new_conn),
+                new_root,
+            )
+
+            report = new_service.import_package(package_path, options=ExchangeImportOptions(mode="create"))
+
+            self.assertEqual(report.failed, 0)
+            self.assertEqual(new_conn.execute("SELECT COUNT(*) FROM Tracks").fetchone()[0], 1)
+            self.assertEqual(new_conn.execute("SELECT COUNT(*) FROM Releases").fetchone()[0], 1)
+            audio_ref = new_conn.execute("SELECT audio_file_path FROM Tracks").fetchone()[0]
+            track_art_meta = new_service.track_service.get_media_meta(1, "album_art")
+            release_art_ref = new_conn.execute("SELECT artwork_path FROM Releases").fetchone()[0]
+            self.assertTrue(str(audio_ref or "").strip())
+            self.assertTrue(str(track_art_meta.get("path") or "").strip())
+            self.assertTrue(str(release_art_ref or "").strip())
+        finally:
+            new_conn.close()
+
+    def test_package_import_supports_legacy_relative_media_without_index(self):
+        package_path = self.data_root / "legacy-package.zip"
+        rows = [
+            {
+                "track_id": 1,
+                "isrc": "NL-ABC-26-00025",
+                "track_title": "Legacy Track",
+                "artist_name": "Cosmowyn",
+                "additional_artists": "",
+                "album_title": "Legacy Release",
+                "release_date": "2026-03-15",
+                "track_length_sec": 180,
+                "track_length_hms": "00:03:00",
+                "iswc": "",
+                "upc": "036000291452",
+                "genre": "Ambient",
+                "catalog_number": "CAT-004",
+                "buma_work_number": "",
+                "composer": "",
+                "publisher": "",
+                "comments": "",
+                "lyrics": "",
+                "audio_file_path": "track_media/audio/legacy.wav",
+                "album_art_path": "track_media/images/legacy.png",
+                "release_id": "",
+                "release_title": "Legacy Release",
+                "release_version_subtitle": "",
+                "release_primary_artist": "Cosmowyn",
+                "release_album_artist": "Cosmowyn",
+                "release_type": "album",
+                "release_date_release": "2026-03-15",
+                "release_original_release_date": "",
+                "release_label": "",
+                "release_sublabel": "",
+                "release_catalog_number": "CAT-004",
+                "release_upc": "036000291452",
+                "release_barcode_validation_status": "valid",
+                "release_territory": "",
+                "release_explicit_flag": 0,
+                "release_notes": "",
+                "release_artwork_path": "track_media/images/legacy.png",
+                "disc_number": 1,
+                "track_number": 1,
+                "sequence_number": 1,
+                "license_files": "",
+            }
+        ]
+        payload = {
+            "schema_version": 1,
+            "exported_at": "2026-03-15T22:44:12",
+            "columns": list(rows[0].keys()),
+            "rows": rows,
+            "custom_field_defs": [],
+            "packaged_media": True,
+        }
+        with ZipFile(package_path, "w") as archive:
+            archive.writestr("manifest.json", json.dumps(payload, indent=2, ensure_ascii=False))
+            archive.writestr("media/track_media/audio/legacy.wav", b"RIFFlegacy")
+            archive.writestr(
+                "media/track_media/images/legacy.png",
+                bytes.fromhex(
+                    "89504E470D0A1A0A"
+                    "0000000D49484452000000010000000108060000001F15C489"
+                    "0000000D49444154789C63F8FFFF3F0005FE02FEA7D6059F"
+                    "0000000049454E44AE426082"
+                ),
+            )
+
+        new_root = self.data_root / "legacy-imported"
+        new_root.mkdir(parents=True, exist_ok=True)
+        new_conn = sqlite3.connect(":memory:")
+        try:
+            DatabaseSchemaService(new_conn, data_root=new_root).init_db()
+            DatabaseSchemaService(new_conn, data_root=new_root).migrate_schema()
+            new_service = ExchangeService(
+                new_conn,
+                TrackService(new_conn, new_root),
+                ReleaseService(new_conn, new_root),
+                CustomFieldDefinitionService(new_conn),
+                new_root,
+            )
+
+            report = new_service.import_package(package_path, options=ExchangeImportOptions(mode="create"))
+
+            self.assertEqual(report.failed, 0)
+            self.assertEqual(new_conn.execute("SELECT COUNT(*) FROM Tracks").fetchone()[0], 1)
+            self.assertTrue(str(new_conn.execute("SELECT audio_file_path FROM Tracks").fetchone()[0] or "").strip())
+            self.assertTrue(str(new_conn.execute("SELECT artwork_path FROM Releases").fetchone()[0] or "").strip())
+        finally:
+            new_conn.close()
 
     def test_inspect_csv_suggests_known_headers(self):
         csv_path = self.data_root / "headers.csv"

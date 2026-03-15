@@ -5,7 +5,9 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import shutil
 import sqlite3
+import tempfile
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
@@ -354,16 +356,8 @@ class ExchangeService:
         zip_path = Path(path)
         zip_path.parent.mkdir(parents=True, exist_ok=True)
         headers, rows = self.export_rows(track_ids)
-        payload = {
-            "schema_version": JSON_SCHEMA_VERSION,
-            "exported_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
-            "columns": headers,
-            "rows": rows,
-            "custom_field_defs": self.custom_fields.list_active_fields(),
-            "packaged_media": True,
-        }
+        packaged_media_index: dict[str, str] = {}
         with ZipFile(zip_path, "w", compression=ZIP_DEFLATED) as archive:
-            archive.writestr("manifest.json", json.dumps(payload, indent=2, ensure_ascii=False))
             if self.data_root is not None:
                 written_media: set[str] = set()
                 for row in rows:
@@ -379,7 +373,104 @@ class ExchangeService:
                             continue
                         archive.write(abs_path, arcname=arcname)
                         written_media.add(arcname)
+                        packaged_media_index[rel_path] = arcname
+            payload = {
+                "schema_version": JSON_SCHEMA_VERSION,
+                "exported_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+                "columns": headers,
+                "rows": rows,
+                "custom_field_defs": self.custom_fields.list_active_fields(),
+                "packaged_media": True,
+                "packaged_media_index": packaged_media_index,
+            }
+            archive.writestr("manifest.json", json.dumps(payload, indent=2, ensure_ascii=False))
         return len(rows)
+
+    def _load_json_payload(self, path: str | Path) -> dict[str, object]:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        schema_version = int(payload.get("schema_version") or 0)
+        if schema_version != JSON_SCHEMA_VERSION:
+            raise ValueError(
+                f"Unsupported JSON schema version {schema_version}. Expected {JSON_SCHEMA_VERSION}."
+            )
+        return payload
+
+    def _load_package_payload(self, path: str | Path) -> dict[str, object]:
+        with ZipFile(path, "r") as archive:
+            try:
+                manifest_bytes = archive.read("manifest.json")
+            except KeyError as exc:
+                raise ValueError("ZIP package does not contain manifest.json.") from exc
+        payload = json.loads(manifest_bytes.decode("utf-8"))
+        schema_version = int(payload.get("schema_version") or 0)
+        if schema_version != JSON_SCHEMA_VERSION:
+            raise ValueError(
+                f"Unsupported package schema version {schema_version}. Expected {JSON_SCHEMA_VERSION}."
+            )
+        return payload
+
+    @staticmethod
+    def _safe_extract_zip(path: str | Path, target_dir: Path) -> None:
+        target_root = target_dir.resolve()
+        with ZipFile(path, "r") as archive:
+            for member in archive.infolist():
+                member_name = str(member.filename or "")
+                destination = (target_root / member_name).resolve()
+                try:
+                    destination.relative_to(target_root)
+                except ValueError as exc:
+                    raise ValueError(f"ZIP package contains an unsafe path: {member_name}") from exc
+                if member.is_dir():
+                    destination.mkdir(parents=True, exist_ok=True)
+                    continue
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                with archive.open(member, "r") as src, destination.open("wb") as dst:
+                    shutil.copyfileobj(src, dst)
+
+    @staticmethod
+    def _normalize_package_media_key(value: object) -> str:
+        return str(value or "").strip().replace("\\", "/")
+
+    def _prepare_packaged_rows(
+        self,
+        payload: dict[str, object],
+        *,
+        extracted_root: Path,
+    ) -> list[dict[str, object]]:
+        packaged_media_index = payload.get("packaged_media_index")
+        media_lookup: dict[str, str] = {}
+        if isinstance(packaged_media_index, dict):
+            for stored_path, arcname in packaged_media_index.items():
+                key = self._normalize_package_media_key(stored_path)
+                arc = str(arcname or "").strip()
+                if key and arc:
+                    media_lookup[key] = arc
+
+        prepared_rows: list[dict[str, object]] = []
+        for source_row in payload.get("rows") or []:
+            row = dict(source_row)
+            for field_name in ("audio_file_path", "album_art_path", "release_artwork_path"):
+                raw_value = row.get(field_name)
+                normalized_key = self._normalize_package_media_key(raw_value)
+                if not normalized_key:
+                    continue
+                resolved_path = None
+                if normalized_key in media_lookup:
+                    candidate = extracted_root / media_lookup[normalized_key]
+                    if candidate.exists():
+                        resolved_path = candidate
+                if resolved_path is None:
+                    direct_candidate = extracted_root / normalized_key
+                    if direct_candidate.exists():
+                        resolved_path = direct_candidate
+                if resolved_path is None:
+                    media_candidate = extracted_root / "media" / normalized_key
+                    if media_candidate.exists():
+                        resolved_path = media_candidate
+                if resolved_path is not None:
+                    row[field_name] = str(resolved_path)
+            prepared_rows.append(row)
+        return prepared_rows
 
     def inspect_csv(self, path: str | Path, *, delimiter: str = ",") -> ExchangeInspection:
         with Path(path).open("r", encoding="utf-8-sig", newline="") as handle:
@@ -413,17 +504,32 @@ class ExchangeService:
         )
 
     def inspect_json(self, path: str | Path) -> ExchangeInspection:
-        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        payload = self._load_json_payload(path)
         headers = list(payload.get("columns") or [])
         preview_rows = [dict(row) for row in list(payload.get("rows") or [])[:5]]
         warnings = []
-        if int(payload.get("schema_version") or 0) != JSON_SCHEMA_VERSION:
-            warnings.append(
-                f"JSON schema version {payload.get('schema_version')} differs from supported version {JSON_SCHEMA_VERSION}."
-            )
         return ExchangeInspection(
             file_path=str(path),
             format_name="json",
+            headers=headers,
+            preview_rows=preview_rows,
+            suggested_mapping=self._suggest_mapping(headers),
+            warnings=warnings,
+        )
+
+    def inspect_package(self, path: str | Path) -> ExchangeInspection:
+        payload = self._load_package_payload(path)
+        headers = list(payload.get("columns") or [])
+        preview_rows = [dict(row) for row in list(payload.get("rows") or [])[:5]]
+        packaged_media_index = payload.get("packaged_media_index")
+        media_count = len(packaged_media_index) if isinstance(packaged_media_index, dict) else 0
+        warnings = []
+        if not bool(payload.get("packaged_media")):
+            warnings.append("This ZIP does not advertise packaged media.")
+        warnings.append(f"Packaged media entries detected: {media_count}")
+        return ExchangeInspection(
+            file_path=str(path),
+            format_name="package",
             headers=headers,
             preview_rows=preview_rows,
             suggested_mapping=self._suggest_mapping(headers),
@@ -468,14 +574,23 @@ class ExchangeService:
         return self._import_rows(rows, mapping=mapping, options=options, format_name="xlsx", source_dir=Path(path).parent)
 
     def import_json(self, path: str | Path, *, options: ExchangeImportOptions | None = None) -> ExchangeImportReport:
-        payload = json.loads(Path(path).read_text(encoding="utf-8"))
-        schema_version = int(payload.get("schema_version") or 0)
-        if schema_version != JSON_SCHEMA_VERSION:
-            raise ValueError(
-                f"Unsupported JSON schema version {schema_version}. Expected {JSON_SCHEMA_VERSION}."
-            )
+        payload = self._load_json_payload(path)
         rows = [dict(row) for row in payload.get("rows") or []]
         return self._import_rows(rows, mapping=None, options=options, format_name="json", source_dir=Path(path).parent)
+
+    def import_package(self, path: str | Path, *, options: ExchangeImportOptions | None = None) -> ExchangeImportReport:
+        payload = self._load_package_payload(path)
+        with tempfile.TemporaryDirectory(prefix="exchange-package-") as temp_dir:
+            extracted_root = Path(temp_dir)
+            self._safe_extract_zip(path, extracted_root)
+            rows = self._prepare_packaged_rows(payload, extracted_root=extracted_root)
+            return self._import_rows(
+                rows,
+                mapping=None,
+                options=options,
+                format_name="package",
+                source_dir=extracted_root,
+            )
 
     def _apply_mapping(self, row: dict[str, object], mapping: dict[str, str] | None) -> dict[str, object]:
         if not mapping:
@@ -567,7 +682,7 @@ class ExchangeService:
             return str(path)
         return None
 
-    def _upsert_release_from_row(self, row: dict[str, object], track_id: int) -> None:
+    def _upsert_release_from_row(self, row: dict[str, object], track_id: int, *, source_dir: Path) -> None:
         release_title = str(row.get("release_title") or "").strip()
         if not release_title:
             return
@@ -615,6 +730,7 @@ class ExchangeService:
             territory=str(row.get("release_territory") or "").strip() or None,
             explicit_flag=str(row.get("release_explicit_flag") or "").strip().lower() in {"1", "true", "yes"},
             notes=str(row.get("release_notes") or "").strip() or None,
+            artwork_source_path=self._resolve_media_path(source_dir, row.get("release_artwork_path")),
             placements=[placement],
         )
         if existing_id is None:
@@ -768,13 +884,14 @@ class ExchangeService:
                     track_id = existing_track_id
 
                 _apply_custom_fields(track_id, row)
-                self._upsert_release_from_row(row, track_id)
+                self._upsert_release_from_row(row, track_id, source_dir=source_dir)
             except Exception as exc:
                 failed += 1
                 warnings.append(f"Row {index}: {exc}")
 
         return ExchangeImportReport(
             format_name=format_name,
+            mode=opts.mode,
             passed=passed,
             failed=failed,
             skipped=skipped,

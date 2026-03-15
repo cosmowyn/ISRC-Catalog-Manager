@@ -4818,6 +4818,11 @@ class App(QMainWindow):
             slot=lambda: self.import_exchange_file("json"),
         )
         import_exchange_menu.addAction(self.import_json_action)
+        self.import_package_action = self._create_action(
+            "Import ZIP Package…",
+            slot=lambda: self.import_exchange_file("package"),
+        )
+        import_exchange_menu.addAction(self.import_package_action)
 
         export_submenu = file_menu.addMenu("Export")
         self.export_selected_action = self._create_action(
@@ -7763,6 +7768,13 @@ class App(QMainWindow):
                 "action": self.import_json_action,
             },
             {
+                "id": "import_package",
+                "label": "Import ZIP Package",
+                "category": "File",
+                "description": "Import a packaged ZIP export with manifest metadata and media copies.",
+                "action": self.import_package_action,
+            },
+            {
                 "id": "export_selected",
                 "label": "Export Selected to XML",
                 "category": "File",
@@ -10031,6 +10043,7 @@ class App(QMainWindow):
             "csv": "CSV Files (*.csv)",
             "xlsx": "Excel Workbook (*.xlsx)",
             "json": "JSON Files (*.json)",
+            "package": "ZIP Packages (*.zip)",
         }
         path, _ = QFileDialog.getOpenFileName(
             self,
@@ -10048,6 +10061,8 @@ class App(QMainWindow):
                 inspection = self.exchange_service.inspect_xlsx(path)
             elif normalized_format == "json":
                 inspection = self.exchange_service.inspect_json(path)
+            elif normalized_format == "package":
+                inspection = self.exchange_service.inspect_package(path)
             else:
                 raise ValueError(f"Unsupported exchange format: {normalized_format}")
         except Exception as exc:
@@ -10065,6 +10080,7 @@ class App(QMainWindow):
             inspection=inspection,
             supported_headers=supported_headers,
             settings=self.settings,
+            initial_mode=("create" if normalized_format == "package" else "dry_run"),
             parent=self,
         )
         if dlg.exec() != QDialog.Accepted:
@@ -10084,6 +10100,8 @@ class App(QMainWindow):
                 report = self.exchange_service.import_csv(path, mapping=mapping, options=options)
             elif normalized_format == "xlsx":
                 report = self.exchange_service.import_xlsx(path, mapping=mapping, options=options)
+            elif normalized_format == "package":
+                report = self.exchange_service.import_package(path, options=options)
             else:
                 report = self.exchange_service.import_json(path, options=options)
         except Exception as exc:
@@ -10153,10 +10171,14 @@ class App(QMainWindow):
     def _show_exchange_import_report(self, path: str, report: ExchangeImportReport) -> None:
         lines = [
             f"Format: {report.format_name.upper()}",
+            f"Mode: {report.mode}",
             f"Passed: {report.passed}",
             f"Failed: {report.failed}",
             f"Skipped: {report.skipped}",
         ]
+        if report.mode == "dry_run":
+            lines.append("")
+            lines.append("No database changes were made because this run used Dry run validation mode.")
         if report.duplicates:
             lines.append(f"Duplicates: {len(report.duplicates)}")
         if report.unknown_fields:

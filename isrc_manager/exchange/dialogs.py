@@ -31,12 +31,14 @@ class ExchangeImportDialog(QDialog):
         inspection: ExchangeInspection,
         supported_headers: list[str],
         settings,
+        initial_mode: str = "dry_run",
         parent=None,
     ):
         super().__init__(parent)
         self.inspection = inspection
         self.supported_headers = supported_headers
         self.settings = settings
+        self.initial_mode = str(initial_mode or "dry_run")
 
         self.setWindowTitle(f"Import {inspection.format_name.upper()}")
         self.resize(1100, 760)
@@ -106,6 +108,10 @@ class ExchangeImportDialog(QDialog):
         option_row.addWidget(self.create_custom_checkbox)
         root.addLayout(option_row)
 
+        self.mode_hint_label = QLabel()
+        self.mode_hint_label.setWordWrap(True)
+        root.addWidget(self.mode_hint_label)
+
         mapping_label = QLabel("Column Mapping")
         root.addWidget(mapping_label)
 
@@ -126,18 +132,21 @@ class ExchangeImportDialog(QDialog):
 
         buttons = QHBoxLayout()
         buttons.addStretch(1)
-        import_button = QPushButton("Run Import")
-        import_button.setDefault(True)
-        import_button.clicked.connect(self.accept)
+        self.import_button = QPushButton("Run Import")
+        self.import_button.setDefault(True)
+        self.import_button.clicked.connect(self.accept)
         cancel_button = QPushButton("Cancel")
         cancel_button.clicked.connect(self.reject)
-        buttons.addWidget(import_button)
+        buttons.addWidget(self.import_button)
         buttons.addWidget(cancel_button)
         root.addLayout(buttons)
 
         self._reload_presets()
         self._populate_mapping_table()
         self._populate_preview_table()
+        self._apply_initial_mode()
+        self.mode_combo.currentIndexChanged.connect(self._update_mode_affordances)
+        self._update_mode_affordances()
 
     def _settings_key(self) -> str:
         return f"exchange/mapping_presets/{self.inspection.format_name}"
@@ -183,6 +192,25 @@ class ExchangeImportDialog(QDialog):
                     column,
                     QTableWidgetItem("" if row.get(header) is None else str(row.get(header))),
                 )
+
+    def _apply_initial_mode(self) -> None:
+        index = self.mode_combo.findData(self.initial_mode)
+        if index < 0:
+            index = self.mode_combo.findData("dry_run")
+        self.mode_combo.setCurrentIndex(max(0, index))
+
+    def _update_mode_affordances(self) -> None:
+        mode = str(self.mode_combo.currentData() or "dry_run")
+        if mode == "dry_run":
+            self.import_button.setText("Run Validation")
+            self.mode_hint_label.setText(
+                "Dry run checks the source data and mappings only. No rows will be written to the database."
+            )
+        else:
+            self.import_button.setText("Import Data")
+            self.mode_hint_label.setText(
+                "This mode writes rows into the current profile using the matching rules selected below."
+            )
 
     def _save_preset(self) -> None:
         name = self.preset_name_edit.text().strip()

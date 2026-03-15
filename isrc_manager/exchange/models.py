@@ -28,6 +28,7 @@ class ExchangeImportOptions:
 @dataclass(slots=True)
 class ExchangeImportReport:
     format_name: str
+    mode: str
     passed: int
     failed: int
     skipped: int

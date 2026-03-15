@@ -195,14 +195,14 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         <p>Beyond XML and the GS1 workbook workflow, the app now supports broader catalog exchange formats for local-first sharing and archive workflows.</p>
         <ul>
           <li><strong>Export formats</strong>: CSV, XLSX, JSON, XML, and ZIP packages containing a JSON manifest plus copied media references.</li>
-          <li><strong>Import formats</strong>: CSV, XLSX, JSON, and XML.</li>
+          <li><strong>Import formats</strong>: CSV, XLSX, JSON, ZIP packages, and XML.</li>
           <li><strong>Import preview</strong>: CSV and XLSX imports open a mapping dialog so you can confirm how source columns map to standard or custom fields before running the import.</li>
           <li><strong>Saved mapping presets</strong>: frequently used column mappings can be saved per format and reused later.</li>
           <li><strong>Import modes</strong>: dry-run validation, create new rows, merge into existing matches, update existing matches only, or insert-new-when-duplicate-exists.</li>
           <li><strong>Matching options</strong>: internal ID, ISRC, UPC/EAN plus title, and optional title/artist heuristics.</li>
           <li><strong>JSON schema versioning</strong>: exported JSON includes an explicit schema version so future migrations stay manageable.</li>
         </ul>
-        <p>Binary media is exported by file reference in plain tabular formats. ZIP package exports also copy referenced media into the package so the export remains portable without embedding raw blobs into CSV or XLSX.</p>
+        <p>Binary media is exported by file reference in plain tabular formats. ZIP package exports also copy referenced media into the package so the export remains portable without embedding raw blobs into CSV or XLSX, and those ZIP packages can be imported back into the app directly.</p>
         """,
     ),
     HelpChapter(
