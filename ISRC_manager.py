@@ -5724,20 +5724,31 @@ class App(QMainWindow):
             if self.conn is not None:
                 media_rows = self.conn.execute(
                     """
-                    SELECT id, track_title, audio_file_path, album_art_path
+                    SELECT id, track_title, audio_file_path
                     FROM Tracks
                     ORDER BY id
                     """
                 ).fetchall()
-                for track_id, track_title, audio_path, art_path in media_rows:
+                for track_id, track_title, audio_path in media_rows:
                     if audio_path:
                         resolved = self.track_service.resolve_media_path(audio_path) if self.track_service else Path(audio_path)
                         if resolved is not None and not resolved.exists():
                             missing_files.append(f"Track #{track_id} '{track_title}': missing audio file -> {resolved}")
-                    if art_path:
-                        resolved = self.track_service.resolve_media_path(art_path) if self.track_service else Path(art_path)
-                        if resolved is not None and not resolved.exists():
-                            missing_files.append(f"Track #{track_id} '{track_title}': missing album art -> {resolved}")
+
+                album_art_rows = self.conn.execute(
+                    """
+                    SELECT id, title, album_art_path
+                    FROM Albums
+                    WHERE album_art_path IS NOT NULL AND album_art_path != ''
+                    ORDER BY id
+                    """
+                ).fetchall()
+                for album_id, album_title, art_path in album_art_rows:
+                    resolved = self.track_service.resolve_media_path(art_path) if self.track_service else Path(art_path)
+                    if resolved is not None and not resolved.exists():
+                        missing_files.append(
+                            f"Album #{album_id} '{album_title or 'Untitled Album'}': missing album art -> {resolved}"
+                        )
 
                 license_rows = self.conn.execute(
                     "SELECT id, filename, file_path FROM Licenses ORDER BY id"
@@ -10173,11 +10184,19 @@ class App(QMainWindow):
 
     def _delete_standard_media_for_track(self, track_id: int, media_key: str):
         header_label = "Audio File" if media_key == "audio_file" else "Album Art"
+        confirm_text = f"Remove the stored {header_label.lower()} from this track?"
+        if media_key == "album_art" and self.track_service is not None:
+            shared_track_ids = self.track_service.list_album_group_track_ids(track_id, cursor=self.cursor)
+            if len(shared_track_ids) > 1:
+                confirm_text = (
+                    f"Remove the shared album art for this album?\n"
+                    f"This will affect {len(shared_track_ids)} linked track(s)."
+                )
         if (
             QMessageBox.question(
                 self,
                 "Delete File",
-                f"Remove the stored {header_label.lower()} from this track?",
+                confirm_text,
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No,
             )

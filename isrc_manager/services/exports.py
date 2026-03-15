@@ -123,8 +123,22 @@ class XMLExportService:
                 COALESCE(t.buma_work_number, '') AS buma_work_number,
                 COALESCE(t.audio_file_mime_type, '') AS audio_file_mime_type,
                 COALESCE(t.audio_file_size_bytes, 0) AS audio_file_size_bytes,
-                COALESCE(t.album_art_mime_type, '') AS album_art_mime_type,
-                COALESCE(t.album_art_size_bytes, 0) AS album_art_size_bytes
+                CASE
+                    WHEN t.album_id IS NOT NULL
+                     AND TRIM(COALESCE(al.title, '')) != ''
+                     AND LOWER(TRIM(COALESCE(al.title, ''))) != 'single'
+                     AND COALESCE(al.album_art_path, '') != ''
+                    THEN COALESCE(al.album_art_mime_type, '')
+                    ELSE COALESCE(t.album_art_mime_type, '')
+                END AS album_art_mime_type,
+                CASE
+                    WHEN t.album_id IS NOT NULL
+                     AND TRIM(COALESCE(al.title, '')) != ''
+                     AND LOWER(TRIM(COALESCE(al.title, ''))) != 'single'
+                     AND COALESCE(al.album_art_path, '') != ''
+                    THEN COALESCE(al.album_art_size_bytes, 0)
+                    ELSE COALESCE(t.album_art_size_bytes, 0)
+                END AS album_art_size_bytes
             FROM Tracks t
             LEFT JOIN Artists a ON a.id = t.main_artist_id
             LEFT JOIN Albums al ON al.id = t.album_id

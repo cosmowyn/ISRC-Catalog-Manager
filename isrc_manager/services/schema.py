@@ -51,10 +51,14 @@ class DatabaseSchemaService:
             """
             CREATE TABLE IF NOT EXISTS Albums (
                 id INTEGER PRIMARY KEY,
-                title TEXT NOT NULL
+                title TEXT NOT NULL,
+                album_art_path TEXT,
+                album_art_mime_type TEXT,
+                album_art_size_bytes INTEGER NOT NULL DEFAULT 0
             )
             """
         )
+        self._ensure_current_album_columns()
         self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_title ON Albums(title)")
 
         self.cursor.execute(
@@ -383,6 +387,9 @@ class DatabaseSchemaService:
             elif version == 15:
                 self._apply_migration(15, self._mig_15_to_16)
                 version = 16
+            elif version == 16:
+                self._apply_migration(16, self._mig_16_to_17)
+                version = 17
             else:
                 self.logger.warning("Unknown migration path from version %s", version)
                 break
@@ -782,6 +789,9 @@ class DatabaseSchemaService:
     def _mig_15_to_16(self) -> None:
         self._ensure_gs1_metadata_table()
 
+    def _mig_16_to_17(self) -> None:
+        self._ensure_current_album_columns()
+
     def _ensure_current_track_columns(self) -> None:
         cols = self._table_columns("Tracks")
         additions = (
@@ -807,6 +817,28 @@ class DatabaseSchemaService:
                 self.cursor.execute("UPDATE Tracks SET isrc_compact=? WHERE id=?", (to_compact_isrc(isrc), track_id))
         self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_catalog_number ON Tracks(catalog_number)")
         self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_buma_work_number ON Tracks(buma_work_number)")
+
+    def _ensure_current_album_columns(self) -> None:
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS Albums (
+                id INTEGER PRIMARY KEY,
+                title TEXT NOT NULL,
+                album_art_path TEXT,
+                album_art_mime_type TEXT,
+                album_art_size_bytes INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+        cols = self._table_columns("Albums")
+        additions = (
+            ("album_art_path", "TEXT"),
+            ("album_art_mime_type", "TEXT"),
+            ("album_art_size_bytes", "INTEGER NOT NULL DEFAULT 0"),
+        )
+        for column_name, column_sql in additions:
+            if column_name not in cols:
+                self.cursor.execute(f"ALTER TABLE Albums ADD COLUMN {column_name} {column_sql}")
 
     def _ensure_gs1_metadata_table(self) -> None:
         self.cursor.execute(

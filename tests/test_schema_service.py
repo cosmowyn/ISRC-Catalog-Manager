@@ -26,6 +26,9 @@ class DatabaseSchemaServiceTests(unittest.TestCase):
         value_columns = {
             row[1] for row in self.conn.execute("PRAGMA table_info(CustomFieldValues)").fetchall()
         }
+        album_columns = {
+            row[1] for row in self.conn.execute("PRAGMA table_info(Albums)").fetchall()
+        }
         track_columns = {
             row[1] for row in self.conn.execute("PRAGMA table_info(Tracks)").fetchall()
         }
@@ -51,6 +54,14 @@ class DatabaseSchemaServiceTests(unittest.TestCase):
         self.assertIn("vw_Licenses", tables)
         self.assertIn("contract_number", gs1_columns)
         self.assertTrue({"blob_value", "mime_type", "size_bytes"} <= value_columns)
+        self.assertTrue(
+            {
+                "album_art_path",
+                "album_art_mime_type",
+                "album_art_size_bytes",
+            }
+            <= album_columns
+        )
         self.assertTrue(
             {
                 "audio_file_path",

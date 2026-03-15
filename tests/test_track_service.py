@@ -1,5 +1,7 @@
 import sqlite3
+import tempfile
 import unittest
+from pathlib import Path
 
 from isrc_manager.services import TrackCreatePayload, TrackService, TrackUpdatePayload
 
@@ -15,7 +17,10 @@ def make_track_conn():
         );
         CREATE TABLE Albums (
             id INTEGER PRIMARY KEY,
-            title TEXT NOT NULL
+            title TEXT NOT NULL,
+            album_art_path TEXT,
+            album_art_mime_type TEXT,
+            album_art_size_bytes INTEGER NOT NULL DEFAULT 0
         );
         CREATE TABLE Tracks (
             id INTEGER PRIMARY KEY,
@@ -57,10 +62,13 @@ def make_track_conn():
 class TrackServiceTests(unittest.TestCase):
     def setUp(self):
         self.conn = make_track_conn()
-        self.service = TrackService(self.conn)
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.data_root = Path(self.temp_dir.name)
+        self.service = TrackService(self.conn, self.data_root)
 
     def tearDown(self):
         self.conn.close()
+        self.temp_dir.cleanup()
 
     def test_create_track_persists_relations_and_metadata(self):
         track_id = self.service.create_track(
@@ -325,6 +333,126 @@ class TrackServiceTests(unittest.TestCase):
         self.assertEqual(peer_snapshot.track_length_sec, 321)
         self.assertEqual(peer_snapshot.iswc, "T-123.456.780-0")
         self.assertEqual(peer_snapshot.buma_work_number, "BUMA-88")
+
+    def test_album_art_is_shared_across_real_album_tracks(self):
+        lead_track = self.service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00030",
+                track_title="Lead Track",
+                artist_name="Album Artist",
+                additional_artists=[],
+                album_title="Shared Art Album",
+                release_date="2026-03-13",
+                track_length_sec=245,
+                iswc=None,
+                upc=None,
+                genre=None,
+            )
+        )
+        peer_track = self.service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00031",
+                track_title="Peer Track",
+                artist_name="Album Artist",
+                additional_artists=[],
+                album_title="Shared Art Album",
+                release_date="2026-03-13",
+                track_length_sec=245,
+                iswc=None,
+                upc=None,
+                genre=None,
+            )
+        )
+
+        source_image = self.data_root / "cover.png"
+        source_image.write_bytes(b"shared-album-art")
+
+        self.service.set_media_path(lead_track, "album_art", source_image)
+
+        lead_meta = self.service.get_media_meta(lead_track, "album_art")
+        peer_meta = self.service.get_media_meta(peer_track, "album_art")
+        self.assertTrue(lead_meta["has_media"])
+        self.assertTrue(peer_meta["has_media"])
+        self.assertEqual(lead_meta["path"], peer_meta["path"])
+        self.assertEqual(lead_meta["mime_type"], "image/png")
+
+        album_row = self.conn.execute(
+            """
+            SELECT al.album_art_path, al.album_art_mime_type, al.album_art_size_bytes
+            FROM Albums al
+            JOIN Tracks t ON t.album_id = al.id
+            WHERE t.id = ?
+            """,
+            (lead_track,),
+        ).fetchone()
+        self.assertEqual(album_row[0], lead_meta["path"])
+        self.assertEqual(album_row[1], "image/png")
+        self.assertGreater(int(album_row[2] or 0), 0)
+
+        track_rows = self.conn.execute(
+            "SELECT album_art_path FROM Tracks WHERE id IN (?, ?) ORDER BY id",
+            (lead_track, peer_track),
+        ).fetchall()
+        self.assertEqual(track_rows, [(None,), (None,)])
+
+        lead_bytes, _ = self.service.fetch_media_bytes(lead_track, "album_art")
+        peer_bytes, _ = self.service.fetch_media_bytes(peer_track, "album_art")
+        self.assertEqual(lead_bytes, b"shared-album-art")
+        self.assertEqual(peer_bytes, b"shared-album-art")
+
+    def test_clearing_shared_album_art_removes_managed_file_when_unreferenced(self):
+        lead_track = self.service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00040",
+                track_title="Lead Track",
+                artist_name="Album Artist",
+                additional_artists=[],
+                album_title="Shared Art Album",
+                release_date="2026-03-13",
+                track_length_sec=245,
+                iswc=None,
+                upc=None,
+                genre=None,
+            )
+        )
+        peer_track = self.service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00041",
+                track_title="Peer Track",
+                artist_name="Album Artist",
+                additional_artists=[],
+                album_title="Shared Art Album",
+                release_date="2026-03-13",
+                track_length_sec=245,
+                iswc=None,
+                upc=None,
+                genre=None,
+            )
+        )
+
+        source_image = self.data_root / "cover_delete.png"
+        source_image.write_bytes(b"delete-me")
+
+        meta = self.service.set_media_path(lead_track, "album_art", source_image)
+        managed_path = self.service.resolve_media_path(str(meta["path"] or ""))
+        self.assertIsNotNone(managed_path)
+        self.assertTrue(managed_path.exists())
+
+        self.service.clear_media(peer_track, "album_art")
+
+        self.assertFalse(self.service.get_media_meta(lead_track, "album_art")["has_media"])
+        self.assertFalse(self.service.get_media_meta(peer_track, "album_art")["has_media"])
+        album_row = self.conn.execute(
+            """
+            SELECT al.album_art_path
+            FROM Albums al
+            JOIN Tracks t ON t.album_id = al.id
+            WHERE t.id = ?
+            """,
+            (lead_track,),
+        ).fetchone()
+        self.assertEqual(album_row, (None,))
+        self.assertFalse(managed_path.exists())
 
     def test_delete_track_removes_track_and_join_rows(self):
         track_id = self.service.create_track(

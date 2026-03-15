@@ -17,7 +17,10 @@ def make_export_conn():
         );
         CREATE TABLE Albums (
             id INTEGER PRIMARY KEY,
-            title TEXT NOT NULL
+            title TEXT NOT NULL,
+            album_art_path TEXT,
+            album_art_mime_type TEXT,
+            album_art_size_bytes INTEGER NOT NULL DEFAULT 0
         );
         CREATE TABLE Tracks (
             id INTEGER PRIMARY KEY,
@@ -67,7 +70,12 @@ def make_export_conn():
         "INSERT INTO Artists(id, name) VALUES (?, ?)",
         [(1, "Main Artist"), (2, "Guest Artist"), (3, "Second Artist")],
     )
-    conn.execute("INSERT INTO Albums(id, title) VALUES (1, 'Album One')")
+    conn.execute(
+        """
+        INSERT INTO Albums(id, title, album_art_path, album_art_mime_type, album_art_size_bytes)
+        VALUES (1, 'Album One', 'track_media/images/cover.png', 'image/png', 42)
+        """
+    )
     conn.executemany(
         """
         INSERT INTO Tracks(
@@ -80,7 +88,7 @@ def make_export_conn():
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
-            (1, "NL-ABC-26-00001", "2026-03-13", "track_media/audio/demo.wav", "audio/wav", 512, "First Song", "CAT-001", "track_media/images/cover.png", "image/png", 42, 1, "BUMA-42", 1, "2026-03-14", 195, "T-123.456.789-0", "123456789012", "Pop"),
+            (1, "NL-ABC-26-00001", "2026-03-13", "track_media/audio/demo.wav", "audio/wav", 512, "First Song", "CAT-001", None, None, 0, 1, "BUMA-42", 1, "2026-03-14", 195, "T-123.456.789-0", "123456789012", "Pop"),
             (2, "NL-ABC-26-00002", "2026-03-15", None, None, 0, "Second Song", "", None, None, 0, 3, "", None, "", 60, "", "", "Rock"),
         ],
     )
