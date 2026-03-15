@@ -27,7 +27,7 @@ from logging.handlers import RotatingFileHandler
 
 from PySide6.QtCore import(QRegularExpression, Signal, QEvent,
     Qt, QDate, QPoint, QSettings, QStandardPaths, QByteArray, QUrl, QEvent, QTimer, QEventLoop, QSortFilterProxyModel,
-    QItemSelectionModel, )
+    QItemSelectionModel, QtMsgType, qInstallMessageHandler, )
 
 from PySide6.QtGui import (QDesktopServices, QCursor, QAction,
     QIcon, QAction, QKeySequence, QImage, QPixmap, QStandardItemModel, QStandardItem,
@@ -147,6 +147,28 @@ class _JsonLogFormatter(logging.Formatter):
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)
         return json.dumps(payload, ensure_ascii=True, default=str)
+
+
+_PREVIOUS_QT_MESSAGE_HANDLER = None
+
+
+def _install_qt_message_filter() -> None:
+    global _PREVIOUS_QT_MESSAGE_HANDLER
+    if _PREVIOUS_QT_MESSAGE_HANDLER is not None:
+        return
+
+    def _handler(mode, context, message):
+        category = getattr(context, "category", "") or ""
+        if category == "qt.multimedia.ffmpeg" and mode in (QtMsgType.QtDebugMsg, QtMsgType.QtInfoMsg):
+            return
+        if category == "qt.qpa.fonts" and "Populating font family aliases took" in message:
+            return
+        if _PREVIOUS_QT_MESSAGE_HANDLER is not None:
+            _PREVIOUS_QT_MESSAGE_HANDLER(mode, context, message)
+            return
+        sys.stderr.write(f"{message}\n")
+
+    _PREVIOUS_QT_MESSAGE_HANDLER = qInstallMessageHandler(_handler)
 
 
 def _find_theme_owner(widget: QWidget | None):
@@ -6198,6 +6220,13 @@ class App(QMainWindow):
     def _normalize_theme_string(value) -> str:
         return str(value or "").strip()
 
+    @classmethod
+    def _normalize_theme_font_family(cls, value, fallback) -> str:
+        text = cls._normalize_theme_string(value)
+        if text in {"-apple-system", "BlinkMacSystemFont", "system-ui"}:
+            return str(fallback)
+        return text or str(fallback)
+
     @staticmethod
     def _normalize_theme_color(value) -> str:
         text = str(value or "").strip()
@@ -6239,7 +6268,7 @@ class App(QMainWindow):
             elif key == "selected_name":
                 normalized[key] = self._normalize_theme_string(value)
             elif key == "font_family":
-                normalized[key] = self._normalize_theme_string(value) or str(default)
+                normalized[key] = self._normalize_theme_font_family(value, default)
             else:
                 normalized[key] = self._normalize_theme_color(value)
         return normalized
@@ -13711,6 +13740,7 @@ def load_wav_peaks(path: str, width_px: int):
 def main() -> int:
     settings = init_settings()
 
+    _install_qt_message_filter()
     app = QApplication(sys.argv)
 
     lock = enforce_single_instance(60000)

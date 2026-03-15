@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import warnings
 from zipfile import ZipFile
 from xml.etree import ElementTree as ET
 
@@ -89,12 +90,20 @@ class GS1TemplateVerificationService:
 
         load_workbook, invalid_file_exc = _load_openpyxl()
         try:
-            workbook = load_workbook(
-                filename=str(path),
-                read_only=True,
-                data_only=False,
-                keep_vba=path.suffix.lower() == ".xlsm",
-            )
+            with warnings.catch_warnings():
+                # Some official GS1 workbooks contain Excel-only data-validation extensions
+                # that openpyxl warns about while reading. Verification only inspects the
+                # workbook structure and never saves it, so that warning is just console noise here.
+                warnings.filterwarnings(
+                    "ignore",
+                    message="Data Validation extension is not supported and will be removed",
+                )
+                workbook = load_workbook(
+                    filename=str(path),
+                    read_only=True,
+                    data_only=False,
+                    keep_vba=path.suffix.lower() == ".xlsm",
+                )
         except invalid_file_exc as exc:
             raise GS1TemplateVerificationError(
                 "The selected file could not be opened as an Excel workbook."

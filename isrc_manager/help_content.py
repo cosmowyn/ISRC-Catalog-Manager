@@ -368,7 +368,7 @@ def render_help_html(app_name: str, version_text: str = "") -> str:
   <title>{escape(app_name)} Help</title>
   <style>
     body {{
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-family: "SF Pro Text", "Helvetica Neue", "Segoe UI", Arial, sans-serif;
       margin: 24px;
       line-height: 1.55;
       color: #18212b;
