@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFileDialog,
+    QFrame,
     QGroupBox,
     QHeaderView,
     QHBoxLayout,
@@ -26,6 +27,7 @@ from PySide6.QtWidgets import (
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -54,6 +56,75 @@ def _safe_filename(text: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", str(text or "").strip())
     cleaned = cleaned.strip("._")
     return cleaned or "gs1_export"
+
+
+def _dialog_stylesheet(object_name: str) -> str:
+    return f"""
+    QDialog#{object_name} QLabel[role="dialogTitle"] {{
+        font-size: 26px;
+        font-weight: 700;
+    }}
+    QDialog#{object_name} QLabel[role="dialogSubtitle"] {{
+        color: #64748b;
+        font-size: 15px;
+    }}
+    QDialog#{object_name} QLabel[role="sectionDescription"],
+    QDialog#{object_name} QLabel[role="supportingText"] {{
+        color: #52606d;
+    }}
+    QDialog#{object_name} QGroupBox {{
+        font-size: 15px;
+        font-weight: 600;
+        margin-top: 10px;
+    }}
+    QDialog#{object_name} QGroupBox::title {{
+        subcontrol-origin: margin;
+        left: 10px;
+        padding: 0 6px;
+    }}
+    """
+
+
+def _create_help_button(owner: QWidget, *, app, topic_id: str, tooltip: str | None = None) -> QToolButton:
+    button = QToolButton(owner)
+    button.setText("?")
+    button.setFixedSize(28, 28)
+    button.setProperty("role", "helpButton")
+    button.setToolTip(tooltip or "Open help")
+    def _open():
+        opener = getattr(app, "open_help_dialog", None)
+        if callable(opener):
+            opener(topic_id=topic_id, parent=owner)
+    button.clicked.connect(_open)
+    return button
+
+
+def _add_dialog_header(
+    layout: QVBoxLayout,
+    owner: QWidget,
+    *,
+    app,
+    title: str,
+    subtitle: str | None = None,
+    help_topic_id: str | None = None,
+) -> tuple[QLabel, QLabel | None]:
+    title_row = QHBoxLayout()
+    title_row.setSpacing(12)
+    title_label = QLabel(title, owner)
+    title_label.setProperty("role", "dialogTitle")
+    title_row.addWidget(title_label)
+    title_row.addStretch(1)
+    if help_topic_id:
+        title_row.addWidget(_create_help_button(owner, app=app, topic_id=help_topic_id))
+    layout.addLayout(title_row)
+
+    subtitle_label = None
+    if subtitle:
+        subtitle_label = QLabel(subtitle, owner)
+        subtitle_label.setProperty("role", "dialogSubtitle")
+        subtitle_label.setWordWrap(True)
+        layout.addWidget(subtitle_label)
+    return title_label, subtitle_label
 
 
 class GS1MetadataEditorPage(QWidget):
@@ -432,14 +503,25 @@ class GS1ExportPreviewDialog(QDialog):
     def __init__(self, plan: GS1ExportPlan, parent=None):
         super().__init__(parent)
         self.plan = plan
+        self.setObjectName("gs1ExportPreviewDialog")
         self.setWindowTitle("GS1 Export Preview")
         self.setModal(True)
         self.resize(1080, 680)
         self.setMinimumSize(960, 560)
+        self.setStyleSheet(_dialog_stylesheet("gs1ExportPreviewDialog"))
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(16, 16, 16, 16)
-        root.setSpacing(12)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(14)
+        preview_host = parent if parent is not None else self
+        _add_dialog_header(
+            root,
+            self,
+            app=getattr(preview_host, "app", preview_host),
+            title="GS1 Export Preview",
+            subtitle="Review the final workbook rows before the export is written to the selected official GS1 template.",
+            help_topic_id="gs1-metadata",
+        )
 
         summary_box = QGroupBox("Export Summary", self)
         summary_layout = QVBoxLayout(summary_box)
@@ -549,19 +631,30 @@ class GS1MetadataDialog(QDialog):
         self.setModal(True)
         self.resize(1120, 860)
         self.setMinimumSize(1020, 780)
+        self.setObjectName("gs1MetadataDialog")
+        self.setStyleSheet(_dialog_stylesheet("gs1MetadataDialog"))
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(16, 16, 16, 16)
-        root.setSpacing(12)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(14)
+        _add_dialog_header(
+            root,
+            self,
+            app=self.app,
+            title="GS1 Metadata",
+            subtitle="Prepare grouped GS1 product data, verify the official workbook, and export the final spreadsheet from one workflow.",
+            help_topic_id="gs1-metadata",
+        )
 
         scroll_area = QScrollArea(self)
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_area.setFrameShape(QFrame.NoFrame)
         scroll_content = QWidget(scroll_area)
         scroll_content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         content_layout = QVBoxLayout(scroll_content)
         content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(12)
+        content_layout.setSpacing(14)
         scroll_area.setWidget(scroll_content)
         root.addWidget(scroll_area, 1)
 

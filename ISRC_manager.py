@@ -207,6 +207,100 @@ def _create_round_help_button(owner: QWidget, topic_id: str, tooltip: str | None
     return button
 
 
+def _standard_dialog_stylesheet(object_name: str, extra_qss: str = "") -> str:
+    base_qss = f"""
+    QDialog#{object_name} QLabel[role="dialogTitle"] {{
+        font-size: 26px;
+        font-weight: 700;
+    }}
+    QDialog#{object_name} QLabel[role="dialogSubtitle"] {{
+        color: #64748b;
+        font-size: 15px;
+    }}
+    QDialog#{object_name} QLabel[role="sectionDescription"],
+    QDialog#{object_name} QLabel[role="supportingText"],
+    QDialog#{object_name} QLabel[role="secondary"],
+    QDialog#{object_name} QLabel[role="meta"],
+    QDialog#{object_name} QLabel[role="statusText"] {{
+        color: #52606d;
+    }}
+    QDialog#{object_name} QGroupBox {{
+        font-size: 15px;
+        font-weight: 600;
+        margin-top: 10px;
+    }}
+    QDialog#{object_name} QGroupBox::title {{
+        subcontrol-origin: margin;
+        left: 10px;
+        padding: 0 6px;
+    }}
+    QDialog#{object_name} QFrame[role="compactControlGroup"] {{
+        border: 1px solid palette(mid);
+        border-radius: 8px;
+        background: palette(base);
+    }}
+    """
+    if extra_qss.strip():
+        return f"{base_qss}\n{extra_qss.strip()}\n"
+    return base_qss
+
+
+def _apply_standard_dialog_chrome(dialog: QDialog, object_name: str, *, extra_qss: str = "") -> None:
+    dialog.setObjectName(object_name)
+    dialog.setStyleSheet(
+        _compose_widget_stylesheet(
+            dialog,
+            _standard_dialog_stylesheet(object_name, extra_qss=extra_qss),
+        )
+    )
+
+
+def _add_standard_dialog_header(
+    layout: QVBoxLayout,
+    owner: QWidget,
+    *,
+    title: str,
+    subtitle: str | None = None,
+    help_topic_id: str | None = None,
+) -> tuple[QLabel, QLabel | None]:
+    title_row = QHBoxLayout()
+    title_row.setSpacing(12)
+
+    title_label = QLabel(title, owner)
+    title_label.setProperty("role", "dialogTitle")
+    title_row.addWidget(title_label)
+    title_row.addStretch(1)
+    if help_topic_id:
+        title_row.addWidget(_create_round_help_button(owner, help_topic_id), 0, Qt.AlignTop)
+    layout.addLayout(title_row)
+
+    subtitle_label = None
+    if subtitle:
+        subtitle_label = QLabel(subtitle, owner)
+        subtitle_label.setProperty("role", "dialogSubtitle")
+        subtitle_label.setWordWrap(True)
+        layout.addWidget(subtitle_label)
+
+    return title_label, subtitle_label
+
+
+def _create_standard_section(
+    owner: QWidget,
+    title: str,
+    description: str | None = None,
+) -> tuple[QGroupBox, QVBoxLayout]:
+    box = QGroupBox(title, owner)
+    box_layout = QVBoxLayout(box)
+    box_layout.setContentsMargins(14, 18, 14, 14)
+    box_layout.setSpacing(10)
+    if description:
+        desc_label = QLabel(description, box)
+        desc_label.setProperty("role", "sectionDescription")
+        desc_label.setWordWrap(True)
+        box_layout.addWidget(desc_label)
+    return box, box_layout
+
+
 # =============================================================================
 # Custom Columns Dialog (with type + options)
 # =============================================================================
@@ -222,20 +316,38 @@ class CustomColumnsDialog(QDialog):
     def __init__(self, fields, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Manage Custom Columns")
+        self.setModal(True)
+        self.resize(760, 560)
+        self.setMinimumSize(680, 500)
+        _apply_standard_dialog_chrome(self, "customColumnsDialog")
 
         # fields: [{"id": int|None, "name": str, "field_type": "text|dropdown|checkbox|date", "options": str|None}]
         self.fields = [dict(f) for f in fields]
 
-        layout = QVBoxLayout(self)
-        help_row = QHBoxLayout()
-        help_row.addStretch(1)
-        help_row.addWidget(_create_round_help_button(self, "custom-columns"))
-        layout.addLayout(help_row)
-
         self.listw = QListWidget()
-        layout.addWidget(self.listw)
+        self.listw.setAlternatingRowColors(True)
+        self.listw.setMinimumHeight(280)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(14)
+        _add_standard_dialog_header(
+            layout,
+            self,
+            title="Manage Custom Columns",
+            subtitle="Create, rename, remove, and configure custom metadata fields used across the catalog.",
+            help_topic_id="custom-columns",
+        )
+
+        list_box, list_layout = _create_standard_section(
+            self,
+            "Defined Columns",
+            "Each custom column stores one metadata field for every track. Dropdown fields can keep a reusable list of choices.",
+        )
+        list_layout.addWidget(self.listw, 1)
 
         row1 = QHBoxLayout()
+        row1.setSpacing(8)
         self.btn_add = QPushButton("Add…")
         self.btn_remove = QPushButton("Remove")
         self.btn_rename = QPushButton("Rename…")
@@ -246,22 +358,26 @@ class CustomColumnsDialog(QDialog):
         row1.addWidget(self.btn_rename)
         row1.addWidget(self.btn_type)
         row1.addWidget(self.btn_opts)
-        layout.addLayout(row1)
+        row1.addStretch(1)
+        list_layout.addLayout(row1)
+        layout.addWidget(list_box, 1)
 
-        row2 = QHBoxLayout()
-        ok = QPushButton("OK")
-        cancel = QPushButton("Cancel")
-        row2.addWidget(ok)
-        row2.addWidget(cancel)
-        layout.addLayout(row2)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, Qt.Horizontal, self)
+        ok = buttons.button(QDialogButtonBox.Ok)
+        cancel = buttons.button(QDialogButtonBox.Cancel)
+        if ok is not None:
+            ok.setDefault(True)
+        if cancel is not None:
+            cancel.setAutoDefault(False)
+        layout.addWidget(buttons)
 
         self.btn_add.clicked.connect(self._add)
         self.btn_remove.clicked.connect(self._remove)
         self.btn_rename.clicked.connect(self._rename)
         self.btn_type.clicked.connect(self._change_type)
         self.btn_opts.clicked.connect(self._edit_options)
-        ok.clicked.connect(self.accept)
-        cancel.clicked.connect(self.reject)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
 
         self._refresh_list()
 
@@ -464,34 +580,49 @@ class DatePickerDialog(QDialog):
     def __init__(self, parent=None, initial_iso_date: str | None = None, title: str = "Pick a date"):
         super().__init__(parent)
         self.setWindowTitle(title)
+        self.setModal(True)
+        self.resize(500, 460)
+        self.setMinimumSize(460, 420)
+        _apply_standard_dialog_chrome(self, "datePickerDialog")
+
         lay = QVBoxLayout(self)
-        help_row = QHBoxLayout()
-        help_row.addStretch(1)
-        help_row.addWidget(_create_round_help_button(self, "metadata-dates"))
-        lay.addLayout(help_row)
+        lay.setContentsMargins(18, 18, 18, 18)
+        lay.setSpacing(14)
+        _add_standard_dialog_header(
+            lay,
+            self,
+            title=title,
+            subtitle="Choose a calendar date or clear the field completely.",
+            help_topic_id="metadata-dates",
+        )
+
+        calendar_box, calendar_layout = _create_standard_section(self, "Calendar")
 
         self.calendar = FocusWheelCalendarWidget()
+        self.calendar.setVerticalHeaderFormat(QCalendarWidget.NoVerticalHeader)
+        self.calendar.setHorizontalHeaderFormat(QCalendarWidget.ShortDayNames)
         if initial_iso_date:
             qd = QDate.fromString(initial_iso_date, "yyyy-MM-dd")
             self.calendar.setSelectedDate(qd if qd.isValid() else QDate.currentDate())
         else:
             self.calendar.setSelectedDate(QDate.currentDate())
-        lay.addWidget(self.calendar)
+        calendar_layout.addWidget(self.calendar, 0, Qt.AlignCenter)
+        lay.addWidget(calendar_box, 1)
 
-        btns = QHBoxLayout()
-        self.btn_clear = QPushButton("Clear")
-        self.btn_ok = QPushButton("OK")
-        self.btn_cancel = QPushButton("Cancel")
-        btns.addWidget(self.btn_clear)
-        btns.addStretch(1)
-        btns.addWidget(self.btn_ok)
-        btns.addWidget(self.btn_cancel)
-        lay.addLayout(btns)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, Qt.Horizontal, self)
+        self.btn_clear = buttons.addButton("Clear", QDialogButtonBox.ResetRole)
+        self.btn_ok = buttons.button(QDialogButtonBox.Ok)
+        self.btn_cancel = buttons.button(QDialogButtonBox.Cancel)
+        if self.btn_ok is not None:
+            self.btn_ok.setDefault(True)
+        if self.btn_cancel is not None:
+            self.btn_cancel.setAutoDefault(False)
+        lay.addWidget(buttons)
 
         self._cleared = False
         self.btn_clear.clicked.connect(self._on_clear)
-        self.btn_ok.clicked.connect(self.accept)
-        self.btn_cancel.clicked.connect(self.reject)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
 
     def _on_clear(self):
         self._cleared = True
@@ -1070,19 +1201,15 @@ class ApplicationSettingsDialog(QDialog):
         )
         theme_layout.addWidget(typography_box)
 
-        color_columns = QHBoxLayout()
-        color_columns.setSpacing(14)
-        theme_layout.addLayout(color_columns)
-
         app_colors_box = QGroupBox("Application Colors")
         app_colors_grid = QGridLayout(app_colors_box)
         self._configure_grid(app_colors_grid)
-        color_columns.addWidget(app_colors_box, 1)
+        theme_layout.addWidget(app_colors_box)
 
         control_colors_box = QGroupBox("Controls & Tables")
         control_colors_grid = QGridLayout(control_colors_box)
         self._configure_grid(control_colors_grid)
-        color_columns.addWidget(control_colors_box, 1)
+        theme_layout.addWidget(control_colors_box)
 
         left_keys = {"window_bg", "window_fg", "accent", "selection_bg", "selection_fg"}
         left_row = 0
@@ -2198,70 +2325,58 @@ class HelpContentsDialog(QDialog):
     def __init__(self, app, parent=None):
         super().__init__(parent or app)
         self.app = app
-        self.setObjectName("helpContentsDialog")
         self.setWindowTitle("Help Contents")
         self.resize(1180, 820)
         self.setMinimumSize(980, 680)
         self._current_topic_id = "overview"
         self._help_html = ""
 
-        self.setStyleSheet(
-            _compose_widget_stylesheet(
-                self,
-                """
-                QDialog#helpContentsDialog QLabel#helpTitle {
-                    font-size: 28px;
-                    font-weight: 700;
-                }
-                QDialog#helpContentsDialog QLabel#helpSubtitle {
-                    color: #64748b;
-                    font-size: 15px;
-                }
-                QDialog#helpContentsDialog QListWidget#helpChapterList {
-                    min-width: 280px;
-                }
-                """,
-            )
+        _apply_standard_dialog_chrome(
+            self,
+            "helpContentsDialog",
+            extra_qss="""
+            QDialog#helpContentsDialog QListWidget#helpChapterList {
+                min-width: 280px;
+            }
+            """,
         )
 
         root = QVBoxLayout(self)
         root.setContentsMargins(18, 18, 18, 18)
         root.setSpacing(14)
 
-        title_row = QHBoxLayout()
-        title_row.setSpacing(10)
-        title = QLabel("Help Contents")
-        title.setObjectName("helpTitle")
-        title_row.addWidget(title)
-        title_row.addStretch(1)
-        root.addLayout(title_row)
-
-        subtitle = QLabel(
-            "Search the local help manual, browse indexed chapters, and jump directly to the section that matches the current window."
+        _add_standard_dialog_header(
+            root,
+            self,
+            title="Help Contents",
+            subtitle="Search the local help manual, browse indexed chapters, and jump directly to the section that matches the current window.",
         )
-        subtitle.setObjectName("helpSubtitle")
-        subtitle.setWordWrap(True)
-        root.addWidget(subtitle)
 
-        search_row = QHBoxLayout()
-        search_row.setSpacing(8)
         self.search_field = QLineEdit(self)
         self.search_field.setPlaceholderText("Search help...")
+        self.search_field.setClearButtonEnabled(True)
         self.search_field.setMinimumWidth(320)
         self.search_prev_button = QPushButton("Previous Match")
         self.search_next_button = QPushButton("Next Match")
         self.open_file_button = QPushButton("Open Help File")
         self.close_button = QPushButton("Close")
+        search_box, search_layout = _create_standard_section(
+            self,
+            "Find & Navigate",
+            "Filter the chapter index or search inside the loaded help page. Use the navigation buttons to jump between matches.",
+        )
+        search_row = QHBoxLayout()
+        search_row.setSpacing(8)
         search_row.addWidget(self.search_field, 1)
         search_row.addWidget(self.search_prev_button)
         search_row.addWidget(self.search_next_button)
         search_row.addStretch(1)
         search_row.addWidget(self.open_file_button)
         search_row.addWidget(self.close_button)
-        root.addLayout(search_row)
+        search_layout.addLayout(search_row)
+        root.addWidget(search_box)
 
         splitter = QSplitter(Qt.Horizontal, self)
-        root.addWidget(splitter, 1)
 
         self.chapter_list = QListWidget(self)
         self.chapter_list.setObjectName("helpChapterList")
@@ -2273,6 +2388,13 @@ class HelpContentsDialog(QDialog):
         splitter.addWidget(self.browser)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
+        content_box, content_layout = _create_standard_section(
+            self,
+            "Help Manual",
+            "Browse the indexed chapters on the left and read the selected help article on the right.",
+        )
+        content_layout.addWidget(splitter, 1)
+        root.addWidget(content_box, 1)
 
         self.match_status_label = QLabel("Type to search or select a chapter from the index.")
         self.match_status_label.setProperty("role", "secondary")
@@ -2552,14 +2674,10 @@ class _ManageArtistsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Manage stored artists")
         self.setModal(True)
+        self.resize(900, 620)
+        self.setMinimumSize(820, 560)
         self.catalog_service = parent.catalog_service
-
-        v = QVBoxLayout(self)
-        help_row = QHBoxLayout()
-        help_row.addStretch(1)
-        help_row.addWidget(_create_round_help_button(self, "catalog-managers"))
-        v.addLayout(help_row)
-        v.addWidget(QLabel("Only artists with 0 references can be deleted."))
+        _apply_standard_dialog_chrome(self, "manageArtistsDialog")
 
         self.tbl = QTableWidget(0, 5, self)
         self.tbl.setHorizontalHeaderLabels(["Artist", "Main uses", "Extra uses", "Total", "Delete?"])
@@ -2567,13 +2685,35 @@ class _ManageArtistsDialog(QDialog):
         hh.setSectionResizeMode(0, QHeaderView.Stretch)
         for c in (1, 2, 3, 4): hh.setSectionResizeMode(c, QHeaderView.ResizeToContents)
         self.tbl.setEditTriggers(QTableWidget.NoEditTriggers)
-        v.addWidget(self.tbl)
+        self.tbl.setAlternatingRowColors(True)
+        self.tbl.verticalHeader().setVisible(False)
+        self.tbl.setMinimumHeight(380)
+
+        v = QVBoxLayout(self)
+        v.setContentsMargins(18, 18, 18, 18)
+        v.setSpacing(14)
+        _add_standard_dialog_header(
+            v,
+            self,
+            title="Stored Artists",
+            subtitle="Review artist names stored in the catalog and safely remove entries that are no longer used anywhere.",
+            help_topic_id="catalog-managers",
+        )
+
+        table_box, table_layout = _create_standard_section(
+            self,
+            "Artist Usage",
+            "Only artists with zero references can be deleted or purged from the stored artist list.",
+        )
+        table_layout.addWidget(self.tbl, 1)
 
         h = QHBoxLayout()
-        btn_refresh = QPushButton("Refresh"); btn_purge = QPushButton("Purge all unused")
-        btn_delete  = QPushButton("Delete selected"); btn_close = QPushButton("Close")
+        h.setSpacing(8)
+        btn_refresh = QPushButton("Refresh"); btn_purge = QPushButton("Purge All Unused")
+        btn_delete  = QPushButton("Delete Selected"); btn_close = QPushButton("Close")
         h.addWidget(btn_refresh); h.addWidget(btn_purge); h.addWidget(btn_delete); h.addStretch(1); h.addWidget(btn_close)
-        v.addLayout(h)
+        table_layout.addLayout(h)
+        v.addWidget(table_box, 1)
 
         btn_refresh.clicked.connect(self._load)
         btn_purge.clicked.connect(self._purge_unused)
@@ -2655,14 +2795,10 @@ class _ManageAlbumsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Manage stored album names")
         self.setModal(True)
+        self.resize(860, 600)
+        self.setMinimumSize(780, 540)
         self.catalog_service = parent.catalog_service
-
-        v = QVBoxLayout(self)
-        help_row = QHBoxLayout()
-        help_row.addStretch(1)
-        help_row.addWidget(_create_round_help_button(self, "catalog-managers"))
-        v.addLayout(help_row)
-        v.addWidget(QLabel("Only albums with 0 references can be deleted."))
+        _apply_standard_dialog_chrome(self, "manageAlbumsDialog")
 
         self.tbl = QTableWidget(0, 3, self)
         self.tbl.setHorizontalHeaderLabels(["Album", "Uses", "Delete?"])
@@ -2671,13 +2807,35 @@ class _ManageAlbumsDialog(QDialog):
         hh.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         hh.setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.tbl.setEditTriggers(QTableWidget.NoEditTriggers)
-        v.addWidget(self.tbl)
+        self.tbl.setAlternatingRowColors(True)
+        self.tbl.verticalHeader().setVisible(False)
+        self.tbl.setMinimumHeight(360)
+
+        v = QVBoxLayout(self)
+        v.setContentsMargins(18, 18, 18, 18)
+        v.setSpacing(14)
+        _add_standard_dialog_header(
+            v,
+            self,
+            title="Stored Albums",
+            subtitle="Review stored album titles and safely remove records that are no longer linked to any tracks.",
+            help_topic_id="catalog-managers",
+        )
+
+        table_box, table_layout = _create_standard_section(
+            self,
+            "Album Usage",
+            "Only album titles with zero linked tracks can be deleted or purged from the catalog list.",
+        )
+        table_layout.addWidget(self.tbl, 1)
 
         h = QHBoxLayout()
-        btn_refresh = QPushButton("Refresh"); btn_purge = QPushButton("Purge all unused")
-        btn_delete  = QPushButton("Delete selected"); btn_close = QPushButton("Close")
+        h.setSpacing(8)
+        btn_refresh = QPushButton("Refresh"); btn_purge = QPushButton("Purge All Unused")
+        btn_delete  = QPushButton("Delete Selected"); btn_close = QPushButton("Close")
         h.addWidget(btn_refresh); h.addWidget(btn_purge); h.addWidget(btn_delete); h.addStretch(1); h.addWidget(btn_close)
-        v.addLayout(h)
+        table_layout.addLayout(h)
+        v.addWidget(table_box, 1)
 
         btn_refresh.clicked.connect(self._load)
         btn_purge.clicked.connect(self._purge_unused)
@@ -2761,6 +2919,9 @@ class LicenseUploadDialog(QDialog):
         self.license_service = license_service
         self.setWindowTitle("Add License (PDF)")
         self.setModal(True)
+        self.resize(720, 420)
+        self.setMinimumSize(640, 360)
+        _apply_standard_dialog_chrome(self, "licenseUploadDialog")
 
         # --- Controls ---
         self.track_combo = FocusWheelComboBox()
@@ -2776,50 +2937,62 @@ class LicenseUploadDialog(QDialog):
         for lid, name in licensees:
             self.lic_combo.addItem(name, lid)
 
-        self.file_label = QLabel("No file chosen")
+        self.file_label = QLabel("No signed PDF selected yet.")
+        self.file_label.setProperty("role", "supportingText")
+        self.file_label.setWordWrap(True)
         self.btn_pick = QPushButton("Upload PDF…")
         self.btn_pick.clicked.connect(self._pick_pdf)
 
-        self.btn_save = QPushButton("Save")
-        self.btn_save.setEnabled(False)
-        self.btn_cancel = QPushButton("Cancel")
-        self.btn_cancel.clicked.connect(self.reject)
-        self.btn_save.clicked.connect(self._save)
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(18, 18, 18, 18)
+        main_layout.setSpacing(14)
+        _add_standard_dialog_header(
+            main_layout,
+            self,
+            title="Attach Signed License PDF",
+            subtitle="Link a signed PDF to one catalog track and store it in the managed license archive.",
+            help_topic_id="licenses",
+        )
 
-        # --- Layout ---
+        details_box, details_layout = _create_standard_section(
+            self,
+            "License Details",
+            "Choose the track and licensee that this uploaded PDF should belong to.",
+        )
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
         form.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)
-        form.setHorizontalSpacing(12)
+        form.setHorizontalSpacing(14)
         form.setVerticalSpacing(10)
         form.addRow("Track", self.track_combo)
         form.addRow("Licensee", self.lic_combo)
+        details_layout.addLayout(form)
+        main_layout.addWidget(details_box)
 
+        file_box, file_layout = _create_standard_section(
+            self,
+            "Signed PDF",
+            "The selected file is copied into the app-managed license storage when you save.",
+        )
         file_row = QHBoxLayout()
+        file_row.setSpacing(10)
         file_row.addWidget(self.file_label, 1)
-        file_row.addSpacing(12)
-        file_row.addWidget(self.btn_pick, 0, Qt.AlignRight)
+        file_row.addWidget(self.btn_pick)
+        file_layout.addLayout(file_row)
+        main_layout.addWidget(file_box)
 
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(16, 16, 16, 16)
-        main_layout.setSpacing(12)
-        help_row = QHBoxLayout()
-        help_row.addStretch(1)
-        help_row.addWidget(_create_round_help_button(self, "licenses"))
-        main_layout.addLayout(help_row)
-        main_layout.addLayout(form)
-        main_layout.addLayout(file_row)
-        main_layout.addStretch(1)  # push content up/left
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel, Qt.Horizontal, self)
+        self.btn_save = buttons.button(QDialogButtonBox.Save)
+        self.btn_cancel = buttons.button(QDialogButtonBox.Cancel)
+        if self.btn_save is not None:
+            self.btn_save.setEnabled(False)
+            self.btn_save.setDefault(True)
+        if self.btn_cancel is not None:
+            self.btn_cancel.setAutoDefault(False)
+        buttons.accepted.connect(self._save)
+        buttons.rejected.connect(self.reject)
+        main_layout.addWidget(buttons)
 
-        buttons = QHBoxLayout()
-        buttons.addStretch(1)
-        buttons.addWidget(self.btn_cancel)
-        buttons.addSpacing(16)
-        buttons.addWidget(self.btn_save)
-        buttons.addStretch(1)
-        main_layout.addLayout(buttons)
-
-        self.resize(560, 240)
         self._picked_path = None
 
     def _pick_pdf(self):
@@ -2873,7 +3046,9 @@ class LicensesBrowserDialog(QDialog):
         self.license_service = license_service
         self.setWindowTitle("Licenses")
         self.setModal(True)
-        self.resize(900, 520)
+        self.resize(1080, 760)
+        self.setMinimumSize(980, 680)
+        _apply_standard_dialog_chrome(self, "licensesBrowserDialog")
 
         # --- model/proxy ---
         self.model = QStandardItemModel(self)
@@ -2890,9 +3065,11 @@ class LicensesBrowserDialog(QDialog):
         self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.table.setEditTriggers(QTableView.NoEditTriggers)
         self.table.verticalHeader().setVisible(False)
+        self.table.setAlternatingRowColors(True)
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._ctx_menu)
         self.table.installEventFilter(self)
+        self.table.horizontalHeader().setStretchLastSection(True)
 
         self.list = QListView()
         self.list.setModel(self.proxy)
@@ -2901,19 +3078,15 @@ class LicensesBrowserDialog(QDialog):
         self.list.customContextMenuRequested.connect(self._ctx_menu)
         self.list.installEventFilter(self)
 
-        tabs = QTabWidget()
-        tabs.addTab(self.table, "Table")
-        tabs.addTab(self.list, "List")
+        self.tabs = QTabWidget()
+        self.tabs.addTab(self.table, "Table")
+        self.tabs.addTab(self.list, "List")
 
         # --- filter ---
         self.filter_edit = QLineEdit()
         self.filter_edit.setPlaceholderText("Fuzzy filter…")
+        self.filter_edit.setClearButtonEnabled(True)
         self.filter_edit.textChanged.connect(self._apply_filter)
-        self.filter_row = QHBoxLayout()
-        self.filter_row.setContentsMargins(0, 0, 0, 0)
-        self.filter_row.setSpacing(8)
-        self.filter_row.addWidget(self.filter_edit, 1)
-        self.filter_row.addWidget(_create_round_help_button(self, "licenses"))
 
         # --- actions (single instances, reused in menu + context) ---
         self.act_preview = QAction("Preview (Space)", self)
@@ -2928,20 +3101,60 @@ class LicensesBrowserDialog(QDialog):
         self.act_delete = QAction("Delete Selected", self)
         self.act_delete.triggered.connect(self._delete_selected)
 
-        # --- menubar ---
-        mbar = QMenuBar(self)
-        act_menu = mbar.addMenu("Actions")
-        act_menu.addAction(self.act_preview)
-        act_menu.addAction(self.act_download)
-        act_menu.addSeparator()
-        act_menu.addAction(self.act_edit)
-        act_menu.addAction(self.act_delete)
-
         # --- layout ---
         v = QVBoxLayout(self)
-        v.setMenuBar(mbar)
-        v.addLayout(self.filter_row)
-        v.addWidget(tabs)
+        v.setContentsMargins(18, 18, 18, 18)
+        v.setSpacing(14)
+        _add_standard_dialog_header(
+            v,
+            self,
+            title="License Archive",
+            subtitle="Browse stored license PDFs, preview the documents, and manage the records linked to your catalog tracks.",
+            help_topic_id="licenses",
+        )
+
+        filter_box, filter_layout = _create_standard_section(
+            self,
+            "Find Licenses",
+            "Search by licensee, track title, upload date, or filename. The table view supports multi-select deletion.",
+        )
+        filter_row = QHBoxLayout()
+        filter_row.setContentsMargins(0, 0, 0, 0)
+        filter_row.setSpacing(8)
+        filter_row.addWidget(self.filter_edit, 1)
+        filter_layout.addLayout(filter_row)
+        v.addWidget(filter_box)
+
+        browser_box, browser_layout = _create_standard_section(
+            self,
+            "Stored License Records",
+            "Use the action buttons or the context menu to preview, download, edit, or delete the selected license records.",
+        )
+        action_row = QHBoxLayout()
+        action_row.setSpacing(8)
+        self.preview_button = QPushButton("Preview")
+        self.download_button = QPushButton("Download PDF…")
+        self.edit_button = QPushButton("Edit…")
+        self.delete_button = QPushButton("Delete Selected")
+        self.refresh_button = QPushButton("Refresh")
+        self.preview_button.clicked.connect(self._preview_pdf)
+        self.download_button.clicked.connect(self._download_pdf)
+        self.edit_button.clicked.connect(self._edit_selected)
+        self.delete_button.clicked.connect(self._delete_selected)
+        self.refresh_button.clicked.connect(self.refresh_data)
+        action_row.addWidget(self.preview_button)
+        action_row.addWidget(self.download_button)
+        action_row.addWidget(self.edit_button)
+        action_row.addWidget(self.delete_button)
+        action_row.addStretch(1)
+        action_row.addWidget(self.refresh_button)
+        browser_layout.addLayout(action_row)
+        browser_layout.addWidget(self.tabs, 1)
+        v.addWidget(browser_box, 1)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Close, Qt.Horizontal, self)
+        buttons.rejected.connect(self.reject)
+        v.addWidget(buttons)
 
         # --- init/load ---
         self._track_filter_id = track_filter_id
@@ -2950,6 +3163,7 @@ class LicensesBrowserDialog(QDialog):
         # after views exist, hook selection signals
         self.table.selectionModel().selectionChanged.connect(lambda *_: self._update_action_states())
         self.list.selectionModel().selectionChanged.connect(lambda *_: self._update_action_states())
+        self.tabs.currentChanged.connect(lambda *_: self._update_action_states())
         self._update_action_states()
 
     # ---------- helpers ----------
@@ -2957,6 +3171,14 @@ class LicensesBrowserDialog(QDialog):
         has = bool(self._selected_record())
         for a in (self.act_preview, self.act_download, self.act_edit, self.act_delete):
             a.setEnabled(has)
+        for button in (
+            getattr(self, "preview_button", None),
+            getattr(self, "download_button", None),
+            getattr(self, "edit_button", None),
+            getattr(self, "delete_button", None),
+        ):
+            if button is not None:
+                button.setEnabled(has)
 
     def refresh_data(self):
         filt = self.filter_edit.text()
@@ -2989,17 +3211,49 @@ class LicensesBrowserDialog(QDialog):
         self.table.resizeColumnsToContents()
 
     def _selected_record(self):
-        # prefer the view that has focus; fall back to table
-        idx = self.table.currentIndex() if self.table.hasFocus() else self.list.currentIndex()
+        current_view = self.tabs.currentWidget()
+        idx = current_view.currentIndex() if current_view is not None else self.table.currentIndex()
         if not idx.isValid():
             idx = self.table.currentIndex()
-            if not idx.isValid():
-                return None
+        if not idx.isValid():
+            idx = self.list.currentIndex()
+        if not idx.isValid():
+            return None
         src = self.proxy.mapToSource(idx)
         row = src.row()
         file_path = self.model.item(row, 4).text()
         rec_id = int(self.model.item(row, 5).text())
         return rec_id, file_path
+
+    def _selected_records(self) -> list[tuple[int, str]]:
+        current_view = self.tabs.currentWidget()
+        proxy_indices = []
+        if current_view is self.table:
+            proxy_indices = list(self.table.selectionModel().selectedRows())
+        else:
+            idx = self.list.currentIndex()
+            if idx.isValid():
+                proxy_indices = [idx]
+
+        if not proxy_indices:
+            if self.table.selectionModel() is not None:
+                proxy_indices = list(self.table.selectionModel().selectedRows())
+            elif self.list.currentIndex().isValid():
+                proxy_indices = [self.list.currentIndex()]
+
+        rows: list[tuple[int, str]] = []
+        seen_ids: set[int] = set()
+        for proxy_idx in proxy_indices:
+            if not proxy_idx.isValid():
+                continue
+            src_idx = self.proxy.mapToSource(proxy_idx)
+            row = src_idx.row()
+            rec_id = int(self.model.item(row, 5).text())
+            if rec_id in seen_ids:
+                continue
+            seen_ids.add(rec_id)
+            rows.append((rec_id, self.model.item(row, 4).text()))
+        return rows
 
     def _ctx_menu(self, _pos):
         # reuse same actions as menu bar
@@ -3031,7 +3285,9 @@ class LicensesBrowserDialog(QDialog):
 
             dlg = QDialog(self)
             dlg.setWindowTitle(abs_path.name)
-            dlg.resize(900, 640)
+            dlg.resize(980, 760)
+            dlg.setMinimumSize(860, 660)
+            _apply_standard_dialog_chrome(dlg, "licensePdfPreviewDialog")
 
             doc = QPdfDocument(dlg)
             if doc.load(str(abs_path)) != QPdfDocument.NoError:
@@ -3043,11 +3299,27 @@ class LicensesBrowserDialog(QDialog):
             view.setPageMode(QPdfView.PageMode.SinglePage)
 
             layout = QVBoxLayout(dlg)
-            help_row = QHBoxLayout()
-            help_row.addStretch(1)
-            help_row.addWidget(_create_round_help_button(dlg, "licenses"))
-            layout.addLayout(help_row)
-            layout.addWidget(view)
+            layout.setContentsMargins(18, 18, 18, 18)
+            layout.setSpacing(14)
+            _add_standard_dialog_header(
+                layout,
+                dlg,
+                title="License PDF Preview",
+                subtitle=f"Review the stored signed PDF for {abs_path.name}.",
+                help_topic_id="licenses",
+            )
+
+            preview_box, preview_layout = _create_standard_section(
+                dlg,
+                "Document Preview",
+                "This window opens the managed PDF directly from the license archive so you can verify the stored document before downloading or editing it.",
+            )
+            preview_layout.addWidget(view, 1)
+            layout.addWidget(preview_box, 1)
+
+            buttons = QDialogButtonBox(QDialogButtonBox.Close, Qt.Horizontal, dlg)
+            buttons.rejected.connect(dlg.reject)
+            layout.addWidget(buttons)
 
             from PySide6.QtCore import QTimer
             dlg.finished.connect(lambda _: QTimer.singleShot(200, doc.deleteLater))
@@ -3095,7 +3367,12 @@ class LicensesBrowserDialog(QDialog):
         track_id, licensee_id = row
         d = QDialog(self)
         d.setWindowTitle("Edit License")
-        track_lbl = QLabel("Track cannot be changed")
+        d.setModal(True)
+        d.resize(680, 420)
+        d.setMinimumSize(620, 360)
+        _apply_standard_dialog_chrome(d, "editLicenseDialog")
+        track_lbl = QLabel(f"Track ID {track_id}")
+        track_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
         lic_combo = FocusWheelComboBox()
         lic_combo.setEditable(True)
         # load licensees
@@ -3115,26 +3392,40 @@ class LicensesBrowserDialog(QDialog):
                 file_lbl.setText(Path(p).name)
 
         pick_btn.clicked.connect(pick)
-        btn_ok = QPushButton("Save")
-        btn_ok.clicked.connect(lambda: d.accept())
-        btn_cancel = QPushButton("Cancel")
-        btn_cancel.clicked.connect(lambda: d.reject())
-        f = QFormLayout(d)
-        help_row = QHBoxLayout()
-        help_row.addStretch(1)
-        help_row.addWidget(_create_round_help_button(d, "licenses"))
-        f.addRow(help_row)
-        f.addRow(track_lbl)
-        f.addRow("Licensee", lic_combo)
+        root = QVBoxLayout(d)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(14)
+        _add_standard_dialog_header(
+            root,
+            d,
+            title="Edit License Record",
+            subtitle="Update the linked licensee or replace the stored PDF while keeping the track relationship fixed.",
+            help_topic_id="licenses",
+        )
+
+        details_box, details_layout = _create_standard_section(
+            d,
+            "License Details",
+            "The associated track stays fixed for this record. Use this form to correct the licensee name or swap in a newer signed PDF.",
+        )
+        form = QFormLayout()
+        form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        form.setHorizontalSpacing(14)
+        form.setVerticalSpacing(10)
+        form.addRow("Track", track_lbl)
+        form.addRow("Licensee", lic_combo)
         h = QHBoxLayout()
-        h.addWidget(file_lbl)
+        h.setSpacing(8)
+        h.addWidget(file_lbl, 1)
         h.addWidget(pick_btn)
-        f.addRow("File", h)
-        bb = QHBoxLayout()
-        bb.addStretch()
-        bb.addWidget(btn_cancel)
-        bb.addWidget(btn_ok)
-        f.addRow(bb)
+        form.addRow("PDF", h)
+        details_layout.addLayout(form)
+        root.addWidget(details_box, 1)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel, Qt.Horizontal, d)
+        buttons.accepted.connect(d.accept)
+        buttons.rejected.connect(d.reject)
+        root.addWidget(buttons)
         if d.exec() != QDialog.Accepted:
             return
         new_name = lic_combo.currentText().strip()
@@ -3167,19 +3458,12 @@ class LicensesBrowserDialog(QDialog):
             QMessageBox.critical(self, "Error", str(e))
 
     def _delete_selected(self):
-        sel = self.table.selectionModel().selectedRows()
-        if not sel:
+        selected_records = self._selected_records()
+        if not selected_records:
             QMessageBox.information(self, "Delete Licenses", "No records selected.")
             return
 
-        ids, paths = [], []
-        for proxy_idx in sel:
-            src_idx = self.proxy.mapToSource(proxy_idx)
-            row = src_idx.row()
-            rec_id = int(self.model.item(row, 5).text())  # _id
-            fpath = self.model.item(row, 4).text()        # _file
-            ids.append(rec_id)
-            paths.append(fpath)
+        ids = [record_id for record_id, _path in selected_records]
 
         confirm = QMessageBox.question(
             self, "Delete Licenses",
@@ -3231,27 +3515,52 @@ class LicenseeManagerDialog(QDialog):
         super().__init__(parent)
         self.catalog_service = catalog_service
         self.setWindowTitle("Manage Licensees")
-        self.resize(420, 480)
+        self.setModal(True)
+        self.resize(720, 560)
+        self.setMinimumSize(640, 500)
+        _apply_standard_dialog_chrome(self, "licenseeManagerDialog")
 
         self.list = QListWidget()
+        self.list.setAlternatingRowColors(True)
+        self.list.setMinimumHeight(320)
         self._reload()
 
         btn_add = QPushButton("Add")
         btn_ren = QPushButton("Rename")
         btn_del = QPushButton("Delete")
+        btn_close = QPushButton("Close")
         btn_add.clicked.connect(self._add)
         btn_ren.clicked.connect(self._rename)
         btn_del.clicked.connect(self._delete)
+        v = QVBoxLayout(self)
+        v.setContentsMargins(18, 18, 18, 18)
+        v.setSpacing(14)
+        _add_standard_dialog_header(
+            v,
+            self,
+            title="Manage Licensees",
+            subtitle="Keep the stored licensee directory tidy by adding new names or renaming and removing entries that are no longer in use.",
+            help_topic_id="licenses",
+        )
+
+        list_box, list_layout = _create_standard_section(
+            self,
+            "Stored Licensees",
+            "Licensees with linked license records cannot be deleted until those records are removed or reassigned.",
+        )
+        list_layout.addWidget(self.list, 1)
 
         h = QHBoxLayout()
+        h.setSpacing(8)
         h.addWidget(btn_add)
         h.addWidget(btn_ren)
         h.addWidget(btn_del)
         h.addStretch(1)
-        h.addWidget(_create_round_help_button(self, "licenses"))
-        v = QVBoxLayout(self)
-        v.addWidget(self.list)
-        v.addLayout(h)
+        h.addWidget(btn_close)
+        list_layout.addLayout(h)
+        v.addWidget(list_box, 1)
+
+        btn_close.clicked.connect(self.accept)
 
     def _reload(self):
         self.list.clear()
@@ -5005,6 +5314,13 @@ class App(QMainWindow):
 
     def open_help_dialog(self, topic_id: str | None = None, parent=None):
         self._ensure_help_file()
+        if isinstance(parent, QDialog) and parent.isModal():
+            dlg = HelpContentsDialog(self, parent=parent)
+            dlg.setWindowModality(Qt.WindowModal)
+            dlg.refresh_help_source()
+            dlg.open_topic(topic_id or "overview", focus_search=False)
+            dlg.exec()
+            return
         if self.help_dialog is None:
             self.help_dialog = HelpContentsDialog(self, parent=self)
         self.help_dialog.refresh_help_source()
@@ -9115,18 +9431,37 @@ class App(QMainWindow):
 
         dlg = QDialog(self)
         dlg.setWindowTitle(f"Image preview — {title}")
-        layout = QVBoxLayout(dlg)
+        dlg.resize(1040, 780)
+        dlg.setMinimumSize(900, 680)
+        _apply_standard_dialog_chrome(dlg, "imagePreviewDialog")
 
-        # Zoom row
-        zoom_row = QHBoxLayout()
-        zoom_row.addWidget(QLabel("Zoom"))
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(14)
+        _add_standard_dialog_header(
+            layout,
+            dlg,
+            title="Image Preview",
+            subtitle=f"Inspect stored artwork or image media for {title}.",
+            help_topic_id="media-preview",
+        )
+
         zoom_slider = FocusWheelSlider(Qt.Horizontal)
-        zoom_slider.setRange(10, 400)   # percent
+        zoom_slider.setRange(10, 400)
         zoom_value_lbl = QLabel("")
+        zoom_value_lbl.setProperty("role", "statusText")
+        controls_box, controls_layout = _create_standard_section(
+            dlg,
+            "Preview Controls",
+            "Use the zoom slider to inspect the stored image without changing the source file.",
+        )
+        zoom_row = QHBoxLayout()
+        zoom_row.setSpacing(10)
+        zoom_row.addWidget(QLabel("Zoom"), 0)
         zoom_row.addWidget(zoom_slider, 1)
-        zoom_row.addWidget(zoom_value_lbl)
-        zoom_row.addWidget(_create_round_help_button(dlg, "media-preview"))
-        layout.addLayout(zoom_row)
+        zoom_row.addWidget(zoom_value_lbl, 0)
+        controls_layout.addLayout(zoom_row)
+        layout.addWidget(controls_box)
 
         # Image area
         lbl = QLabel()
@@ -9136,13 +9471,18 @@ class App(QMainWindow):
         sc = QScrollArea()
         sc.setWidget(lbl)
         sc.setWidgetResizable(True)
-        layout.addWidget(sc, 1)
-
-        dlg.resize(960, 720)
+        sc.setFrameShape(QFrame.NoFrame)
+        preview_box, preview_layout = _create_standard_section(
+            dlg,
+            "Image",
+            "The preview scales to fit the window until you manually set a zoom level.",
+        )
+        preview_layout.addWidget(sc, 1)
+        layout.addWidget(preview_box, 1)
 
         def fit_percent():
-            avail_w = max(1, dlg.width() - 40)
-            avail_h = max(1, dlg.height() - 120)
+            avail_w = max(1, sc.viewport().width() - 24)
+            avail_h = max(1, sc.viewport().height() - 24)
             sx = avail_w / max(1, base_pix.width())
             sy = avail_h / max(1, base_pix.height())
             pct = int(max(10, min(100, (min(sx, sy) * 100))))
@@ -9177,6 +9517,7 @@ class App(QMainWindow):
 
         detected_mime = self._detect_mime(data) or "image/png"
         button_row = QHBoxLayout()
+        button_row.setSpacing(8)
         button_row.addStretch(1)
         export_btn = QPushButton("Export Image…")
         export_btn.clicked.connect(
@@ -10260,36 +10601,50 @@ class EditDialog(QDialog):
             f"Bulk Edit {len(self.batch_track_ids)} Entries" if self._is_bulk_edit else "Edit Entry"
         )
         self.setModal(True)
+        self.resize(760, 920 if self._is_bulk_edit else 860)
+        self.setMinimumSize(700, 780)
+        _apply_standard_dialog_chrome(self, "editDialog")
 
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(8, 8, 8, 8)
-        main_layout.setSpacing(8)
-
-        help_row = QHBoxLayout()
-        help_row.addStretch(1)
-        help_row.addWidget(_create_round_help_button(self, "edit-entry"))
-        main_layout.addLayout(help_row)
+        main_layout.setContentsMargins(18, 18, 18, 18)
+        main_layout.setSpacing(14)
+        header_subtitle = (
+            "Replace only the fields you want to change across the selected records. Mixed values stay untouched unless you enter a new one."
+            if self._is_bulk_edit
+            else "Update track details, release metadata, registration codes, and managed media from one organized editor."
+        )
+        _add_standard_dialog_header(
+            main_layout,
+            self,
+            title=f"Bulk Edit {len(self.batch_track_ids)} Tracks" if self._is_bulk_edit else "Edit Track",
+            subtitle=header_subtitle,
+            help_topic_id="edit-entry",
+        )
 
         if self._is_bulk_edit:
+            bulk_box, bulk_layout = _create_standard_section(
+                self,
+                "Bulk Edit Rules",
+                "Only changed fields are applied to every selected record. Locked identifiers stay view-only in this editor.",
+            )
             bulk_notice = QLabel(
                 f"Bulk editing {len(self.batch_track_ids)} selected tracks. "
                 f"Fields showing {self.BULK_MIXED_TEXT} stay unchanged unless you replace them. "
                 "ISRC, ISWC, Track Title, Audio File, Track Length, and BUMA Wnr. are view-only in this window."
             )
             bulk_notice.setWordWrap(True)
-            main_layout.addWidget(bulk_notice)
+            bulk_notice.setProperty("role", "supportingText")
+            bulk_layout.addWidget(bulk_notice)
+            main_layout.addWidget(bulk_box)
 
         self._form_container = QWidget(self)
         form_layout = QVBoxLayout()
-        form_layout.setContentsMargins(6, 6, 6, 6)
-        form_layout.setSpacing(10)
+        form_layout.setContentsMargins(0, 0, 0, 0)
+        form_layout.setSpacing(12)
         self._form_container.setLayout(form_layout)
 
         def create_section(title: str):
-            box = QGroupBox(title, self._form_container)
-            box_layout = QVBoxLayout(box)
-            box_layout.setContentsMargins(12, 10, 12, 12)
-            box_layout.setSpacing(8)
+            box, box_layout = _create_standard_section(self._form_container, title)
             form_layout.addWidget(box)
             return box_layout
 
@@ -10493,8 +10848,7 @@ class EditDialog(QDialog):
             self.len_m.valueChanged.connect(lambda _value: self._mark_bulk_field_modified("track_length_sec"))
             self.len_s.valueChanged.connect(lambda _value: self._mark_bulk_field_modified("track_length_sec"))
         tl_group = QFrame(self)
-        tl_group.setFrameShape(QFrame.StyledPanel)
-        tl_group.setFrameShadow(QFrame.Raised)
+        tl_group.setProperty("role", "compactControlGroup")
         tl_group.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
         tl = QHBoxLayout(tl_group)
         tl.setContentsMargins(10, 8, 10, 8)
@@ -10551,6 +10905,7 @@ class EditDialog(QDialog):
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
         scroll.setWidget(self._form_container)
         main_layout.addWidget(scroll, 1)
 
@@ -10578,7 +10933,6 @@ class EditDialog(QDialog):
             self.btn_iswc_copy_compact.setEnabled(False)
 
         self._bulk_loading = False
-        self.resize(520, 800 if self._is_bulk_edit else 760)
 
     @staticmethod
     def _normalize_batch_track_ids(track_id: int, batch_track_ids: list[int] | None) -> list[int]:
@@ -11216,6 +11570,9 @@ class _AudioPreviewDialog(QDialog):
     def __init__(self, parent, file_path: str, title: str):
         super().__init__(parent)
         self._tmp_path = file_path
+        self.setWindowTitle(f"Audio Preview — {title}")
+        self.setMinimumSize(760, 420)
+        _apply_standard_dialog_chrome(self, "audioPreviewDialog")
 
         if platform.system().lower() == "darwin":
             os.environ.setdefault("PATH", "/opt/homebrew/bin:/usr/local/bin:" + os.environ.get("PATH", ""))
@@ -11228,23 +11585,40 @@ class _AudioPreviewDialog(QDialog):
             ]
             os.environ["PATH"] = ";".join([*extra, os.environ.get("PATH", "")])
 
-
         v = QVBoxLayout(self)
+        v.setContentsMargins(18, 18, 18, 18)
+        v.setSpacing(14)
+        _add_standard_dialog_header(
+            v,
+            self,
+            title="Audio Preview",
+            subtitle=f"Listen back to the stored audio media for {title} and inspect its waveform when available.",
+            help_topic_id="media-preview",
+        )
 
-        help_row = QHBoxLayout()
-        help_row.addStretch(1)
-        help_row.addWidget(_create_round_help_button(self, "media-preview"))
-        v.addLayout(help_row)
+        waveform_box, waveform_layout = _create_standard_section(
+            self,
+            "Waveform Preview",
+            "The waveform is generated from the stored audio file when supported by the current runtime.",
+        )
 
         # --- waveform ---
         self.wave = WaveformWidget(self)
-        v.addWidget(self.wave)
+        waveform_layout.addWidget(self.wave)
+        v.addWidget(waveform_box)
 
         # transport row
+        playback_box, playback_layout = _create_standard_section(
+            self,
+            "Playback Controls",
+            "Use the transport buttons or the keyboard shortcuts to play, pause, stop, and scrub through the preview.",
+        )
         h = QHBoxLayout()
+        h.setSpacing(8)
         btn_play = QPushButton("Play"); btn_pause = QPushButton("Pause"); btn_stop = QPushButton("Stop")
         h.addWidget(btn_play); h.addWidget(btn_pause); h.addWidget(btn_stop)
-        v.addLayout(h)
+        h.addStretch(1)
+        playback_layout.addLayout(h)
 
         # --- audio backend ---
         self._player = QMediaPlayer(self)
@@ -11270,7 +11644,10 @@ class _AudioPreviewDialog(QDialog):
         # slider + time
         self._slider = FocusWheelSlider(Qt.Horizontal)
         self._label_time = QLabel("0:00 / 0:00")
-        v.addWidget(self._slider); v.addWidget(self._label_time)
+        self._label_time.setProperty("role", "statusText")
+        playback_layout.addWidget(self._slider)
+        playback_layout.addWidget(self._label_time)
+        v.addWidget(playback_box)
 
         self._player.durationChanged.connect(self._on_duration_changed)
         self._player.positionChanged.connect(self._on_position_changed)
@@ -11284,15 +11661,25 @@ class _AudioPreviewDialog(QDialog):
         if not peaks:
             self.wave.hide()
             self._peaks_src = None
-            self.adjustSize()
+            waveform_box.setTitle("Waveform Preview Unavailable")
+            waveform_layout.itemAt(0).widget().setText(
+                "This file can still be played back, but a waveform preview could not be generated in the current environment."
+            )
+            self.resize(760, 380)
         else:
             self._resize_timer = QTimer(self)
             self._resize_timer.setSingleShot(True)
             self._resize_timer.setInterval(50)
             self._resize_timer.timeout.connect(self._reload_peaks_for_current_width)
-            self.resize(640, 220)
+            self.resize(840, 520)
 
-        self.setWindowTitle(f'Now playing: {title}')
+        button_row = QHBoxLayout()
+        button_row.setSpacing(8)
+        button_row.addStretch(1)
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.accept)
+        button_row.addWidget(close_btn)
+        v.addLayout(button_row)
 
     def resizeEvent(self, e):
         super().resizeEvent(e)

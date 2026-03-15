@@ -7,6 +7,8 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
     QHBoxLayout,
+    QGroupBox,
+    QLabel,
     QMessageBox,
     QPushButton,
     QTableWidget,
@@ -23,13 +25,76 @@ class HistoryDialog(QDialog):
     def __init__(self, app, parent=None):
         super().__init__(parent or app)
         self.app = app
+        self.setObjectName("historyDialog")
         self.setWindowTitle("Undo History")
-        self.resize(980, 600)
+        self.resize(1040, 720)
+        self.setMinimumSize(940, 640)
+        self.setStyleSheet(
+            """
+            QDialog#historyDialog QLabel[role="dialogTitle"] {
+                font-size: 26px;
+                font-weight: 700;
+            }
+            QDialog#historyDialog QLabel[role="dialogSubtitle"] {
+                color: #64748b;
+                font-size: 15px;
+            }
+            QDialog#historyDialog QLabel[role="supportingText"] {
+                color: #52606d;
+            }
+            QDialog#historyDialog QGroupBox {
+                font-size: 15px;
+                font-weight: 600;
+                margin-top: 10px;
+            }
+            QDialog#historyDialog QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 6px;
+            }
+            """
+        )
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(14)
+
+        header_row = QHBoxLayout()
+        title_label = QLabel("History & Snapshots", self)
+        title_label.setProperty("role", "dialogTitle")
+        header_row.addWidget(title_label)
+        header_row.addStretch(1)
+        self.help_btn = QToolButton(self)
+        self.help_btn.setText("?")
+        self.help_btn.setFixedSize(28, 28)
+        self.help_btn.setProperty("role", "helpButton")
+        self.help_btn.setToolTip("Open help for history and snapshots")
+        self.help_btn.clicked.connect(lambda: self.app.open_help_dialog(topic_id="history", parent=self))
+        header_row.addWidget(self.help_btn)
+        layout.addLayout(header_row)
+
+        subtitle_label = QLabel(
+            "Review recent undo and redo activity, inspect saved history entries, and manage database snapshots from one place.",
+            self,
+        )
+        subtitle_label.setProperty("role", "dialogSubtitle")
+        subtitle_label.setWordWrap(True)
+        layout.addWidget(subtitle_label)
 
         self.tabs = QTabWidget()
-        layout.addWidget(self.tabs)
+        browser_box = QGroupBox("History Browser", self)
+        browser_layout = QVBoxLayout(browser_box)
+        browser_layout.setContentsMargins(14, 18, 14, 14)
+        browser_layout.setSpacing(10)
+        browser_help = QLabel(
+            "Use the Session and History tabs to review changes. The Snapshots tab lists full restore points stored on disk.",
+            browser_box,
+        )
+        browser_help.setProperty("role", "supportingText")
+        browser_help.setWordWrap(True)
+        browser_layout.addWidget(browser_help)
+        browser_layout.addWidget(self.tabs, 1)
+        layout.addWidget(browser_box, 1)
 
         self.session_table = self._build_table(["Current", "Time", "Label", "Action", "Strategy"])
         self.tabs.addTab(self.session_table, "Session")
@@ -68,13 +133,6 @@ class HistoryDialog(QDialog):
         ):
             buttons.addWidget(button)
         buttons.addStretch(1)
-        self.help_btn = QToolButton(self)
-        self.help_btn.setText("?")
-        self.help_btn.setFixedSize(28, 28)
-        self.help_btn.setProperty("role", "helpButton")
-        self.help_btn.setToolTip("Open help for history and snapshots")
-        self.help_btn.clicked.connect(lambda: self.app.open_help_dialog(topic_id="history", parent=self))
-        buttons.addWidget(self.help_btn)
         layout.addLayout(buttons)
 
         self.refresh_data()
