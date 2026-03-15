@@ -91,6 +91,7 @@ from isrc_manager.quality.models import QualityIssue
 from isrc_manager.quality.service import QualityDashboardService
 from isrc_manager.releases import ReleasePayload, ReleaseRecord, ReleaseService, ReleaseTrackPlacement
 from isrc_manager.releases.dialogs import ReleaseBrowserDialog, ReleaseEditorDialog
+from isrc_manager.services.db_access import DatabaseWriteCoordinator, SQLiteConnectionFactory
 from isrc_manager.services.bulk_edit import MIXED_VALUE, shared_bulk_value, should_apply_bulk_change
 from isrc_manager.services.sqlite_utils import safe_wal_checkpoint
 from isrc_manager.services import (
@@ -121,6 +122,9 @@ from isrc_manager.services import (
     TrackUpdatePayload,
 )
 from isrc_manager.settings import enforce_single_instance, init_settings
+from isrc_manager.tasks import BackgroundTaskManager, TaskFailure
+from isrc_manager.tasks.app_services import BackgroundAppServiceFactory
+from isrc_manager.tasks.history_helpers import run_file_history_action, run_snapshot_history_action
 from isrc_manager.tags import AudioTagService, TaggedAudioExportService, catalog_metadata_to_tags, merge_imported_tags
 from isrc_manager.tags.dialogs import TagPreviewDialog
 from isrc_manager.tags.models import ArtworkPayload
@@ -4632,10 +4636,19 @@ class App(QMainWindow):
         self.help_dir = DATA_DIR() / "help"
         self.help_dir.mkdir(parents=True, exist_ok=True)
         self.help_file_path = self.help_dir / "isrc_catalog_manager_help.html"
-        self.database_session = DatabaseSessionService()
+        self.sqlite_connection_factory = SQLiteConnectionFactory()
+        self.database_session = DatabaseSessionService(self.sqlite_connection_factory)
         self.profile_store = ProfileStoreService(self.database_dir)
         self.profile_workflows = ProfileWorkflowService(self.database_dir, self.profile_store)
         self.database_maintenance = DatabaseMaintenanceService(self.backups_dir)
+        self.background_tasks = BackgroundTaskManager(self)
+        self.background_tasks.task_state_changed.connect(self._on_background_task_state_changed)
+        self.background_service_factory = BackgroundAppServiceFactory(
+            connection_factory=self.sqlite_connection_factory,
+            data_root=DATA_DIR(),
+            history_dir=self.history_dir,
+            backups_dir=self.backups_dir,
+        )
         self.schema_service = None
 
         # default DB file (used if no previous DB is selected)
@@ -4657,6 +4670,7 @@ class App(QMainWindow):
         ini_path = Path(QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)) / "settings.ini"
         self.settings = QSettings(str(ini_path), QSettings.IniFormat)
         self.settings.setFallbacksEnabled(False)
+        self.background_service_factory.configure(settings_path=self.settings.fileName())
 
         self.identity = self._load_identity()
         self.theme_settings = self._load_theme_settings()
@@ -4703,6 +4717,7 @@ class App(QMainWindow):
         self.quality_service = None
         self.release_browser_dialog = None
         self._explicit_row_filter_track_ids = None
+        self._background_write_lock = None
         self.open_database(last_db)
 
         # ----- Menus -----
@@ -5593,6 +5608,17 @@ class App(QMainWindow):
 
 
     def closeEvent(self, e):
+        if hasattr(self, "background_tasks") and self.background_tasks.has_running_tasks():
+            titles = self.background_tasks.active_task_titles()
+            summary = "\n".join(f"- {title}" for title in titles[:8])
+            QMessageBox.warning(
+                self,
+                "Background Tasks Running",
+                "Wait for the current background task(s) to finish before closing the app.\n\n"
+                + summary,
+            )
+            e.ignore()
+            return
         self._save_main_dock_state(sync=False)
         self.settings.sync()
         self.logger.info("Settings synced to disk")
@@ -7353,6 +7379,151 @@ class App(QMainWindow):
         self.settings_mutations = None
         self.gs1_settings_service = None
         self.gs1_integration_service = None
+        if hasattr(self, "background_service_factory"):
+            self.background_service_factory.db_path = None
+        self._background_write_lock = None
+
+    def _configure_background_runtime(self) -> None:
+        settings_path = self.settings.fileName() if hasattr(self, "settings") else None
+        db_path = str(getattr(self, "current_db_path", "") or "").strip() or None
+        if hasattr(self, "background_service_factory"):
+            self.background_service_factory.configure(
+                db_path=db_path,
+                settings_path=settings_path,
+            )
+        self._background_write_lock = (
+            DatabaseWriteCoordinator.for_path(db_path)
+            if db_path
+            else None
+        )
+
+    def _on_background_task_state_changed(self) -> None:
+        status_bar = self.statusBar() if hasattr(self, "statusBar") else None
+        if status_bar is None:
+            return
+        if self.background_tasks.has_running_tasks():
+            titles = self.background_tasks.active_task_titles()
+            preview = ", ".join(titles[:3])
+            if len(titles) > 3:
+                preview += ", ..."
+            status_bar.showMessage(f"Background tasks running: {preview}")
+        else:
+            status_bar.clearMessage()
+
+    def _prepare_for_background_db_task(self) -> None:
+        if getattr(self, "conn", None) is None:
+            return
+        try:
+            self.conn.commit()
+        except Exception:
+            pass
+        try:
+            safe_wal_checkpoint(self.conn, mode="PASSIVE", logger=self.logger)
+        except Exception:
+            pass
+
+    def _show_background_task_error(
+        self,
+        title: str,
+        failure: TaskFailure,
+        *,
+        user_message: str,
+    ) -> None:
+        self.logger.error("%s: %s", title, failure.message)
+        if failure.traceback_text:
+            self.logger.error("%s traceback:\n%s", title, failure.traceback_text)
+        QMessageBox.critical(self, title, f"{user_message}\n{failure.message}")
+
+    def _submit_background_task(
+        self,
+        *,
+        title: str,
+        description: str,
+        task_fn,
+        kind: str = "read",
+        unique_key: str | None = None,
+        requires_profile: bool = True,
+        show_dialog: bool = True,
+        cancellable: bool = False,
+        on_success=None,
+        on_error=None,
+        on_cancelled=None,
+        on_finished=None,
+        on_progress=None,
+        on_status=None,
+    ):
+        if requires_profile and not str(getattr(self, "current_db_path", "") or "").strip():
+            QMessageBox.warning(self, title, "Open a profile first.")
+            return None
+        if kind in {"read", "write", "exclusive"}:
+            self._prepare_for_background_db_task()
+
+        write_lock = self._background_write_lock if kind in {"write", "exclusive"} else None
+
+        def _wrapped_task(ctx):
+            ctx.set_status(description)
+            if write_lock is not None:
+                with write_lock.acquire():
+                    ctx.raise_if_cancelled()
+                    return task_fn(ctx)
+            ctx.raise_if_cancelled()
+            return task_fn(ctx)
+
+        return self.background_tasks.submit(
+            title=title,
+            description=description,
+            task_fn=_wrapped_task,
+            kind=kind,
+            unique_key=unique_key,
+            owner=self,
+            show_dialog=show_dialog,
+            cancellable=cancellable,
+            on_success=on_success,
+            on_error=on_error,
+            on_cancelled=on_cancelled,
+            on_finished=on_finished,
+            on_progress=on_progress,
+            on_status=on_status,
+        )
+
+    def _submit_background_bundle_task(
+        self,
+        *,
+        title: str,
+        description: str,
+        task_fn,
+        kind: str = "read",
+        unique_key: str | None = None,
+        requires_profile: bool = True,
+        show_dialog: bool = True,
+        cancellable: bool = False,
+        on_success=None,
+        on_error=None,
+        on_cancelled=None,
+        on_finished=None,
+        on_progress=None,
+        on_status=None,
+    ):
+        def _bundle_task(ctx):
+            with self.background_service_factory.open_bundle() as bundle:
+                return task_fn(bundle, ctx)
+
+        return self._submit_background_task(
+            title=title,
+            description=description,
+            task_fn=_bundle_task,
+            kind=kind,
+            unique_key=unique_key,
+            requires_profile=requires_profile,
+            show_dialog=show_dialog,
+            cancellable=cancellable,
+            on_success=on_success,
+            on_error=on_error,
+            on_cancelled=on_cancelled,
+            on_finished=on_finished,
+            on_progress=on_progress,
+            on_status=on_status,
+        )
 
     # -------------------------------------------------------------------------
     # DB: open/init helpers + MIGRATIONS
@@ -7364,6 +7535,7 @@ class App(QMainWindow):
         self.conn = session.conn
         self.cursor = session.cursor
         self.current_db_path = path
+        self._configure_background_runtime()
         self._init_services()
 
         self._migrate_artist_code_from_qsettings_if_needed()
@@ -8378,16 +8550,33 @@ class App(QMainWindow):
         label, ok = QInputDialog.getText(self, "Create Snapshot", "Snapshot label (optional):")
         if not ok:
             return
-        try:
-            snapshot = self.history_manager.create_manual_snapshot(label.strip() or None)
-            self.logger.info(f"Created snapshot {snapshot.snapshot_id}: {snapshot.label}")
-            QMessageBox.information(self, "Snapshot Created", f"Snapshot saved:\n{snapshot.label}")
+        snapshot_label = label.strip() or None
+
+        def _worker(bundle, ctx):
+            ctx.set_status("Capturing a full profile snapshot...")
+            snapshot = bundle.history_manager.create_manual_snapshot(snapshot_label)
+            return {"snapshot_id": snapshot.snapshot_id, "label": snapshot.label}
+
+        def _success(result):
+            self.logger.info("Created snapshot %s: %s", result["snapshot_id"], result["label"])
+            QMessageBox.information(self, "Snapshot Created", f"Snapshot saved:\n{result['label']}")
             self._refresh_history_actions()
             if self.history_dialog is not None and self.history_dialog.isVisible():
                 self.history_dialog.refresh_data()
-        except Exception as e:
-            self.logger.exception(f"Create snapshot failed: {e}")
-            QMessageBox.critical(self, "Snapshot Error", f"Could not create snapshot:\n{e}")
+
+        self._submit_background_bundle_task(
+            title="Create Snapshot",
+            description="Creating a manual snapshot of the current profile...",
+            task_fn=_worker,
+            kind="read",
+            unique_key="snapshot.create",
+            on_success=_success,
+            on_error=lambda failure: self._show_background_task_error(
+                "Snapshot Error",
+                failure,
+                user_message="Could not create the snapshot:",
+            ),
+        )
 
     def delete_snapshot_from_history(self, snapshot_id: int):
         if self.history_manager is None:
@@ -8407,12 +8596,19 @@ class App(QMainWindow):
             QMessageBox.Yes | QMessageBox.No,
         ) != QMessageBox.Yes:
             return
-        try:
-            self.history_manager.restore_snapshot_as_action(snapshot_id)
-            self._refresh_after_history_change()
-        except Exception as e:
-            self.logger.exception(f"Restore snapshot failed: {e}")
-            QMessageBox.critical(self, "Restore Snapshot", f"Could not restore the snapshot:\n{e}")
+        self._submit_background_bundle_task(
+            title="Restore Snapshot",
+            description="Restoring the selected snapshot...",
+            task_fn=lambda bundle, ctx: bundle.history_manager.restore_snapshot_as_action(snapshot_id),
+            kind="write",
+            unique_key="snapshot.restore",
+            on_success=lambda _result: self._refresh_after_history_change(),
+            on_error=lambda failure: self._show_background_task_error(
+                "Restore Snapshot",
+                failure,
+                user_message="Could not restore the snapshot:",
+            ),
+        )
 
     def _collect_catalog_cleanup_targets(
         self,
@@ -10005,8 +10201,19 @@ class App(QMainWindow):
         if not output_dir:
             return
 
-        try:
-            result = self.tagged_audio_export_service.export_copies(output_dir=output_dir, exports=exports)
+        def _worker(bundle, ctx):
+            return bundle.tagged_audio_export_service.export_copies(
+                output_dir=output_dir,
+                exports=exports,
+                progress_callback=lambda value, maximum, message: ctx.report_progress(
+                    value=value,
+                    maximum=maximum,
+                    message=message,
+                ),
+                is_cancelled=ctx.is_cancelled,
+            )
+
+        def _success(result):
             all_warnings = warnings + list(result.warnings)
             self._log_event(
                 "tags.export_audio",
@@ -10030,9 +10237,22 @@ class App(QMainWindow):
                 f"\n\nSkipped: {result.skipped}"
                 + (f"\n\nWarnings:\n- " + "\n- ".join(all_warnings[:12]) if all_warnings else ""),
             )
-        except Exception as exc:
-            self.logger.exception(f"Tagged audio export failed: {exc}")
-            QMessageBox.critical(self, "Write Tags to Exported Audio", f"Could not export tagged audio copies:\n{exc}")
+
+        self._submit_background_bundle_task(
+            title="Write Tags to Exported Audio",
+            description="Writing catalog metadata into exported audio copies...",
+            task_fn=_worker,
+            kind="read",
+            unique_key="tags.export_audio",
+            cancellable=True,
+            on_success=_success,
+            on_cancelled=lambda: self.statusBar().showMessage("Tagged audio export cancelled.", 5000),
+            on_error=lambda failure: self._show_background_task_error(
+                "Write Tags to Exported Audio",
+                failure,
+                user_message="Could not export tagged audio copies:",
+            ),
+        )
 
     def import_exchange_file(self, format_name: str):
         if self.exchange_service is None:
@@ -10054,119 +10274,135 @@ class App(QMainWindow):
         if not path:
             return
 
-        try:
+        def _inspection_worker(bundle, ctx):
+            ctx.set_status(f"Inspecting {normalized_format.upper()} source file...")
             if normalized_format == "csv":
-                inspection = self.exchange_service.inspect_csv(path)
-            elif normalized_format == "xlsx":
-                inspection = self.exchange_service.inspect_xlsx(path)
-            elif normalized_format == "json":
-                inspection = self.exchange_service.inspect_json(path)
-            elif normalized_format == "package":
-                inspection = self.exchange_service.inspect_package(path)
-            else:
-                raise ValueError(f"Unsupported exchange format: {normalized_format}")
-        except Exception as exc:
-            self.logger.exception(f"Exchange inspection failed: {exc}")
-            QMessageBox.critical(self, "Import Exchange", f"Could not inspect the selected file:\n{exc}")
-            return
+                return bundle.exchange_service.inspect_csv(path)
+            if normalized_format == "xlsx":
+                return bundle.exchange_service.inspect_xlsx(path)
+            if normalized_format == "json":
+                return bundle.exchange_service.inspect_json(path)
+            if normalized_format == "package":
+                return bundle.exchange_service.inspect_package(path)
+            raise ValueError(f"Unsupported exchange format: {normalized_format}")
 
-        supported_headers = list(self.exchange_service.BASE_EXPORT_COLUMNS)
-        for field in self.custom_field_definitions.list_active_fields():
-            if field.get("field_type") in {"blob_audio", "blob_image"}:
-                continue
-            supported_headers.append(f"custom::{field['name']}")
+        def _inspection_success(inspection):
+            supported_headers = list(self.exchange_service.BASE_EXPORT_COLUMNS)
+            for field in self.custom_field_definitions.list_active_fields():
+                if field.get("field_type") in {"blob_audio", "blob_image"}:
+                    continue
+                supported_headers.append(f"custom::{field['name']}")
 
-        dlg = ExchangeImportDialog(
-            inspection=inspection,
-            supported_headers=supported_headers,
-            settings=self.settings,
-            initial_mode=("create" if normalized_format == "package" else "dry_run"),
-            parent=self,
-        )
-        if dlg.exec() != QDialog.Accepted:
-            return
-
-        mapping = dlg.mapping()
-        options = dlg.import_options()
-        before_snapshot = None
-        if options.mode != "dry_run" and self.history_manager is not None:
-            before_snapshot = self.history_manager.capture_snapshot(
-                kind=f"pre_import_{normalized_format}",
-                label=f"Before Import {normalized_format.upper()}: {Path(path).name}",
+            dlg = ExchangeImportDialog(
+                inspection=inspection,
+                supported_headers=supported_headers,
+                settings=self.settings,
+                initial_mode=("create" if normalized_format == "package" else "dry_run"),
+                parent=self,
             )
+            if dlg.exec() != QDialog.Accepted:
+                return
 
-        try:
-            if normalized_format == "csv":
-                report = self.exchange_service.import_csv(path, mapping=mapping, options=options)
-            elif normalized_format == "xlsx":
-                report = self.exchange_service.import_xlsx(path, mapping=mapping, options=options)
-            elif normalized_format == "package":
-                report = self.exchange_service.import_package(path, options=options)
-            else:
-                report = self.exchange_service.import_json(path, options=options)
-        except Exception as exc:
-            if before_snapshot is not None:
+            mapping = dlg.mapping()
+            options = dlg.import_options()
+
+            def _import_worker(bundle, ctx):
+                ctx.set_status(f"Importing {normalized_format.upper()} exchange data...")
+
+                def _mutation():
+                    if normalized_format == "csv":
+                        return bundle.exchange_service.import_csv(path, mapping=mapping, options=options)
+                    if normalized_format == "xlsx":
+                        return bundle.exchange_service.import_xlsx(path, mapping=mapping, options=options)
+                    if normalized_format == "package":
+                        return bundle.exchange_service.import_package(path, options=options)
+                    return bundle.exchange_service.import_json(path, options=options)
+
+                if options.mode == "dry_run":
+                    return _mutation()
+
+                return run_snapshot_history_action(
+                    history_manager=bundle.history_manager,
+                    action_label=f"Import {normalized_format.upper()}: {Path(path).name}",
+                    action_type=f"import.{normalized_format}",
+                    entity_type="Import",
+                    entity_id=path,
+                    payload={"path": path, "mode": options.mode},
+                    mutation=_mutation,
+                    logger=self.logger,
+                )
+
+            def _import_success(report: ExchangeImportReport):
+                changed = bool(report.created_tracks or report.updated_tracks)
                 try:
-                    self.history_manager.delete_snapshot(before_snapshot.snapshot_id)
+                    self.conn.commit()
                 except Exception:
                     pass
-            self.conn.rollback()
-            self.logger.exception(f"Exchange import failed: {exc}")
-            QMessageBox.critical(self, "Import Exchange", f"Could not complete the import:\n{exc}")
-            return
+                if options.mode != "dry_run":
+                    self.active_custom_fields = self.load_active_custom_fields()
+                    self._rebuild_table_headers()
+                    try:
+                        self._load_header_state()
+                    except Exception:
+                        pass
+                    self._refresh_history_actions()
+                if changed:
+                    self.refresh_table_preserve_view(
+                        focus_id=(report.created_tracks or report.updated_tracks or [None])[0]
+                    )
+                    self.populate_all_comboboxes()
 
-        changed = bool(report.created_tracks or report.updated_tracks)
-        if changed and before_snapshot is not None:
-            after_snapshot = self.history_manager.capture_snapshot(
-                kind=f"post_import_{normalized_format}",
-                label=f"After Import {normalized_format.upper()}: {Path(path).name}",
-            )
-            self.history_manager.record_snapshot_action(
-                label=f"Import {normalized_format.upper()}: {report.passed} rows",
-                action_type=f"import.{normalized_format}",
-                entity_type="Import",
-                entity_id=path,
-                payload={
-                    "path": path,
-                    "mode": options.mode,
-                    "passed": report.passed,
-                    "failed": report.failed,
-                    "skipped": report.skipped,
-                },
-                snapshot_before_id=before_snapshot.snapshot_id,
-                snapshot_after_id=after_snapshot.snapshot_id,
-            )
-            self._refresh_history_actions()
+                self._log_event(
+                    f"import.{normalized_format}",
+                    f"Imported {normalized_format.upper()} exchange data",
+                    path=path,
+                    mode=options.mode,
+                    passed=report.passed,
+                    failed=report.failed,
+                    skipped=report.skipped,
+                    warnings=report.warnings,
+                    duplicates=report.duplicates,
+                    unknown_fields=report.unknown_fields,
+                )
+                self._audit(
+                    "IMPORT",
+                    normalized_format.upper(),
+                    ref_id=path,
+                    details=(
+                        f"mode={options.mode}; passed={report.passed}; failed={report.failed}; "
+                        f"skipped={report.skipped}; duplicates={len(report.duplicates)}"
+                    ),
+                )
+                self._audit_commit()
+                self._show_exchange_import_report(path, report)
 
-        if changed:
-            self.refresh_table_preserve_view(
-                focus_id=(report.created_tracks or report.updated_tracks or [None])[0]
+            self._submit_background_bundle_task(
+                title=f"Import {normalized_format.upper()}",
+                description=f"Importing {normalized_format.upper()} data into the current profile...",
+                task_fn=_import_worker,
+                kind=("read" if options.mode == "dry_run" else "write"),
+                unique_key=f"exchange.import.{normalized_format}",
+                on_success=_import_success,
+                on_error=lambda failure: self._show_background_task_error(
+                    "Import Exchange",
+                    failure,
+                    user_message="Could not complete the exchange import:",
+                ),
             )
-            self.populate_all_comboboxes()
 
-        self._log_event(
-            f"import.{normalized_format}",
-            f"Imported {normalized_format.upper()} exchange data",
-            path=path,
-            mode=options.mode,
-            passed=report.passed,
-            failed=report.failed,
-            skipped=report.skipped,
-            warnings=report.warnings,
-            duplicates=report.duplicates,
-            unknown_fields=report.unknown_fields,
-        )
-        self._audit(
-            "IMPORT",
-            normalized_format.upper(),
-            ref_id=path,
-            details=(
-                f"mode={options.mode}; passed={report.passed}; failed={report.failed}; "
-                f"skipped={report.skipped}; duplicates={len(report.duplicates)}"
+        self._submit_background_bundle_task(
+            title=f"Inspect {normalized_format.upper()}",
+            description=f"Inspecting the selected {normalized_format.upper()} source...",
+            task_fn=_inspection_worker,
+            kind="read",
+            unique_key=f"exchange.inspect.{normalized_format}",
+            on_success=_inspection_success,
+            on_error=lambda failure: self._show_background_task_error(
+                "Import Exchange",
+                failure,
+                user_message="Could not inspect the selected file:",
             ),
         )
-        self._audit_commit()
-        self._show_exchange_import_report(path, report)
 
     def _show_exchange_import_report(self, path: str, report: ExchangeImportReport) -> None:
         lines = [
@@ -10226,19 +10462,22 @@ class App(QMainWindow):
         if not path:
             return
 
-        def mutation():
-            if normalized_format == "csv":
-                return self.exchange_service.export_csv(path, track_ids)
-            if normalized_format == "xlsx":
-                return self.exchange_service.export_xlsx(path, track_ids)
-            if normalized_format == "json":
-                return self.exchange_service.export_json(path, track_ids)
-            if normalized_format == "package":
-                return self.exchange_service.export_package(path, track_ids)
-            raise ValueError(f"Unsupported exchange format: {normalized_format}")
+        def _worker(bundle, ctx):
+            ctx.set_status(f"Exporting {normalized_format.upper()} exchange data...")
 
-        try:
-            exported = self._run_file_history_action(
+            def mutation():
+                if normalized_format == "csv":
+                    return bundle.exchange_service.export_csv(path, track_ids)
+                if normalized_format == "xlsx":
+                    return bundle.exchange_service.export_xlsx(path, track_ids)
+                if normalized_format == "json":
+                    return bundle.exchange_service.export_json(path, track_ids)
+                if normalized_format == "package":
+                    return bundle.exchange_service.export_package(path, track_ids)
+                raise ValueError(f"Unsupported exchange format: {normalized_format}")
+
+            return run_file_history_action(
+                history_manager=bundle.history_manager,
                 action_label=lambda count: f"Export {normalized_format.upper()}: {count} rows",
                 action_type=f"file.export_{normalized_format}",
                 target_path=path,
@@ -10251,7 +10490,11 @@ class App(QMainWindow):
                     "selected_only": bool(selected_only),
                     "count": count,
                 },
+                logger=self.logger,
             )
+
+        def _success(exported):
+            self._refresh_history_actions()
             self._log_event(
                 f"export.{normalized_format}",
                 f"Exported {normalized_format.upper()} exchange data",
@@ -10271,9 +10514,20 @@ class App(QMainWindow):
                 "Export Exchange",
                 f"Exported {exported} row{'s' if exported != 1 else ''} to:\n{path}",
             )
-        except Exception as exc:
-            self.logger.exception(f"Exchange export failed: {exc}")
-            QMessageBox.critical(self, "Export Exchange", f"Could not export the selected data:\n{exc}")
+
+        self._submit_background_bundle_task(
+            title=f"Export {normalized_format.upper()}",
+            description=f"Exporting {normalized_format.upper()} exchange data...",
+            task_fn=_worker,
+            kind="read",
+            unique_key=f"exchange.export.{normalized_format}",
+            on_success=_success,
+            on_error=lambda failure: self._show_background_task_error(
+                "Export Exchange",
+                failure,
+                user_message="Could not export the selected data:",
+            ),
+        )
 
     def open_quality_dashboard(self):
         if self.quality_service is None:
@@ -10282,6 +10536,7 @@ class App(QMainWindow):
         dlg = QualityDashboardDialog(
             service=self.quality_service,
             scan_callback=self._scan_quality_dashboard_in_background,
+            task_manager=self.background_tasks,
             release_choices_provider=self._release_choices,
             apply_fix_callback=self._apply_quality_fix,
             open_issue_callback=self._open_issue_from_dashboard,
@@ -10290,20 +10545,8 @@ class App(QMainWindow):
         dlg.exec()
 
     def _scan_quality_dashboard_in_background(self):
-        db_path = str(getattr(self, "current_db_path", "") or "").strip()
-        if not db_path:
-            raise ValueError("Open a profile first.")
-        session = DatabaseSessionService().open(db_path)
-        try:
-            quality_service = QualityDashboardService(
-                session.conn,
-                track_service=TrackService(session.conn, DATA_DIR()),
-                release_service=ReleaseService(session.conn, DATA_DIR()),
-                data_root=DATA_DIR(),
-            )
-            return quality_service.scan()
-        finally:
-            DatabaseSessionService.close(session.conn)
+        with self.background_service_factory.open_bundle() as bundle:
+            return bundle.quality_service.scan()
 
     def _apply_quality_fix(self, fix_key: str) -> str:
         def mutation():
@@ -10415,32 +10658,38 @@ class App(QMainWindow):
     # Export / Import (with location picker, overwrite confirm, dry-run option)
     # =============================================================================
     def export_full_to_xml(self):
-        try:
-            default_name = f"full_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xml"
-            default_path = str(self.exports_dir / default_name)
-            path, sel = QFileDialog.getSaveFileName(
-                self, "Export All to XML", default_path, "XML Files (*.xml)"
-            )
-            if not path:
+        default_name = f"full_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xml"
+        default_path = str(self.exports_dir / default_name)
+        path, sel = QFileDialog.getSaveFileName(
+            self, "Export All to XML", default_path, "XML Files (*.xml)"
+        )
+        if not path:
+            return
+
+        if Path(path).exists():
+            if QMessageBox.question(
+                self, "Overwrite?",
+                f"File exists:\n{path}\n\nOverwrite?",
+                QMessageBox.Yes | QMessageBox.No
+            ) != QMessageBox.Yes:
                 return
 
-            if Path(path).exists():
-                if QMessageBox.question(
-                    self, "Overwrite?",
-                    f"File exists:\n{path}\n\nOverwrite?",
-                    QMessageBox.Yes | QMessageBox.No
-                ) != QMessageBox.Yes:
-                    return
-
-            exported = self._run_file_history_action(
+        def _worker(bundle, ctx):
+            ctx.set_status("Exporting the full catalog to XML...")
+            return run_file_history_action(
+                history_manager=bundle.history_manager,
                 action_label=lambda count: f"Export XML: {count} tracks",
                 action_type="file.export_xml_all",
                 target_path=path,
-                mutation=lambda: self.xml_export_service.export_all(path),
+                mutation=lambda: bundle.xml_export_service.export_all(path),
                 entity_type="Export",
                 entity_id=path,
                 payload=lambda count: {"path": path, "count": count},
+                logger=self.logger,
             )
+
+        def _success(exported):
+            self._refresh_history_actions()
             QMessageBox.information(self, "Export", f"All data exported:\n{path}")
             self._log_event(
                 "export.xml.all",
@@ -10450,9 +10699,20 @@ class App(QMainWindow):
             )
             self._audit("EXPORT", "Tracks", ref_id=path, details=f"all rows incl. duration+customs count={exported}")
             self._audit_commit()
-        except Exception as e:
-            self.logger.exception(f"Export failed: {e}")
-            QMessageBox.critical(self, "Export Error", f"Failed to export:\n{e}")
+
+        self._submit_background_bundle_task(
+            title="Export XML",
+            description="Exporting the full catalog to XML...",
+            task_fn=_worker,
+            kind="read",
+            unique_key="export.xml.all",
+            on_success=_success,
+            on_error=lambda failure: self._show_background_task_error(
+                "Export Error",
+                failure,
+                user_message="Failed to export the library to XML:",
+            ),
+        )
 
     def export_selected_to_xml(self):
         """Export visible rows if a filter is active; otherwise export explicitly selected rows."""
@@ -10485,12 +10745,14 @@ class App(QMainWindow):
         if not out_path:
             return
 
-        try:
-            exported = self._run_file_history_action(
+        def _worker(bundle, ctx):
+            ctx.set_status("Exporting the selected tracks to XML...")
+            return run_file_history_action(
+                history_manager=bundle.history_manager,
                 action_label=lambda count: f"Export Selected XML: {count} tracks",
                 action_type="file.export_xml_selected",
                 target_path=out_path,
-                mutation=lambda: self.xml_export_service.export_selected(
+                mutation=lambda: bundle.xml_export_service.export_selected(
                     out_path,
                     track_ids,
                     current_db_path=str(self.current_db_path),
@@ -10498,7 +10760,11 @@ class App(QMainWindow):
                 entity_type="Export",
                 entity_id=out_path,
                 payload=lambda count: {"path": out_path, "count": count, "track_ids": track_ids},
+                logger=self.logger,
             )
+
+        def _success(exported):
+            self._refresh_history_actions()
             self._log_event(
                 "export.xml.selected",
                 "Exported selected tracks to XML",
@@ -10507,9 +10773,20 @@ class App(QMainWindow):
                 track_ids=track_ids,
             )
             QMessageBox.information(self, "Export Complete", f"Saved:\n{out_path}")
-        except Exception as e:
-            self.logger.exception(f"Export Selected failed: {e}")
-            QMessageBox.critical(self, "Export Error", f"Could not write file:\n{e}")
+
+        self._submit_background_bundle_task(
+            title="Export Selected XML",
+            description="Exporting the selected tracks to XML...",
+            task_fn=_worker,
+            kind="read",
+            unique_key="export.xml.selected",
+            on_success=_success,
+            on_error=lambda failure: self._show_background_task_error(
+                "Export Error",
+                failure,
+                user_message="Could not write the selected XML export:",
+            ),
+        )
 
     def import_from_xml(self):
         """
@@ -10525,26 +10802,22 @@ class App(QMainWindow):
         - Per-row savepoints
         - Dry-run with optional "Proceed with import?" to commit without re-picking file
         """
-        try:
-            file_path, _ = QFileDialog.getOpenFileName(self, "Import from XML", "", "XML Files (*.xml)")
-            if not file_path:
-                return
+        file_path, _ = QFileDialog.getOpenFileName(self, "Import from XML", "", "XML Files (*.xml)")
+        if not file_path:
+            return
 
-            before_snapshot = None
+        dry = QMessageBox.question(
+            self, "Dry Run?",
+            "Run a dry-run first (no changes will be written) to see the summary?",
+            QMessageBox.Yes | QMessageBox.No
+        ) == QMessageBox.Yes
+
+        def _inspection_worker(bundle, ctx):
+            ctx.set_status("Inspecting the selected XML file...")
+            return bundle.xml_import_service.inspect_file(file_path)
+
+        def _inspection_success(inspection):
             create_missing_custom_fields = False
-
-            dry = QMessageBox.question(
-                self, "Dry Run?",
-                "Run a dry-run first (no changes will be written) to see the summary?",
-                QMessageBox.Yes | QMessageBox.No
-            ) == QMessageBox.Yes
-
-            try:
-                inspection = self.xml_import_service.inspect_file(file_path)
-            except Exception as e:
-                QMessageBox.critical(self, "Import Error", str(e))
-                return
-
             if inspection.conflicting_custom_fields:
                 msg = "Custom columns already exist with a different type:\n" + "\n".join(
                     f"- {name} : XML={import_type}, profile={existing_type}"
@@ -10590,7 +10863,6 @@ class App(QMainWindow):
                     )
                     return
 
-            # If dry-run, show summary then optionally proceed
             if dry:
                 self._log_event(
                     "import.xml.dry_run",
@@ -10628,97 +10900,94 @@ class App(QMainWindow):
                     self._audit_commit()
                     return
 
-            try:
-                before_snapshot = self.history_manager.capture_snapshot(
-                    kind="pre_import",
-                    label=f"Before Import XML: {Path(file_path).name}",
+            def _import_worker(bundle, ctx):
+                ctx.set_status("Importing XML data into the catalog...")
+                return run_snapshot_history_action(
+                    history_manager=bundle.history_manager,
+                    action_label=f"Import XML: {Path(file_path).name}",
+                    action_type="import.xml",
+                    entity_type="Import",
+                    entity_id=file_path,
+                    payload={"path": file_path},
+                    mutation=lambda: bundle.xml_import_service.execute_import(
+                        file_path,
+                        create_missing_custom_fields=create_missing_custom_fields,
+                    ),
+                    logger=self.logger,
                 )
-                result = self.xml_import_service.execute_import(
-                    file_path,
-                    create_missing_custom_fields=create_missing_custom_fields,
+
+            def _import_success(result):
+                try:
+                    self.conn.commit()
+                except Exception:
+                    pass
+                self.active_custom_fields = self.load_active_custom_fields()
+                self._rebuild_table_headers()
+                try:
+                    self._load_header_state()
+                except Exception:
+                    pass
+                self.refresh_table_preserve_view()
+                self.populate_all_comboboxes()
+                self._refresh_history_actions()
+
+                mode = "Import finished" if not dry else "Import finished (after dry-run)"
+                self._log_event(
+                    "import.xml.commit",
+                    mode,
+                    path=file_path,
+                    inserted=result.inserted,
+                    duplicates=result.duplicate_count,
+                    invalid=result.invalid_count,
+                    errors=result.error_count,
                 )
-            except Exception as e:
-                if before_snapshot is not None:
-                    try:
-                        self.history_manager.delete_snapshot(before_snapshot.snapshot_id)
-                    except Exception:
-                        pass
-                self.conn.rollback()
-                self.logger.exception(f"Import transaction failed: {e}")
-                QMessageBox.critical(self, "Import Error", f"Import failed:\n{e}")
-                return
+                self._audit(
+                    "IMPORT",
+                    "Tracks",
+                    ref_id=file_path,
+                    details=(
+                        f"mode={'commit_after_dry' if dry else 'commit'}, "
+                        f"ins={result.inserted}, dup={result.duplicate_count}, "
+                        f"inv={result.invalid_count}, err={result.error_count}"
+                    ),
+                )
+                self._audit_commit()
 
-            self.refresh_table_preserve_view()
-            self.populate_all_comboboxes()
+                QMessageBox.information(
+                    self, mode,
+                    f"Inserted: {result.inserted}\n"
+                    f"Skipped (duplicates): {result.duplicate_count}\n"
+                    f"Skipped (invalid): {result.invalid_count}\n"
+                    f"Errors: {result.error_count}"
+                )
 
-            mode = "Import finished" if not dry else "Import finished (after dry-run)"
-            self._log_event(
-                "import.xml.commit",
-                mode,
-                path=file_path,
-                inserted=result.inserted,
-                duplicates=result.duplicate_count,
-                invalid=result.invalid_count,
-                errors=result.error_count,
-            )
-            self._audit(
-                "IMPORT",
-                "Tracks",
-                ref_id=file_path,
-                details=(
-                    f"mode={'commit_after_dry' if dry else 'commit'}, "
-                    f"ins={result.inserted}, dup={result.duplicate_count}, "
-                    f"inv={result.invalid_count}, err={result.error_count}"
+            self._submit_background_bundle_task(
+                title="Import XML",
+                description="Importing XML data into the current profile...",
+                task_fn=_import_worker,
+                kind="write",
+                unique_key="import.xml",
+                on_success=_import_success,
+                on_error=lambda failure: self._show_background_task_error(
+                    "Import Error",
+                    failure,
+                    user_message="Could not complete the XML import:",
                 ),
             )
-            self._audit_commit()
 
-            if result.inserted > 0 and before_snapshot is not None:
-                after_snapshot = self.history_manager.capture_snapshot(
-                    kind="post_import",
-                    label=f"After Import XML: {Path(file_path).name}",
-                )
-                self.history_manager.record_snapshot_action(
-                    label=f"Import XML: {result.inserted} tracks",
-                    action_type="import.xml",
-                    entity_type="Import",
-                    entity_id=file_path,
-                    payload={
-                        "path": file_path,
-                        "inserted": result.inserted,
-                        "duplicate_count": result.duplicate_count,
-                        "invalid_count": result.invalid_count,
-                        "error_count": result.error_count,
-                    },
-                    snapshot_before_id=before_snapshot.snapshot_id,
-                    snapshot_after_id=after_snapshot.snapshot_id,
-                )
-            else:
-                self.history_manager.record_event(
-                    label=f"Import XML: {result.inserted} tracks",
-                    action_type="import.xml",
-                    entity_type="Import",
-                    entity_id=file_path,
-                    payload={
-                        "path": file_path,
-                        "inserted": result.inserted,
-                        "duplicate_count": result.duplicate_count,
-                        "invalid_count": result.invalid_count,
-                        "error_count": result.error_count,
-                    },
-                )
-            self._refresh_history_actions()
-
-            QMessageBox.information(
-                self, mode,
-                f"Inserted: {result.inserted}\n"
-                f"Skipped (duplicates): {result.duplicate_count}\n"
-                f"Skipped (invalid): {result.invalid_count}\n"
-                f"Errors: {result.error_count}"
-            )
-        except Exception as e:
-            self.logger.exception(f"Import failed: {e}")
-            QMessageBox.critical(self, "Import Error", f"Unexpected error:\n{e}")
+        self._submit_background_bundle_task(
+            title="Inspect XML",
+            description="Inspecting the selected XML file...",
+            task_fn=_inspection_worker,
+            kind="read",
+            unique_key="inspect.xml",
+            on_success=_inspection_success,
+            on_error=lambda failure: self._show_background_task_error(
+                "Import Error",
+                failure,
+                user_message="Could not inspect the selected XML file:",
+            ),
+        )
 
     # =============================================================================
     # Settings (prefix / numbers) + summary dialog
@@ -12070,84 +12339,112 @@ class App(QMainWindow):
         If that fails (older Python/SQLite), it falls back to `VACUUM INTO`,
         and finally to a safe file copy after closing the connection.
         """
-        try:
-            src = Path(self.current_db_path)
-            if not src.exists():
-                QMessageBox.warning(self, "Backup", "No current database to backup.")
-                return
+        src = Path(self.current_db_path)
+        if not src.exists():
+            QMessageBox.warning(self, "Backup", "No current database to backup.")
+            return
 
-            result = self.database_maintenance.create_backup(
-                self.conn,
-                src,
-                close_connection=self._close_database_connection,
-                reopen_connection=lambda: self.open_database(str(src)),
-            )
+        def _worker(bundle, ctx):
+            ctx.set_status("Creating a database backup...")
+            result = bundle.database_maintenance.create_backup(bundle.conn, src)
+            if bundle.history_manager is not None:
+                before_state = {
+                    "target_path": str(result.backup_path),
+                    "companion_suffixes": list(bundle.history_manager.FILE_COMPANION_SUFFIXES),
+                    "exists": False,
+                    "files": [],
+                }
+                after_state = bundle.history_manager.capture_file_state(
+                    result.backup_path,
+                    companion_suffixes=bundle.history_manager.FILE_COMPANION_SUFFIXES,
+                )
+                bundle.history_manager.record_file_write_action(
+                    label="Create Database Backup",
+                    action_type="file.db_backup",
+                    target_path=result.backup_path,
+                    before_state=before_state,
+                    after_state=after_state,
+                    entity_type="DB",
+                    entity_id=str(result.backup_path),
+                    payload={"path": str(result.backup_path), "method": result.method},
+                )
+            return {"backup_path": str(result.backup_path), "method": result.method}
 
-            QMessageBox.information(self, "Backup", f"Backup created:\n{result.backup_path}")
+        def _success(result):
+            self._refresh_history_actions()
+            QMessageBox.information(self, "Backup", f"Backup created:\n{result['backup_path']}")
             self._log_event(
                 "db.backup",
                 "Database backup created",
-                path=result.backup_path,
-                method=result.method,
+                path=result["backup_path"],
+                method=result["method"],
             )
             try:
                 self._audit(
                     "BACKUP",
                     "DB",
-                    ref_id=str(result.backup_path),
-                    details=f"Full DB (schema+data), method={result.method}",
+                    ref_id=str(result["backup_path"]),
+                    details=f"Full DB (schema+data), method={result['method']}",
                 )
                 self._audit_commit()
             except Exception:
                 pass
-            before_state = {
-                "target_path": str(result.backup_path),
-                "companion_suffixes": list(self.history_manager.FILE_COMPANION_SUFFIXES),
-                "exists": False,
-                "files": [],
-            }
-            after_state = self.history_manager.capture_file_state(
-                result.backup_path,
-                companion_suffixes=self.history_manager.FILE_COMPANION_SUFFIXES,
-            )
-            self.history_manager.record_file_write_action(
-                label="Create Database Backup",
-                action_type="file.db_backup",
-                target_path=result.backup_path,
-                before_state=before_state,
-                after_state=after_state,
-                entity_type="DB",
-                entity_id=str(result.backup_path),
-                payload={"path": str(result.backup_path), "method": result.method},
-            )
-            self._refresh_history_actions()
 
-        except Exception as e:
-            self.logger.exception(f"Backup failed: {e}")
-            QMessageBox.critical(self, "Backup Error", f"Failed to backup:\n{e}")
+        self._submit_background_bundle_task(
+            title="Create Backup",
+            description="Creating a full database backup...",
+            task_fn=_worker,
+            kind="read",
+            unique_key="db.backup",
+            on_success=_success,
+            on_error=lambda failure: self._show_background_task_error(
+                "Backup Error",
+                failure,
+                user_message="Failed to create the database backup:",
+            ),
+        )
 
     def verify_integrity(self):
-        try:
-            res = self.database_maintenance.verify_integrity(self.current_db_path)
-            QMessageBox.information(self, "Integrity Check", f"Result: {res}")
+        current_path = str(self.current_db_path)
+
+        def _worker(bundle, ctx):
+            ctx.set_status("Running SQLite integrity check...")
+            result = bundle.database_maintenance.verify_integrity(current_path)
+            if bundle.history_manager is not None:
+                bundle.history_manager.record_event(
+                    label=f"Verify Integrity: {result}",
+                    action_type="db.verify",
+                    entity_type="DB",
+                    entity_id=current_path,
+                    payload={"result": result, "path": current_path},
+                )
+            return result
+
+        def _success(result):
+            self._refresh_history_actions()
+            QMessageBox.information(self, "Integrity Check", f"Result: {result}")
             self._log_event(
                 "db.verify",
                 "Database integrity check completed",
-                result=res,
-                path=self.current_db_path,
+                result=result,
+                path=current_path,
             )
-            self._audit("VERIFY", "DB", ref_id=self.current_db_path, details=res)
+            self._audit("VERIFY", "DB", ref_id=current_path, details=result)
             self._audit_commit()
-            self.history_manager.record_event(
-                label=f"Verify Integrity: {res}",
-                action_type="db.verify",
-                entity_type="DB",
-                entity_id=str(self.current_db_path),
-                payload={"result": res, "path": str(self.current_db_path)},
-            )
-        except Exception as e:
-            self.logger.exception(f"Integrity check failed: {e}")
-            QMessageBox.critical(self, "Integrity Error", f"Failed to verify:\n{e}")
+
+        self._submit_background_bundle_task(
+            title="Integrity Check",
+            description="Checking the current database for corruption...",
+            task_fn=_worker,
+            kind="read",
+            unique_key="db.verify",
+            on_success=_success,
+            on_error=lambda failure: self._show_background_task_error(
+                "Integrity Error",
+                failure,
+                user_message="Failed to verify the database:",
+            ),
+        )
 
 
     def restore_database(self):
@@ -12157,31 +12454,39 @@ class App(QMainWindow):
         ensuring that **all** schema (including user-added columns) and data are restored.
         """
         pre_restore_snapshot = None
-        try:
-            path, _ = QFileDialog.getOpenFileName(
-                self, "Restore...Backup", str(self.backups_dir), "SQLite DB (*.db)"
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Restore...Backup", str(self.backups_dir), "SQLite DB (*.db)"
+        )
+        if not path:
+            return
+
+        if QMessageBox.question(
+            self, "Restore",
+            f"This will replace your current database with:\n{path}\n\nContinue?",
+            QMessageBox.Yes | QMessageBox.No
+        ) != QMessageBox.Yes:
+            return
+
+        current_db_path = str(self.current_db_path)
+        if self.history_manager is not None:
+            pre_restore_snapshot = self.history_manager.capture_snapshot(
+                kind="pre_db_restore",
+                label=f"Before Database Restore: {Path(path).name}",
             )
-            if not path:
-                return
 
-            # Extra confirmation
-            if QMessageBox.question(
-                self, "Restore",
-                f"This will replace your current database with:\n{path}\n\nContinue?",
-                QMessageBox.Yes | QMessageBox.No
-            ) != QMessageBox.Yes:
-                return
+        self._close_database_connection()
 
-            if self.history_manager is not None:
-                pre_restore_snapshot = self.history_manager.capture_snapshot(
-                    kind="pre_db_restore",
-                    label=f"Before Database Restore: {Path(path).name}",
-                )
+        def _worker(ctx):
+            ctx.set_status("Restoring the database from backup...")
+            result = self.database_maintenance.restore_database(path, current_db_path)
+            return {
+                "restored_path": str(result.restored_path),
+                "integrity_result": result.integrity_result,
+                "safety_copy_path": str(result.safety_copy_path) if result.safety_copy_path else None,
+            }
 
-            self._close_database_connection()
-            result = self.database_maintenance.restore_database(path, self.current_db_path)
-            self.open_database(str(result.restored_path))
-
+        def _success(result):
+            self.open_database(str(result["restored_path"]))
             self.refresh_table_preserve_view()
             QMessageBox.information(self, "Restore", "Database restored successfully (schema + data).")
             self._log_event(
@@ -12189,34 +12494,35 @@ class App(QMainWindow):
                 "Database restored from backup",
                 level=logging.WARNING,
                 source_backup=path,
-                restored_path=result.restored_path,
-                safety_copy_path=result.safety_copy_path,
+                restored_path=result["restored_path"],
+                safety_copy_path=result["safety_copy_path"],
             )
             try:
-                details = f"restored to {result.restored_path}"
-                if result.safety_copy_path is not None:
-                    details += f"; safety_copy={result.safety_copy_path}"
+                details = f"restored to {result['restored_path']}"
+                if result["safety_copy_path"] is not None:
+                    details += f"; safety_copy={result['safety_copy_path']}"
                 self._audit("RESTORE", "DB", ref_id=path, details=details)
                 self._audit_commit()
             except Exception:
                 pass
+
             payload = {
                 "source_backup": str(path),
-                "restored_path": str(result.restored_path),
-                "safety_copy_path": str(result.safety_copy_path) if result.safety_copy_path else None,
+                "restored_path": str(result["restored_path"]),
+                "safety_copy_path": result["safety_copy_path"],
             }
-            if result.safety_copy_path is not None and self.history_manager is not None:
+            if result["safety_copy_path"] is not None and self.history_manager is not None:
                 payload["file_effects"] = [
                     {
-                        "target_path": str(result.safety_copy_path),
+                        "target_path": str(result["safety_copy_path"]),
                         "before_state": {
-                            "target_path": str(result.safety_copy_path),
+                            "target_path": str(result["safety_copy_path"]),
                             "companion_suffixes": list(self.history_manager.FILE_COMPANION_SUFFIXES),
                             "exists": False,
                             "files": [],
                         },
                         "after_state": self.history_manager.capture_file_state(
-                            result.safety_copy_path,
+                            result["safety_copy_path"],
                             companion_suffixes=self.history_manager.FILE_COMPANION_SUFFIXES,
                         ),
                     }
@@ -12250,9 +12556,27 @@ class App(QMainWindow):
                 )
             self._refresh_history_actions()
 
-        except Exception as e:
-            self.logger.exception(f"Restore failed: {e}")
-            QMessageBox.critical(self, "Restore Error", f"Failed to restore:\n{e}")
+        def _error(failure):
+            try:
+                self.open_database(current_db_path)
+            except Exception as reopen_error:
+                self.logger.exception("Failed to reopen database after restore error: %s", reopen_error)
+            self._show_background_task_error(
+                "Restore Error",
+                failure,
+                user_message="Failed to restore the database:",
+            )
+
+        self._submit_background_task(
+            title="Restore Database",
+            description="Restoring the selected backup...",
+            task_fn=_worker,
+            kind="exclusive",
+            unique_key="db.restore",
+            requires_profile=False,
+            on_success=_success,
+            on_error=_error,
+        )
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Delete:

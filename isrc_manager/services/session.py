@@ -8,6 +8,8 @@ from pathlib import Path
 
 from PySide6.QtCore import QSettings
 
+from .db_access import SQLiteConnectionFactory
+
 
 @dataclass(slots=True)
 class OpenDatabaseSession:
@@ -48,19 +50,18 @@ class ProfileKVService:
 class DatabaseSessionService:
     """Handles opening, closing, and remembering database sessions."""
 
+    def __init__(self, connection_factory: SQLiteConnectionFactory | None = None):
+        self.connection_factory = connection_factory or SQLiteConnectionFactory()
+
     def open(self, path: str | Path) -> OpenDatabaseSession:
         db_path = Path(path)
         db_path.parent.mkdir(parents=True, exist_ok=True)
 
-        conn = sqlite3.connect(str(db_path))
+        conn = self.connection_factory.open(db_path)
         cursor = conn.cursor()
 
         profile_kv = ProfileKVService(conn)
         profile_kv.ensure_store()
-
-        cursor.execute("PRAGMA foreign_keys = ON")
-        cursor.execute("PRAGMA journal_mode = WAL")
-        cursor.execute("PRAGMA synchronous = NORMAL")
 
         return OpenDatabaseSession(conn=conn, cursor=cursor)
 

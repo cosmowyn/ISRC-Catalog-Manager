@@ -163,6 +163,16 @@ The application provides:
 - Independent ISRC sequences per profile.  
 - Each profile can store unique settings and field layouts.  
 - SQLite backend for stability and portability.
+- Background tasks now open their own SQLite connections instead of reusing the UI connection.
+- The app configures SQLite for `WAL` mode, `foreign_keys=ON`, and a busy timeout so long-running reads and writes remain safer under concurrent background work.
+
+## Responsive Background Tasks
+- Heavy workflows now run through a centralized Qt background-task manager instead of blocking the UI thread.
+- Long-running tasks report status through Qt signals and update the UI only on the main thread.
+- Write-heavy background jobs use per-profile write coordination so imports, snapshot restores, and other database mutations are serialized safely.
+- Each worker thread opens and closes its own SQLite connection. Connections are never shared across threads.
+- Failed worker writes roll back cleanly, and file-writing tasks still use history-aware rollback where supported.
+- The app prevents closing while background tasks are still running so database restores, imports, exports, snapshots, and other file/database operations cannot be interrupted unsafely.
 
 ## Media Previews
 - Built-in audio preview window with waveform on macOS and Windows via the app's Qt multimedia decoder stack.  
@@ -185,6 +195,7 @@ The application provides:
 - JSON exchange uses an explicit schema version and includes release data, custom fields, and media references.
 - Import modes now include dry run, create, merge, update existing matches only, and insert-new-when-duplicate-exists.
 - Match detection can use internal IDs, ISRC, UPC/EAN plus title, and optional title/artist heuristics.
+- Exchange inspections, imports, exports, packaged ZIP creation/extraction, XML import/export, database backup/restore, manual snapshots, snapshot restores, tagged-audio export, and quality scans now run off the main thread so the workspace stays responsive during heavier jobs.
 
 ## Data Quality Dashboard
 - `Catalog > Data Quality Dashboard…` scans the active profile for metadata, release, media, and integrity issues.

@@ -18,7 +18,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         chapter_id="overview",
         title="Overview",
         summary="What the app does, how the workspace is organized, and the main workflows you will use every day.",
-        keywords=("overview", "introduction", "menus", "workflow", "catalog", "tracks", "album entry", "licenses", "gs1", "bulk edit", "action ribbon", "quick actions", "releases", "audio tags", "csv", "json", "xlsx", "quality dashboard"),
+        keywords=("overview", "introduction", "menus", "workflow", "catalog", "tracks", "album entry", "licenses", "gs1", "bulk edit", "action ribbon", "quick actions", "releases", "audio tags", "csv", "json", "xlsx", "quality dashboard", "background tasks", "threading"),
         content_html="""
         <p><strong>ISRC Catalog Manager</strong> is a local-first desktop application for managing track metadata, first-class releases, optional or generated ISRC values, licensing files, GS1 workbook metadata, custom metadata columns, backups, snapshots, audio tag workflows, exchange formats, and quality checks from one workspace.</p>
         <p>The app is organized around a few core ideas:</p>
@@ -31,6 +31,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Exchange</strong>: CSV, XLSX, JSON, XML, and packaged exports for sharing or archiving the catalog safely.</li>
           <li><strong>Quality Dashboard</strong>: an actionable scan view for missing metadata, duplicate codes, broken media links, and other export-readiness issues.</li>
           <li><strong>Action Ribbon</strong>: a customizable top-row quick-action bar built from your preferred menu actions.</li>
+          <li><strong>Background tasks</strong>: longer imports, exports, scans, snapshots, and maintenance jobs now run outside the UI thread so the window remains responsive.</li>
           <li><strong>Settings</strong>: application identity, registration settings, snapshots, and themes.</li>
           <li><strong>History</strong>: undo, redo, manual snapshots, and restore points.</li>
         </ul>
@@ -67,6 +68,24 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Remove…</strong>: remove the selected profile from the list and optionally from disk.</li>
         </ul>
         <p>Some settings, such as the visual theme library and remembered window layout, are stored in application settings so they remain available across profiles.</p>
+        """,
+    ),
+    HelpChapter(
+        chapter_id="background-tasks",
+        title="Background Tasks",
+        summary="How long-running jobs stay responsive, how progress works, and what the app guarantees for SQLite safety.",
+        keywords=("background tasks", "threading", "progress", "cancel", "sqlite", "wal", "imports", "exports"),
+        content_html="""
+        <p>The app now runs heavier workflows outside the UI thread so long jobs do not freeze the main workspace.</p>
+        <ul>
+          <li><strong>Central task runner</strong>: imports, exports, ZIP packaging, snapshots, restores, quality scans, tagged-audio export, backup, and integrity checks are dispatched through one shared Qt background-task manager.</li>
+          <li><strong>Main-thread UI updates only</strong>: worker threads report back through Qt signals, and dialogs, tables, messages, and status text are updated on the main thread only.</li>
+          <li><strong>Per-thread SQLite connections</strong>: background jobs never reuse the main window's SQLite connection. Each worker opens and closes its own connection safely.</li>
+          <li><strong>SQLite concurrency</strong>: the app enables WAL mode, foreign-key enforcement, and a busy timeout. Write-heavy jobs are serialized per profile so concurrent background writers do not fight each other.</li>
+          <li><strong>Progress and cancellation</strong>: longer jobs show a progress dialog or in-place status text where practical. Some file-based jobs, such as tagged-audio export, can be cancelled safely.</li>
+          <li><strong>Safe shutdown</strong>: the app blocks closing while background jobs are still running so restores, imports, and other file/database writes cannot be interrupted mid-operation.</li>
+        </ul>
+        <p>If a background task fails, the app shows a clear error message and writes the details to the normal application log. Database writes roll back cleanly on failure, and file-writing tasks continue to use history-aware rollback where supported.</p>
         """,
     ),
     HelpChapter(
@@ -203,6 +222,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>JSON schema versioning</strong>: exported JSON includes an explicit schema version so future migrations stay manageable.</li>
         </ul>
         <p>Binary media is exported by file reference in plain tabular formats. ZIP package exports also copy referenced media into the package so the export remains portable without embedding raw blobs into CSV or XLSX, and those ZIP packages can be imported back into the app directly.</p>
+        <p>Inspection, import, export, ZIP creation, and ZIP extraction now run in the background so larger exchange workflows stay responsive while they work.</p>
         """,
     ),
     HelpChapter(
@@ -220,7 +240,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Suggested fixes</strong>: regenerate derived values, normalize date formats, relink missing media by filename, or fill blank track values from linked release metadata where appropriate.</li>
           <li><strong>Export</strong>: save the current issue list to CSV or JSON for reporting or offline cleanup planning.</li>
         </ul>
-        <p>Quality scans run on demand and are designed to surface practical export-readiness issues instead of generic diagnostics only.</p>
+        <p>Quality scans run on demand in the background and are designed to surface practical export-readiness issues instead of generic diagnostics only.</p>
         """,
     ),
     HelpChapter(

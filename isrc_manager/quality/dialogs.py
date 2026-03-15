@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -23,21 +23,6 @@ from PySide6.QtWidgets import (
 )
 
 from .models import QualityIssue, QualityScanResult
-
-
-class _QualityScanThread(QThread):
-    finished_result = Signal(object)
-    failed = Signal(str)
-
-    def __init__(self, scan_callback):
-        super().__init__()
-        self.scan_callback = scan_callback
-
-    def run(self) -> None:
-        try:
-            self.finished_result.emit(self.scan_callback())
-        except Exception as exc:  # pragma: no cover - defensive UI path
-            self.failed.emit(str(exc))
 
 
 def _create_filter_combo(parent=None, *, minimum_contents_length: int = 14) -> QComboBox:
@@ -61,6 +46,7 @@ class QualityDashboardDialog(QDialog):
         *,
         service,
         scan_callback=None,
+        task_manager=None,
         release_choices_provider,
         apply_fix_callback,
         open_issue_callback,
@@ -69,11 +55,12 @@ class QualityDashboardDialog(QDialog):
         super().__init__(parent)
         self.service = service
         self.scan_callback = scan_callback or service.scan
+        self.task_manager = task_manager
         self.release_choices_provider = release_choices_provider
         self.apply_fix_callback = apply_fix_callback
         self.open_issue_callback = open_issue_callback
         self._scan_result = QualityScanResult(issues=[])
-        self._scan_thread: _QualityScanThread | None = None
+        self._active_scan_task_id: str | None = None
 
         self.setWindowTitle("Data Quality Dashboard")
         self.resize(1180, 780)
@@ -168,16 +155,40 @@ class QualityDashboardDialog(QDialog):
         self.refresh_scan()
 
     def refresh_scan(self) -> None:
-        if self._scan_thread is not None and self._scan_thread.isRunning():
+        if self._active_scan_task_id is not None:
             return
         self.refresh_button.setEnabled(False)
         self.details.setPlainText("Scanning the current profile...")
         self.issue_table.setRowCount(0)
-        self._scan_thread = _QualityScanThread(self.scan_callback)
-        self._scan_thread.finished_result.connect(self._finish_scan)
-        self._scan_thread.failed.connect(self._fail_scan)
-        self._scan_thread.finished.connect(lambda: self.refresh_button.setEnabled(True))
-        self._scan_thread.start()
+        if self.task_manager is None:
+            try:
+                self._finish_scan(self.scan_callback())
+            except Exception as exc:  # pragma: no cover - defensive UI path
+                self._fail_scan(str(exc))
+            finally:
+                self.refresh_button.setEnabled(True)
+            return
+
+        self._active_scan_task_id = self.task_manager.submit(
+            title="Data Quality Scan",
+            description="Scanning the current profile for data-quality issues...",
+            task_fn=lambda _ctx: self.scan_callback(),
+            kind="read",
+            unique_key="quality.dashboard.scan",
+            owner=self,
+            show_dialog=False,
+            cancellable=False,
+            on_success=self._finish_scan,
+            on_error=lambda failure: self._fail_scan(getattr(failure, "message", str(failure))),
+            on_finished=self._finish_scan_request,
+        )
+        if self._active_scan_task_id is None:
+            self.refresh_button.setEnabled(True)
+            self.details.setPlainText("A quality scan is already running.")
+
+    def _finish_scan_request(self) -> None:
+        self._active_scan_task_id = None
+        self.refresh_button.setEnabled(True)
 
     def _finish_scan(self, result: QualityScanResult) -> None:
         self._scan_result = result

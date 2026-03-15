@@ -1,19 +1,26 @@
 import unittest
 
-from PySide6.QtCore import QCoreApplication, QEventLoop, QTimer
 from PySide6.QtWidgets import QApplication, QListView
 
-from isrc_manager.quality.dialogs import _QualityScanThread, _create_filter_combo
+from isrc_manager.quality.dialogs import QualityDashboardDialog, _create_filter_combo
 from isrc_manager.quality.models import QualityIssue, QualityScanResult
 
 
-class QualityDialogThreadTests(unittest.TestCase):
+class _DummyQualityService:
+    def __init__(self, result: QualityScanResult):
+        self._result = result
+
+    def scan(self) -> QualityScanResult:
+        return self._result
+
+
+class QualityDialogTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QCoreApplication.instance() or QCoreApplication([])
+        cls.app = QApplication.instance() or QApplication([])
 
-    def test_quality_scan_thread_uses_callback_result(self):
-        expected = QualityScanResult(
+    def test_quality_dashboard_dialog_uses_scan_result(self):
+        result = QualityScanResult(
             issues=[
                 QualityIssue(
                     issue_type="missing_isrc",
@@ -28,27 +35,21 @@ class QualityDialogThreadTests(unittest.TestCase):
             counts_by_severity={"warning": 1},
             counts_by_type={"missing_isrc": 1},
         )
-        loop = QEventLoop()
-        captured = {}
-        thread = _QualityScanThread(lambda: expected)
-        thread.finished_result.connect(lambda result: (captured.setdefault("result", result), loop.quit()))
-        thread.failed.connect(lambda message: (captured.setdefault("failed", message), loop.quit()))
-        thread.finished.connect(thread.deleteLater)
-        QTimer.singleShot(2000, loop.quit)
-
-        thread.start()
-        loop.exec()
-        thread.wait(2000)
-
-        self.assertNotIn("failed", captured)
-        self.assertIn("result", captured)
-        self.assertEqual(captured["result"].issues[0].issue_type, "missing_isrc")
-
-
-class QualityDialogFilterComboTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        dialog = QualityDashboardDialog(
+            service=_DummyQualityService(result),
+            scan_callback=None,
+            task_manager=None,
+            release_choices_provider=lambda: [],
+            apply_fix_callback=lambda _fix_key: "",
+            open_issue_callback=lambda _issue: None,
+        )
+        try:
+            self.assertEqual(dialog.total_label.text(), "Total issues: 1")
+            self.assertEqual(dialog.warning_label.text(), "Warnings: 1")
+            self.assertEqual(dialog.issue_table.rowCount(), 1)
+            self.assertIn("Track is missing an ISRC.", dialog.details.toPlainText())
+        finally:
+            dialog.close()
 
     def test_filter_combo_uses_qt_list_popup(self):
         combo = _create_filter_combo(minimum_contents_length=12)

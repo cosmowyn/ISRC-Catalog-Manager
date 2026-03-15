@@ -7,7 +7,7 @@ from mutagen.id3 import ID3
 from mutagen.mp4 import MP4Cover
 
 from isrc_manager.tags import ArtworkPayload, AudioTagData, catalog_metadata_to_tags, merge_imported_tags
-from isrc_manager.tags.service import AudioTagService
+from isrc_manager.tags.service import AudioTagService, TaggedAudioExportService
 
 
 class _DummyID3Audio:
@@ -185,6 +185,45 @@ class AudioTagServiceTests(unittest.TestCase):
         self.assertEqual(reread.artist, self.tag_data.artist)
         self.assertEqual(reread.isrc, self.tag_data.isrc)
         self.assertEqual(reread.upc, self.tag_data.upc)
+
+    def test_tagged_audio_export_reports_progress(self):
+        export_service = TaggedAudioExportService(self.service)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source_path = Path(tmpdir) / "sample.wav"
+            with wave.open(str(source_path), "wb") as handle:
+                handle.setnchannels(1)
+                handle.setsampwidth(2)
+                handle.setframerate(44100)
+                handle.writeframes(b"\x00\x00" * 22050)
+
+            progress_updates = []
+            result = export_service.export_copies(
+                output_dir=Path(tmpdir) / "exports",
+                exports=[(str(source_path), "orbit_export", self.tag_data)],
+                progress_callback=lambda value, maximum, message: progress_updates.append((value, maximum, message)),
+            )
+
+        self.assertEqual(result.exported, 1)
+        self.assertGreaterEqual(len(progress_updates), 2)
+        self.assertEqual(progress_updates[0][0:2], (0, 1))
+        self.assertEqual(progress_updates[-1][0:2], (1, 1))
+
+    def test_tagged_audio_export_can_be_cancelled(self):
+        export_service = TaggedAudioExportService(self.service)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source_path = Path(tmpdir) / "sample.wav"
+            with wave.open(str(source_path), "wb") as handle:
+                handle.setnchannels(1)
+                handle.setsampwidth(2)
+                handle.setframerate(44100)
+                handle.writeframes(b"\x00\x00" * 22050)
+
+            with self.assertRaises(InterruptedError):
+                export_service.export_copies(
+                    output_dir=Path(tmpdir) / "exports",
+                    exports=[(str(source_path), "orbit_export", self.tag_data)],
+                    is_cancelled=lambda: True,
+                )
 
 
 if __name__ == "__main__":

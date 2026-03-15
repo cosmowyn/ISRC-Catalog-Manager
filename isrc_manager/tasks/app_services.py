@@ -1,0 +1,168 @@
+"""Factories for recreating app service bundles inside worker threads."""
+
+from __future__ import annotations
+
+import sqlite3
+from dataclasses import dataclass
+from pathlib import Path
+
+from PySide6.QtCore import QSettings
+
+from isrc_manager.exchange.service import ExchangeService
+from isrc_manager.history import HistoryManager
+from isrc_manager.quality.service import QualityDashboardService
+from isrc_manager.releases import ReleaseService
+from isrc_manager.services import (
+    CustomFieldDefinitionService,
+    CustomFieldValueService,
+    DatabaseMaintenanceService,
+    GS1IntegrationService,
+    GS1MetadataRepository,
+    GS1SettingsService,
+    ProfileKVService,
+    SettingsMutationService,
+    SettingsReadService,
+    TrackService,
+    XMLExportService,
+    XMLImportService,
+)
+from isrc_manager.services.db_access import SQLiteConnectionFactory
+from isrc_manager.tags import AudioTagService, TaggedAudioExportService
+
+
+@dataclass(slots=True)
+class BackgroundAppServiceBundle:
+    conn: sqlite3.Connection
+    settings: QSettings
+    track_service: TrackService
+    release_service: ReleaseService
+    custom_field_definitions: CustomFieldDefinitionService
+    custom_field_values: CustomFieldValueService
+    xml_export_service: XMLExportService
+    xml_import_service: XMLImportService
+    exchange_service: ExchangeService
+    quality_service: QualityDashboardService
+    gs1_settings_service: GS1SettingsService
+    gs1_integration_service: GS1IntegrationService
+    audio_tag_service: AudioTagService
+    tagged_audio_export_service: TaggedAudioExportService
+    history_manager: HistoryManager
+    database_maintenance: DatabaseMaintenanceService
+    settings_reads: SettingsReadService
+    settings_mutations: SettingsMutationService
+    profile_kv: ProfileKVService
+
+    def close(self) -> None:
+        try:
+            self.settings.sync()
+        except Exception:
+            pass
+        try:
+            if self.conn.in_transaction:
+                self.conn.commit()
+        except Exception:
+            pass
+        try:
+            self.conn.close()
+        except Exception:
+            pass
+
+    def __enter__(self) -> "BackgroundAppServiceBundle":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        if exc_type is not None:
+            try:
+                if self.conn.in_transaction:
+                    self.conn.rollback()
+            except Exception:
+                pass
+        self.close()
+
+
+class BackgroundAppServiceFactory:
+    """Rebuilds profile-scoped service objects on a worker-thread connection."""
+
+    def __init__(
+        self,
+        *,
+        connection_factory: SQLiteConnectionFactory,
+        data_root: str | Path,
+        history_dir: str | Path,
+        backups_dir: str | Path,
+        settings_path: str | Path | None = None,
+        db_path: str | Path | None = None,
+    ):
+        self.connection_factory = connection_factory
+        self.data_root = Path(data_root)
+        self.history_dir = Path(history_dir)
+        self.backups_dir = Path(backups_dir)
+        self.settings_path = str(settings_path) if settings_path else None
+        self.db_path = str(db_path) if db_path else None
+
+    def configure(
+        self,
+        *,
+        db_path: str | Path | None = None,
+        settings_path: str | Path | None = None,
+    ) -> None:
+        if db_path is not None:
+            self.db_path = str(db_path)
+        if settings_path is not None:
+            self.settings_path = str(settings_path)
+
+    def open_bundle(self) -> BackgroundAppServiceBundle:
+        if not self.db_path:
+            raise ValueError("No profile database is currently open.")
+        if not self.settings_path:
+            raise ValueError("No settings file path is available for background services.")
+
+        settings = QSettings(str(self.settings_path), QSettings.IniFormat)
+        settings.setFallbacksEnabled(False)
+        conn = self.connection_factory.open(self.db_path)
+
+        track_service = TrackService(conn, self.data_root)
+        release_service = ReleaseService(conn, self.data_root)
+        custom_field_definitions = CustomFieldDefinitionService(conn)
+        custom_field_values = CustomFieldValueService(conn, custom_field_definitions)
+        settings_reads = SettingsReadService(conn)
+        settings_mutations = SettingsMutationService(conn, settings)
+        gs1_settings_service = GS1SettingsService(conn, settings)
+        audio_tag_service = AudioTagService()
+
+        return BackgroundAppServiceBundle(
+            conn=conn,
+            settings=settings,
+            track_service=track_service,
+            release_service=release_service,
+            custom_field_definitions=custom_field_definitions,
+            custom_field_values=custom_field_values,
+            xml_export_service=XMLExportService(conn),
+            xml_import_service=XMLImportService(conn, track_service, custom_field_definitions),
+            exchange_service=ExchangeService(
+                conn,
+                track_service,
+                release_service,
+                custom_field_definitions,
+                self.data_root,
+            ),
+            quality_service=QualityDashboardService(
+                conn,
+                track_service=track_service,
+                release_service=release_service,
+                data_root=self.data_root,
+            ),
+            gs1_settings_service=gs1_settings_service,
+            gs1_integration_service=GS1IntegrationService(
+                GS1MetadataRepository(conn),
+                gs1_settings_service,
+                track_service,
+            ),
+            audio_tag_service=audio_tag_service,
+            tagged_audio_export_service=TaggedAudioExportService(audio_tag_service),
+            history_manager=HistoryManager(conn, settings, self.db_path, self.history_dir, self.data_root),
+            database_maintenance=DatabaseMaintenanceService(self.backups_dir),
+            settings_reads=settings_reads,
+            settings_mutations=settings_mutations,
+            profile_kv=ProfileKVService(conn),
+        )

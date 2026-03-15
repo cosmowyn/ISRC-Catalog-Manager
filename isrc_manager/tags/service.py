@@ -482,6 +482,8 @@ class TaggedAudioExportService:
         *,
         output_dir: str | Path,
         exports: list[tuple[str, str, AudioTagData]],
+        progress_callback=None,
+        is_cancelled=None,
     ) -> TaggedAudioExportResult:
         destination_root = Path(output_dir)
         destination_root.mkdir(parents=True, exist_ok=True)
@@ -491,7 +493,16 @@ class TaggedAudioExportService:
         warnings: list[str] = []
         written_paths: list[str] = []
 
-        for source_path, suggested_name, tag_data in exports:
+        total = len(exports)
+        for index, (source_path, suggested_name, tag_data) in enumerate(exports, start=1):
+            if progress_callback is not None:
+                progress_callback(
+                    index - 1,
+                    total,
+                    f"Writing tags to exported copy {index} of {total}: {suggested_name}",
+                )
+            if is_cancelled is not None and is_cancelled():
+                raise InterruptedError("Tagged audio export cancelled.")
             source = Path(source_path)
             if not source.exists():
                 skipped += 1
@@ -508,6 +519,9 @@ class TaggedAudioExportService:
                 skipped += 1
                 warnings.append(f"{destination.name}: {exc}")
                 destination.unlink(missing_ok=True)
+
+        if progress_callback is not None:
+            progress_callback(total, total, "Tagged audio export finished.")
 
         return TaggedAudioExportResult(
             requested=len(exports),
