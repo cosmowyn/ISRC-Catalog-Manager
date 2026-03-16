@@ -157,6 +157,14 @@ from isrc_manager.help_content import render_help_html
 from isrc_manager.app_bootstrap import run_desktop_application
 from isrc_manager.main_window_shell import build_main_window_shell
 from isrc_manager.paths import DATA_DIR
+from isrc_manager.qss_reference import (
+    QssCodeEditor,
+    QssReferenceEntry,
+    build_qss_completion_tokens,
+    collect_qss_reference_entries,
+    ensure_widget_object_names as _ensure_qss_widget_object_names,
+    repolish_widget_tree as _repolish_qss_widget_tree,
+)
 from isrc_manager.gs1_dialog import GS1MetadataDialog
 from isrc_manager.assets import AssetService
 from isrc_manager.assets.dialogs import AssetBrowserDialog
@@ -468,6 +476,8 @@ class ApplicationSettingsDialog(QDialog):
         }
         self._theme_color_edits = {}
         self._theme_color_swatches = {}
+        self._qss_reference_entries: list[QssReferenceEntry] = []
+        self._qss_filtered_reference_entries: list[QssReferenceEntry] = []
         self._theme_change_tracking_enabled = True
         self.gs1_integration_service = getattr(parent, "gs1_integration_service", None)
         self._gs1_template_profile = None
@@ -1031,19 +1041,91 @@ class ApplicationSettingsDialog(QDialog):
         advanced_layout.addWidget(advanced_note)
 
         qss_help = QLabel(
-            "Example selectors: `QPushButton`, `QLineEdit`, `QDockWidget::title`, or `#profilesToolbar QPushButton`."
+            "Example selectors: `QPushButton`, `QLineEdit`, `QDockWidget::title`, or `#profilesToolbar QPushButton`. "
+            "Press Ctrl+Space in the editor for autocomplete."
         )
         qss_help.setProperty("role", "hint")
         qss_help.setWordWrap(True)
         advanced_layout.addWidget(qss_help)
 
-        self.theme_custom_qss_edit = QPlainTextEdit(self)
+        self.theme_qss_tabs = QTabWidget(self)
+        self.theme_qss_tabs.setDocumentMode(True)
+        advanced_layout.addWidget(self.theme_qss_tabs, 1)
+
+        qss_editor_page = QWidget(self)
+        qss_editor_layout = QVBoxLayout(qss_editor_page)
+        qss_editor_layout.setContentsMargins(0, 0, 0, 0)
+        qss_editor_layout.setSpacing(10)
+        self.theme_custom_qss_edit = QssCodeEditor(self)
         self.theme_custom_qss_edit.setPlaceholderText(
             "/* Advanced QSS */\nQPushButton#saveButton {\n    font-weight: 600;\n}\n"
         )
         self.theme_custom_qss_edit.setMinimumHeight(220)
         self.theme_custom_qss_edit.setPlainText(str(self._theme_settings.get("custom_qss") or ""))
-        advanced_layout.addWidget(self.theme_custom_qss_edit, 1)
+        qss_editor_layout.addWidget(self.theme_custom_qss_edit, 1)
+        self.theme_qss_tabs.addTab(qss_editor_page, "Editor")
+
+        qss_reference_page = QWidget(self)
+        qss_reference_layout = QVBoxLayout(qss_reference_page)
+        qss_reference_layout.setContentsMargins(0, 0, 0, 0)
+        qss_reference_layout.setSpacing(10)
+
+        qss_reference_note = QLabel(
+            "The reference catalog is built from the currently open app windows and dialogs. "
+            "Open the screen you want to style, then refresh the catalog to harvest its generated object names."
+        )
+        qss_reference_note.setWordWrap(True)
+        qss_reference_note.setProperty("role", "hint")
+        qss_reference_layout.addWidget(qss_reference_note)
+
+        qss_reference_controls = QWidget(self)
+        qss_reference_controls_layout = QHBoxLayout(qss_reference_controls)
+        qss_reference_controls_layout.setContentsMargins(0, 0, 0, 0)
+        qss_reference_controls_layout.setSpacing(8)
+        self.qss_reference_filter_edit = QLineEdit(self)
+        self.qss_reference_filter_edit.setPlaceholderText(
+            "Filter selectors by widget type, object name, role, or note..."
+        )
+        self.qss_reference_filter_edit.setClearButtonEnabled(True)
+        self.qss_reference_filter_edit.textChanged.connect(self._apply_qss_reference_filter)
+        self.qss_reference_refresh_button = QPushButton("Refresh Catalog", self)
+        self.qss_reference_refresh_button.setAutoDefault(False)
+        self.qss_reference_refresh_button.clicked.connect(self._refresh_qss_selector_reference)
+        self.qss_reference_status_label = QLabel("", self)
+        self.qss_reference_status_label.setProperty("role", "secondary")
+        self.qss_reference_status_label.setWordWrap(True)
+        qss_reference_controls_layout.addWidget(self.qss_reference_filter_edit, 1)
+        qss_reference_controls_layout.addWidget(self.qss_reference_refresh_button)
+        qss_reference_layout.addWidget(qss_reference_controls)
+        qss_reference_layout.addWidget(self.qss_reference_status_label)
+
+        self.qss_reference_table = QTableWidget(0, 3, self)
+        self.qss_reference_table.setHorizontalHeaderLabels(["Category", "Selector", "Details"])
+        self.qss_reference_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.qss_reference_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.qss_reference_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.qss_reference_table.verticalHeader().setVisible(False)
+        self.qss_reference_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.qss_reference_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.qss_reference_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.qss_reference_table.itemSelectionChanged.connect(self._update_qss_reference_actions)
+        self.qss_reference_table.doubleClicked.connect(lambda _index: self._insert_selected_qss_selector())
+        qss_reference_layout.addWidget(self.qss_reference_table, 1)
+
+        qss_reference_button_row = QHBoxLayout()
+        qss_reference_button_row.setContentsMargins(0, 0, 0, 0)
+        qss_reference_button_row.setSpacing(8)
+        qss_reference_button_row.addStretch(1)
+        self.qss_reference_copy_button = QPushButton("Copy Selector", self)
+        self.qss_reference_copy_button.setAutoDefault(False)
+        self.qss_reference_copy_button.clicked.connect(self._copy_selected_qss_selector)
+        self.qss_reference_insert_button = QPushButton("Insert Into Editor", self)
+        self.qss_reference_insert_button.setAutoDefault(False)
+        self.qss_reference_insert_button.clicked.connect(self._insert_selected_qss_selector)
+        qss_reference_button_row.addWidget(self.qss_reference_copy_button)
+        qss_reference_button_row.addWidget(self.qss_reference_insert_button)
+        qss_reference_layout.addLayout(qss_reference_button_row)
+        self.theme_qss_tabs.addTab(qss_reference_page, "Selector Reference")
         theme_layout.addWidget(advanced_box, 1)
 
         theme_layout.addStretch(1)
@@ -1092,6 +1174,7 @@ class ApplicationSettingsDialog(QDialog):
         self._configure_gs1_contract_combo()
         self._configure_gs1_default_option_combos()
         self._refresh_gs1_template_options(show_errors=False)
+        self._refresh_qss_selector_reference()
 
     @staticmethod
     def _configure_grid(grid: QGridLayout):
@@ -1410,6 +1493,90 @@ class ApplicationSettingsDialog(QDialog):
         self.theme_load_button.clicked.connect(self._load_selected_theme_preset)
         self.theme_save_button.clicked.connect(self._save_current_theme_preset)
         self.theme_delete_button.clicked.connect(self._delete_selected_theme_preset)
+
+    def _collect_qss_reference_entries(self) -> list[QssReferenceEntry]:
+        app = QApplication.instance()
+        widgets: list[QWidget] = []
+        if app is not None:
+            widgets = [widget for widget in app.topLevelWidgets() if isinstance(widget, QWidget)]
+        if self not in widgets:
+            widgets.append(self)
+        for widget in widgets:
+            _ensure_qss_widget_object_names(widget)
+        return collect_qss_reference_entries(widgets)
+
+    def _refresh_qss_selector_reference(self) -> None:
+        self._qss_reference_entries = self._collect_qss_reference_entries()
+        self.theme_custom_qss_edit.set_completion_tokens(
+            build_qss_completion_tokens(self._qss_reference_entries)
+        )
+        self._apply_qss_reference_filter()
+
+    def _apply_qss_reference_filter(self) -> None:
+        filter_text = str(self.qss_reference_filter_edit.text() or "").strip().lower()
+        if not filter_text:
+            visible_entries = list(self._qss_reference_entries)
+        else:
+            visible_entries = [
+                entry
+                for entry in self._qss_reference_entries
+                if filter_text in entry.category.lower()
+                or filter_text in entry.selector.lower()
+                or filter_text in entry.details.lower()
+            ]
+        self._qss_filtered_reference_entries = visible_entries
+        self.qss_reference_table.setRowCount(0)
+        for entry in visible_entries:
+            row = self.qss_reference_table.rowCount()
+            self.qss_reference_table.insertRow(row)
+            self.qss_reference_table.setItem(row, 0, QTableWidgetItem(entry.category))
+            self.qss_reference_table.setItem(row, 1, QTableWidgetItem(entry.selector))
+            self.qss_reference_table.setItem(row, 2, QTableWidgetItem(entry.details))
+        total = len(self._qss_reference_entries)
+        shown = len(visible_entries)
+        if total == 0:
+            self.qss_reference_status_label.setText(
+                "No selectors discovered yet. Open another window or dialog and refresh the catalog."
+            )
+        elif shown == total:
+            self.qss_reference_status_label.setText(
+                f"{total} selectors available for autocomplete and copy/insert."
+            )
+        else:
+            self.qss_reference_status_label.setText(
+                f"Showing {shown} of {total} selectors after filtering."
+            )
+        self._update_qss_reference_actions()
+
+    def _selected_qss_selector(self) -> str:
+        rows = self.qss_reference_table.selectionModel().selectedRows()
+        if not rows:
+            return ""
+        item = self.qss_reference_table.item(rows[0].row(), 1)
+        return item.text().strip() if item is not None else ""
+
+    def _update_qss_reference_actions(self) -> None:
+        has_selection = bool(self._selected_qss_selector())
+        self.qss_reference_copy_button.setEnabled(has_selection)
+        self.qss_reference_insert_button.setEnabled(has_selection)
+
+    def _copy_selected_qss_selector(self) -> None:
+        selector = self._selected_qss_selector()
+        if not selector:
+            return
+        clipboard = QApplication.clipboard()
+        if clipboard is not None:
+            clipboard.setText(selector)
+
+    def _insert_selected_qss_selector(self) -> None:
+        selector = self._selected_qss_selector()
+        if not selector:
+            return
+        self.theme_qss_tabs.setCurrentIndex(0)
+        cursor = self.theme_custom_qss_edit.textCursor()
+        cursor.insertText(selector)
+        self.theme_custom_qss_edit.setTextCursor(cursor)
+        self.theme_custom_qss_edit.setFocus()
 
     def _theme_value_payload(self) -> dict[str, object]:
         values = {
@@ -4947,42 +5114,11 @@ class App(QMainWindow):
         return base
 
     def _ensure_widget_object_names(self, root: QWidget | None) -> bool:
-        if root is None:
-            return False
-        changed = False
-        root_name = self._root_object_name(root)
-
-        for attr_name, value in getattr(root, "__dict__", {}).items():
-            if isinstance(value, QWidget) and value.objectName() == "":
-                value.setObjectName(attr_name)
-                changed = True
-
-        counters: dict[str, int] = {}
-        for child in root.findChildren(QWidget):
-            if child.objectName():
-                continue
-            for attr_name, value in getattr(child, "__dict__", {}).items():
-                if isinstance(value, QWidget) and value.objectName() == "":
-                    value.setObjectName(attr_name)
-                    changed = True
-            if child.objectName():
-                continue
-            class_name = child.metaObject().className() or "widget"
-            base = class_name[0].lower() + class_name[1:] if class_name else "widget"
-            counters[base] = counters.get(base, 0) + 1
-            child.setObjectName(f"{root_name}_{base}_{counters[base]}")
-            changed = True
-        return changed
+        return _ensure_qss_widget_object_names(root)
 
     @staticmethod
     def _repolish_widget_tree(root: QWidget | None) -> None:
-        if root is None:
-            return
-        root.style().unpolish(root)
-        root.style().polish(root)
-        for child in root.findChildren(QWidget):
-            child.style().unpolish(child)
-            child.style().polish(child)
+        _repolish_qss_widget_tree(root)
 
     def _current_auto_snapshot_settings(self) -> tuple[bool, int]:
         if self.settings_reads is None:

@@ -119,7 +119,7 @@ The application provides:
 - Dockable views for the add-data form and catalog table  
 - GS1 metadata editing and grouped workbook export using the official GS1 template workflow  
 - Searchable in-app help with contextual help buttons  
-- Theme customization with saved presets and advanced QSS  
+- Theme customization with saved presets, advanced QSS, selector autocomplete, and an in-app selector reference catalog  
 - Full audit logging and backup system  
 - Import/export tools for XML metadata  
 - A built-in license management system  
