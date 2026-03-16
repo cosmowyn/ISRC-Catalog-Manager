@@ -4,15 +4,16 @@
 
 Split the current monolith into logical modules without changing runtime behavior, database shape, settings keys, file layout, or user workflows.
 
-This plan is based on the current codebase as of March 13, 2026.
+This plan is based on the current codebase as of March 16, 2026.
 
 ## Current Shape
 
-- The repository is functionally centered on [`ISRC_manager.py`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/ISRC_manager.py), which is about 6,200 lines.
+- The repository is still functionally centered on [`ISRC_manager.py`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/ISRC_manager.py), which is now about 15,200 lines.
 - Auxiliary files are mostly packaging/build support:
   - [`build.py`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/build.py)
   - [`icon_factory.py`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/icon_factory.py)
 - The main window class `App` contains 131 methods and currently owns UI construction, database lifecycle, schema migrations, CRUD operations, import/export, blob handling, preview logic, backup/restore, and profile/settings workflows.
+- The entry path is now slightly thinner than before: startup orchestration is delegated through [`isrc_manager/app_bootstrap.py`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/isrc_manager/app_bootstrap.py), which preserves the real launch behavior while giving tests and coverage a measurable seam.
 
 ## Responsibility Clusters In The Monolith
 
@@ -164,7 +165,14 @@ Minimum coverage:
 - license upload/edit/delete
 - backup/restore and integrity check
 
-If automated GUI tests are too heavy at first, begin with service-level and database-level tests around temporary databases and a manual smoke checklist for the UI.
+This baseline is now in place and has been extended with:
+
+- headless-safe startup coverage for the real desktop shell bootstrap path
+- main-window construction and workspace/profile integration tests
+- dialog/controller tests for release, work, and global-search workflows
+- reusable Qt test helpers that keep `QApplication` lifecycle stable in CI
+
+The remaining test gap is no longer "can we test the shell at all?" but "which additional dialog-heavy flows should be promoted from smoke coverage to behavior coverage next?"
 
 ### Stage 1: Extract pure helpers first
 
@@ -182,6 +190,13 @@ Why first:
 - lowest coupling
 - easiest to verify
 - shrinks imports and mental load immediately
+
+Status:
+
+- partially complete
+- settings bootstrap already lives in [`isrc_manager/settings.py`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/isrc_manager/settings.py)
+- startup orchestration now lives in [`isrc_manager/app_bootstrap.py`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/isrc_manager/app_bootstrap.py)
+- both paths are covered by integration tests
 
 ### Stage 2: Move standalone dialogs and widgets as-is
 

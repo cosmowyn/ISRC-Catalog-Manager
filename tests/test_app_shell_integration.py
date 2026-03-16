@@ -4,16 +4,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-try:
-    from PySide6.QtWidgets import QApplication
-except ImportError as exc:  # pragma: no cover - environment-specific fallback
-    QApplication = None
-    QT_IMPORT_ERROR = exc
-else:
-    QT_IMPORT_ERROR = None
-
 from isrc_manager.constants import APP_NAME
 from isrc_manager.services import DatabaseSchemaService, DatabaseSessionService
+from tests.qt_test_helpers import require_qapplication
 
 try:
     import ISRC_manager as app_module
@@ -34,11 +27,9 @@ def _no_catalog_background_refresh(self, *args, **kwargs):
 class AppShellIntegrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        if QApplication is None:
-            raise unittest.SkipTest(f"PySide6 QtWidgets unavailable: {QT_IMPORT_ERROR}")
         if app_module is None:
             raise unittest.SkipTest(f"ISRC_manager import unavailable: {APP_IMPORT_ERROR}")
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = require_qapplication()
 
     def setUp(self):
         self.tmpdir = tempfile.TemporaryDirectory()

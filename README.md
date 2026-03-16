@@ -438,6 +438,12 @@ python -m coverage report
 python -m coverage xml
 ```
 
+Notes:
+
+- The test suite now includes headless Qt app-shell coverage for the real desktop startup path, dialog/controller integration tests for the release, work, and global-search flows, and workspace-level integration tests that exercise temporary SQLite profiles.
+- CI runs the Qt suite with `QT_QPA_PLATFORM=offscreen`; when reproducing Linux CI issues locally, make sure the same environment is set and that the Qt runtime libraries used by the workflow are installed.
+- The top-level desktop entry point remains `ISRC_manager.py`, while the measurable bootstrap path lives in [`isrc_manager/app_bootstrap.py`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/isrc_manager/app_bootstrap.py) so startup behavior can be tested without changing the end-user launch flow.
+
 Apply formatting fixes:
 
 ```bash
@@ -463,8 +469,11 @@ GitHub Actions now runs separate jobs for:
 - Black formatting checks
 - mypy type checking on the curated service/domain scope
 - unittest on Python 3.10 and 3.13
+- headless Qt app-shell and dialog integration coverage inside the unittest matrix
 - coverage XML generation with an 80% package-level threshold
 - a lightweight packaging smoke check for PyInstaller availability
+
+The Ubuntu CI jobs also install the Qt multimedia/runtime libraries needed by the PySide6 shell tests, including `libpulse-mainloop-glib0`, so the startup-path coverage matches the real desktop dependencies more closely.
 
 ---
 

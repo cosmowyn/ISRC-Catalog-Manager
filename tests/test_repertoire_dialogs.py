@@ -1,21 +1,20 @@
 import unittest
 
-try:
-    from PySide6.QtWidgets import QApplication, QDialogButtonBox, QTabWidget
-except ImportError as exc:  # pragma: no cover - environment-specific fallback
-    QApplication = None
-    QDialogButtonBox = None
-    QTabWidget = None
-    QT_IMPORT_ERROR = exc
-else:
-    QT_IMPORT_ERROR = None
+from tests.qt_test_helpers import require_qapplication
 
-from isrc_manager.assets.dialogs import AssetEditorDialog
-from isrc_manager.contracts.dialogs import ContractEditorDialog
-from isrc_manager.releases.dialogs import ReleaseBrowserDialog
-from isrc_manager.rights.dialogs import RightEditorDialog
-from isrc_manager.search.dialogs import GlobalSearchDialog
-from isrc_manager.works.dialogs import WorkEditorDialog
+try:
+    from PySide6.QtWidgets import QDialogButtonBox, QTabWidget
+
+    from isrc_manager.assets.dialogs import AssetEditorDialog
+    from isrc_manager.contracts.dialogs import ContractEditorDialog
+    from isrc_manager.releases.dialogs import ReleaseBrowserDialog
+    from isrc_manager.rights.dialogs import RightEditorDialog
+    from isrc_manager.search.dialogs import GlobalSearchDialog
+    from isrc_manager.works.dialogs import WorkEditorDialog
+except Exception as exc:  # pragma: no cover - environment-specific fallback
+    REPERTOIRE_IMPORT_ERROR = exc
+else:
+    REPERTOIRE_IMPORT_ERROR = None
 
 
 class _EmptyReleaseService:
@@ -49,9 +48,11 @@ class _EmptyRelationshipService:
 class RepertoireDialogSmokeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        if QApplication is None:
-            raise unittest.SkipTest(f"PySide6 QtWidgets unavailable: {QT_IMPORT_ERROR}")
-        cls.app = QApplication.instance() or QApplication([])
+        if REPERTOIRE_IMPORT_ERROR is not None:
+            raise unittest.SkipTest(
+                f"Repertoire dialog modules unavailable: {REPERTOIRE_IMPORT_ERROR}"
+            )
+        cls.app = require_qapplication()
 
     def test_work_editor_uses_two_tab_layout(self):
         dialog = WorkEditorDialog(

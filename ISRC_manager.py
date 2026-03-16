@@ -154,6 +154,7 @@ from isrc_manager.services.gs1_mapping import (
     COMMON_PACKAGING_CHOICES,
 )
 from isrc_manager.help_content import render_help_html
+from isrc_manager.app_bootstrap import run_desktop_application
 from isrc_manager.main_window_shell import build_main_window_shell
 from isrc_manager.paths import DATA_DIR
 from isrc_manager.gs1_dialog import GS1MetadataDialog
@@ -15191,21 +15192,13 @@ def load_wav_peaks(path: str, width_px: int):
 # Application Startup (Settings bootstrap + Single-instance enforcement)
 # =============================================================================
 def main() -> int:
-    settings = init_settings()
-
-    _install_qt_message_filter()
-    app = QApplication(sys.argv)
-
-    lock = enforce_single_instance(60000)
-    if lock is None:
-        QMessageBox.warning(None, "Already running", f"{APP_NAME} is already running.")
-        return 0
-
-    app._single_instance_lock = lock
-
-    window = App()
-    window.showMaximized()
-    return app.exec()
+    return run_desktop_application(
+        argv=sys.argv,
+        init_settings=init_settings,
+        install_qt_message_filter=_install_qt_message_filter,
+        enforce_single_instance=enforce_single_instance,
+        window_factory=App,
+    )
 
 
 if __name__ == "__main__":
