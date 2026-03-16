@@ -12,9 +12,16 @@ except ImportError as exc:  # pragma: no cover - environment-specific fallback
 else:
     QT_IMPORT_ERROR = None
 
-import ISRC_manager as app_module
 from isrc_manager.constants import APP_NAME
 from isrc_manager.services import DatabaseSchemaService, DatabaseSessionService
+
+try:
+    import ISRC_manager as app_module
+except Exception as exc:  # pragma: no cover - environment-specific fallback
+    app_module = None
+    APP_IMPORT_ERROR = exc
+else:
+    APP_IMPORT_ERROR = None
 
 
 def _no_catalog_background_refresh(self, *args, **kwargs):
@@ -29,6 +36,8 @@ class AppShellIntegrationTests(unittest.TestCase):
     def setUpClass(cls):
         if QApplication is None:
             raise unittest.SkipTest(f"PySide6 QtWidgets unavailable: {QT_IMPORT_ERROR}")
+        if app_module is None:
+            raise unittest.SkipTest(f"ISRC_manager import unavailable: {APP_IMPORT_ERROR}")
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):

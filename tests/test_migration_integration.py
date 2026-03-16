@@ -14,7 +14,6 @@ except ImportError as exc:  # pragma: no cover - environment-specific fallback
 else:
     QT_IMPORT_ERROR = None
 
-import ISRC_manager as app_module
 from isrc_manager.constants import APP_NAME, SCHEMA_TARGET
 from isrc_manager.services import (
     DatabaseSchemaService,
@@ -26,6 +25,14 @@ from isrc_manager.services import (
 from isrc_manager.services.db_access import SQLiteConnectionFactory
 from isrc_manager.tasks.app_services import BackgroundAppServiceFactory
 from tests._legacy_profile_builders import build_legacy_v12_profile
+
+try:
+    import ISRC_manager as app_module
+except Exception as exc:  # pragma: no cover - environment-specific fallback
+    app_module = None
+    APP_IMPORT_ERROR = exc
+else:
+    APP_IMPORT_ERROR = None
 
 
 def _no_catalog_background_refresh(self, *args, **kwargs):
@@ -40,6 +47,8 @@ class MigrationIntegrationTests(unittest.TestCase):
     def setUpClass(cls):
         if QApplication is None or QSettings is None:
             raise unittest.SkipTest(f"PySide6 Qt unavailable: {QT_IMPORT_ERROR}")
+        if app_module is None:
+            raise unittest.SkipTest(f"ISRC_manager import unavailable: {APP_IMPORT_ERROR}")
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
