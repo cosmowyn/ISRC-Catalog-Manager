@@ -13,6 +13,7 @@ from isrc_manager.history import HistoryManager
 from isrc_manager.quality.service import QualityDashboardService
 from isrc_manager.releases import ReleaseService
 from isrc_manager.services import (
+    CatalogReadService,
     CustomFieldDefinitionService,
     CustomFieldValueService,
     DatabaseMaintenanceService,
@@ -36,6 +37,7 @@ class BackgroundAppServiceBundle:
     settings: QSettings
     track_service: TrackService
     release_service: ReleaseService
+    catalog_reads: CatalogReadService
     custom_field_definitions: CustomFieldDefinitionService
     custom_field_values: CustomFieldValueService
     xml_export_service: XMLExportService
@@ -125,6 +127,7 @@ class BackgroundAppServiceFactory:
         release_service = ReleaseService(conn, self.data_root)
         custom_field_definitions = CustomFieldDefinitionService(conn)
         custom_field_values = CustomFieldValueService(conn, custom_field_definitions)
+        catalog_reads = CatalogReadService(conn)
         settings_reads = SettingsReadService(conn)
         settings_mutations = SettingsMutationService(conn, settings)
         gs1_settings_service = GS1SettingsService(conn, settings)
@@ -135,6 +138,7 @@ class BackgroundAppServiceFactory:
             settings=settings,
             track_service=track_service,
             release_service=release_service,
+            catalog_reads=catalog_reads,
             custom_field_definitions=custom_field_definitions,
             custom_field_values=custom_field_values,
             xml_export_service=XMLExportService(conn),

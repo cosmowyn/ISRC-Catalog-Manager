@@ -5596,8 +5596,6 @@ class App(QMainWindow):
         self._apply_saved_view_preferences()
 
         self._update_add_data_generated_fields()
-        self.refresh_table()
-        self.populate_all_comboboxes()
         self.resize(1280, 800)
         self._refresh_history_actions()
         app_instance = QApplication.instance()
@@ -5605,6 +5603,7 @@ class App(QMainWindow):
             app_instance.installEventFilter(self)
         self._ensure_widget_object_names(self)
         self._apply_theme()
+        self._refresh_catalog_ui_in_background(unique_key="catalog.ui.startup")
 
 
     def closeEvent(self, e):
@@ -7224,21 +7223,28 @@ class App(QMainWindow):
             return
 
         previous_path = self.current_db_path
-        self._activate_profile(path)
-        self._log_event(
-            "profile.switch",
-            "Switched profile",
-            from_path=previous_path,
-            to_path=path,
+        def _after_switch(prepared_path: str):
+            self._log_event(
+                "profile.switch",
+                "Switched profile",
+                from_path=previous_path,
+                to_path=prepared_path,
+            )
+            self._audit("PROFILE", "Database", ref_id=prepared_path, details="switch_profile")
+            self._audit_commit()
+            self.session_history_manager.record_profile_switch(
+                from_path=previous_path,
+                to_path=prepared_path,
+                action_type="profile.switch",
+            )
+            self._refresh_history_actions()
+
+        self._activate_profile_in_background(
+            path,
+            title="Switch Profile",
+            description="Preparing the selected profile database...",
+            on_activated=_after_switch,
         )
-        self._audit("PROFILE", "Database", ref_id=path, details="switch_profile")
-        self._audit_commit()
-        self.session_history_manager.record_profile_switch(
-            from_path=previous_path,
-            to_path=path,
-            action_type="profile.switch",
-        )
-        self._refresh_history_actions()
 
     def create_new_profile(self):
         name, ok = QInputDialog.getText(self, "New Profile", "Database file name (no path, e.g., mylabel.db):")
@@ -7251,43 +7257,57 @@ class App(QMainWindow):
             QMessageBox.warning(self, "Exists", "A database with this name already exists.")
             return
         self._clear_table_settings_for_path(new_path)
-        self._activate_profile(new_path)
-        self._log_event(
-            "profile.create",
-            "Created new profile database",
-            previous_path=previous_path,
-            created_path=new_path,
+        def _after_create(prepared_path: str):
+            self._log_event(
+                "profile.create",
+                "Created new profile database",
+                previous_path=previous_path,
+                created_path=prepared_path,
+            )
+            self._audit("PROFILE", "Database", ref_id=prepared_path, details="create_new_profile")
+            self._audit_commit()
+            self.session_history_manager.record_profile_create(
+                created_path=prepared_path,
+                previous_path=previous_path,
+            )
+            self._refresh_history_actions()
+            QMessageBox.information(self, "Profile Created", f"Database created:\n{prepared_path}")
+
+        self._activate_profile_in_background(
+            new_path,
+            title="Create Profile",
+            description="Creating the new profile database...",
+            on_activated=_after_create,
         )
-        self._audit("PROFILE", "Database", ref_id=new_path, details="create_new_profile")
-        self._audit_commit()
-        self.session_history_manager.record_profile_create(
-            created_path=new_path,
-            previous_path=previous_path,
-        )
-        self._refresh_history_actions()
-        QMessageBox.information(self, "Profile Created", f"Database created:\n{new_path}")
 
     def browse_profile(self):
         path, _ = QFileDialog.getOpenFileName(self, "Open Database", str(self.database_dir), "SQLite DB (*.db);;All Files (*)")
         if not path:
             return
         previous_path = self.current_db_path
-        self._activate_profile(path)
-        self._log_event(
-            "profile.browse",
-            "Opened external profile database",
-            previous_path=previous_path,
-            path=path,
+        def _after_browse(prepared_path: str):
+            self._log_event(
+                "profile.browse",
+                "Opened external profile database",
+                previous_path=previous_path,
+                path=prepared_path,
+            )
+            self._audit("PROFILE", "Database", ref_id=prepared_path, details="browse_profile")
+            self._audit_commit()
+            self.session_history_manager.record_profile_switch(
+                from_path=previous_path,
+                to_path=prepared_path,
+                action_type="profile.browse",
+                label=f"Browse Profile: {Path(prepared_path).name}",
+            )
+            self._refresh_history_actions()
+
+        self._activate_profile_in_background(
+            path,
+            title="Open Profile",
+            description="Preparing the selected profile database...",
+            on_activated=_after_browse,
         )
-        self._audit("PROFILE", "Database", ref_id=path, details="browse_profile")
-        self._audit_commit()
-        self.session_history_manager.record_profile_switch(
-            from_path=previous_path,
-            to_path=path,
-            action_type="profile.browse",
-            label=f"Browse Profile: {Path(path).name}",
-        )
-        self._refresh_history_actions()
 
     def remove_selected_profile(self):
         idx = self.profile_combo.currentIndex()
@@ -7445,6 +7465,7 @@ class App(QMainWindow):
         requires_profile: bool = True,
         show_dialog: bool = True,
         cancellable: bool = False,
+        owner: QWidget | None = None,
         on_success=None,
         on_error=None,
         on_cancelled=None,
@@ -7475,7 +7496,7 @@ class App(QMainWindow):
             task_fn=_wrapped_task,
             kind=kind,
             unique_key=unique_key,
-            owner=self,
+            owner=owner or self,
             show_dialog=show_dialog,
             cancellable=cancellable,
             on_success=on_success,
@@ -7497,6 +7518,7 @@ class App(QMainWindow):
         requires_profile: bool = True,
         show_dialog: bool = True,
         cancellable: bool = False,
+        owner: QWidget | None = None,
         on_success=None,
         on_error=None,
         on_cancelled=None,
@@ -7517,6 +7539,7 @@ class App(QMainWindow):
             requires_profile=requires_profile,
             show_dialog=show_dialog,
             cancellable=cancellable,
+            owner=owner,
             on_success=on_success,
             on_error=on_error,
             on_cancelled=on_cancelled,
@@ -8401,6 +8424,97 @@ class App(QMainWindow):
         self._update_add_data_generated_fields()
         self._refresh_history_actions()
 
+    def _prepare_profile_database_background(
+        self,
+        path: str,
+        *,
+        title: str,
+        description: str,
+        on_success,
+        on_finished=None,
+    ) -> str | None:
+        target_path = str(Path(path))
+
+        def _worker(ctx):
+            ctx.set_status(description)
+            session = self.database_session.open(target_path)
+            try:
+                schema_service = DatabaseSchemaService(
+                    session.conn,
+                    logger=self.logger,
+                    data_root=DATA_DIR(),
+                )
+                schema_service.init_db()
+                schema_service.migrate_schema()
+                return target_path
+            finally:
+                self.database_session.close(session.conn)
+
+        return self._submit_background_task(
+            title=title,
+            description=description,
+            task_fn=_worker,
+            kind="exclusive",
+            unique_key=f"profile.prepare.{target_path}",
+            requires_profile=False,
+            show_dialog=True,
+            cancellable=False,
+            owner=self,
+            on_success=on_success,
+            on_finished=on_finished,
+            on_error=lambda failure: self._show_background_task_error(
+                title,
+                failure,
+                user_message="Could not prepare the selected profile:",
+            ),
+        )
+
+    def _activate_profile_in_background(
+        self,
+        path: str,
+        *,
+        save_current_header: bool = True,
+        title: str = "Open Profile",
+        description: str = "Preparing the selected profile database...",
+        on_activated=None,
+    ) -> str | None:
+        if save_current_header:
+            try:
+                self._save_header_state(record_history=False)
+            except Exception:
+                pass
+
+        prepared = {"path": None}
+
+        def _success(prepared_path: str):
+            prepared["path"] = str(prepared_path)
+
+        def _finished():
+            prepared_path = str(prepared.get("path") or "").strip()
+            if not prepared_path:
+                return
+            self.open_database(prepared_path)
+            try:
+                self.active_custom_fields = self.load_active_custom_fields()
+                self._rebuild_table_headers()
+                self._load_header_state()
+            except Exception:
+                pass
+            self._reload_profiles_list(select_path=prepared_path)
+            self._refresh_catalog_ui_in_background(
+                select_path=prepared_path,
+                unique_key=f"catalog.ui.profile.{prepared_path}",
+                on_finished=lambda: on_activated(prepared_path) if on_activated is not None else None,
+            )
+
+        return self._prepare_profile_database_background(
+            path,
+            title=title,
+            description=description,
+            on_success=_success,
+            on_finished=_finished,
+        )
+
     @staticmethod
     def _history_time_key(entry):
         if entry is None or not entry.created_at:
@@ -8823,27 +8937,46 @@ class App(QMainWindow):
         self._rebuild_search_column_choices()
         self._refresh_column_visibility_menu()
 
+    @staticmethod
+    def _catalog_combo_values_from_connection(conn: sqlite3.Connection) -> dict[str, list[str]]:
+        return {
+            "artists": [
+                r[0]
+                for r in conn.execute(
+                    "SELECT DISTINCT name FROM Artists WHERE name IS NOT NULL AND name != '' ORDER BY name"
+                ).fetchall()
+            ],
+            "albums": [
+                r[0]
+                for r in conn.execute(
+                    "SELECT DISTINCT title FROM Albums WHERE title IS NOT NULL AND title != '' ORDER BY title"
+                ).fetchall()
+            ],
+            "upcs": [
+                r[0]
+                for r in conn.execute(
+                    "SELECT DISTINCT upc FROM Tracks WHERE upc IS NOT NULL AND upc != '' ORDER BY upc"
+                ).fetchall()
+            ],
+            "genres": [
+                r[0]
+                for r in conn.execute(
+                    "SELECT DISTINCT genre FROM Tracks WHERE genre IS NOT NULL AND genre != '' ORDER BY genre"
+                ).fetchall()
+            ],
+        }
+
+    def _apply_catalog_combo_values(self, combo_values: dict[str, list[str]]) -> None:
+        self._populate_combobox(self.artist_field, combo_values.get("artists", []))
+        self._populate_combobox(self.additional_artist_field, combo_values.get("artists", []), allow_empty=True)
+        self._populate_combobox(self.album_title_field, combo_values.get("albums", []), allow_empty=True)
+        self._populate_combobox(self.upc_field, combo_values.get("upcs", []), allow_empty=True)
+        self._populate_combobox(self.genre_field, combo_values.get("genres", []), allow_empty=True)
+
     def populate_all_comboboxes(self):
-        artists = [r[0] for r in self.cursor.execute(
-            "SELECT DISTINCT name FROM Artists WHERE name IS NOT NULL AND name != '' ORDER BY name"
-        ).fetchall()]
-        self._populate_combobox(self.artist_field, artists)
-        self._populate_combobox(self.additional_artist_field, artists, allow_empty=True)
-
-        albums = [r[0] for r in self.cursor.execute(
-            "SELECT DISTINCT title FROM Albums WHERE title IS NOT NULL AND title != '' ORDER BY title"
-        ).fetchall()]
-        self._populate_combobox(self.album_title_field, albums, allow_empty=True)
-
-        upcs = [r[0] for r in self.cursor.execute(
-            "SELECT DISTINCT upc FROM Tracks WHERE upc IS NOT NULL AND upc != '' ORDER BY upc"
-        ).fetchall()]
-        self._populate_combobox(self.upc_field, upcs, allow_empty=True)
-
-        genres = [r[0] for r in self.cursor.execute(
-            "SELECT DISTINCT genre FROM Tracks WHERE genre IS NOT NULL AND genre != '' ORDER BY genre"
-        ).fetchall()]
-        self._populate_combobox(self.genre_field, genres, allow_empty=True)
+        if self.conn is None:
+            return
+        self._apply_catalog_combo_values(self._catalog_combo_values_from_connection(self.conn))
 
     @staticmethod
     def _populate_combobox(combo: QComboBox, items, allow_empty=False):
@@ -8943,11 +9076,165 @@ class App(QMainWindow):
         self._update_duration_label()
 
 
+    def _load_catalog_ui_dataset(
+        self,
+        *,
+        custom_field_definitions: CustomFieldDefinitionService | None = None,
+        catalog_reads: CatalogReadService | None = None,
+        conn: sqlite3.Connection | None = None,
+    ) -> dict[str, object]:
+        active_custom_fields = (
+            custom_field_definitions.list_active_fields()
+            if custom_field_definitions is not None
+            else self.load_active_custom_fields()
+        )
+        active_catalog_reads = catalog_reads or self.catalog_reads
+        active_conn = conn or self.conn
+        if active_catalog_reads is None or active_conn is None:
+            raise ValueError("Catalog dataset services are not available.")
+        rows, cf_map = active_catalog_reads.fetch_rows_with_customs(active_custom_fields)
+        return {
+            "active_custom_fields": active_custom_fields,
+            "rows": rows,
+            "cf_map": cf_map,
+            "combo_values": self._catalog_combo_values_from_connection(active_conn),
+        }
+
+    def _populate_table_from_dataset(self, rows: list[tuple], cf_map: dict[tuple[int, int], str]) -> None:
+        base_cols = len(self.BASE_HEADERS)
+        self.table.setRowCount(len(rows))
+
+        for row_idx, row_data in enumerate(rows):
+            for col_idx in range(base_cols):
+                header = self.table.horizontalHeaderItem(col_idx).text()
+                val_raw = row_data[col_idx]
+                if header == 'Track Length (hh:mm:ss)':
+                    secs = 0
+                    try:
+                        secs = int(val_raw or 0)
+                    except Exception:
+                        secs = parse_hms_text(str(val_raw))
+                    disp = seconds_to_hms(secs)
+                    it = self._make_item(col_idx, disp)
+                    it.setData(Qt.UserRole, secs)
+                    self.table.setItem(row_idx, col_idx, it)
+                else:
+                    val = '' if val_raw is None else str(val_raw)
+                    self.table.setItem(row_idx, col_idx, self._make_item(col_idx, val))
+
+            track_id = row_data[0]
+            for offset, field in enumerate(self.active_custom_fields):
+                val = cf_map.get((track_id, field["id"]), "")
+                self.table.setItem(
+                    row_idx,
+                    base_cols + offset,
+                    self._make_item(base_cols + offset, val, custom_def=field),
+                )
+
+    def _apply_catalog_ui_dataset(self, dataset: dict[str, object]) -> None:
+        self.active_custom_fields = list(dataset.get("active_custom_fields") or [])
+        self._rebuild_table_headers()
+        self._populate_table_from_dataset(
+            list(dataset.get("rows") or []),
+            dict(dataset.get("cf_map") or {}),
+        )
+        self._apply_catalog_combo_values(dict(dataset.get("combo_values") or {}))
+        self.table.resizeColumnsToContents()
+        self._update_count_label()
+        self._update_duration_label()
+        self._apply_blob_badges()
+
+    def _refresh_catalog_ui_in_background(
+        self,
+        *,
+        focus_id: int | None = None,
+        select_path: str | None = None,
+        on_finished=None,
+        unique_key: str = "catalog.ui.refresh",
+        retry_count: int = 0,
+    ) -> str | None:
+        if self.conn is None:
+            return None
+        state = self._capture_view_state()
+        sort_enabled = self.table.isSortingEnabled()
+        if sort_enabled:
+            self.table.setSortingEnabled(False)
+        self.table.setRowCount(0)
+        self._update_count_label()
+        self._update_duration_label()
+
+        def _worker(bundle, ctx):
+            ctx.set_status("Loading catalog rows and lookup values...")
+            return self._load_catalog_ui_dataset(
+                custom_field_definitions=bundle.custom_field_definitions,
+                catalog_reads=bundle.catalog_reads,
+                conn=bundle.conn,
+            )
+
+        def _success(dataset: dict[str, object]):
+            try:
+                self.conn.commit()
+            except Exception:
+                pass
+            self._apply_catalog_ui_dataset(dataset)
+            try:
+                self._load_header_state()
+            except Exception as e:
+                self.logger.warning("Failed to load header state: %s", e)
+            self._restore_view_state(state)
+            if focus_id is not None:
+                self._select_row_by_id(focus_id)
+            if select_path:
+                self._reload_profiles_list(select_path=select_path)
+            if sort_enabled:
+                self.table.setSortingEnabled(True)
+                try:
+                    self.table.sortItems(self._last_sort_col, self._last_sort_order)
+                except Exception:
+                    pass
+            self._update_add_data_generated_fields()
+            self._refresh_history_actions()
+            if on_finished is not None:
+                on_finished()
+
+        def _finished():
+            if not sort_enabled:
+                self.table.setSortingEnabled(False)
+
+        task_id = self._submit_background_bundle_task(
+            title="Load Catalog",
+            description="Loading catalog rows and lookup values...",
+            task_fn=_worker,
+            kind="read",
+            unique_key=unique_key,
+            show_dialog=False,
+            owner=self,
+            on_success=_success,
+            on_error=lambda failure: (
+                QTimer.singleShot(
+                    100,
+                    lambda: self._refresh_catalog_ui_in_background(
+                        focus_id=focus_id,
+                        select_path=select_path,
+                        on_finished=on_finished,
+                        unique_key=unique_key,
+                        retry_count=retry_count + 1,
+                    ),
+                )
+                if retry_count < 3 and "exclusive database task is currently running" in str(failure.message or "").lower()
+                else self._show_background_task_error(
+                    "Load Catalog",
+                    failure,
+                    user_message="Could not load the catalog view:",
+                )
+            ),
+            on_finished=_finished,
+        )
+        return task_id
+
     def refresh_table(self):
         # Ensure custom fields and headers are ready
-        if not hasattr(self, "active_custom_fields") or self.active_custom_fields is None:
-            self.active_custom_fields = self.load_active_custom_fields()
-            self._rebuild_table_headers()
+        dataset = self._load_catalog_ui_dataset()
 
         previous_suspend_state = self._suspend_layout_history
         self._suspend_layout_history = True
@@ -8957,38 +9244,7 @@ class App(QMainWindow):
                 self.table.setSortingEnabled(False)
             self.table.setSortingEnabled(False)
             self.table.setRowCount(0)
-
-            rows, cf_map = self.catalog_reads.fetch_rows_with_customs(self.active_custom_fields)
-            base_cols = len(self.BASE_HEADERS)
-            self.table.setRowCount(len(rows))
-
-            for row_idx, row_data in enumerate(rows):
-                for col_idx in range(base_cols):
-                    header = self.table.horizontalHeaderItem(col_idx).text()
-                    val_raw = row_data[col_idx]
-                    if header == 'Track Length (hh:mm:ss)':
-                        secs = 0
-                        try:
-                            secs = int(val_raw or 0)
-                        except Exception:
-                            secs = parse_hms_text(str(val_raw))
-                        disp = seconds_to_hms(secs)
-                        it = self._make_item(col_idx, disp)
-                        it.setData(Qt.UserRole, secs)
-                        self.table.setItem(row_idx, col_idx, it)
-                    else:
-                        val = '' if val_raw is None else str(val_raw)
-                        self.table.setItem(row_idx, col_idx, self._make_item(col_idx, val))
-
-                track_id = row_data[0]
-                for offset, field in enumerate(self.active_custom_fields):
-                    val = cf_map.get((track_id, field["id"]), "")
-                    self.table.setItem(row_idx, base_cols + offset, self._make_item(base_cols + offset, val, custom_def=field))
-
-            self.table.resizeColumnsToContents()
-            self._update_count_label()
-            self._update_duration_label()
-            self._apply_blob_badges()
+            self._apply_catalog_ui_dataset(dataset)
             self.table.setSortingEnabled(True)
             if _prev_sort_enabled:
                 self.table.setSortingEnabled(True)
@@ -9496,13 +9752,19 @@ class App(QMainWindow):
             choices.append((release.id, label))
         return choices
 
-    def _release_context_for_track(self, track_id: int) -> tuple[ReleaseRecord | None, ReleaseTrackPlacement | None]:
-        if self.release_service is None:
+    def _release_context_for_track(
+        self,
+        track_id: int,
+        *,
+        release_service: ReleaseService | None = None,
+    ) -> tuple[ReleaseRecord | None, ReleaseTrackPlacement | None]:
+        active_release_service = release_service or self.release_service
+        if active_release_service is None:
             return None, None
-        release = self.release_service.find_primary_release_for_track(track_id)
+        release = active_release_service.find_primary_release_for_track(track_id)
         if release is None:
             return None, None
-        summary = self.release_service.fetch_release_summary(release.id)
+        summary = active_release_service.fetch_release_summary(release.id)
         if summary is None:
             return release, None
         for placement in summary.tracks:
@@ -9515,12 +9777,16 @@ class App(QMainWindow):
         track_id: int,
         *,
         snapshot: TrackSnapshot | None = None,
+        track_service: TrackService | None = None,
     ) -> ArtworkPayload | None:
         try:
-            source_snapshot = snapshot or self.track_service.fetch_track_snapshot(track_id)
+            active_track_service = track_service or self.track_service
+            if active_track_service is None:
+                return None
+            source_snapshot = snapshot or active_track_service.fetch_track_snapshot(track_id)
             if source_snapshot is None or not source_snapshot.album_art_path:
                 return None
-            data, mime_type = self.track_service.fetch_media_bytes(track_id, "album_art")
+            data, mime_type = active_track_service.fetch_media_bytes(track_id, "album_art")
             return ArtworkPayload(data=data, mime_type=mime_type or "image/jpeg")
         except Exception:
             return None
@@ -9535,11 +9801,21 @@ class App(QMainWindow):
             return f"<{len(value)} bytes>"
         return str(value)
 
-    def _catalog_tag_data_for_track(self, track_id: int, *, snapshot: TrackSnapshot | None = None):
-        source_snapshot = snapshot or self.track_service.fetch_track_snapshot(track_id)
+    def _catalog_tag_data_for_track(
+        self,
+        track_id: int,
+        *,
+        snapshot: TrackSnapshot | None = None,
+        track_service: TrackService | None = None,
+        release_service: ReleaseService | None = None,
+    ):
+        active_track_service = track_service or self.track_service
+        if active_track_service is None:
+            raise ValueError("Track service is not available")
+        source_snapshot = snapshot or active_track_service.fetch_track_snapshot(track_id)
         if source_snapshot is None:
             raise ValueError(f"Track {track_id} not found")
-        release, placement = self._release_context_for_track(track_id)
+        release, placement = self._release_context_for_track(track_id, release_service=release_service)
         track_values = {
             "track_title": source_snapshot.track_title,
             "artist_name": source_snapshot.artist_name,
@@ -9562,7 +9838,11 @@ class App(QMainWindow):
             if placement is not None
             else {}
         )
-        artwork = self._effective_artwork_payload_for_track(track_id, snapshot=source_snapshot)
+        artwork = self._effective_artwork_payload_for_track(
+            track_id,
+            snapshot=source_snapshot,
+            track_service=active_track_service,
+        )
         return catalog_metadata_to_tags(
             track_values=track_values,
             release_values=release_values,
@@ -9578,12 +9858,18 @@ class App(QMainWindow):
         existing_summary=None,
         artwork_source_path: str | None = None,
         clear_artwork: bool = False,
+        track_service: TrackService | None = None,
+        release_service: ReleaseService | None = None,
+        profile_name: str | None = None,
     ) -> ReleasePayload:
+        active_track_service = track_service or self.track_service
+        if active_track_service is None:
+            raise ValueError("Track service is not available.")
         normalized_ids = self._normalize_track_ids(track_ids)
         snapshots = [
             snapshot
             for track_id in normalized_ids
-            if (snapshot := self.track_service.fetch_track_snapshot(track_id)) is not None
+            if (snapshot := active_track_service.fetch_track_snapshot(track_id)) is not None
         ]
         if not snapshots:
             raise ValueError("No valid tracks were available to build release metadata.")
@@ -9616,7 +9902,7 @@ class App(QMainWindow):
         derived_artwork_source = artwork_source_path
         if not clear_artwork and not derived_artwork_source and (existing_release is None or not existing_release.artwork_path):
             for snapshot in snapshots:
-                resolved = self.track_service.resolve_media_path(snapshot.album_art_path)
+                resolved = active_track_service.resolve_media_path(snapshot.album_art_path)
                 if resolved is not None and resolved.exists():
                     derived_artwork_source = str(resolved)
                     break
@@ -9660,7 +9946,7 @@ class App(QMainWindow):
             notes=existing_release.notes if existing_release is not None else None,
             artwork_source_path=derived_artwork_source,
             clear_artwork=bool(clear_artwork),
-            profile_name=self._current_profile_name(),
+            profile_name=profile_name or self._current_profile_name(),
             placements=placements,
         )
 
@@ -9669,20 +9955,31 @@ class App(QMainWindow):
         track_ids,
         *,
         cursor: sqlite3.Cursor | None = None,
+        track_service: TrackService | None = None,
+        release_service: ReleaseService | None = None,
+        profile_name: str | None = None,
     ) -> list[int]:
-        if self.release_service is None:
+        active_track_service = track_service or self.track_service
+        active_release_service = release_service or self.release_service
+        if active_track_service is None or active_release_service is None:
             return []
         if cursor is None:
             with self.conn:
                 cur = self.conn.cursor()
-                return self._sync_releases_for_tracks(track_ids, cursor=cur)
+                return self._sync_releases_for_tracks(
+                    track_ids,
+                    cursor=cur,
+                    track_service=active_track_service,
+                    release_service=active_release_service,
+                    profile_name=profile_name,
+                )
 
         cur = cursor
         created_or_updated: list[int] = []
         processed_group_keys: set[tuple[int, ...]] = set()
 
         for track_id in self._normalize_track_ids(track_ids):
-            group_track_ids = self.track_service.list_album_group_track_ids(track_id, cursor=cur)
+            group_track_ids = active_track_service.list_album_group_track_ids(track_id, cursor=cur)
             if not group_track_ids:
                 group_track_ids = [track_id]
             group_key = tuple(self._normalize_track_ids(group_track_ids))
@@ -9690,9 +9987,9 @@ class App(QMainWindow):
                 continue
             processed_group_keys.add(group_key)
 
-            existing_release = self.release_service.find_primary_release_for_track(track_id)
+            existing_release = active_release_service.find_primary_release_for_track(track_id)
             existing_summary = (
-                self.release_service.fetch_release_summary(existing_release.id)
+                active_release_service.fetch_release_summary(existing_release.id)
                 if existing_release is not None
                 else None
             )
@@ -9707,11 +10004,14 @@ class App(QMainWindow):
                 list(group_key),
                 existing_release=existing_release,
                 existing_summary=existing_summary,
+                track_service=active_track_service,
+                release_service=active_release_service,
+                profile_name=profile_name,
             )
             if existing_release is None:
-                release_id = self.release_service.create_release(payload, cursor=cur)
+                release_id = active_release_service.create_release(payload, cursor=cur)
             else:
-                release_id = self.release_service.update_release(existing_release.id, payload, cursor=cur)
+                release_id = active_release_service.update_release(existing_release.id, payload, cursor=cur)
             created_or_updated.append(int(release_id))
 
         return self._normalize_track_ids(created_or_updated)
@@ -9751,17 +10051,21 @@ class App(QMainWindow):
         if dlg.exec() != QDialog.Accepted:
             return
         payload = dlg.payload()
-
-        def mutation():
-            if summary is None:
-                return self.release_service.create_release(payload)
-            return self.release_service.update_release(summary.release.id, payload)
-
         action_label = f"Create Release: {payload.title}" if summary is None else f"Update Release: {payload.title}"
         action_type = "release.create" if summary is None else "release.update"
         entity_id = payload.title if summary is None else summary.release.id
-        try:
-            release_pk = self._run_snapshot_history_action(
+        existing_release_id = summary.release.id if summary is not None else None
+
+        def _worker(bundle, ctx):
+            ctx.set_status("Saving the release and track order...")
+
+            def _mutation():
+                if summary is None:
+                    return bundle.release_service.create_release(payload)
+                return bundle.release_service.update_release(int(summary.release.id), payload)
+
+            return run_snapshot_history_action(
+                history_manager=bundle.history_manager,
                 action_label=action_label,
                 action_type=action_type,
                 entity_type="Release",
@@ -9769,10 +10073,18 @@ class App(QMainWindow):
                 payload={
                     "title": payload.title,
                     "track_count": len(payload.placements),
-                    "release_id": summary.release.id if summary is not None else None,
+                    "release_id": existing_release_id,
                 },
-                mutation=mutation,
+                mutation=_mutation,
+                logger=self.logger,
             )
+
+        def _success(release_pk: int):
+            try:
+                self.conn.commit()
+            except Exception:
+                pass
+            self._refresh_history_actions()
             self._log_event(
                 action_type,
                 action_label,
@@ -9790,14 +10102,22 @@ class App(QMainWindow):
             self.refresh_table_preserve_view(
                 focus_id=payload.placements[0].track_id if payload.placements else None
             )
-        except Exception as exc:
-            self.conn.rollback()
-            self.logger.exception(f"Release save failed: {exc}")
-            QMessageBox.critical(self, "Release Editor", f"Could not save the release:\n{exc}")
-            return
+            if self.release_browser_dialog is not None and self.release_browser_dialog.isVisible():
+                self.release_browser_dialog.refresh()
 
-        if self.release_browser_dialog is not None and self.release_browser_dialog.isVisible():
-            self.release_browser_dialog.refresh()
+        self._submit_background_bundle_task(
+            title="Release Editor",
+            description="Saving release metadata and track order...",
+            task_fn=_worker,
+            kind="write",
+            unique_key=f"release.save.{existing_release_id or payload.title}",
+            on_success=_success,
+            on_error=lambda failure: self._show_background_task_error(
+                "Release Editor",
+                failure,
+                user_message="Could not save the release:",
+            ),
+        )
 
     def create_release_from_selection(self):
         selected_ids = self._selected_track_ids()
@@ -9928,12 +10248,14 @@ class App(QMainWindow):
         self,
         *,
         track_id: int,
+        track_title: str | None = None,
         source_path: str,
         database_values: dict[str, object],
         file_tags,
         chosen_values: dict[str, object],
     ) -> list[dict[str, object]]:
         rows: list[dict[str, object]] = []
+        display_track_title = str(track_title or self._get_track_title(track_id) or "")
         for field_name, chosen_value in chosen_values.items():
             database_value = database_values.get(field_name)
             file_value = getattr(file_tags, field_name, None)
@@ -9941,7 +10263,7 @@ class App(QMainWindow):
                 continue
             rows.append(
                 {
-                    "track": self._get_track_title(track_id),
+                    "track": display_track_title,
                     "field": field_name.replace("_", " ").title(),
                     "database": self._display_tag_value(database_value),
                     "file": self._display_tag_value(file_value),
@@ -9951,19 +10273,103 @@ class App(QMainWindow):
             )
         return rows
 
+    def _prepare_tag_import_preview(
+        self,
+        track_ids: list[int],
+        *,
+        policy: str,
+        track_service: TrackService | None = None,
+        release_service: ReleaseService | None = None,
+        audio_tag_service: AudioTagService | None = None,
+        progress_callback=None,
+    ) -> dict[str, object]:
+        active_track_service = track_service or self.track_service
+        active_release_service = release_service or self.release_service
+        active_audio_tag_service = audio_tag_service or self.audio_tag_service
+        if active_track_service is None or active_audio_tag_service is None:
+            raise ValueError("Audio tag services are not available.")
+
+        normalized_ids = self._normalize_track_ids(track_ids)
+        prepared: list[dict[str, object]] = []
+        preview_rows: list[dict[str, object]] = []
+        warnings: list[str] = []
+        total = max(1, len(normalized_ids))
+        for index, track_id in enumerate(normalized_ids, start=1):
+            if callable(progress_callback):
+                progress_callback(index - 1, total, f"Reading audio tags for track {index} of {total}...")
+            snapshot = active_track_service.fetch_track_snapshot(track_id)
+            if snapshot is None:
+                warnings.append(f"Track {track_id} could not be loaded.")
+                continue
+            resolved = active_track_service.resolve_media_path(snapshot.audio_file_path)
+            if resolved is None or not resolved.exists():
+                warnings.append(f"{snapshot.track_title}: no managed audio file is attached.")
+                continue
+            try:
+                file_tags = active_audio_tag_service.read_tags(resolved)
+            except Exception as exc:
+                warnings.append(f"{snapshot.track_title}: {exc}")
+                continue
+            database_values = self._catalog_tag_data_for_track(
+                track_id,
+                snapshot=snapshot,
+                track_service=active_track_service,
+                release_service=active_release_service,
+            ).to_dict()
+            preview = merge_imported_tags(
+                database_values=database_values,
+                file_tags=file_tags,
+                policy=policy,
+            )
+            prepared.append(
+                {
+                    "track_id": int(track_id),
+                    "track_title": snapshot.track_title,
+                    "source_path": str(resolved),
+                    "file_tags": file_tags,
+                }
+            )
+            preview_rows.extend(
+                self._build_tag_preview_rows(
+                    track_id=track_id,
+                    track_title=snapshot.track_title,
+                    source_path=str(resolved),
+                    database_values=database_values,
+                    file_tags=file_tags,
+                    chosen_values=preview.patch.values,
+                )
+            )
+
+        if callable(progress_callback):
+            progress_callback(total, total, "Audio tag preview ready.")
+
+        return {
+            "prepared": prepared,
+            "rows": preview_rows,
+            "warnings": warnings,
+        }
+
     def _apply_tag_patch_to_track(
         self,
         track_id: int,
         values: dict[str, object],
         *,
         cursor: sqlite3.Cursor | None = None,
+        track_service: TrackService | None = None,
     ) -> None:
-        snapshot = self.track_service.fetch_track_snapshot(track_id, cursor=cursor)
+        active_track_service = track_service or self.track_service
+        if active_track_service is None:
+            raise ValueError("Track service is not available.")
+        snapshot = active_track_service.fetch_track_snapshot(track_id, cursor=cursor)
         if snapshot is None:
             raise ValueError(f"Track {track_id} not found")
         artwork = values.get("artwork")
         temp_artwork_path = None
-        current_artwork = self._effective_artwork_payload_for_track(track_id, snapshot=snapshot)
+        current_artwork = self._effective_artwork_payload_for_track(
+            track_id,
+            snapshot=snapshot,
+            track_service=active_track_service,
+        )
         if isinstance(artwork, ArtworkPayload) and artwork != current_artwork:
             suffix = mimetypes.guess_extension(artwork.mime_type or "image/jpeg") or ".img"
             handle = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
@@ -9997,7 +10403,7 @@ class App(QMainWindow):
                 clear_audio_file=False,
                 clear_album_art=False,
             )
-            self.track_service.update_track(payload, cursor=cursor)
+            active_track_service.update_track(payload, cursor=cursor)
         finally:
             if temp_artwork_path:
                 Path(temp_artwork_path).unlink(missing_ok=True)
@@ -10012,118 +10418,170 @@ class App(QMainWindow):
             return
 
         policy = str(self.settings.value("audio_tags/import_policy", "merge_blanks", str) or "merge_blanks")
-        prepared: list[tuple[int, str, object, dict[str, object]]] = []
-        preview_rows: list[dict[str, object]] = []
-        warnings: list[str] = []
 
-        for track_id in selected_ids:
-            snapshot = self.track_service.fetch_track_snapshot(track_id)
-            if snapshot is None:
-                warnings.append(f"Track {track_id} could not be loaded.")
-                continue
-            resolved = self.track_service.resolve_media_path(snapshot.audio_file_path)
-            if resolved is None or not resolved.exists():
-                warnings.append(f"{snapshot.track_title}: no managed audio file is attached.")
-                continue
-            try:
-                file_tags = self.audio_tag_service.read_tags(resolved)
-            except Exception as exc:
-                warnings.append(f"{snapshot.track_title}: {exc}")
-                continue
-            database_values = self._catalog_tag_data_for_track(track_id, snapshot=snapshot).to_dict()
-            preview = merge_imported_tags(
-                database_values=database_values,
-                file_tags=file_tags,
+        def _preview_worker(bundle, ctx):
+            return self._prepare_tag_import_preview(
+                selected_ids,
                 policy=policy,
+                track_service=bundle.track_service,
+                release_service=bundle.release_service,
+                audio_tag_service=bundle.audio_tag_service,
+                progress_callback=lambda value, maximum, message: ctx.report_progress(
+                    value=value,
+                    maximum=maximum,
+                    message=message,
+                ),
             )
-            prepared.append((track_id, str(resolved), file_tags, database_values))
-            preview_rows.extend(
-                self._build_tag_preview_rows(
-                    track_id=track_id,
-                    source_path=str(resolved),
-                    database_values=database_values,
-                    file_tags=file_tags,
-                    chosen_values=preview.patch.values,
+
+        def _preview_success(result: dict[str, object]):
+            prepared = list(result.get("prepared") or [])
+            preview_rows = list(result.get("rows") or [])
+            warnings = list(result.get("warnings") or [])
+            if not prepared:
+                QMessageBox.information(
+                    self,
+                    "Import Tags",
+                    "No readable managed audio files were available for the selected tracks."
+                    + (f"\n\nWarnings:\n- " + "\n- ".join(warnings[:12]) if warnings else ""),
                 )
+                return
+
+            dlg = TagPreviewDialog(
+                title="Import Tags from Audio",
+                intro=(
+                    "Review how embedded file tags map onto the selected catalog records. "
+                    "Choose the conflict policy you want to apply before importing."
+                ),
+                rows=preview_rows,
+                initial_policy=policy,
+                allow_policy_change=True,
+                parent=self,
+            )
+            if dlg.exec() != QDialog.Accepted:
+                return
+
+            chosen_policy = dlg.selected_policy()
+            self.settings.setValue("audio_tags/import_policy", chosen_policy)
+            self.settings.sync()
+
+            def _import_worker(bundle, ctx):
+                profile_name = self._current_profile_name()
+
+                def _mutation():
+                    updated_track_ids: list[int] = []
+                    total = max(1, len(prepared))
+                    with bundle.conn:
+                        cur = bundle.conn.cursor()
+                        for index, entry in enumerate(prepared, start=1):
+                            track_id = int(entry["track_id"])
+                            snapshot = bundle.track_service.fetch_track_snapshot(track_id, cursor=cur)
+                            if snapshot is None:
+                                continue
+                            database_values = self._catalog_tag_data_for_track(
+                                track_id,
+                                snapshot=snapshot,
+                                track_service=bundle.track_service,
+                                release_service=bundle.release_service,
+                            ).to_dict()
+                            preview = merge_imported_tags(
+                                database_values=database_values,
+                                file_tags=entry["file_tags"],
+                                policy=chosen_policy,
+                            )
+                            self._apply_tag_patch_to_track(
+                                track_id,
+                                preview.patch.values,
+                                cursor=cur,
+                                track_service=bundle.track_service,
+                            )
+                            updated_track_ids.append(track_id)
+                            ctx.report_progress(
+                                value=index,
+                                maximum=total,
+                                message=f"Importing tags for track {index} of {total}...",
+                            )
+                        self._sync_releases_for_tracks(
+                            updated_track_ids,
+                            cursor=cur,
+                            track_service=bundle.track_service,
+                            release_service=bundle.release_service,
+                            profile_name=profile_name,
+                        )
+                    return {"changed_ids": updated_track_ids}
+
+                return run_snapshot_history_action(
+                    history_manager=bundle.history_manager,
+                    action_label=f"Import Audio Tags ({len(prepared)} tracks)",
+                    action_type="tags.import",
+                    entity_type="Track",
+                    entity_id="batch",
+                    payload={
+                        "track_ids": [int(entry["track_id"]) for entry in prepared],
+                        "policy": chosen_policy,
+                    },
+                    mutation=_mutation,
+                    logger=self.logger,
+                )
+
+            def _import_success(result: dict[str, object]):
+                changed_ids = list(result.get("changed_ids") or [])
+                try:
+                    self.conn.commit()
+                except Exception:
+                    pass
+                self._refresh_history_actions()
+                self._log_event(
+                    "tags.import",
+                    "Imported embedded tags from audio",
+                    track_ids=changed_ids,
+                    policy=chosen_policy,
+                    warnings=warnings,
+                )
+                self._audit(
+                    "IMPORT",
+                    "AudioTags",
+                    ref_id="batch",
+                    details=f"track_ids={','.join(str(track_id) for track_id in changed_ids)}; policy={chosen_policy}",
+                )
+                self._audit_commit()
+                self.refresh_table_preserve_view(focus_id=changed_ids[0] if changed_ids else None)
+                self.populate_all_comboboxes()
+                QMessageBox.information(
+                    self,
+                    "Import Tags",
+                    f"Imported tags for {len(changed_ids or [])} track{'s' if len(changed_ids or []) != 1 else ''}."
+                    + (f"\n\nWarnings:\n- " + "\n- ".join(warnings[:12]) if warnings else ""),
+                )
+
+            self._submit_background_bundle_task(
+                title="Import Tags from Audio",
+                description="Applying imported audio tags to the selected catalog tracks...",
+                task_fn=_import_worker,
+                kind="write",
+                unique_key="tags.import.apply",
+                cancellable=False,
+                on_success=_import_success,
+                on_error=lambda failure: self._show_background_task_error(
+                    "Import Tags",
+                    failure,
+                    user_message="Could not import audio tags:",
+                ),
             )
 
-        if not prepared:
-            QMessageBox.information(
-                self,
-                "Import Tags",
-                "No readable managed audio files were available for the selected tracks."
-                + (f"\n\nWarnings:\n- " + "\n- ".join(warnings[:12]) if warnings else ""),
-            )
-            return
-
-        dlg = TagPreviewDialog(
+        self._submit_background_bundle_task(
             title="Import Tags from Audio",
-            intro=(
-                "Review how embedded file tags map onto the selected catalog records. "
-                "Choose the conflict policy you want to apply before importing."
-            ),
-            rows=preview_rows,
-            initial_policy=policy,
-            allow_policy_change=True,
-            parent=self,
-        )
-        if dlg.exec() != QDialog.Accepted:
-            return
-        policy = dlg.selected_policy()
-        self.settings.setValue("audio_tags/import_policy", policy)
-        self.settings.sync()
-
-        updated_track_ids: list[int] = []
-
-        def mutation():
-            with self.conn:
-                cur = self.conn.cursor()
-                for track_id, _, file_tags, database_values in prepared:
-                    preview = merge_imported_tags(
-                        database_values=database_values,
-                        file_tags=file_tags,
-                        policy=policy,
-                    )
-                    self._apply_tag_patch_to_track(track_id, preview.patch.values, cursor=cur)
-                    updated_track_ids.append(track_id)
-                self._sync_releases_for_tracks(updated_track_ids, cursor=cur)
-            return list(updated_track_ids)
-
-        try:
-            changed_ids = self._run_snapshot_history_action(
-                action_label=f"Import Audio Tags ({len(prepared)} tracks)",
-                action_type="tags.import",
-                entity_type="Track",
-                entity_id="batch",
-                payload={"track_ids": [track_id for track_id, _, _, _ in prepared], "policy": policy},
-                mutation=mutation,
-            )
-            self._log_event(
-                "tags.import",
-                "Imported embedded tags from audio",
-                track_ids=changed_ids,
-                policy=policy,
-                warnings=warnings,
-            )
-            self._audit(
-                "IMPORT",
-                "AudioTags",
-                ref_id="batch",
-                details=f"track_ids={','.join(str(track_id) for track_id in changed_ids)}; policy={policy}",
-            )
-            self._audit_commit()
-            self.refresh_table_preserve_view(focus_id=changed_ids[0] if changed_ids else None)
-            self.populate_all_comboboxes()
-            QMessageBox.information(
-                self,
+            description="Reading embedded tags from the selected audio files...",
+            task_fn=_preview_worker,
+            kind="read",
+            unique_key="tags.import.preview",
+            cancellable=False,
+            on_success=_preview_success,
+            on_error=lambda failure: self._show_background_task_error(
                 "Import Tags",
-                f"Imported tags for {len(changed_ids or [])} track{'s' if len(changed_ids or []) != 1 else ''}."
-                + (f"\n\nWarnings:\n- " + "\n- ".join(warnings[:12]) if warnings else ""),
-            )
-        except Exception as exc:
-            self.conn.rollback()
-            self.logger.exception(f"Audio tag import failed: {exc}")
-            QMessageBox.critical(self, "Import Tags", f"Could not import audio tags:\n{exc}")
+                failure,
+                user_message="Could not prepare the audio tag preview:",
+            ),
+        )
 
     def write_tags_to_exported_audio(self, track_ids: list[int] | None = None):
         if self.tagged_audio_export_service is None or self.track_service is None:
@@ -14586,14 +15044,103 @@ class EditDialog(QDialog):
                 additional_artists=new_additional_artist,
                 album_title=new_album_title,
             )
-            def mutation():
-                with parent.conn:
-                    cur = parent.conn.cursor()
-                    parent.track_service.update_track(source_payload, cursor=cur)
-                    parent._sync_releases_for_tracks([row_id], cursor=cur)
+            propagated_mode = bool(propagated_track_ids and album_shared_fields_changed)
+            profile_name = parent._current_profile_name()
+            action_label = (
+                f"Update Album Metadata: {new_track_title}"
+                if propagated_mode
+                else f"Update Track: {new_track_title}"
+            )
+            action_type = "track.update_album_metadata" if propagated_mode else "track.update"
+            history_payload = (
+                {
+                    "track_id": row_id,
+                    "track_title": new_track_title,
+                    "propagated_track_ids": propagated_track_ids,
+                    "propagated_fields": propagated_field_labels,
+                }
+                if propagated_mode
+                else {
+                    "track_id": row_id,
+                    "track_title": new_track_title,
+                    "cleanup_artist_names": cleanup_artist_names,
+                    "cleanup_album_titles": cleanup_album_titles,
+                }
+            )
 
-                safe_wal_checkpoint(parent.conn, logger=parent.logger)
+            def _worker(bundle, ctx):
+                total_steps = 3 if propagated_mode else 2
+
+                def _mutation():
+                    with bundle.conn:
+                        cur = bundle.conn.cursor()
+                        ctx.report_progress(0, total_steps, message="Saving track changes...")
+                        bundle.track_service.update_track(source_payload, cursor=cur)
+                        sync_track_ids = [row_id]
+                        if propagated_mode:
+                            ctx.report_progress(1, total_steps, message="Propagating shared album fields...")
+                            bundle.track_service.apply_album_metadata_to_tracks(
+                                propagated_track_ids,
+                                field_updates=album_field_updates,
+                                album_art_source_path=album_art_source_path if not self._clear_album_art else None,
+                                clear_album_art=bool(self._clear_album_art and not album_art_source_path),
+                                cursor=cur,
+                            )
+                            sync_track_ids = [row_id, *propagated_track_ids]
+                        ctx.report_progress(total_steps - 1, total_steps, message="Synchronizing release records...")
+                        parent._sync_releases_for_tracks(
+                            sync_track_ids,
+                            cursor=cur,
+                            track_service=bundle.track_service,
+                            release_service=bundle.release_service,
+                            profile_name=profile_name,
+                        )
+                    ctx.report_progress(total_steps, total_steps, message="Track update complete.")
+                    return {
+                        "focus_id": row_id,
+                        "propagated": propagated_mode,
+                        "propagated_track_ids": list(propagated_track_ids),
+                        "propagated_fields": list(propagated_field_labels),
+                    }
+
+                return run_snapshot_history_action(
+                    history_manager=bundle.history_manager,
+                    action_label=action_label,
+                    action_type=action_type,
+                    entity_type="Track",
+                    entity_id=row_id,
+                    payload=history_payload,
+                    mutation=_mutation,
+                    logger=parent.logger,
+                )
+
+            def _success(result: dict[str, object]):
                 try:
+                    parent.conn.commit()
+                except Exception:
+                    pass
+                parent._refresh_history_actions()
+                if propagated_mode:
+                    parent._log_event(
+                        "track.update",
+                        "Track updated with album-level propagation",
+                        track_id=row_id,
+                        isrc=iso_isrc,
+                        track_title=new_track_title,
+                        propagated_track_ids=propagated_track_ids,
+                        propagated_fields=propagated_field_labels,
+                    )
+                    parent._audit(
+                        "UPDATE",
+                        "Track",
+                        ref_id=row_id,
+                        details=(
+                            f"isrc={iso_isrc}; "
+                            f"propagated_track_ids={','.join(str(track_id) for track_id in propagated_track_ids)}; "
+                            f"propagated_fields={','.join(propagated_field_labels)}"
+                        ),
+                    )
+                else:
                     parent._log_event(
                         "track.update",
                         "Track updated",
@@ -14602,25 +15149,24 @@ class EditDialog(QDialog):
                         track_title=new_track_title,
                     )
                     parent._audit("UPDATE", "Track", ref_id=row_id, details=f"isrc={iso_isrc}")
-                    parent._audit_commit()
-                except Exception as audit_err:
-                    parent.logger.warning(f"Audit failed: {audit_err}")
+                parent._audit_commit()
+                parent.refresh_table_preserve_view(focus_id=row_id)
+                self.accept()
 
-            parent._run_snapshot_history_action(
-                action_label=f"Update Track: {new_track_title}",
-                action_type="track.update",
-                entity_type="Track",
-                entity_id=row_id,
-                payload={
-                    "track_id": row_id,
-                    "track_title": new_track_title,
-                    "cleanup_artist_names": cleanup_artist_names,
-                    "cleanup_album_titles": cleanup_album_titles,
-                },
-                mutation=mutation,
+            parent._submit_background_bundle_task(
+                title="Update Track",
+                description="Saving track changes...",
+                task_fn=_worker,
+                kind="write",
+                unique_key=f"track.update.{row_id}",
+                owner=self,
+                on_success=_success,
+                on_error=lambda failure: parent._show_background_task_error(
+                    "Update Error",
+                    failure,
+                    user_message="Failed to update record:",
+                ),
             )
-            parent.refresh_table_preserve_view(focus_id=row_id)
-            self.accept()
 
         except Exception as e:
             parent = self.parentWidget()
@@ -14701,77 +15247,119 @@ class EditDialog(QDialog):
             QMessageBox.information(self, "Bulk Edit", "No editable fields were changed.")
             return
 
-        def mutation():
-            for snapshot in self._bulk_snapshots:
-                parent.track_service.update_track(
-                    TrackUpdatePayload(
-                        track_id=snapshot.track_id,
-                        isrc=snapshot.isrc,
-                        track_title=new_track_title if apply_track_title else snapshot.track_title,
-                        artist_name=new_artist_name if apply_artist_name else snapshot.artist_name,
-                        additional_artists=(
-                            new_additional_artist if apply_additional_artist else list(snapshot.additional_artists)
-                        ),
-                        album_title=(
-                            new_album_title or None
-                        ) if apply_album_title else snapshot.album_title,
-                        release_date=new_release_date if apply_release_date else snapshot.release_date,
-                        track_length_sec=(
-                            new_track_length_sec if apply_track_length else int(snapshot.track_length_sec or 0)
-                        ),
-                        iswc=snapshot.iswc,
-                        upc=(new_upc_raw or None) if apply_upc else snapshot.upc,
-                        genre=(new_genre or None) if apply_genre else snapshot.genre,
-                        catalog_number=(
-                            new_catalog_number or None
-                        ) if apply_catalog_number else snapshot.catalog_number,
-                        buma_work_number=(
-                            new_buma_work_number or None
-                        ) if apply_buma_work_number else snapshot.buma_work_number,
-                        audio_file_source_path=(
-                            (new_audio_path or None) if apply_audio and not self._clear_audio_file else None
-                        ),
-                        album_art_source_path=(
-                            (new_album_art_path or None) if apply_album_art and not self._clear_album_art else None
-                        ),
-                        clear_audio_file=bool(apply_audio and self._clear_audio_file and not new_audio_path),
-                        clear_album_art=bool(apply_album_art and self._clear_album_art and not new_album_art_path),
+        profile_name = parent._current_profile_name()
+        update_payloads = [
+            TrackUpdatePayload(
+                track_id=snapshot.track_id,
+                isrc=snapshot.isrc,
+                track_title=new_track_title if apply_track_title else snapshot.track_title,
+                artist_name=new_artist_name if apply_artist_name else snapshot.artist_name,
+                additional_artists=(
+                    new_additional_artist if apply_additional_artist else list(snapshot.additional_artists)
+                ),
+                album_title=(new_album_title or None) if apply_album_title else snapshot.album_title,
+                release_date=new_release_date if apply_release_date else snapshot.release_date,
+                track_length_sec=(
+                    new_track_length_sec if apply_track_length else int(snapshot.track_length_sec or 0)
+                ),
+                iswc=snapshot.iswc,
+                upc=(new_upc_raw or None) if apply_upc else snapshot.upc,
+                genre=(new_genre or None) if apply_genre else snapshot.genre,
+                catalog_number=(new_catalog_number or None) if apply_catalog_number else snapshot.catalog_number,
+                buma_work_number=(
+                    new_buma_work_number or None
+                ) if apply_buma_work_number else snapshot.buma_work_number,
+                audio_file_source_path=(
+                    (new_audio_path or None) if apply_audio and not self._clear_audio_file else None
+                ),
+                album_art_source_path=(
+                    (new_album_art_path or None) if apply_album_art and not self._clear_album_art else None
+                ),
+                clear_audio_file=bool(apply_audio and self._clear_audio_file and not new_audio_path),
+                clear_album_art=bool(apply_album_art and self._clear_album_art and not new_album_art_path),
+            )
+            for snapshot in self._bulk_snapshots
+        ]
+
+        def _worker(bundle, ctx):
+            total = max(1, len(update_payloads))
+
+            def _mutation():
+                with bundle.conn:
+                    cur = bundle.conn.cursor()
+                    for index, payload in enumerate(update_payloads, start=1):
+                        ctx.report_progress(
+                            value=index - 1,
+                            maximum=total + 1,
+                            message=f"Updating track {index} of {total}...",
+                        )
+                        bundle.track_service.update_track(payload, cursor=cur)
+                    ctx.report_progress(
+                        value=total,
+                        maximum=total + 1,
+                        message="Synchronizing release records...",
                     )
-                )
-            parent._sync_releases_for_tracks(self.batch_track_ids)
+                    parent._sync_releases_for_tracks(
+                        self.batch_track_ids,
+                        cursor=cur,
+                        track_service=bundle.track_service,
+                        release_service=bundle.release_service,
+                        profile_name=profile_name,
+                    )
+                ctx.report_progress(total + 1, total + 1, message="Bulk update complete.")
+                return {"focus_id": self.batch_track_ids[0] if self.batch_track_ids else None}
 
-            safe_wal_checkpoint(parent.conn, logger=parent.logger)
-            try:
-                parent._log_event(
-                    "track.bulk_update",
-                    "Bulk updated tracks",
-                    track_ids=self.batch_track_ids,
-                    changed_fields=changed_fields,
-                )
-                parent._audit(
-                    "UPDATE",
-                    "Track",
-                    ref_id="batch",
-                    details=(
-                        f"track_ids={','.join(str(track_id) for track_id in self.batch_track_ids)}; "
-                        f"fields={','.join(changed_fields)}"
-                    ),
-                )
-                parent._audit_commit()
-            except Exception as audit_err:
-                parent.logger.warning(f"Audit failed: {audit_err}")
-
-        try:
-            parent._run_snapshot_history_action(
+            return run_snapshot_history_action(
+                history_manager=bundle.history_manager,
                 action_label=f"Bulk Edit Tracks ({len(self.batch_track_ids)})",
                 action_type="track.bulk_update",
                 entity_type="Track",
                 entity_id="batch",
                 payload={"track_ids": self.batch_track_ids, "fields": changed_fields},
-                mutation=mutation,
+                mutation=_mutation,
+                logger=parent.logger,
             )
-            parent.refresh_table_preserve_view(focus_id=self.batch_track_ids[0])
+
+        def _success(result: dict[str, object]):
+            try:
+                parent.conn.commit()
+            except Exception:
+                pass
+            parent._refresh_history_actions()
+            parent._log_event(
+                "track.bulk_update",
+                "Bulk updated tracks",
+                track_ids=self.batch_track_ids,
+                changed_fields=changed_fields,
+            )
+            parent._audit(
+                "UPDATE",
+                "Track",
+                ref_id="batch",
+                details=(
+                    f"track_ids={','.join(str(track_id) for track_id in self.batch_track_ids)}; "
+                    f"fields={','.join(changed_fields)}"
+                ),
+            )
+            parent._audit_commit()
+            parent.refresh_table_preserve_view(focus_id=result.get("focus_id"))
             self.accept()
+
+        try:
+            parent._submit_background_bundle_task(
+                title="Bulk Edit",
+                description="Applying bulk changes to the selected tracks...",
+                task_fn=_worker,
+                kind="write",
+                unique_key=f"track.bulk_update.{','.join(str(track_id) for track_id in self.batch_track_ids)}",
+                owner=self,
+                on_success=_success,
+                on_error=lambda failure: parent._show_background_task_error(
+                    "Update Error",
+                    failure,
+                    user_message="Failed to update selected records:",
+                ),
+            )
         except Exception as e:
             if hasattr(parent, "conn"):
                 parent.conn.rollback()
