@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from openpyxl import Workbook
 from PySide6.QtCore import QSettings
 
 from isrc_manager.services import GS1ContractEntry, GS1ProfileDefaults, GS1SettingsService
@@ -19,6 +20,14 @@ def make_settings_conn():
         """
     )
     return conn
+
+
+def build_template(path: Path):
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "10070050"
+    sheet["A1"] = "GS1 Artikelcode (GTIN)"
+    workbook.save(path)
 
 
 class GS1SettingsServiceTests(unittest.TestCase):
@@ -111,6 +120,22 @@ class GS1SettingsServiceTests(unittest.TestCase):
             [entry.contract_number for entry in self.service.load_contracts()],
             ["10064976", "10070050"],
         )
+
+    def test_template_workbook_round_trips_through_profile_database(self):
+        template_path = Path(self.tmpdir.name) / "official-gs1-template.xlsx"
+        build_template(template_path)
+
+        stored = self.service.import_template_from_path(template_path)
+
+        self.assertTrue(self.service.has_stored_template())
+        self.assertEqual(stored.filename, "official-gs1-template.xlsx")
+        self.assertEqual(stored.source_path, str(template_path))
+        self.assertTrue(stored.stored_in_database)
+        self.assertEqual(self.service.load_template_path(), "")
+        exported_path = Path(self.tmpdir.name) / "exported-template.xlsx"
+        saved_path = self.service.export_stored_template(exported_path)
+        self.assertEqual(saved_path, exported_path)
+        self.assertEqual(exported_path.read_bytes(), template_path.read_bytes())
 
 
 if __name__ == "__main__":

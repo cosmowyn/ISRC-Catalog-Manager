@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import tempfile
+from contextlib import contextmanager
 from copy import copy
 from pathlib import Path
 
@@ -80,49 +82,53 @@ class GS1ExcelExportService:
             raise ValueError("At least one GS1 record is required for export")
 
         load_workbook = _load_openpyxl()
-        workbook = load_workbook(
-            filename=str(template_profile.workbook_path),
-            read_only=False,
-            data_only=False,
-            keep_vba=template_profile.workbook_path.suffix.lower() == ".xlsm",
-        )
-        start_rows_by_sheet: dict[str, int] = {}
-        style_rows_by_sheet: dict[str, int | None] = {}
-        sequence_by_sheet: dict[str, int] = {}
-        row_numbers: list[int] = []
-        sheet_row_numbers: dict[str, list[int]] = {}
-
-        for record in records:
-            sheet_name = template_profile.resolve_sheet_name(record.metadata.contract_number)
-            sheet_profile = template_profile.sheet_profile(sheet_name)
-            worksheet = workbook[sheet_name]
-            if sheet_name not in start_rows_by_sheet:
-                start_rows_by_sheet[sheet_name] = self._find_start_row(worksheet, sheet_profile)
-                style_rows_by_sheet[sheet_name] = (
-                    sheet_profile.header_row + 1
-                    if worksheet.max_row >= sheet_profile.header_row + 1
-                    else None
-                )
-            sequence_number = sequence_by_sheet.get(sheet_name, 0) + 1
-            sequence_by_sheet[sheet_name] = sequence_number
-            row_number = start_rows_by_sheet[sheet_name] + sequence_number - 1
-            style_template_row = style_rows_by_sheet[sheet_name]
-            if style_template_row is not None and row_number > worksheet.max_row:
-                self._clone_row_style(worksheet, style_template_row, row_number)
-            self._write_record_row(
-                worksheet,
-                row_number=row_number,
-                sheet_profile=sheet_profile,
-                locale_hint=template_profile.locale_hint,
-                prepared_record=record,
-                sequence_number=sequence_number,
+        with self._materialized_template_path(template_profile) as workbook_path:
+            workbook = load_workbook(
+                filename=str(workbook_path),
+                read_only=False,
+                data_only=False,
+                keep_vba=template_profile.template_suffix == ".xlsm",
             )
-            row_numbers.append(row_number)
-            sheet_row_numbers.setdefault(sheet_name, []).append(row_number)
+            start_rows_by_sheet: dict[str, int] = {}
+            style_rows_by_sheet: dict[str, int | None] = {}
+            sequence_by_sheet: dict[str, int] = {}
+            row_numbers: list[int] = []
+            sheet_row_numbers: dict[str, list[int]] = {}
 
-        final_output_path = Path(output_path)
-        final_output_path.parent.mkdir(parents=True, exist_ok=True)
-        workbook.save(str(final_output_path))
+            for record in records:
+                sheet_name = template_profile.resolve_sheet_name(record.metadata.contract_number)
+                sheet_profile = template_profile.sheet_profile(sheet_name)
+                worksheet = workbook[sheet_name]
+                if sheet_name not in start_rows_by_sheet:
+                    start_rows_by_sheet[sheet_name] = self._find_start_row(
+                        worksheet,
+                        sheet_profile,
+                    )
+                    style_rows_by_sheet[sheet_name] = (
+                        sheet_profile.header_row + 1
+                        if worksheet.max_row >= sheet_profile.header_row + 1
+                        else None
+                    )
+                sequence_number = sequence_by_sheet.get(sheet_name, 0) + 1
+                sequence_by_sheet[sheet_name] = sequence_number
+                row_number = start_rows_by_sheet[sheet_name] + sequence_number - 1
+                style_template_row = style_rows_by_sheet[sheet_name]
+                if style_template_row is not None and row_number > worksheet.max_row:
+                    self._clone_row_style(worksheet, style_template_row, row_number)
+                self._write_record_row(
+                    worksheet,
+                    row_number=row_number,
+                    sheet_profile=sheet_profile,
+                    locale_hint=template_profile.locale_hint,
+                    prepared_record=record,
+                    sequence_number=sequence_number,
+                )
+                row_numbers.append(row_number)
+                sheet_row_numbers.setdefault(sheet_name, []).append(row_number)
+
+            final_output_path = Path(output_path)
+            final_output_path.parent.mkdir(parents=True, exist_ok=True)
+            workbook.save(str(final_output_path))
         ordered_sheet_names = list(sheet_row_numbers)
         if len(ordered_sheet_names) == 1:
             result_sheet_name = ordered_sheet_names[0]
@@ -137,6 +143,30 @@ class GS1ExcelExportService:
                 sheet_name: tuple(values) for sheet_name, values in sheet_row_numbers.items()
             },
         )
+
+    @contextmanager
+    def _materialized_template_path(self, template_profile: GS1TemplateProfile):
+        if template_profile.source_bytes is None:
+            yield template_profile.workbook_path
+            return
+
+        temp_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                prefix="gs1-template-",
+                suffix=template_profile.template_suffix,
+                delete=False,
+            ) as handle:
+                handle.write(template_profile.source_bytes)
+                handle.flush()
+                temp_path = Path(handle.name)
+            yield temp_path
+        finally:
+            if temp_path is not None:
+                try:
+                    temp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     def _find_start_row(self, worksheet, sheet_profile: GS1TemplateSheetProfile) -> int:
         mapped_columns = list(sheet_profile.column_map.values())

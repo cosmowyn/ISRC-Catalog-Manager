@@ -168,6 +168,26 @@ class GS1TemplateSheetProfile:
 
 
 @dataclass(slots=True)
+class GS1TemplateAsset:
+    filename: str = ""
+    source_path: str = ""
+    mime_type: str = ""
+    size_bytes: int = 0
+    created_at: str | None = None
+    updated_at: str | None = None
+    stored_in_database: bool = True
+
+    @property
+    def label(self) -> str:
+        return (self.source_path or self.filename or "Official GS1 workbook").strip()
+
+    @property
+    def suffix(self) -> str:
+        suffix = Path(self.filename or self.source_path or "").suffix.lower()
+        return suffix if suffix else ".xlsx"
+
+
+@dataclass(slots=True)
 class GS1TemplateProfile:
     workbook_path: Path
     sheet_name: str
@@ -180,6 +200,25 @@ class GS1TemplateProfile:
     missing_optional_fields: tuple[str, ...] = ()
     field_options: dict[str, tuple[str, ...]] = field(default_factory=dict)
     sheet_profiles: dict[str, GS1TemplateSheetProfile] = field(default_factory=dict)
+    source_name: str = ""
+    source_label: str = ""
+    stored_in_database: bool = False
+    source_bytes: bytes | None = field(default=None, repr=False)
+
+    @property
+    def template_filename(self) -> str:
+        filename = str(self.source_name or self.workbook_path.name or "").strip()
+        return filename or "gs1-template.xlsx"
+
+    @property
+    def template_label(self) -> str:
+        label = str(self.source_label or "").strip()
+        return label or str(self.workbook_path)
+
+    @property
+    def template_suffix(self) -> str:
+        suffix = Path(self.template_filename).suffix.lower()
+        return suffix if suffix else ".xlsx"
 
     @property
     def available_sheet_names(self) -> tuple[str, ...]:

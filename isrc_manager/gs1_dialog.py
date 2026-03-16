@@ -679,7 +679,7 @@ class GS1MetadataDialog(QDialog):
         if self.gs1_service is None:
             raise RuntimeError("GS1 integration service is not available")
 
-        self._template_path_override = ""
+        self._template_asset = self.gs1_service.load_template_asset()
         self._template_profile = None
         self._contract_entries = tuple(self.app.gs1_settings_service.load_contracts())
         self._group_tabs: QTabWidget | None = None
@@ -752,7 +752,7 @@ class GS1MetadataDialog(QDialog):
             self.ELEMENT_MARGIN, self.ELEMENT_MARGIN, self.ELEMENT_MARGIN, self.ELEMENT_MARGIN
         )
         template_button_row.setSpacing(8)
-        self.choose_template_button = QPushButton("Choose Workbook…", self)
+        self.choose_template_button = QPushButton("Upload / Replace…", self)
         self.choose_template_button.setAutoDefault(False)
         self.choose_template_button.clicked.connect(
             lambda: self._choose_template_path(prompt_message=None)
@@ -924,7 +924,7 @@ class GS1MetadataDialog(QDialog):
 
     def _open_settings(self) -> None:
         self.app.open_settings_dialog(initial_focus="gs1_template_path")
-        self._template_path_override = ""
+        self._template_asset = self.gs1_service.load_template_asset()
         self._contract_entries = tuple(self.app.gs1_settings_service.load_contracts())
         for page in self._editor_pages:
             page.set_contract_entries(self._contract_entries)
@@ -932,26 +932,24 @@ class GS1MetadataDialog(QDialog):
         self._update_readiness()
 
     def _refresh_template_status(self, *, prompt_if_missing: bool) -> bool:
-        template_path = (
-            self._template_path_override or self.app.gs1_settings_service.load_template_path()
-        )
-        if not template_path:
+        self._template_asset = self.gs1_service.load_template_asset()
+        if self._template_asset is None:
             self._template_profile = None
             self.template_status_label.setText(
-                "No official GS1 workbook is configured yet. Choose the Excel upload template from your GS1 portal or environment."
+                "No official GS1 workbook is stored yet. Upload the official workbook once so this profile can export without depending on an external file path."
             )
             self._update_readiness()
             if prompt_if_missing:
                 return self._choose_template_path(
                     prompt_message=(
                         "GS1 export requires the official Excel upload template from your GS1 portal or regional GS1 environment.\n\n"
-                        "Choose that workbook now so the app can validate it and use the correct upload sheet."
+                        "Choose that workbook now so the app can validate it and store it inside this profile database."
                     )
                 )
             return False
 
         try:
-            self._template_profile = self.gs1_service.load_template_profile(template_path)
+            self._template_profile = self.gs1_service.load_template_profile()
         except (GS1DependencyError, GS1TemplateVerificationError) as exc:
             self._template_profile = None
             self.template_status_label.setText(str(exc))
@@ -960,7 +958,6 @@ class GS1MetadataDialog(QDialog):
                 return self._choose_template_path(prompt_message=str(exc))
             return False
 
-        self._template_path_override = str(template_path)
         self.template_status_label.setText(self._template_status_text(self._template_profile))
         self._update_readiness()
         return True
@@ -982,14 +979,20 @@ class GS1MetadataDialog(QDialog):
         path, _ = QFileDialog.getOpenFileName(
             self,
             "Choose Official GS1 Workbook",
-            self._template_path_override or str(Path.home()),
+            (
+                self._template_asset.label
+                if self._template_asset is not None and self._template_asset.source_path
+                else str(Path.home())
+            ),
             "Excel Workbook (*.xlsx *.xlsm *.xltx *.xltm)",
         )
         if not path:
             return False
 
         try:
-            profile = self.gs1_service.load_template_profile(path)
+            self.gs1_service.import_template_workbook(path)
+            self._template_asset = self.gs1_service.load_template_asset()
+            profile = self.gs1_service.load_template_profile()
         except (GS1DependencyError, GS1TemplateVerificationError) as exc:
             self._template_profile = None
             self.template_status_label.setText(str(exc))
@@ -997,19 +1000,8 @@ class GS1MetadataDialog(QDialog):
             QMessageBox.warning(self, "GS1 Workbook", str(exc))
             return False
 
-        self._template_path_override = str(path)
         self._template_profile = profile
         self.template_status_label.setText(self._template_status_text(profile))
-        if (
-            QMessageBox.question(
-                self,
-                "Save as Default?",
-                "Save this workbook path as the default GS1 template for future exports?",
-                QMessageBox.Yes | QMessageBox.No,
-            )
-            == QMessageBox.Yes
-        ):
-            self.gs1_service.save_template_path(str(path))
         self._update_readiness()
         return True
 
@@ -1025,7 +1017,12 @@ class GS1MetadataDialog(QDialog):
                 + ", ".join(available_sheets)
                 + f"\nDefault matched sheet: {profile.sheet_name} (header row {profile.header_row})"
             )
-        return "Verified workbook:\n" f"{self._template_path_override}\n{sheet_text}"
+        storage_text = (
+            "Stored in profile database"
+            if profile.stored_in_database
+            else "Using legacy workbook path"
+        )
+        return f"{storage_text}:\n{profile.template_label}\n{sheet_text}"
 
     def _update_readiness(self) -> None:
         if not hasattr(self, "readiness_label"):
@@ -1117,11 +1114,7 @@ class GS1MetadataDialog(QDialog):
         base_name = (
             self._current_group().display_title if not batch else f"selection_{len(self._groups)}"
         )
-        suffix = Path(
-            self._template_path_override
-            or self.app.gs1_settings_service.load_template_path()
-            or "template.xlsx"
-        ).suffix
+        suffix = self._template_profile.template_suffix if self._template_profile is not None else ".xlsx"
         if suffix.lower() not in {".xlsx", ".xlsm", ".xltx", ".xltm"}:
             suffix = ".xlsx"
         filename = (
@@ -1135,19 +1128,6 @@ class GS1MetadataDialog(QDialog):
         if not output_path:
             return False
         selected_path = Path(output_path)
-        template_path_text = str(
-            self._template_path_override or self.app.gs1_settings_service.load_template_path() or ""
-        ).strip()
-        if template_path_text and selected_path.resolve() == Path(template_path_text).resolve():
-            return (
-                QMessageBox.question(
-                    self,
-                    "Overwrite Template?",
-                    "The selected output path is the same as the configured GS1 template. Overwrite it?",
-                    QMessageBox.Yes | QMessageBox.No,
-                )
-                == QMessageBox.Yes
-            )
         if selected_path.exists():
             return (
                 QMessageBox.question(
@@ -1164,7 +1144,6 @@ class GS1MetadataDialog(QDialog):
         try:
             plan = self.gs1_service.prepare_export_plan(
                 track_ids,
-                template_path=self._template_path_override,
                 current_profile_path=self._current_profile_path(),
                 window_title=self._window_title(),
             )

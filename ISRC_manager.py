@@ -108,6 +108,7 @@ from isrc_manager.services import (
     GS1ProfileDefaults,
     GS1MetadataRepository,
     GS1SettingsService,
+    GS1TemplateAsset,
     XMLExportService,
     XMLImportService,
     LicenseService,
@@ -931,7 +932,7 @@ class ApplicationSettingsDialog(QDialog):
         btw_number: str,
         buma_relatie_nummer: str,
         buma_ipi: str,
-        gs1_template_path: str,
+        gs1_template_asset: GS1TemplateAsset | None,
         gs1_contracts_csv_path: str,
         gs1_contract_entries: tuple[GS1ContractEntry, ...] | list[GS1ContractEntry],
         gs1_active_contract_number: str,
@@ -963,6 +964,8 @@ class ApplicationSettingsDialog(QDialog):
         self._theme_change_tracking_enabled = True
         self.gs1_integration_service = getattr(parent, "gs1_integration_service", None)
         self._gs1_template_profile = None
+        self._gs1_template_asset = gs1_template_asset
+        self._pending_gs1_template_path = ""
         self._gs1_default_option_combos: dict[str, QComboBox] = {}
         self._gs1_contract_entries = tuple(gs1_contract_entries or ())
         self._gs1_contracts_csv_path = str(gs1_contracts_csv_path or "").strip()
@@ -1221,32 +1224,40 @@ class ApplicationSettingsDialog(QDialog):
         gs1_template_grid = QGridLayout(gs1_template_box)
         self._configure_grid(gs1_template_grid)
 
-        self.gs1_template_path_edit = QLineEdit((gs1_template_path or "").strip())
-        self.gs1_template_path_edit.setClearButtonEnabled(True)
-        self.gs1_template_path_edit.setPlaceholderText("Official GS1 workbook path")
+        self.gs1_template_path_edit = QLineEdit("")
+        self.gs1_template_path_edit.setReadOnly(True)
+        self.gs1_template_path_edit.setPlaceholderText("No official GS1 workbook stored yet")
         self.gs1_template_path_edit.setMinimumWidth(420)
-        self.gs1_template_path_edit.editingFinished.connect(lambda: self._refresh_gs1_template_options(show_errors=False))
-        gs1_browse_btn = QPushButton("Browse…")
-        gs1_browse_btn.setAutoDefault(False)
-        gs1_browse_btn.clicked.connect(self._browse_gs1_template)
-        gs1_clear_btn = QPushButton("Clear")
-        gs1_clear_btn.setAutoDefault(False)
-        gs1_clear_btn.clicked.connect(self.gs1_template_path_edit.clear)
-        gs1_clear_btn.clicked.connect(lambda: self._refresh_gs1_template_options(show_errors=False))
+        self.gs1_template_store_btn = QPushButton("Upload…")
+        self.gs1_template_store_btn.setAutoDefault(False)
+        self.gs1_template_store_btn.clicked.connect(self._browse_gs1_template)
+        self.gs1_template_export_btn = QPushButton("Export…")
+        self.gs1_template_export_btn.setAutoDefault(False)
+        self.gs1_template_export_btn.clicked.connect(self._export_gs1_template)
         gs1_template_widget = QWidget(self)
         gs1_template_row = QHBoxLayout(gs1_template_widget)
         gs1_template_row.setContentsMargins(0, 0, 0, 0)
         gs1_template_row.setSpacing(8)
         gs1_template_row.addWidget(self.gs1_template_path_edit, 1)
-        gs1_template_row.addWidget(gs1_browse_btn)
-        gs1_template_row.addWidget(gs1_clear_btn)
+        gs1_template_row.addWidget(self.gs1_template_store_btn)
+        gs1_template_row.addWidget(self.gs1_template_export_btn)
         self._add_row(
             gs1_template_grid,
             0,
             "Template Workbook",
             gs1_template_widget,
-            "Choose the official Excel workbook from your GS1 portal or regional GS1 environment. "
-            "The app validates this workbook before export.",
+            "Upload the official Excel workbook once so it is stored inside the current profile database. "
+            "Export saves a copy of the embedded workbook back to disk when you need it.",
+        )
+        self.gs1_template_status_label = QLabel("")
+        self.gs1_template_status_label.setWordWrap(True)
+        self.gs1_template_status_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self._add_row(
+            gs1_template_grid,
+            1,
+            "Workbook Status",
+            self.gs1_template_status_label,
+            "Replace lets you update the stored workbook later without keeping the original file path around.",
         )
         gs1_layout.addWidget(gs1_template_box)
 
@@ -1726,6 +1737,76 @@ class ApplicationSettingsDialog(QDialog):
             + suffix
         )
 
+    def _refresh_gs1_template_status(self) -> None:
+        asset = self._gs1_template_asset
+        pending_path = self._pending_gs1_template_path.strip()
+        if pending_path:
+            self.gs1_template_path_edit.setText(pending_path)
+            self.gs1_template_store_btn.setText("Replace…")
+            self.gs1_template_export_btn.setEnabled(
+                bool(asset is not None and asset.stored_in_database)
+            )
+            summary = self._gs1_template_profile_summary()
+            if summary:
+                self.gs1_template_status_label.setText(
+                    "Selected replacement workbook. Save settings to store it in the profile database.\n\n"
+                    + summary
+                )
+            else:
+                self.gs1_template_status_label.setText(
+                    "Selected replacement workbook. Save settings to store it in the profile database."
+                )
+            return
+
+        if asset is None:
+            self.gs1_template_path_edit.clear()
+            self.gs1_template_store_btn.setText("Upload…")
+            self.gs1_template_export_btn.setEnabled(False)
+            self.gs1_template_status_label.setText(
+                "No official GS1 workbook is stored in this profile yet."
+            )
+            return
+
+        self.gs1_template_path_edit.setText(asset.label)
+        self.gs1_template_store_btn.setText("Replace…")
+        self.gs1_template_export_btn.setEnabled(bool(asset.stored_in_database))
+        lines = []
+        if asset.stored_in_database:
+            lines.append("Workbook is stored inside the current profile database.")
+        else:
+            lines.append(
+                "Using a legacy workbook path. Upload it once to store it in the profile database."
+            )
+        if asset.filename:
+            lines.append(f"Filename: {asset.filename}")
+        if asset.size_bytes:
+            lines.append(f"Size: {asset.size_bytes} bytes")
+        if asset.updated_at:
+            lines.append(f"Updated: {asset.updated_at}")
+        summary = self._gs1_template_profile_summary()
+        if summary:
+            lines.append("")
+            lines.append(summary)
+        self.gs1_template_status_label.setText("\n".join(lines))
+
+    def _gs1_template_profile_summary(self) -> str:
+        profile = self._gs1_template_profile
+        if profile is None:
+            return ""
+        available_sheets = list(profile.available_sheet_names)
+        if len(available_sheets) == 1:
+            return (
+                f"Verified workbook sheet: {available_sheets[0]} "
+                f"(header row {profile.header_row})"
+            )
+        if available_sheets:
+            return (
+                "Verified workbook sheets: "
+                + ", ".join(available_sheets)
+                + f"\nDefault matched sheet: {profile.sheet_name} (header row {profile.header_row})"
+            )
+        return ""
+
     @staticmethod
     def _set_combo_items(combo: QComboBox, values, *, preserve_text: str = "") -> None:
         clean_values: list[str] = []
@@ -1747,16 +1828,22 @@ class ApplicationSettingsDialog(QDialog):
         combo.blockSignals(False)
 
     def _refresh_gs1_template_options(self, *, show_errors: bool) -> None:
-        template_path = self.gs1_template_path_edit.text().strip()
         self._gs1_template_profile = None
         options_by_field: dict[str, tuple[str, ...]] = {}
-        if template_path and self.gs1_integration_service is not None:
+        template_path = self._pending_gs1_template_path.strip()
+        if self.gs1_integration_service is not None:
             try:
-                self._gs1_template_profile = self.gs1_integration_service.load_template_profile(template_path)
+                if template_path:
+                    self._gs1_template_profile = self.gs1_integration_service.load_template_profile(
+                        template_path
+                    )
+                elif self._gs1_template_asset is not None:
+                    self._gs1_template_profile = self.gs1_integration_service.load_template_profile()
                 options_by_field = dict(self._gs1_template_profile.field_options)
             except Exception as exc:
                 if show_errors:
                     QMessageBox.warning(self, "GS1 Workbook", str(exc))
+        self._refresh_gs1_template_status()
         builtin_options = {
             "target_market": COMMON_MARKET_CHOICES,
             "language": COMMON_LANGUAGE_CHOICES,
@@ -1954,12 +2041,63 @@ class ApplicationSettingsDialog(QDialog):
         path, _ = QFileDialog.getOpenFileName(
             self,
             "Choose Official GS1 Workbook",
-            "",
+            self._pending_gs1_template_path
+            or self.gs1_template_path_edit.text().strip()
+            or str(Path.home()),
             "Excel Workbook (*.xlsx *.xlsm *.xltx *.xltm)",
         )
         if path:
-            self.gs1_template_path_edit.setText(path)
-            self._refresh_gs1_template_options(show_errors=True)
+            if self.gs1_integration_service is not None:
+                try:
+                    self.gs1_integration_service.load_template_profile(path)
+                except Exception as exc:
+                    QMessageBox.warning(self, "GS1 Workbook", str(exc))
+                    return
+            self._pending_gs1_template_path = str(path)
+            self._refresh_gs1_template_options(show_errors=False)
+
+    def _export_gs1_template(self):
+        if self.gs1_integration_service is None:
+            return
+        asset = self._gs1_template_asset
+        if asset is None or not asset.stored_in_database:
+            QMessageBox.information(
+                self,
+                "GS1 Workbook",
+                "No embedded GS1 workbook is stored in this profile yet.",
+            )
+            return
+        suggested_path = str(Path.home() / (asset.filename or "gs1-template.xlsx"))
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Stored GS1 Workbook",
+            suggested_path,
+            "Excel Workbook (*.xlsx *.xlsm *.xltx *.xltm)",
+        )
+        if not path:
+            return
+        destination = Path(path)
+        if not destination.suffix:
+            destination = destination.with_suffix(asset.suffix)
+        if destination.exists():
+            overwrite = QMessageBox.question(
+                self,
+                "Overwrite File?",
+                f"The file already exists:\n{destination}\n\nOverwrite it?",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            if overwrite != QMessageBox.Yes:
+                return
+        try:
+            saved_path = self.gs1_integration_service.export_template_workbook(destination)
+        except Exception as exc:
+            QMessageBox.warning(self, "GS1 Workbook", str(exc))
+            return
+        QMessageBox.information(
+            self,
+            "GS1 Workbook",
+            f"Saved the stored GS1 workbook to:\n{saved_path}",
+        )
 
     def _browse_gs1_contracts_csv(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -2032,7 +2170,8 @@ class ApplicationSettingsDialog(QDialog):
             "btw_number": self.btw_number_edit.text().strip(),
             "buma_relatie_nummer": self.buma_relatie_edit.text().strip(),
             "buma_ipi": self.buma_ipi_edit.text().strip(),
-            "gs1_template_path": self.gs1_template_path_edit.text().strip(),
+            "gs1_template_asset": self._gs1_template_asset,
+            "gs1_template_import_path": self._pending_gs1_template_path.strip(),
             "gs1_contracts_csv_path": self.gs1_contracts_csv_edit.text().strip(),
             "gs1_contract_entries": tuple(self._gs1_contract_entries),
             "gs1_active_contract_number": self.gs1_active_contract_edit.currentText().strip(),
@@ -2056,15 +2195,14 @@ class ApplicationSettingsDialog(QDialog):
             QMessageBox.warning(self, "Invalid Artist Code", "ISRC Artist Code must be exactly two digits (00–99).")
             self.focus_field("artist_code")
             return
-        gs1_template_path = str(values["gs1_template_path"] or "").strip()
-        if gs1_template_path and Path(gs1_template_path).suffix.lower() not in {".xlsx", ".xlsm", ".xltx", ".xltm"}:
-            QMessageBox.warning(
-                self,
-                "Invalid GS1 Workbook",
-                "GS1 Template Workbook must be an Excel file with one of these extensions: .xlsx, .xlsm, .xltx, or .xltm.",
-            )
-            self.focus_field("gs1_template_path")
-            return
+        gs1_template_import_path = str(values["gs1_template_import_path"] or "").strip()
+        if gs1_template_import_path and self.gs1_integration_service is not None:
+            try:
+                self.gs1_integration_service.load_template_profile(gs1_template_import_path)
+            except Exception as exc:
+                QMessageBox.warning(self, "GS1 Workbook", str(exc))
+                self.focus_field("gs1_template_path")
+                return
         gs1_contracts_csv_path = str(values["gs1_contracts_csv_path"] or "").strip()
         if gs1_contracts_csv_path and Path(gs1_contracts_csv_path).suffix.lower() != ".csv":
             QMessageBox.warning(
@@ -6836,7 +6974,7 @@ class App(QMainWindow):
             "btw_number": registration.btw_number,
             "buma_relatie_nummer": registration.buma_relatie_nummer,
             "buma_ipi": registration.buma_ipi,
-            "gs1_template_path": self.gs1_settings_service.load_template_path() if self.gs1_settings_service is not None else "",
+            "gs1_template_asset": self.gs1_settings_service.load_template_asset() if self.gs1_settings_service is not None else None,
             "gs1_contracts_csv_path": self.gs1_settings_service.load_contracts_csv_path() if self.gs1_settings_service is not None else "",
             "gs1_contract_entries": tuple(gs1_contracts),
             "gs1_active_contract_number": gs1_defaults.contract_number if gs1_defaults is not None else "",
@@ -7041,16 +7179,21 @@ class App(QMainWindow):
                 changed_count += 1
 
             if self.gs1_settings_service is not None:
-                before_template_path = str(before_values.get("gs1_template_path") or "").strip()
-                after_template_path = str(after_values.get("gs1_template_path") or "").strip()
-                if after_template_path != before_template_path:
-                    if after_template_path and self.gs1_integration_service is not None:
-                        self.gs1_integration_service.load_template_profile(after_template_path)
-                    self.gs1_settings_service.set_template_path(after_template_path)
+                pending_template_path = str(after_values.get("gs1_template_import_path") or "").strip()
+                if pending_template_path:
+                    if self.gs1_integration_service is not None:
+                        stored_template = self.gs1_integration_service.import_template_workbook(
+                            pending_template_path
+                        )
+                    else:
+                        stored_template = self.gs1_settings_service.import_template_from_path(
+                            pending_template_path
+                        )
                     self._log_event(
-                        "settings.gs1_template_path",
-                        "GS1 template workbook updated",
-                        template_path=after_template_path,
+                        "settings.gs1_template_workbook",
+                        "GS1 template workbook stored",
+                        template_path=stored_template.source_path,
+                        stored_filename=stored_template.filename,
                     )
                     changed_count += 1
 
@@ -7128,7 +7271,7 @@ class App(QMainWindow):
             btw_number=before_values["btw_number"],
             buma_relatie_nummer=before_values["buma_relatie_nummer"],
             buma_ipi=before_values["buma_ipi"],
-            gs1_template_path=before_values["gs1_template_path"],
+            gs1_template_asset=before_values["gs1_template_asset"],
             gs1_contracts_csv_path=before_values["gs1_contracts_csv_path"],
             gs1_contract_entries=before_values["gs1_contract_entries"],
             gs1_active_contract_number=before_values["gs1_active_contract_number"],

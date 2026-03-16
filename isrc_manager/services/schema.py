@@ -278,6 +278,7 @@ class DatabaseSchemaService:
         )
 
         self._ensure_gs1_metadata_table()
+        self._ensure_gs1_template_storage_table()
         self._ensure_release_tables()
 
         self.conn.commit()
@@ -406,6 +407,9 @@ class DatabaseSchemaService:
             elif version == 18:
                 self._apply_migration(18, self._mig_18_to_19)
                 version = 19
+            elif version == 19:
+                self._apply_migration(19, self._mig_19_to_20)
+                version = 20
             else:
                 self.logger.warning("Unknown migration path from version %s", version)
                 break
@@ -832,6 +836,9 @@ class DatabaseSchemaService:
         self._ensure_release_tables()
         self._migrate_legacy_releases()
 
+    def _mig_19_to_20(self) -> None:
+        self._ensure_gs1_template_storage_table()
+
     def _ensure_current_track_columns(self) -> None:
         cols = self._table_columns("Tracks")
         additions = (
@@ -993,6 +1000,22 @@ class DatabaseSchemaService:
         )
         self.cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_gs1_metadata_contract_number ON GS1Metadata(contract_number)"
+        )
+
+    def _ensure_gs1_template_storage_table(self) -> None:
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS GS1TemplateStorage (
+                id INTEGER PRIMARY KEY CHECK(id = 1),
+                filename TEXT NOT NULL,
+                source_path TEXT,
+                workbook_blob BLOB NOT NULL,
+                mime_type TEXT,
+                size_bytes INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
         )
 
     def _ensure_release_tables(self) -> None:

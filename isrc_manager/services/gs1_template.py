@@ -236,6 +236,9 @@ class GS1TemplateVerificationService:
                     if values
                 },
                 sheet_profiles=sheet_profiles,
+                source_name=path.name,
+                source_label=str(path),
+                stored_in_database=False,
             )
         finally:
             close = getattr(workbook, "close", None)

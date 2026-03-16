@@ -56,6 +56,7 @@ class DatabaseSchemaServiceTests(unittest.TestCase):
         self.assertIn("HistoryHead", tables)
         self.assertIn("Licensees", tables)
         self.assertIn("GS1Metadata", tables)
+        self.assertIn("GS1TemplateStorage", tables)
         self.assertIn("Releases", tables)
         self.assertIn("ReleaseTracks", tables)
         self.assertIn("vw_Licenses", tables)

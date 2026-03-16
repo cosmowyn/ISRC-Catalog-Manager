@@ -183,6 +183,28 @@ class GS1ExcelExportServiceTests(unittest.TestCase):
         self.assertEqual(sheet_a["G3"].value, "Lunar Release")
         self.assertEqual(sheet_b["G2"].value, "Solar Release")
 
+    def test_export_supports_embedded_template_bytes_without_a_live_source_path(self):
+        embedded_profile = GS1TemplateVerificationService().verify(self.template_path)
+        embedded_profile.source_name = "embedded-template.xlsx"
+        embedded_profile.source_label = "embedded-template.xlsx"
+        embedded_profile.stored_in_database = True
+        embedded_profile.source_bytes = self.template_path.read_bytes()
+        embedded_profile.workbook_path = Path("embedded-template.xlsx")
+        output_path = self.root / "embedded-export.xlsx"
+
+        result = self.service.export(
+            embedded_profile,
+            [prepared_record(1, "Orbit Release"), prepared_record(2, "Solar Release")],
+            output_path,
+        )
+
+        self.assertEqual(result.exported_count, 2)
+        workbook = load_workbook(output_path, data_only=False)
+        target_sheet = workbook["10070050"]
+        self.assertEqual(target_sheet["A2"].value, "1")
+        self.assertEqual(target_sheet["A3"].value, "2")
+        self.assertEqual(target_sheet["G3"].value, "Solar Release")
+
 
 if __name__ == "__main__":
     unittest.main()

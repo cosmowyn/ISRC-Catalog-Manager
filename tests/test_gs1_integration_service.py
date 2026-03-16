@@ -395,6 +395,23 @@ class GS1IntegrationServiceTests(unittest.TestCase):
         self.assertIn("Sheet '10064976': 1 product row(s).", plan.summary_lines)
         self.assertIn("Sheet '10070050': 1 product row(s).", plan.summary_lines)
 
+    def test_prepare_export_plan_uses_stored_template_when_no_path_is_provided(self):
+        template_path = Path(self.tmpdir.name) / "stored-gs1-template.xlsx"
+        build_template(template_path)
+        self.service.import_template_workbook(template_path)
+
+        plan = self.service.prepare_export_plan(
+            [1, 2],
+            current_profile_path="/tmp/Orbit_Label.db",
+            window_title="Orbit Window",
+        )
+
+        self.assertTrue(plan.template_profile.stored_in_database)
+        self.assertEqual(plan.template_profile.template_filename, "stored-gs1-template.xlsx")
+        self.assertIsNotNone(plan.template_profile.source_bytes)
+        self.assertEqual(plan.preview.rows[0][0], "1")
+        self.assertIn("Orbit Release", plan.preview.rows[0])
+
 
 if __name__ == "__main__":
     unittest.main()

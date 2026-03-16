@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 from isrc_manager.constants import DEFAULT_WINDOW_TITLE
 
@@ -17,6 +18,7 @@ from .gs1_models import (
     GS1MetadataRecord,
     GS1PreparedRecord,
     GS1RecordContext,
+    GS1TemplateAsset,
     GS1TemplateProfile,
     GS1TemplateVerificationError,
     GS1ValidationError,
@@ -200,17 +202,53 @@ class GS1IntegrationService:
         )
 
     def load_template_profile(self, template_path: str | None = None) -> GS1TemplateProfile:
-        resolved_path = (
-            str(template_path or "").strip() or self.settings_service.load_template_path()
-        )
+        explicit_path = str(template_path or "").strip()
+        if explicit_path:
+            profile = self.template_verification_service.verify(explicit_path)
+            return self._finalize_template_profile(
+                profile,
+                source_name=Path(explicit_path).name,
+                source_label=explicit_path,
+                stored_in_database=False,
+            )
+
+        stored_asset = self.settings_service.load_stored_template_info()
+        if stored_asset is not None:
+            workbook_bytes = self.settings_service.load_stored_template_bytes()
+            if workbook_bytes is None:
+                raise GS1TemplateVerificationError(
+                    "The stored GS1 workbook could not be loaded from the profile database."
+                )
+            return self._load_stored_template_profile(stored_asset, workbook_bytes)
+
+        resolved_path = self.settings_service.load_template_path()
         if not resolved_path:
             raise GS1TemplateVerificationError(
-                "No GS1 workbook is configured yet. Choose the official workbook from your GS1 portal before exporting."
+                "No GS1 workbook is configured yet. Upload the official workbook once in Settings before exporting."
             )
-        return self.template_verification_service.verify(resolved_path)
+        profile = self.template_verification_service.verify(resolved_path)
+        return self._finalize_template_profile(
+            profile,
+            source_name=Path(resolved_path).name,
+            source_label=resolved_path,
+            stored_in_database=False,
+        )
 
     def save_template_path(self, template_path: str) -> str:
         return self.settings_service.set_template_path(template_path)
+
+    def load_template_asset(self) -> GS1TemplateAsset | None:
+        return self.settings_service.load_template_asset()
+
+    def import_template_workbook(self, template_path: str | Path) -> GS1TemplateAsset:
+        self.template_verification_service.verify(template_path)
+        return self.settings_service.import_template_from_path(template_path)
+
+    def replace_template_workbook(self, template_path: str | Path) -> GS1TemplateAsset:
+        return self.import_template_workbook(template_path)
+
+    def export_template_workbook(self, destination_path: str | Path) -> Path:
+        return self.settings_service.export_stored_template(destination_path)
 
     def build_metadata_groups(
         self,
@@ -583,6 +621,53 @@ class GS1IntegrationService:
                 "Multiple different UPC/EAN values are present in the selection. Confirm that the export grouping matches the product you want to register."
             )
         return warnings
+
+    def _load_stored_template_profile(
+        self,
+        template_asset: GS1TemplateAsset,
+        workbook_bytes: bytes,
+    ) -> GS1TemplateProfile:
+        temp_path: Path | None = None
+        try:
+            with NamedTemporaryFile(
+                prefix="gs1-template-",
+                suffix=template_asset.suffix,
+                delete=False,
+            ) as handle:
+                handle.write(workbook_bytes)
+                handle.flush()
+                temp_path = Path(handle.name)
+            profile = self.template_verification_service.verify(temp_path)
+        finally:
+            if temp_path is not None:
+                try:
+                    temp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+        return self._finalize_template_profile(
+            profile,
+            source_name=template_asset.filename,
+            source_label=template_asset.label,
+            stored_in_database=True,
+            source_bytes=workbook_bytes,
+        )
+
+    @staticmethod
+    def _finalize_template_profile(
+        profile: GS1TemplateProfile,
+        *,
+        source_name: str,
+        source_label: str,
+        stored_in_database: bool,
+        source_bytes: bytes | None = None,
+    ) -> GS1TemplateProfile:
+        profile.source_name = str(source_name or profile.source_name or "").strip()
+        profile.source_label = str(source_label or profile.source_label or "").strip()
+        profile.stored_in_database = bool(stored_in_database)
+        profile.source_bytes = source_bytes
+        if profile.stored_in_database:
+            profile.workbook_path = Path(profile.template_filename)
+        return profile
 
     def _normalized_group_record(
         self, group: GS1MetadataGroup, record: GS1MetadataRecord
