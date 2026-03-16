@@ -515,9 +515,9 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Saved Themes</strong>: save the current theme under a name, load a stored theme, or delete saved presets.</li>
           <li><strong>Advanced QSS</strong>: append custom Qt stylesheet rules that target object names or widget types directly.</li>
           <li><strong>Selector Reference</strong>: browse a searchable catalog of selectors harvested from the currently open windows and dialogs, then copy or insert them into the QSS editor.</li>
-          <li><strong>Autocomplete</strong>: press <strong>Ctrl+Space</strong> inside the advanced QSS editor to complete selector names from the current catalog.</li>
+          <li><strong>Autocomplete</strong>: press <strong>Ctrl+Space</strong> inside the advanced QSS editor for context-aware selector, pseudo-state, subcontrol, property, value, and full-template completion.</li>
         </ul>
-        <p>All visible controls receive object names automatically so advanced QSS can target specific widgets. If you want to style a dialog that is not currently open, open it first and refresh the selector catalog. Saved theme presets persist between launches and remain selectable from the theme dropdown.</p>
+        <p>All visible controls receive object names automatically so advanced QSS can target specific widgets. Object-name suggestions are inserted as references, which means they safely append to an existing widget selector instead of silently rewriting it. If you want to style a dialog that is not currently open, open it first and refresh the selector catalog. Saved theme presets persist between launches and remain selectable from the theme dropdown.</p>
         """,
     ),
     HelpChapter(

@@ -1,13 +1,11 @@
-"""Helpers for exposing QSS selector targets inside the app."""
+"""Helpers for exposing live QSS selector targets inside the app."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Iterable
 
-from PySide6.QtCore import QStringListModel, Qt
-from PySide6.QtGui import QTextCursor
-from PySide6.QtWidgets import QCompleter, QPlainTextEdit, QWidget
+from PySide6.QtWidgets import QWidget
 
 
 @dataclass(frozen=True, slots=True)
@@ -15,31 +13,99 @@ class QssReferenceEntry:
     category: str
     selector: str
     details: str
+    selector_kind: str = "static"
+    widget_class: str | None = None
+    object_name: str | None = None
+    role_name: str | None = None
 
 
 STATIC_QSS_REFERENCE_ENTRIES: tuple[QssReferenceEntry, ...] = (
-    QssReferenceEntry("Subcontrol", "QDockWidget::title", "Dock title bar area."),
-    QssReferenceEntry("Subcontrol", "QHeaderView::section", "Table and tree header sections."),
-    QssReferenceEntry("Subcontrol", "QMenu::item", "Individual menu rows."),
-    QssReferenceEntry("Subcontrol", "QScrollBar:vertical", "Vertical scrollbars."),
-    QssReferenceEntry("Subcontrol", "QScrollBar:horizontal", "Horizontal scrollbars."),
-    QssReferenceEntry("Subcontrol", "QTabBar::tab", "Tabs inside tab widgets."),
     QssReferenceEntry(
-        "Subcontrol", "QToolBar", "Toolbars such as the profile and action ribbon bars."
+        "Subcontrol",
+        "QDockWidget::title",
+        "Dock title bar area.",
+        selector_kind="subcontrol_selector",
+        widget_class="QDockWidget",
     ),
-    QssReferenceEntry("Pseudo State", ":hover", "Hovered widget state."),
-    QssReferenceEntry("Pseudo State", ":checked", "Checked state for buttons and actions."),
-    QssReferenceEntry("Pseudo State", ":disabled", "Disabled widget state."),
-    QssReferenceEntry("Example", "#mainWindow QTableWidget", "Tables inside the main window."),
+    QssReferenceEntry(
+        "Subcontrol",
+        "QHeaderView::section",
+        "Table and tree header sections.",
+        selector_kind="subcontrol_selector",
+        widget_class="QHeaderView",
+    ),
+    QssReferenceEntry(
+        "Subcontrol",
+        "QMenu::item",
+        "Individual menu rows.",
+        selector_kind="subcontrol_selector",
+        widget_class="QMenu",
+    ),
+    QssReferenceEntry(
+        "Subcontrol",
+        "QScrollBar::handle:vertical",
+        "Vertical scrollbar handle.",
+        selector_kind="subcontrol_selector",
+        widget_class="QScrollBar",
+    ),
+    QssReferenceEntry(
+        "Subcontrol",
+        "QScrollBar::handle:horizontal",
+        "Horizontal scrollbar handle.",
+        selector_kind="subcontrol_selector",
+        widget_class="QScrollBar",
+    ),
+    QssReferenceEntry(
+        "Subcontrol",
+        "QTabBar::tab",
+        "Tabs inside tab widgets.",
+        selector_kind="subcontrol_selector",
+        widget_class="QTabBar",
+    ),
+    QssReferenceEntry(
+        "Subcontrol",
+        "QToolBar",
+        "Toolbars such as the profile and action ribbon bars.",
+        selector_kind="widget_type",
+        widget_class="QToolBar",
+    ),
+    QssReferenceEntry(
+        "Pseudo State",
+        ":hover",
+        "Hovered widget state.",
+        selector_kind="pseudo_state",
+    ),
+    QssReferenceEntry(
+        "Pseudo State",
+        ":checked",
+        "Checked state for buttons and actions.",
+        selector_kind="pseudo_state",
+    ),
+    QssReferenceEntry(
+        "Pseudo State",
+        ":disabled",
+        "Disabled widget state.",
+        selector_kind="pseudo_state",
+    ),
+    QssReferenceEntry(
+        "Example",
+        "#mainWindow QTableWidget",
+        "Tables inside the main window.",
+        selector_kind="example",
+    ),
     QssReferenceEntry(
         "Example",
         'QLabel[role="secondary"]',
         "Secondary helper and status text labels.",
+        selector_kind="typed_role",
+        widget_class="QLabel",
+        role_name="secondary",
     ),
 )
 
 
-def _root_object_name(widget: QWidget) -> str:
+def root_object_name(widget: QWidget) -> str:
+    """Return a stable object name for a widget, creating one if needed."""
     name = (widget.objectName() or "").strip()
     if name:
         return name
@@ -54,7 +120,7 @@ def ensure_widget_object_names(root: QWidget | None) -> bool:
     if root is None:
         return False
     changed = False
-    root_name = _root_object_name(root)
+    root_name = root_object_name(root)
 
     for attr_name, value in getattr(root, "__dict__", {}).items():
         if isinstance(value, QWidget) and value.objectName() == "":
@@ -105,17 +171,17 @@ def collect_qss_reference_entries(widgets: Iterable[QWidget]) -> list[QssReferen
     entries: dict[tuple[str, str], QssReferenceEntry] = {}
     seen_widgets: set[int] = set()
 
-    def add_entry(category: str, selector: str, details: str) -> None:
-        clean_selector = str(selector or "").strip()
+    def add_entry(entry: QssReferenceEntry) -> None:
+        clean_selector = str(entry.selector or "").strip()
         if not clean_selector:
             return
-        key = (category, clean_selector)
+        key = (entry.category, clean_selector)
         current = entries.get(key)
-        if current is None or len(details) > len(current.details):
-            entries[key] = QssReferenceEntry(category, clean_selector, details)
+        if current is None or len(entry.details) > len(current.details):
+            entries[key] = entry
 
     for entry in STATIC_QSS_REFERENCE_ENTRIES:
-        add_entry(entry.category, entry.selector, entry.details)
+        add_entry(entry)
 
     for root in widgets:
         if root is None:
@@ -131,124 +197,62 @@ def collect_qss_reference_entries(widgets: Iterable[QWidget]) -> list[QssReferen
             object_name = (widget.objectName() or "").strip()
             role_name = str(widget.property("role") or "").strip()
 
-            add_entry("Widget Type", class_name, f"Target all visible {class_name} controls.")
+            add_entry(
+                QssReferenceEntry(
+                    "Widget Type",
+                    class_name,
+                    f"Target all visible {class_name} controls.",
+                    selector_kind="widget_type",
+                    widget_class=class_name,
+                )
+            )
             if object_name:
-                add_entry("Object Name", f"#{object_name}", f"{class_name} named '{object_name}'.")
                 add_entry(
-                    "Typed Object",
-                    f"{class_name}#{object_name}",
-                    f"The {class_name} instance named '{object_name}'.",
+                    QssReferenceEntry(
+                        "Object Name",
+                        f"#{object_name}",
+                        f"{class_name} named '{object_name}'.",
+                        selector_kind="object_name",
+                        widget_class=class_name,
+                        object_name=object_name,
+                    )
+                )
+                add_entry(
+                    QssReferenceEntry(
+                        "Typed Object",
+                        f"{class_name}#{object_name}",
+                        f"The {class_name} instance named '{object_name}'.",
+                        selector_kind="typed_object",
+                        widget_class=class_name,
+                        object_name=object_name,
+                    )
                 )
             if role_name:
                 add_entry(
-                    "Role Property",
-                    f'[role="{role_name}"]',
-                    f"Any widget tagged with role='{role_name}'.",
+                    QssReferenceEntry(
+                        "Role Property",
+                        f'[role="{role_name}"]',
+                        f"Any widget tagged with role='{role_name}'.",
+                        selector_kind="role_property",
+                        role_name=role_name,
+                    )
                 )
                 add_entry(
-                    "Typed Role",
-                    f'{class_name}[role="{role_name}"]',
-                    f"{class_name} widgets tagged with role='{role_name}'.",
+                    QssReferenceEntry(
+                        "Typed Role",
+                        f'{class_name}[role="{role_name}"]',
+                        f"{class_name} widgets tagged with role='{role_name}'.",
+                        selector_kind="typed_role",
+                        widget_class=class_name,
+                        role_name=role_name,
+                    )
                 )
 
     return sorted(entries.values(), key=lambda entry: (entry.category, entry.selector.lower()))
 
 
 def build_qss_completion_tokens(entries: Iterable[QssReferenceEntry]) -> list[str]:
-    """Return a sorted completion token list for the in-app QSS editor."""
-    tokens = {
-        entry.selector for entry in entries if entry.selector and not entry.selector.startswith(":")
-    }
-    tokens.update(
-        {
-            "{",
-            "}",
-            ":checked",
-            ":disabled",
-            ":hover",
-            "QDockWidget::title",
-            "QHeaderView::section",
-            "QMenu::item",
-            "QScrollBar:horizontal",
-            "QScrollBar:vertical",
-            "QTabBar::tab",
-        }
-    )
+    """Return a compatibility token list for simple selector completion."""
+    tokens = {entry.selector for entry in entries if entry.selector}
+    tokens.update({":checked", ":disabled", ":hover"})
     return sorted(tokens, key=str.lower)
-
-
-class QssCodeEditor(QPlainTextEdit):
-    """QSS editor with lightweight selector autocomplete."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._completion_tokens: list[str] = []
-        self._completer = QCompleter(self)
-        self._completer.setWidget(self)
-        self._completer.setCaseSensitivity(Qt.CaseInsensitive)
-        self._completer.setCompletionMode(QCompleter.PopupCompletion)
-        self._completer.activated.connect(self._insert_completion)
-        self._completer.setModel(QStringListModel([], self._completer))
-
-    def set_completion_tokens(self, tokens: Iterable[str]) -> None:
-        self._completion_tokens = sorted(
-            {str(token).strip() for token in tokens if str(token).strip()}
-        )
-        model = self._completer.model()
-        if isinstance(model, QStringListModel):
-            model.setStringList(self._completion_tokens)
-
-    def insertPlainText(self, text: str) -> None:  # noqa: N802 - Qt API name
-        super().insertPlainText(text)
-
-    def _completion_prefix(self) -> str:
-        cursor = self.textCursor()
-        block_text = cursor.block().text()
-        end = cursor.positionInBlock()
-        start = end
-        while start > 0 and block_text[start - 1] not in " \t\r\n{}();,":
-            start -= 1
-        return block_text[start:end]
-
-    def _insert_completion(self, completion: str) -> None:
-        prefix = self._completion_prefix()
-        if completion == prefix:
-            return
-        cursor = self.textCursor()
-        cursor.movePosition(QTextCursor.Left, QTextCursor.KeepAnchor, len(prefix))
-        cursor.insertText(completion)
-        self.setTextCursor(cursor)
-
-    def _show_completion_popup(self, prefix: str) -> None:
-        if not prefix:
-            self._completer.popup().hide()
-            return
-        self._completer.setCompletionPrefix(prefix)
-        popup = self._completer.popup()
-        popup.setCurrentIndex(self._completer.completionModel().index(0, 0))
-        rect = self.cursorRect()
-        rect.setWidth(max(320, popup.sizeHintForColumn(0) + 24))
-        self._completer.complete(rect)
-
-    def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt API name
-        if self._completer.popup().isVisible() and event.key() in (
-            Qt.Key_Enter,
-            Qt.Key_Return,
-            Qt.Key_Escape,
-            Qt.Key_Tab,
-            Qt.Key_Backtab,
-        ):
-            event.ignore()
-            return
-
-        ctrl_space = bool(event.modifiers() & Qt.ControlModifier and event.key() == Qt.Key_Space)
-        super().keyPressEvent(event)
-
-        prefix = self._completion_prefix()
-        if ctrl_space:
-            self._show_completion_popup(prefix)
-            return
-        if event.text().strip() and len(prefix) >= 2:
-            self._show_completion_popup(prefix)
-        elif self._completer.popup().isVisible():
-            self._completer.popup().hide()

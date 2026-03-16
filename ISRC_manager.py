@@ -157,10 +157,9 @@ from isrc_manager.help_content import render_help_html
 from isrc_manager.app_bootstrap import run_desktop_application
 from isrc_manager.main_window_shell import build_main_window_shell
 from isrc_manager.paths import DATA_DIR
+from isrc_manager.qss_autocomplete import QssCodeEditor
 from isrc_manager.qss_reference import (
-    QssCodeEditor,
     QssReferenceEntry,
-    build_qss_completion_tokens,
     collect_qss_reference_entries,
     ensure_widget_object_names as _ensure_qss_widget_object_names,
     repolish_widget_tree as _repolish_qss_widget_tree,
@@ -1042,7 +1041,8 @@ class ApplicationSettingsDialog(QDialog):
 
         qss_help = QLabel(
             "Example selectors: `QPushButton`, `QLineEdit`, `QDockWidget::title`, or `#profilesToolbar QPushButton`. "
-            "Press Ctrl+Space in the editor for autocomplete."
+            "Press Ctrl+Space in the editor for context-aware autocomplete with selectors, pseudo-states, subcontrols, "
+            "property lines, value suggestions, and full rule templates."
         )
         qss_help.setProperty("role", "hint")
         qss_help.setWordWrap(True)
@@ -1072,7 +1072,9 @@ class ApplicationSettingsDialog(QDialog):
 
         qss_reference_note = QLabel(
             "The reference catalog is built from the currently open app windows and dialogs. "
-            "Open the screen you want to style, then refresh the catalog to harvest its generated object names."
+            "Open the screen you want to style, then refresh the catalog to harvest its generated object names. "
+            "Object-name entries are inserted as references, so they append safely to an existing widget selector "
+            "instead of rewriting it."
         )
         qss_reference_note.setWordWrap(True)
         qss_reference_note.setProperty("role", "hint")
@@ -1507,9 +1509,7 @@ class ApplicationSettingsDialog(QDialog):
 
     def _refresh_qss_selector_reference(self) -> None:
         self._qss_reference_entries = self._collect_qss_reference_entries()
-        self.theme_custom_qss_edit.set_completion_tokens(
-            build_qss_completion_tokens(self._qss_reference_entries)
-        )
+        self.theme_custom_qss_edit.set_reference_entries(self._qss_reference_entries)
         self._apply_qss_reference_filter()
 
     def _apply_qss_reference_filter(self) -> None:
