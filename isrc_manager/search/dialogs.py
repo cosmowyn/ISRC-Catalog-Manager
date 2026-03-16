@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -17,7 +18,16 @@ from PySide6.QtWidgets import (
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QVBoxLayout,
+    QWidget,
+)
+
+from isrc_manager.ui_common import (
+    _add_standard_dialog_header,
+    _apply_compact_dialog_control_heights,
+    _apply_standard_dialog_chrome,
+    _create_standard_section,
 )
 
 from .service import GlobalSearchService, RelationshipExplorerService
@@ -39,16 +49,31 @@ class GlobalSearchDialog(QDialog):
         self.search_service = search_service
         self.relationship_service = relationship_service
         self.setWindowTitle("Global Search and Relationship Explorer")
-        self.resize(1120, 700)
+        self.resize(1180, 760)
+        self.setMinimumSize(1040, 680)
+        _apply_standard_dialog_chrome(self, "globalSearchDialog")
 
         root = QVBoxLayout(self)
-        intro = QLabel(
-            "Search the complete catalog knowledge graph and inspect everything linked to the selected record from one place."
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(14)
+        _add_standard_dialog_header(
+            root,
+            self,
+            title="Global Search and Relationship Explorer",
+            subtitle=(
+                "Search the complete catalog knowledge graph and inspect everything linked "
+                "to the selected record from one place."
+            ),
         )
-        intro.setWordWrap(True)
-        root.addWidget(intro)
 
+        search_box, search_box_layout = _create_standard_section(
+            self,
+            "Search Query",
+            "Filter across all supported entities or narrow the search to a specific entity type.",
+        )
         search_row = QHBoxLayout()
+        search_row.setContentsMargins(0, 0, 0, 0)
+        search_row.setSpacing(8)
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText(
             "Search works, tracks, releases, contracts, rights, parties, documents, and assets..."
@@ -71,55 +96,98 @@ class GlobalSearchDialog(QDialog):
         self.entity_combo.currentIndexChanged.connect(self.refresh_results)
         search_row.addWidget(self.search_edit, 1)
         search_row.addWidget(self.entity_combo)
-        save_search_button = QPushButton("Save Search")
-        save_search_button.clicked.connect(self.save_current_search)
-        search_row.addWidget(save_search_button)
-        root.addLayout(search_row)
+        self.save_search_button = QPushButton("Save Search")
+        self.save_search_button.clicked.connect(self.save_current_search)
+        search_row.addWidget(self.save_search_button)
+        search_box_layout.addLayout(search_row)
+        self.results_status_label = QLabel("Enter a query to search the catalog.")
+        self.results_status_label.setProperty("role", "secondary")
+        self.results_status_label.setWordWrap(True)
+        search_box_layout.addWidget(self.results_status_label)
+        root.addWidget(search_box)
 
         splitter = QSplitter(Qt.Horizontal, self)
+        splitter.setChildrenCollapsible(False)
         root.addWidget(splitter, 1)
 
-        left_widget = QListWidget()
-        self.saved_searches_list = left_widget
+        left_container = QWidget(self)
+        left_layout = QVBoxLayout(left_container)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(0)
+        saved_box, saved_layout = _create_standard_section(
+            self,
+            "Saved Searches",
+            "Store useful queries and quickly re-apply them later.",
+        )
+        self.saved_searches_list = QListWidget(saved_box)
         self.saved_searches_list.itemDoubleClicked.connect(self.apply_saved_search)
-        left_container = QDialog(self)
-        left_container_layout = QVBoxLayout(left_container)
-        left_container_layout.addWidget(QLabel("Saved Searches"))
-        left_container_layout.addWidget(self.saved_searches_list)
+        saved_layout.addWidget(self.saved_searches_list, 1)
         delete_saved_button = QPushButton("Delete Saved Search")
         delete_saved_button.clicked.connect(self.delete_saved_search)
-        left_container_layout.addWidget(delete_saved_button)
+        saved_layout.addWidget(delete_saved_button)
+        left_layout.addWidget(saved_box, 1)
         splitter.addWidget(left_container)
 
-        middle_container = QDialog(self)
-        middle_layout = QVBoxLayout(middle_container)
-        middle_layout.addWidget(QLabel("Search Results"))
-        self.results_table = QTableWidget(0, 5, middle_container)
+        right_container = QWidget(self)
+        right_layout = QVBoxLayout(right_container)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(0)
+        detail_tabs = QTabWidget(right_container)
+        right_layout.addWidget(detail_tabs, 1)
+
+        results_tab = QWidget(detail_tabs)
+        results_tab_layout = QVBoxLayout(results_tab)
+        results_tab_layout.setContentsMargins(0, 0, 0, 0)
+        results_tab_layout.setSpacing(0)
+        results_box, results_box_layout = _create_standard_section(
+            self,
+            "Search Results",
+            "Select a row to inspect linked records or double-click to open the selected item.",
+        )
+        self.results_table = QTableWidget(0, 5, results_box)
         self.results_table.setHorizontalHeaderLabels(["Type", "ID", "Title", "Subtitle", "Status"])
         self.results_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.results_table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.results_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.results_table.verticalHeader().setVisible(False)
-        self.results_table.horizontalHeader().setStretchLastSection(True)
+        self.results_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.results_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.results_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.results_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        self.results_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
         self.results_table.itemSelectionChanged.connect(self.refresh_relationships)
         self.results_table.doubleClicked.connect(lambda _index: self.open_selected_result())
-        middle_layout.addWidget(self.results_table, 1)
+        results_box_layout.addWidget(self.results_table, 1)
         open_button = QPushButton("Open Selected Record")
         open_button.clicked.connect(self.open_selected_result)
-        middle_layout.addWidget(open_button)
-        splitter.addWidget(middle_container)
+        results_box_layout.addWidget(open_button)
+        results_tab_layout.addWidget(results_box, 1)
+        detail_tabs.addTab(results_tab, "Results")
 
-        right_container = QDialog(self)
-        right_layout = QVBoxLayout(right_container)
-        right_layout.addWidget(QLabel("Relationship Explorer"))
+        relationships_tab = QWidget(detail_tabs)
+        relationships_tab_layout = QVBoxLayout(relationships_tab)
+        relationships_tab_layout.setContentsMargins(0, 0, 0, 0)
+        relationships_tab_layout.setSpacing(0)
+        relationships_box, relationships_box_layout = _create_standard_section(
+            self,
+            "Relationship Explorer",
+            "Everything currently linked to the selected result appears here.",
+        )
+        self.relationship_summary_label = QLabel("Select a result to inspect its links.")
+        self.relationship_summary_label.setProperty("role", "secondary")
+        self.relationship_summary_label.setWordWrap(True)
+        relationships_box_layout.addWidget(self.relationship_summary_label)
         self.relationships_edit = QPlainTextEdit()
         self.relationships_edit.setReadOnly(True)
-        right_layout.addWidget(self.relationships_edit, 1)
+        relationships_box_layout.addWidget(self.relationships_edit, 1)
+        relationships_tab_layout.addWidget(relationships_box, 1)
+        detail_tabs.addTab(relationships_tab, "Relationships")
+
         splitter.addWidget(right_container)
         splitter.setStretchFactor(0, 2)
         splitter.setStretchFactor(1, 5)
-        splitter.setStretchFactor(2, 4)
 
+        _apply_compact_dialog_control_heights(self)
         self.refresh_saved_searches()
 
     def _entity_filter(self) -> list[str] | None:
@@ -156,6 +224,11 @@ class GlobalSearchDialog(QDialog):
             entity_types=self._entity_filter(),
             limit=200,
         )
+        self.results_status_label.setText(
+            f"Showing {len(results)} result{'s' if len(results) != 1 else ''}."
+            if self.search_edit.text().strip()
+            else "Enter a query to search the catalog."
+        )
         self.results_table.setRowCount(0)
         for result in results:
             row = self.results_table.rowCount()
@@ -169,7 +242,6 @@ class GlobalSearchDialog(QDialog):
             ]
             for column, value in enumerate(values):
                 self.results_table.setItem(row, column, QTableWidgetItem(value))
-        self.results_table.resizeColumnsToContents()
         self.refresh_relationships()
 
     def _selected_result(self) -> tuple[str, int] | None:
@@ -186,9 +258,13 @@ class GlobalSearchDialog(QDialog):
     def refresh_relationships(self) -> None:
         selected = self._selected_result()
         if selected is None:
+            self.relationship_summary_label.setText("Select a result to inspect its links.")
             self.relationships_edit.setPlainText("Select a result to inspect its links.")
             return
         entity_type, entity_id = selected
+        self.relationship_summary_label.setText(
+            f"Showing links for {entity_type.title()} #{entity_id}."
+        )
         sections = self.relationship_service.describe_links(entity_type, entity_id)
         if not sections:
             self.relationships_edit.setPlainText("No linked records found.")

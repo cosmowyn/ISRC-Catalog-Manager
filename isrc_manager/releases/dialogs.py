@@ -13,20 +13,29 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
-    QListWidget,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from isrc_manager.services.repertoire_status import REPERTOIRE_STATUS_CHOICES
+from isrc_manager.ui_common import (
+    _add_standard_dialog_header,
+    _apply_compact_dialog_control_heights,
+    _apply_standard_dialog_chrome,
+    _configure_standard_form_layout,
+    _create_scrollable_dialog_content,
+    _create_standard_section,
+)
 
 from .models import ReleasePayload, ReleaseRecord, ReleaseSummary, ReleaseTrackPlacement
 from .service import RELEASE_TYPE_CHOICES, ReleaseService
@@ -472,18 +481,28 @@ class ReleaseBrowserDialog(QDialog):
         self._current_summary: ReleaseSummary | None = None
 
         self.setWindowTitle("Release Browser")
-        self.resize(1100, 760)
+        self.resize(1160, 780)
+        self.setMinimumSize(1020, 700)
+        _apply_standard_dialog_chrome(self, "releaseBrowserDialog")
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(16, 16, 16, 16)
-        root.setSpacing(12)
-
-        header = QLabel(
-            "Browse releases, inspect summary metadata, and attach the current track selection."
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(14)
+        _add_standard_dialog_header(
+            root,
+            self,
+            title="Release Browser",
+            subtitle=(
+                "Browse releases, inspect summary metadata, and attach the current track "
+                "selection without leaving the catalog."
+            ),
         )
-        header.setWordWrap(True)
-        root.addWidget(header)
 
+        controls_box, controls_layout = _create_standard_section(
+            self,
+            "Find and Create",
+            "Search releases by title or artist, then create a new release when you need a new container for the current catalog selection.",
+        )
         controls = QHBoxLayout()
         controls.setContentsMargins(0, 0, 0, 0)
         controls.setSpacing(8)
@@ -495,17 +514,24 @@ class ReleaseBrowserDialog(QDialog):
         new_button = QPushButton("Create Release")
         new_button.clicked.connect(self.create_release_requested.emit)
         controls.addWidget(new_button)
-        root.addLayout(controls)
+        controls_layout.addLayout(controls)
+        root.addWidget(controls_box)
 
         splitter = QSplitter(Qt.Horizontal, self)
+        splitter.setChildrenCollapsible(False)
         root.addWidget(splitter, 1)
 
         list_panel = QWidget(splitter)
         list_layout = QVBoxLayout(list_panel)
         list_layout.setContentsMargins(0, 0, 0, 0)
-        list_layout.setSpacing(8)
+        list_layout.setSpacing(0)
+        list_box, list_box_layout = _create_standard_section(
+            self,
+            "Releases",
+            "Select a release to inspect its overview and track list on the right.",
+        )
 
-        self.release_table = QTableWidget(0, 7, list_panel)
+        self.release_table = QTableWidget(0, 7, list_box)
         self.release_table.setHorizontalHeaderLabels(
             ["ID", "Title", "Artist", "Type", "Status", "Release Date", "Tracks"]
         )
@@ -513,9 +539,19 @@ class ReleaseBrowserDialog(QDialog):
         self.release_table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.release_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.release_table.verticalHeader().setVisible(False)
-        self.release_table.horizontalHeader().setStretchLastSection(True)
+        self.release_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.release_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.release_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.release_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.release_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        self.release_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
+        self.release_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeToContents)
         self.release_table.itemSelectionChanged.connect(self._load_selected_release)
-        list_layout.addWidget(self.release_table, 1)
+        list_box_layout.addWidget(self.release_table, 1)
+        self.release_count_label = QLabel("No releases loaded.")
+        self.release_count_label.setProperty("role", "secondary")
+        list_box_layout.addWidget(self.release_count_label)
+        list_layout.addWidget(list_box, 1)
         splitter.addWidget(list_panel)
 
         detail_panel = QWidget(splitter)
@@ -523,19 +559,105 @@ class ReleaseBrowserDialog(QDialog):
         detail_layout.setContentsMargins(0, 0, 0, 0)
         detail_layout.setSpacing(10)
 
-        self.summary_list = QListWidget(detail_panel)
-        detail_layout.addWidget(self.summary_list, 1)
+        detail_tabs = QTabWidget(detail_panel)
+        detail_layout.addWidget(detail_tabs, 1)
 
-        self.track_table = QTableWidget(0, 4, detail_panel)
+        overview_tab = QWidget(detail_tabs)
+        overview_tab_layout = QVBoxLayout(overview_tab)
+        overview_tab_layout.setContentsMargins(0, 0, 0, 0)
+        overview_tab_layout.setSpacing(0)
+        overview_scroll, _, overview_layout = _create_scrollable_dialog_content(self)
+
+        identity_box, identity_layout = _create_standard_section(
+            self,
+            "Release Overview",
+            "Core release identity, barcode, catalog number, and market-facing information.",
+        )
+        identity_form = QFormLayout()
+        _configure_standard_form_layout(identity_form)
+        self._summary_fields: dict[str, QLabel] = {}
+
+        def _summary_label() -> QLabel:
+            label = QLabel("")
+            label.setWordWrap(True)
+            label.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+            return label
+
+        for key, title in (
+            ("title", "Title"),
+            ("primary_artist", "Primary Artist"),
+            ("album_artist", "Album Artist"),
+            ("release_type", "Type"),
+            ("release_date", "Release Date"),
+            ("original_release_date", "Original Release Date"),
+            ("label", "Label"),
+            ("sublabel", "Sublabel"),
+            ("catalog_number", "Catalog #"),
+            ("upc", "UPC / EAN"),
+            ("barcode_status", "Barcode Status"),
+            ("territory", "Territory"),
+            ("artwork_path", "Artwork"),
+        ):
+            value_label = _summary_label()
+            self._summary_fields[key] = value_label
+            identity_form.addRow(title, value_label)
+        identity_layout.addLayout(identity_form)
+        overview_layout.addWidget(identity_box)
+
+        workflow_box, workflow_layout = _create_standard_section(
+            self,
+            "Workflow and Validation",
+            "Operational status and readiness fields for the selected release.",
+        )
+        workflow_form = QFormLayout()
+        _configure_standard_form_layout(workflow_form)
+        for key, title in (
+            ("workflow_status", "Workflow Status"),
+            ("track_count", "Track Count"),
+            ("explicit", "Explicit"),
+            ("metadata_complete", "Metadata Complete"),
+            ("contract_signed", "Contract Signed"),
+            ("rights_verified", "Rights Verified"),
+        ):
+            value_label = _summary_label()
+            self._summary_fields[key] = value_label
+            workflow_form.addRow(title, value_label)
+        workflow_layout.addLayout(workflow_form)
+        overview_layout.addWidget(workflow_box)
+        overview_layout.addStretch(1)
+        overview_tab_layout.addWidget(overview_scroll, 1)
+        detail_tabs.addTab(overview_tab, "Overview")
+
+        tracks_tab = QWidget(detail_tabs)
+        tracks_tab_layout = QVBoxLayout(tracks_tab)
+        tracks_tab_layout.setContentsMargins(0, 0, 0, 0)
+        tracks_tab_layout.setSpacing(0)
+        tracks_box, tracks_box_layout = _create_standard_section(
+            self,
+            "Release Track List",
+            "Track order for the selected release. Select a row and use the action below to open the corresponding catalog track.",
+        )
+        self.track_table = QTableWidget(0, 4, tracks_box)
         self.track_table.setHorizontalHeaderLabels(["Track ID", "Track Title", "Disc #", "Track #"])
         self.track_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.track_table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.track_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.track_table.verticalHeader().setVisible(False)
-        self.track_table.horizontalHeader().setStretchLastSection(True)
-        detail_layout.addWidget(self.track_table, 1)
+        self.track_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.track_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.track_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.track_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        tracks_box_layout.addWidget(self.track_table, 1)
+        tracks_tab_layout.addWidget(tracks_box, 1)
+        detail_tabs.addTab(tracks_tab, "Tracks")
 
+        actions_box, actions_layout = _create_standard_section(
+            self,
+            "Release Actions",
+            "Edit or duplicate the release, attach the current selection, filter the main table, or open the highlighted track.",
+        )
         action_grid = QGridLayout()
+        action_grid.setContentsMargins(0, 0, 0, 0)
         action_grid.setHorizontalSpacing(8)
         action_grid.setVerticalSpacing(8)
         edit_button = QPushButton("Edit Release")
@@ -553,7 +675,8 @@ class ReleaseBrowserDialog(QDialog):
         open_track_button = QPushButton("Open Selected Track")
         open_track_button.clicked.connect(self._emit_open_track_current)
         action_grid.addWidget(open_track_button, 2, 0, 1, 2)
-        detail_layout.addLayout(action_grid)
+        actions_layout.addLayout(action_grid)
+        detail_layout.addWidget(actions_box)
 
         splitter.addWidget(detail_panel)
         splitter.setStretchFactor(0, 5)
@@ -566,11 +689,15 @@ class ReleaseBrowserDialog(QDialog):
         buttons.addWidget(close_button)
         root.addLayout(buttons)
 
+        _apply_compact_dialog_control_heights(self)
         self.refresh()
 
     def refresh(self) -> None:
         releases = self.release_service.list_releases(search_text=self.search_edit.text().strip())
         self._release_ids_by_row = [release.id for release in releases]
+        self.release_count_label.setText(
+            f"{len(releases)} release{'s' if len(releases) != 1 else ''} shown."
+        )
         self.release_table.setRowCount(len(releases))
         for row, release in enumerate(releases):
             values = [
@@ -587,7 +714,8 @@ class ReleaseBrowserDialog(QDialog):
         if releases:
             self.release_table.selectRow(0)
         else:
-            self.summary_list.clear()
+            for label in self._summary_fields.values():
+                label.setText("")
             self.track_table.setRowCount(0)
 
     def _selected_release_id(self) -> int | None:
@@ -600,36 +728,37 @@ class ReleaseBrowserDialog(QDialog):
         release_id = self._selected_release_id()
         if release_id is None:
             self._current_summary = None
-            self.summary_list.clear()
+            for label in self._summary_fields.values():
+                label.setText("")
             self.track_table.setRowCount(0)
             return
         self._current_summary = self.release_service.fetch_release_summary(release_id)
         if self._current_summary is None:
             return
         release = self._current_summary.release
-        self.summary_list.clear()
-        summary_rows = [
-            ("Title", release.title),
-            ("Primary Artist", release.primary_artist or ""),
-            ("Album Artist", release.album_artist or ""),
-            ("Type", release.release_type.replace("_", " ").title()),
-            ("Release Date", release.release_date or ""),
-            ("Original Release Date", release.original_release_date or ""),
-            ("Label", release.label or ""),
-            ("Sublabel", release.sublabel or ""),
-            ("Catalog#", release.catalog_number or ""),
-            ("UPC / EAN", release.upc or ""),
-            ("Barcode Status", release.barcode_validation_status or ""),
-            ("Territory", release.territory or ""),
-            ("Workflow Status", (release.repertoire_status or "").replace("_", " ").title()),
-            ("Explicit", "Yes" if release.explicit_flag else "No"),
-            ("Metadata Complete", "Yes" if release.metadata_complete else "No"),
-            ("Contract Signed", "Yes" if release.contract_signed else "No"),
-            ("Rights Verified", "Yes" if release.rights_verified else "No"),
-            ("Artwork", release.artwork_path or ""),
-        ]
-        for label, value in summary_rows:
-            self.summary_list.addItem(f"{label}: {value}")
+        summary_values = {
+            "title": release.title,
+            "primary_artist": release.primary_artist or "",
+            "album_artist": release.album_artist or "",
+            "release_type": release.release_type.replace("_", " ").title(),
+            "release_date": release.release_date or "",
+            "original_release_date": release.original_release_date or "",
+            "label": release.label or "",
+            "sublabel": release.sublabel or "",
+            "catalog_number": release.catalog_number or "",
+            "upc": release.upc or "",
+            "barcode_status": release.barcode_validation_status or "",
+            "territory": release.territory or "",
+            "workflow_status": (release.repertoire_status or "").replace("_", " ").title(),
+            "track_count": str(len(self._current_summary.tracks)),
+            "explicit": "Yes" if release.explicit_flag else "No",
+            "metadata_complete": "Yes" if release.metadata_complete else "No",
+            "contract_signed": "Yes" if release.contract_signed else "No",
+            "rights_verified": "Yes" if release.rights_verified else "No",
+            "artwork_path": release.artwork_path or "",
+        }
+        for key, label in self._summary_fields.items():
+            label.setText(summary_values.get(key, ""))
         self.track_table.setRowCount(len(self._current_summary.tracks))
         for row, placement in enumerate(self._current_summary.tracks):
             values = [

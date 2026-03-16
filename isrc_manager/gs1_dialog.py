@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFileDialog,
-    QFrame,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
@@ -22,12 +21,10 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
-    QScrollArea,
     QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -50,6 +47,13 @@ from .services.gs1_mapping import (
     COMMON_STATUS_CHOICES,
     COMMON_UNIT_CHOICES,
 )
+from .ui_common import (
+    _add_standard_dialog_header,
+    _apply_compact_dialog_control_heights,
+    _apply_standard_dialog_chrome,
+    _create_scrollable_dialog_content,
+    _create_standard_section,
+)
 
 
 def _safe_filename(text: str) -> str:
@@ -58,92 +62,17 @@ def _safe_filename(text: str) -> str:
     return cleaned or "gs1_export"
 
 
-def _dialog_stylesheet(object_name: str) -> str:
-    return f"""
-    QDialog#{object_name} QLabel[role="dialogTitle"] {{
-        font-size: 26px;
-        font-weight: 700;
-    }}
-    QDialog#{object_name} QLabel[role="dialogSubtitle"] {{
-        color: #64748b;
-        font-size: 15px;
-    }}
-    QDialog#{object_name} QLabel[role="sectionDescription"],
-    QDialog#{object_name} QLabel[role="supportingText"] {{
-        color: #52606d;
-    }}
-    QDialog#{object_name} QGroupBox {{
-        font-size: 15px;
-        font-weight: 600;
-        margin-top: 10px;
-    }}
-    QDialog#{object_name} QGroupBox::title {{
-        subcontrol-origin: margin;
-        left: 10px;
-        padding: 0 6px;
-    }}
-    """
-
-
-def _create_help_button(
-    owner: QWidget, *, app, topic_id: str, tooltip: str | None = None
-) -> QToolButton:
-    button = QToolButton(owner)
-    button.setText("?")
-    button.setFixedSize(28, 28)
-    button.setProperty("role", "helpButton")
-    button.setToolTip(tooltip or "Open help")
-
-    def _open():
-        opener = getattr(app, "open_help_dialog", None)
-        if callable(opener):
-            opener(topic_id=topic_id, parent=owner)
-
-    button.clicked.connect(_open)
-    return button
-
-
-def _add_dialog_header(
-    layout: QVBoxLayout,
-    owner: QWidget,
-    *,
-    app,
-    title: str,
-    subtitle: str | None = None,
-    help_topic_id: str | None = None,
-) -> tuple[QLabel, QLabel | None]:
-    title_row = QHBoxLayout()
-    title_row.setSpacing(12)
-    title_label = QLabel(title, owner)
-    title_label.setProperty("role", "dialogTitle")
-    title_row.addWidget(title_label)
-    title_row.addStretch(1)
-    if help_topic_id:
-        title_row.addWidget(_create_help_button(owner, app=app, topic_id=help_topic_id))
-    layout.addLayout(title_row)
-
-    subtitle_label = None
-    if subtitle:
-        subtitle_label = QLabel(subtitle, owner)
-        subtitle_label.setProperty("role", "dialogSubtitle")
-        subtitle_label.setWordWrap(True)
-        layout.addWidget(subtitle_label)
-    return title_label, subtitle_label
-
-
 class GS1MetadataEditorPage(QWidget):
     """Reusable GS1 metadata form used for a single export product group."""
 
     changed = Signal()
 
-    ELEMENT_MARGIN = 2
-    FIELD_HEIGHT = 48
-    CHECKBOX_ROW_HEIGHT = 48
-    INLINE_FIELD_MIN_WIDTH = 260
-    COMPACT_FIELD_MIN_WIDTH = 180
-    STANDARD_FIELD_MIN_WIDTH = 380
-    WIDE_FIELD_MIN_WIDTH = 520
-    NOTES_MIN_HEIGHT = 176
+    ELEMENT_MARGIN = 0
+    INLINE_FIELD_MIN_WIDTH = 220
+    COMPACT_FIELD_MIN_WIDTH = 140
+    STANDARD_FIELD_MIN_WIDTH = 280
+    WIDE_FIELD_MIN_WIDTH = 360
+    NOTES_MIN_HEIGHT = 148
 
     def __init__(
         self,
@@ -231,7 +160,6 @@ class GS1MetadataEditorPage(QWidget):
 
         quantity_unit_row = QWidget(self)
         quantity_unit_row.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        quantity_unit_row.setMinimumHeight(self.FIELD_HEIGHT)
         quantity_unit_layout = QHBoxLayout(quantity_unit_row)
         quantity_unit_layout.setContentsMargins(0, 0, 0, 0)
         quantity_unit_layout.setSpacing(8)
@@ -259,6 +187,7 @@ class GS1MetadataEditorPage(QWidget):
         root.addWidget(notes_box)
         notes_layout.addWidget(self._build_form_row("Notes", self.notes_edit, top_aligned=True))
         root.addStretch(1)
+        _apply_compact_dialog_control_heights(self)
 
         self._connect_form_signals()
         self.apply_record_to_form(self._saved_record)
@@ -286,16 +215,7 @@ class GS1MetadataEditorPage(QWidget):
     def _create_section_box(
         self, title: str, description: str | None = None
     ) -> tuple[QGroupBox, QVBoxLayout]:
-        box = QGroupBox(title, self)
-        box_layout = QVBoxLayout(box)
-        box_layout.setContentsMargins(12, 10, 12, 12)
-        box_layout.setSpacing(8)
-        if description:
-            desc = QLabel(description, box)
-            desc.setWordWrap(True)
-            desc.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            box_layout.addWidget(desc)
-        return box, box_layout
+        return _create_standard_section(self, title, description)
 
     def _build_form_row(
         self, label_text: str, widget: QWidget, *, top_aligned: bool = False
@@ -342,10 +262,11 @@ class GS1MetadataEditorPage(QWidget):
         return row
 
     def _checkbox_row(self, checkbox: QCheckBox) -> QWidget:
-        checkbox.setMinimumHeight(self.CHECKBOX_ROW_HEIGHT)
+        row_height = max(checkbox.sizeHint().height(), checkbox.fontMetrics().lineSpacing() + 14)
+        checkbox.setMinimumHeight(row_height)
         row = QWidget(self)
         row.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        row.setMinimumHeight(self.CHECKBOX_ROW_HEIGHT)
+        row.setMinimumHeight(row_height + (self.ELEMENT_MARGIN * 2))
         layout = QHBoxLayout(row)
         layout.setContentsMargins(
             self.ELEMENT_MARGIN,
@@ -366,9 +287,11 @@ class GS1MetadataEditorPage(QWidget):
         max_width: int | None = None,
     ) -> None:
         widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        widget.setFixedHeight(self.FIELD_HEIGHT)
+        widget.setMinimumHeight(
+            max(widget.minimumHeight(), widget.fontMetrics().lineSpacing() + 16)
+        )
         widget.setMinimumWidth(min_width)
-        widget.setTextMargins(8, 4, 8, 4)
+        widget.setTextMargins(8, 3, 8, 3)
         if max_width is not None:
             widget.setMaximumWidth(max_width)
 
@@ -380,28 +303,29 @@ class GS1MetadataEditorPage(QWidget):
         max_width: int | None = None,
     ) -> None:
         widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        widget.setFixedHeight(self.FIELD_HEIGHT)
+        combo_height = max(widget.minimumHeight(), widget.fontMetrics().lineSpacing() + 16)
+        widget.setMinimumHeight(combo_height)
         widget.setMinimumWidth(min_width)
         if max_width is not None:
             widget.setMaximumWidth(max_width)
         line_edit = widget.lineEdit()
         if line_edit is not None:
-            line_edit.setFixedHeight(max(36, self.FIELD_HEIGHT - 8))
-            line_edit.setTextMargins(8, 4, 8, 4)
+            line_edit.setMinimumHeight(max(line_edit.minimumHeight(), combo_height - 8))
+            line_edit.setTextMargins(8, 3, 8, 3)
 
     def _apply_form_metrics(self) -> None:
-        self._apply_combo_metrics(self.contract_combo, min_width=260, max_width=340)
-        self._apply_combo_metrics(self.status_combo, min_width=240, max_width=300)
+        self._apply_combo_metrics(self.contract_combo, min_width=220, max_width=300)
+        self._apply_combo_metrics(self.status_combo, min_width=200, max_width=260)
         self._apply_combo_metrics(self.classification_combo, min_width=self.WIDE_FIELD_MIN_WIDTH)
         self._apply_combo_metrics(self.packaging_combo, min_width=self.STANDARD_FIELD_MIN_WIDTH)
         self._apply_combo_metrics(self.market_combo, min_width=self.STANDARD_FIELD_MIN_WIDTH)
-        self._apply_combo_metrics(self.language_combo, min_width=240, max_width=320)
-        self._apply_combo_metrics(self.unit_combo, min_width=180, max_width=220)
+        self._apply_combo_metrics(self.language_combo, min_width=180, max_width=240)
+        self._apply_combo_metrics(self.unit_combo, min_width=120, max_width=180)
         self._apply_line_edit_metrics(self.description_edit, min_width=self.WIDE_FIELD_MIN_WIDTH)
-        self._apply_line_edit_metrics(self.brand_edit, min_width=self.STANDARD_FIELD_MIN_WIDTH)
-        self._apply_line_edit_metrics(self.subbrand_edit, min_width=self.STANDARD_FIELD_MIN_WIDTH)
+        self._apply_line_edit_metrics(self.brand_edit, min_width=220)
+        self._apply_line_edit_metrics(self.subbrand_edit, min_width=220)
         self._apply_line_edit_metrics(
-            self.quantity_edit, min_width=self.COMPACT_FIELD_MIN_WIDTH, max_width=220
+            self.quantity_edit, min_width=self.COMPACT_FIELD_MIN_WIDTH, max_width=180
         )
         self._apply_line_edit_metrics(self.image_url_edit, min_width=self.WIDE_FIELD_MIN_WIDTH)
         self.notes_edit.setMinimumWidth(self.WIDE_FIELD_MIN_WIDTH)
@@ -567,16 +491,14 @@ class GS1ExportPreviewDialog(QDialog):
         self.setModal(True)
         self.resize(1080, 680)
         self.setMinimumSize(960, 560)
-        self.setStyleSheet(_dialog_stylesheet("gs1ExportPreviewDialog"))
+        _apply_standard_dialog_chrome(self, "gs1ExportPreviewDialog")
 
         root = QVBoxLayout(self)
         root.setContentsMargins(18, 18, 18, 18)
         root.setSpacing(14)
-        preview_host = parent if parent is not None else self
-        _add_dialog_header(
+        _add_standard_dialog_header(
             root,
             self,
-            app=getattr(preview_host, "app", preview_host),
             title="GS1 Export Preview",
             subtitle="Review the final workbook rows before the export is written to the selected official GS1 template.",
             help_topic_id="gs1-metadata",
@@ -660,6 +582,7 @@ class GS1ExportPreviewDialog(QDialog):
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
         root.addWidget(button_box)
+        _apply_compact_dialog_control_heights(self)
 
 
 class GS1MetadataDialog(QDialog):
@@ -696,47 +619,36 @@ class GS1MetadataDialog(QDialog):
         self.setModal(True)
         self.resize(1120, 860)
         self.setMinimumSize(1020, 780)
-        self.setObjectName("gs1MetadataDialog")
-        self.setStyleSheet(_dialog_stylesheet("gs1MetadataDialog"))
+        _apply_standard_dialog_chrome(self, "gs1MetadataDialog")
 
         root = QVBoxLayout(self)
         root.setContentsMargins(18, 18, 18, 18)
         root.setSpacing(14)
-        _add_dialog_header(
+        _add_standard_dialog_header(
             root,
             self,
-            app=self.app,
             title="GS1 Metadata",
             subtitle="Prepare grouped GS1 product data, verify the official workbook, and export the final spreadsheet from one workflow.",
             help_topic_id="gs1-metadata",
         )
 
-        scroll_area = QScrollArea(self)
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll_area.setFrameShape(QFrame.NoFrame)
-        scroll_content = QWidget(scroll_area)
-        scroll_content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
-        content_layout = QVBoxLayout(scroll_content)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(14)
-        scroll_area.setWidget(scroll_content)
+        scroll_area, _, content_layout = _create_scrollable_dialog_content(self)
         root.addWidget(scroll_area, 1)
 
-        summary_box = QGroupBox("Selection Overview", self)
-        summary_layout = QVBoxLayout(summary_box)
-        summary_layout.setContentsMargins(14, 14, 14, 14)
-        summary_layout.setSpacing(6)
+        summary_box, summary_layout = _create_standard_section(
+            self,
+            "Selection Overview",
+        )
         self.summary_label = QLabel(self._selection_summary_text())
         self.summary_label.setWordWrap(True)
         self.summary_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         summary_layout.addWidget(self.summary_label)
         content_layout.addWidget(summary_box)
 
-        template_box = QGroupBox("Official Workbook", self)
-        template_layout = QVBoxLayout(template_box)
-        template_layout.setContentsMargins(14, 14, 14, 14)
-        template_layout.setSpacing(8)
+        template_box, template_layout = _create_standard_section(
+            self,
+            "Official Workbook",
+        )
         self.template_help_label = QLabel(
             "GS1 export uses the official workbook from your GS1 portal or regional GS1 environment. "
             "The app validates the workbook before writing any rows."
@@ -748,9 +660,7 @@ class GS1MetadataDialog(QDialog):
         self.template_status_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         template_layout.addWidget(self.template_status_label)
         template_button_row = QHBoxLayout()
-        template_button_row.setContentsMargins(
-            self.ELEMENT_MARGIN, self.ELEMENT_MARGIN, self.ELEMENT_MARGIN, self.ELEMENT_MARGIN
-        )
+        template_button_row.setContentsMargins(0, 0, 0, 0)
         template_button_row.setSpacing(8)
         self.choose_template_button = QPushButton("Upload / Replace…", self)
         self.choose_template_button.setAutoDefault(False)
@@ -772,11 +682,11 @@ class GS1MetadataDialog(QDialog):
         template_layout.addLayout(template_button_row)
         content_layout.addWidget(template_box)
 
-        editor_box = QGroupBox("Product Metadata", self)
+        editor_box, editor_layout = _create_standard_section(
+            self,
+            "Product Metadata",
+        )
         editor_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        editor_layout = QVBoxLayout(editor_box)
-        editor_layout.setContentsMargins(16, 14, 16, 14)
-        editor_layout.setSpacing(10)
         if len(self._groups) > 1:
             tabs_help = QLabel(
                 "Each tab represents one final GS1 product row. Album tabs apply the same GS1 metadata to every selected track in that album group when you save."
@@ -797,10 +707,10 @@ class GS1MetadataDialog(QDialog):
                 editor_layout.addWidget(page)
         content_layout.addWidget(editor_box)
 
-        info_box = QGroupBox("Export Readiness", self)
-        info_layout = QVBoxLayout(info_box)
-        info_layout.setContentsMargins(14, 14, 14, 14)
-        info_layout.setSpacing(8)
+        info_box, info_layout = _create_standard_section(
+            self,
+            "Export Readiness",
+        )
         self.readiness_label = QLabel("")
         self.readiness_label.setWordWrap(True)
         info_layout.addWidget(self.readiness_label)
@@ -816,9 +726,7 @@ class GS1MetadataDialog(QDialog):
             self._group_tabs.currentChanged.connect(lambda *_args: self._update_readiness())
 
         button_row = QHBoxLayout()
-        button_row.setContentsMargins(
-            self.ELEMENT_MARGIN, self.ELEMENT_MARGIN, self.ELEMENT_MARGIN, self.ELEMENT_MARGIN
-        )
+        button_row.setContentsMargins(0, 0, 0, 0)
         button_row.setSpacing(12)
         self.revert_button = QPushButton("Revert", self)
         self.revert_button.setAutoDefault(False)
@@ -860,6 +768,7 @@ class GS1MetadataDialog(QDialog):
 
         self._refresh_template_status(prompt_if_missing=True)
         self._update_readiness()
+        _apply_compact_dialog_control_heights(self)
 
     def _normalize_track_ids(self, track_ids: list[int]) -> list[int]:
         normalized: list[int] = []

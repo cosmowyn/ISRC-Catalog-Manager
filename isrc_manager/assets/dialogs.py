@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,
     QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
-    QLabel,
+    QHeaderView,
     QLineEdit,
     QMessageBox,
     QPlainTextEdit,
@@ -19,6 +19,16 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
+    QWidget,
+)
+
+from isrc_manager.ui_common import (
+    _add_standard_dialog_header,
+    _apply_compact_dialog_control_heights,
+    _apply_standard_dialog_chrome,
+    _configure_standard_form_layout,
+    _create_scrollable_dialog_content,
+    _create_standard_section,
 )
 
 from .models import ASSET_TYPE_CHOICES, AssetVersionPayload, AssetVersionRecord
@@ -35,61 +45,106 @@ class AssetEditorDialog(QDialog):
         self.asset_service = asset_service
         self.asset = asset
         self.setWindowTitle("Edit Asset Version" if asset is not None else "Register Asset Version")
-        self.resize(620, 520)
+        self.resize(760, 600)
+        self.setMinimumSize(700, 540)
+        _apply_standard_dialog_chrome(self, "assetEditorDialog")
 
         root = QVBoxLayout(self)
-        form = QFormLayout()
-        form.setLabelAlignment(Qt.AlignLeft | Qt.AlignTop)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(14)
+        _add_standard_dialog_header(
+            root,
+            self,
+            title=self.windowTitle(),
+            subtitle=(
+                "Register a managed master, derivative, or artwork variant and keep its "
+                "approval state tied to the right track or release."
+            ),
+        )
+
+        scroll_area, _, content_layout = _create_scrollable_dialog_content(self)
+        root.addWidget(scroll_area, 1)
+
+        target_box, target_layout = _create_standard_section(
+            self,
+            "Target Record",
+            "Link the asset to a track or release, then describe the type and status of the version.",
+        )
+        target_form = QFormLayout()
+        _configure_standard_form_layout(target_form)
 
         self.track_id_edit = QLineEdit()
-        form.addRow("Track ID", self.track_id_edit)
+        target_form.addRow("Track ID", self.track_id_edit)
 
         self.release_id_edit = QLineEdit()
-        form.addRow("Release ID", self.release_id_edit)
+        target_form.addRow("Release ID", self.release_id_edit)
 
         self.asset_type_combo = QComboBox()
         self.asset_type_combo.addItems(
             [item.replace("_", " ").title() for item in ASSET_TYPE_CHOICES]
         )
-        form.addRow("Asset Type", self.asset_type_combo)
-
-        self.file_edit = QLineEdit()
-        self.file_edit.setReadOnly(True)
-        file_row = QHBoxLayout()
-        file_row.addWidget(self.file_edit, 1)
-        browse_button = QPushButton("Browse…")
-        browse_button.clicked.connect(self._pick_file)
-        file_row.addWidget(browse_button)
-        form.addRow("Source File", file_row)
+        target_form.addRow("Asset Type", self.asset_type_combo)
 
         self.status_edit = QLineEdit()
-        form.addRow("Version Status", self.status_edit)
+        target_form.addRow("Version Status", self.status_edit)
 
         self.format_edit = QLineEdit()
-        form.addRow("Format", self.format_edit)
+        target_form.addRow("Format", self.format_edit)
 
+        flags_widget = QWidget(self)
+        flags_row = QHBoxLayout(flags_widget)
+        flags_row.setContentsMargins(0, 0, 0, 0)
+        flags_row.setSpacing(10)
         self.approved_checkbox = QCheckBox("Approved for use")
         self.primary_checkbox = QCheckBox("Primary asset")
-        flags_row = QHBoxLayout()
         flags_row.addWidget(self.approved_checkbox)
         flags_row.addWidget(self.primary_checkbox)
         flags_row.addStretch(1)
-        form.addRow("Flags", flags_row)
+        target_form.addRow("Flags", flags_widget)
+        target_layout.addLayout(target_form)
+        content_layout.addWidget(target_box)
 
+        source_box, source_layout = _create_standard_section(
+            self,
+            "Source File",
+            "Choose the file to register. The app will manage the stored copy inside the catalog workspace.",
+        )
+        source_form = QFormLayout()
+        _configure_standard_form_layout(source_form)
+        self.file_edit = QLineEdit()
+        self.file_edit.setReadOnly(True)
+        file_row = QWidget(self)
+        file_layout = QHBoxLayout(file_row)
+        file_layout.setContentsMargins(0, 0, 0, 0)
+        file_layout.setSpacing(8)
+        file_layout.addWidget(self.file_edit, 1)
+        browse_button = QPushButton("Browse…")
+        browse_button.clicked.connect(self._pick_file)
+        file_layout.addWidget(browse_button)
+        source_form.addRow("Source File", file_row)
+        source_layout.addLayout(source_form)
+        content_layout.addWidget(source_box)
+
+        notes_box, notes_layout = _create_standard_section(
+            self,
+            "Notes",
+            "Capture approval comments, delivery instructions, or any context that distinguishes this version from others.",
+        )
         self.notes_edit = QPlainTextEdit()
-        self.notes_edit.setMinimumHeight(100)
-        form.addRow("Notes", self.notes_edit)
-        root.addLayout(form)
+        self.notes_edit.setMinimumHeight(180)
+        notes_layout.addWidget(self.notes_edit)
+        content_layout.addWidget(notes_box)
+        content_layout.addStretch(1)
 
-        buttons = QHBoxLayout()
-        buttons.addStretch(1)
-        save_button = QPushButton("Save")
-        save_button.clicked.connect(self.accept)
-        cancel_button = QPushButton("Cancel")
-        cancel_button.clicked.connect(self.reject)
-        buttons.addWidget(save_button)
-        buttons.addWidget(cancel_button)
-        root.addLayout(buttons)
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel, self)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        save_button = buttons.button(QDialogButtonBox.Save)
+        if save_button is not None:
+            save_button.setText("Save Asset")
+            save_button.setDefault(True)
+        root.addWidget(buttons)
+        _apply_compact_dialog_control_heights(self)
 
         if asset is not None:
             self.track_id_edit.setText(str(asset.track_id or ""))
@@ -131,16 +186,31 @@ class AssetBrowserDialog(QDialog):
         super().__init__(parent)
         self.asset_service = asset_service
         self.setWindowTitle("Deliverables and Asset Versions")
-        self.resize(1000, 620)
+        self.resize(1060, 700)
+        self.setMinimumSize(940, 620)
+        _apply_standard_dialog_chrome(self, "assetBrowserDialog")
 
         root = QVBoxLayout(self)
-        intro = QLabel(
-            "Track alternate masters, derivatives, and artwork variants here so one repertoire item can safely have multiple usable files."
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(14)
+        _add_standard_dialog_header(
+            root,
+            self,
+            title="Deliverables and Asset Versions",
+            subtitle=(
+                "Track alternate masters, derivatives, and artwork variants so one "
+                "repertoire item can safely have multiple usable files."
+            ),
         )
-        intro.setWordWrap(True)
-        root.addWidget(intro)
 
+        controls_box, controls_layout = _create_standard_section(
+            self,
+            "Find and Manage",
+            "Search by filename, asset type, or version status, then maintain the selected managed asset record.",
+        )
         controls = QHBoxLayout()
+        controls.setContentsMargins(0, 0, 0, 0)
+        controls.setSpacing(8)
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("Search by filename, type, or version status...")
         self.search_edit.textChanged.connect(self.refresh)
@@ -155,9 +225,15 @@ class AssetBrowserDialog(QDialog):
             button = QPushButton(label)
             button.clicked.connect(handler)
             controls.addWidget(button)
-        root.addLayout(controls)
+        controls_layout.addLayout(controls)
+        root.addWidget(controls_box)
 
-        self.table = QTableWidget(0, 8, self)
+        table_box, table_layout = _create_standard_section(
+            self,
+            "Asset Registry",
+            "Double-click a row to edit a registered asset version.",
+        )
+        self.table = QTableWidget(0, 8, table_box)
         self.table.setHorizontalHeaderLabels(
             ["ID", "Filename", "Type", "Track", "Release", "Approved", "Primary", "Status"]
         )
@@ -165,9 +241,19 @@ class AssetBrowserDialog(QDialog):
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.verticalHeader().setVisible(False)
-        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeToContents)
         self.table.doubleClicked.connect(lambda _index: self.edit_selected())
-        root.addWidget(self.table, 1)
+        table_layout.addWidget(self.table, 1)
+        root.addWidget(table_box, 1)
+
+        _apply_compact_dialog_control_heights(self)
 
         self.refresh()
 

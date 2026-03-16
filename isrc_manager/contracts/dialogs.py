@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
     QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QFormLayout,
+    QGridLayout,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -17,7 +19,17 @@ from PySide6.QtWidgets import (
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QVBoxLayout,
+)
+
+from isrc_manager.ui_common import (
+    _add_standard_dialog_header,
+    _apply_compact_dialog_control_heights,
+    _apply_standard_dialog_chrome,
+    _configure_standard_form_layout,
+    _create_scrollable_dialog_content,
+    _create_standard_section,
 )
 
 from .models import (
@@ -52,131 +64,188 @@ class ContractEditorDialog(QDialog):
         self.contract_service = contract_service
         self.detail = detail
         self.setWindowTitle("Edit Contract" if detail is not None else "Create Contract")
-        self.resize(920, 760)
+        self.resize(980, 780)
+        self.setMinimumSize(900, 700)
+        _apply_standard_dialog_chrome(self, "contractEditorDialog")
 
         root = QVBoxLayout(self)
-        intro = QLabel(
-            "Track lifecycle dates, linked parties, obligations, and document versions for one contract. "
-            "Use the structured line formats below to keep related records together."
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(14)
+        _add_standard_dialog_header(
+            root,
+            self,
+            title=self.windowTitle(),
+            subtitle=(
+                "Track lifecycle dates, linked parties, obligations, and document versions "
+                "for one contract without losing the connection between them."
+            ),
         )
-        intro.setWordWrap(True)
-        root.addWidget(intro)
+        tabs = QTabWidget(self)
+        root.addWidget(tabs, 1)
 
-        form = QFormLayout()
-        form.setLabelAlignment(Qt.AlignLeft | Qt.AlignTop)
+        overview_scroll, _, overview_layout = _create_scrollable_dialog_content(self)
+        core_box, core_layout = _create_standard_section(
+            self,
+            "Contract Overview",
+            "Core identification fields for the agreement, plus high-level summary and notes.",
+        )
+        core_form = QFormLayout()
+        _configure_standard_form_layout(core_form)
 
         self.title_edit = QLineEdit()
-        form.addRow("Title", self.title_edit)
+        core_form.addRow("Title", self.title_edit)
 
         self.type_edit = QLineEdit()
-        form.addRow("Contract Type", self.type_edit)
+        core_form.addRow("Contract Type", self.type_edit)
 
         self.status_combo = QComboBox()
         self.status_combo.addItems(
             [value.replace("_", " ").title() for value in CONTRACT_STATUS_CHOICES]
         )
-        form.addRow("Status", self.status_combo)
-
-        self.draft_edit = QLineEdit()
-        self.draft_edit.setPlaceholderText("YYYY-MM-DD")
-        form.addRow("Draft Date", self.draft_edit)
-
-        self.signature_edit = QLineEdit()
-        self.signature_edit.setPlaceholderText("YYYY-MM-DD")
-        form.addRow("Signature Date", self.signature_edit)
-
-        self.effective_edit = QLineEdit()
-        self.effective_edit.setPlaceholderText("YYYY-MM-DD")
-        form.addRow("Effective Date", self.effective_edit)
-
-        self.start_edit = QLineEdit()
-        self.start_edit.setPlaceholderText("YYYY-MM-DD")
-        form.addRow("Start Date", self.start_edit)
-
-        self.end_edit = QLineEdit()
-        self.end_edit.setPlaceholderText("YYYY-MM-DD")
-        form.addRow("End Date", self.end_edit)
-
-        self.renewal_edit = QLineEdit()
-        self.renewal_edit.setPlaceholderText("YYYY-MM-DD")
-        form.addRow("Renewal Date", self.renewal_edit)
-
-        self.notice_edit = QLineEdit()
-        self.notice_edit.setPlaceholderText("YYYY-MM-DD")
-        form.addRow("Notice Deadline", self.notice_edit)
-
-        self.option_periods_edit = QLineEdit()
-        form.addRow("Option Periods", self.option_periods_edit)
-
-        self.reversion_edit = QLineEdit()
-        self.reversion_edit.setPlaceholderText("YYYY-MM-DD")
-        form.addRow("Reversion Date", self.reversion_edit)
-
-        self.termination_edit = QLineEdit()
-        self.termination_edit.setPlaceholderText("YYYY-MM-DD")
-        form.addRow("Termination Date", self.termination_edit)
+        core_form.addRow("Status", self.status_combo)
 
         self.summary_edit = QPlainTextEdit()
-        self.summary_edit.setMaximumHeight(80)
-        form.addRow("Summary", self.summary_edit)
+        self.summary_edit.setMinimumHeight(110)
+        core_form.addRow("Summary", self.summary_edit)
 
         self.notes_edit = QPlainTextEdit()
-        self.notes_edit.setMaximumHeight(80)
-        form.addRow("Notes", self.notes_edit)
+        self.notes_edit.setMinimumHeight(120)
+        core_form.addRow("Notes", self.notes_edit)
+        core_layout.addLayout(core_form)
+        overview_layout.addWidget(core_box)
+
+        lifecycle_box, lifecycle_layout = _create_standard_section(
+            self,
+            "Lifecycle Dates",
+            "Keep the contract timeline in one place so notice windows, renewals, and reversion points stay visible.",
+        )
+        lifecycle_grid = QGridLayout()
+        lifecycle_grid.setContentsMargins(0, 0, 0, 0)
+        lifecycle_grid.setHorizontalSpacing(12)
+        lifecycle_grid.setVerticalSpacing(10)
+
+        def _add_lifecycle_field(row: int, column: int, label_text: str, widget: QLineEdit) -> None:
+            widget.setPlaceholderText("YYYY-MM-DD")
+            lifecycle_grid.addWidget(QLabel(label_text), row, column * 2)
+            lifecycle_grid.addWidget(widget, row, column * 2 + 1)
+
+        self.draft_edit = QLineEdit()
+        self.signature_edit = QLineEdit()
+        self.effective_edit = QLineEdit()
+        self.start_edit = QLineEdit()
+        self.end_edit = QLineEdit()
+        self.renewal_edit = QLineEdit()
+        self.notice_edit = QLineEdit()
+        self.reversion_edit = QLineEdit()
+        self.termination_edit = QLineEdit()
+        self.option_periods_edit = QLineEdit()
+
+        _add_lifecycle_field(0, 0, "Draft Date", self.draft_edit)
+        _add_lifecycle_field(0, 1, "Signature Date", self.signature_edit)
+        _add_lifecycle_field(1, 0, "Effective Date", self.effective_edit)
+        _add_lifecycle_field(1, 1, "Start Date", self.start_edit)
+        _add_lifecycle_field(2, 0, "End Date", self.end_edit)
+        _add_lifecycle_field(2, 1, "Renewal Date", self.renewal_edit)
+        _add_lifecycle_field(3, 0, "Notice Deadline", self.notice_edit)
+        _add_lifecycle_field(3, 1, "Reversion Date", self.reversion_edit)
+        _add_lifecycle_field(4, 0, "Termination Date", self.termination_edit)
+        lifecycle_grid.addWidget(QLabel("Option Periods"), 4, 2)
+        lifecycle_grid.addWidget(self.option_periods_edit, 4, 3)
+        lifecycle_grid.setColumnStretch(1, 1)
+        lifecycle_grid.setColumnStretch(3, 1)
+        lifecycle_layout.addLayout(lifecycle_grid)
+        overview_layout.addWidget(lifecycle_box)
+        overview_layout.addStretch(1)
+        tabs.addTab(overview_scroll, "Overview")
+
+        links_scroll, _, links_layout = _create_scrollable_dialog_content(self)
+        repertoire_box, repertoire_layout = _create_standard_section(
+            self,
+            "Linked Repertoire",
+            "Reference the related works, tracks, and releases so the contract stays connected to the assets it governs.",
+        )
+        repertoire_form = QFormLayout()
+        _configure_standard_form_layout(repertoire_form)
 
         self.work_ids_edit = QLineEdit()
         self.work_ids_edit.setPlaceholderText("Comma-separated work IDs")
-        form.addRow("Linked Work IDs", self.work_ids_edit)
+        repertoire_form.addRow("Linked Work IDs", self.work_ids_edit)
 
         self.track_ids_edit = QLineEdit()
         self.track_ids_edit.setPlaceholderText("Comma-separated track IDs")
-        form.addRow("Linked Track IDs", self.track_ids_edit)
+        repertoire_form.addRow("Linked Track IDs", self.track_ids_edit)
 
         self.release_ids_edit = QLineEdit()
         self.release_ids_edit.setPlaceholderText("Comma-separated release IDs")
-        form.addRow("Linked Release IDs", self.release_ids_edit)
-        root.addLayout(form)
+        repertoire_form.addRow("Linked Release IDs", self.release_ids_edit)
+        repertoire_layout.addLayout(repertoire_form)
+        links_layout.addWidget(repertoire_box)
 
+        parties_box, parties_layout = _create_standard_section(
+            self,
+            "Linked Parties",
+            "Use one line per party in the form `party_id|role_label|primary` or `party_name|role_label|primary`.",
+        )
         self.parties_edit = QPlainTextEdit()
         self.parties_edit.setPlaceholderText(
             "One line per party: party_id|role_label|primary\nOr: party_name|role_label|primary"
         )
-        self.parties_edit.setMinimumHeight(90)
-        root.addWidget(QLabel("Linked Parties"))
-        root.addWidget(self.parties_edit)
+        self.parties_edit.setMinimumHeight(180)
+        parties_layout.addWidget(self.parties_edit)
+        links_layout.addWidget(parties_box)
+        links_layout.addStretch(1)
+        tabs.addTab(links_scroll, "Links and Parties")
 
+        obligations_scroll, _, obligations_layout = _create_scrollable_dialog_content(self)
+        obligations_box, obligations_box_layout = _create_standard_section(
+            self,
+            "Obligations",
+            "Use one line per obligation in the form `type|title|due_date|follow_up_date|reminder_date|completed`.",
+        )
         self.obligations_edit = QPlainTextEdit()
         self.obligations_edit.setPlaceholderText(
             "One line per obligation: type|title|due_date|follow_up_date|reminder_date|completed"
         )
-        self.obligations_edit.setMinimumHeight(90)
-        root.addWidget(QLabel("Obligations"))
-        root.addWidget(self.obligations_edit)
+        self.obligations_edit.setMinimumHeight(260)
+        obligations_box_layout.addWidget(self.obligations_edit)
+        obligations_layout.addWidget(obligations_box)
+        obligations_layout.addStretch(1)
+        tabs.addTab(obligations_scroll, "Obligations")
 
+        documents_scroll, _, documents_layout = _create_scrollable_dialog_content(self)
+        documents_box, documents_box_layout = _create_standard_section(
+            self,
+            "Document Versions",
+            "Use one line per document in the form `title|type|version|source_path|signed_all|active`.",
+        )
         docs_label_row = QHBoxLayout()
-        docs_label_row.addWidget(QLabel("Documents"))
+        docs_label_row.setContentsMargins(0, 0, 0, 0)
+        docs_label_row.setSpacing(8)
         docs_label_row.addStretch(1)
         add_file_button = QPushButton("Append File…")
         add_file_button.clicked.connect(self._append_document_file)
         docs_label_row.addWidget(add_file_button)
-        root.addLayout(docs_label_row)
+        documents_box_layout.addLayout(docs_label_row)
 
         self.documents_edit = QPlainTextEdit()
         self.documents_edit.setPlaceholderText(
             "One line per document: title|type|version|source_path|signed_all|active"
         )
-        self.documents_edit.setMinimumHeight(110)
-        root.addWidget(self.documents_edit)
+        self.documents_edit.setMinimumHeight(260)
+        documents_box_layout.addWidget(self.documents_edit)
+        documents_layout.addWidget(documents_box)
+        documents_layout.addStretch(1)
+        tabs.addTab(documents_scroll, "Documents")
 
-        buttons = QHBoxLayout()
-        buttons.addStretch(1)
-        save_button = QPushButton("Save")
-        save_button.clicked.connect(self.accept)
-        cancel_button = QPushButton("Cancel")
-        cancel_button.clicked.connect(self.reject)
-        buttons.addWidget(save_button)
-        buttons.addWidget(cancel_button)
-        root.addLayout(buttons)
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel, self)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        save_button = buttons.button(QDialogButtonBox.Save)
+        if save_button is not None:
+            save_button.setText("Save Contract")
+            save_button.setDefault(True)
+        root.addWidget(buttons)
+        _apply_compact_dialog_control_heights(self)
 
         if detail is not None:
             contract = detail.contract
@@ -323,16 +392,31 @@ class ContractBrowserDialog(QDialog):
         super().__init__(parent)
         self.contract_service = contract_service
         self.setWindowTitle("Contract Manager")
-        self.resize(1000, 640)
+        self.resize(1060, 700)
+        self.setMinimumSize(940, 620)
+        _apply_standard_dialog_chrome(self, "contractBrowserDialog")
 
         root = QVBoxLayout(self)
-        intro = QLabel(
-            "See which contracts are draft, active, expiring, or blocked by missing signatures and document versions."
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(14)
+        _add_standard_dialog_header(
+            root,
+            self,
+            title="Contract Manager",
+            subtitle=(
+                "See which contracts are draft, active, expiring, or blocked by missing "
+                "signatures and document versions."
+            ),
         )
-        intro.setWordWrap(True)
-        root.addWidget(intro)
 
+        controls_box, controls_layout = _create_standard_section(
+            self,
+            "Find and Manage",
+            "Search by title, contract type, linked party, or summary, then act on the selected agreement.",
+        )
         controls = QHBoxLayout()
+        controls.setContentsMargins(0, 0, 0, 0)
+        controls.setSpacing(8)
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("Search contracts by title, type, party, or summary...")
         self.search_edit.textChanged.connect(self.refresh)
@@ -347,9 +431,15 @@ class ContractBrowserDialog(QDialog):
             button = QPushButton(label)
             button.clicked.connect(handler)
             controls.addWidget(button)
-        root.addLayout(controls)
+        controls_layout.addLayout(controls)
+        root.addWidget(controls_box)
 
-        self.table = QTableWidget(0, 7, self)
+        table_box, table_layout = _create_standard_section(
+            self,
+            "Contracts",
+            "Double-click a row to open the editor for the selected contract.",
+        )
+        self.table = QTableWidget(0, 7, table_box)
         self.table.setHorizontalHeaderLabels(
             ["ID", "Title", "Type", "Status", "Notice", "Obligations", "Documents"]
         )
@@ -357,9 +447,18 @@ class ContractBrowserDialog(QDialog):
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.verticalHeader().setVisible(False)
-        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeToContents)
         self.table.doubleClicked.connect(lambda _index: self.edit_selected())
-        root.addWidget(self.table, 1)
+        table_layout.addWidget(self.table, 1)
+        root.addWidget(table_box, 1)
+
+        _apply_compact_dialog_control_heights(self)
 
         self.refresh()
 

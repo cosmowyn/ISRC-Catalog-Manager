@@ -11,9 +11,15 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFontComboBox,
+    QFormLayout,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QSlider,
     QSpinBox,
     QToolButton,
@@ -178,6 +184,52 @@ def _create_standard_section(
         desc_label.setWordWrap(True)
         box_layout.addWidget(desc_label)
     return box, box_layout
+
+
+def _configure_standard_form_layout(form: QFormLayout) -> None:
+    form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+    form.setLabelAlignment(Qt.AlignLeft | Qt.AlignTop)
+    form.setHorizontalSpacing(12)
+    form.setVerticalSpacing(10)
+
+
+def _create_scrollable_dialog_content(
+    owner: QWidget,
+) -> tuple[QScrollArea, QWidget, QVBoxLayout]:
+    scroll_area = QScrollArea(owner)
+    scroll_area.setWidgetResizable(True)
+    scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    scroll_area.setFrameShape(QFrame.NoFrame)
+
+    content = QWidget(scroll_area)
+    content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+
+    layout = QVBoxLayout(content)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(14)
+
+    scroll_area.setWidget(content)
+    return scroll_area, content, layout
+
+
+def _apply_compact_dialog_control_heights(owner: QWidget) -> None:
+    for widget in owner.findChildren(QWidget):
+        if isinstance(widget, QToolButton) and widget.property("role") == "helpButton":
+            continue
+
+        if isinstance(widget, (QLineEdit, QComboBox, QFontComboBox, QSpinBox)):
+            target_height = max(widget.minimumHeight(), widget.fontMetrics().lineSpacing() + 16)
+            widget.setMinimumHeight(target_height)
+            continue
+
+        if isinstance(widget, QPushButton):
+            target_height = max(widget.minimumHeight(), widget.fontMetrics().lineSpacing() + 14)
+            target_width = max(
+                widget.minimumWidth(),
+                widget.fontMetrics().horizontalAdvance(widget.text() or "") + 28,
+            )
+            widget.setMinimumHeight(target_height)
+            widget.setMinimumWidth(target_width)
 
 
 class _WheelIntentMixin:

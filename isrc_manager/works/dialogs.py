@@ -8,17 +8,32 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
+    QDialogButtonBox,
     QFormLayout,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QSplitter,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QVBoxLayout,
+    QWidget,
+)
+
+from isrc_manager.ui_common import (
+    _add_standard_dialog_header,
+    _apply_compact_dialog_control_heights,
+    _apply_standard_dialog_chrome,
+    _configure_standard_form_layout,
+    _create_scrollable_dialog_content,
+    _create_standard_section,
 )
 
 from .models import (
@@ -51,74 +66,123 @@ class WorkEditorDialog(QDialog):
         self.selected_track_ids_provider = selected_track_ids_provider
         self.work = work
         self.setWindowTitle("Edit Work" if work is not None else "Create Work")
-        self.resize(980, 760)
+        self.resize(1020, 780)
+        self.setMinimumSize(900, 700)
+        _apply_standard_dialog_chrome(self, "workEditorDialog")
 
         root = QVBoxLayout(self)
-
-        intro = QLabel(
-            "Works are separate from recordings. Use this dialog to manage composition metadata, splits, and linked track recordings."
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(14)
+        _add_standard_dialog_header(
+            root,
+            self,
+            title=self.windowTitle(),
+            subtitle=(
+                "Works are separate from recordings. Capture composition metadata, splits, "
+                "and linked recordings without mixing them into release data."
+            ),
         )
-        intro.setWordWrap(True)
-        root.addWidget(intro)
 
-        form_box = QGroupBox("Work Metadata", self)
-        form = QFormLayout(form_box)
-        form.setLabelAlignment(Qt.AlignLeft | Qt.AlignTop)
+        tabs = QTabWidget(self)
+        root.addWidget(tabs, 1)
+
+        metadata_scroll, _, metadata_layout = _create_scrollable_dialog_content(self)
+        identity_box, identity_layout = _create_standard_section(
+            self,
+            "Work Metadata",
+            "Core composition fields, alternate titles, and registration references for the work itself.",
+        )
+        identity_form = QFormLayout()
+        _configure_standard_form_layout(identity_form)
 
         self.title_edit = QLineEdit()
-        form.addRow("Work Title", self.title_edit)
+        identity_form.addRow("Work Title", self.title_edit)
 
         self.alt_titles_edit = QPlainTextEdit()
         self.alt_titles_edit.setPlaceholderText("One alternate title per line")
-        self.alt_titles_edit.setMaximumHeight(90)
-        form.addRow("Alternate Titles", self.alt_titles_edit)
+        self.alt_titles_edit.setMinimumHeight(104)
+        identity_form.addRow("Alternate Titles", self.alt_titles_edit)
 
         self.subtitle_edit = QLineEdit()
-        form.addRow("Subtitle / Version", self.subtitle_edit)
+        identity_form.addRow("Subtitle / Version", self.subtitle_edit)
 
         self.language_edit = QLineEdit()
-        form.addRow("Language", self.language_edit)
+        identity_form.addRow("Language", self.language_edit)
 
         self.genre_edit = QLineEdit()
-        form.addRow("Genre / Style", self.genre_edit)
+        identity_form.addRow("Genre / Style", self.genre_edit)
 
         self.iswc_edit = QLineEdit()
-        form.addRow("ISWC", self.iswc_edit)
+        identity_form.addRow("ISWC", self.iswc_edit)
 
         self.registration_edit = QLineEdit()
-        form.addRow("Registration #", self.registration_edit)
+        identity_form.addRow("Registration #", self.registration_edit)
+        identity_layout.addLayout(identity_form)
+        metadata_layout.addWidget(identity_box)
+
+        workflow_box, workflow_layout = _create_standard_section(
+            self,
+            "Workflow and Notes",
+            "Track the current work status and mark which readiness items are already complete.",
+        )
+        workflow_form = QFormLayout()
+        _configure_standard_form_layout(workflow_form)
 
         self.status_combo = QComboBox()
         self.status_combo.addItem("")
         self.status_combo.addItems(
             [value.replace("_", " ").title() for value in WORK_STATUS_CHOICES]
         )
-        form.addRow("Work Status", self.status_combo)
+        workflow_form.addRow("Work Status", self.status_combo)
 
-        flags_row = QHBoxLayout()
+        checklist_widget = QWidget(self)
+        checklist_layout = QGridLayout(checklist_widget)
+        checklist_layout.setContentsMargins(0, 0, 0, 0)
+        checklist_layout.setHorizontalSpacing(10)
+        checklist_layout.setVerticalSpacing(6)
         self.lyrics_checkbox = QCheckBox("Lyrics-based")
         self.instrumental_checkbox = QCheckBox("Instrumental")
         self.metadata_checkbox = QCheckBox("Metadata Complete")
         self.contract_checkbox = QCheckBox("Contract Signed")
         self.rights_checkbox = QCheckBox("Rights Verified")
-        for widget in (
+        checklist_widgets = (
             self.lyrics_checkbox,
             self.instrumental_checkbox,
             self.metadata_checkbox,
             self.contract_checkbox,
             self.rights_checkbox,
-        ):
-            flags_row.addWidget(widget)
-        flags_row.addStretch(1)
-        form.addRow("Checklist", flags_row)
+        )
+        for index, widget in enumerate(checklist_widgets):
+            checklist_layout.addWidget(widget, index // 2, index % 2)
+        checklist_layout.setColumnStretch(2, 1)
+        workflow_form.addRow("Checklist", checklist_widget)
 
         self.notes_edit = QPlainTextEdit()
-        self.notes_edit.setMinimumHeight(90)
-        form.addRow("Notes", self.notes_edit)
-        root.addWidget(form_box)
+        self.notes_edit.setMinimumHeight(132)
+        workflow_form.addRow("Notes", self.notes_edit)
+        workflow_layout.addLayout(workflow_form)
+        metadata_layout.addWidget(workflow_box)
+        metadata_layout.addStretch(1)
+        tabs.addTab(metadata_scroll, "Metadata")
 
-        contributors_box = QGroupBox("Creators / Publishers", self)
+        links_tab = QWidget(self)
+        links_layout = QVBoxLayout(links_tab)
+        links_layout.setContentsMargins(0, 0, 0, 0)
+        links_layout.setSpacing(12)
+
+        splitter = QSplitter(Qt.Vertical, links_tab)
+        splitter.setChildrenCollapsible(False)
+        links_layout.addWidget(splitter, 1)
+
+        contributors_box = QGroupBox("Creators / Publishers", links_tab)
         contributors_layout = QVBoxLayout(contributors_box)
+        contributors_layout.setContentsMargins(14, 18, 14, 14)
+        contributors_layout.setSpacing(10)
+        contributors_layout.addWidget(
+            QLabel(
+                "Add one row per credited party. Keep split columns populated when the work needs share validation."
+            )
+        )
         contributors_actions = QHBoxLayout()
         add_contributor_button = QPushButton("Add Contributor")
         add_contributor_button.clicked.connect(self._add_contributor_row)
@@ -134,12 +198,30 @@ class WorkEditorDialog(QDialog):
             ["Name", "Role", "Share %", "Role Share %"]
         )
         self.contributors_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.contributors_table.horizontalHeader().setStretchLastSection(True)
+        self.contributors_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.contributors_table.verticalHeader().setVisible(False)
+        self.contributors_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.contributors_table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeToContents
+        )
+        self.contributors_table.horizontalHeader().setSectionResizeMode(
+            2, QHeaderView.ResizeToContents
+        )
+        self.contributors_table.horizontalHeader().setSectionResizeMode(
+            3, QHeaderView.ResizeToContents
+        )
         contributors_layout.addWidget(self.contributors_table, 1)
-        root.addWidget(contributors_box, 1)
+        splitter.addWidget(contributors_box)
 
-        tracks_box = QGroupBox("Linked Recordings / Tracks", self)
+        tracks_box = QGroupBox("Linked Recordings / Tracks", links_tab)
         tracks_layout = QVBoxLayout(tracks_box)
+        tracks_layout.setContentsMargins(14, 18, 14, 14)
+        tracks_layout.setSpacing(10)
+        tracks_layout.addWidget(
+            QLabel(
+                "Link one or more recordings to this work. Releases remain attached to recordings instead of directly to the work."
+            )
+        )
         track_actions = QHBoxLayout()
         add_selected_button = QPushButton("Link Selected Tracks")
         add_selected_button.clicked.connect(self._add_selected_tracks)
@@ -153,20 +235,26 @@ class WorkEditorDialog(QDialog):
         self.track_table = QTableWidget(0, 2, tracks_box)
         self.track_table.setHorizontalHeaderLabels(["Track ID", "Track Title"])
         self.track_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.track_table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.track_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.track_table.horizontalHeader().setStretchLastSection(True)
+        self.track_table.verticalHeader().setVisible(False)
+        self.track_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.track_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         tracks_layout.addWidget(self.track_table, 1)
-        root.addWidget(tracks_box, 1)
+        splitter.addWidget(tracks_box)
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 2)
+        tabs.addTab(links_tab, "Contributors and Links")
 
-        buttons = QHBoxLayout()
-        buttons.addStretch(1)
-        save_button = QPushButton("Save")
-        save_button.clicked.connect(self.accept)
-        cancel_button = QPushButton("Cancel")
-        cancel_button.clicked.connect(self.reject)
-        buttons.addWidget(save_button)
-        buttons.addWidget(cancel_button)
-        root.addLayout(buttons)
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel, self)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        save_button = buttons.button(QDialogButtonBox.Save)
+        if save_button is not None:
+            save_button.setText("Save Work")
+            save_button.setDefault(True)
+        root.addWidget(buttons)
+        _apply_compact_dialog_control_heights(self)
 
         if work is not None:
             self.title_edit.setText(work.title)
@@ -320,16 +408,31 @@ class WorkBrowserDialog(QDialog):
         self.selected_track_ids_provider = selected_track_ids_provider
         self.linked_track_id = linked_track_id
         self.setWindowTitle("Work Manager")
-        self.resize(980, 640)
+        self.resize(1040, 700)
+        self.setMinimumSize(920, 620)
+        _apply_standard_dialog_chrome(self, "workBrowserDialog")
 
         root = QVBoxLayout(self)
-        intro = QLabel(
-            "Browse compositions separately from recordings, validate splits, and attach selected tracks to the correct work."
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(14)
+        _add_standard_dialog_header(
+            root,
+            self,
+            title="Work Manager",
+            subtitle=(
+                "Browse compositions separately from recordings, validate splits, and "
+                "attach selected tracks to the correct work."
+            ),
         )
-        intro.setWordWrap(True)
-        root.addWidget(intro)
 
+        controls_box, controls_layout = _create_standard_section(
+            self,
+            "Find and Manage",
+            "Search by work title, alternate title, ISWC, or registration number, then use the actions to maintain the selected work.",
+        )
         controls = QHBoxLayout()
+        controls.setContentsMargins(0, 0, 0, 0)
+        controls.setSpacing(8)
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText(
             "Search works by title, alternate title, ISWC, or registration #..."
@@ -358,9 +461,15 @@ class WorkBrowserDialog(QDialog):
             open_filter_button,
         ):
             controls.addWidget(button)
-        root.addLayout(controls)
+        controls_layout.addLayout(controls)
+        root.addWidget(controls_box)
 
-        self.table = QTableWidget(0, 6, self)
+        table_box, table_layout = _create_standard_section(
+            self,
+            "Works",
+            "Each row is a separate composition record. Double-click a row to edit it.",
+        )
+        self.table = QTableWidget(0, 6, table_box)
         self.table.setHorizontalHeaderLabels(
             ["ID", "Title", "ISWC", "Status", "Tracks", "Contributors"]
         )
@@ -368,9 +477,17 @@ class WorkBrowserDialog(QDialog):
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.verticalHeader().setVisible(False)
-        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
         self.table.doubleClicked.connect(lambda _index: self.edit_selected())
-        root.addWidget(self.table, 1)
+        table_layout.addWidget(self.table, 1)
+        root.addWidget(table_box, 1)
+
+        _apply_compact_dialog_control_heights(self)
 
         self.refresh()
 

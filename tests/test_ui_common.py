@@ -1,9 +1,12 @@
 import unittest
 
 try:
-    from PySide6.QtWidgets import QApplication, QWidget
+    from PySide6.QtWidgets import QApplication, QFormLayout, QLineEdit, QPushButton, QWidget
 except ImportError as exc:  # pragma: no cover - environment-specific fallback
     QApplication = None
+    QFormLayout = None
+    QLineEdit = None
+    QPushButton = None
     QWidget = None
     QT_IMPORT_ERROR = exc
 else:
@@ -12,8 +15,11 @@ else:
 from isrc_manager.ui_common import (
     DatePickerDialog,
     TwoDigitSpinBox,
+    _apply_compact_dialog_control_heights,
     _compose_widget_stylesheet,
+    _configure_standard_form_layout,
     _create_round_help_button,
+    _create_scrollable_dialog_content,
 )
 
 
@@ -80,6 +86,40 @@ class UICommonTests(unittest.TestCase):
             self.assertEqual(spinbox.textFromValue(12), "12")
         finally:
             spinbox.close()
+
+    def test_configure_standard_form_layout_sets_repo_defaults(self):
+        form = QFormLayout()
+        _configure_standard_form_layout(form)
+        self.assertEqual(form.horizontalSpacing(), 12)
+        self.assertEqual(form.verticalSpacing(), 10)
+        self.assertEqual(form.fieldGrowthPolicy(), QFormLayout.AllNonFixedFieldsGrow)
+
+    def test_scrollable_dialog_content_wraps_expanding_widget(self):
+        owner = QWidget()
+        try:
+            scroll_area, content, layout = _create_scrollable_dialog_content(owner)
+            self.assertIs(scroll_area.widget(), content)
+            self.assertIs(content.parentWidget(), scroll_area.viewport())
+            self.assertEqual(layout.spacing(), 14)
+        finally:
+            owner.close()
+
+    def test_compact_dialog_control_heights_raise_fields_and_buttons(self):
+        owner = QWidget()
+        try:
+            line_edit = QLineEdit(owner)
+            button = QPushButton("Save", owner)
+            _apply_compact_dialog_control_heights(owner)
+            self.assertGreaterEqual(
+                line_edit.minimumHeight(), line_edit.fontMetrics().lineSpacing() + 16
+            )
+            self.assertGreaterEqual(button.minimumHeight(), button.fontMetrics().lineSpacing() + 14)
+            self.assertGreaterEqual(
+                button.minimumWidth(),
+                button.fontMetrics().horizontalAdvance("Save") + 28,
+            )
+        finally:
+            owner.close()
 
 
 if __name__ == "__main__":

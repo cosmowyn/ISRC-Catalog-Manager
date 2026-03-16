@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,
     QDialog,
+    QDialogButtonBox,
     QFormLayout,
+    QGridLayout,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -17,11 +19,21 @@ from PySide6.QtWidgets import (
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QVBoxLayout,
+    QWidget,
 )
 
 from isrc_manager.contracts import ContractService
 from isrc_manager.parties import PartyService
+from isrc_manager.ui_common import (
+    _add_standard_dialog_header,
+    _apply_compact_dialog_control_heights,
+    _apply_standard_dialog_chrome,
+    _configure_standard_form_layout,
+    _create_scrollable_dialog_content,
+    _create_standard_section,
+)
 
 from .models import RIGHT_TYPE_CHOICES, RightPayload, RightRecord
 from .service import RightsService
@@ -45,72 +57,143 @@ class RightEditorDialog(QDialog):
         self.contract_service = contract_service
         self.right = right
         self.setWindowTitle("Edit Right" if right is not None else "Create Right")
-        self.resize(680, 540)
+        self.resize(820, 640)
+        self.setMinimumSize(760, 560)
+        _apply_standard_dialog_chrome(self, "rightEditorDialog")
 
         root = QVBoxLayout(self)
-        form = QFormLayout()
-        form.setLabelAlignment(Qt.AlignLeft | Qt.AlignTop)
-
-        self.title_edit = QLineEdit()
-        form.addRow("Title", self.title_edit)
-
-        self.type_combo = QComboBox()
-        self.type_combo.addItems([item.replace("_", " ").title() for item in RIGHT_TYPE_CHOICES])
-        form.addRow("Right Type", self.type_combo)
-
-        self.exclusive_checkbox = QCheckBox("Exclusive")
-        self.perpetual_checkbox = QCheckBox("Perpetual")
-        exclusivity_row = QHBoxLayout()
-        exclusivity_row.addWidget(self.exclusive_checkbox)
-        exclusivity_row.addWidget(self.perpetual_checkbox)
-        exclusivity_row.addStretch(1)
-        form.addRow("Flags", exclusivity_row)
-
-        self.territory_edit = QLineEdit()
-        form.addRow("Territory", self.territory_edit)
-
-        self.media_use_edit = QLineEdit()
-        form.addRow("Media / Use Type", self.media_use_edit)
-
-        self.start_edit = QLineEdit()
-        self.start_edit.setPlaceholderText("YYYY-MM-DD")
-        form.addRow("Start Date", self.start_edit)
-
-        self.end_edit = QLineEdit()
-        self.end_edit.setPlaceholderText("YYYY-MM-DD")
-        form.addRow("End Date", self.end_edit)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(14)
+        _add_standard_dialog_header(
+            root,
+            self,
+            title=self.windowTitle(),
+            subtitle=(
+                "Capture the scope of one rights grant, then link the parties, source "
+                "contract, and related repertoire record."
+            ),
+        )
 
         self.granted_by_combo = QComboBox()
         self.granted_to_combo = QComboBox()
         self.retained_by_combo = QComboBox()
         self.contract_combo = QComboBox()
         self._populate_reference_combos()
-        form.addRow("Granted By", self.granted_by_combo)
-        form.addRow("Granted To", self.granted_to_combo)
-        form.addRow("Retained By", self.retained_by_combo)
-        form.addRow("Source Contract", self.contract_combo)
 
+        tabs = QTabWidget(self)
+        root.addWidget(tabs, 1)
+
+        definition_scroll, _, definition_layout = _create_scrollable_dialog_content(self)
+        definition_box, definition_box_layout = _create_standard_section(
+            self,
+            "Rights Definition",
+            "Describe the kind of right being granted, where it applies, and how long the grant lasts.",
+        )
+        definition_form = QFormLayout()
+        _configure_standard_form_layout(definition_form)
+
+        self.title_edit = QLineEdit()
+        definition_form.addRow("Title", self.title_edit)
+
+        self.type_combo = QComboBox()
+        self.type_combo.addItems([item.replace("_", " ").title() for item in RIGHT_TYPE_CHOICES])
+        definition_form.addRow("Right Type", self.type_combo)
+
+        flags_widget = QWidget(self)
+        flags_layout = QHBoxLayout(flags_widget)
+        flags_layout.setContentsMargins(0, 0, 0, 0)
+        flags_layout.setSpacing(10)
+        self.exclusive_checkbox = QCheckBox("Exclusive")
+        self.perpetual_checkbox = QCheckBox("Perpetual")
+        flags_layout.addWidget(self.exclusive_checkbox)
+        flags_layout.addWidget(self.perpetual_checkbox)
+        flags_layout.addStretch(1)
+        definition_form.addRow("Flags", flags_widget)
+
+        self.territory_edit = QLineEdit()
+        definition_form.addRow("Territory", self.territory_edit)
+
+        self.media_use_edit = QLineEdit()
+        definition_form.addRow("Media / Use Type", self.media_use_edit)
+        definition_box_layout.addLayout(definition_form)
+        definition_layout.addWidget(definition_box)
+
+        date_box, date_box_layout = _create_standard_section(
+            self,
+            "Grant Window",
+            "Use start and end dates when the right has a limited term. Perpetual grants can leave the end date empty.",
+        )
+        date_grid = QGridLayout()
+        date_grid.setContentsMargins(0, 0, 0, 0)
+        date_grid.setHorizontalSpacing(12)
+        date_grid.setVerticalSpacing(10)
+        self.start_edit = QLineEdit()
+        self.start_edit.setPlaceholderText("YYYY-MM-DD")
+        self.end_edit = QLineEdit()
+        self.end_edit.setPlaceholderText("YYYY-MM-DD")
+        date_grid.addWidget(QLabel("Start Date"), 0, 0)
+        date_grid.addWidget(self.start_edit, 0, 1)
+        date_grid.addWidget(QLabel("End Date"), 0, 2)
+        date_grid.addWidget(self.end_edit, 0, 3)
+        date_grid.setColumnStretch(1, 1)
+        date_grid.setColumnStretch(3, 1)
+        date_box_layout.addLayout(date_grid)
+        definition_layout.addWidget(date_box)
+        definition_layout.addStretch(1)
+        tabs.addTab(definition_scroll, "Definition")
+
+        links_scroll, _, links_layout = _create_scrollable_dialog_content(self)
+        parties_box, parties_layout = _create_standard_section(
+            self,
+            "Parties and Source",
+            "Link the grantor, grantee, retained rights holder, and the source contract that created the right.",
+        )
+        parties_form = QFormLayout()
+        _configure_standard_form_layout(parties_form)
+        parties_form.addRow("Granted By", self.granted_by_combo)
+        parties_form.addRow("Granted To", self.granted_to_combo)
+        parties_form.addRow("Retained By", self.retained_by_combo)
+        parties_form.addRow("Source Contract", self.contract_combo)
+        parties_layout.addLayout(parties_form)
+        links_layout.addWidget(parties_box)
+
+        repertoire_box, repertoire_layout = _create_standard_section(
+            self,
+            "Linked Repertoire",
+            "Reference the specific work, track, or release that this rights record applies to.",
+        )
+        repertoire_form = QFormLayout()
+        _configure_standard_form_layout(repertoire_form)
         self.work_id_edit = QLineEdit()
-        form.addRow("Work ID", self.work_id_edit)
+        repertoire_form.addRow("Work ID", self.work_id_edit)
         self.track_id_edit = QLineEdit()
-        form.addRow("Track ID", self.track_id_edit)
+        repertoire_form.addRow("Track ID", self.track_id_edit)
         self.release_id_edit = QLineEdit()
-        form.addRow("Release ID", self.release_id_edit)
+        repertoire_form.addRow("Release ID", self.release_id_edit)
+        repertoire_layout.addLayout(repertoire_form)
+        links_layout.addWidget(repertoire_box)
 
+        notes_box, notes_layout = _create_standard_section(
+            self,
+            "Notes",
+            "Capture territory nuances, carve-outs, or any supporting context that matters later.",
+        )
         self.notes_edit = QPlainTextEdit()
-        self.notes_edit.setMinimumHeight(100)
-        form.addRow("Notes", self.notes_edit)
-        root.addLayout(form)
+        self.notes_edit.setMinimumHeight(180)
+        notes_layout.addWidget(self.notes_edit)
+        links_layout.addWidget(notes_box)
+        links_layout.addStretch(1)
+        tabs.addTab(links_scroll, "Links and Notes")
 
-        buttons = QHBoxLayout()
-        buttons.addStretch(1)
-        save_button = QPushButton("Save")
-        save_button.clicked.connect(self.accept)
-        cancel_button = QPushButton("Cancel")
-        cancel_button.clicked.connect(self.reject)
-        buttons.addWidget(save_button)
-        buttons.addWidget(cancel_button)
-        root.addLayout(buttons)
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel, self)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        save_button = buttons.button(QDialogButtonBox.Save)
+        if save_button is not None:
+            save_button.setText("Save Right")
+            save_button.setDefault(True)
+        root.addWidget(buttons)
+        _apply_compact_dialog_control_heights(self)
 
         if right is not None:
             self.title_edit.setText(right.title or "")
@@ -192,16 +275,31 @@ class RightsBrowserDialog(QDialog):
         self.party_service = party_service
         self.contract_service = contract_service
         self.setWindowTitle("Rights Matrix")
-        self.resize(1040, 640)
+        self.resize(1080, 700)
+        self.setMinimumSize(960, 620)
+        _apply_standard_dialog_chrome(self, "rightsBrowserDialog")
 
         root = QVBoxLayout(self)
-        intro = QLabel(
-            "Use the rights matrix to see who controls what, in which territory, and under which source contract."
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(14)
+        _add_standard_dialog_header(
+            root,
+            self,
+            title="Rights Matrix",
+            subtitle=(
+                "See who controls what, in which territory, and under which source "
+                "contract without leaving the catalog."
+            ),
         )
-        intro.setWordWrap(True)
-        root.addWidget(intro)
 
+        controls_box, controls_layout = _create_standard_section(
+            self,
+            "Find and Manage",
+            "Search by right type, territory, contract, or party, then open the selected record or review conflicts.",
+        )
         controls = QHBoxLayout()
+        controls.setContentsMargins(0, 0, 0, 0)
+        controls.setSpacing(8)
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText(
             "Search rights by type, territory, contract, or party..."
@@ -218,9 +316,15 @@ class RightsBrowserDialog(QDialog):
             button = QPushButton(label)
             button.clicked.connect(handler)
             controls.addWidget(button)
-        root.addLayout(controls)
+        controls_layout.addLayout(controls)
+        root.addWidget(controls_box)
 
-        self.table = QTableWidget(0, 7, self)
+        table_box, table_layout = _create_standard_section(
+            self,
+            "Rights Records",
+            "Each row is one rights grant. Double-click a row to edit it.",
+        )
+        self.table = QTableWidget(0, 7, table_box)
         self.table.setHorizontalHeaderLabels(
             ["ID", "Type", "Title", "Territory", "Exclusive", "Granted To", "Contract"]
         )
@@ -228,9 +332,18 @@ class RightsBrowserDialog(QDialog):
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.verticalHeader().setVisible(False)
-        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeToContents)
         self.table.doubleClicked.connect(lambda _index: self.edit_selected())
-        root.addWidget(self.table, 1)
+        table_layout.addWidget(self.table, 1)
+        root.addWidget(table_box, 1)
+
+        _apply_compact_dialog_control_heights(self)
 
         self.refresh()
 
