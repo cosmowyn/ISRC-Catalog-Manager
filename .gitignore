@@ -2,7 +2,6 @@
 build/
 dist/
 *.spec
-!ISRCManager.spec
 
 # Virtual environments
 .venv/
