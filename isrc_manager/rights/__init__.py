@@ -1,6 +1,6 @@
 """Rights and ownership package."""
 
-from .models import OwnershipSummary, RightPayload, RightRecord, RightsConflict, RIGHT_TYPE_CHOICES
+from .models import RIGHT_TYPE_CHOICES, OwnershipSummary, RightPayload, RightRecord, RightsConflict
 from .service import RightsService
 
 __all__ = [

@@ -10,8 +10,8 @@ from PySide6.QtCore import QSettings
 
 from isrc_manager.assets import AssetService
 from isrc_manager.contracts import ContractService
-from isrc_manager.exchange.service import ExchangeService
 from isrc_manager.exchange.repertoire_service import RepertoireExchangeService
+from isrc_manager.exchange.service import ExchangeService
 from isrc_manager.history import HistoryManager
 from isrc_manager.parties import PartyService
 from isrc_manager.quality.service import QualityDashboardService
@@ -20,14 +20,14 @@ from isrc_manager.rights import RightsService
 from isrc_manager.search import GlobalSearchService, RelationshipExplorerService
 from isrc_manager.services import (
     CatalogReadService,
-    LicenseService,
-    LegacyLicenseMigrationService,
     CustomFieldDefinitionService,
     CustomFieldValueService,
     DatabaseMaintenanceService,
     GS1IntegrationService,
     GS1MetadataRepository,
     GS1SettingsService,
+    LegacyLicenseMigrationService,
+    LicenseService,
     ProfileKVService,
     RepertoireWorkflowService,
     SettingsMutationService,

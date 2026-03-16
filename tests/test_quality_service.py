@@ -4,19 +4,19 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from isrc_manager.assets import AssetService, AssetVersionPayload
+from isrc_manager.contracts import ContractPayload, ContractService
+from isrc_manager.parties import PartyPayload, PartyService
 from isrc_manager.quality import QualityDashboardService
 from isrc_manager.releases import ReleasePayload, ReleaseService, ReleaseTrackPlacement
+from isrc_manager.rights import RightPayload, RightsService
 from isrc_manager.services import (
     CustomFieldDefinitionService,
     DatabaseSchemaService,
     TrackCreatePayload,
     TrackService,
 )
-from isrc_manager.parties import PartyPayload, PartyService
 from isrc_manager.works import WorkContributorPayload, WorkPayload, WorkService
-from isrc_manager.contracts import ContractPayload, ContractService
-from isrc_manager.rights import RightPayload, RightsService
-from isrc_manager.assets import AssetService, AssetVersionPayload
 
 
 class QualityDashboardServiceTests(unittest.TestCase):

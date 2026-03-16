@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 
-
 CONTRACT_STATUS_CHOICES = (
     "draft",
     "pending_signature",

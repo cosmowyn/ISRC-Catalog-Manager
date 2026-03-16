@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 
-
 ASSET_TYPE_CHOICES = (
     "main_master",
     "instrumental",

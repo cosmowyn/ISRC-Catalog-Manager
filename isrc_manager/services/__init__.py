@@ -32,9 +32,18 @@ from isrc_manager.parties import (
     PartyService,
     PartyUsageSummary,
 )
+from isrc_manager.releases import (
+    RELEASE_TYPE_CHOICES,
+    ReleasePayload,
+    ReleaseRecord,
+    ReleaseService,
+    ReleaseSummary,
+    ReleaseTrackPlacement,
+    ReleaseValidationIssue,
+)
 from isrc_manager.rights import (
-    OwnershipSummary,
     RIGHT_TYPE_CHOICES,
+    OwnershipSummary,
     RightPayload,
     RightRecord,
     RightsConflict,
@@ -50,15 +59,6 @@ from isrc_manager.works import (
     WorkRecord,
     WorkService,
     WorkValidationIssue,
-)
-from isrc_manager.releases import (
-    RELEASE_TYPE_CHOICES,
-    ReleasePayload,
-    ReleaseRecord,
-    ReleaseService,
-    ReleaseSummary,
-    ReleaseTrackPlacement,
-    ReleaseValidationIssue,
 )
 
 from .catalog_admin import AlbumUsage, ArtistUsage, CatalogAdminService, LicenseeUsage

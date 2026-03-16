@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 
-
 WORK_CREATOR_ROLE_CHOICES = (
     "songwriter",
     "composer",

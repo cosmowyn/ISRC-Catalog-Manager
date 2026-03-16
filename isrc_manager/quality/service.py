@@ -21,8 +21,8 @@ from isrc_manager.domain.codes import barcode_validation_status, to_compact_isrc
 from isrc_manager.parties import PartyService
 from isrc_manager.releases import ReleaseService
 from isrc_manager.rights import RightsService
-from isrc_manager.services.tracks import TrackService
 from isrc_manager.services.repertoire_status import RepertoireWorkflowService
+from isrc_manager.services.tracks import TrackService
 from isrc_manager.works import WorkContributorPayload, WorkPayload, WorkService
 
 from .models import QualityIssue, QualityScanResult

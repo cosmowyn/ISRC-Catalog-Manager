@@ -79,7 +79,6 @@ class GlobalSearchDialog(QDialog):
         splitter = QSplitter(Qt.Horizontal, self)
         root.addWidget(splitter, 1)
 
-        left_panel = QVBoxLayout()
         left_widget = QListWidget()
         self.saved_searches_list = left_widget
         self.saved_searches_list.itemDoubleClicked.connect(self.apply_saved_search)

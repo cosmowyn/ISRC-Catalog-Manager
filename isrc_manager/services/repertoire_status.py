@@ -50,10 +50,11 @@ class RepertoireWorkflowService:
         clean_ids = sorted({int(item) for item in row_ids if int(item) > 0})
         if not clean_ids:
             return 0
+        status_column = "work_status" if table_name == "Works" else "repertoire_status"
         assignments: list[str] = []
         params: list[object] = []
         if status is not None:
-            assignments.append("repertoire_status=?")
+            assignments.append(f"{status_column}=?")
             params.append(self._clean_status(status))
         if metadata_complete is not None:
             assignments.append("metadata_complete=?")
@@ -157,13 +158,13 @@ class RepertoireWorkflowService:
 
     def summary_counts(self) -> dict[str, dict[str, int]]:
         summary: dict[str, dict[str, int]] = {}
-        for entity_type, table_name in (
-            ("works", "Works"),
-            ("tracks", "Tracks"),
-            ("releases", "Releases"),
+        for entity_type, table_name, status_column in (
+            ("works", "Works", "work_status"),
+            ("tracks", "Tracks", "repertoire_status"),
+            ("releases", "Releases", "repertoire_status"),
         ):
             rows = self.conn.execute(
-                f"SELECT COALESCE(repertoire_status, '') FROM {table_name}"
+                f"SELECT COALESCE({status_column}, '') FROM {table_name}"
             ).fetchall()
             counter = Counter(clean_text(row[0]) or "unspecified" for row in rows)
             summary[entity_type] = dict(counter)

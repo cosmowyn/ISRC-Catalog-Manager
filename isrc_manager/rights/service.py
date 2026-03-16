@@ -7,7 +7,7 @@ from dataclasses import asdict
 
 from isrc_manager.domain.repertoire import clean_text, normalized_territory, ranges_overlap
 
-from .models import OwnershipSummary, RightPayload, RightRecord, RightsConflict, RIGHT_TYPE_CHOICES
+from .models import RIGHT_TYPE_CHOICES, OwnershipSummary, RightPayload, RightRecord, RightsConflict
 
 
 class RightsService:

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 
-
 RIGHT_TYPE_CHOICES = (
     "master",
     "composition_publishing",

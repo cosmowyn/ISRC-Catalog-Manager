@@ -5,9 +5,9 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QFileDialog,
     QComboBox,
     QDialog,
+    QFileDialog,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -26,7 +26,6 @@ from .models import (
     ContractObligationPayload,
     ContractPartyPayload,
     ContractPayload,
-    ContractRecord,
 )
 from .service import ContractService
 

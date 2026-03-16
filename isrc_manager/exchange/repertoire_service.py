@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import csv
 import json
-import shutil
 import sqlite3
 import tempfile
 from pathlib import Path
@@ -373,7 +372,6 @@ class RepertoireExchangeService:
                 ]
                 document_payloads = []
                 for item in source.get("documents", []) or []:
-                    file_source = item.get("source_path") or item.get("file_path")
                     document_payloads.append(
                         ContractDocumentPayload(
                             title=item.get("title") or "",
@@ -384,7 +382,7 @@ class RepertoireExchangeService:
                             signed_status=item.get("signed_status"),
                             signed_by_all_parties=bool(item.get("signed_by_all_parties")),
                             active_flag=bool(item.get("active_flag")),
-                            source_path=file_source,
+                            source_path=item.get("source_path"),
                             stored_path=item.get("file_path"),
                             filename=item.get("filename"),
                             checksum_sha256=item.get("checksum_sha256"),
