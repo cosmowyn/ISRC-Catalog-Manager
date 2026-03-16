@@ -127,13 +127,11 @@ omit = [
   "isrc_manager/parties/dialogs.py",
   "isrc_manager/gs1_dialog.py",
   "isrc_manager/history/dialogs.py",
-  "isrc_manager/main_window_shell.py",
   "isrc_manager/rights/dialogs.py",
   "isrc_manager/releases/dialogs.py",
   "isrc_manager/search/dialogs.py",
   "isrc_manager/settings.py",
   "isrc_manager/tags/dialogs.py",
-  "isrc_manager/tasks/app_services.py",
   "isrc_manager/tasks/history_helpers.py",
   "isrc_manager/works/dialogs.py",
 ]
