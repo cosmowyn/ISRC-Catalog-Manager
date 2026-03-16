@@ -6,9 +6,12 @@ from PySide6.QtCore import QPoint, QSettings
 
 from isrc_manager.history import HistoryManager
 from isrc_manager.services import (
+    ContractService,
     DatabaseSchemaService,
     DatabaseSessionService,
+    LegacyLicenseMigrationService,
     LicenseService,
+    PartyService,
     SettingsMutationService,
     SettingsReadService,
     TrackCreatePayload,
@@ -38,6 +41,16 @@ class HistoryManagerTests(unittest.TestCase):
 
         self.track_service = TrackService(self.conn)
         self.license_service = LicenseService(self.conn, self.data_root)
+        self.party_service = PartyService(self.conn)
+        self.contract_service = ContractService(
+            self.conn, self.data_root, party_service=self.party_service
+        )
+        self.license_migration_service = LegacyLicenseMigrationService(
+            self.conn,
+            license_service=self.license_service,
+            party_service=self.party_service,
+            contract_service=self.contract_service,
+        )
         self.settings_mutations = SettingsMutationService(self.conn, self.settings)
         self.settings_reads = SettingsReadService(self.conn)
         self.history = HistoryManager(
@@ -392,6 +405,73 @@ class HistoryManagerTests(unittest.TestCase):
         self.history.redo()
         self.assertTrue(export_path.exists())
         self.assertEqual(export_path.read_text(encoding="utf-8"), "<catalog/>")
+
+    def test_snapshot_actions_restore_legacy_license_migration_state(self):
+        track_id = self._create_track(title="Migration History Song")
+        source_pdf = self._create_source_pdf("history_legacy_license.pdf")
+        record_id = self.license_service.add_license(
+            track_id=track_id,
+            licensee_name="History Label",
+            source_pdf_path=source_pdf,
+        )
+        legacy_record = self.license_service.fetch_license(record_id)
+        self.assertIsNotNone(legacy_record)
+        assert legacy_record is not None
+        legacy_path = self.license_service.resolve_path(legacy_record.file_path)
+        self.assertTrue(legacy_path.exists())
+
+        before = self.history.capture_snapshot(
+            kind="pre_license_migration", label="Before Legacy License Migration"
+        )
+        result = self.license_migration_service.migrate_all()
+        after = self.history.capture_snapshot(
+            kind="post_license_migration", label="After Legacy License Migration"
+        )
+        self.history.record_snapshot_action(
+            label="Migrate Legacy Licenses to Contracts",
+            action_type="license.migrate_legacy",
+            entity_type="License",
+            entity_id="legacy_migration",
+            payload={"legacy_license_count": 1},
+            snapshot_before_id=before.snapshot_id,
+            snapshot_after_id=after.snapshot_id,
+        )
+
+        self.assertIsNone(self.license_service.fetch_license(record_id))
+        self.assertFalse(legacy_path.exists())
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Contracts").fetchone()[0], 1)
+        contract_detail = self.contract_service.fetch_contract_detail(result.contract_ids[0])
+        self.assertIsNotNone(contract_detail)
+        assert contract_detail is not None
+        migrated_path = self.contract_service.resolve_document_path(
+            contract_detail.documents[0].file_path
+        )
+        self.assertIsNotNone(migrated_path)
+        assert migrated_path is not None
+        self.assertTrue(migrated_path.exists())
+
+        self.history.undo()
+        restored_legacy = self.license_service.fetch_license(record_id)
+        self.assertIsNotNone(restored_legacy)
+        self.assertTrue(legacy_path.exists())
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Contracts").fetchone()[0], 0)
+        self.assertFalse((self.data_root / "contract_documents").exists())
+
+        self.history.redo()
+        self.assertIsNone(self.license_service.fetch_license(record_id))
+        self.assertFalse(legacy_path.exists())
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Contracts").fetchone()[0], 1)
+        restored_contract_detail = self.contract_service.fetch_contract_detail(
+            result.contract_ids[0]
+        )
+        self.assertIsNotNone(restored_contract_detail)
+        assert restored_contract_detail is not None
+        restored_migrated_path = self.contract_service.resolve_document_path(
+            restored_contract_detail.documents[0].file_path
+        )
+        self.assertIsNotNone(restored_migrated_path)
+        assert restored_migrated_path is not None
+        self.assertTrue(restored_migrated_path.exists())
 
 
 if __name__ == "__main__":

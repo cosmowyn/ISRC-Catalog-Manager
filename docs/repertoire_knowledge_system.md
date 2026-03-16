@@ -85,6 +85,12 @@ Relationships:
 - releases
 - source rights grants
 
+Legacy note:
+
+- the older `Licenses` + `Licensees` tables still exist as the lightweight track-level PDF archive
+- `Catalog > Migrate Legacy Licenses to Contracts...` promotes those legacy records into `Parties`, `Contracts`, and `ContractDocuments`
+- the migration is explicit and checksum-verified; it does not silently reinterpret old data on profile open
+
 ### RightsRecord
 
 A `RightsRecord` stores a specific rights grant or retained control position.
@@ -199,6 +205,16 @@ The repertoire expansion is additive and preserves older workspaces:
 - foreign keys stay explicit
 - old databases remain valid even if no work/contract/right data exists yet
 
+Legacy license migration strategy:
+
+- legacy license rows can remain in place for users who prefer the simpler PDF archive workflow
+- a dedicated migration action copies each managed legacy PDF into `contract_documents`
+- the migrated document checksum is verified against the original managed file before cleanup
+- related `Party` records are created or reused from legacy `Licensees`
+- related `Work` and `Release` links are inferred from the original track where possible
+- legacy `Licenses`, `Licensees`, and old managed license files are removed only after verification succeeds
+- before/after history snapshots are recorded so the whole migration can be undone or redone safely
+
 ## Package Layout
 
 New packages introduced by this layer:
@@ -209,6 +225,11 @@ New packages introduced by this layer:
 - `isrc_manager.rights`
 - `isrc_manager.assets`
 - `isrc_manager.search`
+
+Additional service entrypoints added on top of the original service layer:
+
+- `LegacyLicenseMigrationService`
+- expanded `HistoryManager` snapshot coverage for repertoire tables and managed directories
 
 These packages follow the same pattern already used elsewhere in the project:
 

@@ -101,6 +101,12 @@ from .gs1_settings import GS1SettingsService
 from .gs1_template import GS1TemplateVerificationService
 from .gs1_validation import GS1ValidationService
 from .imports import ImportExecutionResult, ImportInspection, ImportRecord, XMLImportService
+from .license_migration import (
+    LegacyLicenseMigrationIssue,
+    LegacyLicenseMigrationResult,
+    LegacyLicenseMigrationService,
+    LegacyLicenseMigrationSummary,
+)
 from .licenses import LicenseRecord, LicenseRow, LicenseService
 from .profiles import ProfileChoice, ProfileRemovalResult, ProfileWorkflowService
 from .repertoire_status import REPERTOIRE_STATUS_CHOICES, RepertoireWorkflowService
@@ -165,6 +171,10 @@ __all__ = [
     "PartyService",
     "PartyUsageSummary",
     "LicenseeUsage",
+    "LegacyLicenseMigrationIssue",
+    "LegacyLicenseMigrationResult",
+    "LegacyLicenseMigrationService",
+    "LegacyLicenseMigrationSummary",
     "LicenseRecord",
     "LicenseRow",
     "LicenseService",

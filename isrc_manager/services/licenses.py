@@ -94,6 +94,23 @@ class LicenseService:
         path = Path(stored_path)
         return path if path.is_absolute() else (self.data_dir / path)
 
+    def is_managed_license_path(self, stored_path: str) -> bool:
+        clean_path = str(stored_path or "").strip()
+        if not clean_path:
+            return False
+        path = Path(clean_path)
+        if path.is_absolute():
+            try:
+                path.resolve().relative_to(self.licenses_dir.resolve())
+                return True
+            except Exception:
+                return False
+        try:
+            (self.data_dir / path).resolve().relative_to(self.licenses_dir.resolve())
+            return True
+        except Exception:
+            return False
+
     def add_license(self, *, track_id: int, licensee_name: str, source_pdf_path: str | Path) -> int:
         source_path = Path(source_pdf_path)
         if not source_path.exists():

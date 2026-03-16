@@ -206,6 +206,7 @@ from isrc_manager.services import (
     GS1MetadataRepository,
     GS1SettingsService,
     GS1TemplateAsset,
+    LegacyLicenseMigrationService,
     XMLExportService,
     XMLImportService,
     LicenseService,
@@ -3845,16 +3846,19 @@ class LicensesBrowserDialog(QDialog):
         self.download_button = QPushButton("Download PDF…")
         self.edit_button = QPushButton("Edit…")
         self.delete_button = QPushButton("Delete Selected")
+        self.migrate_button = QPushButton("Migrate to Contracts…")
         self.refresh_button = QPushButton("Refresh")
         self.preview_button.clicked.connect(self._preview_pdf)
         self.download_button.clicked.connect(self._download_pdf)
         self.edit_button.clicked.connect(self._edit_selected)
         self.delete_button.clicked.connect(self._delete_selected)
+        self.migrate_button.clicked.connect(self._migrate_to_contracts)
         self.refresh_button.clicked.connect(self.refresh_data)
         action_row.addWidget(self.preview_button)
         action_row.addWidget(self.download_button)
         action_row.addWidget(self.edit_button)
         action_row.addWidget(self.delete_button)
+        action_row.addWidget(self.migrate_button)
         action_row.addStretch(1)
         action_row.addWidget(self.refresh_button)
         browser_layout.addLayout(action_row)
@@ -4225,6 +4229,18 @@ class LicensesBrowserDialog(QDialog):
 
     def _reload_current(self):
         self.refresh_data()
+
+    def _migrate_to_contracts(self):
+        app = self.parentWidget()
+        if app is None or not hasattr(app, "migrate_legacy_licenses_to_contracts"):
+            QMessageBox.information(
+                self,
+                "Legacy License Migration",
+                "This action is only available when the browser is opened from the main window.",
+            )
+            return
+        self.accept()
+        app.migrate_legacy_licenses_to_contracts()
 
     def eventFilter(self, obj, ev):
         if ev.type() == QEvent.KeyPress and ev.key() == Qt.Key_Space:
@@ -5180,6 +5196,7 @@ class App(QMainWindow):
         self.catalog_service = None
         self.catalog_reads = None
         self.license_service = None
+        self.license_migration_service = None
         self.profile_kv = None
         self.custom_field_definitions = None
         self.custom_field_values = None
@@ -5428,6 +5445,11 @@ class App(QMainWindow):
             shortcuts=("Ctrl+L", "Meta+L"),
         )
         catalog_menu.addAction(self.license_browser_action)
+        self.legacy_license_migration_action = self._create_action(
+            "Migrate Legacy Licenses to Contracts…",
+            slot=self.migrate_legacy_licenses_to_contracts,
+        )
+        catalog_menu.addAction(self.legacy_license_migration_action)
         catalog_menu.addSeparator()
 
         self.catalog_managers_action = self._create_action(
@@ -6974,6 +6996,21 @@ class App(QMainWindow):
         self.contract_service = (
             ContractService(self.conn, DATA_DIR(), party_service=self.party_service)
             if self.conn is not None
+            else None
+        )
+        self.license_migration_service = (
+            LegacyLicenseMigrationService(
+                self.conn,
+                license_service=self.license_service,
+                party_service=self.party_service,
+                contract_service=self.contract_service,
+                release_service=self.release_service,
+                work_service=self.work_service,
+            )
+            if self.conn is not None
+            and self.license_service is not None
+            and self.party_service is not None
+            and self.contract_service is not None
             else None
         )
         self.rights_service = RightsService(self.conn) if self.conn is not None else None
@@ -8849,6 +8886,13 @@ class App(QMainWindow):
                 "category": "Catalog",
                 "description": "Browse, preview, edit, and export stored license PDFs.",
                 "action": self.license_browser_action,
+            },
+            {
+                "id": "migrate_legacy_licenses",
+                "label": "Migrate Legacy Licenses",
+                "category": "Catalog",
+                "description": "Convert the legacy license/licensee archive into parties, contracts, and managed contract documents.",
+                "action": self.legacy_license_migration_action,
             },
             {
                 "id": "catalog_managers",
@@ -14783,6 +14827,116 @@ class App(QMainWindow):
 
     def _list_licensees(self):
         return self.catalog_service.list_licensee_choices()
+
+    def migrate_legacy_licenses_to_contracts(self):
+        if self.license_migration_service is None or self.history_manager is None:
+            QMessageBox.warning(self, "Legacy License Migration", "Open a profile first.")
+            return
+
+        summary = self.license_migration_service.inspect()
+        if summary.legacy_license_count == 0 and summary.legacy_licensee_count == 0:
+            QMessageBox.information(
+                self,
+                "Legacy License Migration",
+                "No legacy license records or legacy licensee names were found in this profile.",
+            )
+            return
+
+        if not summary.ready:
+            detail_lines = [issue.message for issue in summary.issues[:8]]
+            extra_count = max(0, len(summary.issues) - len(detail_lines))
+            if extra_count:
+                detail_lines.append(f"...and {extra_count} more issue(s).")
+            QMessageBox.warning(
+                self,
+                "Legacy License Migration Blocked",
+                "\n\n".join(
+                    [
+                        (
+                            "The migration cannot start until every legacy license row still points "
+                            "to a valid managed PDF and a valid track."
+                        ),
+                        "\n".join(detail_lines),
+                    ]
+                ),
+            )
+            return
+
+        confirm_message = "\n".join(
+            [
+                "Migrate the legacy license archive into the new party and contract model?",
+                "",
+                f"Legacy license PDFs to migrate: {summary.legacy_license_count}",
+                f"Legacy licensee names to migrate: {summary.legacy_licensee_count}",
+                f"Unused legacy licensee names to convert into parties: {summary.unused_licensee_count}",
+                "",
+                "This will:",
+                "- create or reuse Party records for legacy licensees",
+                "- create Contract records linked to the original tracks and related releases/works where found",
+                "- copy each legacy PDF into managed contract-document storage and verify its checksum",
+                "- remove the migrated legacy license rows, legacy licensee rows, and old managed license files only after verification",
+                "- capture before/after restore points so the migration can be rolled back safely",
+            ]
+        )
+        if (
+            QMessageBox.question(
+                self,
+                "Legacy License Migration",
+                confirm_message,
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            != QMessageBox.Yes
+        ):
+            return
+
+        def _worker(bundle, ctx):
+            ctx.set_status("Preparing legacy license migration...")
+            return run_snapshot_history_action(
+                history_manager=bundle.history_manager,
+                action_label="Migrate Legacy Licenses to Contracts",
+                action_type="license.migrate_legacy",
+                entity_type="License",
+                entity_id="legacy_migration",
+                payload={
+                    "legacy_license_count": summary.legacy_license_count,
+                    "legacy_licensee_count": summary.legacy_licensee_count,
+                },
+                mutation=lambda: bundle.license_migration_service.migrate_all(ctx=ctx),
+                logger=self.logger,
+            )
+
+        def _success(result):
+            self._refresh_after_history_change()
+            QMessageBox.information(
+                self,
+                "Legacy License Migration",
+                "\n".join(
+                    [
+                        "Legacy license migration completed successfully.",
+                        "",
+                        f"Migrated legacy licenses: {result.migrated_license_count}",
+                        f"Migrated legacy licensees: {result.migrated_licensee_count}",
+                        f"Created contracts: {result.created_contract_count}",
+                        f"Created contract documents: {result.created_document_count}",
+                        f"Deleted old legacy files: {result.deleted_legacy_file_count}",
+                    ]
+                ),
+            )
+
+        self._submit_background_bundle_task(
+            title="Legacy License Migration",
+            description="Migrating legacy license PDFs into structured contracts...",
+            task_fn=_worker,
+            kind="write",
+            unique_key="licenses.migrate_legacy",
+            on_success=_success,
+            on_error=lambda failure: self._show_background_task_error(
+                "Legacy License Migration",
+                failure,
+                user_message="Could not migrate the legacy license archive:",
+            ),
+        )
 
     def open_license_upload(self, preselect_track_id=None):
         dlg = LicenseUploadDialog(

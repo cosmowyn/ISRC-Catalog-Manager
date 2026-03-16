@@ -123,6 +123,7 @@ The application provides:
 - Full audit logging and backup system  
 - Import/export tools for XML metadata  
 - A built-in license management system  
+- A snapshot-protected migration path from the legacy license/licensee archive into the newer party/contract/document model  
 - A cross-platform icon factory for building distributable applications  
 
 ---
@@ -167,6 +168,7 @@ The application provides:
 - `Catalog > Rights Matrix…` stores ownership and grant records linked to works, tracks, releases, and source contracts, including exclusivity, territories, media-use scope, and control summaries.
 - `Catalog > Asset Version Registry…` tracks masters, alternates, derivatives, artwork variants, approval state, and primary deliverable designation.
 - `Catalog > Global Search and Relationships…` searches across works, tracks, releases, contracts, rights, parties, documents, and assets, then shows everything linked to the selected record.
+- `Catalog > Migrate Legacy Licenses to Contracts…` promotes the older track-level license PDF archive into Party + Contract + Contract Document records, verifies every copied PDF before cleanup, and wraps the migration in before/after restore points so it can be rolled back safely.
 
 ## GS1 Metadata Workflow
 - Open GS1 metadata from the Catalog menu, the table context menu, or directly from the bulk edit dialog.

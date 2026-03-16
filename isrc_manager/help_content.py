@@ -458,6 +458,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Licenses</strong>: browse all stored license records, preview them, download them, edit them, or delete them.</li>
           <li><strong>Manage Licensees</strong>: add, rename, and delete reusable licensee names.</li>
         </ul>
+        <p>If you are moving into the richer contract system, <strong>Catalog &gt; Migrate Legacy Licenses to Contracts…</strong> converts the legacy license archive into Party records plus Contract records with managed contract documents. The migration copies each stored PDF into the newer contract-document archive, verifies the copied file, and only then removes the legacy rows and old managed license files. Before/after restore points are captured automatically so the migration can be rolled back safely.</p>
         <p>License actions participate in snapshot-based history so the catalog and managed files remain recoverable when possible.</p>
         """,
     ),

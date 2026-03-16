@@ -26,39 +26,16 @@ from .models import HistoryEntry, SnapshotRecord
 class HistoryManager:
     """Stores history entries and applies undo/redo for supported actions."""
 
-    MANAGED_DIRECTORIES = ("licenses", "track_media")
+    MANAGED_DIRECTORIES = (
+        "licenses",
+        "track_media",
+        "release_media",
+        "contract_documents",
+        "asset_registry",
+    )
     FILE_COMPANION_SUFFIXES = (".wal", ".shm")
     SETTINGS_COALESCE_WINDOW_SECONDS = 2.0
-    DOMAIN_TABLES_DELETE_ORDER = [
-        "Licenses",
-        "CustomFieldValues",
-        "TrackArtists",
-        "Tracks",
-        "Licensees",
-        "CustomFieldDefs",
-        "Albums",
-        "Artists",
-        "ISRC_Prefix",
-        "SENA",
-        "BTW",
-        "BUMA_STEMRA",
-        "app_kv",
-    ]
-    DOMAIN_TABLES_COPY_ORDER = [
-        "Artists",
-        "Albums",
-        "Licensees",
-        "CustomFieldDefs",
-        "Tracks",
-        "TrackArtists",
-        "CustomFieldValues",
-        "Licenses",
-        "ISRC_Prefix",
-        "SENA",
-        "BTW",
-        "BUMA_STEMRA",
-        "app_kv",
-    ]
+    SNAPSHOT_EXCLUDED_TABLES = frozenset({"HistoryEntries", "HistoryHead", "HistorySnapshots"})
 
     def __init__(
         self,
@@ -964,9 +941,9 @@ class HistoryManager:
         self.conn.execute("ATTACH DATABASE ? AS snapshot_restore", (attach_path,))
         try:
             self.conn.execute("BEGIN")
-            for table_name in self.DOMAIN_TABLES_DELETE_ORDER:
+            for table_name in self._snapshot_domain_tables("main"):
                 self.conn.execute(f"DELETE FROM {table_name}")
-            for table_name in self.DOMAIN_TABLES_COPY_ORDER:
+            for table_name in self._snapshot_domain_tables("snapshot_restore"):
                 if not self._table_exists("snapshot_restore", table_name):
                     continue
                 columns = self._shared_columns(table_name)
@@ -1027,6 +1004,22 @@ class HistoryManager:
             (table_name,),
         ).fetchone()
         return bool(row)
+
+    def _snapshot_domain_tables(self, db_alias: str) -> list[str]:
+        rows = self.conn.execute(
+            f"""
+            SELECT name
+            FROM {db_alias}.sqlite_master
+            WHERE type='table'
+              AND name NOT LIKE 'sqlite_%'
+            ORDER BY name
+            """
+        ).fetchall()
+        return [
+            str(row[0])
+            for row in rows
+            if row and row[0] and str(row[0]) not in self.SNAPSHOT_EXCLUDED_TABLES
+        ]
 
     def _shared_columns(self, table_name: str) -> list[str]:
         main_cols = {

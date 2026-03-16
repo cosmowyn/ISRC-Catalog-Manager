@@ -20,6 +20,8 @@ from isrc_manager.rights import RightsService
 from isrc_manager.search import GlobalSearchService, RelationshipExplorerService
 from isrc_manager.services import (
     CatalogReadService,
+    LicenseService,
+    LegacyLicenseMigrationService,
     CustomFieldDefinitionService,
     CustomFieldValueService,
     DatabaseMaintenanceService,
@@ -45,6 +47,7 @@ class BackgroundAppServiceBundle:
     settings: QSettings
     track_service: TrackService
     release_service: ReleaseService
+    license_service: LicenseService
     catalog_reads: CatalogReadService
     custom_field_definitions: CustomFieldDefinitionService
     custom_field_values: CustomFieldValueService
@@ -56,6 +59,7 @@ class BackgroundAppServiceBundle:
     party_service: PartyService
     work_service: WorkService
     contract_service: ContractService
+    license_migration_service: LegacyLicenseMigrationService
     rights_service: RightsService
     asset_service: AssetService
     workflow_service: RepertoireWorkflowService
@@ -142,6 +146,7 @@ class BackgroundAppServiceFactory:
 
         track_service = TrackService(conn, self.data_root)
         release_service = ReleaseService(conn, self.data_root)
+        license_service = LicenseService(conn, self.data_root)
         custom_field_definitions = CustomFieldDefinitionService(conn)
         custom_field_values = CustomFieldValueService(conn, custom_field_definitions)
         catalog_reads = CatalogReadService(conn)
@@ -152,6 +157,14 @@ class BackgroundAppServiceFactory:
         party_service = PartyService(conn)
         work_service = WorkService(conn, party_service=party_service)
         contract_service = ContractService(conn, self.data_root, party_service=party_service)
+        license_migration_service = LegacyLicenseMigrationService(
+            conn,
+            license_service=license_service,
+            party_service=party_service,
+            contract_service=contract_service,
+            release_service=release_service,
+            work_service=work_service,
+        )
         rights_service = RightsService(conn)
         asset_service = AssetService(conn, self.data_root)
         workflow_service = RepertoireWorkflowService(conn)
@@ -163,6 +176,7 @@ class BackgroundAppServiceFactory:
             settings=settings,
             track_service=track_service,
             release_service=release_service,
+            license_service=license_service,
             catalog_reads=catalog_reads,
             custom_field_definitions=custom_field_definitions,
             custom_field_values=custom_field_values,
@@ -193,6 +207,7 @@ class BackgroundAppServiceFactory:
             party_service=party_service,
             work_service=work_service,
             contract_service=contract_service,
+            license_migration_service=license_migration_service,
             rights_service=rights_service,
             asset_service=asset_service,
             workflow_service=workflow_service,

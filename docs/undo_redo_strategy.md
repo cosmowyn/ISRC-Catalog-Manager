@@ -10,7 +10,7 @@ Add a complete, persistent undo/redo system for user actions in ISRC Manager, in
 - snapshot support for high-risk or high-volume operations
 - the ability to move backward and forward through history without losing prior branches
 
-This document is based on the current codebase as of March 13, 2026.
+This document is based on the current codebase as of March 16, 2026.
 
 ## Executive Summary
 
@@ -29,7 +29,7 @@ Those changes touch multiple storage layers:
 
 1. profile SQLite database
 2. `QSettings` / `settings.ini`
-3. app-managed filesystem storage, especially `DATA_DIR()/licenses`
+3. app-managed filesystem storage, especially `DATA_DIR()/licenses`, `DATA_DIR()/release_media`, `DATA_DIR()/contract_documents`, and `DATA_DIR()/asset_registry`
 4. profile `.db` files themselves during profile removal and restore
 
 Because of that, a complete undo/redo system here should **not** be implemented as a simple in-memory stack.
@@ -101,6 +101,20 @@ Primary user-facing data mutations:
   - updates `Licensees`
 - `LicenseeManagerDialog._delete`
   - deletes from `Licensees`
+
+### C2. Legacy license migration
+
+- `App.migrate_legacy_licenses_to_contracts`
+  - captures a pre-migration snapshot
+  - creates or reuses `Parties` from legacy `Licensees`
+  - creates `Contracts`
+  - creates `ContractDocuments`
+  - copies managed PDFs from `DATA_DIR()/licenses` into `DATA_DIR()/contract_documents`
+  - verifies the copied file checksums before cleanup
+  - deletes migrated rows from `Licenses`
+  - deletes migrated rows from `Licensees`
+  - deletes the old managed legacy PDF files only after verification succeeds
+  - captures a post-migration snapshot and records the action as a snapshot-backed history entry
 
 ### D. Artist / album maintenance
 
@@ -191,6 +205,7 @@ Some operations are much safer as snapshot actions:
 
 - import XML
 - manage custom columns
+- migrate legacy licenses into contracts
 - remove profile
 - restore database
 - bulk purge artists / albums
@@ -254,6 +269,23 @@ Recommended responsibilities:
   - persists entries, head pointers, and branch structure
 - `ManagedFileStore`
   - stores captured files for reversible filesystem actions
+
+## Current Implementation Notes
+
+The current implementation now includes two important pieces that were only proposed earlier:
+
+- snapshot-backed migration for the legacy license archive into the newer party/contract/document model
+- managed-directory snapshot coverage beyond the original license and track-media folders
+
+Current managed directory snapshot coverage includes:
+
+- `licenses`
+- `track_media`
+- `release_media`
+- `contract_documents`
+- `asset_registry`
+
+Current snapshot restore behavior now restores the full application domain state instead of only the older legacy tables, while still excluding the history tables themselves.
 
 ### Mutation flow
 
@@ -586,4 +618,3 @@ The undo/redo system should only be considered complete when:
 - redo does not silently discard prior history branches
 - licenses and other filesystem-backed actions restore both DB rows and files
 - tests cover core actions, grouped actions, and snapshot restore paths
-
