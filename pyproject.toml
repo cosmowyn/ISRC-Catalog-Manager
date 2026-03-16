@@ -121,11 +121,13 @@ show_error_codes = true
 [tool.coverage.run]
 source = ["isrc_manager"]
 omit = [
+  "isrc_manager/app_dialogs.py",
   "isrc_manager/assets/dialogs.py",
   "isrc_manager/contracts/dialogs.py",
   "isrc_manager/parties/dialogs.py",
   "isrc_manager/gs1_dialog.py",
   "isrc_manager/history/dialogs.py",
+  "isrc_manager/main_window_shell.py",
   "isrc_manager/rights/dialogs.py",
   "isrc_manager/releases/dialogs.py",
   "isrc_manager/search/dialogs.py",
