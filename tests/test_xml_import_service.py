@@ -226,7 +226,10 @@ class XMLImportServiceTests(unittest.TestCase):
 
         result = self.service.execute_import(file_path)
 
-        self.assertEqual((result.inserted, result.duplicate_count, result.invalid_count, result.error_count), (1, 0, 0, 0))
+        self.assertEqual(
+            (result.inserted, result.duplicate_count, result.invalid_count, result.error_count),
+            (1, 0, 0, 0),
+        )
         row = self.conn.execute(
             """
             SELECT
@@ -304,7 +307,10 @@ class XMLImportServiceTests(unittest.TestCase):
 
         result = self.service.execute_import(file_path)
 
-        self.assertEqual((result.inserted, result.duplicate_count, result.invalid_count, result.error_count), (1, 0, 0, 0))
+        self.assertEqual(
+            (result.inserted, result.duplicate_count, result.invalid_count, result.error_count),
+            (1, 0, 0, 0),
+        )
         row = self.conn.execute(
             """
             SELECT isrc, isrc_compact, track_title
@@ -338,7 +344,10 @@ class XMLImportServiceTests(unittest.TestCase):
 
         result = self.service.execute_import(file_path, create_missing_custom_fields=True)
 
-        self.assertEqual((result.inserted, result.duplicate_count, result.invalid_count, result.error_count), (1, 0, 0, 0))
+        self.assertEqual(
+            (result.inserted, result.duplicate_count, result.invalid_count, result.error_count),
+            (1, 0, 0, 0),
+        )
         field_row = self.conn.execute(
             "SELECT field_type, options FROM CustomFieldDefs WHERE name='Energy'"
         ).fetchone()

@@ -8,14 +8,13 @@ from PySide6.QtCore import QSettings
 
 from isrc_manager.services import (
     DatabaseSchemaService,
-    GS1MetadataRecord,
-    GS1ProfileDefaults,
     GS1IntegrationService,
+    GS1MetadataRecord,
     GS1MetadataRepository,
+    GS1ProfileDefaults,
     GS1SettingsService,
     TrackService,
 )
-
 
 HEADERS = [
     "GS1 Artikelcode (GTIN)",
@@ -138,7 +137,9 @@ class GS1IntegrationServiceTests(unittest.TestCase):
             GS1SettingsService(self.conn, self.settings),
             TrackService(self.conn, self.tmpdir.name),
         )
-        self.service.settings_service.set_profile_defaults(GS1ProfileDefaults(contract_number="10070050"))
+        self.service.settings_service.set_profile_defaults(
+            GS1ProfileDefaults(contract_number="10070050")
+        )
 
     def tearDown(self):
         self.settings.clear()
@@ -175,7 +176,9 @@ class GS1IntegrationServiceTests(unittest.TestCase):
             )
         )
 
-        record = self.service.build_default_metadata(1, current_profile_path="/tmp/Orbit_Label.db", window_title="Orbit Window")
+        record = self.service.build_default_metadata(
+            1, current_profile_path="/tmp/Orbit_Label.db", window_title="Orbit Window"
+        )
 
         self.assertEqual(record.contract_number, "10070050")
 
@@ -231,7 +234,9 @@ class GS1IntegrationServiceTests(unittest.TestCase):
         self.assertEqual(len(prepared), 1)
         self.assertEqual(prepared[0].metadata.product_description, "Orbit Release")
         self.assertEqual(prepared[0].source_track_ids, (1, 2))
-        self.assertEqual(prepared[0].source_track_labels, ("Orbit Release", "Orbit Reprise (Orbit Release)"))
+        self.assertEqual(
+            prepared[0].source_track_labels, ("Orbit Release", "Orbit Reprise (Orbit Release)")
+        )
 
     def test_build_metadata_groups_split_selection_into_album_groups_and_singles(self):
         groups = self.service.build_metadata_groups(
@@ -240,7 +245,10 @@ class GS1IntegrationServiceTests(unittest.TestCase):
             window_title="Orbit Window",
         )
 
-        self.assertEqual([group.display_title for group in groups], ["Orbit Release", "Solar Release", "Standalone Echo - Single"])
+        self.assertEqual(
+            [group.display_title for group in groups],
+            ["Orbit Release", "Solar Release", "Standalone Echo - Single"],
+        )
         self.assertEqual([group.track_ids for group in groups], [(1, 2), (3,), (4,)])
         self.assertEqual([group.mode for group in groups], ["album", "album", "single"])
 
@@ -266,7 +274,10 @@ class GS1IntegrationServiceTests(unittest.TestCase):
             window_title="Orbit Window",
         )
 
-        self.assertEqual([group.display_title for group in groups], ["Night Current - Single", "Silent Orbit - Single"])
+        self.assertEqual(
+            [group.display_title for group in groups],
+            ["Night Current - Single", "Silent Orbit - Single"],
+        )
         self.assertEqual([group.mode for group in groups], ["single", "single"])
         self.assertEqual([group.track_ids for group in groups], [(5,), (6,)])
 
@@ -276,7 +287,10 @@ class GS1IntegrationServiceTests(unittest.TestCase):
             window_title="Orbit Window",
         )
 
-        self.assertEqual([record.metadata.product_description for record in prepared], ["Night Current - Single", "Silent Orbit - Single"])
+        self.assertEqual(
+            [record.metadata.product_description for record in prepared],
+            ["Night Current - Single", "Silent Orbit - Single"],
+        )
         self.assertEqual(prepared[0].source_track_labels, ("Night Current",))
         self.assertEqual(prepared[1].source_track_labels, ("Silent Orbit",))
 
@@ -296,8 +310,12 @@ class GS1IntegrationServiceTests(unittest.TestCase):
         self.assertEqual(len(saved_records), 2)
         self.assertEqual(self.service.repository.fetch_by_track_id(1).brand, "Unified Label")
         self.assertEqual(self.service.repository.fetch_by_track_id(2).brand, "Unified Label")
-        self.assertEqual(self.service.repository.fetch_by_track_id(1).product_description, "Orbit Release")
-        self.assertEqual(self.service.repository.fetch_by_track_id(2).product_description, "Orbit Release")
+        self.assertEqual(
+            self.service.repository.fetch_by_track_id(1).product_description, "Orbit Release"
+        )
+        self.assertEqual(
+            self.service.repository.fetch_by_track_id(2).product_description, "Orbit Release"
+        )
 
     def test_prepare_export_plan_includes_preview_and_upc_warning_details(self):
         template_path = Path(self.tmpdir.name) / "gs1-template.xlsx"

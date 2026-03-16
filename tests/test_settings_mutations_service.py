@@ -74,15 +74,23 @@ class SettingsMutationServiceTests(unittest.TestCase):
             ("42",),
         )
         self.assertEqual(
-            self.conn.execute("SELECT value FROM app_kv WHERE key='auto_snapshot_enabled'").fetchone(),
+            self.conn.execute(
+                "SELECT value FROM app_kv WHERE key='auto_snapshot_enabled'"
+            ).fetchone(),
             ("0",),
         )
         self.assertEqual(
-            self.conn.execute("SELECT value FROM app_kv WHERE key='auto_snapshot_interval_minutes'").fetchone(),
+            self.conn.execute(
+                "SELECT value FROM app_kv WHERE key='auto_snapshot_interval_minutes'"
+            ).fetchone(),
             ("45",),
         )
-        self.assertEqual(self.conn.execute("SELECT prefix FROM ISRC_Prefix WHERE id=1").fetchone(), ("NLABC",))
-        self.assertEqual(self.conn.execute("SELECT number FROM SENA WHERE id=1").fetchone(), ("SENA-1",))
+        self.assertEqual(
+            self.conn.execute("SELECT prefix FROM ISRC_Prefix WHERE id=1").fetchone(), ("NLABC",)
+        )
+        self.assertEqual(
+            self.conn.execute("SELECT number FROM SENA WHERE id=1").fetchone(), ("SENA-1",)
+        )
         self.assertEqual(self.conn.execute("SELECT nr FROM BTW WHERE id=1").fetchone(), ("BTW-2",))
         self.assertEqual(
             self.conn.execute("SELECT relatie_nummer, ipi FROM BUMA_STEMRA WHERE id=1").fetchone(),

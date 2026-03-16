@@ -6,6 +6,8 @@ from pathlib import Path
 
 from isrc_manager.constants import DEFAULT_WINDOW_TITLE
 
+from .gs1_contracts import GS1ContractImportService
+from .gs1_excel import GS1ExcelExportService
 from .gs1_models import (
     GS1BatchValidationError,
     GS1BatchValidationIssue,
@@ -19,11 +21,9 @@ from .gs1_models import (
     GS1TemplateVerificationError,
     GS1ValidationError,
 )
-from .gs1_contracts import GS1ContractImportService
 from .gs1_repository import GS1MetadataRepository
 from .gs1_settings import GS1SettingsService
 from .gs1_template import GS1TemplateVerificationService
-from .gs1_excel import GS1ExcelExportService
 from .gs1_validation import GS1ValidationService
 
 
@@ -46,7 +46,9 @@ class GS1IntegrationService:
         self.track_service = track_service
         self.validation_service = validation_service or GS1ValidationService()
         self.contract_import_service = contract_import_service or GS1ContractImportService()
-        self.template_verification_service = template_verification_service or GS1TemplateVerificationService()
+        self.template_verification_service = (
+            template_verification_service or GS1TemplateVerificationService()
+        )
         self.excel_export_service = excel_export_service or GS1ExcelExportService()
 
     def load_or_create_metadata(
@@ -59,8 +61,18 @@ class GS1IntegrationService:
         context = self.build_context(track_id, current_profile_path=current_profile_path)
         existing = self.repository.fetch_by_track_id(track_id)
         if existing is not None:
-            return self._apply_legacy_default_repairs(existing, context, window_title=window_title), context, True
-        return self.build_default_metadata(track_id, current_profile_path=current_profile_path, window_title=window_title), context, False
+            return (
+                self._apply_legacy_default_repairs(existing, context, window_title=window_title),
+                context,
+                True,
+            )
+        return (
+            self.build_default_metadata(
+                track_id, current_profile_path=current_profile_path, window_title=window_title
+            ),
+            context,
+            False,
+        )
 
     def build_context(self, track_id: int, *, current_profile_path: str = "") -> GS1RecordContext:
         if int(track_id) <= 0:
@@ -105,7 +117,12 @@ class GS1IntegrationService:
             brand = "UNBRANDED"
 
         subbrand = defaults.subbrand.strip()
-        if not subbrand and defaults.brand.strip() and profile_label and profile_label != defaults.brand.strip():
+        if (
+            not subbrand
+            and defaults.brand.strip()
+            and profile_label
+            and profile_label != defaults.brand.strip()
+        ):
             subbrand = profile_label
 
         return GS1MetadataRecord(
@@ -166,7 +183,9 @@ class GS1IntegrationService:
     def validate_metadata(self, record: GS1MetadataRecord, *, for_export: bool = False):
         return self.validation_service.validate(record, for_export=for_export)
 
-    def normalize_group_record(self, group: GS1MetadataGroup, record: GS1MetadataRecord) -> GS1MetadataRecord:
+    def normalize_group_record(
+        self, group: GS1MetadataGroup, record: GS1MetadataRecord
+    ) -> GS1MetadataRecord:
         return self._normalized_group_record(group, record)
 
     def validate_group_metadata(
@@ -176,10 +195,14 @@ class GS1IntegrationService:
         *,
         for_export: bool = False,
     ):
-        return self.validation_service.validate(self._normalized_group_record(group, record), for_export=for_export)
+        return self.validation_service.validate(
+            self._normalized_group_record(group, record), for_export=for_export
+        )
 
     def load_template_profile(self, template_path: str | None = None) -> GS1TemplateProfile:
-        resolved_path = str(template_path or "").strip() or self.settings_service.load_template_path()
+        resolved_path = (
+            str(template_path or "").strip() or self.settings_service.load_template_path()
+        )
         if not resolved_path:
             raise GS1TemplateVerificationError(
                 "No GS1 workbook is configured yet. Choose the official workbook from your GS1 portal before exporting."
@@ -254,8 +277,13 @@ class GS1IntegrationService:
                         metadata=export_record,
                         context=context,
                         source_track_ids=group.track_ids,
-                        source_track_labels=tuple(self._source_track_label(entry_context) for entry_context in group.contexts),
-                        source_upc_values=tuple(str(entry_context.upc or "").strip() for entry_context in group.contexts),
+                        source_track_labels=tuple(
+                            self._source_track_label(entry_context)
+                            for entry_context in group.contexts
+                        ),
+                        source_upc_values=tuple(
+                            str(entry_context.upc or "").strip() for entry_context in group.contexts
+                        ),
                     )
                 )
                 continue
@@ -369,7 +397,6 @@ class GS1IntegrationService:
         current_brand_key = self._normalize_identity_value(record.brand)
         current_subbrand_key = self._normalize_identity_value(record.subbrand)
         default_brand_key = self._normalize_identity_value(default_brand)
-        default_subbrand_key = self._normalize_identity_value(default_subbrand)
 
         repaired = record.copy()
         if default_contract_number and not repaired.contract_number.strip():
@@ -441,7 +468,8 @@ class GS1IntegrationService:
         album_groups = sum(
             1
             for record in prepared
-            if len(record.source_track_ids) > 1 or GS1IntegrationService._effective_album_title(record.context.album_title)
+            if len(record.source_track_ids) > 1
+            or GS1IntegrationService._effective_album_title(record.context.album_title)
         )
         single_groups = sum(
             1
@@ -475,7 +503,9 @@ class GS1IntegrationService:
             f"This export will write {len(prepared_records)} GS1 product row(s) from {len(track_ids)} selected track(s) {destination_text}.",
         ]
         if len(sheet_names) == 1:
-            lines.append("The GS1 request/code field will be filled with 1, 2, 3, ... in export order.")
+            lines.append(
+                "The GS1 request/code field will be filled with 1, 2, 3, ... in export order."
+            )
         else:
             lines.append(
                 "The GS1 request/code field restarts at 1 on each contract sheet, so every selected contract receives its own 1, 2, 3, ... sequence."
@@ -489,7 +519,11 @@ class GS1IntegrationService:
             for record in prepared_records
             if self._effective_album_title(record.context.album_title)
         ]
-        single_count = sum(1 for record in prepared_records if not self._effective_album_title(record.context.album_title))
+        single_count = sum(
+            1
+            for record in prepared_records
+            if not self._effective_album_title(record.context.album_title)
+        )
         if album_titles:
             lines.insert(
                 1,
@@ -524,7 +558,9 @@ class GS1IntegrationService:
         unique_upcs: list[str] = []
         seen_upcs: set[str] = set()
         for prepared in prepared_records:
-            source_labels = prepared.source_track_labels or (GS1IntegrationService._source_track_label(prepared.context),)
+            source_labels = prepared.source_track_labels or (
+                GS1IntegrationService._source_track_label(prepared.context),
+            )
             source_upcs = prepared.source_upc_values or (str(prepared.context.upc or "").strip(),)
             for index, track_label in enumerate(source_labels):
                 upc_value = str(source_upcs[index] if index < len(source_upcs) else "").strip()
@@ -548,7 +584,9 @@ class GS1IntegrationService:
             )
         return warnings
 
-    def _normalized_group_record(self, group: GS1MetadataGroup, record: GS1MetadataRecord) -> GS1MetadataRecord:
+    def _normalized_group_record(
+        self, group: GS1MetadataGroup, record: GS1MetadataRecord
+    ) -> GS1MetadataRecord:
         normalized = record.copy()
         normalized.track_id = int(group.representative_context.track_id)
         normalized.product_description = group.display_title

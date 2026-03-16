@@ -36,7 +36,9 @@ class GS1ContractImportService:
                 reader = csv.DictReader(handle)
                 fieldnames = [str(name or "").strip() for name in (reader.fieldnames or [])]
                 if not any(fieldnames):
-                    raise GS1ContractImportError("The selected file does not contain recognizable CSV headers.")
+                    raise GS1ContractImportError(
+                        "The selected file does not contain recognizable CSV headers."
+                    )
                 header_map = self._resolve_header_map(fieldnames)
                 contracts = [
                     entry
@@ -44,9 +46,13 @@ class GS1ContractImportService:
                     if (entry := self._entry_from_row(row, header_map)) is not None
                 ]
         except UnicodeDecodeError as exc:
-            raise GS1ContractImportError("The selected GS1 contracts CSV could not be decoded as text.") from exc
+            raise GS1ContractImportError(
+                "The selected GS1 contracts CSV could not be decoded as text."
+            ) from exc
         except OSError as exc:
-            raise GS1ContractImportError(f"The selected GS1 contracts CSV could not be read:\n{exc}") from exc
+            raise GS1ContractImportError(
+                f"The selected GS1 contracts CSV could not be read:\n{exc}"
+            ) from exc
 
         if not contracts:
             raise GS1ContractImportError(
@@ -79,7 +85,9 @@ class GS1ContractImportService:
             )
         return header_map
 
-    def _entry_from_row(self, row: dict[str, object], header_map: dict[str, str]) -> GS1ContractEntry | None:
+    def _entry_from_row(
+        self, row: dict[str, object], header_map: dict[str, str]
+    ) -> GS1ContractEntry | None:
         contract_number = self._value(row, header_map, "contract_number")
         if not contract_number:
             return None

@@ -1,6 +1,12 @@
 import unittest
 
-from PySide6.QtWidgets import QApplication
+try:
+    from PySide6.QtWidgets import QApplication
+except ImportError as exc:  # pragma: no cover - environment-specific fallback
+    QApplication = None
+    QT_IMPORT_ERROR = exc
+else:
+    QT_IMPORT_ERROR = None
 
 from isrc_manager.exchange.dialogs import ExchangeImportDialog
 from isrc_manager.exchange.models import ExchangeInspection
@@ -23,6 +29,8 @@ class _FakeSettings:
 class ExchangeImportDialogTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        if QApplication is None:
+            raise unittest.SkipTest(f"PySide6 QtWidgets unavailable: {QT_IMPORT_ERROR}")
         cls.app = QApplication.instance() or QApplication([])
 
     def test_package_mode_can_default_to_create(self):

@@ -11,6 +11,10 @@ dist/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.coverage
+.mypy_cache/
+.ruff_cache/
+coverage.xml
 
 # macOS junk
 .DS_Store

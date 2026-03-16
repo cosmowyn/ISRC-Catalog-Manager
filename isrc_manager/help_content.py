@@ -18,7 +18,28 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         chapter_id="overview",
         title="Overview",
         summary="What the app does, how the workspace is organized, and the main workflows you will use every day.",
-        keywords=("overview", "introduction", "menus", "workflow", "catalog", "tracks", "album entry", "licenses", "gs1", "bulk edit", "action ribbon", "quick actions", "releases", "audio tags", "csv", "json", "xlsx", "quality dashboard", "background tasks", "threading"),
+        keywords=(
+            "overview",
+            "introduction",
+            "menus",
+            "workflow",
+            "catalog",
+            "tracks",
+            "album entry",
+            "licenses",
+            "gs1",
+            "bulk edit",
+            "action ribbon",
+            "quick actions",
+            "releases",
+            "audio tags",
+            "csv",
+            "json",
+            "xlsx",
+            "quality dashboard",
+            "background tasks",
+            "threading",
+        ),
         content_html="""
         <p><strong>ISRC Catalog Manager</strong> is a local-first desktop application for managing track metadata, first-class releases, optional or generated ISRC values, licensing files, GS1 workbook metadata, custom metadata columns, backups, snapshots, audio tag workflows, exchange formats, and quality checks from one workspace.</p>
         <p>The app is organized around a few core ideas:</p>
@@ -42,7 +63,16 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         chapter_id="main-window",
         title="Main Window",
         summary="The main application window, dock layout, top toolbar, and general navigation.",
-        keywords=("main window", "toolbar", "profiles", "dock", "layout", "window", "action ribbon", "quick actions"),
+        keywords=(
+            "main window",
+            "toolbar",
+            "profiles",
+            "dock",
+            "layout",
+            "window",
+            "action ribbon",
+            "quick actions",
+        ),
         content_html="""
         <p>The main window is built from dockable panes. By default, the left side contains the <strong>Add Data</strong> form and the right side contains the <strong>Catalog Table</strong>.</p>
         <ul>
@@ -58,7 +88,15 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         chapter_id="profiles",
         title="Profiles and Databases",
         summary="How profile databases work, how to create, remove, browse, restore, and switch between them.",
-        keywords=("profiles", "database", "workspace", "browse", "create profile", "remove profile", "switch"),
+        keywords=(
+            "profiles",
+            "database",
+            "workspace",
+            "browse",
+            "create profile",
+            "remove profile",
+            "switch",
+        ),
         content_html="""
         <p>A profile is a single SQLite catalog database. Each profile keeps its own tracks, settings stored in the profile database, history, and catalog metadata.</p>
         <ul>
@@ -74,7 +112,16 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         chapter_id="background-tasks",
         title="Background Tasks",
         summary="How long-running jobs stay responsive, how progress works, and what the app guarantees for SQLite safety.",
-        keywords=("background tasks", "threading", "progress", "cancel", "sqlite", "wal", "imports", "exports"),
+        keywords=(
+            "background tasks",
+            "threading",
+            "progress",
+            "cancel",
+            "sqlite",
+            "wal",
+            "imports",
+            "exports",
+        ),
         content_html="""
         <p>The app now runs heavier workflows outside the UI thread so long jobs do not freeze the main workspace.</p>
         <ul>
@@ -92,7 +139,17 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         chapter_id="add-data",
         title="Add Data Panel",
         summary="How to create a track, fill in standard metadata, generate ISRC values, and attach managed media.",
-        keywords=("add data", "add track", "save track", "audio file", "album art", "release date", "isrc", "prefix", "dsp"),
+        keywords=(
+            "add data",
+            "add track",
+            "save track",
+            "audio file",
+            "album art",
+            "release date",
+            "isrc",
+            "prefix",
+            "dsp",
+        ),
         content_html="""
         <p>The Add Data panel is the primary entry form for new tracks. It is grouped into sections:</p>
         <ul>
@@ -108,7 +165,14 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         chapter_id="album-entry",
         title="Add Album Dialog",
         summary="How to enter shared album metadata once and create multiple track rows from one dialog.",
-        keywords=("add album", "album dialog", "multi track", "album entry", "track sections", "shared metadata"),
+        keywords=(
+            "add album",
+            "album dialog",
+            "multi track",
+            "album entry",
+            "track sections",
+            "shared metadata",
+        ),
         content_html="""
         <p>The <strong>Add Album</strong> dialog is designed for building a full release in one pass. It starts with shared album metadata at the top, followed by a tabbed track workspace so each track gets its own dedicated page.</p>
         <ul>
@@ -125,7 +189,18 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         chapter_id="catalog-table",
         title="Catalog Table",
         summary="Search, preview, sort, hide columns, and work with existing tracks from the main table view.",
-        keywords=("catalog table", "search", "columns", "preview", "double click", "table", "records", "bulk edit", "context menu", "multi selection"),
+        keywords=(
+            "catalog table",
+            "search",
+            "columns",
+            "preview",
+            "double click",
+            "table",
+            "records",
+            "bulk edit",
+            "context menu",
+            "multi selection",
+        ),
         content_html="""
         <p>The Catalog Table shows all saved track rows. It supports sorting, filtering, column visibility, header layout persistence, and media preview shortcuts.</p>
         <ul>
@@ -142,7 +217,15 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         chapter_id="custom-columns",
         title="Custom Columns",
         summary="Create, rename, reorder, remove, and populate custom metadata fields beyond the default track schema.",
-        keywords=("custom columns", "custom fields", "metadata", "dropdown", "checkbox", "date", "columns"),
+        keywords=(
+            "custom columns",
+            "custom fields",
+            "metadata",
+            "dropdown",
+            "checkbox",
+            "date",
+            "columns",
+        ),
         content_html="""
         <p>Custom columns let you extend the catalog beyond the built-in track fields. Supported field types include text, dropdown, checkbox, and date-based custom values.</p>
         <ul>
@@ -157,7 +240,18 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         chapter_id="edit-entry",
         title="Edit Entry",
         summary="How the full track editor works for existing rows, including standard metadata, media replacement, and validation.",
-        keywords=("edit entry", "track editor", "edit track", "iswc", "upc", "catalog number", "buma", "bulk edit", "gs1 metadata", "release sync"),
+        keywords=(
+            "edit entry",
+            "track editor",
+            "edit track",
+            "iswc",
+            "upc",
+            "catalog number",
+            "buma",
+            "bulk edit",
+            "gs1 metadata",
+            "release sync",
+        ),
         content_html="""
         <p>The Edit Entry dialog opens the full editor for an existing track. When multiple table rows are selected, the same dialog switches into <strong>bulk edit</strong> mode and shows mixed-value placeholders where the selected records do not match.</p>
         <ul>
@@ -175,7 +269,18 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         chapter_id="audio-tags",
         title="Audio Tags",
         summary="Import embedded tags from supported audio files and write catalog metadata back to exported copies.",
-        keywords=("audio tags", "id3", "flac", "vorbis", "m4a", "mp4", "wav", "aiff", "import tags", "write tags"),
+        keywords=(
+            "audio tags",
+            "id3",
+            "flac",
+            "vorbis",
+            "m4a",
+            "mp4",
+            "wav",
+            "aiff",
+            "import tags",
+            "write tags",
+        ),
         content_html="""
         <p>The app can read and write embedded audio metadata so the catalog and exported audio files stay aligned.</p>
         <ul>
@@ -192,7 +297,15 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         chapter_id="releases",
         title="Releases",
         summary="How first-class release records work, how they connect to tracks, and how to browse or edit them.",
-        keywords=("releases", "release browser", "product", "upc", "catalog number", "disc number", "track number"),
+        keywords=(
+            "releases",
+            "release browser",
+            "product",
+            "upc",
+            "catalog number",
+            "disc number",
+            "track number",
+        ),
         content_html="""
         <p>The app now stores releases as first-class records instead of treating album-style metadata only as repeated track fields. A release can store product-level metadata and a separate ordered track list.</p>
         <ul>
@@ -209,7 +322,17 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         chapter_id="exchange-formats",
         title="Exchange Formats",
         summary="CSV, XLSX, JSON, XML, and packaged export/import workflows.",
-        keywords=("csv", "xlsx", "json", "xml", "package", "zip", "column mapping", "dry run", "import report"),
+        keywords=(
+            "csv",
+            "xlsx",
+            "json",
+            "xml",
+            "package",
+            "zip",
+            "column mapping",
+            "dry run",
+            "import report",
+        ),
         content_html="""
         <p>Beyond XML and the GS1 workbook workflow, the app now supports broader catalog exchange formats for local-first sharing and archive workflows.</p>
         <ul>
@@ -229,7 +352,15 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         chapter_id="quality-dashboard",
         title="Quality Dashboard",
         summary="Scan the profile for metadata, release, media, and integrity issues, then export or fix them.",
-        keywords=("quality dashboard", "issues", "validation", "duplicates", "broken media", "fixes", "export readiness"),
+        keywords=(
+            "quality dashboard",
+            "issues",
+            "validation",
+            "duplicates",
+            "broken media",
+            "fixes",
+            "export readiness",
+        ),
         content_html="""
         <p>The <strong>Data Quality Dashboard</strong> scans the active profile for actionable issues and groups them by severity and rule type.</p>
         <ul>
@@ -247,7 +378,15 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         chapter_id="gs1-metadata",
         title="GS1 Metadata",
         summary="How GS1 metadata editing works for single tracks, grouped releases, and official workbook export.",
-        keywords=("gs1", "gs1 metadata", "workbook", "template", "export", "album groups", "official workbook"),
+        keywords=(
+            "gs1",
+            "gs1 metadata",
+            "workbook",
+            "template",
+            "export",
+            "album groups",
+            "official workbook",
+        ),
         content_html="""
         <p>The GS1 Metadata dialog can be opened for one track or for a selected batch of tracks. The dialog groups the current selection into one or more final GS1 product rows, depending on the release context.</p>
         <ul>
@@ -303,7 +442,14 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         chapter_id="settings",
         title="Application Settings",
         summary="The consolidated settings dialog for application identity, registration values, snapshots, and theme configuration.",
-        keywords=("settings", "application settings", "window title", "icon", "isrc prefix", "snapshot interval"),
+        keywords=(
+            "settings",
+            "application settings",
+            "window title",
+            "icon",
+            "isrc prefix",
+            "snapshot interval",
+        ),
         content_html="""
         <p>The Application Settings dialog combines the app-level and profile-aware settings that used to live in separate dialogs.</p>
         <ul>
@@ -450,9 +596,7 @@ def render_help_html(app_name: str, version_text: str = "") -> str:
             f"<a href='#{escape(chapter.chapter_id)}'>{escape(chapter.title)}</a>"
             for chapter in keyword_map[keyword]
         )
-        keyword_rows.append(
-            f"<tr><th>{escape(keyword)}</th><td>{links}</td></tr>"
-        )
+        keyword_rows.append(f"<tr><th>{escape(keyword)}</th><td>{links}</td></tr>")
 
     version_line = f"<p class='version'>Version {escape(version_text)}</p>" if version_text else ""
     return f"""<!DOCTYPE html>

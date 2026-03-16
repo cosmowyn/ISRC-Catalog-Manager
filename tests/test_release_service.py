@@ -23,7 +23,15 @@ class ReleaseServiceTests(unittest.TestCase):
         self.conn.close()
         self.temp_dir.cleanup()
 
-    def _create_track(self, *, isrc: str, title: str, album: str, upc: str | None = None, catalog: str | None = None) -> int:
+    def _create_track(
+        self,
+        *,
+        isrc: str,
+        title: str,
+        album: str,
+        upc: str | None = None,
+        catalog: str | None = None,
+    ) -> int:
         return self.track_service.create_track(
             TrackCreatePayload(
                 isrc=isrc,
@@ -41,8 +49,12 @@ class ReleaseServiceTests(unittest.TestCase):
         )
 
     def test_create_release_persists_metadata_and_track_order(self):
-        track_a = self._create_track(isrc="NL-ABC-26-00001", title="Track A", album="Release Album", upc="036000291452")
-        track_b = self._create_track(isrc="NL-ABC-26-00002", title="Track B", album="Release Album", upc="036000291452")
+        track_a = self._create_track(
+            isrc="NL-ABC-26-00001", title="Track A", album="Release Album", upc="036000291452"
+        )
+        track_b = self._create_track(
+            isrc="NL-ABC-26-00002", title="Track B", album="Release Album", upc="036000291452"
+        )
 
         release_id = self.release_service.create_release(
             ReleasePayload(
@@ -54,8 +66,12 @@ class ReleaseServiceTests(unittest.TestCase):
                 catalog_number="CAT-900",
                 upc="036000291452",
                 placements=[
-                    ReleaseTrackPlacement(track_id=track_a, disc_number=1, track_number=1, sequence_number=1),
-                    ReleaseTrackPlacement(track_id=track_b, disc_number=1, track_number=2, sequence_number=2),
+                    ReleaseTrackPlacement(
+                        track_id=track_a, disc_number=1, track_number=1, sequence_number=1
+                    ),
+                    ReleaseTrackPlacement(
+                        track_id=track_b, disc_number=1, track_number=2, sequence_number=2
+                    ),
                 ],
             )
         )
@@ -77,7 +93,9 @@ class ReleaseServiceTests(unittest.TestCase):
             ReleasePayload(
                 title="Release Album",
                 primary_artist="Release Artist",
-                placements=[ReleaseTrackPlacement(track_id=track_a, track_number=1, sequence_number=1)],
+                placements=[
+                    ReleaseTrackPlacement(track_id=track_a, track_number=1, sequence_number=1)
+                ],
             )
         )
         added = self.release_service.add_tracks_to_release(release_id, [track_b, track_c])
@@ -95,8 +113,12 @@ class ReleaseServiceTests(unittest.TestCase):
                 title="Release Album",
                 primary_artist="Release Artist",
                 placements=[
-                    ReleaseTrackPlacement(track_id=track_a, disc_number=1, track_number=1, sequence_number=1),
-                    ReleaseTrackPlacement(track_id=track_b, disc_number=1, track_number=1, sequence_number=2),
+                    ReleaseTrackPlacement(
+                        track_id=track_a, disc_number=1, track_number=1, sequence_number=1
+                    ),
+                    ReleaseTrackPlacement(
+                        track_id=track_b, disc_number=1, track_number=1, sequence_number=2
+                    ),
                 ],
             )
         )
@@ -125,7 +147,9 @@ class ReleaseServiceTests(unittest.TestCase):
             )
         )
 
-        self.assertTrue(any(issue.field_name == "upc" and issue.severity == "warning" for issue in issues))
+        self.assertTrue(
+            any(issue.field_name == "upc" and issue.severity == "warning" for issue in issues)
+        )
 
         second_release = self.release_service.create_release(
             ReleasePayload(
@@ -153,7 +177,9 @@ class ReleaseServiceTests(unittest.TestCase):
             )
         )
 
-        self.assertFalse(any(issue.field_name == "upc" and issue.severity == "warning" for issue in issues))
+        self.assertFalse(
+            any(issue.field_name == "upc" and issue.severity == "warning" for issue in issues)
+        )
 
     def test_schema_migration_allows_duplicate_upc_across_inferred_releases(self):
         conn = sqlite3.connect(":memory:")

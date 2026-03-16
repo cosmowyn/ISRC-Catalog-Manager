@@ -8,7 +8,6 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-
 SQLITE_TIMEOUT_SECONDS = 30.0
 SQLITE_BUSY_TIMEOUT_MS = 30_000
 

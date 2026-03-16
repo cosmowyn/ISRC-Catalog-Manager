@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
-
 MIXED_VALUE = object()
 
 
@@ -30,4 +29,4 @@ def should_apply_bulk_change(
         return False
     if mixed:
         return True
-    return final_value != initial_value
+    return bool(final_value != initial_value)

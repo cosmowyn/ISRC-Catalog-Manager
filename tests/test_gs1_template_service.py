@@ -6,8 +6,11 @@ from openpyxl import Workbook
 from openpyxl.worksheet.datavalidation import DataValidation
 
 from isrc_manager.services import GS1TemplateVerificationError, GS1TemplateVerificationService
-from isrc_manager.services.gs1_mapping import COMMON_MARKET_CHOICES, localize_export_value, resolve_header_row
-
+from isrc_manager.services.gs1_mapping import (
+    COMMON_MARKET_CHOICES,
+    localize_export_value,
+    resolve_header_row,
+)
 
 HEADERS = [
     "GS1 Artikelcode (GTIN)",
@@ -94,8 +97,12 @@ class GS1HeaderMappingTests(unittest.TestCase):
         self.assertIn("Niet EU", COMMON_MARKET_CHOICES)
 
     def test_localize_export_value_handles_non_country_specific_target_markets(self):
-        self.assertEqual(localize_export_value("target_market", "Global Market", "nl"), "Global Market")
-        self.assertEqual(localize_export_value("target_market", "European Union", "nl"), "Europese Unie")
+        self.assertEqual(
+            localize_export_value("target_market", "Global Market", "nl"), "Global Market"
+        )
+        self.assertEqual(
+            localize_export_value("target_market", "European Union", "nl"), "Europese Unie"
+        )
         self.assertEqual(localize_export_value("target_market", "Non-EU", "nl"), "Niet EU")
         self.assertEqual(
             localize_export_value("target_market", "Developing Countries Support", "nl"),

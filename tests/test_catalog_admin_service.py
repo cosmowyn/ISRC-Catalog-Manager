@@ -58,9 +58,7 @@ def make_catalog_conn():
     conn.execute(
         "INSERT INTO Tracks(id, track_title, main_artist_id, album_id) VALUES (1, 'Song A', 1, 1)"
     )
-    conn.execute(
-        "INSERT INTO TrackArtists(track_id, artist_id, role) VALUES (1, 2, 'additional')"
-    )
+    conn.execute("INSERT INTO TrackArtists(track_id, artist_id, role) VALUES (1, 2, 'additional')")
     conn.executemany(
         "INSERT INTO Licensees(id, name) VALUES (?, ?)",
         [
@@ -87,8 +85,12 @@ class CatalogAdminServiceTests(unittest.TestCase):
         artists = {artist.name: artist for artist in self.service.list_artists_with_usage()}
         albums = {album.title: album for album in self.service.list_albums_with_usage()}
 
-        self.assertEqual((artists["Main Artist"].main_uses, artists["Main Artist"].extra_uses), (1, 0))
-        self.assertEqual((artists["Featured Artist"].main_uses, artists["Featured Artist"].extra_uses), (0, 1))
+        self.assertEqual(
+            (artists["Main Artist"].main_uses, artists["Main Artist"].extra_uses), (1, 0)
+        )
+        self.assertEqual(
+            (artists["Featured Artist"].main_uses, artists["Featured Artist"].extra_uses), (0, 1)
+        )
         self.assertEqual(artists["Unused Artist"].total_uses, 0)
         self.assertEqual(albums["Used Album"].uses, 1)
         self.assertEqual(albums["Unused Album"].uses, 0)

@@ -2,8 +2,16 @@ import threading
 import time
 import unittest
 
-from PySide6.QtCore import QEventLoop, QTimer
-from PySide6.QtWidgets import QApplication
+try:
+    from PySide6.QtCore import QEventLoop, QTimer
+    from PySide6.QtWidgets import QApplication
+except ImportError as exc:  # pragma: no cover - environment-specific fallback
+    QApplication = None
+    QEventLoop = None
+    QTimer = None
+    QT_IMPORT_ERROR = exc
+else:
+    QT_IMPORT_ERROR = None
 
 from isrc_manager.tasks.manager import BackgroundTaskManager
 
@@ -11,6 +19,8 @@ from isrc_manager.tasks.manager import BackgroundTaskManager
 class BackgroundTaskManagerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        if QApplication is None:
+            raise unittest.SkipTest(f"PySide6 QtWidgets unavailable: {QT_IMPORT_ERROR}")
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):

@@ -37,7 +37,9 @@ class ProfileWorkflowService:
         choices = [ProfileChoice(label=Path(path).name, path=path) for path in profiles]
         if current_db_path and current_db_path not in profiles:
             choices.append(
-                ProfileChoice(label=f"{Path(current_db_path).name} (external)", path=current_db_path)
+                ProfileChoice(
+                    label=f"{Path(current_db_path).name} (external)", path=current_db_path
+                )
             )
         return choices
 
@@ -47,16 +49,23 @@ class ProfileWorkflowService:
             raise FileExistsError(path)
         return path
 
-    def delete_profile(self, path: str | Path, current_db_path: str | None = None) -> ProfileRemovalResult:
+    def delete_profile(
+        self, path: str | Path, current_db_path: str | None = None
+    ) -> ProfileRemovalResult:
         profile_path = str(Path(path))
-        deleting_current = bool(current_db_path) and str(Path(current_db_path)) == profile_path
+        current_path = str(Path(current_db_path)) if current_db_path else None
+        deleting_current = current_path == profile_path
 
         self.profile_store.delete_profile(profile_path)
 
         fallback_path = None
         if deleting_current:
             remaining_profiles = self.profile_store.list_profiles()
-            fallback_path = remaining_profiles[0] if remaining_profiles else str(self.database_dir / "library.db")
+            fallback_path = (
+                remaining_profiles[0]
+                if remaining_profiles
+                else str(self.database_dir / "library.db")
+            )
 
         return ProfileRemovalResult(
             deleted_path=profile_path,

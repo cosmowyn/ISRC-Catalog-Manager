@@ -21,7 +21,9 @@ class DatabaseSchemaServiceTests(unittest.TestCase):
 
         tables = {
             row[0]
-            for row in self.conn.execute("SELECT name FROM sqlite_master WHERE type IN ('table', 'view')").fetchall()
+            for row in self.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type IN ('table', 'view')"
+            ).fetchall()
         }
         value_columns = {
             row[1] for row in self.conn.execute("PRAGMA table_info(CustomFieldValues)").fetchall()
@@ -42,7 +44,10 @@ class DatabaseSchemaServiceTests(unittest.TestCase):
             row[1] for row in self.conn.execute("PRAGMA index_list(GS1Metadata)").fetchall()
         }
         triggers = {
-            row[0] for row in self.conn.execute("SELECT name FROM sqlite_master WHERE type='trigger'").fetchall()
+            row[0]
+            for row in self.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='trigger'"
+            ).fetchall()
         }
 
         self.assertEqual(self.service.get_db_version(), SCHEMA_TARGET)
@@ -221,9 +226,7 @@ class DatabaseSchemaServiceTests(unittest.TestCase):
             """
         )
 
-        rows = self.conn.execute(
-            "SELECT isrc, isrc_compact FROM Tracks ORDER BY id"
-        ).fetchall()
+        rows = self.conn.execute("SELECT isrc, isrc_compact FROM Tracks ORDER BY id").fetchall()
         self.assertEqual(rows, [("", ""), ("", "")])
 
     def test_migrate_13_to_14_reconciles_leftover_promoted_custom_fields(self):
@@ -486,12 +489,8 @@ class DatabaseSchemaServiceTests(unittest.TestCase):
 
             service.init_db()
 
-            track_columns = {
-                row[1] for row in conn.execute("PRAGMA table_info(Tracks)").fetchall()
-            }
-            track_indexes = {
-                row[1] for row in conn.execute("PRAGMA index_list(Tracks)").fetchall()
-            }
+            track_columns = {row[1] for row in conn.execute("PRAGMA table_info(Tracks)").fetchall()}
+            track_indexes = {row[1] for row in conn.execute("PRAGMA index_list(Tracks)").fetchall()}
             self.assertTrue(
                 {
                     "db_entry_date",

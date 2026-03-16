@@ -118,16 +118,8 @@ def standard_field_spec_for_label(label: str) -> StandardFieldSpec | None:
 
 
 def standard_media_specs_by_label() -> dict[str, StandardFieldSpec]:
-    return {
-        spec.label: spec
-        for spec in STANDARD_FIELD_SPECS
-        if spec.media_key is not None
-    }
+    return {spec.label: spec for spec in STANDARD_FIELD_SPECS if spec.media_key is not None}
 
 
 def standard_media_specs_by_key() -> dict[str, StandardFieldSpec]:
-    return {
-        spec.media_key: spec
-        for spec in STANDARD_FIELD_SPECS
-        if spec.media_key is not None
-    }
+    return {spec.media_key: spec for spec in STANDARD_FIELD_SPECS if spec.media_key is not None}

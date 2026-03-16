@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -13,7 +12,6 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QVBoxLayout,
 )
-
 
 TAG_POLICY_CHOICES = (
     ("merge_blanks", "Merge blanks only"),

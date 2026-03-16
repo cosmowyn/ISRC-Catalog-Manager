@@ -23,6 +23,12 @@ dependencies = [
 build = [
   "pyinstaller==6.15.0",
 ]
+dev = [
+  "black==25.1.0",
+  "coverage[toml]==7.10.6",
+  "mypy==1.17.1",
+  "ruff==0.13.2",
+]
 
 [project.gui-scripts]
 isrc-manager = "ISRC_manager:main"
@@ -39,4 +45,89 @@ packages = [
   "isrc_manager.releases",
   "isrc_manager.services",
   "isrc_manager.tags",
+  "isrc_manager.tasks",
 ]
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+extend-exclude = '''
+(
+  ^/ISRC_manager\.py
+| ^/icon_factory\.py
+| ^/demo/
+| ^/shibokensupport/
+| ^/signature_bootstrap\.py
+| ^/pyscript$
+)
+'''
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = [
+  "ISRC_manager.py",
+  "icon_factory.py",
+  "demo",
+  "shibokensupport",
+  "signature_bootstrap.py",
+  "pyscript",
+]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.mypy]
+python_version = "3.10"
+files = [
+  "isrc_manager/constants.py",
+  "isrc_manager/domain/codes.py",
+  "isrc_manager/domain/standard_fields.py",
+  "isrc_manager/domain/timecode.py",
+  "isrc_manager/exchange/models.py",
+  "isrc_manager/quality/models.py",
+  "isrc_manager/releases/models.py",
+  "isrc_manager/services/bulk_edit.py",
+  "isrc_manager/services/catalog_admin.py",
+  "isrc_manager/services/catalog_reads.py",
+  "isrc_manager/services/database_admin.py",
+  "isrc_manager/services/db_access.py",
+  "isrc_manager/services/gs1_repository.py",
+  "isrc_manager/services/gs1_settings.py",
+  "isrc_manager/services/gs1_validation.py",
+  "isrc_manager/services/profiles.py",
+  "isrc_manager/services/session.py",
+  "isrc_manager/services/settings_mutations.py",
+  "isrc_manager/services/settings_reads.py",
+  "isrc_manager/services/sqlite_utils.py",
+  "isrc_manager/tags/models.py",
+  "isrc_manager/tasks/models.py",
+]
+follow_imports = "skip"
+check_untyped_defs = true
+disallow_incomplete_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_return_any = true
+warn_unused_ignores = true
+show_error_codes = true
+
+[tool.coverage.run]
+source = ["isrc_manager"]
+omit = [
+  "isrc_manager/gs1_dialog.py",
+  "isrc_manager/history/dialogs.py",
+  "isrc_manager/releases/dialogs.py",
+  "isrc_manager/settings.py",
+  "isrc_manager/tags/dialogs.py",
+  "isrc_manager/tasks/app_services.py",
+  "isrc_manager/tasks/history_helpers.py",
+]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+skip_covered = true
+
+[tool.coverage.xml]
+output = "coverage.xml"

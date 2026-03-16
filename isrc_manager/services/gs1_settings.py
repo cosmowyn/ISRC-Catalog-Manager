@@ -62,7 +62,9 @@ class GS1SettingsService:
             brand=self._profile_get(self.PROFILE_KEY_MAP["brand"]),
             subbrand=self._profile_get(self.PROFILE_KEY_MAP["subbrand"]),
             packaging_type=self._profile_get(self.PROFILE_KEY_MAP["packaging_type"]),
-            product_classification=self._profile_get(self.PROFILE_KEY_MAP["product_classification"]),
+            product_classification=self._profile_get(
+                self.PROFILE_KEY_MAP["product_classification"]
+            ),
         )
 
     def set_profile_defaults(self, defaults: GS1ProfileDefaults) -> GS1ProfileDefaults:
@@ -72,7 +74,9 @@ class GS1SettingsService:
         self._profile_set(self.PROFILE_KEY_MAP["brand"], defaults.brand)
         self._profile_set(self.PROFILE_KEY_MAP["subbrand"], defaults.subbrand)
         self._profile_set(self.PROFILE_KEY_MAP["packaging_type"], defaults.packaging_type)
-        self._profile_set(self.PROFILE_KEY_MAP["product_classification"], defaults.product_classification)
+        self._profile_set(
+            self.PROFILE_KEY_MAP["product_classification"], defaults.product_classification
+        )
         return self.load_profile_defaults()
 
     def load_contracts(self) -> tuple[GS1ContractEntry, ...]:

@@ -38,7 +38,9 @@ except ImportError:  # pragma: no cover - exercised indirectly in runtime packag
     FLAC = None
     Picture = None
     ID3 = None
-    APIC = COMM = TALB = TCOM = TCON = TDRC = TIT2 = TPE1 = TPE2 = TPOS = TPUB = TRCK = TSRC = TXXX = USLT = None
+    APIC = COMM = TALB = TCOM = TCON = TDRC = TIT2 = TPE1 = TPE2 = TPOS = TPUB = TRCK = TSRC = (
+        TXXX
+    ) = USLT = None
     MP3 = None
     MP4 = MP4Cover = MP4FreeForm = None
     OggOpus = OggVorbis = None
@@ -384,7 +386,11 @@ class AudioTagService:
             cover = covers[0]
             artwork = ArtworkPayload(
                 data=bytes(cover),
-                mime_type="image/png" if getattr(cover, "imageformat", None) == MP4Cover.FORMAT_PNG else "image/jpeg",
+                mime_type=(
+                    "image/png"
+                    if getattr(cover, "imageformat", None) == MP4Cover.FORMAT_PNG
+                    else "image/jpeg"
+                ),
             )
         return AudioTagData(
             title=_clean_text(_first(audio.tags.get("\xa9nam")) if audio.tags else None),
@@ -403,7 +409,10 @@ class AudioTagService:
             ),
             genre=_clean_text(_first(audio.tags.get("\xa9gen")) if audio.tags else None),
             composer=_clean_text(_first(audio.tags.get("\xa9wrt")) if audio.tags else None),
-            publisher=_clean_text(self._decode_mp4_freeform(audio, "LABEL") or self._decode_mp4_freeform(audio, "PUBLISHER")),
+            publisher=_clean_text(
+                self._decode_mp4_freeform(audio, "LABEL")
+                or self._decode_mp4_freeform(audio, "PUBLISHER")
+            ),
             release_date=_clean_text(_first(audio.tags.get("\xa9day")) if audio.tags else None),
             isrc=_clean_isrc(self._decode_mp4_freeform(audio, "ISRC")),
             upc=_clean_text(self._decode_mp4_freeform(audio, "UPC")),
@@ -445,7 +454,11 @@ class AudioTagService:
         if tag_data.artwork is None:
             tags.pop("covr", None)
         else:
-            image_format = MP4Cover.FORMAT_PNG if tag_data.artwork.mime_type == "image/png" else MP4Cover.FORMAT_JPEG
+            image_format = (
+                MP4Cover.FORMAT_PNG
+                if tag_data.artwork.mime_type == "image/png"
+                else MP4Cover.FORMAT_JPEG
+            )
             tags["covr"] = [MP4Cover(tag_data.artwork.data, imageformat=image_format)]
         audio.tags = tags
         audio.save()

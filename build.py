@@ -22,9 +22,8 @@ import platform
 import shutil
 import subprocess
 import sys
-import textwrap
-from pathlib import Path
 import venv
+from pathlib import Path
 
 # Pillow is loaded lazily so this script can run on a clean machine.
 Image = None  # type: ignore[assignment]
@@ -42,6 +41,7 @@ def ensure_pillow_loaded():
         return Image
     try:
         from PIL import Image as _Image  # type: ignore[import]
+
         Image = _Image
     except ImportError:
         Image = None
@@ -277,8 +277,8 @@ def _factory_get_square_image(root) -> "Image.Image | None":
 
 def _factory_ask_base_name(root) -> str | None:
     """Ask for a base file name (without extension) via a custom centered dialog."""
-    from tkinter import Toplevel, Label, Entry, Button, StringVar, messagebox
     import tkinter as tk
+    from tkinter import Button, Entry, Label, StringVar, Toplevel, messagebox
 
     result: dict[str, str | None] = {"value": None}
 
@@ -402,8 +402,7 @@ def _factory_create_icon_for_current_os(root) -> Path | None:
     if ensure_pillow_loaded() is None:
         messagebox.showerror(
             "Pillow not available",
-            "Pillow (PIL) is not installed in this environment.\n"
-            "Icon creation is not possible.",
+            "Pillow (PIL) is not installed in this environment.\n" "Icon creation is not possible.",
             parent=root,
         )
         return None
@@ -468,6 +467,7 @@ def reexec_in_dotvenv_if_found():
 def ensure_pyinstaller():
     try:
         import PyInstaller  # noqa: F401
+
         return
     except Exception:
         pass
@@ -638,7 +638,9 @@ def build_binary(onefile: bool, console: bool):
             common += ["--icon", str(ICON_PATH)]
 
     print("[info] PyInstaller command:", " ".join(common))
-    proc = subprocess.run(pyinstaller_cmd + common, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    proc = subprocess.run(
+        pyinstaller_cmd + common, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+    )
     if proc.returncode != 0:
         print("\n[error] PyInstaller failed with the following output (last 200 lines shown):\n")
         lines = proc.stdout.splitlines()
@@ -697,7 +699,7 @@ def install_artifact(artifact: Path, install_base: Path):
     if system in ("linux", "darwin") and artifact.is_file():
         launcher = install_base / ("run_" + APP_NAME.lower())
         launcher.write_text(
-            f"#!/usr/bin/env bash\n\"$(dirname \"$0\")/{artifact.name}\"\n", encoding="utf-8"
+            f'#!/usr/bin/env bash\n"$(dirname "$0")/{artifact.name}"\n', encoding="utf-8"
         )
         launcher.chmod(0o755)
 
@@ -725,9 +727,14 @@ def venv_python(venv_path: Path) -> Path:
 
 def create_venv(venv_path: Path):
     print(f"[setup] Creating virtual environment at: {venv_path}")
-    venv.EnvBuilder(with_pip=True, clear=False, upgrade=True, symlinks=os.name != "nt").create(str(venv_path))
+    venv.EnvBuilder(with_pip=True, clear=False, upgrade=True, symlinks=os.name != "nt").create(
+        str(venv_path)
+    )
     if not venv_python(venv_path).exists():
-        print("[setup] Failed to create virtual environment (python not found in venv).", file=sys.stderr)
+        print(
+            "[setup] Failed to create virtual environment (python not found in venv).",
+            file=sys.stderr,
+        )
         sys.exit(2)
 
 
@@ -882,7 +889,9 @@ def main():
             print("[debug] dist contents:", [p.name for p in (PROJECT_ROOT / "dist").iterdir()])
         except Exception:
             pass
-        raise SystemExit("[error] Build succeeded but artifact not found; check PyInstaller output.")
+        raise SystemExit(
+            "[error] Build succeeded but artifact not found; check PyInstaller output."
+        )
 
     # 2) Pick install location (user-writable)
     default_dir = safe_default_install_dir()
@@ -896,7 +905,7 @@ def main():
     print(f"- Location: {install_root}")
     if platform.system().lower() == "darwin":
         if artifact.suffix == ".app":
-            print(f"- Launch: open \"{install_root / artifact.name}\"")
+            print(f'- Launch: open "{install_root / artifact.name}"')
         else:
             print(f"- Launch: \"{install_root / ('run_' + APP_NAME.lower())}\"")
     elif platform.system().lower() == "windows":

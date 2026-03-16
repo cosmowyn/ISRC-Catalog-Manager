@@ -6,7 +6,12 @@ from pathlib import Path
 from mutagen.id3 import ID3
 from mutagen.mp4 import MP4Cover
 
-from isrc_manager.tags import ArtworkPayload, AudioTagData, catalog_metadata_to_tags, merge_imported_tags
+from isrc_manager.tags import (
+    ArtworkPayload,
+    AudioTagData,
+    catalog_metadata_to_tags,
+    merge_imported_tags,
+)
 from isrc_manager.tags.service import AudioTagService, TaggedAudioExportService
 
 
@@ -112,7 +117,11 @@ class AudioTagServiceTests(unittest.TestCase):
 
     def test_merge_imported_tags_can_prefer_file_tags(self):
         preview = merge_imported_tags(
-            database_values={"title": "Database Title", "artist": "Database Artist", "artwork": None},
+            database_values={
+                "title": "Database Title",
+                "artist": "Database Artist",
+                "artwork": None,
+            },
             file_tags=AudioTagData(title="File Title", artist="File Artist"),
             policy="prefer_file_tags",
         )
@@ -200,7 +209,9 @@ class AudioTagServiceTests(unittest.TestCase):
             result = export_service.export_copies(
                 output_dir=Path(tmpdir) / "exports",
                 exports=[(str(source_path), "orbit_export", self.tag_data)],
-                progress_callback=lambda value, maximum, message: progress_updates.append((value, maximum, message)),
+                progress_callback=lambda value, maximum, message: progress_updates.append(
+                    (value, maximum, message)
+                ),
             )
 
         self.assertEqual(result.exported, 1)

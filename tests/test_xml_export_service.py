@@ -88,8 +88,48 @@ def make_export_conn():
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
-            (1, "NL-ABC-26-00001", "2026-03-13", "track_media/audio/demo.wav", "audio/wav", 512, "First Song", "CAT-001", None, None, 0, 1, "BUMA-42", 1, "2026-03-14", 195, "T-123.456.789-0", "123456789012", "Pop"),
-            (2, "NL-ABC-26-00002", "2026-03-15", None, None, 0, "Second Song", "", None, None, 0, 3, "", None, "", 60, "", "", "Rock"),
+            (
+                1,
+                "NL-ABC-26-00001",
+                "2026-03-13",
+                "track_media/audio/demo.wav",
+                "audio/wav",
+                512,
+                "First Song",
+                "CAT-001",
+                None,
+                None,
+                0,
+                1,
+                "BUMA-42",
+                1,
+                "2026-03-14",
+                195,
+                "T-123.456.789-0",
+                "123456789012",
+                "Pop",
+            ),
+            (
+                2,
+                "NL-ABC-26-00002",
+                "2026-03-15",
+                None,
+                None,
+                0,
+                "Second Song",
+                "",
+                None,
+                None,
+                0,
+                3,
+                "",
+                None,
+                "",
+                60,
+                "",
+                "",
+                "Rock",
+            ),
         ],
     )
     conn.execute("INSERT INTO TrackArtists(track_id, artist_id, role) VALUES (1, 2, 'additional')")
@@ -176,7 +216,9 @@ class XMLExportServiceTests(unittest.TestCase):
         self.assertEqual(track.findtext("AudioFileMimeType"), "audio/wav")
         self.assertEqual(track.findtext("AlbumArtSizeBytes"), "42")
         self.assertEqual(track.findtext("./CustomFields/Field[@name='Mood']/Value"), "Calm")
-        self.assertEqual(track.findtext("./CustomFields/Field[@name='Artwork']/MimeType"), "image/png")
+        self.assertEqual(
+            track.findtext("./CustomFields/Field[@name='Artwork']/MimeType"), "image/png"
+        )
 
 
 if __name__ == "__main__":

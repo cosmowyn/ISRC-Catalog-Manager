@@ -1,2 +1,1 @@
 """Media-related helper functions."""
-

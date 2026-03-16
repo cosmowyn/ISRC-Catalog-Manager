@@ -78,7 +78,9 @@ class LicenseServiceTests(unittest.TestCase):
         self.assertEqual(rows[0].track_title, "Song A")
         self.assertTrue(record.file_path.startswith("licenses/"))
         self.assertTrue(self.service.resolve_path(record.file_path).exists())
-        self.assertEqual(self.service.resolve_path(record.file_path).read_bytes(), b"%PDF-1.4 original")
+        self.assertEqual(
+            self.service.resolve_path(record.file_path).read_bytes(), b"%PDF-1.4 original"
+        )
 
     def test_update_and_delete_license_manage_current_file(self):
         record_id = self.service.add_license(
@@ -97,7 +99,9 @@ class LicenseServiceTests(unittest.TestCase):
         self.assertEqual(updated.licensee_id, 2)
         self.assertNotEqual(updated.file_path, original_record.file_path)
         self.assertTrue(self.service.resolve_path(updated.file_path).exists())
-        self.assertEqual(self.service.resolve_path(updated.file_path).read_bytes(), b"%PDF-1.4 replacement")
+        self.assertEqual(
+            self.service.resolve_path(updated.file_path).read_bytes(), b"%PDF-1.4 replacement"
+        )
         self.assertTrue(
             self.service.resolve_path(original_record.file_path).exists(),
             "Replacing a license keeps the old stored PDF, matching current app behavior.",

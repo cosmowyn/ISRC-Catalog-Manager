@@ -8,10 +8,16 @@ import time
 from pathlib import Path
 from typing import Iterable
 
-from isrc_manager.domain.codes import barcode_validation_status, is_blank
+from isrc_manager.domain.codes import barcode_validation_status
 from isrc_manager.media.blob_files import _is_valid_image_path
 
-from .models import ReleasePayload, ReleaseRecord, ReleaseSummary, ReleaseTrackPlacement, ReleaseValidationIssue
+from .models import (
+    ReleasePayload,
+    ReleaseRecord,
+    ReleaseSummary,
+    ReleaseTrackPlacement,
+    ReleaseValidationIssue,
+)
 
 RELEASE_TYPE_CHOICES = ("single", "ep", "album", "compilation", "remix_package", "other")
 
@@ -122,7 +128,9 @@ class ReleaseService:
         except ValueError:
             return False
 
-    def _delete_unreferenced_artwork(self, stored_path: str | None, *, cursor: sqlite3.Cursor) -> None:
+    def _delete_unreferenced_artwork(
+        self, stored_path: str | None, *, cursor: sqlite3.Cursor
+    ) -> None:
         clean_path = str(stored_path or "").strip()
         if not clean_path or not self._is_managed_release_media_path(clean_path):
             return
@@ -167,12 +175,18 @@ class ReleaseService:
 
         clean_release_type = self._clean_release_type(payload.release_type)
         if clean_release_type != str(payload.release_type or "").strip().lower().replace(" ", "_"):
-            issues.append(ReleaseValidationIssue("warning", "release_type", "Release Type was normalized to a supported value."))
+            issues.append(
+                ReleaseValidationIssue(
+                    "warning", "release_type", "Release Type was normalized to a supported value."
+                )
+            )
 
         upc = self._clean_text(payload.upc)
         status = barcode_validation_status(upc)
         if status == "invalid_format":
-            issues.append(ReleaseValidationIssue("error", "upc", "UPC/EAN must be 12 or 13 digits."))
+            issues.append(
+                ReleaseValidationIssue("error", "upc", "UPC/EAN must be 12 or 13 digits.")
+            )
         elif status == "invalid_checksum":
             issues.append(ReleaseValidationIssue("error", "upc", "UPC/EAN checksum is invalid."))
         elif status == "missing":
@@ -217,10 +231,14 @@ class ReleaseService:
                     )
                 )
         if payload.release_date and len(str(payload.release_date)) != 10:
-            issues.append(ReleaseValidationIssue("error", "release_date", "Release Date must be YYYY-MM-DD."))
+            issues.append(
+                ReleaseValidationIssue("error", "release_date", "Release Date must be YYYY-MM-DD.")
+            )
         if payload.original_release_date and len(str(payload.original_release_date)) != 10:
             issues.append(
-                ReleaseValidationIssue("error", "original_release_date", "Original Release Date must be YYYY-MM-DD.")
+                ReleaseValidationIssue(
+                    "error", "original_release_date", "Original Release Date must be YYYY-MM-DD."
+                )
             )
         return issues
 
@@ -328,7 +346,9 @@ class ReleaseService:
             artwork_mime = None
             artwork_size = 0
         elif payload.artwork_source_path:
-            artwork_path, artwork_mime, artwork_size = self._write_artwork_file(payload.artwork_source_path)
+            artwork_path, artwork_mime, artwork_size = self._write_artwork_file(
+                payload.artwork_source_path
+            )
             stale_artwork_path = current_artwork_path
 
         values = (
@@ -417,14 +437,18 @@ class ReleaseService:
             self.replace_release_tracks(release_id, payload.placements, cursor=cursor)
         return int(release_id)
 
-    def create_release(self, payload: ReleasePayload, *, cursor: sqlite3.Cursor | None = None) -> int:
+    def create_release(
+        self, payload: ReleasePayload, *, cursor: sqlite3.Cursor | None = None
+    ) -> int:
         if cursor is not None:
             return self._persist_release(payload, cursor=cursor)
         with self.conn:
             cur = self.conn.cursor()
             return self._persist_release(payload, cursor=cur)
 
-    def update_release(self, release_id: int, payload: ReleasePayload, *, cursor: sqlite3.Cursor | None = None) -> int:
+    def update_release(
+        self, release_id: int, payload: ReleasePayload, *, cursor: sqlite3.Cursor | None = None
+    ) -> int:
         if cursor is not None:
             return self._persist_release(payload, release_id=int(release_id), cursor=cursor)
         with self.conn:
@@ -511,7 +535,9 @@ class ReleaseService:
                 track_number=int(track_number or 1),
                 sequence_number=int(sequence_number or index + 1),
             )
-            for index, (track_id, disc_number, track_number, sequence_number) in enumerate(current_rows)
+            for index, (track_id, disc_number, track_number, sequence_number) in enumerate(
+                current_rows
+            )
         ]
         seen = {placement.track_id for placement in placements}
         next_track_number = max([placement.track_number for placement in placements], default=0) + 1
@@ -544,7 +570,9 @@ class ReleaseService:
                 (int(release_id), int(track_id)),
             )
 
-    def fetch_release(self, release_id: int, *, cursor: sqlite3.Cursor | None = None) -> ReleaseRecord | None:
+    def fetch_release(
+        self, release_id: int, *, cursor: sqlite3.Cursor | None = None
+    ) -> ReleaseRecord | None:
         cur = cursor or self.conn.cursor()
         row = cur.execute(
             """

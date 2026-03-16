@@ -187,13 +187,19 @@ class HistoryManagerTests(unittest.TestCase):
             cleanup_album_titles=["New Album"],
         )
 
-        self.assertEqual(self.track_service.fetch_track_snapshot(track_id).track_title, "Updated Song")
+        self.assertEqual(
+            self.track_service.fetch_track_snapshot(track_id).track_title, "Updated Song"
+        )
 
         self.history.undo()
-        self.assertEqual(self.track_service.fetch_track_snapshot(track_id).track_title, "First Song")
+        self.assertEqual(
+            self.track_service.fetch_track_snapshot(track_id).track_title, "First Song"
+        )
 
         self.history.redo()
-        self.assertEqual(self.track_service.fetch_track_snapshot(track_id).track_title, "Updated Song")
+        self.assertEqual(
+            self.track_service.fetch_track_snapshot(track_id).track_title, "Updated Song"
+        )
 
         snapshot = self.history.create_manual_snapshot("Before manual restore")
 
@@ -212,16 +218,24 @@ class HistoryManagerTests(unittest.TestCase):
                 genre="Electronic",
             )
         )
-        self.assertEqual(self.track_service.fetch_track_snapshot(track_id).track_title, "Changed Again")
+        self.assertEqual(
+            self.track_service.fetch_track_snapshot(track_id).track_title, "Changed Again"
+        )
 
         self.history.restore_snapshot_as_action(snapshot.snapshot_id)
-        self.assertEqual(self.track_service.fetch_track_snapshot(track_id).track_title, "Updated Song")
+        self.assertEqual(
+            self.track_service.fetch_track_snapshot(track_id).track_title, "Updated Song"
+        )
 
         self.history.undo()
-        self.assertEqual(self.track_service.fetch_track_snapshot(track_id).track_title, "Changed Again")
+        self.assertEqual(
+            self.track_service.fetch_track_snapshot(track_id).track_title, "Changed Again"
+        )
 
         self.history.redo()
-        self.assertEqual(self.track_service.fetch_track_snapshot(track_id).track_title, "Updated Song")
+        self.assertEqual(
+            self.track_service.fetch_track_snapshot(track_id).track_title, "Updated Song"
+        )
 
     def test_snapshot_actions_restore_managed_license_files(self):
         track_id = self._create_track()
@@ -260,7 +274,9 @@ class HistoryManagerTests(unittest.TestCase):
 
     def test_registered_snapshot_can_be_restored(self):
         snapshot = self.history.create_manual_snapshot("Initial State")
-        registered = self.history.register_snapshot(snapshot, kind="registered", label="Registered Initial State")
+        registered = self.history.register_snapshot(
+            snapshot, kind="registered", label="Registered Initial State"
+        )
         self.assertNotEqual(snapshot.snapshot_id, registered.snapshot_id)
 
         track_id = self._create_track()
@@ -277,7 +293,9 @@ class HistoryManagerTests(unittest.TestCase):
         self.assertIsNone(self.history.fetch_snapshot(created.snapshot_id))
 
         self.history.redo()
-        restored_snapshots = [snap for snap in self.history.list_snapshots() if snap.label == "Manual Snapshot"]
+        restored_snapshots = [
+            snap for snap in self.history.list_snapshots() if snap.label == "Manual Snapshot"
+        ]
         self.assertEqual(len(restored_snapshots), 1)
 
         restored = restored_snapshots[0]
@@ -285,11 +303,15 @@ class HistoryManagerTests(unittest.TestCase):
         self.assertIsNone(self.history.fetch_snapshot(restored.snapshot_id))
 
         self.history.undo()
-        restored_again = [snap for snap in self.history.list_snapshots() if snap.label == "Manual Snapshot"]
+        restored_again = [
+            snap for snap in self.history.list_snapshots() if snap.label == "Manual Snapshot"
+        ]
         self.assertEqual(len(restored_again), 1)
 
         self.history.redo()
-        self.assertEqual([snap for snap in self.history.list_snapshots() if snap.label == "Manual Snapshot"], [])
+        self.assertEqual(
+            [snap for snap in self.history.list_snapshots() if snap.label == "Manual Snapshot"], []
+        )
 
     def test_setting_bundle_change_restores_qpoint_and_coalesces(self):
         key = "display/col_hint_pos"
@@ -317,7 +339,11 @@ class HistoryManagerTests(unittest.TestCase):
             entity_id=key,
         )
 
-        bundle_entries = [entry for entry in self.history.list_entries(limit=20) if entry.action_type == "settings.bundle"]
+        bundle_entries = [
+            entry
+            for entry in self.history.list_entries(limit=20)
+            if entry.action_type == "settings.bundle"
+        ]
         self.assertEqual(len(bundle_entries), 1)
 
         self.history.undo()
@@ -327,11 +353,15 @@ class HistoryManagerTests(unittest.TestCase):
         self.assertEqual(self.settings.value(key, type=QPoint), QPoint(60, 90))
 
     def test_snapshot_actions_restore_external_file_side_effects(self):
-        before = self.history.capture_snapshot(kind="pre_file_side_effect", label="Before file side effect")
+        before = self.history.capture_snapshot(
+            kind="pre_file_side_effect", label="Before file side effect"
+        )
         export_path = self.root / "exports" / "catalog.xml"
         export_path.parent.mkdir(parents=True, exist_ok=True)
         export_path.write_text("<catalog/>", encoding="utf-8")
-        after = self.history.capture_snapshot(kind="post_file_side_effect", label="After file side effect")
+        after = self.history.capture_snapshot(
+            kind="post_file_side_effect", label="After file side effect"
+        )
 
         self.history.record_snapshot_action(
             label="Create Export File",

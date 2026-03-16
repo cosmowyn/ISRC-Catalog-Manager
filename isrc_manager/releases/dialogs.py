@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
-from pathlib import Path
-
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -20,8 +17,8 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QMessageBox,
-    QPushButton,
     QPlainTextEdit,
+    QPushButton,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
@@ -95,7 +92,9 @@ class ReleaseEditorDialog(QDialog):
         form.addRow("Album Artist", self.album_artist_edit)
 
         self.release_type_combo = QComboBox()
-        self.release_type_combo.addItems([value.replace("_", " ").title() for value in RELEASE_TYPE_CHOICES])
+        self.release_type_combo.addItems(
+            [value.replace("_", " ").title() for value in RELEASE_TYPE_CHOICES]
+        )
         form.addRow("Release Type", self.release_type_combo)
 
         self.release_date_edit = QLineEdit()
@@ -191,7 +190,9 @@ class ReleaseEditorDialog(QDialog):
         self.tracks_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.tracks_table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.tracks_table.setEditTriggers(
-            QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed | QAbstractItemView.SelectedClicked
+            QAbstractItemView.DoubleClicked
+            | QAbstractItemView.EditKeyPressed
+            | QAbstractItemView.SelectedClicked
         )
         self.tracks_table.verticalHeader().setVisible(False)
         self.tracks_table.horizontalHeader().setStretchLastSection(True)
@@ -218,7 +219,9 @@ class ReleaseEditorDialog(QDialog):
         self._original_artwork_display_path = ""
         self._populate(release, placements or [])
 
-    def _populate(self, release: ReleaseRecord | None, placements: list[ReleaseTrackPlacement]) -> None:
+    def _populate(
+        self, release: ReleaseRecord | None, placements: list[ReleaseTrackPlacement]
+    ) -> None:
         if release is None:
             self.release_type_combo.setCurrentText("Album")
             self._original_artwork_display_path = ""
@@ -229,7 +232,9 @@ class ReleaseEditorDialog(QDialog):
         self.subtitle_edit.setText(release.version_subtitle or "")
         self.primary_artist_edit.setText(release.primary_artist or "")
         self.album_artist_edit.setText(release.album_artist or "")
-        self.release_type_combo.setCurrentText((release.release_type or "album").replace("_", " ").title())
+        self.release_type_combo.setCurrentText(
+            (release.release_type or "album").replace("_", " ").title()
+        )
         self.release_date_edit.setText(release.release_date or "")
         self.original_release_date_edit.setText(release.original_release_date or "")
         self.label_edit.setText(release.label or "")
@@ -319,9 +324,13 @@ class ReleaseEditorDialog(QDialog):
         target = row + offset
         if target < 0 or target >= self.tracks_table.rowCount():
             return
-        values = [self.tracks_table.item(row, column).text() for column in range(self.tracks_table.columnCount())]
+        values = [
+            self.tracks_table.item(row, column).text()
+            for column in range(self.tracks_table.columnCount())
+        ]
         target_values = [
-            self.tracks_table.item(target, column).text() for column in range(self.tracks_table.columnCount())
+            self.tracks_table.item(target, column).text()
+            for column in range(self.tracks_table.columnCount())
         ]
         for column, value in enumerate(target_values):
             self.tracks_table.item(row, column).setText(value)
@@ -397,7 +406,9 @@ class ReleaseEditorDialog(QDialog):
             QMessageBox.warning(self, "Release Validation", "\n".join(errors))
             return
         if not payload.placements:
-            QMessageBox.warning(self, "Release Validation", "Attach at least one track to the release.")
+            QMessageBox.warning(
+                self, "Release Validation", "Attach at least one track to the release."
+            )
             return
         super().accept()
 
@@ -432,7 +443,9 @@ class ReleaseBrowserDialog(QDialog):
         root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(12)
 
-        header = QLabel("Browse releases, inspect summary metadata, and attach the current track selection.")
+        header = QLabel(
+            "Browse releases, inspect summary metadata, and attach the current track selection."
+        )
         header.setWordWrap(True)
         root.addWidget(header)
 
@@ -458,7 +471,9 @@ class ReleaseBrowserDialog(QDialog):
         list_layout.setSpacing(8)
 
         self.release_table = QTableWidget(0, 6, list_panel)
-        self.release_table.setHorizontalHeaderLabels(["ID", "Title", "Artist", "Type", "Release Date", "Tracks"])
+        self.release_table.setHorizontalHeaderLabels(
+            ["ID", "Title", "Artist", "Type", "Release Date", "Tracks"]
+        )
         self.release_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.release_table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.release_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -604,7 +619,9 @@ class ReleaseBrowserDialog(QDialog):
     def _emit_filter_current(self) -> None:
         if self._current_summary is None:
             return
-        self.filter_requested.emit([placement.track_id for placement in self._current_summary.tracks])
+        self.filter_requested.emit(
+            [placement.track_id for placement in self._current_summary.tracks]
+        )
 
     def _emit_open_track_current(self) -> None:
         row = self.track_table.currentRow()

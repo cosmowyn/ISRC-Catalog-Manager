@@ -77,7 +77,9 @@ class CatalogAdminService:
             self.conn.executemany("DELETE FROM Artists WHERE id=?", ids)
 
     def purge_unused_artists(self) -> list[int]:
-        unused_ids = [artist.artist_id for artist in self.list_artists_with_usage() if artist.total_uses == 0]
+        unused_ids = [
+            artist.artist_id for artist in self.list_artists_with_usage() if artist.total_uses == 0
+        ]
         self.delete_artists(unused_ids)
         return unused_ids
 
@@ -145,7 +147,9 @@ class CatalogAdminService:
         ]
 
     def list_licensee_choices(self) -> list[tuple[int, str]]:
-        return [(licensee.licensee_id, licensee.name) for licensee in self.list_licensees_with_usage()]
+        return [
+            (licensee.licensee_id, licensee.name) for licensee in self.list_licensees_with_usage()
+        ]
 
     def ensure_licensee(self, name: str, *, cursor: sqlite3.Cursor | None = None) -> int:
         clean_name = (name or "").strip()
@@ -175,7 +179,9 @@ class CatalogAdminService:
         if not clean_name:
             raise ValueError("Licensee name is required")
         with self.conn:
-            self.conn.execute("UPDATE Licensees SET name=? WHERE id=?", (clean_name, int(licensee_id)))
+            self.conn.execute(
+                "UPDATE Licensees SET name=? WHERE id=?", (clean_name, int(licensee_id))
+            )
 
     def delete_licensee(self, licensee_id: int) -> None:
         row = self.conn.execute(

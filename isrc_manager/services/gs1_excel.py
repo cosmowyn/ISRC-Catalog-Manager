@@ -6,13 +6,21 @@ from copy import copy
 from pathlib import Path
 
 from .gs1_mapping import localize_export_value
-from .gs1_models import GS1ExportPreview, GS1ExportResult, GS1PreparedRecord, GS1TemplateProfile, GS1TemplateSheetProfile
+from .gs1_models import (
+    GS1ExportPreview,
+    GS1ExportResult,
+    GS1PreparedRecord,
+    GS1TemplateProfile,
+    GS1TemplateSheetProfile,
+)
 
 
 def _load_openpyxl():
     try:
         from openpyxl import load_workbook
-    except ImportError as exc:  # pragma: no cover - exercised by UI on systems without the dependency
+    except (
+        ImportError
+    ) as exc:  # pragma: no cover - exercised by UI on systems without the dependency
         from .gs1_models import GS1DependencyError
 
         raise GS1DependencyError(
@@ -32,7 +40,9 @@ class GS1ExcelExportService:
         headers: list[str] = []
         rows: list[tuple[str, ...]] = []
         row_sheet_names: list[str] = []
-        ordered_columns = self._ordered_export_columns(template_profile.sheet_profile(template_profile.sheet_name))
+        ordered_columns = self._ordered_export_columns(
+            template_profile.sheet_profile(template_profile.sheet_name)
+        )
         for field_name, _ in ordered_columns:
             headers.append(
                 str(template_profile.matched_headers.get(field_name) or field_name).strip()
@@ -49,7 +59,9 @@ class GS1ExcelExportService:
                 sequence_number=sequence_number,
             )
             rows.append(
-                tuple(str(localized_values.get(field_name, "")) for field_name, _ in ordered_columns)
+                tuple(
+                    str(localized_values.get(field_name, "")) for field_name, _ in ordered_columns
+                )
             )
             row_sheet_names.append(sheet_profile.sheet_name)
         return GS1ExportPreview(
@@ -87,7 +99,9 @@ class GS1ExcelExportService:
             if sheet_name not in start_rows_by_sheet:
                 start_rows_by_sheet[sheet_name] = self._find_start_row(worksheet, sheet_profile)
                 style_rows_by_sheet[sheet_name] = (
-                    sheet_profile.header_row + 1 if worksheet.max_row >= sheet_profile.header_row + 1 else None
+                    sheet_profile.header_row + 1
+                    if worksheet.max_row >= sheet_profile.header_row + 1
+                    else None
                 )
             sequence_number = sequence_by_sheet.get(sheet_name, 0) + 1
             sequence_by_sheet[sheet_name] = sequence_number
@@ -119,14 +133,19 @@ class GS1ExcelExportService:
             exported_count=len(records),
             sheet_name=result_sheet_name,
             row_numbers=row_numbers,
-            sheet_row_numbers={sheet_name: tuple(values) for sheet_name, values in sheet_row_numbers.items()},
+            sheet_row_numbers={
+                sheet_name: tuple(values) for sheet_name, values in sheet_row_numbers.items()
+            },
         )
 
     def _find_start_row(self, worksheet, sheet_profile: GS1TemplateSheetProfile) -> int:
         mapped_columns = list(sheet_profile.column_map.values())
         row_number = sheet_profile.header_row + 1
         while row_number <= max(worksheet.max_row, sheet_profile.header_row + 1):
-            if all(self._is_blank(worksheet.cell(row=row_number, column=column_index).value) for column_index in mapped_columns):
+            if all(
+                self._is_blank(worksheet.cell(row=row_number, column=column_index).value)
+                for column_index in mapped_columns
+            ):
                 return row_number
             row_number += 1
         return max(worksheet.max_row + 1, sheet_profile.header_row + 1)

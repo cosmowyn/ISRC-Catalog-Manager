@@ -8,7 +8,6 @@ from collections.abc import Sequence
 
 from .gs1_models import CANONICAL_GS1_EXPORT_FIELDS, CORE_GS1_TEMPLATE_FIELDS
 
-
 GS1_FIELD_LABELS = {
     "contract_number": "Contract Number",
     "gtin_request_number": "GS1 Article Code / GTIN",
@@ -42,9 +41,7 @@ GS1_HEADER_ALIASES = {
         "gtin 13",
         "code",
     ),
-    "status": (
-        "status",
-    ),
+    "status": ("status",),
     "product_classification": (
         "productclassificatie",
         "productclassificatie gpc",
@@ -193,8 +190,14 @@ _SIMPLE_LOCALIZED_VALUES = {
         "europese unie": {"default": "European Union", "nl": "Europese Unie"},
         "non eu": {"default": "Non-EU", "nl": "Niet EU"},
         "niet eu": {"default": "Non-EU", "nl": "Niet EU"},
-        "developing countries support": {"default": "Developing Countries Support", "nl": "Ontwikkelingslanden ondersteuning"},
-        "ontwikkelingslanden ondersteuning": {"default": "Developing Countries Support", "nl": "Ontwikkelingslanden ondersteuning"},
+        "developing countries support": {
+            "default": "Developing Countries Support",
+            "nl": "Ontwikkelingslanden ondersteuning",
+        },
+        "ontwikkelingslanden ondersteuning": {
+            "default": "Developing Countries Support",
+            "nl": "Ontwikkelingslanden ondersteuning",
+        },
     },
     "unit": {
         "ea": {"default": "Each", "nl": "Aantal"},
@@ -274,7 +277,9 @@ def match_canonical_field(header_text: object) -> tuple[str | None, float]:
     return best_field, best_score
 
 
-def resolve_header_row(header_values: Sequence[object]) -> tuple[dict[str, int], dict[str, str], float]:
+def resolve_header_row(
+    header_values: Sequence[object],
+) -> tuple[dict[str, int], dict[str, str], float]:
     best_by_field: dict[str, tuple[int, str, float]] = {}
     for column_index, header_value in enumerate(header_values, start=1):
         if header_value is None or str(header_value).strip() == "":
@@ -297,15 +302,24 @@ def missing_core_template_fields(column_map: dict[str, int]) -> tuple[str, ...]:
 
 
 def optional_template_fields(column_map: dict[str, int]) -> tuple[str, ...]:
-    return tuple(field for field in CANONICAL_GS1_EXPORT_FIELDS if field not in column_map and field not in CORE_GS1_TEMPLATE_FIELDS)
+    return tuple(
+        field
+        for field in CANONICAL_GS1_EXPORT_FIELDS
+        if field not in column_map and field not in CORE_GS1_TEMPLATE_FIELDS
+    )
 
 
-def detect_template_locale(matched_headers: dict[str, str], workbook_markers: Sequence[str] | None = None) -> str:
+def detect_template_locale(
+    matched_headers: dict[str, str], workbook_markers: Sequence[str] | None = None
+) -> str:
     normalized_headers = {normalize_gs1_text(text) for text in matched_headers.values() if text}
     if normalized_headers & _DUTCH_HEADER_HINTS:
         return "nl"
     markers = {normalize_gs1_text(marker) for marker in (workbook_markers or ()) if marker}
-    if any("instruct" in marker or "codelijst" in marker or "artikelcode" in marker for marker in markers):
+    if any(
+        "instruct" in marker or "codelijst" in marker or "artikelcode" in marker
+        for marker in markers
+    ):
         return "nl"
     return "default"
 

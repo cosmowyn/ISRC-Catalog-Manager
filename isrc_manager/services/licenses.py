@@ -155,7 +155,9 @@ class LicenseService:
             file_paths = [row[0] for row in file_rows if row and row[0]]
 
         with self.conn:
-            self.conn.executemany("DELETE FROM Licenses WHERE id=?", [(record_id,) for record_id in ids])
+            self.conn.executemany(
+                "DELETE FROM Licenses WHERE id=?", [(record_id,) for record_id in ids]
+            )
 
         if delete_files:
             for stored_path in file_paths:

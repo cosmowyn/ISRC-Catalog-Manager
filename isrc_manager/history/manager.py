@@ -6,7 +6,6 @@ import base64
 import json
 import shutil
 import sqlite3
-from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -159,7 +158,9 @@ class HistoryManager:
     # Recording actions
     # ------------------------------------------------------------------
     def create_manual_snapshot(self, label: str | None = None) -> SnapshotRecord:
-        snapshot = self.capture_snapshot(kind="manual", label=label or f"Manual Snapshot {self._now_stamp()}")
+        snapshot = self.capture_snapshot(
+            kind="manual", label=label or f"Manual Snapshot {self._now_stamp()}"
+        )
         self.record_snapshot_create(snapshot)
         return snapshot
 
@@ -186,7 +187,9 @@ class HistoryManager:
         )
         return self.fetch_entry(entry_id)
 
-    def delete_snapshot_as_action(self, snapshot_id: int, *, label: str | None = None) -> HistoryEntry:
+    def delete_snapshot_as_action(
+        self, snapshot_id: int, *, label: str | None = None
+    ) -> HistoryEntry:
         snapshot = self.fetch_snapshot(snapshot_id)
         if snapshot is None:
             raise ValueError(f"Snapshot {snapshot_id} not found")
@@ -239,7 +242,9 @@ class HistoryManager:
         )
         return self.fetch_entry(entry_id)
 
-    def restore_snapshot_as_action(self, snapshot_id: int, *, label: str | None = None) -> HistoryEntry:
+    def restore_snapshot_as_action(
+        self, snapshot_id: int, *, label: str | None = None
+    ) -> HistoryEntry:
         before = self.capture_snapshot(kind="auto_pre_restore", label="Before Snapshot Restore")
         target = self.fetch_snapshot(snapshot_id)
         if target is None:
@@ -353,7 +358,10 @@ class HistoryManager:
         history_entity_id = entity_id or label
         current = self.get_current_entry()
         if self._can_coalesce_setting_bundle(current, history_entity_id):
-            inverse_payload = current.inverse_payload or {"key": "bundle", "entries": before_entries}
+            inverse_payload = current.inverse_payload or {
+                "key": "bundle",
+                "entries": before_entries,
+            }
             self._update_entry_payloads(
                 current.entry_id,
                 label=label,
@@ -395,7 +403,9 @@ class HistoryManager:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         registered_path = snapshot_dir / f"{timestamp}_{register_kind}.db"
         shutil.copy2(snapshot_path, registered_path)
-        manifest = self._clone_managed_manifest(snapshot.manifest, registered_path.with_suffix(".assets"))
+        manifest = self._clone_managed_manifest(
+            snapshot.manifest, registered_path.with_suffix(".assets")
+        )
         return self._insert_snapshot_row(
             kind=register_kind,
             label=label or snapshot.label,
@@ -520,7 +530,10 @@ class HistoryManager:
             entity_id=str(before_snapshot.track_id),
             reversible=True,
             strategy="inverse",
-            payload={"track_id": before_snapshot.track_id, "track_title": before_snapshot.track_title},
+            payload={
+                "track_id": before_snapshot.track_id,
+                "track_title": before_snapshot.track_title,
+            },
             inverse_payload={"snapshot": before_snapshot.to_dict()},
             redo_payload={"track_id": before_snapshot.track_id},
             snapshot_before_id=None,
@@ -541,7 +554,9 @@ class HistoryManager:
         return entry
 
     def redo(self, entry_id: int | None = None) -> HistoryEntry | None:
-        entry = self.fetch_entry(entry_id) if entry_id is not None else self.get_default_redo_entry()
+        entry = (
+            self.fetch_entry(entry_id) if entry_id is not None else self.get_default_redo_entry()
+        )
         if entry is None or not entry.reversible:
             return None
         self._apply_entry_payload(entry, entry.redo_payload, direction="redo")
@@ -723,9 +738,13 @@ class HistoryManager:
                 (entry_id,),
             )
 
-    def _apply_entry_payload(self, entry: HistoryEntry, payload: dict | None, *, direction: str) -> None:
+    def _apply_entry_payload(
+        self, entry: HistoryEntry, payload: dict | None, *, direction: str
+    ) -> None:
         if entry.strategy == "snapshot":
-            snapshot_id = entry.snapshot_before_id if direction == "undo" else entry.snapshot_after_id
+            snapshot_id = (
+                entry.snapshot_before_id if direction == "undo" else entry.snapshot_after_id
+            )
             if snapshot_id is None:
                 return
             snapshot = self.fetch_snapshot(snapshot_id)
@@ -777,8 +796,12 @@ class HistoryManager:
         with self.conn:
             cur = self.conn.cursor()
             cur.execute("DELETE FROM Tracks WHERE id=?", (track_id,))
-            self.track_service.delete_unused_artists_by_names(payload.get("cleanup_artist_names", []), cursor=cur)
-            self.track_service.delete_unused_albums_by_titles(payload.get("cleanup_album_titles", []), cursor=cur)
+            self.track_service.delete_unused_artists_by_names(
+                payload.get("cleanup_artist_names", []), cursor=cur
+            )
+            self.track_service.delete_unused_albums_by_titles(
+                payload.get("cleanup_album_titles", []), cursor=cur
+            )
 
     def _redo_track_delete(self, payload: dict) -> None:
         with self.conn:
@@ -793,8 +816,12 @@ class HistoryManager:
     def _cleanup_catalog_from_payload(self, payload: dict) -> None:
         with self.conn:
             cur = self.conn.cursor()
-            self.track_service.delete_unused_artists_by_names(payload.get("cleanup_artist_names", []), cursor=cur)
-            self.track_service.delete_unused_albums_by_titles(payload.get("cleanup_album_titles", []), cursor=cur)
+            self.track_service.delete_unused_artists_by_names(
+                payload.get("cleanup_artist_names", []), cursor=cur
+            )
+            self.track_service.delete_unused_albums_by_titles(
+                payload.get("cleanup_album_titles", []), cursor=cur
+            )
 
     def _apply_setting_payload(self, payload: dict) -> None:
         key = payload["key"]
@@ -1006,9 +1033,16 @@ class HistoryManager:
             row[1] for row in self.conn.execute(f"PRAGMA table_info({table_name})").fetchall()
         }
         snapshot_cols = {
-            row[1] for row in self.conn.execute(f"PRAGMA snapshot_restore.table_info({table_name})").fetchall()
+            row[1]
+            for row in self.conn.execute(
+                f"PRAGMA snapshot_restore.table_info({table_name})"
+            ).fetchall()
         }
-        return [column for column in self._ordered_columns(table_name) if column in main_cols and column in snapshot_cols]
+        return [
+            column
+            for column in self._ordered_columns(table_name)
+            if column in main_cols and column in snapshot_cols
+        ]
 
     def _ordered_columns(self, table_name: str) -> list[str]:
         rows = self.conn.execute(f"PRAGMA table_info({table_name})").fetchall()
@@ -1025,7 +1059,9 @@ class HistoryManager:
         return {
             "setting_key": key,
             "exists": bool(exists),
-            "serialized": self._serialize_setting_value(self.settings.value(key)) if exists else None,
+            "serialized": (
+                self._serialize_setting_value(self.settings.value(key)) if exists else None
+            ),
         }
 
     def _capture_managed_state(self, assets_dir: Path) -> dict:
@@ -1096,7 +1132,9 @@ class HistoryManager:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         archive_path = archive_dir / f"{timestamp}_{prefix}.db"
         shutil.copy2(snapshot.db_snapshot_path, archive_path)
-        manifest = self._clone_managed_manifest(snapshot.manifest, archive_path.with_suffix(".assets"))
+        manifest = self._clone_managed_manifest(
+            snapshot.manifest, archive_path.with_suffix(".assets")
+        )
         return {
             "kind": snapshot.kind,
             "label": snapshot.label,
@@ -1138,9 +1176,15 @@ class HistoryManager:
         if isinstance(value, bytes):
             return {"kind": "bytes", "value": base64.b64encode(value).decode("ascii")}
         if isinstance(value, list):
-            return {"kind": "list", "value": [self._serialize_setting_value(item) for item in value]}
+            return {
+                "kind": "list",
+                "value": [self._serialize_setting_value(item) for item in value],
+            }
         if isinstance(value, tuple):
-            return {"kind": "tuple", "value": [self._serialize_setting_value(item) for item in value]}
+            return {
+                "kind": "tuple",
+                "value": [self._serialize_setting_value(item) for item in value],
+            }
         if value is None or isinstance(value, (bool, int, float, str)):
             return {"kind": "json", "value": value}
         return {"kind": "string", "value": str(value)}
@@ -1156,7 +1200,9 @@ class HistoryManager:
         if kind == "list":
             return [self._deserialize_setting_value(item) for item in serialized.get("value", [])]
         if kind == "tuple":
-            return tuple(self._deserialize_setting_value(item) for item in serialized.get("value", []))
+            return tuple(
+                self._deserialize_setting_value(item) for item in serialized.get("value", [])
+            )
         return serialized.get("value")
 
     @staticmethod
@@ -1183,7 +1229,9 @@ class HistoryManager:
         except ValueError:
             return False
         created_at_utc = created_at.replace(tzinfo=timezone.utc)
-        return (datetime.now(timezone.utc) - created_at_utc).total_seconds() <= self.SETTINGS_COALESCE_WINDOW_SECONDS
+        return (
+            datetime.now(timezone.utc) - created_at_utc
+        ).total_seconds() <= self.SETTINGS_COALESCE_WINDOW_SECONDS
 
     def _update_entry_payloads(
         self,
@@ -1209,7 +1257,9 @@ class HistoryManager:
                     label if label is not None else current.label,
                     created_at if created_at is not None else current.created_at,
                     json.dumps(payload if payload is not None else current.payload),
-                    json.dumps(inverse_payload if inverse_payload is not None else current.inverse_payload),
+                    json.dumps(
+                        inverse_payload if inverse_payload is not None else current.inverse_payload
+                    ),
                     json.dumps(redo_payload if redo_payload is not None else current.redo_payload),
                     int(entry_id),
                 ),

@@ -43,4 +43,3 @@ def enforce_single_instance(timeout_ms: int = 60000):
     if not lock.tryLock(0):
         return None
     return lock
-

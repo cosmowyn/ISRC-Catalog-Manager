@@ -27,7 +27,9 @@ class XMLExportService:
             row_dict = dict(zip(cols, row))
             for col in cols:
                 if col == "track_length_sec":
-                    ET.SubElement(item, "TrackLength").text = seconds_to_hms(int(row_dict[col] or 0))
+                    ET.SubElement(item, "TrackLength").text = seconds_to_hms(
+                        int(row_dict[col] or 0)
+                    )
                 sub = ET.SubElement(item, col)
                 sub.text = "" if row_dict[col] is None else str(row_dict[col])
 
@@ -36,7 +38,9 @@ class XMLExportService:
         self._write_xml(path, root)
         return len(rows)
 
-    def export_selected(self, path: str | Path, track_ids: list[int], *, current_db_path: str) -> int:
+    def export_selected(
+        self, path: str | Path, track_ids: list[int], *, current_db_path: str
+    ) -> int:
         _, rows = self._fetch_base_rows(track_ids)
         custom_by_track = self._fetch_custom_by_track(track_ids)
 
@@ -67,7 +71,9 @@ class XMLExportService:
             album_art_size_bytes,
         ) in rows:
             track = ET.SubElement(tracks_element, "Track", id=str(tid))
-            ET.SubElement(track, "ISRC").text = to_iso_isrc(isrc) or to_compact_isrc(isrc) or (isrc or "")
+            ET.SubElement(track, "ISRC").text = (
+                to_iso_isrc(isrc) or to_compact_isrc(isrc) or (isrc or "")
+            )
             ET.SubElement(track, "DBEntryDate").text = db_entry_date or ""
             ET.SubElement(track, "Title").text = title or ""
             ET.SubElement(track, "MainArtist").text = artist or ""
@@ -182,7 +188,10 @@ class XMLExportService:
             ORDER BY COALESCE(sort_order, 999999), name
             """
         ).fetchall()
-        defmap = {field_id: {"name": name, "field_type": field_type} for field_id, name, field_type in defs}
+        defmap = {
+            field_id: {"name": name, "field_type": field_type}
+            for field_id, name, field_type in defs
+        }
 
         qmarks = ",".join("?" * len(track_ids))
         values = self.conn.execute(

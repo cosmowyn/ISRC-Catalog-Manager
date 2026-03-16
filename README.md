@@ -389,6 +389,54 @@ Logs are stored in:
 - `pillow`: image processing and icon tooling
 - `mutagen`: audio metadata tag read/write across common formats
 
+## Developer Quality Checks
+
+Install the development toolchain:
+
+```bash
+python -m pip install -r requirements-dev.txt
+```
+
+Run the checks individually:
+
+```bash
+python -m ruff check build.py isrc_manager tests
+python -m black --check build.py isrc_manager tests
+python -m mypy
+python -m unittest discover -s tests -p 'test_*.py'
+python -m coverage run -m unittest discover -s tests -p 'test_*.py'
+python -m coverage report
+python -m coverage xml
+```
+
+Apply formatting fixes:
+
+```bash
+python -m black build.py isrc_manager tests
+```
+
+Or use the bundled `Makefile` shortcuts:
+
+```bash
+make lint
+make format-check
+make type-check
+make test
+make coverage
+make all-checks
+```
+
+## CI Quality Gates
+
+GitHub Actions now runs separate jobs for:
+- Python byte-compilation sanity checks
+- Ruff linting
+- Black formatting checks
+- mypy type checking on the curated service/domain scope
+- unittest on Python 3.10 and 3.13
+- coverage XML generation with an 80% package-level threshold
+- a lightweight packaging smoke check for PyInstaller availability
+
 ---
 
 # Keyboard Shortcuts

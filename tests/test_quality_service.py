@@ -36,7 +36,9 @@ class QualityDashboardServiceTests(unittest.TestCase):
         self.conn.close()
         self.tmpdir.cleanup()
 
-    def _create_track(self, *, isrc: str = "", title: str = "Orbit", album: str | None = "Orbit Release") -> int:
+    def _create_track(
+        self, *, isrc: str = "", title: str = "Orbit", album: str | None = "Orbit Release"
+    ) -> int:
         return self.track_service.create_track(
             TrackCreatePayload(
                 isrc=isrc,
@@ -69,7 +71,11 @@ class QualityDashboardServiceTests(unittest.TestCase):
                 release_type="album",
                 release_date="2026-03-15",
                 upc=None,
-                placements=[ReleaseTrackPlacement(track_id=track_id, disc_number=1, track_number=1, sequence_number=1)],
+                placements=[
+                    ReleaseTrackPlacement(
+                        track_id=track_id, disc_number=1, track_number=1, sequence_number=1
+                    )
+                ],
             )
         )
         self.conn.execute(
@@ -105,7 +111,11 @@ class QualityDashboardServiceTests(unittest.TestCase):
                 primary_artist="Cosmowyn",
                 release_type="album",
                 release_date="15-03-2026",
-                placements=[ReleaseTrackPlacement(track_id=track_id, disc_number=1, track_number=1, sequence_number=1)],
+                placements=[
+                    ReleaseTrackPlacement(
+                        track_id=track_id, disc_number=1, track_number=1, sequence_number=1
+                    )
+                ],
             )
         )
         self.assertGreater(release_id, 0)
@@ -114,11 +124,15 @@ class QualityDashboardServiceTests(unittest.TestCase):
 
         self.assertIn("Normalized", message)
         self.assertEqual(
-            self.conn.execute("SELECT release_date FROM Tracks WHERE id=?", (track_id,)).fetchone()[0],
+            self.conn.execute("SELECT release_date FROM Tracks WHERE id=?", (track_id,)).fetchone()[
+                0
+            ],
             "2026-03-15",
         )
         self.assertEqual(
-            self.conn.execute("SELECT release_date FROM Releases WHERE id=?", (release_id,)).fetchone()[0],
+            self.conn.execute(
+                "SELECT release_date FROM Releases WHERE id=?", (release_id,)
+            ).fetchone()[0],
             "2026-03-15",
         )
 
@@ -140,7 +154,11 @@ class QualityDashboardServiceTests(unittest.TestCase):
                 release_date="2026-03-15",
                 catalog_number="CAT-777",
                 upc="036000291452",
-                placements=[ReleaseTrackPlacement(track_id=track_id, disc_number=1, track_number=1, sequence_number=1)],
+                placements=[
+                    ReleaseTrackPlacement(
+                        track_id=track_id, disc_number=1, track_number=1, sequence_number=1
+                    )
+                ],
             )
         )
         self.assertGreater(release_id, 0)
@@ -174,11 +192,15 @@ class QualityDashboardServiceTests(unittest.TestCase):
         )
 
         result = self.service.scan()
-        shared_upc_issues = [issue for issue in result.issues if issue.issue_type == "shared_release_upc"]
+        shared_upc_issues = [
+            issue for issue in result.issues if issue.issue_type == "shared_release_upc"
+        ]
 
         self.assertEqual(len(shared_upc_issues), 2)
         self.assertTrue(all(issue.severity == "info" for issue in shared_upc_issues))
-        self.assertFalse(any(issue.issue_type == "duplicate_release_upc" for issue in result.issues))
+        self.assertFalse(
+            any(issue.issue_type == "duplicate_release_upc" for issue in result.issues)
+        )
 
     def test_different_title_duplicate_upc_remains_error(self):
         self.release_service.create_release(
@@ -197,7 +219,9 @@ class QualityDashboardServiceTests(unittest.TestCase):
         )
 
         result = self.service.scan()
-        duplicate_upc_issues = [issue for issue in result.issues if issue.issue_type == "duplicate_release_upc"]
+        duplicate_upc_issues = [
+            issue for issue in result.issues if issue.issue_type == "duplicate_release_upc"
+        ]
 
         self.assertEqual(len(duplicate_upc_issues), 2)
         self.assertTrue(all(issue.severity == "error" for issue in duplicate_upc_issues))

@@ -8,7 +8,6 @@ import json
 import shutil
 import sqlite3
 import tempfile
-from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -204,7 +203,9 @@ class ExchangeService:
             return f"media/external/{digest}_{path.name}"
         return f"media/{path.as_posix()}"
 
-    def export_rows(self, track_ids: list[int] | None = None) -> tuple[list[str], list[dict[str, object]]]:
+    def export_rows(
+        self, track_ids: list[int] | None = None
+    ) -> tuple[list[str], list[dict[str, object]]]:
         where_clause = ""
         params: list[object] = []
         if track_ids:
@@ -249,7 +250,11 @@ class ExchangeService:
         ).fetchall()
 
         defs, custom_map = self._custom_field_maps()
-        custom_headers = [f"custom::{field['name']}" for field in defs if field["field_type"] not in {"blob_image", "blob_audio"}]
+        custom_headers = [
+            f"custom::{field['name']}"
+            for field in defs
+            if field["field_type"] not in {"blob_image", "blob_audio"}
+        ]
         headers = list(self.BASE_EXPORT_COLUMNS) + custom_headers
         release_map = self._release_columns_for_track_rows()
         license_map = self._license_map()
@@ -257,7 +262,9 @@ class ExchangeService:
         exported_rows: list[dict[str, object]] = []
         for row in rows:
             track_id = int(row[0])
-            effective_audio_path, effective_album_art_path = self._effective_track_media_paths(track_id)
+            effective_audio_path, effective_album_art_path = self._effective_track_media_paths(
+                track_id
+            )
             base = {
                 "track_id": track_id,
                 "isrc": row[1] or "",
@@ -311,7 +318,9 @@ class ExchangeService:
                 for field in defs:
                     if field["field_type"] in {"blob_image", "blob_audio"}:
                         continue
-                    export_row[f"custom::{field['name']}"] = custom_map.get((track_id, int(field["id"])), "")
+                    export_row[f"custom::{field['name']}"] = custom_map.get(
+                        (track_id, int(field["id"])), ""
+                    )
                 exported_rows.append(export_row)
         return headers, exported_rows
 
@@ -557,7 +566,9 @@ class ExchangeService:
         with Path(path).open("r", encoding="utf-8-sig", newline="") as handle:
             reader = csv.DictReader(handle)
             rows = [dict(row) for row in reader]
-        return self._import_rows(rows, mapping=mapping, options=options, format_name="csv", source_dir=Path(path).parent)
+        return self._import_rows(
+            rows, mapping=mapping, options=options, format_name="csv", source_dir=Path(path).parent
+        )
 
     def import_xlsx(
         self,
@@ -571,14 +582,22 @@ class ExchangeService:
         values = list(sheet.iter_rows(values_only=True))
         headers = [str(value or "").strip() for value in (values[0] if values else ())]
         rows = [{header: row[index] for index, header in enumerate(headers)} for row in values[1:]]
-        return self._import_rows(rows, mapping=mapping, options=options, format_name="xlsx", source_dir=Path(path).parent)
+        return self._import_rows(
+            rows, mapping=mapping, options=options, format_name="xlsx", source_dir=Path(path).parent
+        )
 
-    def import_json(self, path: str | Path, *, options: ExchangeImportOptions | None = None) -> ExchangeImportReport:
+    def import_json(
+        self, path: str | Path, *, options: ExchangeImportOptions | None = None
+    ) -> ExchangeImportReport:
         payload = self._load_json_payload(path)
         rows = [dict(row) for row in payload.get("rows") or []]
-        return self._import_rows(rows, mapping=None, options=options, format_name="json", source_dir=Path(path).parent)
+        return self._import_rows(
+            rows, mapping=None, options=options, format_name="json", source_dir=Path(path).parent
+        )
 
-    def import_package(self, path: str | Path, *, options: ExchangeImportOptions | None = None) -> ExchangeImportReport:
+    def import_package(
+        self, path: str | Path, *, options: ExchangeImportOptions | None = None
+    ) -> ExchangeImportReport:
         payload = self._load_package_payload(path)
         with tempfile.TemporaryDirectory(prefix="exchange-package-") as temp_dir:
             extracted_root = Path(temp_dir)
@@ -592,7 +611,9 @@ class ExchangeService:
                 source_dir=extracted_root,
             )
 
-    def _apply_mapping(self, row: dict[str, object], mapping: dict[str, str] | None) -> dict[str, object]:
+    def _apply_mapping(
+        self, row: dict[str, object], mapping: dict[str, str] | None
+    ) -> dict[str, object]:
         if not mapping:
             return dict(row)
         normalized: dict[str, object] = {}
@@ -603,7 +624,9 @@ class ExchangeService:
             normalized[target_name] = value
         return normalized
 
-    def _ensure_custom_headers(self, rows: list[dict[str, object]], *, create_missing: bool) -> list[str]:
+    def _ensure_custom_headers(
+        self, rows: list[dict[str, object]], *, create_missing: bool
+    ) -> list[str]:
         custom_specs: list[dict[str, object]] = []
         for row in rows:
             for key in row:
@@ -626,7 +649,9 @@ class ExchangeService:
             except Exception:
                 track_id = 0
             if track_id > 0:
-                found = self.conn.execute("SELECT id FROM Tracks WHERE id=?", (track_id,)).fetchone()
+                found = self.conn.execute(
+                    "SELECT id FROM Tracks WHERE id=?", (track_id,)
+                ).fetchone()
                 if found:
                     return int(found[0])
         if options.match_by_isrc:
@@ -682,11 +707,15 @@ class ExchangeService:
             return str(path)
         return None
 
-    def _upsert_release_from_row(self, row: dict[str, object], track_id: int, *, source_dir: Path) -> None:
+    def _upsert_release_from_row(
+        self, row: dict[str, object], track_id: int, *, source_dir: Path
+    ) -> None:
         release_title = str(row.get("release_title") or "").strip()
         if not release_title:
             return
-        release_id = int(row.get("release_id") or 0) if str(row.get("release_id") or "").strip() else 0
+        release_id = (
+            int(row.get("release_id") or 0) if str(row.get("release_id") or "").strip() else 0
+        )
         existing_id = None
         if release_id > 0:
             release = self.release_service.fetch_release(release_id)
@@ -718,19 +747,38 @@ class ExchangeService:
         payload = ReleasePayload(
             title=release_title,
             version_subtitle=str(row.get("release_version_subtitle") or "").strip() or None,
-            primary_artist=str(row.get("release_primary_artist") or row.get("artist_name") or "").strip() or None,
-            album_artist=str(row.get("release_album_artist") or row.get("release_primary_artist") or row.get("artist_name") or "").strip() or None,
+            primary_artist=str(
+                row.get("release_primary_artist") or row.get("artist_name") or ""
+            ).strip()
+            or None,
+            album_artist=str(
+                row.get("release_album_artist")
+                or row.get("release_primary_artist")
+                or row.get("artist_name")
+                or ""
+            ).strip()
+            or None,
             release_type=str(row.get("release_type") or "album").strip() or "album",
-            release_date=str(row.get("release_date_release") or row.get("release_date") or "").strip() or None,
-            original_release_date=str(row.get("release_original_release_date") or "").strip() or None,
+            release_date=str(
+                row.get("release_date_release") or row.get("release_date") or ""
+            ).strip()
+            or None,
+            original_release_date=str(row.get("release_original_release_date") or "").strip()
+            or None,
             label=str(row.get("release_label") or "").strip() or None,
             sublabel=str(row.get("release_sublabel") or "").strip() or None,
-            catalog_number=str(row.get("release_catalog_number") or row.get("catalog_number") or "").strip() or None,
+            catalog_number=str(
+                row.get("release_catalog_number") or row.get("catalog_number") or ""
+            ).strip()
+            or None,
             upc=str(row.get("release_upc") or row.get("upc") or "").strip() or None,
             territory=str(row.get("release_territory") or "").strip() or None,
-            explicit_flag=str(row.get("release_explicit_flag") or "").strip().lower() in {"1", "true", "yes"},
+            explicit_flag=str(row.get("release_explicit_flag") or "").strip().lower()
+            in {"1", "true", "yes"},
             notes=str(row.get("release_notes") or "").strip() or None,
-            artwork_source_path=self._resolve_media_path(source_dir, row.get("release_artwork_path")),
+            artwork_source_path=self._resolve_media_path(
+                source_dir, row.get("release_artwork_path")
+            ),
             placements=[placement],
         )
         if existing_id is None:
@@ -762,7 +810,9 @@ class ExchangeService:
                 if key not in self.BASE_EXPORT_COLUMNS and not str(key).startswith("custom::")
             }
         )
-        self._ensure_custom_headers(normalized_rows, create_missing=opts.create_missing_custom_fields)
+        self._ensure_custom_headers(
+            normalized_rows, create_missing=opts.create_missing_custom_fields
+        )
         warnings: list[str] = []
         duplicates: list[str] = []
         passed = 0
@@ -771,7 +821,9 @@ class ExchangeService:
         created_tracks: list[int] = []
         updated_tracks: list[int] = []
 
-        custom_defs = {field["name"]: field["id"] for field in self.custom_fields.list_active_fields()}
+        custom_defs = {
+            field["name"]: field["id"] for field in self.custom_fields.list_active_fields()
+        }
 
         def _apply_custom_fields(track_id: int, row: dict[str, object]) -> None:
             for key, value in row.items():
@@ -797,7 +849,9 @@ class ExchangeService:
                 failed += 1
                 warnings.append(f"Row {index}: Track Title and Artist are required.")
                 continue
-            existing_track_id = None if opts.mode == "create" else self._find_existing_track_id(row, options=opts)
+            existing_track_id = (
+                None if opts.mode == "create" else self._find_existing_track_id(row, options=opts)
+            )
             if opts.mode == "dry_run":
                 passed += 1
                 continue
@@ -829,18 +883,28 @@ class ExchangeService:
                     publisher=str(row.get("publisher") or "").strip() or None,
                     comments=str(row.get("comments") or "").strip() or None,
                     lyrics=str(row.get("lyrics") or "").strip() or None,
-                    audio_file_source_path=self._resolve_media_path(source_dir, row.get("audio_file_path")),
-                    album_art_source_path=self._resolve_media_path(source_dir, row.get("album_art_path")),
+                    audio_file_source_path=self._resolve_media_path(
+                        source_dir, row.get("audio_file_path")
+                    ),
+                    album_art_source_path=self._resolve_media_path(
+                        source_dir, row.get("album_art_path")
+                    ),
                 )
                 if row.get("audio_file_path") and payload_kwargs["audio_file_source_path"] is None:
-                    warnings.append(f"Row {index}: Audio reference not found: {row.get('audio_file_path')}")
+                    warnings.append(
+                        f"Row {index}: Audio reference not found: {row.get('audio_file_path')}"
+                    )
                 if row.get("album_art_path") and payload_kwargs["album_art_source_path"] is None:
-                    warnings.append(f"Row {index}: Artwork reference not found: {row.get('album_art_path')}")
+                    warnings.append(
+                        f"Row {index}: Artwork reference not found: {row.get('album_art_path')}"
+                    )
 
                 if existing_track_id is None:
                     if opts.mode == "update":
                         skipped += 1
-                        warnings.append(f"Row {index}: no existing match was found for update mode.")
+                        warnings.append(
+                            f"Row {index}: no existing match was found for update mode."
+                        )
                         continue
                     track_id = self.track_service.create_track(TrackCreatePayload(**payload_kwargs))
                     created_tracks.append(track_id)
@@ -848,28 +912,50 @@ class ExchangeService:
                 else:
                     if opts.mode == "insert_new":
                         skipped += 1
-                        duplicates.append(f"Row {index}: matched existing track {existing_track_id}")
+                        duplicates.append(
+                            f"Row {index}: matched existing track {existing_track_id}"
+                        )
                         continue
                     snapshot = self.track_service.fetch_track_snapshot(existing_track_id)
                     if snapshot is None:
                         raise ValueError(f"Track {existing_track_id} not found")
                     if opts.mode == "merge":
-                        payload_kwargs["track_title"] = snapshot.track_title or payload_kwargs["track_title"]
-                        payload_kwargs["artist_name"] = snapshot.artist_name or payload_kwargs["artist_name"]
-                        payload_kwargs["album_title"] = snapshot.album_title or payload_kwargs["album_title"]
-                        payload_kwargs["release_date"] = snapshot.release_date or payload_kwargs["release_date"]
-                        payload_kwargs["track_length_sec"] = snapshot.track_length_sec or payload_kwargs["track_length_sec"]
+                        payload_kwargs["track_title"] = (
+                            snapshot.track_title or payload_kwargs["track_title"]
+                        )
+                        payload_kwargs["artist_name"] = (
+                            snapshot.artist_name or payload_kwargs["artist_name"]
+                        )
+                        payload_kwargs["album_title"] = (
+                            snapshot.album_title or payload_kwargs["album_title"]
+                        )
+                        payload_kwargs["release_date"] = (
+                            snapshot.release_date or payload_kwargs["release_date"]
+                        )
+                        payload_kwargs["track_length_sec"] = (
+                            snapshot.track_length_sec or payload_kwargs["track_length_sec"]
+                        )
                         payload_kwargs["iswc"] = snapshot.iswc or payload_kwargs["iswc"]
                         payload_kwargs["upc"] = snapshot.upc or payload_kwargs["upc"]
                         payload_kwargs["genre"] = snapshot.genre or payload_kwargs["genre"]
-                        payload_kwargs["catalog_number"] = snapshot.catalog_number or payload_kwargs["catalog_number"]
-                        payload_kwargs["buma_work_number"] = snapshot.buma_work_number or payload_kwargs["buma_work_number"]
+                        payload_kwargs["catalog_number"] = (
+                            snapshot.catalog_number or payload_kwargs["catalog_number"]
+                        )
+                        payload_kwargs["buma_work_number"] = (
+                            snapshot.buma_work_number or payload_kwargs["buma_work_number"]
+                        )
                         payload_kwargs["composer"] = snapshot.composer or payload_kwargs["composer"]
-                        payload_kwargs["publisher"] = snapshot.publisher or payload_kwargs["publisher"]
+                        payload_kwargs["publisher"] = (
+                            snapshot.publisher or payload_kwargs["publisher"]
+                        )
                         payload_kwargs["comments"] = snapshot.comments or payload_kwargs["comments"]
                         payload_kwargs["lyrics"] = snapshot.lyrics or payload_kwargs["lyrics"]
-                        payload_kwargs["audio_file_source_path"] = payload_kwargs["audio_file_source_path"] or None
-                        payload_kwargs["album_art_source_path"] = payload_kwargs["album_art_source_path"] or None
+                        payload_kwargs["audio_file_source_path"] = (
+                            payload_kwargs["audio_file_source_path"] or None
+                        )
+                        payload_kwargs["album_art_source_path"] = (
+                            payload_kwargs["album_art_source_path"] or None
+                        )
 
                     self.track_service.update_track(
                         TrackUpdatePayload(

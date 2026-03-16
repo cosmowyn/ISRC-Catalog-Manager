@@ -5,7 +5,12 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation
 
 from .gs1_mapping import field_label
-from .gs1_models import GS1MetadataRecord, GS1ValidationIssue, GS1ValidationResult, REQUIRED_GS1_METADATA_FIELDS
+from .gs1_models import (
+    REQUIRED_GS1_METADATA_FIELDS,
+    GS1MetadataRecord,
+    GS1ValidationIssue,
+    GS1ValidationResult,
+)
 
 
 class GS1ValidationService:
@@ -17,7 +22,9 @@ class GS1ValidationService:
     MAX_SUBBRAND_LENGTH = 70
     MAX_CONTRACT_NUMBER_LENGTH = 40
 
-    def validate(self, record: GS1MetadataRecord, *, for_export: bool = False) -> GS1ValidationResult:
+    def validate(
+        self, record: GS1MetadataRecord, *, for_export: bool = False
+    ) -> GS1ValidationResult:
         issues: list[GS1ValidationIssue] = []
 
         for field_name in REQUIRED_GS1_METADATA_FIELDS:

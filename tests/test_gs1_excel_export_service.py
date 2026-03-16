@@ -13,7 +13,6 @@ from isrc_manager.services import (
     GS1TemplateVerificationService,
 )
 
-
 HEADERS = [
     "GS1 Artikelcode (GTIN)",
     "Status",
@@ -53,7 +52,9 @@ def build_multi_contract_template(path: Path):
     workbook.save(path)
 
 
-def prepared_record(track_id: int, title: str, *, contract_number: str = "10070050") -> GS1PreparedRecord:
+def prepared_record(
+    track_id: int, title: str, *, contract_number: str = "10070050"
+) -> GS1PreparedRecord:
     return GS1PreparedRecord(
         metadata=GS1MetadataRecord(
             track_id=track_id,
@@ -100,7 +101,9 @@ class GS1ExcelExportServiceTests(unittest.TestCase):
     def test_single_export_writes_into_output_copy_without_mutating_template(self):
         output_path = self.root / "single-export.xlsx"
 
-        result = self.service.export(self.template_profile, [prepared_record(1, "Orbit Release")], output_path)
+        result = self.service.export(
+            self.template_profile, [prepared_record(1, "Orbit Release")], output_path
+        )
 
         self.assertIsInstance(result, GS1ExportResult)
         self.assertEqual(result.exported_count, 1)

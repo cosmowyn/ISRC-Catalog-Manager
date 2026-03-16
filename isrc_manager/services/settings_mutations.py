@@ -20,7 +20,7 @@ class SettingsMutationService:
         self.conn = conn
         self.settings = settings
 
-    def _profile_set(self, key: str, value) -> None:
+    def _profile_set(self, key: str, value: object) -> None:
         with self.conn:
             self.conn.execute(
                 "INSERT INTO app_kv(key, value) VALUES(?, ?) "
@@ -46,7 +46,9 @@ class SettingsMutationService:
 
     def set_auto_snapshot_interval_minutes(self, minutes: int) -> None:
         value = int(minutes)
-        value = max(MIN_AUTO_SNAPSHOT_INTERVAL_MINUTES, min(MAX_AUTO_SNAPSHOT_INTERVAL_MINUTES, value))
+        value = max(
+            MIN_AUTO_SNAPSHOT_INTERVAL_MINUTES, min(MAX_AUTO_SNAPSHOT_INTERVAL_MINUTES, value)
+        )
         if value <= 0:
             value = DEFAULT_AUTO_SNAPSHOT_INTERVAL_MINUTES
         self._profile_set("auto_snapshot_interval_minutes", value)

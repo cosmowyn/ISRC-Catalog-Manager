@@ -57,7 +57,9 @@ class SessionHistoryManagerTests(unittest.TestCase):
         self.created.write_text("created", encoding="utf-8")
         app = _FakeApp(self.created)
 
-        self.history.record_profile_create(created_path=str(self.created), previous_path=str(self.primary))
+        self.history.record_profile_create(
+            created_path=str(self.created), previous_path=str(self.primary)
+        )
 
         self.history.undo(app)
         self.assertFalse(self.created.exists())

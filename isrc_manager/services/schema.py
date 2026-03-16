@@ -33,7 +33,9 @@ class DatabaseSchemaService:
         self.data_root = Path(data_root) if data_root is not None else None
 
     def _table_columns(self, table_name: str) -> set[str]:
-        return {row[1] for row in self.cursor.execute(f"PRAGMA table_info({table_name})").fetchall()}
+        return {
+            row[1] for row in self.cursor.execute(f"PRAGMA table_info({table_name})").fetchall()
+        }
 
     def init_db(self) -> None:
         # Core entities
@@ -97,15 +99,21 @@ class DatabaseSchemaService:
         track_columns = self._table_columns("Tracks")
         self._ensure_optional_isrc_constraints()
         if "track_title" in track_columns:
-            self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_title ON Tracks(track_title)")
+            self.cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_tracks_title ON Tracks(track_title)"
+            )
         if "upc" in track_columns:
             self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_upc ON Tracks(upc)")
         if "genre" in track_columns:
             self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_genre ON Tracks(genre)")
         if "catalog_number" in track_columns:
-            self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_catalog_number ON Tracks(catalog_number)")
+            self.cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_tracks_catalog_number ON Tracks(catalog_number)"
+            )
         if "buma_work_number" in track_columns:
-            self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_buma_work_number ON Tracks(buma_work_number)")
+            self.cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_tracks_buma_work_number ON Tracks(buma_work_number)"
+            )
         if "db_entry_date" in track_columns:
             self.cursor.execute(
                 """
@@ -295,7 +303,9 @@ class DatabaseSchemaService:
             """
         )
 
-    def _record_audit(self, action: str, entity: str, ref_id: str | int | None, details: str | None) -> None:
+    def _record_audit(
+        self, action: str, entity: str, ref_id: str | int | None, details: str | None
+    ) -> None:
         if self.audit_callback is None:
             return
         try:
@@ -401,15 +411,23 @@ class DatabaseSchemaService:
                 break
 
     def _mig_1_to_2(self) -> None:
-        cols = [row[1] for row in self.cursor.execute("PRAGMA table_info(CustomFieldDefs)").fetchall()]
+        cols = [
+            row[1] for row in self.cursor.execute("PRAGMA table_info(CustomFieldDefs)").fetchall()
+        ]
         if "field_type" not in cols:
-            self.cursor.execute("ALTER TABLE CustomFieldDefs ADD COLUMN field_type TEXT NOT NULL DEFAULT 'text'")
+            self.cursor.execute(
+                "ALTER TABLE CustomFieldDefs ADD COLUMN field_type TEXT NOT NULL DEFAULT 'text'"
+            )
         if "options" not in cols:
             self.cursor.execute("ALTER TABLE CustomFieldDefs ADD COLUMN options TEXT")
 
     def _mig_2_to_3(self) -> None:
-        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_release_date ON Tracks(release_date)")
-        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_cfvalues_field ON CustomFieldValues(field_def_id)")
+        self.cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tracks_release_date ON Tracks(release_date)"
+        )
+        self.cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_cfvalues_field ON CustomFieldValues(field_def_id)"
+        )
 
     def _mig_3_to_4(self) -> None:
         cols = [row[1] for row in self.cursor.execute("PRAGMA table_info(Tracks)").fetchall()]
@@ -418,7 +436,9 @@ class DatabaseSchemaService:
         for track_id, isrc in self.cursor.execute(
             "SELECT id, isrc FROM Tracks WHERE isrc_compact IS NULL OR isrc_compact = ''"
         ).fetchall():
-            self.cursor.execute("UPDATE Tracks SET isrc_compact=? WHERE id=?", (to_compact_isrc(isrc), track_id))
+            self.cursor.execute(
+                "UPDATE Tracks SET isrc_compact=? WHERE id=?", (to_compact_isrc(isrc), track_id)
+            )
         self.cursor.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_tracks_isrc_compact_unique ON Tracks(isrc_compact)"
         )
@@ -592,16 +612,22 @@ class DatabaseSchemaService:
     def _mig_8_to_9(self) -> None:
         cols = [row[1] for row in self.cursor.execute("PRAGMA table_info(Tracks)").fetchall()]
         if "track_length_sec" not in cols:
-            self.cursor.execute("ALTER TABLE Tracks ADD COLUMN track_length_sec INTEGER NOT NULL DEFAULT 0")
+            self.cursor.execute(
+                "ALTER TABLE Tracks ADD COLUMN track_length_sec INTEGER NOT NULL DEFAULT 0"
+            )
 
     def _mig_9_to_10(self) -> None:
-        cols = [row[1] for row in self.cursor.execute("PRAGMA table_info(CustomFieldValues)").fetchall()]
+        cols = [
+            row[1] for row in self.cursor.execute("PRAGMA table_info(CustomFieldValues)").fetchall()
+        ]
         if "blob_value" not in cols:
             self.cursor.execute("ALTER TABLE CustomFieldValues ADD COLUMN blob_value BLOB")
         if "mime_type" not in cols:
             self.cursor.execute("ALTER TABLE CustomFieldValues ADD COLUMN mime_type TEXT")
         if "size_bytes" not in cols:
-            self.cursor.execute("ALTER TABLE CustomFieldValues ADD COLUMN size_bytes INTEGER NOT NULL DEFAULT 0")
+            self.cursor.execute(
+                "ALTER TABLE CustomFieldValues ADD COLUMN size_bytes INTEGER NOT NULL DEFAULT 0"
+            )
 
         self.cursor.execute(
             """
@@ -832,9 +858,15 @@ class DatabaseSchemaService:
             for track_id, isrc in self.cursor.execute(
                 "SELECT id, isrc FROM Tracks WHERE isrc_compact IS NULL OR isrc_compact = ''"
             ).fetchall():
-                self.cursor.execute("UPDATE Tracks SET isrc_compact=? WHERE id=?", (to_compact_isrc(isrc), track_id))
-        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_catalog_number ON Tracks(catalog_number)")
-        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_buma_work_number ON Tracks(buma_work_number)")
+                self.cursor.execute(
+                    "UPDATE Tracks SET isrc_compact=? WHERE id=?", (to_compact_isrc(isrc), track_id)
+                )
+        self.cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tracks_catalog_number ON Tracks(catalog_number)"
+        )
+        self.cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tracks_buma_work_number ON Tracks(buma_work_number)"
+        )
 
     def _ensure_optional_isrc_constraints(self) -> None:
         self.cursor.execute("DROP INDEX IF EXISTS idx_tracks_isrc_unique")
@@ -953,11 +985,15 @@ class DatabaseSchemaService:
         cols = self._table_columns("GS1Metadata")
         if "contract_number" not in cols:
             self.cursor.execute("ALTER TABLE GS1Metadata ADD COLUMN contract_number TEXT")
-        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_gs1_metadata_track_id ON GS1Metadata(track_id)")
+        self.cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_gs1_metadata_track_id ON GS1Metadata(track_id)"
+        )
         self.cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_gs1_metadata_export_enabled ON GS1Metadata(export_enabled)"
         )
-        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_gs1_metadata_contract_number ON GS1Metadata(contract_number)")
+        self.cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_gs1_metadata_contract_number ON GS1Metadata(contract_number)"
+        )
 
     def _ensure_release_tables(self) -> None:
         self.cursor.execute(
@@ -1046,7 +1082,9 @@ class DatabaseSchemaService:
     def _migrate_legacy_releases(self) -> None:
         tables = {
             row[0]
-            for row in self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+            for row in self.cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
         }
         if "Tracks" not in tables or "Artists" not in tables:
             return
@@ -1093,7 +1131,9 @@ class DatabaseSchemaService:
                     str(row[7] or "").strip(),
                 )
                 grouped.setdefault(group_key, []).append(row)
-            elif str(row[6] or "").strip() or str(row[7] or "").strip() or str(row[5] or "").strip():
+            elif (
+                str(row[6] or "").strip() or str(row[7] or "").strip() or str(row[5] or "").strip()
+            ):
                 single_rows.append(row)
 
         for group_rows in grouped.values():
@@ -1239,7 +1279,9 @@ class DatabaseSchemaService:
                     value_column=spec["value_column"],
                 )
 
-            self.cursor.execute("DELETE FROM CustomFieldValues WHERE field_def_id=?", (int(field_id),))
+            self.cursor.execute(
+                "DELETE FROM CustomFieldValues WHERE field_def_id=?", (int(field_id),)
+            )
             self.cursor.execute("DELETE FROM CustomFieldDefs WHERE id=?", (int(field_id),))
 
     def _migrate_promoted_text_field(self, *, field_id: int, value_column: str) -> None:

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from threading import Event
 from typing import Callable
 
-from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
+from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
 from PySide6.QtWidgets import QProgressDialog, QWidget
 
 from .models import TaskCancelledError, TaskFailure, TaskProgressUpdate
@@ -70,11 +70,15 @@ class _BackgroundTaskWorker(QObject):
     cancelled = Signal()
     finished = Signal()
 
-    def __init__(self, task_fn: Callable[[BackgroundTaskContext], object], context: BackgroundTaskContext):
+    def __init__(
+        self, task_fn: Callable[[BackgroundTaskContext], object], context: BackgroundTaskContext
+    ):
         super().__init__()
         self._task_fn = task_fn
         self._context = context
-        self._context.bind_callbacks(progress_callback=self.progress.emit, status_callback=self.status.emit)
+        self._context.bind_callbacks(
+            progress_callback=self.progress.emit, status_callback=self.status.emit
+        )
 
     @Slot()
     def run(self) -> None:
@@ -153,7 +157,9 @@ class _TaskCallbackRelay(QObject):
         if isinstance(failure, TaskFailure):
             self._error_handler(failure)
             return
-        self._error_handler(TaskFailure(message=str(failure or "Background task failed."), traceback_text=""))
+        self._error_handler(
+            TaskFailure(message=str(failure or "Background task failed."), traceback_text="")
+        )
 
     @Slot()
     def handle_cancelled(self) -> None:
@@ -201,7 +207,9 @@ class BackgroundTaskManager(QObject):
     def active_task_titles(self) -> list[str]:
         return [record.title for record in self._tasks.values()]
 
-    def can_start(self, *, kind: str = "read", unique_key: str | None = None) -> tuple[bool, str | None]:
+    def can_start(
+        self, *, kind: str = "read", unique_key: str | None = None
+    ) -> tuple[bool, str | None]:
         clean_kind = str(kind or "read")
         if unique_key:
             for record in self._tasks.values():

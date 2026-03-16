@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -15,8 +13,8 @@ from PySide6.QtWidgets import (
     QLabel,
     QListView,
     QMessageBox,
-    QPushButton,
     QPlainTextEdit,
+    QPushButton,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -310,7 +308,9 @@ class QualityDashboardDialog(QDialog):
         self.refresh_scan()
 
     def _export_csv(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(self, "Export Quality Report to CSV", "quality-report.csv", "CSV (*.csv)")
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export Quality Report to CSV", "quality-report.csv", "CSV (*.csv)"
+        )
         if not path:
             return
         self.service.export_csv(

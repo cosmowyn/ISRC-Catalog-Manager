@@ -139,18 +139,24 @@ class TrackService:
         if is_blank(name):
             raise ValueError("Artist name is required")
         cur = cursor or self.conn.cursor()
-        row = cur.execute("SELECT id FROM Artists WHERE name=? ORDER BY id LIMIT 1", (name,)).fetchone()
+        row = cur.execute(
+            "SELECT id FROM Artists WHERE name=? ORDER BY id LIMIT 1", (name,)
+        ).fetchone()
         if row:
             return int(row[0])
         cur.execute("INSERT INTO Artists (name) VALUES (?)", (name,))
         return int(cur.lastrowid)
 
-    def get_or_create_album(self, title: str | None, *, cursor: sqlite3.Cursor | None = None) -> int | None:
+    def get_or_create_album(
+        self, title: str | None, *, cursor: sqlite3.Cursor | None = None
+    ) -> int | None:
         title = (title or "").strip()
         if is_blank(title):
             return None
         cur = cursor or self.conn.cursor()
-        row = cur.execute("SELECT id FROM Albums WHERE title=? ORDER BY id LIMIT 1", (title,)).fetchone()
+        row = cur.execute(
+            "SELECT id FROM Albums WHERE title=? ORDER BY id LIMIT 1", (title,)
+        ).fetchone()
         if row:
             return int(row[0])
         cur.execute("INSERT INTO Albums (title) VALUES (?)", (title,))
@@ -203,7 +209,9 @@ class TrackService:
             return False
         cur = cursor or self.conn.cursor()
         if exclude_track_id is None:
-            row = cur.execute("SELECT 1 FROM Tracks WHERE isrc_compact = ? LIMIT 1", (norm,)).fetchone()
+            row = cur.execute(
+                "SELECT 1 FROM Tracks WHERE isrc_compact = ? LIMIT 1", (norm,)
+            ).fetchone()
         else:
             row = cur.execute(
                 "SELECT 1 FROM Tracks WHERE isrc_compact = ? AND id != ? LIMIT 1",
@@ -263,7 +271,11 @@ class TrackService:
     @staticmethod
     def _album_supports_shared_art(album_id: int | None, album_title: str | None) -> bool:
         clean_title = str(album_title or "").strip()
-        return album_id is not None and not is_blank(clean_title) and clean_title.casefold() != "single"
+        return (
+            album_id is not None
+            and not is_blank(clean_title)
+            and clean_title.casefold() != "single"
+        )
 
     def _get_track_row_media_meta(
         self,
@@ -283,7 +295,9 @@ class TrackService:
             (int(track_id),),
         ).fetchone()
         if not row:
-            return self._normalize_media_meta("", "", 0, owner_scope="track", owner_id=int(track_id))
+            return self._normalize_media_meta(
+                "", "", 0, owner_scope="track", owner_id=int(track_id)
+            )
         return self._normalize_media_meta(
             row[0],
             row[1],
@@ -308,7 +322,9 @@ class TrackService:
             (int(album_id),),
         ).fetchone()
         if not row:
-            return self._normalize_media_meta("", "", 0, owner_scope="album", owner_id=int(album_id))
+            return self._normalize_media_meta(
+                "", "", 0, owner_scope="album", owner_id=int(album_id)
+            )
         return self._normalize_media_meta(
             row[0],
             row[1],
@@ -337,7 +353,9 @@ class TrackService:
             (int(album_id),),
         ).fetchone()
         if not row:
-            return self._normalize_media_meta("", "", 0, owner_scope="album_track", owner_id=None, album_id=int(album_id))
+            return self._normalize_media_meta(
+                "", "", 0, owner_scope="album_track", owner_id=None, album_id=int(album_id)
+            )
         return self._normalize_media_meta(
             row[1],
             row[2],
@@ -533,7 +551,9 @@ class TrackService:
                     return fallback_meta
         return self._get_track_row_media_meta(track_id, media_key, cursor=cur)
 
-    def has_media(self, track_id: int, media_key: str, *, cursor: sqlite3.Cursor | None = None) -> bool:
+    def has_media(
+        self, track_id: int, media_key: str, *, cursor: sqlite3.Cursor | None = None
+    ) -> bool:
         return bool(self.get_media_meta(track_id, media_key, cursor=cursor).get("has_media"))
 
     def fetch_media_bytes(
@@ -619,7 +639,9 @@ class TrackService:
             owner_id=int(track_id),
         )
 
-    def clear_media(self, track_id: int, media_key: str, *, cursor: sqlite3.Cursor | None = None) -> None:
+    def clear_media(
+        self, track_id: int, media_key: str, *, cursor: sqlite3.Cursor | None = None
+    ) -> None:
         cur = cursor or self.conn.cursor()
         if media_key == "album_art":
             album_id, album_title = self._fetch_album_context(track_id, cursor=cur)
@@ -654,7 +676,9 @@ class TrackService:
             return str(row[0])
         return f"track_{track_id}"
 
-    def list_album_group_track_ids(self, track_id: int, *, cursor: sqlite3.Cursor | None = None) -> list[int]:
+    def list_album_group_track_ids(
+        self, track_id: int, *, cursor: sqlite3.Cursor | None = None
+    ) -> list[int]:
         cur = cursor or self.conn.cursor()
         row = cur.execute(
             """
@@ -679,7 +703,9 @@ class TrackService:
         ).fetchall()
         return [int(group_track_id) for (group_track_id,) in rows]
 
-    def fetch_track_snapshot(self, track_id: int, *, cursor: sqlite3.Cursor | None = None) -> TrackSnapshot | None:
+    def fetch_track_snapshot(
+        self, track_id: int, *, cursor: sqlite3.Cursor | None = None
+    ) -> TrackSnapshot | None:
         cur = cursor or self.conn.cursor()
         row = cur.execute(
             """
@@ -756,12 +782,16 @@ class TrackService:
             album_art_size_bytes=int(album_art_meta.get("size_bytes") or 0),
         )
 
-    def restore_track_snapshot(self, snapshot: TrackSnapshot, *, cursor: sqlite3.Cursor | None = None) -> None:
+    def restore_track_snapshot(
+        self, snapshot: TrackSnapshot, *, cursor: sqlite3.Cursor | None = None
+    ) -> None:
         cur = cursor or self.conn.cursor()
         main_artist_id = self.get_or_create_artist(snapshot.artist_name, cursor=cur)
         album_id = self.get_or_create_album(snapshot.album_title, cursor=cur)
         compact_isrc = to_compact_isrc(snapshot.isrc)
-        existing = cur.execute("SELECT 1 FROM Tracks WHERE id=?", (int(snapshot.track_id),)).fetchone()
+        existing = cur.execute(
+            "SELECT 1 FROM Tracks WHERE id=?", (int(snapshot.track_id),)
+        ).fetchone()
         if existing:
             cur.execute(
                 """
@@ -877,7 +907,9 @@ class TrackService:
             )
         self.replace_additional_artists(snapshot.track_id, snapshot.additional_artists, cursor=cur)
 
-    def delete_unused_artists_by_names(self, names: Iterable[str], *, cursor: sqlite3.Cursor | None = None) -> None:
+    def delete_unused_artists_by_names(
+        self, names: Iterable[str], *, cursor: sqlite3.Cursor | None = None
+    ) -> None:
         cur = cursor or self.conn.cursor()
         cleaned_names = sorted({(name or "").strip() for name in names if not is_blank(name)})
         for name in cleaned_names:
@@ -891,7 +923,9 @@ class TrackService:
                 (name,),
             )
 
-    def delete_unused_albums_by_titles(self, titles: Iterable[str], *, cursor: sqlite3.Cursor | None = None) -> None:
+    def delete_unused_albums_by_titles(
+        self, titles: Iterable[str], *, cursor: sqlite3.Cursor | None = None
+    ) -> None:
         cur = cursor or self.conn.cursor()
         cleaned_titles = sorted({(title or "").strip() for title in titles if not is_blank(title)})
         for title in cleaned_titles:
@@ -967,9 +1001,13 @@ class TrackService:
             )
             track_id = int(cur.lastrowid)
             if payload.audio_file_source_path:
-                self.set_media_path(track_id, "audio_file", payload.audio_file_source_path, cursor=cur)
+                self.set_media_path(
+                    track_id, "audio_file", payload.audio_file_source_path, cursor=cur
+                )
             if payload.album_art_source_path:
-                self.set_media_path(track_id, "album_art", payload.album_art_source_path, cursor=cur)
+                self.set_media_path(
+                    track_id, "album_art", payload.album_art_source_path, cursor=cur
+                )
             self.replace_additional_artists(track_id, payload.additional_artists, cursor=cur)
             return track_id
 
@@ -978,8 +1016,12 @@ class TrackService:
         album_id = self.get_or_create_album(payload.album_title, cursor=cursor)
         clean_isrc = str(payload.isrc or "").strip()
         compact_isrc = to_compact_isrc(clean_isrc)
-        current_audio = self._get_track_row_media_meta(payload.track_id, "audio_file", cursor=cursor)
-        current_track_art = self._get_track_row_media_meta(payload.track_id, "album_art", cursor=cursor)
+        current_audio = self._get_track_row_media_meta(
+            payload.track_id, "audio_file", cursor=cursor
+        )
+        current_track_art = self._get_track_row_media_meta(
+            payload.track_id, "album_art", cursor=cursor
+        )
         current_effective_art = self.get_media_meta(payload.track_id, "album_art", cursor=cursor)
         shared_album_art = self._album_supports_shared_art(album_id, payload.album_title)
 
@@ -1002,11 +1044,7 @@ class TrackService:
                 int(current_audio.get("size_bytes") or 0),
                 payload.track_title.strip(),
                 payload.catalog_number,
-                (
-                    None
-                    if shared_album_art
-                    else (str(current_track_art.get("path") or "") or None)
-                ),
+                (None if shared_album_art else (str(current_track_art.get("path") or "") or None)),
                 (
                     None
                     if shared_album_art
@@ -1032,12 +1070,16 @@ class TrackService:
         if payload.clear_audio_file:
             self.clear_media(payload.track_id, "audio_file", cursor=cursor)
         elif payload.audio_file_source_path:
-            self.set_media_path(payload.track_id, "audio_file", payload.audio_file_source_path, cursor=cursor)
+            self.set_media_path(
+                payload.track_id, "audio_file", payload.audio_file_source_path, cursor=cursor
+            )
 
         if payload.clear_album_art:
             self.clear_media(payload.track_id, "album_art", cursor=cursor)
         elif payload.album_art_source_path:
-            self.set_media_path(payload.track_id, "album_art", payload.album_art_source_path, cursor=cursor)
+            self.set_media_path(
+                payload.track_id, "album_art", payload.album_art_source_path, cursor=cursor
+            )
         elif shared_album_art:
             stale_track_art_path = str(current_track_art.get("path") or "")
             if stale_track_art_path:
@@ -1052,7 +1094,9 @@ class TrackService:
                 self._delete_unreferenced_media_files([stale_track_art_path], cursor=cursor)
         else:
             effective_art_path = str(current_effective_art.get("path") or "")
-            if effective_art_path and effective_art_path != str(current_track_art.get("path") or ""):
+            if effective_art_path and effective_art_path != str(
+                current_track_art.get("path") or ""
+            ):
                 self._update_track_media_reference(
                     payload.track_id,
                     "album_art",
@@ -1064,7 +1108,9 @@ class TrackService:
 
         self.replace_additional_artists(payload.track_id, payload.additional_artists, cursor=cursor)
 
-    def update_track(self, payload: TrackUpdatePayload, *, cursor: sqlite3.Cursor | None = None) -> None:
+    def update_track(
+        self, payload: TrackUpdatePayload, *, cursor: sqlite3.Cursor | None = None
+    ) -> None:
         if cursor is not None:
             self._update_track_row(payload, cursor=cursor)
             return
@@ -1130,7 +1176,9 @@ class TrackService:
                         track_length_sec=int(snapshot.track_length_sec or 0),
                         iswc=snapshot.iswc,
                         upc=field_updates["upc"] if "upc" in field_updates else snapshot.upc,
-                        genre=field_updates["genre"] if "genre" in field_updates else snapshot.genre,
+                        genre=(
+                            field_updates["genre"] if "genre" in field_updates else snapshot.genre
+                        ),
                         catalog_number=(
                             field_updates["catalog_number"]
                             if "catalog_number" in field_updates
@@ -1141,8 +1189,14 @@ class TrackService:
                         publisher=snapshot.publisher,
                         comments=snapshot.comments,
                         lyrics=snapshot.lyrics,
-                        album_art_source_path=album_art_source_path if apply_album_art and not clear_album_art else None,
-                        clear_album_art=bool(apply_album_art and clear_album_art and not album_art_source_path),
+                        album_art_source_path=(
+                            album_art_source_path
+                            if apply_album_art and not clear_album_art
+                            else None
+                        ),
+                        clear_album_art=bool(
+                            apply_album_art and clear_album_art and not album_art_source_path
+                        ),
                     ),
                     cursor=cur,
                 )

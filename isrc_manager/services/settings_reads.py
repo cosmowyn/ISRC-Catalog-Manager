@@ -85,7 +85,9 @@ class SettingsReadService:
             value = int(raw)
         except Exception:
             value = DEFAULT_AUTO_SNAPSHOT_INTERVAL_MINUTES
-        return max(MIN_AUTO_SNAPSHOT_INTERVAL_MINUTES, min(MAX_AUTO_SNAPSHOT_INTERVAL_MINUTES, value))
+        return max(
+            MIN_AUTO_SNAPSHOT_INTERVAL_MINUTES, min(MAX_AUTO_SNAPSHOT_INTERVAL_MINUTES, value)
+        )
 
     def load_auto_snapshot_settings(self) -> AutoSnapshotSettings:
         return AutoSnapshotSettings(

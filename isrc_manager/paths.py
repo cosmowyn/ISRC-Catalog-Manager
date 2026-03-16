@@ -13,7 +13,11 @@ def _is_frozen() -> bool:
 
 def BIN_DIR() -> Path:
     """Folder of the actual .exe (PyInstaller) or script dir in dev."""
-    return Path(sys.executable).resolve().parent if _is_frozen() else Path(__file__).resolve().parent.parent
+    return (
+        Path(sys.executable).resolve().parent
+        if _is_frozen()
+        else Path(__file__).resolve().parent.parent
+    )
 
 
 def RES_DIR() -> Path:
@@ -31,4 +35,3 @@ def DATA_DIR(app_name: str = APP_NAME, portable: bool | None = None) -> Path:
         return BIN_DIR()
     base = Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local"))
     return (base / app_name).resolve()
-

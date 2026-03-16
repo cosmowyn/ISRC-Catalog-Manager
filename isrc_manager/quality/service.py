@@ -71,7 +71,17 @@ class QualityDashboardService:
             ORDER BY t.id
             """
         ).fetchall()
-        for track_id, title, artist, isrc, release_date, audio_file_path, upc, catalog_number, compact_isrc in rows:
+        for (
+            track_id,
+            title,
+            artist,
+            isrc,
+            release_date,
+            audio_file_path,
+            upc,
+            catalog_number,
+            compact_isrc,
+        ) in rows:
             if not str(title or "").strip():
                 issues.append(
                     QualityIssue(
@@ -191,7 +201,16 @@ class QualityDashboardService:
             ORDER BY id
             """
         ).fetchall()
-        for release_id, title, primary_artist, release_date, upc, catalog_number, artwork_path, stored_barcode_status in rows:
+        for (
+            release_id,
+            title,
+            primary_artist,
+            release_date,
+            upc,
+            catalog_number,
+            artwork_path,
+            stored_barcode_status,
+        ) in rows:
             if not str(title or "").strip():
                 issues.append(
                     QualityIssue(
@@ -351,7 +370,9 @@ class QualityDashboardService:
             shared_release_family = len(normalized_titles) == 1 and bool(normalized_titles)
             issue_type = "shared_release_upc" if shared_release_family else "duplicate_release_upc"
             severity = "info" if shared_release_family else "error"
-            issue_title = "Shared Release UPC/EAN" if shared_release_family else "Duplicate Release UPC/EAN"
+            issue_title = (
+                "Shared Release UPC/EAN" if shared_release_family else "Duplicate Release UPC/EAN"
+            )
             details = (
                 f"UPC/EAN {upc} is shared across multiple release rows for the same titled release. "
                 "This is often intentional for remix packages, compilations, or other multi-artist editions."
@@ -700,7 +721,9 @@ class QualityDashboardService:
                     if not str(row[3] or "").strip() and str(row[7] or "").strip():
                         updates["catalog_number"] = row[7]
                     if not str(row[4] or "").strip() and str(row[8] or "").strip():
-                        album_id = self.track_service.get_or_create_album(str(row[8]), cursor=self.conn.cursor())
+                        album_id = self.track_service.get_or_create_album(
+                            str(row[8]), cursor=self.conn.cursor()
+                        )
                         updates["album_id"] = album_id
                     if updates:
                         assignments = ", ".join(f"{column}=?" for column in updates)

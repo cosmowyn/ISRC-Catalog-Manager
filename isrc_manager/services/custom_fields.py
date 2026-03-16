@@ -5,9 +5,12 @@ from __future__ import annotations
 import json
 import mimetypes
 import sqlite3
-from pathlib import Path
 
-from isrc_manager.media.blob_files import _is_valid_audio_path, _is_valid_image_path, _read_blob_from_path
+from isrc_manager.media.blob_files import (
+    _is_valid_audio_path,
+    _is_valid_image_path,
+    _read_blob_from_path,
+)
 
 
 class CustomFieldDefinitionService:
@@ -66,7 +69,9 @@ class CustomFieldDefinitionService:
                     )
                 order += 1
 
-    def ensure_fields(self, fields: list[dict], *, cursor: sqlite3.Cursor | None = None) -> list[dict]:
+    def ensure_fields(
+        self, fields: list[dict], *, cursor: sqlite3.Cursor | None = None
+    ) -> list[dict]:
         normalized_fields: list[dict] = []
         seen: set[tuple[str, str]] = set()
         for field in fields:
@@ -107,7 +112,9 @@ class CustomFieldDefinitionService:
                 for row in rows
                 if row[1]
             }
-            max_sort = cur.execute("SELECT COALESCE(MAX(sort_order), -1) FROM CustomFieldDefs").fetchone()
+            max_sort = cur.execute(
+                "SELECT COALESCE(MAX(sort_order), -1) FROM CustomFieldDefs"
+            ).fetchone()
             next_sort_order = int(max_sort[0] if max_sort and max_sort[0] is not None else -1)
             ensured: list[dict] = []
 
@@ -140,7 +147,11 @@ class CustomFieldDefinitionService:
                         f"not '{field['field_type']}'"
                     )
 
-                merged_options = existing["options"] if existing["options"] not in (None, "") else field.get("options")
+                merged_options = (
+                    existing["options"]
+                    if existing["options"] not in (None, "")
+                    else field.get("options")
+                )
                 if int(existing["active"]) != 1 or merged_options != existing["options"]:
                     cur.execute(
                         """
@@ -198,7 +209,9 @@ class CustomFieldValueService:
         self.conn = conn
         self.definitions = definitions
 
-    def save_value(self, track_id: int, field_def_id: int, *, value=None, blob_path: str | None = None) -> None:
+    def save_value(
+        self, track_id: int, field_def_id: int, *, value=None, blob_path: str | None = None
+    ) -> None:
         field_type = self.definitions.get_field_type(field_def_id)
         if field_type in ("blob_image", "blob_audio"):
             if blob_path is None:

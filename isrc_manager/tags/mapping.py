@@ -67,8 +67,7 @@ def catalog_metadata_to_tags(
         genre=str(track_values.get("genre") or "").strip() or None,
         composer=str(track_values.get("composer") or "").strip() or None,
         publisher=(
-            str(release.get("label") or track_values.get("publisher") or "").strip()
-            or None
+            str(release.get("label") or track_values.get("publisher") or "").strip() or None
         ),
         release_date=(
             str(release.get("release_date") or track_values.get("release_date") or "").strip()

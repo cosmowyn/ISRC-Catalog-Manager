@@ -513,7 +513,9 @@ class TrackServiceTests(unittest.TestCase):
 
         self.service.delete_track(track_id)
 
-        self.assertIsNone(self.conn.execute("SELECT id FROM Tracks WHERE id=?", (track_id,)).fetchone())
+        self.assertIsNone(
+            self.conn.execute("SELECT id FROM Tracks WHERE id=?", (track_id,)).fetchone()
+        )
         self.assertIsNone(
             self.conn.execute("SELECT 1 FROM TrackArtists WHERE track_id=?", (track_id,)).fetchone()
         )

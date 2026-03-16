@@ -1,7 +1,10 @@
 import sqlite3
 import unittest
 
-from isrc_manager.constants import DEFAULT_AUTO_SNAPSHOT_ENABLED, DEFAULT_AUTO_SNAPSHOT_INTERVAL_MINUTES
+from isrc_manager.constants import (
+    DEFAULT_AUTO_SNAPSHOT_ENABLED,
+    DEFAULT_AUTO_SNAPSHOT_INTERVAL_MINUTES,
+)
 from isrc_manager.services import AutoSnapshotSettings, RegistrationSettings, SettingsReadService
 
 

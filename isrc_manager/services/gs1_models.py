@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-
 CANONICAL_GS1_EXPORT_FIELDS = (
     "gtin_request_number",
     "status",

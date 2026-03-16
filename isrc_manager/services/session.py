@@ -34,11 +34,11 @@ class ProfileKVService:
         )
         self.conn.commit()
 
-    def get(self, key: str, default=None):
+    def get(self, key: str, default: object = None) -> object:
         row = self.conn.execute("SELECT value FROM app_kv WHERE key=?", (key,)).fetchone()
         return row[0] if row else default
 
-    def set(self, key: str, value) -> None:
+    def set(self, key: str, value: object) -> None:
         with self.conn:
             self.conn.execute(
                 "INSERT INTO app_kv(key, value) VALUES(?, ?) "

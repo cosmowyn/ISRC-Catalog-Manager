@@ -124,7 +124,9 @@ class DatabaseMaintenanceService:
         finally:
             conn.close()
 
-    def restore_database(self, backup_path: str | Path, current_db_path: str | Path) -> RestoreResult:
+    def restore_database(
+        self, backup_path: str | Path, current_db_path: str | Path
+    ) -> RestoreResult:
         src = Path(backup_path)
         dst = Path(current_db_path)
         if not src.exists():
@@ -141,7 +143,9 @@ class DatabaseMaintenanceService:
                 for ext in (".wal", ".shm"):
                     companion = dst.with_suffix(dst.suffix + ext)
                     if companion.exists():
-                        shutil.copy2(companion, safety_copy_path.with_suffix(safety_copy_path.suffix + ext))
+                        shutil.copy2(
+                            companion, safety_copy_path.with_suffix(safety_copy_path.suffix + ext)
+                        )
         except Exception:
             safety_copy_path = None
 
@@ -157,4 +161,6 @@ class DatabaseMaintenanceService:
         integrity = self.verify_integrity(dst)
         if integrity.lower() != "ok":
             raise RuntimeError(f"Integrity check failed after restore: {integrity}")
-        return RestoreResult(restored_path=dst, integrity_result=integrity, safety_copy_path=safety_copy_path)
+        return RestoreResult(
+            restored_path=dst, integrity_result=integrity, safety_copy_path=safety_copy_path
+        )

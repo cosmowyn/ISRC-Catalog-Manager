@@ -69,7 +69,12 @@ class ImportExecutionResult:
 class XMLImportService:
     """Centralizes XML import preflight analysis and transactional writes."""
 
-    def __init__(self, conn: sqlite3.Connection, track_service: TrackService, custom_fields: CustomFieldDefinitionService):
+    def __init__(
+        self,
+        conn: sqlite3.Connection,
+        track_service: TrackService,
+        custom_fields: CustomFieldDefinitionService,
+    ):
         self.conn = conn
         self.track_service = track_service
         self.custom_fields = custom_fields
@@ -77,7 +82,9 @@ class XMLImportService:
     def inspect_file(self, file_path: str) -> ImportInspection:
         schema, records, invalid_count = self._parse_file(file_path)
         missing_specs, conflicting = self._inspect_custom_field_requirements(records)
-        duplicate_count = sum(1 for record in records if self.track_service.is_isrc_taken_normalized(record.iso_isrc))
+        duplicate_count = sum(
+            1 for record in records if self.track_service.is_isrc_taken_normalized(record.iso_isrc)
+        )
         return ImportInspection(
             file_path=file_path,
             schema=schema,
@@ -88,10 +95,14 @@ class XMLImportService:
             conflicting_custom_fields=conflicting,
         )
 
-    def execute_import(self, file_path: str, *, create_missing_custom_fields: bool = False) -> ImportExecutionResult:
+    def execute_import(
+        self, file_path: str, *, create_missing_custom_fields: bool = False
+    ) -> ImportExecutionResult:
         inspection = self.inspect_file(file_path)
         if inspection.conflicting_custom_fields:
-            raise ValueError(f"Custom column type conflicts: {inspection.conflicting_custom_fields}")
+            raise ValueError(
+                f"Custom column type conflicts: {inspection.conflicting_custom_fields}"
+            )
         if inspection.missing_custom_fields:
             if not create_missing_custom_fields:
                 raise ValueError(f"Missing custom columns: {inspection.missing_custom_fields}")
@@ -118,7 +129,9 @@ class XMLImportService:
 
                 self.conn.execute("SAVEPOINT row_import")
                 try:
-                    main_artist_id = self.track_service.get_or_create_artist(record.artist, cursor=cur)
+                    main_artist_id = self.track_service.get_or_create_artist(
+                        record.artist, cursor=cur
+                    )
                     album_id = self.track_service.get_or_create_album(record.album, cursor=cur)
                     cur.execute(
                         """
@@ -151,7 +164,9 @@ class XMLImportService:
                     for custom in record.custom_fields:
                         if not custom["name"] or not custom["type"]:
                             continue
-                        promoted_key = PROMOTED_TEXT_CUSTOM_FIELDS.get(custom["name"].strip().lower())
+                        promoted_key = PROMOTED_TEXT_CUSTOM_FIELDS.get(
+                            custom["name"].strip().lower()
+                        )
                         if promoted_key:
                             cur.execute(
                                 f"UPDATE Tracks SET {promoted_key}=? WHERE id=?",
@@ -220,12 +235,16 @@ class XMLImportService:
                         tracks_element = element
                         break
             if tracks_element is not None:
-                records = [element for element in tracks_element if self._xml_local(element.tag) == "Track"]
+                records = [
+                    element for element in tracks_element if self._xml_local(element.tag) == "Track"
+                ]
                 if records:
                     schema = "selected"
 
         if not records or schema is None:
-            raise ValueError(f"Unexpected XML root element: <{root_tag}> or no importable records found.")
+            raise ValueError(
+                f"Unexpected XML root element: <{root_tag}> or no importable records found."
+            )
 
         parsed_records: list[ImportRecord] = []
         invalid_count = 0

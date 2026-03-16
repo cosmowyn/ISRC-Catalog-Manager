@@ -6,8 +6,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
-    QHBoxLayout,
     QGroupBox,
+    QHBoxLayout,
     QLabel,
     QMessageBox,
     QPushButton,
@@ -69,7 +69,9 @@ class HistoryDialog(QDialog):
         self.help_btn.setFixedSize(28, 28)
         self.help_btn.setProperty("role", "helpButton")
         self.help_btn.setToolTip("Open help for history and snapshots")
-        self.help_btn.clicked.connect(lambda: self.app.open_help_dialog(topic_id="history", parent=self))
+        self.help_btn.clicked.connect(
+            lambda: self.app.open_help_dialog(topic_id="history", parent=self)
+        )
         header_row.addWidget(self.help_btn)
         layout.addLayout(header_row)
 
@@ -149,12 +151,20 @@ class HistoryDialog(QDialog):
         return table
 
     def refresh_data(self):
-        self._populate_entry_table(self.session_table, self.app.session_history_manager.list_entries())
+        self._populate_entry_table(
+            self.session_table, self.app.session_history_manager.list_entries()
+        )
 
-        history_entries = self.app.history_manager.list_entries() if self.app.history_manager is not None else []
+        history_entries = (
+            self.app.history_manager.list_entries() if self.app.history_manager is not None else []
+        )
         self._populate_entry_table(self.history_table, history_entries)
 
-        snapshots = self.app.history_manager.list_snapshots() if self.app.history_manager is not None else []
+        snapshots = (
+            self.app.history_manager.list_snapshots()
+            if self.app.history_manager is not None
+            else []
+        )
         self.snapshot_table.setRowCount(len(snapshots))
         for row_idx, snapshot in enumerate(snapshots):
             values = [
@@ -172,8 +182,12 @@ class HistoryDialog(QDialog):
         redo_source, redo_entry = self.app._get_best_history_candidate("redo")
         self.undo_btn.setEnabled(bool(undo_source and undo_entry))
         self.redo_btn.setEnabled(bool(redo_source and redo_entry))
-        self.restore_snapshot_btn.setEnabled(self.app.history_manager is not None and self.snapshot_table.rowCount() > 0)
-        self.delete_snapshot_btn.setEnabled(self.app.history_manager is not None and self.snapshot_table.rowCount() > 0)
+        self.restore_snapshot_btn.setEnabled(
+            self.app.history_manager is not None and self.snapshot_table.rowCount() > 0
+        )
+        self.delete_snapshot_btn.setEnabled(
+            self.app.history_manager is not None and self.snapshot_table.rowCount() > 0
+        )
 
     @staticmethod
     def _populate_entry_table(table: QTableWidget, entries):
@@ -222,12 +236,15 @@ class HistoryDialog(QDialog):
         if snapshot_id is None:
             QMessageBox.information(self, "Snapshots", "Select a snapshot first.")
             return
-        if QMessageBox.question(
-            self,
-            "Delete Snapshot",
-            "Delete this snapshot from disk and history metadata?",
-            QMessageBox.Yes | QMessageBox.No,
-        ) != QMessageBox.Yes:
+        if (
+            QMessageBox.question(
+                self,
+                "Delete Snapshot",
+                "Delete this snapshot from disk and history metadata?",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            != QMessageBox.Yes
+        ):
             return
         try:
             self.app.delete_snapshot_from_history(snapshot_id)

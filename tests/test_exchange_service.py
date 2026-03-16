@@ -7,7 +7,13 @@ from zipfile import ZipFile
 
 from isrc_manager.exchange import ExchangeImportOptions, ExchangeService
 from isrc_manager.releases import ReleasePayload, ReleaseService, ReleaseTrackPlacement
-from isrc_manager.services import CustomFieldDefinitionService, CustomFieldValueService, DatabaseSchemaService, TrackCreatePayload, TrackService
+from isrc_manager.services import (
+    CustomFieldDefinitionService,
+    CustomFieldValueService,
+    DatabaseSchemaService,
+    TrackCreatePayload,
+    TrackService,
+)
 
 
 class ExchangeServiceTests(unittest.TestCase):
@@ -72,13 +78,17 @@ class ExchangeServiceTests(unittest.TestCase):
                 catalog_number="CAT-001",
                 upc="036000291452",
                 territory="Worldwide",
-                placements=[ReleaseTrackPlacement(track_id=track_id, disc_number=1, track_number=1, sequence_number=1)],
+                placements=[
+                    ReleaseTrackPlacement(
+                        track_id=track_id, disc_number=1, track_number=1, sequence_number=1
+                    )
+                ],
             )
         )
 
     def test_json_round_trip_preserves_release_and_custom_fields(self):
         track_id = self._create_track(isrc="NL-ABC-26-00001", title="Orbit")
-        release_id = self._create_release(track_id)
+        self._create_release(track_id)
         field = self.custom_defs.ensure_fields([{"name": "Mood", "field_type": "text"}])[0]
         self.custom_values.save_value(track_id, int(field["id"]), value="Dreamy")
 
@@ -96,7 +106,9 @@ class ExchangeServiceTests(unittest.TestCase):
                 CustomFieldDefinitionService(new_conn),
                 self.data_root,
             )
-            report = new_service.import_json(export_path, options=ExchangeImportOptions(mode="create"))
+            report = new_service.import_json(
+                export_path, options=ExchangeImportOptions(mode="create")
+            )
 
             self.assertEqual(report.failed, 0)
             self.assertEqual(new_conn.execute("SELECT COUNT(*) FROM Tracks").fetchone()[0], 1)
@@ -113,7 +125,9 @@ class ExchangeServiceTests(unittest.TestCase):
                 "Dreamy",
             )
             self.assertEqual(
-                new_conn.execute("SELECT COUNT(*) FROM ReleaseTracks WHERE release_id=1").fetchone()[0],
+                new_conn.execute(
+                    "SELECT COUNT(*) FROM ReleaseTracks WHERE release_id=1"
+                ).fetchone()[0],
                 1,
             )
         finally:
@@ -151,7 +165,9 @@ class ExchangeServiceTests(unittest.TestCase):
             manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
         self.assertEqual(manifest["schema_version"], 1)
         self.assertTrue(manifest["packaged_media"])
-        self.assertTrue(any(str(row.get("audio_file_path") or "").strip() for row in manifest["rows"]))
+        self.assertTrue(
+            any(str(row.get("audio_file_path") or "").strip() for row in manifest["rows"])
+        )
         self.assertTrue(isinstance(manifest.get("packaged_media_index"), dict))
         self.assertTrue(manifest["packaged_media_index"])
 
@@ -205,8 +221,12 @@ class ExchangeServiceTests(unittest.TestCase):
                 release_date="2026-03-15",
                 upc="036000291452",
                 placements=[
-                    ReleaseTrackPlacement(track_id=track_a, disc_number=1, track_number=1, sequence_number=1),
-                    ReleaseTrackPlacement(track_id=track_b, disc_number=1, track_number=2, sequence_number=2),
+                    ReleaseTrackPlacement(
+                        track_id=track_a, disc_number=1, track_number=1, sequence_number=1
+                    ),
+                    ReleaseTrackPlacement(
+                        track_id=track_b, disc_number=1, track_number=2, sequence_number=2
+                    ),
                 ],
             )
         )
@@ -235,7 +255,9 @@ class ExchangeServiceTests(unittest.TestCase):
         self.assertEqual(inspection.format_name, "package")
         self.assertIn("track_title", inspection.headers)
         self.assertTrue(inspection.preview_rows)
-        self.assertTrue(any("Packaged media entries detected:" in warning for warning in inspection.warnings))
+        self.assertTrue(
+            any("Packaged media entries detected:" in warning for warning in inspection.warnings)
+        )
 
     def test_package_import_round_trip_restores_media_and_release_artwork(self):
         audio_path = self.data_root / "Pulse.wav"
@@ -275,7 +297,11 @@ class ExchangeServiceTests(unittest.TestCase):
                 release_date="2026-03-15",
                 upc="036000291452",
                 artwork_source_path=str(artwork_path),
-                placements=[ReleaseTrackPlacement(track_id=track_id, disc_number=1, track_number=1, sequence_number=1)],
+                placements=[
+                    ReleaseTrackPlacement(
+                        track_id=track_id, disc_number=1, track_number=1, sequence_number=1
+                    )
+                ],
             )
         )
 
@@ -296,7 +322,9 @@ class ExchangeServiceTests(unittest.TestCase):
                 new_root,
             )
 
-            report = new_service.import_package(package_path, options=ExchangeImportOptions(mode="create"))
+            report = new_service.import_package(
+                package_path, options=ExchangeImportOptions(mode="create")
+            )
 
             self.assertEqual(report.failed, 0)
             self.assertEqual(new_conn.execute("SELECT COUNT(*) FROM Tracks").fetchone()[0], 1)
@@ -392,18 +420,30 @@ class ExchangeServiceTests(unittest.TestCase):
                 new_root,
             )
 
-            report = new_service.import_package(package_path, options=ExchangeImportOptions(mode="create"))
+            report = new_service.import_package(
+                package_path, options=ExchangeImportOptions(mode="create")
+            )
 
             self.assertEqual(report.failed, 0)
             self.assertEqual(new_conn.execute("SELECT COUNT(*) FROM Tracks").fetchone()[0], 1)
-            self.assertTrue(str(new_conn.execute("SELECT audio_file_path FROM Tracks").fetchone()[0] or "").strip())
-            self.assertTrue(str(new_conn.execute("SELECT artwork_path FROM Releases").fetchone()[0] or "").strip())
+            self.assertTrue(
+                str(
+                    new_conn.execute("SELECT audio_file_path FROM Tracks").fetchone()[0] or ""
+                ).strip()
+            )
+            self.assertTrue(
+                str(
+                    new_conn.execute("SELECT artwork_path FROM Releases").fetchone()[0] or ""
+                ).strip()
+            )
         finally:
             new_conn.close()
 
     def test_inspect_csv_suggests_known_headers(self):
         csv_path = self.data_root / "headers.csv"
-        csv_path.write_text("track_title,artist_name,custom::Mood\nOrbit,Cosmowyn,Dreamy\n", encoding="utf-8")
+        csv_path.write_text(
+            "track_title,artist_name,custom::Mood\nOrbit,Cosmowyn,Dreamy\n", encoding="utf-8"
+        )
 
         inspection = self.service.inspect_csv(csv_path)
 

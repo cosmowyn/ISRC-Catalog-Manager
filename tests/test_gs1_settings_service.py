@@ -107,7 +107,10 @@ class GS1SettingsServiceTests(unittest.TestCase):
 
         self.assertEqual(len(saved), 2)
         self.assertEqual(self.service.load_contracts_csv_path(), "/tmp/contracts.csv")
-        self.assertEqual([entry.contract_number for entry in self.service.load_contracts()], ["10064976", "10070050"])
+        self.assertEqual(
+            [entry.contract_number for entry in self.service.load_contracts()],
+            ["10064976", "10070050"],
+        )
 
 
 if __name__ == "__main__":

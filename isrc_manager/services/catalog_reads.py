@@ -11,7 +11,9 @@ class CatalogReadService:
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
 
-    def fetch_rows_with_customs(self, active_custom_fields: list[dict]) -> tuple[list[tuple], dict[tuple[int, int], str]]:
+    def fetch_rows_with_customs(
+        self, active_custom_fields: list[dict]
+    ) -> tuple[list[tuple], dict[tuple[int, int], str]]:
         base_rows = self.conn.execute(
             """
             SELECT

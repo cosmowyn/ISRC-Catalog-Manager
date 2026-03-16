@@ -27,7 +27,9 @@ class SessionHistoryManager:
     # ------------------------------------------------------------------
     def list_entries(self, limit: int = 250) -> list[HistoryEntry]:
         current_id = self.get_current_entry_id()
-        rows = sorted(self._state["entries"], key=lambda item: int(item["entry_id"]), reverse=True)[: int(limit)]
+        rows = sorted(self._state["entries"], key=lambda item: int(item["entry_id"]), reverse=True)[
+            : int(limit)
+        ]
         return [self._entry_from_dict(row, current_id=current_id) for row in rows]
 
     def get_current_entry_id(self) -> int | None:
@@ -197,7 +199,9 @@ class SessionHistoryManager:
         return entry
 
     def redo(self, app, entry_id: int | None = None) -> HistoryEntry | None:
-        entry = self.fetch_entry(entry_id) if entry_id is not None else self.get_default_redo_entry()
+        entry = (
+            self.fetch_entry(entry_id) if entry_id is not None else self.get_default_redo_entry()
+        )
         if entry is None or not entry.reversible:
             return None
         self._apply_payload(app, entry.action_type, entry.redo_payload or {}, direction="redo")
@@ -334,4 +338,3 @@ class SessionHistoryManager:
             snapshot_companion = Path(str(snapshot) + suffix)
             if snapshot_companion.exists():
                 shutil.copy2(snapshot_companion, target_companion)
-

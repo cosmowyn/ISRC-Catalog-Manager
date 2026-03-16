@@ -12,7 +12,11 @@ from isrc_manager.domain.codes import (
     valid_upc_ean,
 )
 from isrc_manager.domain.timecode import hms_to_seconds, parse_hms_text, seconds_to_hms
-from isrc_manager.media.blob_files import _is_valid_audio_path, _is_valid_image_path, _read_blob_from_path
+from isrc_manager.media.blob_files import (
+    _is_valid_audio_path,
+    _is_valid_image_path,
+    _read_blob_from_path,
+)
 from isrc_manager.paths import BIN_DIR, DATA_DIR
 
 
@@ -64,12 +68,12 @@ class EntryPointTests(unittest.TestCase):
     def test_main_entrypoint_is_exposed(self):
         source = Path("ISRC_manager.py").read_text(encoding="utf-8")
         module = ast.parse(source, filename="ISRC_manager.py")
-        function_names = {
-            node.name for node in module.body if isinstance(node, ast.FunctionDef)
-        }
+        function_names = {node.name for node in module.body if isinstance(node, ast.FunctionDef)}
 
         self.assertIn("def main()", source)
-        self.assertIn('isrc-manager = "ISRC_manager:main"', Path("pyproject.toml").read_text(encoding="utf-8"))
+        self.assertIn(
+            'isrc-manager = "ISRC_manager:main"', Path("pyproject.toml").read_text(encoding="utf-8")
+        )
         self.assertIn("main", function_names)
 
 

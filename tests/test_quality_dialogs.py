@@ -1,6 +1,13 @@
 import unittest
 
-from PySide6.QtWidgets import QApplication, QListView
+try:
+    from PySide6.QtWidgets import QApplication, QListView
+except ImportError as exc:  # pragma: no cover - environment-specific fallback
+    QApplication = None
+    QListView = None
+    QT_IMPORT_ERROR = exc
+else:
+    QT_IMPORT_ERROR = None
 
 from isrc_manager.quality.dialogs import QualityDashboardDialog, _create_filter_combo
 from isrc_manager.quality.models import QualityIssue, QualityScanResult
@@ -17,6 +24,8 @@ class _DummyQualityService:
 class QualityDialogTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        if QApplication is None:
+            raise unittest.SkipTest(f"PySide6 QtWidgets unavailable: {QT_IMPORT_ERROR}")
         cls.app = QApplication.instance() or QApplication([])
 
     def test_quality_dashboard_dialog_uses_scan_result(self):
