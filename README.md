@@ -4,7 +4,7 @@ Created by **M. van de Kleut**
 
 ---
 
-ISRC Manager is a local-first desktop catalog application for managing tracks, first-class releases, optional or generated ISRCs, managed media, audio tag workflows, licenses, backups, snapshots, quality scans, and multi-format exchange workflows from one workspace.
+ISRC Manager is a local-first desktop catalog application for managing tracks, first-class releases, musical works, rights, contracts, managed media, audio tag workflows, licenses, backups, snapshots, quality scans, and multi-format exchange workflows from one workspace.
 
 ## Preview
 
@@ -103,10 +103,16 @@ The application provides:
 - Metadata management with customizable fields  
 - A grouped Add Album dialog for entering shared album data once and creating multiple tracks in one pass  
 - A first-class release/product layer with release browsing, ordered track placements, UPC/EAN validation, release artwork, and release-level metadata  
+- A first-class work/composition layer with creator roles, split handling, duplicate ISWC detection, and work-to-recording linking  
+- Reusable party/contact records that can be linked across works, contracts, rights, and asset workflows  
+- Contract lifecycle tracking with dates, obligations, linked documents, version chains, and linked works/tracks/releases  
+- Rights and ownership records for masters, publishing/composition, sync, mechanical, performance, digital, promotional, and other grant types  
+- Deliverables and asset version tracking for masters, alternates, derivatives, artwork variants, and approval state  
+- Global search and a relationship explorer for navigating linked records across the complete local knowledge graph  
 - Bulk editing for selected catalog rows with field-by-field updates  
 - Audio metadata tag import and export for managed audio files, with preview-based conflict resolution  
 - CSV, XLSX, JSON, XML, and packaged ZIP exchange workflows  
-- A data-quality dashboard with actionable validation checks and safe repair tools  
+- A data-quality dashboard with actionable validation checks and safe repair tools across repertoire, contracts, rights, parties, and assets  
 - Audio and image preview capabilities  
 - Multiple profile support  
 - Persistent undo/redo history with manual and automatic snapshots  
@@ -153,6 +159,15 @@ The application provides:
 - `Catalog > Release Browser…` lets you browse releases, inspect track order, duplicate a release, add the current track selection, and filter the main catalog table to a release.
 - `Add Album` and normal track-save/edit flows automatically create or update release records when release-level metadata is present.
 
+## Repertoire, Rights, and Contracts
+- `Catalog > Work Manager…` stores compositions separately from recordings so one work can connect to many linked tracks.
+- Works support alternate titles, subtitles/versions, lyrics vs instrumental flags, language, style notes, ISWC, local registration numbers, creator roles, split percentages, and operational status.
+- `Catalog > Party Manager…` keeps one canonical person/company record per important counterparty and reuses it across works, contracts, and rights.
+- `Catalog > Contract Manager…` tracks draft/signature/effective/start/end/renewal/notice/reversion/termination dates, linked parties, obligations, and document version chains.
+- `Catalog > Rights Matrix…` stores ownership and grant records linked to works, tracks, releases, and source contracts, including exclusivity, territories, media-use scope, and control summaries.
+- `Catalog > Asset Version Registry…` tracks masters, alternates, derivatives, artwork variants, approval state, and primary deliverable designation.
+- `Catalog > Global Search and Relationships…` searches across works, tracks, releases, contracts, rights, parties, documents, and assets, then shows everything linked to the selected record.
+
 ## GS1 Metadata Workflow
 - Open GS1 metadata from the Catalog menu, the table context menu, or directly from the bulk edit dialog.
 - Works with single tracks and multi-track selections, including grouped album-style GS1 export rows where applicable.
@@ -196,10 +211,11 @@ The application provides:
 - Import modes now include dry run, create, merge, update existing matches only, and insert-new-when-duplicate-exists.
 - Match detection can use internal IDs, ISRC, UPC/EAN plus title, and optional title/artist heuristics.
 - Exchange inspections, imports, exports, packaged ZIP creation/extraction, XML import/export, database backup/restore, manual snapshots, snapshot restores, tagged-audio export, and quality scans now run off the main thread so the workspace stays responsive during heavier jobs.
+- `File > Repertoire Exchange` exports and imports the extended local knowledge model for parties, works, contracts, rights, assets, and relationship references as JSON, XLSX, CSV bundles, or ZIP packages with managed files.
 
 ## Data Quality Dashboard
 - `Catalog > Data Quality Dashboard…` scans the active profile for metadata, release, media, and integrity issues.
-- Checks include missing or duplicate ISRCs, missing or duplicate release UPC/EANs, invalid barcode checksums, missing release titles/dates/artwork, missing audio files, broken media references, ordering problems, orphaned licenses, and required custom-field gaps where rules exist.
+- Checks include missing or duplicate ISRCs, missing or duplicate release UPC/EANs, invalid barcode checksums, missing release titles/dates/artwork, missing audio files, broken media references, ordering problems, orphaned licenses, required custom-field gaps, works without creators, invalid splits, duplicate ISWCs, contracts near notice deadlines, missing signed final contract documents, rights conflicts, duplicate parties, missing linked works, broken asset references, missing approved masters, and blocked/incomplete repertoire items.
 - Suggested fixes include regenerating derived values, normalizing dates, relinking missing media by filename, and filling blank track fields from linked release metadata.
 - Issue lists can be exported to CSV or JSON for reporting or cleanup planning.
 
@@ -362,11 +378,20 @@ Logs are stored in:
 - Export to XML, CSV, XLSX, JSON, or a packaged ZIP archive  
 - Import XML, CSV, XLSX, and JSON with preview/mapping where applicable  
 - Import validates field structure, reports warnings/skips/failures, and can update or merge existing rows  
+- Use `File > Repertoire Exchange` to import or export parties, works, contracts, rights, deliverables, and their relationship references without mixing those flows into the regular track-exchange workflow.
 
 ## Releases
 - Use `Catalog > Release Browser…` to browse or edit release/product records directly.
 - Saving `Add Album` creates a first-class release and ordered release-track rows automatically.
 - Single-track save/edit workflows also keep release-level values such as release title, UPC/EAN, release date, and artwork synchronized when possible.
+
+## Works, Rights, and Contracts
+- Use `Catalog > Work Manager…` to create and validate compositions separately from recordings, including linked creators and split totals.
+- Use `Catalog > Party Manager…` to maintain reusable songwriter, publisher, label, licensee, manager, lawyer, or organization records.
+- Use `Catalog > Contract Manager…` to track lifecycle dates, obligations, linked assets, and the currently governing signed/amended contract document version.
+- Use `Catalog > Rights Matrix…` to record which party controls master, publishing, sync, mechanical, performance, or other rights in each territory.
+- Use `Catalog > Asset Version Registry…` to register the primary master, derivatives, alternates, and artwork variants for one track or release.
+- Use `Catalog > Global Search and Relationships…` to search across the full local knowledge model and inspect linked records from one place.
 
 ## Audio Tag Workflows
 - Use `Catalog > Import Tags From Audio…` to read embedded tags from the managed audio attached to the current selection.
@@ -376,11 +401,13 @@ Logs are stored in:
 ## Quality Dashboard
 - Use `Catalog > Data Quality Dashboard…` to scan the current profile and jump directly to affected tracks or releases.
 - Export the current issue list to CSV or JSON from the dashboard.
+- The dashboard now also flags work-split problems, contract/document lifecycle gaps, party duplicates, rights conflicts, asset issues, and blocked/incomplete repertoire readiness.
 
 ## Automatic Migration
 - Existing profile databases are migrated automatically on open.
 - Older album-style metadata is preserved and used to infer release records safely where possible.
 - Older track rows remain valid and usable; the migration does not destroy legacy data.
+- The repertoire/rights/contracts expansion is additive: older databases keep their existing track, release, and license data while new works, parties, rights, contracts, documents, assets, and saved searches are added through safe schema migration.
 
 ## Runtime Dependencies
 - `PySide6`: GUI framework

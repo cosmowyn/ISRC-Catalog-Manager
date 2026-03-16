@@ -28,6 +28,10 @@ class ReleasePayload:
     upc: str | None = None
     territory: str | None = None
     explicit_flag: bool = False
+    repertoire_status: str | None = None
+    metadata_complete: bool = False
+    contract_signed: bool = False
+    rights_verified: bool = False
     notes: str | None = None
     artwork_source_path: str | None = None
     clear_artwork: bool = False
@@ -52,6 +56,10 @@ class ReleaseRecord:
     barcode_validation_status: str
     territory: str | None
     explicit_flag: bool
+    repertoire_status: str | None
+    metadata_complete: bool
+    contract_signed: bool
+    rights_verified: bool
     notes: str | None
     artwork_path: str | None
     artwork_mime_type: str | None

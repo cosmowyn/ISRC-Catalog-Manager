@@ -8,10 +8,16 @@ from pathlib import Path
 
 from PySide6.QtCore import QSettings
 
+from isrc_manager.assets import AssetService
+from isrc_manager.contracts import ContractService
 from isrc_manager.exchange.service import ExchangeService
+from isrc_manager.exchange.repertoire_service import RepertoireExchangeService
 from isrc_manager.history import HistoryManager
+from isrc_manager.parties import PartyService
 from isrc_manager.quality.service import QualityDashboardService
 from isrc_manager.releases import ReleaseService
+from isrc_manager.rights import RightsService
+from isrc_manager.search import GlobalSearchService, RelationshipExplorerService
 from isrc_manager.services import (
     CatalogReadService,
     CustomFieldDefinitionService,
@@ -21,9 +27,11 @@ from isrc_manager.services import (
     GS1MetadataRepository,
     GS1SettingsService,
     ProfileKVService,
+    RepertoireWorkflowService,
     SettingsMutationService,
     SettingsReadService,
     TrackService,
+    WorkService,
     XMLExportService,
     XMLImportService,
 )
@@ -43,7 +51,16 @@ class BackgroundAppServiceBundle:
     xml_export_service: XMLExportService
     xml_import_service: XMLImportService
     exchange_service: ExchangeService
+    repertoire_exchange_service: RepertoireExchangeService
     quality_service: QualityDashboardService
+    party_service: PartyService
+    work_service: WorkService
+    contract_service: ContractService
+    rights_service: RightsService
+    asset_service: AssetService
+    workflow_service: RepertoireWorkflowService
+    global_search_service: GlobalSearchService
+    relationship_explorer_service: RelationshipExplorerService
     gs1_settings_service: GS1SettingsService
     gs1_integration_service: GS1IntegrationService
     audio_tag_service: AudioTagService
@@ -132,6 +149,14 @@ class BackgroundAppServiceFactory:
         settings_mutations = SettingsMutationService(conn, settings)
         gs1_settings_service = GS1SettingsService(conn, settings)
         audio_tag_service = AudioTagService()
+        party_service = PartyService(conn)
+        work_service = WorkService(conn, party_service=party_service)
+        contract_service = ContractService(conn, self.data_root, party_service=party_service)
+        rights_service = RightsService(conn)
+        asset_service = AssetService(conn, self.data_root)
+        workflow_service = RepertoireWorkflowService(conn)
+        global_search_service = GlobalSearchService(conn)
+        relationship_explorer_service = RelationshipExplorerService(conn)
 
         return BackgroundAppServiceBundle(
             conn=conn,
@@ -150,12 +175,29 @@ class BackgroundAppServiceFactory:
                 custom_field_definitions,
                 self.data_root,
             ),
+            repertoire_exchange_service=RepertoireExchangeService(
+                conn,
+                party_service=party_service,
+                work_service=work_service,
+                contract_service=contract_service,
+                rights_service=rights_service,
+                asset_service=asset_service,
+                data_root=self.data_root,
+            ),
             quality_service=QualityDashboardService(
                 conn,
                 track_service=track_service,
                 release_service=release_service,
                 data_root=self.data_root,
             ),
+            party_service=party_service,
+            work_service=work_service,
+            contract_service=contract_service,
+            rights_service=rights_service,
+            asset_service=asset_service,
+            workflow_service=workflow_service,
+            global_search_service=global_search_service,
+            relationship_explorer_service=relationship_explorer_service,
             gs1_settings_service=gs1_settings_service,
             gs1_integration_service=GS1IntegrationService(
                 GS1MetadataRepository(conn),

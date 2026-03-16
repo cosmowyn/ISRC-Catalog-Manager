@@ -26,6 +26,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from isrc_manager.services.repertoire_status import REPERTOIRE_STATUS_CHOICES
+
 from .models import ReleasePayload, ReleaseRecord, ReleaseSummary, ReleaseTrackPlacement
 from .service import RELEASE_TYPE_CHOICES, ReleaseService
 
@@ -121,8 +123,30 @@ class ReleaseEditorDialog(QDialog):
         self.territory_edit.setPlaceholderText("Worldwide / EU / NL / etc.")
         form.addRow("Territory / Market", self.territory_edit)
 
+        self.status_combo = QComboBox()
+        self.status_combo.addItem("")
+        self.status_combo.addItems(
+            [value.replace("_", " ").title() for value in REPERTOIRE_STATUS_CHOICES]
+        )
+        form.addRow("Workflow Status", self.status_combo)
+
         self.explicit_checkbox = QCheckBox("Explicit release")
-        form.addRow("", self.explicit_checkbox)
+        self.metadata_checkbox = QCheckBox("Metadata Complete")
+        self.contract_checkbox = QCheckBox("Contract Signed")
+        self.rights_checkbox = QCheckBox("Rights Verified")
+        checklist_row = QWidget()
+        checklist_layout = QHBoxLayout(checklist_row)
+        checklist_layout.setContentsMargins(0, 0, 0, 0)
+        checklist_layout.setSpacing(8)
+        for widget in (
+            self.explicit_checkbox,
+            self.metadata_checkbox,
+            self.contract_checkbox,
+            self.rights_checkbox,
+        ):
+            checklist_layout.addWidget(widget)
+        checklist_layout.addStretch(1)
+        form.addRow("Checklist", checklist_row)
 
         self.artwork_path_edit = QLineEdit()
         self.artwork_path_edit.setReadOnly(True)
@@ -242,7 +266,13 @@ class ReleaseEditorDialog(QDialog):
         self.catalog_number_edit.setText(release.catalog_number or "")
         self.upc_edit.setText(release.upc or "")
         self.territory_edit.setText(release.territory or "")
+        self.status_combo.setCurrentText(
+            (release.repertoire_status or "").replace("_", " ").title()
+        )
         self.explicit_checkbox.setChecked(bool(release.explicit_flag))
+        self.metadata_checkbox.setChecked(bool(release.metadata_complete))
+        self.contract_checkbox.setChecked(bool(release.contract_signed))
+        self.rights_checkbox.setChecked(bool(release.rights_verified))
         self.notes_edit.setPlainText(release.notes or "")
         artwork_path = self.release_service.resolve_artwork_path(release.artwork_path)
         self._original_artwork_display_path = str(artwork_path) if artwork_path is not None else ""
@@ -388,6 +418,11 @@ class ReleaseEditorDialog(QDialog):
             upc=self.upc_edit.text().strip() or None,
             territory=self.territory_edit.text().strip() or None,
             explicit_flag=self.explicit_checkbox.isChecked(),
+            repertoire_status=self.status_combo.currentText().strip().lower().replace(" ", "_")
+            or None,
+            metadata_complete=self.metadata_checkbox.isChecked(),
+            contract_signed=self.contract_checkbox.isChecked(),
+            rights_verified=self.rights_checkbox.isChecked(),
             notes=self.notes_edit.toPlainText().strip() or None,
             artwork_source_path=artwork_source_path,
             clear_artwork=bool(self._clear_artwork_requested and not artwork_source_path),
@@ -470,9 +505,9 @@ class ReleaseBrowserDialog(QDialog):
         list_layout.setContentsMargins(0, 0, 0, 0)
         list_layout.setSpacing(8)
 
-        self.release_table = QTableWidget(0, 6, list_panel)
+        self.release_table = QTableWidget(0, 7, list_panel)
         self.release_table.setHorizontalHeaderLabels(
-            ["ID", "Title", "Artist", "Type", "Release Date", "Tracks"]
+            ["ID", "Title", "Artist", "Type", "Status", "Release Date", "Tracks"]
         )
         self.release_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.release_table.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -543,6 +578,7 @@ class ReleaseBrowserDialog(QDialog):
                 release.title,
                 release.primary_artist or "",
                 release.release_type.replace("_", " ").title(),
+                (release.repertoire_status or "").replace("_", " ").title(),
                 release.release_date or "",
                 str(release.track_count),
             ]
@@ -585,7 +621,11 @@ class ReleaseBrowserDialog(QDialog):
             ("UPC / EAN", release.upc or ""),
             ("Barcode Status", release.barcode_validation_status or ""),
             ("Territory", release.territory or ""),
+            ("Workflow Status", (release.repertoire_status or "").replace("_", " ").title()),
             ("Explicit", "Yes" if release.explicit_flag else "No"),
+            ("Metadata Complete", "Yes" if release.metadata_complete else "No"),
+            ("Contract Signed", "Yes" if release.contract_signed else "No"),
+            ("Rights Verified", "Yes" if release.rights_verified else "No"),
             ("Artwork", release.artwork_path or ""),
         ]
         for label, value in summary_rows:

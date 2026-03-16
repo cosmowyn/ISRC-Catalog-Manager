@@ -12,6 +12,11 @@ from isrc_manager.services import (
     TrackCreatePayload,
     TrackService,
 )
+from isrc_manager.parties import PartyPayload, PartyService
+from isrc_manager.works import WorkContributorPayload, WorkPayload, WorkService
+from isrc_manager.contracts import ContractPayload, ContractService
+from isrc_manager.rights import RightPayload, RightsService
+from isrc_manager.assets import AssetService, AssetVersionPayload
 
 
 class QualityDashboardServiceTests(unittest.TestCase):
@@ -25,6 +30,13 @@ class QualityDashboardServiceTests(unittest.TestCase):
         self.track_service = TrackService(self.conn, self.data_root)
         self.release_service = ReleaseService(self.conn, self.data_root)
         self.custom_defs = CustomFieldDefinitionService(self.conn)
+        self.party_service = PartyService(self.conn)
+        self.work_service = WorkService(self.conn, party_service=self.party_service)
+        self.contract_service = ContractService(
+            self.conn, self.data_root, party_service=self.party_service
+        )
+        self.rights_service = RightsService(self.conn)
+        self.asset_service = AssetService(self.conn, self.data_root)
         self.service = QualityDashboardService(
             self.conn,
             track_service=self.track_service,
@@ -225,6 +237,67 @@ class QualityDashboardServiceTests(unittest.TestCase):
 
         self.assertEqual(len(duplicate_upc_issues), 2)
         self.assertTrue(all(issue.severity == "error" for issue in duplicate_upc_issues))
+
+    def test_scan_includes_repertoire_contract_rights_and_asset_issues(self):
+        track_id = self._create_track(isrc="NL-ABC-26-00088")
+        party_a = self.party_service.create_party(
+            PartyPayload(legal_name="Echo Music", email="hello@echo.test")
+        )
+        self.party_service.create_party(PartyPayload(legal_name="Echo Music"))
+        work_id = self.work_service.create_work(
+            WorkPayload(
+                title="Split Trouble",
+                iswc="T-101.202.303-4",
+                contributors=[
+                    WorkContributorPayload(
+                        role="songwriter", name="Echo Music", party_id=party_a, share_percent=100
+                    )
+                ],
+                track_ids=[track_id],
+            )
+        )
+        self.conn.execute(
+            "UPDATE WorkContributors SET share_percent=40 WHERE work_id=?",
+            (work_id,),
+        )
+        self.contract_service.create_contract(
+            ContractPayload(
+                title="Unsigned Agreement",
+                status="active",
+                notice_deadline="2026-03-20",
+                track_ids=[track_id],
+            )
+        )
+        self.rights_service.create_right(
+            RightPayload(
+                title="Unbacked Exclusive",
+                right_type="master",
+                exclusive_flag=True,
+                territory="NL",
+                track_id=track_id,
+            )
+        )
+        asset_path = self.data_root / "draft-master.wav"
+        asset_path.write_bytes(b"RIFFdemo")
+        self.asset_service.create_asset(
+            AssetVersionPayload(
+                asset_type="main_master",
+                source_path=str(asset_path),
+                approved_for_use=False,
+                primary_flag=True,
+                track_id=track_id,
+            )
+        )
+
+        result = self.service.scan()
+        issue_types = {issue.issue_type for issue in result.issues}
+
+        self.assertIn("invalid_work_split_total", issue_types)
+        self.assertIn("contract_missing_parties", issue_types)
+        self.assertIn("contract_missing_signed_final_document", issue_types)
+        self.assertIn("rights_missing_source_contract", issue_types)
+        self.assertIn("duplicate_party", issue_types)
+        self.assertIn("missing_approved_master", issue_types)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,56 @@
 """Service-layer mutation entrypoints."""
 
+from isrc_manager.assets import (
+    ASSET_TYPE_CHOICES,
+    AssetService,
+    AssetValidationIssue,
+    AssetVersionPayload,
+    AssetVersionRecord,
+)
+from isrc_manager.contracts import (
+    CONTRACT_STATUS_CHOICES,
+    DOCUMENT_TYPE_CHOICES,
+    OBLIGATION_TYPE_CHOICES,
+    ContractDeadline,
+    ContractDetail,
+    ContractDocumentPayload,
+    ContractDocumentRecord,
+    ContractObligationPayload,
+    ContractObligationRecord,
+    ContractPartyPayload,
+    ContractPartyRecord,
+    ContractPayload,
+    ContractRecord,
+    ContractService,
+    ContractValidationIssue,
+)
+from isrc_manager.parties import (
+    PARTY_TYPE_CHOICES,
+    PartyDuplicate,
+    PartyPayload,
+    PartyRecord,
+    PartyService,
+    PartyUsageSummary,
+)
+from isrc_manager.rights import (
+    OwnershipSummary,
+    RIGHT_TYPE_CHOICES,
+    RightPayload,
+    RightRecord,
+    RightsConflict,
+    RightsService,
+)
+from isrc_manager.works import (
+    WORK_CREATOR_ROLE_CHOICES,
+    WORK_STATUS_CHOICES,
+    WorkContributorPayload,
+    WorkContributorRecord,
+    WorkDetail,
+    WorkPayload,
+    WorkRecord,
+    WorkService,
+    WorkValidationIssue,
+)
 from isrc_manager.releases import (
     RELEASE_TYPE_CHOICES,
     ReleasePayload,
@@ -52,6 +103,7 @@ from .gs1_validation import GS1ValidationService
 from .imports import ImportExecutionResult, ImportInspection, ImportRecord, XMLImportService
 from .licenses import LicenseRecord, LicenseRow, LicenseService
 from .profiles import ProfileChoice, ProfileRemovalResult, ProfileWorkflowService
+from .repertoire_status import REPERTOIRE_STATUS_CHOICES, RepertoireWorkflowService
 from .schema import DatabaseSchemaService
 from .session import DatabaseSessionService, OpenDatabaseSession, ProfileKVService
 from .settings_mutations import SettingsMutationService
@@ -60,16 +112,19 @@ from .tracks import TrackCreatePayload, TrackService, TrackSnapshot, TrackUpdate
 
 __all__ = [
     "AlbumUsage",
+    "ASSET_TYPE_CHOICES",
     "ArtistUsage",
     "AutoSnapshotSettings",
     "BackupResult",
     "CatalogAdminService",
     "CatalogReadService",
+    "CONTRACT_STATUS_CHOICES",
     "CustomFieldDefinitionService",
     "CustomFieldValueService",
     "DatabaseMaintenanceService",
     "DatabaseSchemaService",
     "DatabaseSessionService",
+    "DOCUMENT_TYPE_CHOICES",
     "GS1BatchValidationError",
     "GS1ContractEntry",
     "GS1ContractImportError",
@@ -101,6 +156,14 @@ __all__ = [
     "ImportExecutionResult",
     "ImportInspection",
     "ImportRecord",
+    "OBLIGATION_TYPE_CHOICES",
+    "OwnershipSummary",
+    "PARTY_TYPE_CHOICES",
+    "PartyDuplicate",
+    "PartyPayload",
+    "PartyRecord",
+    "PartyService",
+    "PartyUsageSummary",
     "LicenseeUsage",
     "LicenseRecord",
     "LicenseRow",
@@ -111,7 +174,9 @@ __all__ = [
     "ProfileRemovalResult",
     "ProfileStoreService",
     "ProfileWorkflowService",
+    "REPERTOIRE_STATUS_CHOICES",
     "RELEASE_TYPE_CHOICES",
+    "RIGHT_TYPE_CHOICES",
     "RegistrationSettings",
     "ReleasePayload",
     "ReleaseRecord",
@@ -119,6 +184,11 @@ __all__ = [
     "ReleaseSummary",
     "ReleaseTrackPlacement",
     "ReleaseValidationIssue",
+    "RepertoireWorkflowService",
+    "RightPayload",
+    "RightRecord",
+    "RightsConflict",
+    "RightsService",
     "RestoreResult",
     "SettingsReadService",
     "SettingsMutationService",
@@ -126,5 +196,30 @@ __all__ = [
     "TrackService",
     "TrackSnapshot",
     "TrackUpdatePayload",
+    "WORK_CREATOR_ROLE_CHOICES",
+    "WORK_STATUS_CHOICES",
+    "WorkContributorPayload",
+    "WorkContributorRecord",
+    "WorkDetail",
+    "WorkPayload",
+    "WorkRecord",
+    "WorkService",
+    "WorkValidationIssue",
+    "AssetService",
+    "AssetValidationIssue",
+    "AssetVersionPayload",
+    "AssetVersionRecord",
+    "ContractDeadline",
+    "ContractDetail",
+    "ContractDocumentPayload",
+    "ContractDocumentRecord",
+    "ContractObligationPayload",
+    "ContractObligationRecord",
+    "ContractPartyPayload",
+    "ContractPartyRecord",
+    "ContractPayload",
+    "ContractRecord",
+    "ContractService",
+    "ContractValidationIssue",
     "XMLImportService",
 ]

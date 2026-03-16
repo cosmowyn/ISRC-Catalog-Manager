@@ -131,6 +131,8 @@ ISRC-Catalog-Manager/
         tracks_table.py
 ```
 
+Recent extractions already align with this direction. The repertoire layer now lives in focused packages such as `isrc_manager.works`, `isrc_manager.parties`, `isrc_manager.contracts`, `isrc_manager.rights`, `isrc_manager.assets`, and `isrc_manager.search`. See [`docs/repertoire_knowledge_system.md`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/docs/repertoire_knowledge_system.md) for the current data model and service boundaries.
+
 ## Dependency Direction
 
 Keep the dependencies one-way:
@@ -366,4 +368,3 @@ At that point, `App` becomes mostly a Qt coordinator instead of the owner of all
 - Prefer composition over inheritance for services and repositories.
 - Prefer moving existing methods intact first, then cleaning them up once behavior is proven stable.
 - Resolve the currently duplicated and missing helper functions as part of extraction, but do it behind stable interfaces so behavior does not drift.
-

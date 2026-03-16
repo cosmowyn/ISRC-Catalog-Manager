@@ -280,6 +280,7 @@ class DatabaseSchemaService:
         self._ensure_gs1_metadata_table()
         self._ensure_gs1_template_storage_table()
         self._ensure_release_tables()
+        self._ensure_repertoire_tables()
 
         self.conn.commit()
 
@@ -410,6 +411,9 @@ class DatabaseSchemaService:
             elif version == 19:
                 self._apply_migration(19, self._mig_19_to_20)
                 version = 20
+            elif version == 20:
+                self._apply_migration(20, self._mig_20_to_21)
+                version = 21
             else:
                 self.logger.warning("Unknown migration path from version %s", version)
                 break
@@ -839,6 +843,10 @@ class DatabaseSchemaService:
     def _mig_19_to_20(self) -> None:
         self._ensure_gs1_template_storage_table()
 
+    def _mig_20_to_21(self) -> None:
+        self._ensure_release_tables()
+        self._ensure_repertoire_tables()
+
     def _ensure_current_track_columns(self) -> None:
         cols = self._table_columns("Tracks")
         additions = (
@@ -857,6 +865,10 @@ class DatabaseSchemaService:
             ("publisher", "TEXT"),
             ("comments", "TEXT"),
             ("lyrics", "TEXT"),
+            ("repertoire_status", "TEXT"),
+            ("metadata_complete", "INTEGER NOT NULL DEFAULT 0"),
+            ("contract_signed", "INTEGER NOT NULL DEFAULT 0"),
+            ("rights_verified", "INTEGER NOT NULL DEFAULT 0"),
         )
         for column_name, column_sql in additions:
             if column_name not in cols:
@@ -1041,10 +1053,24 @@ class DatabaseSchemaService:
                 artwork_path TEXT,
                 artwork_mime_type TEXT,
                 artwork_size_bytes INTEGER NOT NULL DEFAULT 0,
-                profile_name TEXT
+                profile_name TEXT,
+                repertoire_status TEXT,
+                metadata_complete INTEGER NOT NULL DEFAULT 0,
+                contract_signed INTEGER NOT NULL DEFAULT 0,
+                rights_verified INTEGER NOT NULL DEFAULT 0
             )
             """
         )
+        release_columns = self._table_columns("Releases")
+        release_additions = (
+            ("repertoire_status", "TEXT"),
+            ("metadata_complete", "INTEGER NOT NULL DEFAULT 0"),
+            ("contract_signed", "INTEGER NOT NULL DEFAULT 0"),
+            ("rights_verified", "INTEGER NOT NULL DEFAULT 0"),
+        )
+        for column_name, column_sql in release_additions:
+            if column_name not in release_columns:
+                self.cursor.execute(f"ALTER TABLE Releases ADD COLUMN {column_name} {column_sql}")
         self.cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS ReleaseTracks (
@@ -1100,6 +1126,356 @@ class DatabaseSchemaService:
             CREATE INDEX IF NOT EXISTS idx_releases_title
             ON Releases(title)
             """
+        )
+
+    def _ensure_repertoire_tables(self) -> None:
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS Parties (
+                id INTEGER PRIMARY KEY,
+                legal_name TEXT NOT NULL,
+                display_name TEXT,
+                party_type TEXT NOT NULL DEFAULT 'organization',
+                contact_person TEXT,
+                email TEXT,
+                phone TEXT,
+                website TEXT,
+                address_line1 TEXT,
+                address_line2 TEXT,
+                city TEXT,
+                region TEXT,
+                postal_code TEXT,
+                country TEXT,
+                tax_id TEXT,
+                vat_number TEXT,
+                pro_affiliation TEXT,
+                ipi_cae TEXT,
+                notes TEXT,
+                profile_name TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
+        self.cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_parties_legal_name ON Parties(legal_name)"
+        )
+        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_parties_email ON Parties(email)")
+        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_parties_ipi_cae ON Parties(ipi_cae)")
+
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS Works (
+                id INTEGER PRIMARY KEY,
+                title TEXT NOT NULL,
+                alternate_titles TEXT,
+                version_subtitle TEXT,
+                language TEXT,
+                lyrics_flag INTEGER NOT NULL DEFAULT 0,
+                instrumental_flag INTEGER NOT NULL DEFAULT 0,
+                genre_notes TEXT,
+                iswc TEXT,
+                registration_number TEXT,
+                work_status TEXT,
+                metadata_complete INTEGER NOT NULL DEFAULT 0,
+                contract_signed INTEGER NOT NULL DEFAULT 0,
+                rights_verified INTEGER NOT NULL DEFAULT 0,
+                notes TEXT,
+                profile_name TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
+        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_works_title ON Works(title)")
+        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_works_iswc ON Works(iswc)")
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS WorkContributors (
+                id INTEGER PRIMARY KEY,
+                work_id INTEGER NOT NULL,
+                party_id INTEGER,
+                display_name TEXT,
+                role TEXT NOT NULL,
+                share_percent REAL,
+                role_share_percent REAL,
+                notes TEXT,
+                FOREIGN KEY (work_id) REFERENCES Works(id) ON DELETE CASCADE,
+                FOREIGN KEY (party_id) REFERENCES Parties(id) ON DELETE SET NULL
+            )
+            """
+        )
+        self.cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_work_contributors_work_id ON WorkContributors(work_id)"
+        )
+        self.cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_work_contributors_party_id ON WorkContributors(party_id)"
+        )
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS WorkTrackLinks (
+                work_id INTEGER NOT NULL,
+                track_id INTEGER NOT NULL,
+                is_primary INTEGER NOT NULL DEFAULT 1,
+                notes TEXT,
+                PRIMARY KEY (work_id, track_id),
+                FOREIGN KEY (work_id) REFERENCES Works(id) ON DELETE CASCADE,
+                FOREIGN KEY (track_id) REFERENCES Tracks(id) ON DELETE CASCADE
+            )
+            """
+        )
+        self.cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_work_track_links_track_id ON WorkTrackLinks(track_id)"
+        )
+
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS Contracts (
+                id INTEGER PRIMARY KEY,
+                title TEXT NOT NULL,
+                contract_type TEXT,
+                draft_date TEXT,
+                signature_date TEXT,
+                effective_date TEXT,
+                start_date TEXT,
+                end_date TEXT,
+                renewal_date TEXT,
+                notice_deadline TEXT,
+                option_periods TEXT,
+                reversion_date TEXT,
+                termination_date TEXT,
+                status TEXT NOT NULL DEFAULT 'draft',
+                supersedes_contract_id INTEGER,
+                superseded_by_contract_id INTEGER,
+                summary TEXT,
+                notes TEXT,
+                profile_name TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (supersedes_contract_id) REFERENCES Contracts(id) ON DELETE SET NULL,
+                FOREIGN KEY (superseded_by_contract_id) REFERENCES Contracts(id) ON DELETE SET NULL
+            )
+            """
+        )
+        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_contracts_status ON Contracts(status)")
+        self.cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_contracts_notice_deadline ON Contracts(notice_deadline)"
+        )
+        self.cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_contracts_end_date ON Contracts(end_date)"
+        )
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ContractParties (
+                contract_id INTEGER NOT NULL,
+                party_id INTEGER NOT NULL,
+                role_label TEXT NOT NULL DEFAULT 'counterparty',
+                is_primary INTEGER NOT NULL DEFAULT 0,
+                notes TEXT,
+                PRIMARY KEY (contract_id, party_id, role_label),
+                FOREIGN KEY (contract_id) REFERENCES Contracts(id) ON DELETE CASCADE,
+                FOREIGN KEY (party_id) REFERENCES Parties(id) ON DELETE CASCADE
+            )
+            """
+        )
+        self.cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_contract_parties_party_id ON ContractParties(party_id)"
+        )
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ContractObligations (
+                id INTEGER PRIMARY KEY,
+                contract_id INTEGER NOT NULL,
+                obligation_type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                due_date TEXT,
+                follow_up_date TEXT,
+                reminder_date TEXT,
+                completed INTEGER NOT NULL DEFAULT 0,
+                completed_at TEXT,
+                notes TEXT,
+                FOREIGN KEY (contract_id) REFERENCES Contracts(id) ON DELETE CASCADE
+            )
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_contract_obligations_due_date
+            ON ContractObligations(due_date)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ContractDocuments (
+                id INTEGER PRIMARY KEY,
+                contract_id INTEGER NOT NULL,
+                title TEXT NOT NULL,
+                document_type TEXT NOT NULL DEFAULT 'other',
+                version_label TEXT,
+                created_date TEXT,
+                received_date TEXT,
+                signed_status TEXT,
+                signed_by_all_parties INTEGER NOT NULL DEFAULT 0,
+                active_flag INTEGER NOT NULL DEFAULT 0,
+                supersedes_document_id INTEGER,
+                superseded_by_document_id INTEGER,
+                file_path TEXT,
+                filename TEXT,
+                checksum_sha256 TEXT,
+                notes TEXT,
+                uploaded_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (contract_id) REFERENCES Contracts(id) ON DELETE CASCADE,
+                FOREIGN KEY (supersedes_document_id) REFERENCES ContractDocuments(id) ON DELETE SET NULL,
+                FOREIGN KEY (superseded_by_document_id) REFERENCES ContractDocuments(id) ON DELETE SET NULL
+            )
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_contract_documents_contract_id
+            ON ContractDocuments(contract_id)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_contract_documents_active_flag
+            ON ContractDocuments(active_flag)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ContractWorkLinks (
+                contract_id INTEGER NOT NULL,
+                work_id INTEGER NOT NULL,
+                PRIMARY KEY (contract_id, work_id),
+                FOREIGN KEY (contract_id) REFERENCES Contracts(id) ON DELETE CASCADE,
+                FOREIGN KEY (work_id) REFERENCES Works(id) ON DELETE CASCADE
+            )
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ContractTrackLinks (
+                contract_id INTEGER NOT NULL,
+                track_id INTEGER NOT NULL,
+                PRIMARY KEY (contract_id, track_id),
+                FOREIGN KEY (contract_id) REFERENCES Contracts(id) ON DELETE CASCADE,
+                FOREIGN KEY (track_id) REFERENCES Tracks(id) ON DELETE CASCADE
+            )
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ContractReleaseLinks (
+                contract_id INTEGER NOT NULL,
+                release_id INTEGER NOT NULL,
+                PRIMARY KEY (contract_id, release_id),
+                FOREIGN KEY (contract_id) REFERENCES Contracts(id) ON DELETE CASCADE,
+                FOREIGN KEY (release_id) REFERENCES Releases(id) ON DELETE CASCADE
+            )
+            """
+        )
+
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS RightsRecords (
+                id INTEGER PRIMARY KEY,
+                title TEXT,
+                right_type TEXT NOT NULL,
+                exclusive_flag INTEGER NOT NULL DEFAULT 0,
+                territory TEXT,
+                media_use_type TEXT,
+                start_date TEXT,
+                end_date TEXT,
+                perpetual_flag INTEGER NOT NULL DEFAULT 0,
+                granted_by_party_id INTEGER,
+                granted_to_party_id INTEGER,
+                retained_by_party_id INTEGER,
+                source_contract_id INTEGER,
+                work_id INTEGER,
+                track_id INTEGER,
+                release_id INTEGER,
+                notes TEXT,
+                profile_name TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (granted_by_party_id) REFERENCES Parties(id) ON DELETE SET NULL,
+                FOREIGN KEY (granted_to_party_id) REFERENCES Parties(id) ON DELETE SET NULL,
+                FOREIGN KEY (retained_by_party_id) REFERENCES Parties(id) ON DELETE SET NULL,
+                FOREIGN KEY (source_contract_id) REFERENCES Contracts(id) ON DELETE SET NULL,
+                FOREIGN KEY (work_id) REFERENCES Works(id) ON DELETE CASCADE,
+                FOREIGN KEY (track_id) REFERENCES Tracks(id) ON DELETE CASCADE,
+                FOREIGN KEY (release_id) REFERENCES Releases(id) ON DELETE CASCADE
+            )
+            """
+        )
+        self.cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_rights_work_id ON RightsRecords(work_id)"
+        )
+        self.cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_rights_track_id ON RightsRecords(track_id)"
+        )
+        self.cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_rights_release_id ON RightsRecords(release_id)"
+        )
+        self.cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_rights_source_contract_id ON RightsRecords(source_contract_id)"
+        )
+
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS AssetVersions (
+                id INTEGER PRIMARY KEY,
+                track_id INTEGER,
+                release_id INTEGER,
+                asset_type TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                stored_path TEXT,
+                checksum_sha256 TEXT,
+                duration_sec INTEGER,
+                sample_rate INTEGER,
+                bit_depth INTEGER,
+                format TEXT,
+                derived_from_asset_id INTEGER,
+                approved_for_use INTEGER NOT NULL DEFAULT 0,
+                primary_flag INTEGER NOT NULL DEFAULT 0,
+                version_status TEXT,
+                notes TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (track_id) REFERENCES Tracks(id) ON DELETE CASCADE,
+                FOREIGN KEY (release_id) REFERENCES Releases(id) ON DELETE CASCADE,
+                FOREIGN KEY (derived_from_asset_id) REFERENCES AssetVersions(id) ON DELETE SET NULL
+            )
+            """
+        )
+        self.cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_asset_versions_track_id ON AssetVersions(track_id)"
+        )
+        self.cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_asset_versions_release_id ON AssetVersions(release_id)"
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_asset_versions_primary_flag
+            ON AssetVersions(primary_flag)
+            """
+        )
+
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS SavedSearches (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                query_text TEXT NOT NULL,
+                entity_types TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
+        self.cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_saved_searches_name ON SavedSearches(name)"
         )
 
     def _migrate_legacy_releases(self) -> None:

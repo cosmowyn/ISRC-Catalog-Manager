@@ -25,22 +25,93 @@ from pathlib import Path
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 
-from PySide6.QtCore import(QRegularExpression, Signal, QEvent,
-    Qt, QDate, QPoint, QSettings, QStandardPaths, QByteArray, QUrl, QEvent, QTimer, QEventLoop, QSortFilterProxyModel,
-    QItemSelectionModel, QtMsgType, qInstallMessageHandler, )
-
-from PySide6.QtGui import (QDesktopServices, QCursor, QAction,
-    QIcon, QAction, QKeySequence, QImage, QPixmap, QStandardItemModel, QStandardItem,
-    QColor, QFont, QPalette, QTextCursor, QTextDocument
+from PySide6.QtCore import (
+    QRegularExpression,
+    Signal,
+    QEvent,
+    Qt,
+    QDate,
+    QPoint,
+    QSettings,
+    QStandardPaths,
+    QByteArray,
+    QUrl,
+    QEvent,
+    QTimer,
+    QEventLoop,
+    QSortFilterProxyModel,
+    QItemSelectionModel,
+    QtMsgType,
+    qInstallMessageHandler,
 )
-from PySide6.QtWidgets import ( QListView, QMenuBar, QListWidget, QListWidgetItem, 
-    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QMessageBox,
-    QCalendarWidget, QRadioButton, QMenuBar, QMenu, QInputDialog, QTableWidget, QTableWidgetItem,
-    QHeaderView, QDialog, QMainWindow, QSizePolicy, QComboBox, QCompleter, QListWidget,
-    QListWidgetItem, QFileDialog, QToolBar, QFrame, QSpinBox, QScrollArea, QSlider, QAbstractItemView, QAbstractScrollArea,
-    QFormLayout, QTableView, QTabWidget, QDialogButtonBox, QGridLayout, QGroupBox, QPlainTextEdit, QCheckBox,
-    QColorDialog, QFontComboBox, QTextBrowser, QToolButton, QSplitter,
-    QDockWidget
+
+from PySide6.QtGui import (
+    QDesktopServices,
+    QCursor,
+    QAction,
+    QIcon,
+    QAction,
+    QKeySequence,
+    QImage,
+    QPixmap,
+    QStandardItemModel,
+    QStandardItem,
+    QColor,
+    QFont,
+    QPalette,
+    QTextCursor,
+    QTextDocument,
+)
+from PySide6.QtWidgets import (
+    QListView,
+    QMenuBar,
+    QListWidget,
+    QListWidgetItem,
+    QApplication,
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QMessageBox,
+    QCalendarWidget,
+    QRadioButton,
+    QMenuBar,
+    QMenu,
+    QInputDialog,
+    QTableWidget,
+    QTableWidgetItem,
+    QHeaderView,
+    QDialog,
+    QMainWindow,
+    QSizePolicy,
+    QComboBox,
+    QCompleter,
+    QListWidget,
+    QListWidgetItem,
+    QFileDialog,
+    QToolBar,
+    QFrame,
+    QSpinBox,
+    QScrollArea,
+    QSlider,
+    QAbstractItemView,
+    QAbstractScrollArea,
+    QFormLayout,
+    QTableView,
+    QTabWidget,
+    QDialogButtonBox,
+    QGridLayout,
+    QGroupBox,
+    QPlainTextEdit,
+    QCheckBox,
+    QColorDialog,
+    QFontComboBox,
+    QTextBrowser,
+    QToolButton,
+    QSplitter,
+    QDockWidget,
 )
 
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput, QAudioDecoder, QAudioFormat
@@ -72,7 +143,10 @@ from isrc_manager.domain.codes import (
     to_iso_iswc,
     valid_upc_ean,
 )
-from isrc_manager.domain.standard_fields import standard_field_spec_for_label, standard_media_specs_by_label
+from isrc_manager.domain.standard_fields import (
+    standard_field_spec_for_label,
+    standard_media_specs_by_label,
+)
 from isrc_manager.domain.timecode import hms_to_seconds, parse_hms_text, seconds_to_hms
 from isrc_manager.services.gs1_mapping import (
     COMMON_CLASSIFICATION_CHOICES,
@@ -80,23 +154,46 @@ from isrc_manager.services.gs1_mapping import (
     COMMON_MARKET_CHOICES,
     COMMON_PACKAGING_CHOICES,
 )
-from isrc_manager.help_content import HELP_CHAPTERS, HELP_CHAPTERS_BY_ID, help_topic_title, render_help_html
+from isrc_manager.help_content import (
+    HELP_CHAPTERS,
+    HELP_CHAPTERS_BY_ID,
+    help_topic_title,
+    render_help_html,
+)
 from isrc_manager.paths import DATA_DIR
 from isrc_manager.gs1_dialog import GS1MetadataDialog
+from isrc_manager.assets import AssetService
+from isrc_manager.assets.dialogs import AssetBrowserDialog
+from isrc_manager.contracts import ContractService
+from isrc_manager.contracts.dialogs import ContractBrowserDialog
 from isrc_manager.exchange.dialogs import ExchangeImportDialog
+from isrc_manager.exchange.repertoire_service import RepertoireExchangeService
 from isrc_manager.exchange.models import ExchangeImportReport
 from isrc_manager.exchange.service import ExchangeService
+from isrc_manager.parties import PartyService
+from isrc_manager.parties.dialogs import PartyManagerDialog
 from isrc_manager.quality.dialogs import QualityDashboardDialog
 from isrc_manager.quality.models import QualityIssue
 from isrc_manager.quality.service import QualityDashboardService
-from isrc_manager.releases import ReleasePayload, ReleaseRecord, ReleaseService, ReleaseTrackPlacement
+from isrc_manager.releases import (
+    ReleasePayload,
+    ReleaseRecord,
+    ReleaseService,
+    ReleaseTrackPlacement,
+)
 from isrc_manager.releases.dialogs import ReleaseBrowserDialog, ReleaseEditorDialog
+from isrc_manager.rights import RightsService
+from isrc_manager.rights.dialogs import RightsBrowserDialog
+from isrc_manager.search import GlobalSearchService, RelationshipExplorerService
+from isrc_manager.search.dialogs import GlobalSearchDialog
 from isrc_manager.services.db_access import DatabaseWriteCoordinator, SQLiteConnectionFactory
 from isrc_manager.services.bulk_edit import MIXED_VALUE, shared_bulk_value, should_apply_bulk_change
 from isrc_manager.services.sqlite_utils import safe_wal_checkpoint
 from isrc_manager.services import (
+    AssetVersionPayload,
     CatalogAdminService,
     CatalogReadService,
+    ContractPayload,
     CustomFieldDefinitionService,
     CustomFieldValueService,
     DatabaseMaintenanceService,
@@ -112,23 +209,34 @@ from isrc_manager.services import (
     XMLExportService,
     XMLImportService,
     LicenseService,
+    PartyPayload,
     ProfileKVService,
     ProfileStoreService,
     ProfileWorkflowService,
+    RepertoireWorkflowService,
+    RightPayload,
     SettingsReadService,
     SettingsMutationService,
     TrackCreatePayload,
     TrackSnapshot,
     TrackService,
     TrackUpdatePayload,
+    WorkPayload,
 )
 from isrc_manager.settings import enforce_single_instance, init_settings
 from isrc_manager.tasks import BackgroundTaskManager, TaskFailure
 from isrc_manager.tasks.app_services import BackgroundAppServiceFactory
 from isrc_manager.tasks.history_helpers import run_file_history_action, run_snapshot_history_action
-from isrc_manager.tags import AudioTagService, TaggedAudioExportService, catalog_metadata_to_tags, merge_imported_tags
+from isrc_manager.tags import (
+    AudioTagService,
+    TaggedAudioExportService,
+    catalog_metadata_to_tags,
+    merge_imported_tags,
+)
 from isrc_manager.tags.dialogs import TagPreviewDialog
 from isrc_manager.tags.models import ArtworkPayload
+from isrc_manager.works import WorkService
+from isrc_manager.works.dialogs import WorkBrowserDialog
 
 
 class _JsonLogFormatter(logging.Formatter):
@@ -176,7 +284,10 @@ def _install_qt_message_filter() -> None:
 
     def _handler(mode, context, message):
         category = getattr(context, "category", "") or ""
-        if category == "qt.multimedia.ffmpeg" and mode in (QtMsgType.QtDebugMsg, QtMsgType.QtInfoMsg):
+        if category == "qt.multimedia.ffmpeg" and mode in (
+            QtMsgType.QtDebugMsg,
+            QtMsgType.QtInfoMsg,
+        ):
             return
         if category == "qt.qpa.fonts" and "Populating font family aliases took" in message:
             return
@@ -227,7 +338,9 @@ def _resolve_help_host(widget: QWidget | None):
     return None
 
 
-def _create_round_help_button(owner: QWidget, topic_id: str, tooltip: str | None = None) -> QToolButton:
+def _create_round_help_button(
+    owner: QWidget, topic_id: str, tooltip: str | None = None
+) -> QToolButton:
     button = QToolButton(owner)
     button.setText("?")
     button.setCursor(Qt.PointingHandCursor)
@@ -284,7 +397,9 @@ def _standard_dialog_stylesheet(object_name: str, extra_qss: str = "") -> str:
     return base_qss
 
 
-def _apply_standard_dialog_chrome(dialog: QDialog, object_name: str, *, extra_qss: str = "") -> None:
+def _apply_standard_dialog_chrome(
+    dialog: QDialog, object_name: str, *, extra_qss: str = ""
+) -> None:
     dialog.setObjectName(object_name)
     dialog.setStyleSheet(
         _compose_widget_stylesheet(
@@ -352,6 +467,7 @@ class CustomColumnsDialog(QDialog):
     - Edit options (dropdown)
     - Remove
     """
+
     def __init__(self, fields, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Manage Custom Columns")
@@ -401,7 +517,9 @@ class CustomColumnsDialog(QDialog):
         list_layout.addLayout(row1)
         layout.addWidget(list_box, 1)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, Qt.Horizontal, self)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel, Qt.Horizontal, self
+        )
         ok = buttons.button(QDialogButtonBox.Ok)
         cancel = buttons.button(QDialogButtonBox.Cancel)
         if ok is not None:
@@ -473,11 +591,15 @@ class CustomColumnsDialog(QDialog):
             return
 
         cf = self.fields[idx]
-        if QMessageBox.question(
-            self, "Remove Column",
-            f"Are you sure you want to remove '{cf['name']}'?",
-            QMessageBox.Yes | QMessageBox.No
-        ) != QMessageBox.Yes:
+        if (
+            QMessageBox.question(
+                self,
+                "Remove Column",
+                f"Are you sure you want to remove '{cf['name']}'?",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            != QMessageBox.Yes
+        ):
             return
 
         del self.fields[idx]
@@ -508,8 +630,13 @@ class CustomColumnsDialog(QDialog):
         if cf is None:
             return
 
-        cur = FIELD_TYPE_CHOICES.index(cf.get("field_type", "text")) if cf.get("field_type", "text") in FIELD_TYPE_CHOICES else 0
-        field_type, ok = QInputDialog.getItem(self, "Change Field Type", "Choose type:", FIELD_TYPE_CHOICES, cur, False
+        cur = (
+            FIELD_TYPE_CHOICES.index(cf.get("field_type", "text"))
+            if cf.get("field_type", "text") in FIELD_TYPE_CHOICES
+            else 0
+        )
+        field_type, ok = QInputDialog.getItem(
+            self, "Change Field Type", "Choose type:", FIELD_TYPE_CHOICES, cur, False
         )
         if not ok:
             return
@@ -574,7 +701,9 @@ class ActionRibbonDialog(QDialog):
 
         self.available_actions = [dict(spec) for spec in available_actions]
         self.available_by_id = {str(spec["id"]): spec for spec in self.available_actions}
-        self.default_action_ids = [str(spec["id"]) for spec in self.available_actions if spec.get("default")]
+        self.default_action_ids = [
+            str(spec["id"]) for spec in self.available_actions if spec.get("default")
+        ]
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 18, 18, 18)
@@ -647,7 +776,9 @@ class ActionRibbonDialog(QDialog):
 
         layout.addLayout(content_row, 1)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, Qt.Horizontal, self)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel, Qt.Horizontal, self
+        )
         ok = buttons.button(QDialogButtonBox.Ok)
         cancel = buttons.button(QDialogButtonBox.Cancel)
         if ok is not None:
@@ -661,8 +792,12 @@ class ActionRibbonDialog(QDialog):
         self.btn_up.clicked.connect(lambda: self._move_selected_action(-1))
         self.btn_down.clicked.connect(lambda: self._move_selected_action(1))
         self.btn_reset.clicked.connect(self._reset_defaults)
-        self.available_list.itemDoubleClicked.connect(lambda *_args: self._add_current_available_action())
-        self.selected_list.itemDoubleClicked.connect(lambda *_args: self._remove_current_selected_action())
+        self.available_list.itemDoubleClicked.connect(
+            lambda *_args: self._add_current_available_action()
+        )
+        self.selected_list.itemDoubleClicked.connect(
+            lambda *_args: self._remove_current_selected_action()
+        )
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
 
@@ -673,7 +808,8 @@ class ActionRibbonDialog(QDialog):
         return [
             str(self.selected_list.item(row).data(Qt.UserRole))
             for row in range(self.selected_list.count())
-            if self.selected_list.item(row) is not None and self.selected_list.item(row).data(Qt.UserRole)
+            if self.selected_list.item(row) is not None
+            and self.selected_list.item(row).data(Qt.UserRole)
         ]
 
     def _populate_selected_list(self, action_ids: list[str]) -> None:
@@ -743,7 +879,9 @@ class ActionRibbonDialog(QDialog):
         if current_row < 0:
             return
         removed_item = self.selected_list.takeItem(current_row)
-        removed_action_id = str(removed_item.data(Qt.UserRole) or "") if removed_item is not None else ""
+        removed_action_id = (
+            str(removed_item.data(Qt.UserRole) or "") if removed_item is not None else ""
+        )
         del removed_item
         if self.selected_list.count():
             self.selected_list.setCurrentRow(min(current_row, self.selected_list.count() - 1))
@@ -797,8 +935,13 @@ class DraggableLabel(QLabel):
         if event.button() == Qt.LeftButton:
             self._drag_pos = event.globalPos() - self.frameGeometry().topLeft()
             app = self.window()
-            if hasattr(app, "history_manager") and getattr(app, "history_manager", None) is not None:
-                self._history_before_settings = app.history_manager.capture_setting_states([self.settings_key])
+            if (
+                hasattr(app, "history_manager")
+                and getattr(app, "history_manager", None) is not None
+            ):
+                self._history_before_settings = app.history_manager.capture_setting_states(
+                    [self.settings_key]
+                )
             else:
                 self._history_before_settings = None
             event.accept()
@@ -815,7 +958,10 @@ class DraggableLabel(QLabel):
             app = self.window()
             s = getattr(app, "settings", None)
             if s is None:
-                ini_path = Path(QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)) / "settings.ini"
+                ini_path = (
+                    Path(QStandardPaths.writableLocation(QStandardPaths.AppDataLocation))
+                    / "settings.ini"
+                )
                 s = QSettings(str(ini_path), QSettings.IniFormat)
                 s.setFallbacksEnabled(False)
             s.setValue(self.settings_key, self.pos())
@@ -842,7 +988,10 @@ class DraggableLabel(QLabel):
 # =============================================================================
 class DatePickerDialog(QDialog):
     """Simple calendar picker for custom 'date' fields."""
-    def __init__(self, parent=None, initial_iso_date: str | None = None, title: str = "Pick a date"):
+
+    def __init__(
+        self, parent=None, initial_iso_date: str | None = None, title: str = "Pick a date"
+    ):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setModal(True)
@@ -874,7 +1023,9 @@ class DatePickerDialog(QDialog):
         calendar_layout.addWidget(self.calendar, 0, Qt.AlignCenter)
         lay.addWidget(calendar_box, 1)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, Qt.Horizontal, self)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel, Qt.Horizontal, self
+        )
         self.btn_clear = buttons.addButton("Clear", QDialogButtonBox.ResetRole)
         self.btn_ok = buttons.button(QDialogButtonBox.Ok)
         self.btn_cancel = buttons.button(QDialogButtonBox.Cancel)
@@ -906,14 +1057,34 @@ class DatePickerDialog(QDialog):
 class ApplicationSettingsDialog(QDialog):
     CUSTOM_THEME_LABEL = "Custom Theme"
     COLOR_FIELD_SPECS = (
-        ("window_bg", "Window Background", "Base background for the main window, dialogs, menus, and dock areas."),
-        ("window_fg", "Window Text", "Primary text color used across labels, menus, and general content."),
+        (
+            "window_bg",
+            "Window Background",
+            "Base background for the main window, dialogs, menus, and dock areas.",
+        ),
+        (
+            "window_fg",
+            "Window Text",
+            "Primary text color used across labels, menus, and general content.",
+        ),
         ("accent", "Accent", "Used for highlights, active states, and focus styling."),
-        ("selection_bg", "Selection Background", "Used for selected rows, highlighted text, and active list items."),
+        (
+            "selection_bg",
+            "Selection Background",
+            "Used for selected rows, highlighted text, and active list items.",
+        ),
         ("selection_fg", "Selection Text", "Text color used on top of the selection background."),
-        ("button_bg", "Button Background", "Background color for push buttons and button-like controls."),
+        (
+            "button_bg",
+            "Button Background",
+            "Background color for push buttons and button-like controls.",
+        ),
         ("button_fg", "Button Text", "Text color used for buttons."),
-        ("input_bg", "Input Background", "Background for line edits, combo boxes, spin boxes, and editors."),
+        (
+            "input_bg",
+            "Input Background",
+            "Background for line edits, combo boxes, spin boxes, and editors.",
+        ),
         ("input_fg", "Input Text", "Text color used inside editable controls."),
         ("table_bg", "Table Background", "Background for tables and list views."),
         ("table_fg", "Table Text", "Text color used inside tables and list views."),
@@ -1047,7 +1218,9 @@ class ApplicationSettingsDialog(QDialog):
         profile_grid.setHorizontalSpacing(10)
         profile_grid.setVerticalSpacing(8)
 
-        profile_name = Path(current_profile_path).name if current_profile_path else "(not connected)"
+        profile_name = (
+            Path(current_profile_path).name if current_profile_path else "(not connected)"
+        )
         profile_name_lbl = QLabel(profile_name)
         profile_name_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
         profile_path_lbl = QLabel(current_profile_path or "")
@@ -1196,7 +1369,10 @@ class ApplicationSettingsDialog(QDialog):
         self.auto_snapshot_interval_spin.setValue(
             max(
                 MIN_AUTO_SNAPSHOT_INTERVAL_MINUTES,
-                min(MAX_AUTO_SNAPSHOT_INTERVAL_MINUTES, int(auto_snapshot_interval_minutes or DEFAULT_AUTO_SNAPSHOT_INTERVAL_MINUTES)),
+                min(
+                    MAX_AUTO_SNAPSHOT_INTERVAL_MINUTES,
+                    int(auto_snapshot_interval_minutes or DEFAULT_AUTO_SNAPSHOT_INTERVAL_MINUTES),
+                ),
             )
         )
         self.auto_snapshot_interval_spin.setSuffix(" min")
@@ -1209,7 +1385,9 @@ class ApplicationSettingsDialog(QDialog):
             self.auto_snapshot_interval_spin,
             "Choose how often the app stores an automatic snapshot for this profile.",
         )
-        self.auto_snapshot_enabled_check.toggled.connect(self.auto_snapshot_interval_spin.setEnabled)
+        self.auto_snapshot_enabled_check.toggled.connect(
+            self.auto_snapshot_interval_spin.setEnabled
+        )
         self.auto_snapshot_interval_spin.setEnabled(self.auto_snapshot_enabled_check.isChecked())
 
         general_layout.addStretch(1)
@@ -1294,7 +1472,9 @@ class ApplicationSettingsDialog(QDialog):
             "Import the contracts export from your GS1 portal. GTIN contract numbers from that file become available for defaults and export routing.",
         )
 
-        self.gs1_active_contract_edit = self._create_gs1_contract_combo(initial_text=gs1_active_contract_number)
+        self.gs1_active_contract_edit = self._create_gs1_contract_combo(
+            initial_text=gs1_active_contract_number
+        )
         self._add_row(
             gs1_contracts_grid,
             1,
@@ -1453,7 +1633,9 @@ class ApplicationSettingsDialog(QDialog):
 
         self.theme_font_size_spin = FocusWheelSpinBox(self)
         self.theme_font_size_spin.setRange(8, 36)
-        self.theme_font_size_spin.setValue(max(8, min(36, int(self._theme_settings.get("font_size") or 10))))
+        self.theme_font_size_spin.setValue(
+            max(8, min(36, int(self._theme_settings.get("font_size") or 10)))
+        )
         self.theme_font_size_spin.setSuffix(" pt")
         self.theme_font_size_spin.setMinimumWidth(160)
         self.theme_font_size_spin.setMaximumWidth(220)
@@ -1466,7 +1648,9 @@ class ApplicationSettingsDialog(QDialog):
         )
 
         self.theme_auto_contrast_check = QCheckBox("Auto-fix unreadable text colors")
-        self.theme_auto_contrast_check.setChecked(bool(self._theme_settings.get("auto_contrast_enabled", True)))
+        self.theme_auto_contrast_check.setChecked(
+            bool(self._theme_settings.get("auto_contrast_enabled", True))
+        )
         self._add_row(
             typography_grid,
             2,
@@ -1610,7 +1794,9 @@ class ApplicationSettingsDialog(QDialog):
         scroll.setWidget(content)
         return scroll
 
-    def _add_row(self, grid: QGridLayout, row: int, label: str, editor: QWidget, hint: str | None = None):
+    def _add_row(
+        self, grid: QGridLayout, row: int, label: str, editor: QWidget, hint: str | None = None
+    ):
         grid.addWidget(self._make_label(label), row, 0)
         grid.addWidget(editor, row, 1)
         if hint:
@@ -1703,13 +1889,20 @@ class ApplicationSettingsDialog(QDialog):
                 for part in (
                     entry.product,
                     f"Status: {entry.status}" if entry.status else "",
-                    f"Range: {entry.start_number}-{entry.end_number}" if entry.start_number and entry.end_number else "",
+                    (
+                        f"Range: {entry.start_number}-{entry.end_number}"
+                        if entry.start_number and entry.end_number
+                        else ""
+                    ),
                 )
                 if part
             )
             if details:
                 self.gs1_active_contract_edit.setItemData(index, details, Qt.ToolTipRole)
-        if current_text and self.gs1_active_contract_edit.findText(current_text, Qt.MatchFixedString) < 0:
+        if (
+            current_text
+            and self.gs1_active_contract_edit.findText(current_text, Qt.MatchFixedString) < 0
+        ):
             self.gs1_active_contract_edit.addItem(current_text)
         self.gs1_active_contract_edit.setCurrentText(current_text)
         self.gs1_active_contract_edit.blockSignals(False)
@@ -1838,7 +2031,9 @@ class ApplicationSettingsDialog(QDialog):
                         template_path
                     )
                 elif self._gs1_template_asset is not None:
-                    self._gs1_template_profile = self.gs1_integration_service.load_template_profile()
+                    self._gs1_template_profile = (
+                        self.gs1_integration_service.load_template_profile()
+                    )
                 options_by_field = dict(self._gs1_template_profile.field_options)
             except Exception as exc:
                 if show_errors:
@@ -1892,14 +2087,20 @@ class ApplicationSettingsDialog(QDialog):
             values[key] = self._theme_color_edits[key].text().strip()
         return values
 
-    def _apply_theme_values_to_fields(self, theme_values: dict[str, object], *, selected_name: str = "") -> None:
+    def _apply_theme_values_to_fields(
+        self, theme_values: dict[str, object], *, selected_name: str = ""
+    ) -> None:
         self._theme_change_tracking_enabled = False
         try:
             font_family = str(theme_values.get("font_family") or "").strip()
             if font_family:
                 self.theme_font_family_combo.setCurrentFont(QFont(font_family))
-            self.theme_font_size_spin.setValue(max(8, min(36, int(theme_values.get("font_size") or 10))))
-            self.theme_auto_contrast_check.setChecked(bool(theme_values.get("auto_contrast_enabled", True)))
+            self.theme_font_size_spin.setValue(
+                max(8, min(36, int(theme_values.get("font_size") or 10)))
+            )
+            self.theme_auto_contrast_check.setChecked(
+                bool(theme_values.get("auto_contrast_enabled", True))
+            )
             self.theme_custom_qss_edit.setPlainText(str(theme_values.get("custom_qss") or ""))
             for key, edit in self._theme_color_edits.items():
                 edit.setText(str(theme_values.get(key) or "").strip())
@@ -1948,7 +2149,9 @@ class ApplicationSettingsDialog(QDialog):
             return
         theme_values = self._stored_themes.get(selected_name)
         if not theme_values:
-            QMessageBox.warning(self, "Theme Not Found", "The selected theme preset is no longer available.")
+            QMessageBox.warning(
+                self, "Theme Not Found", "The selected theme preset is no longer available."
+            )
             self._set_theme_preset_selection("")
             return
         self._apply_theme_values_to_fields(theme_values, selected_name=selected_name)
@@ -1960,7 +2163,9 @@ class ApplicationSettingsDialog(QDialog):
             return
         clean_name = str(name or "").strip()
         if not clean_name:
-            QMessageBox.warning(self, "Theme Name Required", "Please enter a name for the saved theme.")
+            QMessageBox.warning(
+                self, "Theme Name Required", "Please enter a name for the saved theme."
+            )
             return
         if clean_name in self._stored_themes:
             answer = QMessageBox.question(
@@ -2009,14 +2214,19 @@ class ApplicationSettingsDialog(QDialog):
             color = QColor(color_text)
             if color.isValid():
                 palette.setColor(QPalette.Window, color)
-                palette.setColor(QPalette.WindowText, QColor("#111827") if color.lightnessF() >= 0.55 else QColor("#f9fafb"))
+                palette.setColor(
+                    QPalette.WindowText,
+                    QColor("#111827") if color.lightnessF() >= 0.55 else QColor("#f9fafb"),
+                )
                 swatch.setText("")
                 swatch.setToolTip(color.name().upper())
             else:
                 palette.setColor(QPalette.Window, QColor("#f87171"))
                 palette.setColor(QPalette.WindowText, QColor("#111827"))
                 swatch.setText("!")
-                swatch.setToolTip("Invalid color. Use values like #112233, #abc, or named Qt colors.")
+                swatch.setToolTip(
+                    "Invalid color. Use values like #112233, #abc, or named Qt colors."
+                )
         swatch.setAutoFillBackground(True)
         swatch.setPalette(palette)
 
@@ -2130,7 +2340,9 @@ class ApplicationSettingsDialog(QDialog):
         self.gs1_contracts_csv_edit.setText(str(path))
         current_contract = self.gs1_active_contract_edit.currentText().strip()
         if not current_contract:
-            active_entry = next((entry for entry in self._gs1_contract_entries if entry.is_active), None)
+            active_entry = next(
+                (entry for entry in self._gs1_contract_entries if entry.is_active), None
+            )
             if active_entry is not None:
                 self.gs1_active_contract_edit.setCurrentText(active_entry.contract_number)
         self._configure_gs1_contract_combo()
@@ -2187,12 +2399,18 @@ class ApplicationSettingsDialog(QDialog):
 
     def _accept_if_valid(self):
         values = self.values()
-        if values["isrc_prefix"] and not re.fullmatch(r"[A-Z]{2}[A-Z0-9]{3}", values["isrc_prefix"]):
-            QMessageBox.warning(self, "Invalid Prefix", "ISRC Prefix must be 5 characters: CC + 3 letters/numbers.")
+        if values["isrc_prefix"] and not re.fullmatch(
+            r"[A-Z]{2}[A-Z0-9]{3}", values["isrc_prefix"]
+        ):
+            QMessageBox.warning(
+                self, "Invalid Prefix", "ISRC Prefix must be 5 characters: CC + 3 letters/numbers."
+            )
             self.focus_field("isrc_prefix")
             return
         if not re.fullmatch(r"\d{2}", values["artist_code"]):
-            QMessageBox.warning(self, "Invalid Artist Code", "ISRC Artist Code must be exactly two digits (00–99).")
+            QMessageBox.warning(
+                self, "Invalid Artist Code", "ISRC Artist Code must be exactly two digits (00–99)."
+            )
             self.focus_field("artist_code")
             return
         gs1_template_import_path = str(values["gs1_template_import_path"] or "").strip()
@@ -2280,7 +2498,9 @@ class ApplicationLogDialog(QDialog):
 
         title = QLabel("Application Log")
         title.setObjectName("logTitle")
-        subtitle = QLabel("Review the live application logs, open archived log files, and jump straight to the log folder.")
+        subtitle = QLabel(
+            "Review the live application logs, open archived log files, and jump straight to the log folder."
+        )
         subtitle.setObjectName("logSubtitle")
         subtitle.setWordWrap(True)
         root.addWidget(title)
@@ -2300,7 +2520,9 @@ class ApplicationLogDialog(QDialog):
 
         self.log_path_label = QLabel()
         self.log_path_label.setProperty("role", "meta")
-        self.log_path_label.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+        self.log_path_label.setTextInteractionFlags(
+            Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard
+        )
         self.log_path_label.setWordWrap(True)
         source_layout.addRow("Path", self.log_path_label)
         root.addWidget(source_group)
@@ -2335,7 +2557,9 @@ class ApplicationLogDialog(QDialog):
         self.log_combo.currentIndexChanged.connect(self._load_selected_log)
         self.refresh_button.clicked.connect(self.refresh)
         self.open_file_button.clicked.connect(self._open_selected_log)
-        self.open_folder_button.clicked.connect(lambda: self.app._open_local_path(self.app.logs_dir, "Open Log Folder"))
+        self.open_folder_button.clicked.connect(
+            lambda: self.app._open_local_path(self.app.logs_dir, "Open Log Folder")
+        )
 
         self.refresh()
 
@@ -2437,7 +2661,9 @@ class DiagnosticsDialog(QDialog):
 
         title = QLabel("Diagnostics")
         title.setObjectName("diagnosticsTitle")
-        subtitle = QLabel("Inspect the current profile, schema, and managed files to quickly spot anything that needs attention.")
+        subtitle = QLabel(
+            "Inspect the current profile, schema, and managed files to quickly spot anything that needs attention."
+        )
         subtitle.setObjectName("diagnosticsSubtitle")
         subtitle.setWordWrap(True)
         root.addWidget(title)
@@ -2451,17 +2677,19 @@ class DiagnosticsDialog(QDialog):
         env_layout.setColumnMinimumWidth(0, 190)
         self.environment_labels = {}
         self.environment_name_labels = {}
-        for row, key in enumerate((
-            "App version",
-            "Schema version",
-            "Current profile",
-            "Database path",
-            "Data folder",
-            "Log folder",
-            "Restore points",
-            "Platform",
-            "Python",
-        )):
+        for row, key in enumerate(
+            (
+                "App version",
+                "Schema version",
+                "Current profile",
+                "Database path",
+                "Data folder",
+                "Log folder",
+                "Restore points",
+                "Platform",
+                "Python",
+            )
+        ):
             name_label = QLabel(key)
             name_label.setAlignment(Qt.AlignRight | Qt.AlignTop)
             name_label.setMinimumWidth(190)
@@ -2525,8 +2753,12 @@ class DiagnosticsDialog(QDialog):
         self.refresh_button.clicked.connect(self.refresh)
         self.preview_repair_button.clicked.connect(self._preview_selected_repair)
         self.repair_button.clicked.connect(self._run_selected_repair)
-        self.open_logs_button.clicked.connect(lambda: self.app._open_local_path(self.app.logs_dir, "Open Log Folder"))
-        self.open_data_button.clicked.connect(lambda: self.app._open_local_path(DATA_DIR(), "Open Data Folder"))
+        self.open_logs_button.clicked.connect(
+            lambda: self.app._open_local_path(self.app.logs_dir, "Open Log Folder")
+        )
+        self.open_data_button.clicked.connect(
+            lambda: self.app._open_local_path(DATA_DIR(), "Open Data Folder")
+        )
         self.close_button.clicked.connect(self.accept)
         self.checks_list.currentRowChanged.connect(self._show_selected_check)
 
@@ -2710,8 +2942,12 @@ class AboutDialog(QDialog):
 
         details = {
             "Window title": app.windowTitle() or DEFAULT_WINDOW_TITLE,
-            "Current profile": Path(app.current_db_path).name if getattr(app, "current_db_path", "") else "(none)",
-            "Database path": str(app.current_db_path) if getattr(app, "current_db_path", "") else "(none)",
+            "Current profile": (
+                Path(app.current_db_path).name if getattr(app, "current_db_path", "") else "(none)"
+            ),
+            "Database path": (
+                str(app.current_db_path) if getattr(app, "current_db_path", "") else "(none)"
+            ),
             "Data folder": str(DATA_DIR()),
             "Log folder": str(app.logs_dir),
             "Schema version": str(app._get_db_version()),
@@ -2834,7 +3070,9 @@ class HelpContentsDialog(QDialog):
         self.chapter_list.blockSignals(True)
         self.chapter_list.clear()
         for chapter in HELP_CHAPTERS:
-            haystack = " ".join((chapter.title, chapter.summary, " ".join(chapter.keywords))).lower()
+            haystack = " ".join(
+                (chapter.title, chapter.summary, " ".join(chapter.keywords))
+            ).lower()
             if needle and needle not in haystack:
                 continue
             item = QListWidgetItem(chapter.title)
@@ -2877,7 +3115,9 @@ class HelpContentsDialog(QDialog):
     def _search_document(self, *, backward: bool) -> bool:
         text = self.search_field.text().strip()
         if not text:
-            self.match_status_label.setText("Type text into the search field to search within the help file.")
+            self.match_status_label.setText(
+                "Type text into the search field to search within the help file."
+            )
             return False
         flags = QTextDocument.FindBackward if backward else None
         found = self.browser.find(text, flags) if flags is not None else self.browser.find(text)
@@ -2930,6 +3170,7 @@ class HelpContentsDialog(QDialog):
 # =============================================================================
 class _SortItem(QTableWidgetItem):
     """Sorts by a hidden key (Qt.UserRole) when present; otherwise natural text."""
+
     def __lt__(self, other):
         # Keyed (numeric/date) compare first
         a = self.data(Qt.UserRole)
@@ -2940,8 +3181,8 @@ class _SortItem(QTableWidgetItem):
         # Fallback: natural text compare (no super().__lt__ to avoid recursion)
         ta = self.text()
         tb = other.text() if isinstance(other, QTableWidgetItem) else ""
-        na = [int(s) if s.isdigit() else s.lower() for s in re.split(r'(\d+)', ta)]
-        nb = [int(s) if s.isdigit() else s.lower() for s in re.split(r'(\d+)', tb)]
+        na = [int(s) if s.isdigit() else s.lower() for s in re.split(r"(\d+)", ta)]
+        nb = [int(s) if s.isdigit() else s.lower() for s in re.split(r"(\d+)", tb)]
         return na < nb
 
 
@@ -3075,8 +3316,10 @@ class TwoDigitSpinBox(FocusWheelSpinBox):
         except Exception:
             return str(v)
 
+
 class _ManageArtistsDialog(QDialog):
     """Safely purge only unused artists (no refs in Tracks or TrackArtists)."""
+
     def __init__(self, parent):
         super().__init__(parent)
         self.setWindowTitle("Manage stored artists")
@@ -3087,10 +3330,13 @@ class _ManageArtistsDialog(QDialog):
         _apply_standard_dialog_chrome(self, "manageArtistsDialog")
 
         self.tbl = QTableWidget(0, 5, self)
-        self.tbl.setHorizontalHeaderLabels(["Artist", "Main uses", "Extra uses", "Total", "Delete?"])
+        self.tbl.setHorizontalHeaderLabels(
+            ["Artist", "Main uses", "Extra uses", "Total", "Delete?"]
+        )
         hh = self.tbl.horizontalHeader()
         hh.setSectionResizeMode(0, QHeaderView.Stretch)
-        for c in (1, 2, 3, 4): hh.setSectionResizeMode(c, QHeaderView.ResizeToContents)
+        for c in (1, 2, 3, 4):
+            hh.setSectionResizeMode(c, QHeaderView.ResizeToContents)
         self.tbl.setEditTriggers(QTableWidget.NoEditTriggers)
         self.tbl.setAlternatingRowColors(True)
         self.tbl.verticalHeader().setVisible(False)
@@ -3116,9 +3362,15 @@ class _ManageArtistsDialog(QDialog):
 
         h = QHBoxLayout()
         h.setSpacing(8)
-        btn_refresh = QPushButton("Refresh"); btn_purge = QPushButton("Purge All Unused")
-        btn_delete  = QPushButton("Delete Selected"); btn_close = QPushButton("Close")
-        h.addWidget(btn_refresh); h.addWidget(btn_purge); h.addWidget(btn_delete); h.addStretch(1); h.addWidget(btn_close)
+        btn_refresh = QPushButton("Refresh")
+        btn_purge = QPushButton("Purge All Unused")
+        btn_delete = QPushButton("Delete Selected")
+        btn_close = QPushButton("Close")
+        h.addWidget(btn_refresh)
+        h.addWidget(btn_purge)
+        h.addWidget(btn_delete)
+        h.addStretch(1)
+        h.addWidget(btn_close)
         table_layout.addLayout(h)
         v.addWidget(table_box, 1)
 
@@ -3132,17 +3384,25 @@ class _ManageArtistsDialog(QDialog):
     def _load(self):
         self.tbl.setRowCount(0)
         for artist in self.catalog_service.list_artists_with_usage():
-            r = self.tbl.rowCount(); self.tbl.insertRow(r)
+            r = self.tbl.rowCount()
+            self.tbl.insertRow(r)
 
             self.tbl.setItem(r, 0, QTableWidgetItem(artist.name))
-            it_main = QTableWidgetItem(str(artist.main_uses)); it_main.setTextAlignment(Qt.AlignCenter)
-            it_extra = QTableWidgetItem(str(artist.extra_uses)); it_extra.setTextAlignment(Qt.AlignCenter)
-            it_total = QTableWidgetItem(str(artist.total_uses));  it_total.setTextAlignment(Qt.AlignCenter)
-            self.tbl.setItem(r, 1, it_main); self.tbl.setItem(r, 2, it_extra); self.tbl.setItem(r, 3, it_total)
+            it_main = QTableWidgetItem(str(artist.main_uses))
+            it_main.setTextAlignment(Qt.AlignCenter)
+            it_extra = QTableWidgetItem(str(artist.extra_uses))
+            it_extra.setTextAlignment(Qt.AlignCenter)
+            it_total = QTableWidgetItem(str(artist.total_uses))
+            it_total.setTextAlignment(Qt.AlignCenter)
+            self.tbl.setItem(r, 1, it_main)
+            self.tbl.setItem(r, 2, it_extra)
+            self.tbl.setItem(r, 3, it_total)
 
-            chk = QTableWidgetItem(); chk.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            chk = QTableWidgetItem()
+            chk.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
             chk.setCheckState(Qt.Checked if artist.total_uses == 0 else Qt.Unchecked)
-            if artist.total_uses > 0: chk.setFlags(Qt.NoItemFlags)
+            if artist.total_uses > 0:
+                chk.setFlags(Qt.NoItemFlags)
             chk.setData(Qt.UserRole, artist.artist_id)  # keep id
             self.tbl.setItem(r, 4, chk)
 
@@ -3158,8 +3418,12 @@ class _ManageArtistsDialog(QDialog):
     def _delete_selected(self):
         ids = self._selected_unused_ids()
         if not ids:
-            QMessageBox.information(self, "Nothing to delete", "No unused artists selected."); return
-        if QMessageBox.question(self, "Confirm", f"Delete {len(ids)} unused artist(s)?") != QMessageBox.Yes:
+            QMessageBox.information(self, "Nothing to delete", "No unused artists selected.")
+            return
+        if (
+            QMessageBox.question(self, "Confirm", f"Delete {len(ids)} unused artist(s)?")
+            != QMessageBox.Yes
+        ):
             return
         app = self.parentWidget()
         if app is not None and hasattr(app, "_run_snapshot_history_action"):
@@ -3176,10 +3440,18 @@ class _ManageArtistsDialog(QDialog):
         self._load()
 
     def _purge_unused(self):
-        to_del = [artist.artist_id for artist in self.catalog_service.list_artists_with_usage() if artist.total_uses == 0]
+        to_del = [
+            artist.artist_id
+            for artist in self.catalog_service.list_artists_with_usage()
+            if artist.total_uses == 0
+        ]
         if not to_del:
-            QMessageBox.information(self, "Nothing to purge", "No unused artists found."); return
-        if QMessageBox.question(self, "Confirm", f"Purge {len(to_del)} unused artist(s)?") != QMessageBox.Yes:
+            QMessageBox.information(self, "Nothing to purge", "No unused artists found.")
+            return
+        if (
+            QMessageBox.question(self, "Confirm", f"Purge {len(to_del)} unused artist(s)?")
+            != QMessageBox.Yes
+        ):
             return
         app = self.parentWidget()
         if app is not None and hasattr(app, "_run_snapshot_history_action"):
@@ -3198,6 +3470,7 @@ class _ManageArtistsDialog(QDialog):
 
 class _ManageAlbumsDialog(QDialog):
     """Safely purge only unused albums (no refs in Tracks.album_id)."""
+
     def __init__(self, parent):
         super().__init__(parent)
         self.setWindowTitle("Manage stored album names")
@@ -3238,9 +3511,15 @@ class _ManageAlbumsDialog(QDialog):
 
         h = QHBoxLayout()
         h.setSpacing(8)
-        btn_refresh = QPushButton("Refresh"); btn_purge = QPushButton("Purge All Unused")
-        btn_delete  = QPushButton("Delete Selected"); btn_close = QPushButton("Close")
-        h.addWidget(btn_refresh); h.addWidget(btn_purge); h.addWidget(btn_delete); h.addStretch(1); h.addWidget(btn_close)
+        btn_refresh = QPushButton("Refresh")
+        btn_purge = QPushButton("Purge All Unused")
+        btn_delete = QPushButton("Delete Selected")
+        btn_close = QPushButton("Close")
+        h.addWidget(btn_refresh)
+        h.addWidget(btn_purge)
+        h.addWidget(btn_delete)
+        h.addStretch(1)
+        h.addWidget(btn_close)
         table_layout.addLayout(h)
         v.addWidget(table_box, 1)
 
@@ -3254,14 +3533,18 @@ class _ManageAlbumsDialog(QDialog):
     def _load(self):
         self.tbl.setRowCount(0)
         for album in self.catalog_service.list_albums_with_usage():
-            r = self.tbl.rowCount(); self.tbl.insertRow(r)
+            r = self.tbl.rowCount()
+            self.tbl.insertRow(r)
             self.tbl.setItem(r, 0, QTableWidgetItem(album.title))
-            it_uses = QTableWidgetItem(str(album.uses)); it_uses.setTextAlignment(Qt.AlignCenter)
+            it_uses = QTableWidgetItem(str(album.uses))
+            it_uses.setTextAlignment(Qt.AlignCenter)
             self.tbl.setItem(r, 1, it_uses)
 
-            chk = QTableWidgetItem(); chk.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            chk = QTableWidgetItem()
+            chk.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
             chk.setCheckState(Qt.Checked if album.uses == 0 else Qt.Unchecked)
-            if album.uses > 0: chk.setFlags(Qt.NoItemFlags)
+            if album.uses > 0:
+                chk.setFlags(Qt.NoItemFlags)
             chk.setData(Qt.UserRole, album.album_id)
             self.tbl.setItem(r, 2, chk)
 
@@ -3277,8 +3560,12 @@ class _ManageAlbumsDialog(QDialog):
     def _delete_selected(self):
         ids = self._selected_unused_ids()
         if not ids:
-            QMessageBox.information(self, "Nothing to delete", "No unused albums selected."); return
-        if QMessageBox.question(self, "Confirm", f"Delete {len(ids)} unused album(s)?") != QMessageBox.Yes:
+            QMessageBox.information(self, "Nothing to delete", "No unused albums selected.")
+            return
+        if (
+            QMessageBox.question(self, "Confirm", f"Delete {len(ids)} unused album(s)?")
+            != QMessageBox.Yes
+        ):
             return
         app = self.parentWidget()
         if app is not None and hasattr(app, "_run_snapshot_history_action"):
@@ -3295,10 +3582,18 @@ class _ManageAlbumsDialog(QDialog):
         self._load()
 
     def _purge_unused(self):
-        to_del = [album.album_id for album in self.catalog_service.list_albums_with_usage() if album.uses == 0]
+        to_del = [
+            album.album_id
+            for album in self.catalog_service.list_albums_with_usage()
+            if album.uses == 0
+        ]
         if not to_del:
-            QMessageBox.information(self, "Nothing to purge", "No unused albums found."); return
-        if QMessageBox.question(self, "Confirm", f"Purge {len(to_del)} unused album(s)?") != QMessageBox.Yes:
+            QMessageBox.information(self, "Nothing to purge", "No unused albums found.")
+            return
+        if (
+            QMessageBox.question(self, "Confirm", f"Purge {len(to_del)} unused album(s)?")
+            != QMessageBox.Yes
+        ):
             return
         app = self.parentWidget()
         if app is not None and hasattr(app, "_run_snapshot_history_action"):
@@ -3313,6 +3608,7 @@ class _ManageAlbumsDialog(QDialog):
         else:
             self.catalog_service.delete_albums(to_del)
         self._load()
+
 
 # =============================================================================
 # App (Relational schema; auto-ISO; custom field editors; auto-learn)
@@ -3388,7 +3684,9 @@ class LicenseUploadDialog(QDialog):
         file_layout.addLayout(file_row)
         main_layout.addWidget(file_box)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel, Qt.Horizontal, self)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Save | QDialogButtonBox.Cancel, Qt.Horizontal, self
+        )
         self.btn_save = buttons.button(QDialogButtonBox.Save)
         self.btn_cancel = buttons.button(QDialogButtonBox.Cancel)
         if self.btn_save is not None:
@@ -3403,7 +3701,9 @@ class LicenseUploadDialog(QDialog):
         self._picked_path = None
 
     def _pick_pdf(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Select signed license (PDF)", "", "PDF (*.pdf)")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select signed license (PDF)", "", "PDF (*.pdf)"
+        )
         if not path:
             return
         if not path.lower().endswith(".pdf"):
@@ -3459,7 +3759,9 @@ class LicensesBrowserDialog(QDialog):
 
         # --- model/proxy ---
         self.model = QStandardItemModel(self)
-        self.model.setHorizontalHeaderLabels(["Licensee", "Track", "Uploaded", "Filename", "_file", "_id"])
+        self.model.setHorizontalHeaderLabels(
+            ["Licensee", "Track", "Uploaded", "Filename", "_file", "_id"]
+        )
         self.proxy = QSortFilterProxyModel(self)
         self.proxy.setSourceModel(self.model)
         self.proxy.setFilterCaseSensitivity(Qt.CaseInsensitive)
@@ -3568,7 +3870,9 @@ class LicensesBrowserDialog(QDialog):
         self._load_rows(self._track_filter_id)
 
         # after views exist, hook selection signals
-        self.table.selectionModel().selectionChanged.connect(lambda *_: self._update_action_states())
+        self.table.selectionModel().selectionChanged.connect(
+            lambda *_: self._update_action_states()
+        )
         self.list.selectionModel().selectionChanged.connect(lambda *_: self._update_action_states())
         self.tabs.currentChanged.connect(lambda *_: self._update_action_states())
         self._update_action_states()
@@ -3595,7 +3899,9 @@ class LicensesBrowserDialog(QDialog):
 
     def _apply_filter(self, text):
         pattern = ".*".join(map(re.escape, text.strip()))
-        self.proxy.setFilterRegularExpression(QRegularExpression(pattern, QRegularExpression.CaseInsensitiveOption))
+        self.proxy.setFilterRegularExpression(
+            QRegularExpression(pattern, QRegularExpression.CaseInsensitiveOption)
+        )
 
     def _load_rows(self, track_filter_id=None):
         if track_filter_id is None:
@@ -3729,6 +4035,7 @@ class LicensesBrowserDialog(QDialog):
             layout.addWidget(buttons)
 
             from PySide6.QtCore import QTimer
+
             dlg.finished.connect(lambda _: QTimer.singleShot(200, doc.deleteLater))
             dlg.finished.connect(lambda _: QTimer.singleShot(250, view.deleteLater))
 
@@ -3829,7 +4136,9 @@ class LicensesBrowserDialog(QDialog):
         details_layout.addLayout(form)
         root.addWidget(details_box, 1)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel, Qt.Horizontal, d)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Save | QDialogButtonBox.Cancel, Qt.Horizontal, d
+        )
         buttons.accepted.connect(d.accept)
         buttons.rejected.connect(d.reject)
         root.addWidget(buttons)
@@ -3873,18 +4182,25 @@ class LicensesBrowserDialog(QDialog):
         ids = [record_id for record_id, _path in selected_records]
 
         confirm = QMessageBox.question(
-            self, "Delete Licenses",
+            self,
+            "Delete Licenses",
             f"Delete {len(ids)} selected license(s)?",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
         )
         if confirm != QMessageBox.Yes:
             return
 
-        delete_files = QMessageBox.question(
-            self, "Delete Files",
-            "Also delete the stored PDF files (if any)?",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
-        ) == QMessageBox.Yes
+        delete_files = (
+            QMessageBox.question(
+                self,
+                "Delete Files",
+                "Also delete the stored PDF files (if any)?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            == QMessageBox.Yes
+        )
 
         try:
             app = self.parentWidget()
@@ -4011,14 +4327,20 @@ class LicenseeManagerDialog(QDialog):
             return
         try:
             app = self.parentWidget()
-            mutation = lambda: self.catalog_service.rename_licensee(it.data(Qt.UserRole), text.strip())
+            mutation = lambda: self.catalog_service.rename_licensee(
+                it.data(Qt.UserRole), text.strip()
+            )
             if app is not None and hasattr(app, "_run_snapshot_history_action"):
                 app._run_snapshot_history_action(
                     action_label=f"Rename Licensee: {old}",
                     action_type="licensee.rename",
                     entity_type="Licensee",
                     entity_id=it.data(Qt.UserRole),
-                    payload={"licensee_id": it.data(Qt.UserRole), "old_name": old, "new_name": text.strip()},
+                    payload={
+                        "licensee_id": it.data(Qt.UserRole),
+                        "old_name": old,
+                        "new_name": text.strip(),
+                    },
                     mutation=mutation,
                 )
             else:
@@ -4176,7 +4498,9 @@ class _CatalogArtistsPane(_CatalogManagerPaneBase):
             self.table.insertRow(row)
 
             self.table.setItem(row, 0, QTableWidgetItem(artist.name))
-            for col, value in enumerate((artist.main_uses, artist.extra_uses, artist.total_uses), start=1):
+            for col, value in enumerate(
+                (artist.main_uses, artist.extra_uses, artist.total_uses), start=1
+            ):
                 item = QTableWidgetItem(str(value))
                 item.setTextAlignment(Qt.AlignCenter)
                 self.table.setItem(row, col, item)
@@ -4248,7 +4572,9 @@ class _CatalogArtistsPane(_CatalogManagerPaneBase):
 
     def _purge_unused(self):
         artist_ids = [
-            artist.artist_id for artist in self.catalog_service.list_artists_with_usage() if artist.total_uses == 0
+            artist.artist_id
+            for artist in self.catalog_service.list_artists_with_usage()
+            if artist.total_uses == 0
         ]
         if not artist_ids:
             QMessageBox.information(self, "Nothing to Purge", "No unused artists were found.")
@@ -4410,7 +4736,11 @@ class _CatalogAlbumsPane(_CatalogManagerPaneBase):
         self._after_mutation()
 
     def _purge_unused(self):
-        album_ids = [album.album_id for album in self.catalog_service.list_albums_with_usage() if album.uses == 0]
+        album_ids = [
+            album.album_id
+            for album in self.catalog_service.list_albums_with_usage()
+            if album.uses == 0
+        ]
         if not album_ids:
             QMessageBox.information(self, "Nothing to Purge", "No unused albums were found.")
             return
@@ -4462,7 +4792,9 @@ class _CatalogLicenseesPane(_CatalogManagerPaneBase):
         self.new_name_edit.setClearButtonEnabled(True)
         self.new_name_edit.setMinimumWidth(360)
         self.add_btn = self._prepare_button(QPushButton("Add Licensee"), width=156)
-        add_hint = self._make_info_label("Licensees can be renamed later, but in-use licensees cannot be deleted.")
+        add_hint = self._make_info_label(
+            "Licensees can be renamed later, but in-use licensees cannot be deleted."
+        )
         add_layout.addWidget(name_label, 0, 0)
         add_layout.addWidget(self.new_name_edit, 0, 1)
         add_layout.addWidget(self.add_btn, 0, 2)
@@ -4611,7 +4943,9 @@ class _CatalogLicenseesPane(_CatalogManagerPaneBase):
                         "old_name": selection["name"],
                         "new_name": new_name,
                     },
-                    mutation=lambda: self.catalog_service.rename_licensee(selection["licensee_id"], new_name),
+                    mutation=lambda: self.catalog_service.rename_licensee(
+                        selection["licensee_id"], new_name
+                    ),
                 )
             else:
                 self.catalog_service.rename_licensee(selection["licensee_id"], new_name)
@@ -4747,6 +5081,7 @@ class CatalogManagersDialog(QDialog):
             index = 0
         self.tabs.setCurrentIndex(index)
 
+
 class App(QMainWindow):
     BASE_HEADERS = list(DEFAULT_BASE_HEADERS)
 
@@ -4805,7 +5140,9 @@ class App(QMainWindow):
         )
 
         # --- Settings / identity ---
-        ini_path = Path(QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)) / "settings.ini"
+        ini_path = (
+            Path(QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)) / "settings.ini"
+        )
         self.settings = QSettings(str(ini_path), QSettings.IniFormat)
         self.settings.setFallbacksEnabled(False)
         self.background_service_factory.configure(settings_path=self.settings.fileName())
@@ -4863,7 +5200,9 @@ class App(QMainWindow):
         self.setMenuBar(self.menu_bar)
 
         try:
-            movable = self.settings.value(f"{self._table_settings_prefix()}/columns_movable", False, bool)
+            movable = self.settings.value(
+                f"{self._table_settings_prefix()}/columns_movable", False, bool
+            )
         except Exception:
             movable = False
 
@@ -5103,6 +5442,42 @@ class App(QMainWindow):
             shortcuts=("Ctrl+Alt+Shift+R", "Meta+Alt+Shift+R"),
         )
         catalog_menu.addAction(self.release_browser_action)
+        self.work_manager_action = self._create_action(
+            "Work Manager…",
+            slot=self.open_work_manager,
+            shortcuts=("Ctrl+Alt+W", "Meta+Alt+W"),
+        )
+        catalog_menu.addAction(self.work_manager_action)
+        self.party_manager_action = self._create_action(
+            "Party Manager…",
+            slot=self.open_party_manager,
+            shortcuts=("Ctrl+Alt+P", "Meta+Alt+P"),
+        )
+        catalog_menu.addAction(self.party_manager_action)
+        self.contract_manager_action = self._create_action(
+            "Contract Manager…",
+            slot=self.open_contract_manager,
+            shortcuts=("Ctrl+Alt+C", "Meta+Alt+C"),
+        )
+        catalog_menu.addAction(self.contract_manager_action)
+        self.rights_matrix_action = self._create_action(
+            "Rights Matrix…",
+            slot=self.open_rights_matrix,
+            shortcuts=("Ctrl+Alt+M", "Meta+Alt+M"),
+        )
+        catalog_menu.addAction(self.rights_matrix_action)
+        self.asset_registry_action = self._create_action(
+            "Asset Version Registry…",
+            slot=self.open_asset_registry,
+            shortcuts=("Ctrl+Alt+A", "Meta+Alt+A"),
+        )
+        catalog_menu.addAction(self.asset_registry_action)
+        self.global_search_action = self._create_action(
+            "Global Search and Relationships…",
+            slot=self.open_global_search,
+            shortcuts=("Ctrl+Alt+F", "Meta+Alt+F"),
+        )
+        catalog_menu.addAction(self.global_search_action)
         self.create_release_action = self._create_action(
             "Create Release from Selection…",
             slot=self.create_release_from_selection,
@@ -5138,6 +5513,49 @@ class App(QMainWindow):
             shortcuts=("Ctrl+Shift+G", "Meta+Shift+G"),
         )
         catalog_menu.addAction(self.gs1_metadata_action)
+
+        repertoire_menu = file_menu.addMenu("Repertoire Exchange")
+        self.export_repertoire_json_action = self._create_action(
+            "Export Repertoire to JSON…",
+            slot=lambda: self.export_repertoire_exchange("json"),
+        )
+        repertoire_menu.addAction(self.export_repertoire_json_action)
+        self.export_repertoire_xlsx_action = self._create_action(
+            "Export Repertoire to XLSX…",
+            slot=lambda: self.export_repertoire_exchange("xlsx"),
+        )
+        repertoire_menu.addAction(self.export_repertoire_xlsx_action)
+        self.export_repertoire_csv_action = self._create_action(
+            "Export Repertoire CSV Bundle…",
+            slot=lambda: self.export_repertoire_exchange("csv"),
+        )
+        repertoire_menu.addAction(self.export_repertoire_csv_action)
+        self.export_repertoire_package_action = self._create_action(
+            "Export Repertoire ZIP Package…",
+            slot=lambda: self.export_repertoire_exchange("package"),
+        )
+        repertoire_menu.addAction(self.export_repertoire_package_action)
+        repertoire_menu.addSeparator()
+        self.import_repertoire_json_action = self._create_action(
+            "Import Repertoire JSON…",
+            slot=lambda: self.import_repertoire_exchange("json"),
+        )
+        repertoire_menu.addAction(self.import_repertoire_json_action)
+        self.import_repertoire_xlsx_action = self._create_action(
+            "Import Repertoire XLSX…",
+            slot=lambda: self.import_repertoire_exchange("xlsx"),
+        )
+        repertoire_menu.addAction(self.import_repertoire_xlsx_action)
+        self.import_repertoire_csv_action = self._create_action(
+            "Import Repertoire CSV Bundle…",
+            slot=lambda: self.import_repertoire_exchange("csv"),
+        )
+        repertoire_menu.addAction(self.import_repertoire_csv_action)
+        self.import_repertoire_package_action = self._create_action(
+            "Import Repertoire ZIP Package…",
+            slot=lambda: self.import_repertoire_exchange("package"),
+        )
+        repertoire_menu.addAction(self.import_repertoire_package_action)
 
         # Settings menu
         settings_menu = self.menu_bar.addMenu("Settings")
@@ -5308,7 +5726,9 @@ class App(QMainWindow):
         self.action_ribbon_toolbar.setFloatable(False)
         self.action_ribbon_toolbar.setToolButtonStyle(Qt.ToolButtonTextOnly)
         self.action_ribbon_toolbar.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.action_ribbon_toolbar.customContextMenuRequested.connect(self._open_action_ribbon_context_menu)
+        self.action_ribbon_toolbar.customContextMenuRequested.connect(
+            self._open_action_ribbon_context_menu
+        )
         self.addToolBar(Qt.TopToolBarArea, self.action_ribbon_toolbar)
         self.addToolBarBreak(Qt.TopToolBarArea)
 
@@ -5333,14 +5753,18 @@ class App(QMainWindow):
         self.toolbar.addWidget(btn_browse)
 
         btn_reload = QPushButton("Reload List")
-        btn_reload.clicked.connect(lambda: self._reload_profiles_list(select_path=self.current_db_path))
+        btn_reload.clicked.connect(
+            lambda: self._reload_profiles_list(select_path=self.current_db_path)
+        )
         self.toolbar.addWidget(btn_reload)
 
         btn_remove = QPushButton("Remove…")
         btn_remove.clicked.connect(self.remove_selected_profile)
         self.toolbar.addWidget(btn_remove)
         self.toolbar.addSeparator()
-        self.toolbar.addWidget(_create_round_help_button(self, "profiles", "Open help for profiles and databases"))
+        self.toolbar.addWidget(
+            _create_round_help_button(self, "profiles", "Open help for profiles and databases")
+        )
 
         self._action_ribbon_action_ids = []
         self._rebuild_action_ribbon_toolbar()
@@ -5386,7 +5810,9 @@ class App(QMainWindow):
 
         self.add_data_title_row.addWidget(self.add_data_title)
         self.add_data_title_row.addStretch(1)
-        self.add_data_title_row.addWidget(_create_round_help_button(self, "add-data", "Open help for the Add Data panel"))
+        self.add_data_title_row.addWidget(
+            _create_round_help_button(self, "add-data", "Open help for the Add Data panel")
+        )
         self.add_data_header_layout.addLayout(self.add_data_title_row)
         self.add_data_header_layout.addWidget(self.add_data_subtitle)
         self.left_panel.addWidget(self.add_data_header)
@@ -5500,15 +5926,23 @@ class App(QMainWindow):
         self.album_art_row.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
         self.track_len_label = QLabel("Track Length (hh:mm:ss)")
-        self.track_len_h = TwoDigitSpinBox(); self.track_len_h.setRange(0, 99);  self.track_len_h.setFixedWidth(60)
-        self.track_len_m = TwoDigitSpinBox(); self.track_len_m.setRange(0, 59);  self.track_len_m.setFixedWidth(50)
-        self.track_len_s = TwoDigitSpinBox(); self.track_len_s.setRange(0, 59);  self.track_len_s.setFixedWidth(50)
+        self.track_len_h = TwoDigitSpinBox()
+        self.track_len_h.setRange(0, 99)
+        self.track_len_h.setFixedWidth(60)
+        self.track_len_m = TwoDigitSpinBox()
+        self.track_len_m.setRange(0, 59)
+        self.track_len_m.setFixedWidth(50)
+        self.track_len_s = TwoDigitSpinBox()
+        self.track_len_s.setRange(0, 59)
+        self.track_len_s.setFixedWidth(50)
 
         _row_len = QHBoxLayout()
         _row_len.setContentsMargins(0, 0, 0, 0)
         _row_len.setSpacing(6)
-        _row_len.addWidget(self.track_len_h); _row_len.addWidget(QLabel(":"))
-        _row_len.addWidget(self.track_len_m); _row_len.addWidget(QLabel(":"))
+        _row_len.addWidget(self.track_len_h)
+        _row_len.addWidget(QLabel(":"))
+        _row_len.addWidget(self.track_len_m)
+        _row_len.addWidget(QLabel(":"))
         _row_len.addWidget(self.track_len_s)
         _row_len.addStretch(1)
 
@@ -5522,28 +5956,54 @@ class App(QMainWindow):
         self.isrc_rule_label = QLabel("ISRC Rule")
 
         status_group, status_layout = self._create_add_data_group("Generated")
-        status_layout.addWidget(self._create_add_data_row(self.record_id_label, self.record_id_field))
-        status_layout.addWidget(self._create_add_data_row(self.generated_isrc_label, self.generated_isrc_field))
-        status_layout.addWidget(self._create_add_data_row(self.entry_date_preview_label, self.entry_date_preview_field))
-        status_layout.addWidget(self._create_add_data_row(self.isrc_rule_label, self.prev_release_toggle))
+        status_layout.addWidget(
+            self._create_add_data_row(self.record_id_label, self.record_id_field)
+        )
+        status_layout.addWidget(
+            self._create_add_data_row(self.generated_isrc_label, self.generated_isrc_field)
+        )
+        status_layout.addWidget(
+            self._create_add_data_row(self.entry_date_preview_label, self.entry_date_preview_field)
+        )
+        status_layout.addWidget(
+            self._create_add_data_row(self.isrc_rule_label, self.prev_release_toggle)
+        )
 
         core_group, core_layout = self._create_add_data_group("Core Details")
-        core_layout.addWidget(self._create_add_data_row(self.track_title_label, self.track_title_field))
+        core_layout.addWidget(
+            self._create_add_data_row(self.track_title_label, self.track_title_field)
+        )
         core_layout.addWidget(self._create_add_data_row(self.artist_label, self.artist_field))
-        core_layout.addWidget(self._create_add_data_row(self.additional_artist_label, self.additional_artist_field))
-        core_layout.addWidget(self._create_add_data_row(self.album_title_label, self.album_title_field))
+        core_layout.addWidget(
+            self._create_add_data_row(self.additional_artist_label, self.additional_artist_field)
+        )
+        core_layout.addWidget(
+            self._create_add_data_row(self.album_title_label, self.album_title_field)
+        )
         core_layout.addWidget(self._create_add_data_row(self.genre_label, self.genre_field))
 
         release_group, release_layout = self._create_add_data_group("Release & Codes")
-        release_layout.addWidget(self._create_add_data_row(self.release_date_label, self.release_date_field, top_aligned=True))
-        release_layout.addWidget(self._create_add_data_row(self.track_len_label, self.track_length_row))
+        release_layout.addWidget(
+            self._create_add_data_row(
+                self.release_date_label, self.release_date_field, top_aligned=True
+            )
+        )
+        release_layout.addWidget(
+            self._create_add_data_row(self.track_len_label, self.track_length_row)
+        )
         release_layout.addWidget(self._create_add_data_row(self.iswc_label, self.iswc_field))
         release_layout.addWidget(self._create_add_data_row(self.upc_label, self.upc_field))
-        release_layout.addWidget(self._create_add_data_row(self.catalog_number_label, self.catalog_number_field))
-        release_layout.addWidget(self._create_add_data_row(self.buma_work_number_label, self.buma_work_number_field))
+        release_layout.addWidget(
+            self._create_add_data_row(self.catalog_number_label, self.catalog_number_field)
+        )
+        release_layout.addWidget(
+            self._create_add_data_row(self.buma_work_number_label, self.buma_work_number_field)
+        )
 
         media_group, media_layout = self._create_add_data_group("Managed Media")
-        media_layout.addWidget(self._create_add_data_row(self.audio_file_label, self.audio_file_row))
+        media_layout.addWidget(
+            self._create_add_data_row(self.audio_file_label, self.audio_file_row)
+        )
         media_layout.addWidget(self._create_add_data_row(self.album_art_label, self.album_art_row))
 
         for section in (status_group, core_group, release_group, media_group):
@@ -5562,7 +6022,9 @@ class App(QMainWindow):
         self.edit_button = QPushButton("Edit Selected")
         self.edit_button.clicked.connect(self.open_selected_editor)
         self.edit_button.setMinimumHeight(32)
-        self.edit_button.setToolTip("Open the selected table row, or bulk edit when multiple rows are selected.")
+        self.edit_button.setToolTip(
+            "Open the selected table row, or bulk edit when multiple rows are selected."
+        )
         self.save_button = QPushButton("Save Track")
         self.save_button.clicked.connect(self.save)
         self.save_button.setMinimumHeight(32)
@@ -5601,14 +6063,18 @@ class App(QMainWindow):
         self.add_data_dock = QDockWidget("Add Data", self)
         self.add_data_dock.setObjectName("addDataDock")
         self.add_data_dock.setAllowedAreas(Qt.AllDockWidgetAreas)
-        self.add_data_dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
+        self.add_data_dock.setFeatures(
+            QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable
+        )
         self.add_data_dock.setMinimumWidth(440)
         self.add_data_dock.setWidget(self.left_scroll)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.add_data_dock)
         self.add_data_dock.dockLocationChanged.connect(lambda *_args: self._save_main_dock_state())
         self.add_data_dock.topLevelChanged.connect(lambda *_args: self._save_main_dock_state())
         self.add_data_dock.visibilityChanged.connect(
-            lambda visible: self._sync_dock_visibility(self.add_data_action, "display/add_data_panel", visible)
+            lambda visible: self._sync_dock_visibility(
+                self.add_data_action, "display/add_data_panel", visible
+            )
         )
 
         # Right panel (search + table)
@@ -5649,7 +6115,9 @@ class App(QMainWindow):
         self.search_layout.addWidget(self.count_label, 1)
         self.search_layout.addWidget(self.duration_label)
         self.search_layout.addWidget(self.search_button)
-        self.search_layout.addWidget(_create_round_help_button(self, "catalog-table", "Open help for the catalog table"))
+        self.search_layout.addWidget(
+            _create_round_help_button(self, "catalog-table", "Open help for the catalog table")
+        )
         right_panel.addLayout(self.search_layout)
 
         self.table = QTableWidget()
@@ -5662,7 +6130,7 @@ class App(QMainWindow):
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.verticalHeader().setSectionResizeMode(QHeaderView.Fixed)
 
-        #patched: 24-aug-2025
+        # patched: 24-aug-2025
         # Consistent width-only resize (default)
         self.table.setWordWrap(False)  # avoid multi-line height calculations by default
 
@@ -5713,11 +6181,15 @@ class App(QMainWindow):
         self.catalog_table_dock = QDockWidget("Catalog Table", self)
         self.catalog_table_dock.setObjectName("catalogTableDock")
         self.catalog_table_dock.setAllowedAreas(Qt.AllDockWidgetAreas)
-        self.catalog_table_dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
+        self.catalog_table_dock.setFeatures(
+            QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable
+        )
         self.catalog_table_dock.setMinimumWidth(700)
         self.catalog_table_dock.setWidget(self.table_panel_widget)
         self.addDockWidget(Qt.RightDockWidgetArea, self.catalog_table_dock)
-        self.catalog_table_dock.dockLocationChanged.connect(lambda *_args: self._save_main_dock_state())
+        self.catalog_table_dock.dockLocationChanged.connect(
+            lambda *_args: self._save_main_dock_state()
+        )
         self.catalog_table_dock.topLevelChanged.connect(lambda *_args: self._save_main_dock_state())
         self.catalog_table_dock.visibilityChanged.connect(
             lambda visible: self._sync_dock_visibility(
@@ -5742,7 +6214,6 @@ class App(QMainWindow):
         self._ensure_widget_object_names(self)
         self._apply_theme()
         self._refresh_catalog_ui_in_background(unique_key="catalog.ui.startup")
-
 
     def closeEvent(self, e):
         if hasattr(self, "background_tasks") and self.background_tasks.has_running_tasks():
@@ -5778,7 +6249,9 @@ class App(QMainWindow):
                 except Exception:
                     pass
 
-        app_handler = RotatingFileHandler(self.log_path, maxBytes=1_000_000, backupCount=7, encoding="utf-8")
+        app_handler = RotatingFileHandler(
+            self.log_path, maxBytes=1_000_000, backupCount=7, encoding="utf-8"
+        )
         app_handler.setLevel(logging.INFO)
         app_handler.setFormatter(app_formatter)
         self.logger.addHandler(app_handler)
@@ -5810,7 +6283,9 @@ class App(QMainWindow):
 
     def _trace_context(self, **fields) -> dict:
         payload = {
-            "profile": Path(self.current_db_path).name if getattr(self, "current_db_path", "") else None,
+            "profile": (
+                Path(self.current_db_path).name if getattr(self, "current_db_path", "") else None
+            ),
             "db_path": str(self.current_db_path) if getattr(self, "current_db_path", "") else None,
         }
         payload.update(fields)
@@ -5820,7 +6295,9 @@ class App(QMainWindow):
             if value not in (None, "", [], {}, ())
         }
 
-    def _log_trace(self, event: str, *, message: str | None = None, level: int = logging.INFO, **fields) -> None:
+    def _log_trace(
+        self, event: str, *, message: str | None = None, level: int = logging.INFO, **fields
+    ) -> None:
         if not hasattr(self, "trace_logger") or self.trace_logger is None:
             return
         extra = {"event": event}
@@ -6090,8 +6567,14 @@ class App(QMainWindow):
         environment = {
             "App version": self._app_version_text(),
             "Schema version": str(self._get_db_version()),
-            "Current profile": Path(self.current_db_path).name if getattr(self, "current_db_path", "") else "(none)",
-            "Database path": str(self.current_db_path) if getattr(self, "current_db_path", "") else "(none)",
+            "Current profile": (
+                Path(self.current_db_path).name
+                if getattr(self, "current_db_path", "")
+                else "(none)"
+            ),
+            "Database path": (
+                str(self.current_db_path) if getattr(self, "current_db_path", "") else "(none)"
+            ),
             "Data folder": str(DATA_DIR()),
             "Log folder": str(self.logs_dir),
             "Restore points": self._history_snapshot_summary(),
@@ -6143,12 +6626,16 @@ class App(QMainWindow):
             )
 
         try:
-            table_names = {
-                row[0]
-                for row in self.conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                ).fetchall()
-            } if self.conn is not None else set()
+            table_names = (
+                {
+                    row[0]
+                    for row in self.conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table'"
+                    ).fetchall()
+                }
+                if self.conn is not None
+                else set()
+            )
             required_tables = {
                 "Tracks",
                 "Artists",
@@ -6165,10 +6652,11 @@ class App(QMainWindow):
             }
             missing_tables = sorted(required_tables - table_names)
 
-            track_columns = {
-                row[1]
-                for row in self.conn.execute("PRAGMA table_info(Tracks)").fetchall()
-            } if self.conn is not None and "Tracks" in table_names else set()
+            track_columns = (
+                {row[1] for row in self.conn.execute("PRAGMA table_info(Tracks)").fetchall()}
+                if self.conn is not None and "Tracks" in table_names
+                else set()
+            )
             required_track_columns = {
                 "id",
                 "isrc",
@@ -6241,7 +6729,11 @@ class App(QMainWindow):
             )
 
         try:
-            fk_rows = self.conn.execute("PRAGMA foreign_key_check").fetchall() if self.conn is not None else []
+            fk_rows = (
+                self.conn.execute("PRAGMA foreign_key_check").fetchall()
+                if self.conn is not None
+                else []
+            )
             if not fk_rows:
                 add_check(
                     "Foreign-key consistency",
@@ -6310,9 +6802,15 @@ class App(QMainWindow):
                 ).fetchall()
                 for track_id, track_title, audio_path in media_rows:
                     if audio_path:
-                        resolved = self.track_service.resolve_media_path(audio_path) if self.track_service else Path(audio_path)
+                        resolved = (
+                            self.track_service.resolve_media_path(audio_path)
+                            if self.track_service
+                            else Path(audio_path)
+                        )
                         if resolved is not None and not resolved.exists():
-                            missing_files.append(f"Track #{track_id} '{track_title}': missing audio file -> {resolved}")
+                            missing_files.append(
+                                f"Track #{track_id} '{track_title}': missing audio file -> {resolved}"
+                            )
 
                 album_art_rows = self.conn.execute(
                     """
@@ -6323,7 +6821,11 @@ class App(QMainWindow):
                     """
                 ).fetchall()
                 for album_id, album_title, art_path in album_art_rows:
-                    resolved = self.track_service.resolve_media_path(art_path) if self.track_service else Path(art_path)
+                    resolved = (
+                        self.track_service.resolve_media_path(art_path)
+                        if self.track_service
+                        else Path(art_path)
+                    )
                     if resolved is not None and not resolved.exists():
                         missing_files.append(
                             f"Album #{album_id} '{album_title or 'Untitled Album'}': missing album art -> {resolved}"
@@ -6335,9 +6837,15 @@ class App(QMainWindow):
                 for record_id, filename, file_path in license_rows:
                     if not file_path:
                         continue
-                    resolved = self.license_service.resolve_path(file_path) if self.license_service else Path(file_path)
+                    resolved = (
+                        self.license_service.resolve_path(file_path)
+                        if self.license_service
+                        else Path(file_path)
+                    )
                     if not resolved.exists():
-                        missing_files.append(f"License #{record_id} '{filename or 'unnamed'}': missing file -> {resolved}")
+                        missing_files.append(
+                            f"License #{record_id} '{filename or 'unnamed'}': missing file -> {resolved}"
+                        )
 
             if not missing_files:
                 add_check(
@@ -6420,7 +6928,9 @@ class App(QMainWindow):
             else None
         )
         self.history_manager = (
-            HistoryManager(self.conn, self.settings, self.current_db_path, self.history_dir, DATA_DIR())
+            HistoryManager(
+                self.conn, self.settings, self.current_db_path, self.history_dir, DATA_DIR()
+            )
             if self.conn is not None and getattr(self, "current_db_path", None)
             else None
         )
@@ -6434,13 +6944,17 @@ class App(QMainWindow):
         )
         self.catalog_service = CatalogAdminService(self.conn) if self.conn is not None else None
         self.catalog_reads = CatalogReadService(self.conn) if self.conn is not None else None
-        self.license_service = LicenseService(self.conn, DATA_DIR()) if self.conn is not None else None
+        self.license_service = (
+            LicenseService(self.conn, DATA_DIR()) if self.conn is not None else None
+        )
         self.profile_kv = ProfileKVService(self.conn) if self.conn is not None else None
         self.custom_field_definitions = (
             CustomFieldDefinitionService(self.conn) if self.conn is not None else None
         )
         self.custom_field_values = (
-            CustomFieldValueService(self.conn, self.custom_field_definitions) if self.conn is not None else None
+            CustomFieldValueService(self.conn, self.custom_field_definitions)
+            if self.conn is not None
+            else None
         )
         self.xml_export_service = XMLExportService(self.conn) if self.conn is not None else None
         self.xml_import_service = (
@@ -6449,9 +6963,29 @@ class App(QMainWindow):
             else None
         )
         self.release_service = (
-            ReleaseService(self.conn, DATA_DIR())
+            ReleaseService(self.conn, DATA_DIR()) if self.conn is not None else None
+        )
+        self.party_service = PartyService(self.conn) if self.conn is not None else None
+        self.work_service = (
+            WorkService(self.conn, party_service=self.party_service)
             if self.conn is not None
             else None
+        )
+        self.contract_service = (
+            ContractService(self.conn, DATA_DIR(), party_service=self.party_service)
+            if self.conn is not None
+            else None
+        )
+        self.rights_service = RightsService(self.conn) if self.conn is not None else None
+        self.asset_service = AssetService(self.conn, DATA_DIR()) if self.conn is not None else None
+        self.repertoire_workflow_service = (
+            RepertoireWorkflowService(self.conn) if self.conn is not None else None
+        )
+        self.global_search_service = (
+            GlobalSearchService(self.conn) if self.conn is not None else None
+        )
+        self.relationship_explorer_service = (
+            RelationshipExplorerService(self.conn) if self.conn is not None else None
         )
         self.audio_tag_service = AudioTagService() if self.conn is not None else None
         self.tagged_audio_export_service = (
@@ -6475,6 +7009,26 @@ class App(QMainWindow):
             )
             else None
         )
+        self.repertoire_exchange_service = (
+            RepertoireExchangeService(
+                self.conn,
+                party_service=self.party_service,
+                work_service=self.work_service,
+                contract_service=self.contract_service,
+                rights_service=self.rights_service,
+                asset_service=self.asset_service,
+                data_root=DATA_DIR(),
+            )
+            if (
+                self.conn is not None
+                and self.party_service is not None
+                and self.work_service is not None
+                and self.contract_service is not None
+                and self.rights_service is not None
+                and self.asset_service is not None
+            )
+            else None
+        )
         self.quality_service = (
             QualityDashboardService(
                 self.conn,
@@ -6482,7 +7036,9 @@ class App(QMainWindow):
                 release_service=self.release_service,
                 data_root=DATA_DIR(),
             )
-            if self.conn is not None and self.track_service is not None and self.release_service is not None
+            if self.conn is not None
+            and self.track_service is not None
+            and self.release_service is not None
             else None
         )
         self.gs1_integration_service = (
@@ -6491,17 +7047,18 @@ class App(QMainWindow):
                 self.gs1_settings_service,
                 self.track_service,
             )
-            if self.conn is not None and self.gs1_settings_service is not None and self.track_service is not None
+            if self.conn is not None
+            and self.gs1_settings_service is not None
+            and self.track_service is not None
             else None
         )
-
 
     # -------------------------------------------------------------------------
     # Identity & Profiles
     # -------------------------------------------------------------------------
     def _load_identity(self):
         title = self.settings.value("identity/window_title", DEFAULT_WINDOW_TITLE, str)
-        icon  = self.settings.value("identity/icon_path", DEFAULT_ICON_PATH, str)
+        icon = self.settings.value("identity/icon_path", DEFAULT_ICON_PATH, str)
         return {"window_title": title, "icon_path": icon}
 
     def _apply_identity(self):
@@ -6572,7 +7129,11 @@ class App(QMainWindow):
             elif isinstance(default, int):
                 loaded[key] = int(self.settings.value(settings_key, default, int))
             else:
-                loaded[key] = self.settings.value(settings_key, default, str) if self.settings.contains(settings_key) else default
+                loaded[key] = (
+                    self.settings.value(settings_key, default, str)
+                    if self.settings.contains(settings_key)
+                    else default
+                )
         return self._normalize_theme_settings(loaded)
 
     def _normalize_theme_settings(self, values: dict[str, object] | None) -> dict[str, object]:
@@ -6603,7 +7164,9 @@ class App(QMainWindow):
         payload["selected_name"] = ""
         return payload
 
-    def _sanitize_theme_library(self, library: dict[str, object] | None) -> dict[str, dict[str, object]]:
+    def _sanitize_theme_library(
+        self, library: dict[str, object] | None
+    ) -> dict[str, dict[str, object]]:
         sanitized: dict[str, dict[str, object]] = {}
         for raw_name, raw_values in dict(library or {}).items():
             name = str(raw_name or "").strip()
@@ -6622,7 +7185,9 @@ class App(QMainWindow):
             parsed = {}
         return self._sanitize_theme_library(parsed)
 
-    def _save_theme_library(self, library: dict[str, object] | None) -> dict[str, dict[str, object]]:
+    def _save_theme_library(
+        self, library: dict[str, object] | None
+    ) -> dict[str, dict[str, object]]:
         sanitized = self._sanitize_theme_library(library)
         self.settings.setValue("theme/library_json", json.dumps(sanitized, sort_keys=True))
         self.settings.sync()
@@ -6668,7 +7233,9 @@ class App(QMainWindow):
         shifted = color.lighter(factor) if factor >= 100 else color.darker(max(1, 200 - factor))
         return shifted.name().upper()
 
-    def _effective_theme_settings(self, raw_values: dict[str, object] | None = None) -> dict[str, object]:
+    def _effective_theme_settings(
+        self, raw_values: dict[str, object] | None = None
+    ) -> dict[str, object]:
         defaults = self._theme_setting_defaults()
         normalized = self._normalize_theme_settings(raw_values or self.theme_settings)
         effective: dict[str, object] = dict(defaults)
@@ -6717,12 +7284,22 @@ class App(QMainWindow):
         table_bg = str(theme["table_bg"])
         table_fg = str(theme["table_fg"])
 
-        border_color = self._shift_color(window_bg, 88 if QColor(window_bg).lightnessF() >= 0.5 else 118)
+        border_color = self._shift_color(
+            window_bg, 88 if QColor(window_bg).lightnessF() >= 0.5 else 118
+        )
         panel_bg = self._shift_color(window_bg, 104 if QColor(window_bg).lightnessF() < 0.5 else 98)
-        button_border = self._shift_color(button_bg, 86 if QColor(button_bg).lightnessF() >= 0.5 else 118)
-        input_border = self._shift_color(input_bg, 86 if QColor(input_bg).lightnessF() >= 0.5 else 118)
-        header_bg = self._shift_color(window_bg, 108 if QColor(window_bg).lightnessF() < 0.5 else 92)
-        secondary_text = self._shift_color(window_fg, 140 if QColor(window_fg).lightnessF() < 0.5 else 72)
+        button_border = self._shift_color(
+            button_bg, 86 if QColor(button_bg).lightnessF() >= 0.5 else 118
+        )
+        input_border = self._shift_color(
+            input_bg, 86 if QColor(input_bg).lightnessF() >= 0.5 else 118
+        )
+        header_bg = self._shift_color(
+            window_bg, 108 if QColor(window_bg).lightnessF() < 0.5 else 92
+        )
+        secondary_text = self._shift_color(
+            window_fg, 140 if QColor(window_fg).lightnessF() < 0.5 else 72
+        )
         accent_text = self._pick_contrasting_color(accent)
         selection_text = str(selection_fg)
         custom_qss = str(theme.get("custom_qss") or "").strip()
@@ -6906,10 +7483,16 @@ class App(QMainWindow):
 
         interval_minutes = max(
             MIN_AUTO_SNAPSHOT_INTERVAL_MINUTES,
-            min(MAX_AUTO_SNAPSHOT_INTERVAL_MINUTES, int(interval_minutes or DEFAULT_AUTO_SNAPSHOT_INTERVAL_MINUTES)),
+            min(
+                MAX_AUTO_SNAPSHOT_INTERVAL_MINUTES,
+                int(interval_minutes or DEFAULT_AUTO_SNAPSHOT_INTERVAL_MINUTES),
+            ),
         )
         interval_ms = int(interval_minutes * 60 * 1000)
-        if self.auto_snapshot_timer.interval() != interval_ms or not self.auto_snapshot_timer.isActive():
+        if (
+            self.auto_snapshot_timer.interval() != interval_ms
+            or not self.auto_snapshot_timer.isActive()
+        ):
             self.auto_snapshot_timer.start(interval_ms)
 
     def _current_auto_snapshot_marker(self) -> int | None:
@@ -6918,11 +7501,16 @@ class App(QMainWindow):
         entry = self.history_manager.get_current_entry()
         while entry is not None:
             action_type = entry.action_type or ""
-            if (
-                action_type.startswith("file.")
-                or action_type in {"db.verify", "snapshot.create", "snapshot.delete"}
-            ):
-                entry = self.history_manager.fetch_entry(entry.parent_id) if entry.parent_id is not None else None
+            if action_type.startswith("file.") or action_type in {
+                "db.verify",
+                "snapshot.create",
+                "snapshot.delete",
+            }:
+                entry = (
+                    self.history_manager.fetch_entry(entry.parent_id)
+                    if entry.parent_id is not None
+                    else None
+                )
                 continue
             return entry.entry_id
         return None
@@ -6958,9 +7546,19 @@ class App(QMainWindow):
 
     def _current_settings_values(self) -> dict[str, object]:
         registration = self.settings_reads.load_registration_settings()
-        auto_snapshot_enabled, auto_snapshot_interval_minutes = self._current_auto_snapshot_settings()
-        gs1_defaults = self.gs1_settings_service.load_profile_defaults() if self.gs1_settings_service is not None else None
-        gs1_contracts = self.gs1_settings_service.load_contracts() if self.gs1_settings_service is not None else ()
+        auto_snapshot_enabled, auto_snapshot_interval_minutes = (
+            self._current_auto_snapshot_settings()
+        )
+        gs1_defaults = (
+            self.gs1_settings_service.load_profile_defaults()
+            if self.gs1_settings_service is not None
+            else None
+        )
+        gs1_contracts = (
+            self.gs1_settings_service.load_contracts()
+            if self.gs1_settings_service is not None
+            else ()
+        )
         return {
             "window_title": self.identity.get("window_title") or DEFAULT_WINDOW_TITLE,
             "icon_path": self.identity.get("icon_path") or "",
@@ -6974,16 +7572,28 @@ class App(QMainWindow):
             "btw_number": registration.btw_number,
             "buma_relatie_nummer": registration.buma_relatie_nummer,
             "buma_ipi": registration.buma_ipi,
-            "gs1_template_asset": self.gs1_settings_service.load_template_asset() if self.gs1_settings_service is not None else None,
-            "gs1_contracts_csv_path": self.gs1_settings_service.load_contracts_csv_path() if self.gs1_settings_service is not None else "",
+            "gs1_template_asset": (
+                self.gs1_settings_service.load_template_asset()
+                if self.gs1_settings_service is not None
+                else None
+            ),
+            "gs1_contracts_csv_path": (
+                self.gs1_settings_service.load_contracts_csv_path()
+                if self.gs1_settings_service is not None
+                else ""
+            ),
             "gs1_contract_entries": tuple(gs1_contracts),
-            "gs1_active_contract_number": gs1_defaults.contract_number if gs1_defaults is not None else "",
+            "gs1_active_contract_number": (
+                gs1_defaults.contract_number if gs1_defaults is not None else ""
+            ),
             "gs1_target_market": gs1_defaults.target_market if gs1_defaults is not None else "",
             "gs1_language": gs1_defaults.language if gs1_defaults is not None else "",
             "gs1_brand": gs1_defaults.brand if gs1_defaults is not None else "",
             "gs1_subbrand": gs1_defaults.subbrand if gs1_defaults is not None else "",
             "gs1_packaging_type": gs1_defaults.packaging_type if gs1_defaults is not None else "",
-            "gs1_product_classification": gs1_defaults.product_classification if gs1_defaults is not None else "",
+            "gs1_product_classification": (
+                gs1_defaults.product_classification if gs1_defaults is not None else ""
+            ),
         }
 
     def _apply_settings_changes(
@@ -7011,7 +7621,12 @@ class App(QMainWindow):
                 )
                 self._apply_identity()
                 self.logger.info("Branding & identity updated")
-                self._audit("SETTINGS", "Identity", ref_id="QSettings", details=f"title={self.identity['window_title']}")
+                self._audit(
+                    "SETTINGS",
+                    "Identity",
+                    ref_id="QSettings",
+                    details=f"title={self.identity['window_title']}",
+                )
                 self._audit_commit()
                 if self.history_manager is not None:
                     self.history_manager.record_setting_change(
@@ -7043,7 +7658,10 @@ class App(QMainWindow):
 
             before_theme = self._normalize_theme_settings(before_values.get("theme_settings"))
             after_theme = self._normalize_theme_settings(after_values.get("theme_settings"))
-            if after_theme.get("selected_name") and after_theme["selected_name"] not in after_theme_library:
+            if (
+                after_theme.get("selected_name")
+                and after_theme["selected_name"] not in after_theme_library
+            ):
                 after_theme["selected_name"] = ""
             if after_theme != before_theme:
                 self._save_theme_settings(after_theme)
@@ -7066,7 +7684,9 @@ class App(QMainWindow):
 
             if after_values["artist_code"] != before_values["artist_code"]:
                 self.settings_mutations.set_artist_code(after_values["artist_code"])
-                self.logger.info(f"ISRC artist code set to '{after_values['artist_code']}' (profile DB)")
+                self.logger.info(
+                    f"ISRC artist code set to '{after_values['artist_code']}' (profile DB)"
+                )
                 if self.history_manager is not None:
                     self.history_manager.record_setting_change(
                         key="artist_code",
@@ -7077,7 +7697,9 @@ class App(QMainWindow):
                 changed_count += 1
 
             if after_values["auto_snapshot_enabled"] != before_values["auto_snapshot_enabled"]:
-                self.settings_mutations.set_auto_snapshot_enabled(bool(after_values["auto_snapshot_enabled"]))
+                self.settings_mutations.set_auto_snapshot_enabled(
+                    bool(after_values["auto_snapshot_enabled"])
+                )
                 self._log_event(
                     "settings.auto_snapshot_enabled",
                     "Automatic snapshots setting updated",
@@ -7086,14 +7708,23 @@ class App(QMainWindow):
                 if self.history_manager is not None:
                     self.history_manager.record_setting_change(
                         key="auto_snapshot_enabled",
-                        label="Automatic Snapshots Enabled" if after_values["auto_snapshot_enabled"] else "Automatic Snapshots Disabled",
+                        label=(
+                            "Automatic Snapshots Enabled"
+                            if after_values["auto_snapshot_enabled"]
+                            else "Automatic Snapshots Disabled"
+                        ),
                         before_value=before_values["auto_snapshot_enabled"],
                         after_value=after_values["auto_snapshot_enabled"],
                     )
                 changed_count += 1
 
-            if after_values["auto_snapshot_interval_minutes"] != before_values["auto_snapshot_interval_minutes"]:
-                self.settings_mutations.set_auto_snapshot_interval_minutes(int(after_values["auto_snapshot_interval_minutes"]))
+            if (
+                after_values["auto_snapshot_interval_minutes"]
+                != before_values["auto_snapshot_interval_minutes"]
+            ):
+                self.settings_mutations.set_auto_snapshot_interval_minutes(
+                    int(after_values["auto_snapshot_interval_minutes"])
+                )
                 self._log_event(
                     "settings.auto_snapshot_interval_minutes",
                     "Automatic snapshot interval updated",
@@ -7111,7 +7742,12 @@ class App(QMainWindow):
             if after_values["isrc_prefix"] != before_values["isrc_prefix"]:
                 self.settings_mutations.set_isrc_prefix(after_values["isrc_prefix"])
                 self.logger.info(f"ISRC prefix updated to '{after_values['isrc_prefix']}'")
-                self._audit("SETTINGS", "ISRC_Prefix", ref_id=1, details=f"prefix={after_values['isrc_prefix']}")
+                self._audit(
+                    "SETTINGS",
+                    "ISRC_Prefix",
+                    ref_id=1,
+                    details=f"prefix={after_values['isrc_prefix']}",
+                )
                 self._audit_commit()
                 if self.history_manager is not None:
                     self.history_manager.record_setting_change(
@@ -7179,7 +7815,9 @@ class App(QMainWindow):
                 changed_count += 1
 
             if self.gs1_settings_service is not None:
-                pending_template_path = str(after_values.get("gs1_template_import_path") or "").strip()
+                pending_template_path = str(
+                    after_values.get("gs1_template_import_path") or ""
+                ).strip()
                 if pending_template_path:
                     if self.gs1_integration_service is not None:
                         stored_template = self.gs1_integration_service.import_template_workbook(
@@ -7198,30 +7836,45 @@ class App(QMainWindow):
                     changed_count += 1
 
                 before_gs1_defaults = GS1ProfileDefaults(
-                    contract_number=str(before_values.get("gs1_active_contract_number") or "").strip(),
+                    contract_number=str(
+                        before_values.get("gs1_active_contract_number") or ""
+                    ).strip(),
                     target_market=str(before_values.get("gs1_target_market") or "").strip(),
                     language=str(before_values.get("gs1_language") or "").strip(),
                     brand=str(before_values.get("gs1_brand") or "").strip(),
                     subbrand=str(before_values.get("gs1_subbrand") or "").strip(),
                     packaging_type=str(before_values.get("gs1_packaging_type") or "").strip(),
-                    product_classification=str(before_values.get("gs1_product_classification") or "").strip(),
+                    product_classification=str(
+                        before_values.get("gs1_product_classification") or ""
+                    ).strip(),
                 )
                 after_gs1_defaults = GS1ProfileDefaults(
-                    contract_number=str(after_values.get("gs1_active_contract_number") or "").strip(),
+                    contract_number=str(
+                        after_values.get("gs1_active_contract_number") or ""
+                    ).strip(),
                     target_market=str(after_values.get("gs1_target_market") or "").strip(),
                     language=str(after_values.get("gs1_language") or "").strip(),
                     brand=str(after_values.get("gs1_brand") or "").strip(),
                     subbrand=str(after_values.get("gs1_subbrand") or "").strip(),
                     packaging_type=str(after_values.get("gs1_packaging_type") or "").strip(),
-                    product_classification=str(after_values.get("gs1_product_classification") or "").strip(),
+                    product_classification=str(
+                        after_values.get("gs1_product_classification") or ""
+                    ).strip(),
                 )
                 before_contracts = tuple(before_values.get("gs1_contract_entries") or ())
                 after_contracts = tuple(after_values.get("gs1_contract_entries") or ())
-                before_contracts_csv = str(before_values.get("gs1_contracts_csv_path") or "").strip()
+                before_contracts_csv = str(
+                    before_values.get("gs1_contracts_csv_path") or ""
+                ).strip()
                 after_contracts_csv = str(after_values.get("gs1_contracts_csv_path") or "").strip()
-                if after_contracts != before_contracts or after_contracts_csv != before_contracts_csv:
+                if (
+                    after_contracts != before_contracts
+                    or after_contracts_csv != before_contracts_csv
+                ):
                     if after_contracts:
-                        self.gs1_settings_service.set_contracts(after_contracts, source_path=after_contracts_csv)
+                        self.gs1_settings_service.set_contracts(
+                            after_contracts, source_path=after_contracts_csv
+                        )
                     else:
                         self.gs1_settings_service.clear_contracts()
                     self._log_event(
@@ -7314,7 +7967,6 @@ class App(QMainWindow):
             self.profile_kv.set("isrc_artist_code", code)
             self.logger.info("Migrated ISRC artist code from QSettings into profile DB")
 
-
     def load_artist_code(self) -> str:
         code = self.profile_kv.get("isrc_artist_code", None)
         if not (isinstance(code, str) and re.fullmatch(r"\d{2}", (code or ""))):
@@ -7323,7 +7975,6 @@ class App(QMainWindow):
             self.logger.info("Normalized invalid/empty ISRC artist code to '00'")
         return code
 
-
     def set_artist_code(self, val: str | None = None):
         if val is None:
             self.open_settings_dialog(initial_focus="artist_code")
@@ -7331,13 +7982,14 @@ class App(QMainWindow):
 
         val = (val or "").strip()
         if not re.fullmatch(r"\d{2}", val):
-            QMessageBox.warning(self, "Invalid artist code", "Artist code must be two digits (00–99).")
+            QMessageBox.warning(
+                self, "Invalid artist code", "Artist code must be two digits (00–99)."
+            )
             return
 
         self._apply_single_setting_value("artist_code", val)
         if hasattr(self, "artist_edit"):
             self.artist_edit.setText(val)
-
 
     def _reload_profiles_list(self, select_path: str | None = None):
         self.profile_combo.blockSignals(True)
@@ -7351,21 +8003,25 @@ class App(QMainWindow):
                 self.profile_combo.setCurrentIndex(idx)
         self.profile_combo.blockSignals(False)
 
-
     def _on_profile_changed(self, idx: int):
         if idx < 0:
             return
         path = self.profile_combo.itemData(idx)
         if not path or path == self.current_db_path:
             return
-        if QMessageBox.question(
-            self, "Switch Profile",
-            f"Switch to database:\n{path}?",
-            QMessageBox.Yes | QMessageBox.No
-        ) != QMessageBox.Yes:
+        if (
+            QMessageBox.question(
+                self,
+                "Switch Profile",
+                f"Switch to database:\n{path}?",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            != QMessageBox.Yes
+        ):
             return
 
         previous_path = self.current_db_path
+
         def _after_switch(prepared_path: str):
             self._log_event(
                 "profile.switch",
@@ -7390,7 +8046,9 @@ class App(QMainWindow):
         )
 
     def create_new_profile(self):
-        name, ok = QInputDialog.getText(self, "New Profile", "Database file name (no path, e.g., mylabel.db):")
+        name, ok = QInputDialog.getText(
+            self, "New Profile", "Database file name (no path, e.g., mylabel.db):"
+        )
         if not ok or not name.strip():
             return
         previous_path = self.current_db_path
@@ -7400,6 +8058,7 @@ class App(QMainWindow):
             QMessageBox.warning(self, "Exists", "A database with this name already exists.")
             return
         self._clear_table_settings_for_path(new_path)
+
         def _after_create(prepared_path: str):
             self._log_event(
                 "profile.create",
@@ -7424,10 +8083,13 @@ class App(QMainWindow):
         )
 
     def browse_profile(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Open Database", str(self.database_dir), "SQLite DB (*.db);;All Files (*)")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open Database", str(self.database_dir), "SQLite DB (*.db);;All Files (*)"
+        )
         if not path:
             return
         previous_path = self.current_db_path
+
         def _after_browse(prepared_path: str):
             self._log_event(
                 "profile.browse",
@@ -7460,14 +8122,18 @@ class App(QMainWindow):
         if not path:
             return
 
-        if QMessageBox.question(
-            self, "Remove Profile",
-            f"Delete this database file from disk?\n\n{path}\n\nThis cannot be undone.",
-            QMessageBox.Yes | QMessageBox.No
-        ) != QMessageBox.Yes:
+        if (
+            QMessageBox.question(
+                self,
+                "Remove Profile",
+                f"Delete this database file from disk?\n\n{path}\n\nThis cannot be undone.",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            != QMessageBox.Yes
+        ):
             return
 
-        deleting_current = (getattr(self, "current_db_path", None) == path)
+        deleting_current = getattr(self, "current_db_path", None) == path
         current_path = self.current_db_path
         removed_snapshot_path = None
 
@@ -7479,7 +8145,9 @@ class App(QMainWindow):
             if deleting_current:
                 self._close_database_connection()
 
-            result = self.profile_workflows.delete_profile(path, getattr(self, "current_db_path", None))
+            result = self.profile_workflows.delete_profile(
+                path, getattr(self, "current_db_path", None)
+            )
 
             self._reload_profiles_list(select_path=None)
 
@@ -7555,9 +8223,7 @@ class App(QMainWindow):
                 settings_path=settings_path,
             )
         self._background_write_lock = (
-            DatabaseWriteCoordinator.for_path(db_path)
-            if db_path
-            else None
+            DatabaseWriteCoordinator.for_path(db_path) if db_path else None
         )
 
     def _on_background_task_state_changed(self) -> None:
@@ -7747,14 +8413,20 @@ class App(QMainWindow):
     def migrate_schema(self):
         self.schema_service.migrate_schema()
 
-
     # --- Audit helpers ---
-    def _audit(self, action: str, entity: str, ref_id: str | int | None = None, details: str | None = None, user: str | None = None):
+    def _audit(
+        self,
+        action: str,
+        entity: str,
+        ref_id: str | int | None = None,
+        details: str | None = None,
+        user: str | None = None,
+    ):
         """Append an entry to AuditLog and write to file logger."""
         try:
             self.cursor.execute(
                 "INSERT INTO AuditLog (user, action, entity, ref_id, details) VALUES (?, ?, ?, ?, ?)",
-                (user, action, entity, str(ref_id) if ref_id is not None else None, details)
+                (user, action, entity, str(ref_id) if ref_id is not None else None, details),
             )
             self._log_trace(
                 "audit",
@@ -7969,7 +8641,9 @@ class App(QMainWindow):
     def _action_shortcut_text(action: QAction | None) -> str:
         if action is None:
             return ""
-        shortcuts = [seq.toString(QKeySequence.NativeText) for seq in action.shortcuts() if not seq.isEmpty()]
+        shortcuts = [
+            seq.toString(QKeySequence.NativeText) for seq in action.shortcuts() if not seq.isEmpty()
+        ]
         if shortcuts:
             return ", ".join(shortcuts)
         shortcut = action.shortcut()
@@ -8371,7 +9045,9 @@ class App(QMainWindow):
             return
 
         toolbar.clear()
-        action_ids = self._normalize_action_ribbon_ids(getattr(self, "_action_ribbon_action_ids", []))
+        action_ids = self._normalize_action_ribbon_ids(
+            getattr(self, "_action_ribbon_action_ids", [])
+        )
         self._action_ribbon_action_ids = action_ids
 
         for action_id in action_ids:
@@ -8393,7 +9069,9 @@ class App(QMainWindow):
         customize_widget = toolbar.widgetForAction(self.customize_action_ribbon_action)
         if customize_widget is not None:
             customize_widget.setProperty("role", "actionRibbonButton")
-            customize_widget.setToolTip("Choose which quick actions appear in the top action ribbon.")
+            customize_widget.setToolTip(
+                "Choose which quick actions appear in the top action ribbon."
+            )
 
     def _apply_action_ribbon_configuration(self, action_ids: list[str], visible: bool):
         self._action_ribbon_action_ids = self._normalize_action_ribbon_ids(action_ids)
@@ -8417,7 +9095,9 @@ class App(QMainWindow):
         previous_suspend_state = self._suspend_layout_history
         self._suspend_layout_history = True
         try:
-            columns_movable = self.settings.value(f"{self._table_settings_prefix()}/columns_movable", False, bool)
+            columns_movable = self.settings.value(
+                f"{self._table_settings_prefix()}/columns_movable", False, bool
+            )
             col_width_enabled = self.settings.value("display/interactive_col_width", False, bool)
             row_height_enabled = self.settings.value("display/interactive_row_height", False, bool)
             add_data_enabled = self.settings.value("display/add_data_panel", False, bool)
@@ -8430,7 +9110,9 @@ class App(QMainWindow):
             self._set_action_checked_silently(self.row_height_action, row_height_enabled)
             self._set_action_checked_silently(self.add_data_action, add_data_enabled)
             self._set_action_checked_silently(self.catalog_table_action, catalog_table_enabled)
-            self._set_action_checked_silently(self.action_ribbon_visibility_action, action_ribbon_visible)
+            self._set_action_checked_silently(
+                self.action_ribbon_visibility_action, action_ribbon_visible
+            )
 
             self._apply_columns_movable_state(columns_movable)
             self._apply_col_width_mode(col_width_enabled)
@@ -8476,7 +9158,9 @@ class App(QMainWindow):
             try:
                 self.history_manager.apply_setting_entries(before_entries)
             except Exception as restore_error:
-                self.logger.exception(f"Settings rollback failed for {action_label}: {restore_error}")
+                self.logger.exception(
+                    f"Settings rollback failed for {action_label}: {restore_error}"
+                )
             raise
         after_entries = self.history_manager.capture_setting_states(setting_keys)
         self._record_setting_bundle_from_entries(
@@ -8647,7 +9331,9 @@ class App(QMainWindow):
             self._refresh_catalog_ui_in_background(
                 select_path=prepared_path,
                 unique_key=f"catalog.ui.profile.{prepared_path}",
-                on_finished=lambda: on_activated(prepared_path) if on_activated is not None else None,
+                on_finished=lambda: (
+                    on_activated(prepared_path) if on_activated is not None else None
+                ),
             )
 
         return self._prepare_profile_database_background(
@@ -8733,7 +9419,9 @@ class App(QMainWindow):
             try:
                 self.history_manager.restore_snapshot(before_snapshot.snapshot_id)
             except Exception as restore_error:
-                self.logger.exception(f"Snapshot rollback failed for {action_type}: {restore_error}")
+                self.logger.exception(
+                    f"Snapshot rollback failed for {action_type}: {restore_error}"
+                )
             try:
                 self.history_manager.delete_snapshot(before_snapshot.snapshot_id)
             except Exception:
@@ -8846,17 +9534,22 @@ class App(QMainWindow):
     def restore_snapshot_from_history(self, snapshot_id: int):
         if self.history_manager is None:
             return
-        if QMessageBox.question(
-            self,
-            "Restore Snapshot",
-            "Restore this snapshot into the current profile?\n\nThe current state can be undone afterward.",
-            QMessageBox.Yes | QMessageBox.No,
-        ) != QMessageBox.Yes:
+        if (
+            QMessageBox.question(
+                self,
+                "Restore Snapshot",
+                "Restore this snapshot into the current profile?\n\nThe current state can be undone afterward.",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            != QMessageBox.Yes
+        ):
             return
         self._submit_background_bundle_task(
             title="Restore Snapshot",
             description="Restoring the selected snapshot...",
-            task_fn=lambda bundle, ctx: bundle.history_manager.restore_snapshot_as_action(snapshot_id),
+            task_fn=lambda bundle, ctx: bundle.history_manager.restore_snapshot_as_action(
+                snapshot_id
+            ),
             kind="write",
             unique_key="snapshot.restore",
             on_success=lambda _result: self._refresh_after_history_change(),
@@ -8940,7 +9633,11 @@ class App(QMainWindow):
             year = release_date.year() % 100
         yy = f"{year:02d}"
 
-        claimed_compacts = {str(code or "").strip().upper() for code in (reserved_compacts or set()) if str(code or "").strip()}
+        claimed_compacts = {
+            str(code or "").strip().upper()
+            for code in (reserved_compacts or set())
+            if str(code or "").strip()
+        }
         for seq in range(1, 1000):
             sss = f"{seq:03d}"
             candidate_compact = f"{prefix}{yy}{artist_code}{sss}"
@@ -8989,7 +9686,9 @@ class App(QMainWindow):
         label_widget.setMinimumWidth(label_width)
         label_widget.setAlignment(Qt.AlignRight | (Qt.AlignTop if top_aligned else Qt.AlignVCenter))
         if field_widget.sizePolicy().horizontalPolicy() == QSizePolicy.Preferred:
-            field_widget.setSizePolicy(QSizePolicy.Expanding, field_widget.sizePolicy().verticalPolicy())
+            field_widget.setSizePolicy(
+                QSizePolicy.Expanding, field_widget.sizePolicy().verticalPolicy()
+            )
         layout.addWidget(label_widget, 0, Qt.AlignTop if top_aligned else Qt.AlignVCenter)
         layout.addWidget(field_widget, 1, Qt.AlignTop if top_aligned else Qt.AlignVCenter)
         return row
@@ -9023,54 +9722,61 @@ class App(QMainWindow):
             self.prev_release_toggle.setEnabled(state == "ready")
 
         if preview:
-            self.generated_isrc_field.setPlaceholderText("Generated automatically using the current ISRC settings.")
+            self.generated_isrc_field.setPlaceholderText(
+                "Generated automatically using the current ISRC settings."
+            )
             self.generated_isrc_field.setToolTip(
                 "Next available ISRC based on the current release date and ISRC settings."
             )
         elif state == "ready":
-            self.generated_isrc_field.setPlaceholderText("No free ISRC sequence is currently available.")
+            self.generated_isrc_field.setPlaceholderText(
+                "No free ISRC sequence is currently available."
+            )
             self.generated_isrc_field.setToolTip(
                 "ISRC auto-generation is enabled, but no free sequence is currently available for the active year and artist code."
             )
         elif state == "disabled":
-            self.generated_isrc_field.setPlaceholderText("Auto-generation disabled until an ISRC prefix is set.")
+            self.generated_isrc_field.setPlaceholderText(
+                "Auto-generation disabled until an ISRC prefix is set."
+            )
             self.generated_isrc_field.setToolTip(message)
         else:
-            self.generated_isrc_field.setPlaceholderText("Fix ISRC settings to re-enable auto-generation.")
+            self.generated_isrc_field.setPlaceholderText(
+                "Fix ISRC settings to re-enable auto-generation."
+            )
             self.generated_isrc_field.setToolTip(message)
 
     def _make_item(self, col_idx, text, *, custom_def=None):
-            it = _SortItem("" if text is None else str(text))
-            t = it.text()
-            key = None
-            header = self.table.horizontalHeaderItem(col_idx).text()
+        it = _SortItem("" if text is None else str(text))
+        t = it.text()
+        key = None
+        header = self.table.horizontalHeaderItem(col_idx).text()
 
-            if header == "ID":
-                try:
-                    key = int(t)
-                except:
-                    pass
-            elif header in ("Entry Date", "Release Date"):
-                if t:  # stored as yyyy-MM-dd → yyyymmdd int
-                    key = int(t.replace("-", ""))
-            elif custom_def and custom_def.get("field_type") == "date":
-                if t:
-                    key = int(t.replace("-", ""))
-            elif custom_def and custom_def.get("field_type") == "checkbox":
-                key = 1 if t.lower() in ("1","true","yes","y","checked") else 0
-            elif header == "Track Length (hh:mm:ss)":
-                key = parse_hms_text(t)
-            else:
-                # numeric-looking strings sort numerically
-                try:
-                    key = float(t) if "." in t else int(t)
-                except:
-                    pass
+        if header == "ID":
+            try:
+                key = int(t)
+            except:
+                pass
+        elif header in ("Entry Date", "Release Date"):
+            if t:  # stored as yyyy-MM-dd → yyyymmdd int
+                key = int(t.replace("-", ""))
+        elif custom_def and custom_def.get("field_type") == "date":
+            if t:
+                key = int(t.replace("-", ""))
+        elif custom_def and custom_def.get("field_type") == "checkbox":
+            key = 1 if t.lower() in ("1", "true", "yes", "y", "checked") else 0
+        elif header == "Track Length (hh:mm:ss)":
+            key = parse_hms_text(t)
+        else:
+            # numeric-looking strings sort numerically
+            try:
+                key = float(t) if "." in t else int(t)
+            except:
+                pass
 
-            if key is not None:
-                it.setData(Qt.UserRole, key)
-            return it
-
+        if key is not None:
+            it.setData(Qt.UserRole, key)
+        return it
 
     def _rebuild_table_headers(self):
         headers = self.BASE_HEADERS + [f["name"] for f in self.active_custom_fields]
@@ -9111,8 +9817,12 @@ class App(QMainWindow):
 
     def _apply_catalog_combo_values(self, combo_values: dict[str, list[str]]) -> None:
         self._populate_combobox(self.artist_field, combo_values.get("artists", []))
-        self._populate_combobox(self.additional_artist_field, combo_values.get("artists", []), allow_empty=True)
-        self._populate_combobox(self.album_title_field, combo_values.get("albums", []), allow_empty=True)
+        self._populate_combobox(
+            self.additional_artist_field, combo_values.get("artists", []), allow_empty=True
+        )
+        self._populate_combobox(
+            self.album_title_field, combo_values.get("albums", []), allow_empty=True
+        )
         self._populate_combobox(self.upc_field, combo_values.get("upcs", []), allow_empty=True)
         self._populate_combobox(self.genre_field, combo_values.get("genres", []), allow_empty=True)
 
@@ -9151,7 +9861,9 @@ class App(QMainWindow):
     # Search / table refresh (with view preservation)
     # =============================================================================
     def _rebuild_search_column_choices(self):
-        cur_data = self.search_column_combo.currentData() if self.search_column_combo.count() else -1
+        cur_data = (
+            self.search_column_combo.currentData() if self.search_column_combo.count() else -1
+        )
         self.search_column_combo.blockSignals(True)
         self.search_column_combo.clear()
         self.search_column_combo.addItem("All columns", -1)
@@ -9174,7 +9886,7 @@ class App(QMainWindow):
         text = self.search_field.text().lower()
         col_sel = self.search_column_combo.currentData()  # -1 = all
         explicit_track_ids = getattr(self, "_explicit_row_filter_track_ids", None)
-        for row  in range(self.table.rowCount()):
+        for row in range(self.table.rowCount()):
             if col_sel == -1:
                 match = any(
                     self.table.item(row, c) and text in self.table.item(row, c).text().lower()
@@ -9190,12 +9902,16 @@ class App(QMainWindow):
         self._update_count_label()
 
         self._update_duration_label()
+
     # =============================================================================
     # Header label helpers for robust persistence (rev09)
     # =============================================================================
     def _header_labels(self):
         m = self.table.model()
-        return [str(m.headerData(c, Qt.Horizontal, Qt.DisplayRole) or "") for c in range(m.columnCount())]
+        return [
+            str(m.headerData(c, Qt.Horizontal, Qt.DisplayRole) or "")
+            for c in range(m.columnCount())
+        ]
 
     def _labels_with_occurrence(self, labels):
         seen = {}
@@ -9205,7 +9921,6 @@ class App(QMainWindow):
             out.append((lbl, n))
             seen[lbl] = n + 1
         return out
-
 
     def reset_search(self):
         self._explicit_row_filter_track_ids = None
@@ -9217,7 +9932,6 @@ class App(QMainWindow):
         self.refresh_table()
         self._update_count_label()
         self._update_duration_label()
-
 
     def _load_catalog_ui_dataset(
         self,
@@ -9243,7 +9957,9 @@ class App(QMainWindow):
             "combo_values": self._catalog_combo_values_from_connection(active_conn),
         }
 
-    def _populate_table_from_dataset(self, rows: list[tuple], cf_map: dict[tuple[int, int], str]) -> None:
+    def _populate_table_from_dataset(
+        self, rows: list[tuple], cf_map: dict[tuple[int, int], str]
+    ) -> None:
         base_cols = len(self.BASE_HEADERS)
         self.table.setRowCount(len(rows))
 
@@ -9251,7 +9967,7 @@ class App(QMainWindow):
             for col_idx in range(base_cols):
                 header = self.table.horizontalHeaderItem(col_idx).text()
                 val_raw = row_data[col_idx]
-                if header == 'Track Length (hh:mm:ss)':
+                if header == "Track Length (hh:mm:ss)":
                     secs = 0
                     try:
                         secs = int(val_raw or 0)
@@ -9262,7 +9978,7 @@ class App(QMainWindow):
                     it.setData(Qt.UserRole, secs)
                     self.table.setItem(row_idx, col_idx, it)
                 else:
-                    val = '' if val_raw is None else str(val_raw)
+                    val = "" if val_raw is None else str(val_raw)
                     self.table.setItem(row_idx, col_idx, self._make_item(col_idx, val))
 
             track_id = row_data[0]
@@ -9364,7 +10080,9 @@ class App(QMainWindow):
                         retry_count=retry_count + 1,
                     ),
                 )
-                if retry_count < 3 and "exclusive database task is currently running" in str(failure.message or "").lower()
+                if retry_count < 3
+                and "exclusive database task is currently running"
+                in str(failure.message or "").lower()
                 else self._show_background_task_error(
                     "Load Catalog",
                     failure,
@@ -9398,7 +10116,6 @@ class App(QMainWindow):
         finally:
             self._suspend_layout_history = previous_suspend_state
 
-
     def _update_count_label(self):
         # updates 'showing: N records'
         if not hasattr(self, "count_label") or self.count_label is None:
@@ -9406,16 +10123,16 @@ class App(QMainWindow):
         visible = sum(not self.table.isRowHidden(r) for r in range(self.table.rowCount()))
         self.count_label.setText(f"showing: {visible} record{'s' if visible != 1 else ''}")
 
-
     def _update_duration_label(self):
-        if not hasattr(self, 'duration_label') or self.duration_label is None:
+        if not hasattr(self, "duration_label") or self.duration_label is None:
             return
         # find column index for Track Length
         col_idx = -1
         try:
             for c in range(self.table.columnCount()):
-                if self.table.horizontalHeaderItem(c).text() == 'Track Length (hh:mm:ss)':
-                    col_idx = c; break
+                if self.table.horizontalHeaderItem(c).text() == "Track Length (hh:mm:ss)":
+                    col_idx = c
+                    break
         except Exception:
             pass
         if col_idx == -1:
@@ -9437,6 +10154,7 @@ class App(QMainWindow):
         except Exception:
             pass
         self.duration_label.setText(f"total: {seconds_to_hms(total_sec)}")
+
     # --- Preserve view wrapper ---
     def _capture_view_state(self):
         hh = self.table.horizontalHeader()
@@ -9539,7 +10257,9 @@ class App(QMainWindow):
         )
         return path or ""
 
-    def _choose_media_into_line_edit(self, media_key: str, line_edit: QLineEdit, *, parent_widget=None) -> None:
+    def _choose_media_into_line_edit(
+        self, media_key: str, line_edit: QLineEdit, *, parent_widget=None
+    ) -> None:
         path = self._browse_track_media_file(media_key, parent_widget=parent_widget)
         if path:
             line_edit.setText(path)
@@ -9565,7 +10285,9 @@ class App(QMainWindow):
             QMessageBox.warning(self, "Missing data", "Track Title and Artist are required.")
             return
         if not valid_upc_ean(self.upc_field.currentText()):
-            QMessageBox.warning(self, "Invalid UPC/EAN", "UPC/EAN must be 12 or 13 digits (or leave empty).")
+            QMessageBox.warning(
+                self, "Invalid UPC/EAN", "UPC/EAN must be 12 or 13 digits (or leave empty)."
+            )
             return
         try:
             # ISWC (optional)
@@ -9575,8 +10297,9 @@ class App(QMainWindow):
                 iso_iswc = to_iso_iswc(raw_iswc)
                 if not iso_iswc or not is_valid_iswc_any(iso_iswc):
                     QMessageBox.warning(
-                        self, "Invalid ISWC",
-                        "ISWC must be like T-123.456.789-0 or T1234567890 (checksum 0–9 or X), or leave empty."
+                        self,
+                        "Invalid ISWC",
+                        "ISWC must be like T-123.456.789-0 or T1234567890 (checksum 0–9 or X), or leave empty.",
                     )
                     return
 
@@ -9601,12 +10324,16 @@ class App(QMainWindow):
                     return
 
                 if self.is_isrc_taken_normalized(generated_iso):
-                    QMessageBox.critical(self, "ISRC Error", "A track with this ISRC already exists.")
+                    QMessageBox.critical(
+                        self, "ISRC Error", "A track with this ISRC already exists."
+                    )
                     return
 
             release_date_sql = self.release_date_field.selectedDate().toString("yyyy-MM-dd")
 
-            track_seconds = hms_to_seconds(self.track_len_h.value(), self.track_len_m.value(), self.track_len_s.value())
+            track_seconds = hms_to_seconds(
+                self.track_len_h.value(), self.track_len_m.value(), self.track_len_s.value()
+            )
             self._log_trace(
                 "track.create.prepare",
                 message="Preparing track insert",
@@ -9618,7 +10345,9 @@ class App(QMainWindow):
                 isrc=generated_iso,
                 track_title=self.track_title_field.text().strip(),
                 artist_name=self.artist_field.currentText(),
-                additional_artists=self._parse_additional_artists(self.additional_artist_field.currentText()),
+                additional_artists=self._parse_additional_artists(
+                    self.additional_artist_field.currentText()
+                ),
                 album_title=self.album_title_field.currentText().strip() or None,
                 release_date=release_date_sql,
                 track_length_sec=track_seconds,
@@ -9821,7 +10550,9 @@ class App(QMainWindow):
             )
             return
         try:
-            dlg = GS1MetadataDialog(app=self, track_id=track_id, batch_track_ids=batch_ids, parent=self)
+            dlg = GS1MetadataDialog(
+                app=self, track_id=track_id, batch_track_ids=batch_ids, parent=self
+            )
         except ValueError as exc:
             QMessageBox.warning(self, "GS1 Metadata", str(exc))
             return
@@ -9870,7 +10601,9 @@ class App(QMainWindow):
             return self._normalize_track_ids(visible_ids)
         return self._normalize_track_ids(self._selected_track_ids())
 
-    def _set_explicit_track_filter(self, track_ids: list[int] | None, *, source_label: str | None = None) -> None:
+    def _set_explicit_track_filter(
+        self, track_ids: list[int] | None, *, source_label: str | None = None
+    ) -> None:
         normalized_ids = self._normalize_track_ids(track_ids)
         self._explicit_row_filter_track_ids = set(normalized_ids) if normalized_ids else None
         self.apply_search_filter()
@@ -9958,7 +10691,9 @@ class App(QMainWindow):
         source_snapshot = snapshot or active_track_service.fetch_track_snapshot(track_id)
         if source_snapshot is None:
             raise ValueError(f"Track {track_id} not found")
-        release, placement = self._release_context_for_track(track_id, release_service=release_service)
+        release, placement = self._release_context_for_track(
+            track_id, release_service=release_service
+        )
         track_values = {
             "track_title": source_snapshot.track_title,
             "artist_name": source_snapshot.artist_name,
@@ -10029,7 +10764,9 @@ class App(QMainWindow):
         placements: list[ReleaseTrackPlacement] = []
         existing_placements = {
             placement.track_id: placement
-            for placement in ((existing_summary.tracks if existing_summary is not None else []) or [])
+            for placement in (
+                (existing_summary.tracks if existing_summary is not None else []) or []
+            )
         }
         for sequence_number, snapshot in enumerate(snapshots, start=1):
             existing = existing_placements.get(snapshot.track_id)
@@ -10037,13 +10774,19 @@ class App(QMainWindow):
                 ReleaseTrackPlacement(
                     track_id=snapshot.track_id,
                     disc_number=int(existing.disc_number if existing is not None else 1),
-                    track_number=int(existing.track_number if existing is not None else sequence_number),
+                    track_number=int(
+                        existing.track_number if existing is not None else sequence_number
+                    ),
                     sequence_number=sequence_number,
                 )
             )
 
         derived_artwork_source = artwork_source_path
-        if not clear_artwork and not derived_artwork_source and (existing_release is None or not existing_release.artwork_path):
+        if (
+            not clear_artwork
+            and not derived_artwork_source
+            and (existing_release is None or not existing_release.artwork_path)
+        ):
             for snapshot in snapshots:
                 resolved = active_track_service.resolve_media_path(snapshot.album_art_path)
                 if resolved is not None and resolved.exists():
@@ -10052,7 +10795,9 @@ class App(QMainWindow):
 
         return ReleasePayload(
             title=clean_title or f"Release {snapshots[0].track_id}",
-            version_subtitle=existing_release.version_subtitle if existing_release is not None else None,
+            version_subtitle=(
+                existing_release.version_subtitle if existing_release is not None else None
+            ),
             primary_artist=self._first_non_blank(
                 existing_release.primary_artist if existing_release is not None else None,
                 *[snapshot.artist_name for snapshot in snapshots],
@@ -10070,7 +10815,9 @@ class App(QMainWindow):
                 existing_release.release_date if existing_release is not None else None,
                 *[snapshot.release_date for snapshot in snapshots],
             ),
-            original_release_date=existing_release.original_release_date if existing_release is not None else None,
+            original_release_date=(
+                existing_release.original_release_date if existing_release is not None else None
+            ),
             label=self._first_non_blank(
                 existing_release.label if existing_release is not None else None,
                 *[snapshot.publisher for snapshot in snapshots],
@@ -10086,6 +10833,18 @@ class App(QMainWindow):
             ),
             territory=existing_release.territory if existing_release is not None else None,
             explicit_flag=existing_release.explicit_flag if existing_release is not None else False,
+            repertoire_status=(
+                existing_release.repertoire_status if existing_release is not None else None
+            ),
+            metadata_complete=(
+                existing_release.metadata_complete if existing_release is not None else False
+            ),
+            contract_signed=(
+                existing_release.contract_signed if existing_release is not None else False
+            ),
+            rights_verified=(
+                existing_release.rights_verified if existing_release is not None else False
+            ),
             notes=existing_release.notes if existing_release is not None else None,
             artwork_source_path=derived_artwork_source,
             clear_artwork=bool(clear_artwork),
@@ -10137,9 +10896,14 @@ class App(QMainWindow):
                 else None
             )
             existing_track_ids = {
-                placement.track_id for placement in (existing_summary.tracks if existing_summary is not None else [])
+                placement.track_id
+                for placement in (existing_summary.tracks if existing_summary is not None else [])
             }
-            if existing_summary is not None and len(existing_track_ids) > 1 and existing_track_ids != set(group_key):
+            if (
+                existing_summary is not None
+                and len(existing_track_ids) > 1
+                and existing_track_ids != set(group_key)
+            ):
                 existing_release = None
                 existing_summary = None
 
@@ -10154,7 +10918,9 @@ class App(QMainWindow):
             if existing_release is None:
                 release_id = active_release_service.create_release(payload, cursor=cur)
             else:
-                release_id = active_release_service.update_release(existing_release.id, payload, cursor=cur)
+                release_id = active_release_service.update_release(
+                    existing_release.id, payload, cursor=cur
+                )
             created_or_updated.append(int(release_id))
 
         return self._normalize_track_ids(created_or_updated)
@@ -10168,7 +10934,9 @@ class App(QMainWindow):
             track_title_resolver=self._get_track_title,
             parent=self,
         )
-        dlg.filter_requested.connect(lambda track_ids: self._set_explicit_track_filter(track_ids, source_label="release"))
+        dlg.filter_requested.connect(
+            lambda track_ids: self._set_explicit_track_filter(track_ids, source_label="release")
+        )
         dlg.open_track_requested.connect(self.open_selected_editor)
         dlg.edit_release_requested.connect(self.open_release_editor)
         dlg.duplicate_release_requested.connect(self.duplicate_release)
@@ -10177,11 +10945,175 @@ class App(QMainWindow):
         self.release_browser_dialog = dlg
         dlg.exec()
 
+    def open_work_manager(self, linked_track_id: int | None = None):
+        if self.work_service is None:
+            QMessageBox.warning(self, "Work Manager", "Open a profile first.")
+            return
+        dlg = WorkBrowserDialog(
+            work_service=self.work_service,
+            track_title_resolver=self._get_track_title,
+            selected_track_ids_provider=self._selected_track_ids,
+            linked_track_id=linked_track_id,
+            parent=self,
+        )
+        dlg.filter_requested.connect(
+            lambda track_ids: self._set_explicit_track_filter(track_ids, source_label="work")
+        )
+        dlg.exec()
+
+    def open_party_manager(self):
+        if self.party_service is None:
+            QMessageBox.warning(self, "Party Manager", "Open a profile first.")
+            return
+        PartyManagerDialog(party_service=self.party_service, parent=self).exec()
+
+    def open_contract_manager(self):
+        if self.contract_service is None:
+            QMessageBox.warning(self, "Contract Manager", "Open a profile first.")
+            return
+        ContractBrowserDialog(contract_service=self.contract_service, parent=self).exec()
+
+    def open_rights_matrix(self):
+        if (
+            self.rights_service is None
+            or self.party_service is None
+            or self.contract_service is None
+        ):
+            QMessageBox.warning(self, "Rights Matrix", "Open a profile first.")
+            return
+        RightsBrowserDialog(
+            rights_service=self.rights_service,
+            party_service=self.party_service,
+            contract_service=self.contract_service,
+            parent=self,
+        ).exec()
+
+    def open_asset_registry(self):
+        if self.asset_service is None:
+            QMessageBox.warning(self, "Asset Registry", "Open a profile first.")
+            return
+        AssetBrowserDialog(asset_service=self.asset_service, parent=self).exec()
+
+    def open_global_search(self):
+        if self.global_search_service is None or self.relationship_explorer_service is None:
+            QMessageBox.warning(self, "Global Search", "Open a profile first.")
+            return
+        dlg = GlobalSearchDialog(
+            search_service=self.global_search_service,
+            relationship_service=self.relationship_explorer_service,
+            parent=self,
+        )
+        dlg.open_entity_requested.connect(self._open_entity_from_relationship_search)
+        dlg.exec()
+
+    def _open_entity_from_relationship_search(self, entity_type: str, entity_id: int):
+        normalized = str(entity_type or "").strip().lower()
+        if normalized == "track":
+            self.open_selected_editor(int(entity_id))
+            return
+        if normalized == "release":
+            self.open_release_editor(int(entity_id))
+            return
+        if normalized == "work":
+            self.open_work_manager(linked_track_id=None)
+            return
+        if normalized == "contract":
+            self.open_contract_manager()
+            return
+        if normalized == "party":
+            self.open_party_manager()
+            return
+        if normalized == "right":
+            self.open_rights_matrix()
+            return
+        if normalized == "asset":
+            self.open_asset_registry()
+            return
+
+    def export_repertoire_exchange(self, format_name: str):
+        if self.repertoire_exchange_service is None:
+            QMessageBox.warning(self, "Repertoire Exchange", "Open a profile first.")
+            return
+        normalized = str(format_name or "").strip().lower()
+        if normalized == "json":
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Export Repertoire JSON", "", "JSON Files (*.json)"
+            )
+            if not path:
+                return
+            self.repertoire_exchange_service.export_json(path)
+        elif normalized == "xlsx":
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Export Repertoire XLSX", "", "Excel Files (*.xlsx)"
+            )
+            if not path:
+                return
+            self.repertoire_exchange_service.export_xlsx(path)
+        elif normalized == "csv":
+            path = QFileDialog.getExistingDirectory(self, "Export Repertoire CSV Bundle")
+            if not path:
+                return
+            self.repertoire_exchange_service.export_csv_bundle(path)
+        elif normalized == "package":
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Export Repertoire ZIP Package", "", "ZIP Files (*.zip)"
+            )
+            if not path:
+                return
+            self.repertoire_exchange_service.export_package(path)
+        else:
+            return
+        if self.statusBar() is not None:
+            self.statusBar().showMessage("Repertoire export complete.", 5000)
+
+    def import_repertoire_exchange(self, format_name: str):
+        if self.repertoire_exchange_service is None:
+            QMessageBox.warning(self, "Repertoire Exchange", "Open a profile first.")
+            return
+        normalized = str(format_name or "").strip().lower()
+        try:
+            if normalized == "json":
+                path, _ = QFileDialog.getOpenFileName(
+                    self, "Import Repertoire JSON", "", "JSON Files (*.json)"
+                )
+                if not path:
+                    return
+                self.repertoire_exchange_service.import_json(path)
+            elif normalized == "xlsx":
+                path, _ = QFileDialog.getOpenFileName(
+                    self, "Import Repertoire XLSX", "", "Excel Files (*.xlsx)"
+                )
+                if not path:
+                    return
+                self.repertoire_exchange_service.import_xlsx(path)
+            elif normalized == "csv":
+                path = QFileDialog.getExistingDirectory(self, "Import Repertoire CSV Bundle")
+                if not path:
+                    return
+                self.repertoire_exchange_service.import_csv_bundle(path)
+            elif normalized == "package":
+                path, _ = QFileDialog.getOpenFileName(
+                    self, "Import Repertoire ZIP Package", "", "ZIP Files (*.zip)"
+                )
+                if not path:
+                    return
+                self.repertoire_exchange_service.import_package(path)
+            else:
+                return
+        except Exception as exc:
+            QMessageBox.critical(self, "Repertoire Exchange", str(exc))
+            return
+        self.refresh_table_preserve_view()
+        if self.statusBar() is not None:
+            self.statusBar().showMessage("Repertoire import complete.", 5000)
+
     def open_release_editor(self, release_id: int | None = None):
         if self.release_service is None:
             QMessageBox.warning(self, "Release Editor", "Open a profile first.")
             return
-        summary = self.release_service.fetch_release_summary(int(release_id)) if release_id else None
+        summary = (
+            self.release_service.fetch_release_summary(int(release_id)) if release_id else None
+        )
         dlg = ReleaseEditorDialog(
             release_service=self.release_service,
             track_title_resolver=self._get_track_title,
@@ -10194,7 +11126,11 @@ class App(QMainWindow):
         if dlg.exec() != QDialog.Accepted:
             return
         payload = dlg.payload()
-        action_label = f"Create Release: {payload.title}" if summary is None else f"Update Release: {payload.title}"
+        action_label = (
+            f"Create Release: {payload.title}"
+            if summary is None
+            else f"Update Release: {payload.title}"
+        )
         action_type = "release.create" if summary is None else "release.update"
         entity_id = payload.title if summary is None else summary.release.id
         existing_release_id = summary.release.id if summary is not None else None
@@ -10338,7 +11274,9 @@ class App(QMainWindow):
         except Exception as exc:
             self.conn.rollback()
             self.logger.exception(f"Add tracks to release failed: {exc}")
-            QMessageBox.critical(self, "Release Browser", f"Could not add the selected tracks:\n{exc}")
+            QMessageBox.critical(
+                self, "Release Browser", f"Could not add the selected tracks:\n{exc}"
+            )
             return
 
         if self.release_browser_dialog is not None and self.release_browser_dialog.isVisible():
@@ -10354,7 +11292,9 @@ class App(QMainWindow):
             return
         summary = self.release_service.fetch_release_summary(int(release_id))
         if summary is None:
-            QMessageBox.warning(self, "Duplicate Release", "The selected release could not be loaded.")
+            QMessageBox.warning(
+                self, "Duplicate Release", "The selected release could not be loaded."
+            )
             return
         try:
             new_release_id = self._run_snapshot_history_action(
@@ -10382,7 +11322,9 @@ class App(QMainWindow):
         except Exception as exc:
             self.conn.rollback()
             self.logger.exception(f"Duplicate release failed: {exc}")
-            QMessageBox.critical(self, "Duplicate Release", f"Could not duplicate the release:\n{exc}")
+            QMessageBox.critical(
+                self, "Duplicate Release", f"Could not duplicate the release:\n{exc}"
+            )
             return
         if self.release_browser_dialog is not None and self.release_browser_dialog.isVisible():
             self.release_browser_dialog.refresh()
@@ -10439,7 +11381,9 @@ class App(QMainWindow):
         total = max(1, len(normalized_ids))
         for index, track_id in enumerate(normalized_ids, start=1):
             if callable(progress_callback):
-                progress_callback(index - 1, total, f"Reading audio tags for track {index} of {total}...")
+                progress_callback(
+                    index - 1, total, f"Reading audio tags for track {index} of {total}..."
+                )
             snapshot = active_track_service.fetch_track_snapshot(track_id)
             if snapshot is None:
                 warnings.append(f"Track {track_id} could not be loaded.")
@@ -10530,7 +11474,8 @@ class App(QMainWindow):
                 artist_name=str(values.get("artist") or snapshot.artist_name or "").strip(),
                 additional_artists=list(snapshot.additional_artists),
                 album_title=str(values.get("album") or snapshot.album_title or "").strip() or None,
-                release_date=str(values.get("release_date") or snapshot.release_date or "").strip() or None,
+                release_date=str(values.get("release_date") or snapshot.release_date or "").strip()
+                or None,
                 track_length_sec=int(snapshot.track_length_sec or 0),
                 iswc=snapshot.iswc,
                 upc=str(values.get("upc") or snapshot.upc or "").strip() or None,
@@ -10557,10 +11502,14 @@ class App(QMainWindow):
             return
         selected_ids = self._normalize_track_ids(track_ids or self._selected_track_ids())
         if not selected_ids:
-            QMessageBox.information(self, "Import Tags", "Select one or more tracks with attached audio first.")
+            QMessageBox.information(
+                self, "Import Tags", "Select one or more tracks with attached audio first."
+            )
             return
 
-        policy = str(self.settings.value("audio_tags/import_policy", "merge_blanks", str) or "merge_blanks")
+        policy = str(
+            self.settings.value("audio_tags/import_policy", "merge_blanks", str) or "merge_blanks"
+        )
 
         def _preview_worker(bundle, ctx):
             return self._prepare_tag_import_preview(
@@ -10617,7 +11566,9 @@ class App(QMainWindow):
                         cur = bundle.conn.cursor()
                         for index, entry in enumerate(prepared, start=1):
                             track_id = int(entry["track_id"])
-                            snapshot = bundle.track_service.fetch_track_snapshot(track_id, cursor=cur)
+                            snapshot = bundle.track_service.fetch_track_snapshot(
+                                track_id, cursor=cur
+                            )
                             if snapshot is None:
                                 continue
                             database_values = self._catalog_tag_data_for_track(
@@ -10752,7 +11703,9 @@ class App(QMainWindow):
                 warnings.append(f"{snapshot.track_title}: no managed audio file is attached.")
                 continue
             tag_data = self._catalog_tag_data_for_track(track_id, snapshot=snapshot)
-            safe_title = re.sub(r"[^A-Za-z0-9._-]+", "_", snapshot.track_title or f"track_{track_id}").strip("_")
+            safe_title = re.sub(
+                r"[^A-Za-z0-9._-]+", "_", snapshot.track_title or f"track_{track_id}"
+            ).strip("_")
             suggested_name = f"{track_id:05d}_{safe_title or 'track'}"
             exports.append((str(resolved), suggested_name, tag_data))
             for field_name, value in tag_data.to_dict().items():
@@ -10847,7 +11800,9 @@ class App(QMainWindow):
             unique_key="tags.export_audio",
             cancellable=True,
             on_success=_success,
-            on_cancelled=lambda: self.statusBar().showMessage("Tagged audio export cancelled.", 5000),
+            on_cancelled=lambda: self.statusBar().showMessage(
+                "Tagged audio export cancelled.", 5000
+            ),
             on_error=lambda failure: self._show_background_task_error(
                 "Write Tags to Exported Audio",
                 failure,
@@ -10912,9 +11867,13 @@ class App(QMainWindow):
 
                 def _mutation():
                     if normalized_format == "csv":
-                        return bundle.exchange_service.import_csv(path, mapping=mapping, options=options)
+                        return bundle.exchange_service.import_csv(
+                            path, mapping=mapping, options=options
+                        )
                     if normalized_format == "xlsx":
-                        return bundle.exchange_service.import_xlsx(path, mapping=mapping, options=options)
+                        return bundle.exchange_service.import_xlsx(
+                            path, mapping=mapping, options=options
+                        )
                     if normalized_format == "package":
                         return bundle.exchange_service.import_package(path, options=options)
                     return bundle.exchange_service.import_json(path, options=options)
@@ -11015,7 +11974,9 @@ class App(QMainWindow):
         ]
         if report.mode == "dry_run":
             lines.append("")
-            lines.append("No database changes were made because this run used Dry run validation mode.")
+            lines.append(
+                "No database changes were made because this run used Dry run validation mode."
+            )
         if report.duplicates:
             lines.append(f"Duplicates: {len(report.duplicates)}")
         if report.unknown_fields:
@@ -11051,9 +12012,7 @@ class App(QMainWindow):
             "package": ("ZIP Packages (*.zip)", ".zip"),
         }
         file_filter, suffix = extension_map.get(normalized_format, ("All files (*)", ""))
-        default_name = (
-            f"{'selected' if selected_only else 'full'}_{normalized_format}_{datetime.now().strftime('%Y%m%d_%H%M%S')}{suffix}"
-        )
+        default_name = f"{'selected' if selected_only else 'full'}_{normalized_format}_{datetime.now().strftime('%Y%m%d_%H%M%S')}{suffix}"
         path, _ = QFileDialog.getSaveFileName(
             self,
             f"Export {normalized_format.upper()}",
@@ -11198,7 +12157,9 @@ class App(QMainWindow):
                 row_id = int(row_id_item.text())
                 before_snapshot = self.track_service.fetch_track_snapshot(row_id)
                 if before_snapshot is None:
-                    QMessageBox.warning(self, "Delete", "Could not load the selected track for deletion.")
+                    QMessageBox.warning(
+                        self, "Delete", "Could not load the selected track for deletion."
+                    )
                     return
                 self.track_service.delete_track(row_id)
                 self.refresh_table_preserve_view()
@@ -11268,11 +12229,15 @@ class App(QMainWindow):
             return
 
         if Path(path).exists():
-            if QMessageBox.question(
-                self, "Overwrite?",
-                f"File exists:\n{path}\n\nOverwrite?",
-                QMessageBox.Yes | QMessageBox.No
-            ) != QMessageBox.Yes:
+            if (
+                QMessageBox.question(
+                    self,
+                    "Overwrite?",
+                    f"File exists:\n{path}\n\nOverwrite?",
+                    QMessageBox.Yes | QMessageBox.No,
+                )
+                != QMessageBox.Yes
+            ):
                 return
 
         def _worker(bundle, ctx):
@@ -11298,7 +12263,12 @@ class App(QMainWindow):
                 path=path,
                 exported=exported,
             )
-            self._audit("EXPORT", "Tracks", ref_id=path, details=f"all rows incl. duration+customs count={exported}")
+            self._audit(
+                "EXPORT",
+                "Tracks",
+                ref_id=path,
+                details=f"all rows incl. duration+customs count={exported}",
+            )
             self._audit_commit()
 
         self._submit_background_bundle_task(
@@ -11325,15 +12295,19 @@ class App(QMainWindow):
         else:
             sel = self.table.selectionModel()
             if not sel or not sel.hasSelection():
-                QMessageBox.information(self, "Export Selected", "Select one or more rows (or apply a filter) first.")
+                QMessageBox.information(
+                    self, "Export Selected", "Select one or more rows (or apply a filter) first."
+                )
                 return
             rows = [idx.row() for idx in sel.selectedRows()]
 
-        track_ids = sorted({
-            int(self.table.item(r, 0).text())
-            for r in rows
-            if self.table.item(r, 0) and self.table.item(r, 0).text().strip().isdigit()
-        })
+        track_ids = sorted(
+            {
+                int(self.table.item(r, 0).text())
+                for r in rows
+                if self.table.item(r, 0) and self.table.item(r, 0).text().strip().isdigit()
+            }
+        )
         if not track_ids:
             QMessageBox.warning(self, "Export Selected", "No valid track IDs found to export.")
             return
@@ -11341,7 +12315,10 @@ class App(QMainWindow):
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         default_name = f"Selected_Tracks_{ts}.xml"
         out_path, _ = QFileDialog.getSaveFileName(
-            self, "Export Selected to XML", str(self.exports_dir / default_name), "XML Files (*.xml)"
+            self,
+            "Export Selected to XML",
+            str(self.exports_dir / default_name),
+            "XML Files (*.xml)",
         )
         if not out_path:
             return
@@ -11407,11 +12384,15 @@ class App(QMainWindow):
         if not file_path:
             return
 
-        dry = QMessageBox.question(
-            self, "Dry Run?",
-            "Run a dry-run first (no changes will be written) to see the summary?",
-            QMessageBox.Yes | QMessageBox.No
-        ) == QMessageBox.Yes
+        dry = (
+            QMessageBox.question(
+                self,
+                "Dry Run?",
+                "Run a dry-run first (no changes will be written) to see the summary?",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            == QMessageBox.Yes
+        )
 
         def _inspection_worker(bundle, ctx):
             ctx.set_status("Inspecting the selected XML file...")
@@ -11438,8 +12419,12 @@ class App(QMainWindow):
                 return
 
             if inspection.missing_custom_fields:
-                msg = "This XML uses custom columns that do not exist in the current profile:\n\n" + "\n".join(
-                    f"- {name} : {field_type}" for name, field_type in inspection.missing_custom_fields
+                msg = (
+                    "This XML uses custom columns that do not exist in the current profile:\n\n"
+                    + "\n".join(
+                        f"- {name} : {field_type}"
+                        for name, field_type in inspection.missing_custom_fields
+                    )
                 )
                 create_missing_custom_fields = (
                     QMessageBox.question(
@@ -11473,21 +12458,25 @@ class App(QMainWindow):
                     duplicates=inspection.duplicate_count,
                     invalid=inspection.invalid_count,
                 )
-                proceed = QMessageBox.question(
-                    self, "Dry-run finished",
-                    f"Would insert: {inspection.would_insert}\n"
-                    f"Skipped (duplicates): {inspection.duplicate_count}\n"
-                    f"Skipped (invalid): {inspection.invalid_count}\n"
-                    f"Errors: 0\n"
-                    + (
-                        f"Will create custom columns: {len(inspection.missing_custom_fields)}\n"
-                        if create_missing_custom_fields
-                        else ""
+                proceed = (
+                    QMessageBox.question(
+                        self,
+                        "Dry-run finished",
+                        f"Would insert: {inspection.would_insert}\n"
+                        f"Skipped (duplicates): {inspection.duplicate_count}\n"
+                        f"Skipped (invalid): {inspection.invalid_count}\n"
+                        f"Errors: 0\n"
+                        + (
+                            f"Will create custom columns: {len(inspection.missing_custom_fields)}\n"
+                            if create_missing_custom_fields
+                            else ""
+                        )
+                        + "\n"
+                        f"Proceed with import now?",
+                        QMessageBox.Yes | QMessageBox.No,
                     )
-                    + "\n"
-                    f"Proceed with import now?",
-                    QMessageBox.Yes | QMessageBox.No
-                ) == QMessageBox.Yes
+                    == QMessageBox.Yes
+                )
                 if not proceed:
                     self._audit(
                         "IMPORT",
@@ -11555,11 +12544,12 @@ class App(QMainWindow):
                 self._audit_commit()
 
                 QMessageBox.information(
-                    self, mode,
+                    self,
+                    mode,
                     f"Inserted: {result.inserted}\n"
                     f"Skipped (duplicates): {result.duplicate_count}\n"
                     f"Skipped (invalid): {result.invalid_count}\n"
-                    f"Errors: {result.error_count}"
+                    f"Errors: {result.error_count}",
                 )
 
             self._submit_background_bundle_task(
@@ -11656,8 +12646,11 @@ class App(QMainWindow):
     # =============================================================================
     def _form_has_focus(self) -> bool:
         w = QApplication.focusWidget()
-        return bool(w and hasattr(self, "left_widget_container")
-                    and self.left_widget_container.isAncestorOf(w))
+        return bool(
+            w
+            and hasattr(self, "left_widget_container")
+            and self.left_widget_container.isAncestorOf(w)
+        )
 
     def _apply_table_view_settings(self):
         self.table.horizontalHeader().setVisible(True)
@@ -11753,7 +12746,8 @@ class App(QMainWindow):
             available_actions,
             list(getattr(self, "_action_ribbon_action_ids", [])),
             ribbon_visible=bool(
-                getattr(self, "action_ribbon_toolbar", None) is not None and self.action_ribbon_toolbar.isVisible()
+                getattr(self, "action_ribbon_toolbar", None) is not None
+                and self.action_ribbon_toolbar.isVisible()
             ),
             parent=self,
         )
@@ -11762,9 +12756,12 @@ class App(QMainWindow):
 
         new_action_ids = self._normalize_action_ribbon_ids(dlg.selected_action_ids())
         new_visible = bool(dlg.ribbon_visible())
-        current_action_ids = self._normalize_action_ribbon_ids(getattr(self, "_action_ribbon_action_ids", []))
+        current_action_ids = self._normalize_action_ribbon_ids(
+            getattr(self, "_action_ribbon_action_ids", [])
+        )
         current_visible = bool(
-            getattr(self, "action_ribbon_toolbar", None) is not None and self.action_ribbon_toolbar.isVisible()
+            getattr(self, "action_ribbon_toolbar", None) is not None
+            and self.action_ribbon_toolbar.isVisible()
         )
 
         if new_action_ids == current_action_ids and new_visible == current_visible:
@@ -11782,7 +12779,6 @@ class App(QMainWindow):
             mutation=mutation,
             entity_id="display/action_ribbon",
         )
-
 
     def _ensure_col_hint_label(self):
         if self.col_hint_label is None:
@@ -11894,7 +12890,10 @@ class App(QMainWindow):
 
         try:
             changed_summary = json.dumps(
-                [{"id": f.get("id"), "name": f["name"], "type": f.get("field_type")} for f in new_fields]
+                [
+                    {"id": f.get("id"), "name": f["name"], "type": f.get("field_type")}
+                    for f in new_fields
+                ]
             )
         except Exception:
             changed_summary = "fields changed"
@@ -11925,7 +12924,11 @@ class App(QMainWindow):
         if not (ok and name):
             return None
         if name in PROMOTED_CUSTOM_FIELD_NAMES:
-            QMessageBox.warning(self, "Reserved Name", f"'{name}' is now a standard column and cannot be added as custom.")
+            QMessageBox.warning(
+                self,
+                "Reserved Name",
+                f"'{name}' is now a standard column and cannot be added as custom.",
+            )
             return None
         if any(field.get("name") == name for field in self.active_custom_fields):
             QMessageBox.warning(self, "Exists", f"Column '{name}' already exists.")
@@ -11959,7 +12962,9 @@ class App(QMainWindow):
 
     def remove_custom_column(self):
         if not self.active_custom_fields:
-            QMessageBox.information(self, "Remove Custom Column", "There are no custom columns to remove.")
+            QMessageBox.information(
+                self, "Remove Custom Column", "There are no custom columns to remove."
+            )
             return
 
         choices = [
@@ -11992,7 +12997,9 @@ class App(QMainWindow):
             return
 
         remaining_fields = [
-            candidate for idx, candidate in enumerate(self.active_custom_fields) if idx != remove_index
+            candidate
+            for idx, candidate in enumerate(self.active_custom_fields)
+            if idx != remove_index
         ]
         self._apply_custom_field_configuration(
             remaining_fields,
@@ -12008,7 +13015,6 @@ class App(QMainWindow):
                 action_label="Manage Custom Columns",
                 action_type="fields.manage",
             )
-
 
     def _on_custom_fields_changed(self):
         self.active_custom_fields = self.load_active_custom_fields()
@@ -12034,7 +13040,6 @@ class App(QMainWindow):
         self.refresh_table()
         self._update_count_label()
         self._apply_blob_badges()
-
 
     # ============================================================
     # Double-click editing: base vs custom fields
@@ -12074,7 +13079,9 @@ class App(QMainWindow):
                 flt = "Images (*.png *.jpg *.jpeg *.webp *.gif *.bmp *.tif *.tiff);;All files (*)"
             else:
                 flt = "Audio (*.wav *.aif *.aiff *.mp3 *.flac *.m4a *.aac *.ogg *.opus);;All files (*)"
-            new_path, _ = QFileDialog.getOpenFileName(self, f"Attach file: {field['name']}", "", flt)
+            new_path, _ = QFileDialog.getOpenFileName(
+                self, f"Attach file: {field['name']}", "", flt
+            )
             if not new_path:
                 return
             try:
@@ -12083,8 +13090,14 @@ class App(QMainWindow):
                     action_type="custom_field.blob_attach",
                     entity_type="CustomFieldValue",
                     entity_id=f"{track_id}:{field_id}",
-                    payload={"track_id": track_id, "field_id": field_id, "field_name": field["name"]},
-                    mutation=lambda: self.cf_save_value(track_id, field_id, value=None, blob_path=new_path),
+                    payload={
+                        "track_id": track_id,
+                        "field_id": field_id,
+                        "field_name": field["name"],
+                    },
+                    mutation=lambda: self.cf_save_value(
+                        track_id, field_id, value=None, blob_path=new_path
+                    ),
                 )
                 self.refresh_table_preserve_view(focus_id=track_id)
                 return
@@ -12104,8 +13117,12 @@ class App(QMainWindow):
             if current_val and current_val not in choices:
                 choices.append(current_val)
             new_val, ok = QInputDialog.getItem(
-                self, f"Edit: {field['name']}", field['name'],
-                choices, current=choices.index(current_val) if current_val in choices else 0, editable=True
+                self,
+                f"Edit: {field['name']}",
+                field["name"],
+                choices,
+                current=choices.index(current_val) if current_val in choices else 0,
+                editable=True,
             )
             if not ok:
                 return
@@ -12114,8 +13131,12 @@ class App(QMainWindow):
             options_updated = options != original_options
         elif field_type == "checkbox":
             choice, ok = QInputDialog.getItem(
-                self, f"Edit: {field['name']}", field['name'],
-                ["True", "False"], current=0 if (current_val == "True") else 1, editable=False
+                self,
+                f"Edit: {field['name']}",
+                field["name"],
+                ["True", "False"],
+                current=0 if (current_val == "True") else 1,
+                editable=False,
             )
             if not ok:
                 return
@@ -12128,7 +13149,9 @@ class App(QMainWindow):
             sel = dlg.selected_iso()
             new_val = "" if sel is None else sel
         else:
-            new_val, ok = QInputDialog.getMultiLineText(self, f"Edit: {field['name']}", f"{field['name']}:", text=current_val)
+            new_val, ok = QInputDialog.getMultiLineText(
+                self, f"Edit: {field['name']}", f"{field['name']}:", text=current_val
+            )
             if not ok:
                 return
 
@@ -12136,6 +13159,7 @@ class App(QMainWindow):
         if new_val == current_val and not options_updated:
             return
         try:
+
             def mutation():
                 if field_type == "dropdown" and options_updated:
                     self.custom_field_definitions.update_dropdown_options(field_id, options)
@@ -12172,7 +13196,9 @@ class App(QMainWindow):
             if row in selected_rows:
                 sel_model.setCurrentIndex(index, QItemSelectionModel.NoUpdate)
             else:
-                sel_model.select(index, QItemSelectionModel.ClearAndSelect | QItemSelectionModel.Rows)
+                sel_model.select(
+                    index, QItemSelectionModel.ClearAndSelect | QItemSelectionModel.Rows
+                )
                 sel_model.setCurrentIndex(index, QItemSelectionModel.NoUpdate)
         else:
             self.table.setCurrentCell(row, col)
@@ -12182,7 +13208,9 @@ class App(QMainWindow):
         selected_ids = self._selected_track_ids()
         bulk_count = len(selected_ids) if track_id is not None and track_id in selected_ids else 1
         track_title = self._get_track_title(track_id) if track_id else ""
-        edit_label = "Edit Entry" if bulk_count <= 1 else f"Bulk Edit {bulk_count} Selected Entries…"
+        edit_label = (
+            "Edit Entry" if bulk_count <= 1 else f"Bulk Edit {bulk_count} Selected Entries…"
+        )
         act_edit = QAction(edit_label, self)
         act_edit.triggered.connect(lambda: self.open_selected_editor(track_id))
         menu.addAction(act_edit)
@@ -12197,20 +13225,33 @@ class App(QMainWindow):
                 act_release = QAction("Open Primary Release…", self)
                 act_release.triggered.connect(lambda: self.open_release_editor(release.id))
                 menu.addAction(act_release)
+        if track_id and self.work_service is not None:
+            linked_works = self.work_service.list_works_for_track(track_id)
+            if linked_works:
+                act_work = QAction("Open Linked Work(s)…", self)
+                act_work.triggered.connect(lambda: self.open_work_manager(linked_track_id=track_id))
+                menu.addAction(act_work)
+            act_link_work = QAction("Link Selected Track(s) to Work…", self)
+            act_link_work.triggered.connect(lambda: self.open_work_manager())
+            menu.addAction(act_link_work)
 
         act_delete = QAction("Delete Entry", self)
         act_delete.triggered.connect(self.delete_entry)
         menu.addAction(act_delete)
-            
+
         menu.addSeparator()
         # Licenses actions
         if track_id:
             act_add_license = QAction("Add License to this Track…", self)
-            act_add_license.triggered.connect(lambda: self.open_license_upload(preselect_track_id=track_id))
+            act_add_license.triggered.connect(
+                lambda: self.open_license_upload(preselect_track_id=track_id)
+            )
             menu.addAction(act_add_license)
 
             act_view_licenses = QAction("View Licenses for this Track…", self)
-            act_view_licenses.triggered.connect(lambda: self.open_licenses_browser(track_filter_id=track_id))
+            act_view_licenses.triggered.connect(
+                lambda: self.open_licenses_browser(track_filter_id=track_id)
+            )
             menu.addAction(act_view_licenses)
 
             if self.track_has_media(track_id, "audio_file"):
@@ -12219,16 +13260,16 @@ class App(QMainWindow):
                 menu.addAction(act_import_tags)
 
                 act_write_tags = QAction("Write Tags to Exported Audio…", self)
-                act_write_tags.triggered.connect(lambda: self.write_tags_to_exported_audio([track_id]))
+                act_write_tags.triggered.connect(
+                    lambda: self.write_tags_to_exported_audio([track_id])
+                )
                 menu.addAction(act_write_tags)
-
 
         cell_item = self.table.item(row, col)
         cell_text = cell_item.text() if cell_item else ""
         act_filter = QAction(f"Set Filter: '{cell_text}'", self)
         act_filter.triggered.connect(lambda: self.search_field.setText(cell_text))
         menu.addAction(act_filter)
-
 
         # Copy actions
         act_copy = QAction("Copy", self)
@@ -12262,7 +13303,9 @@ class App(QMainWindow):
             if self.track_has_media(track_id, standard_media_key):
                 act_export_standard = QAction(f"Export '{track_title}'…", self)
                 act_export_standard.triggered.connect(
-                    lambda: self._export_standard_media_for_track(track_id, standard_media_key, track_title)
+                    lambda: self._export_standard_media_for_track(
+                        track_id, standard_media_key, track_title
+                    )
                 )
                 menu.addAction(act_export_standard)
 
@@ -12282,11 +13325,16 @@ class App(QMainWindow):
                 if id_item:
                     track_id = int(id_item.text())
                     act_prev = QAction("Preview File…", self)
+
                     def _do_prev():
                         try:
-                            data = self.cf_fetch_blob(track_id, field["id"])  # must return bytes or memoryview
+                            data = self.cf_fetch_blob(
+                                track_id, field["id"]
+                            )  # must return bytes or memoryview
                             if not data:
-                                QMessageBox.information(self, "Preview", "No data stored in this cell.")
+                                QMessageBox.information(
+                                    self, "Preview", "No data stored in this cell."
+                                )
                                 return
                             # Use the actual track title for the preview dialog
                             try:
@@ -12298,7 +13346,10 @@ class App(QMainWindow):
                         except Exception as e:
                             self.conn.rollback()
                             self.logger.exception(f"Preview blob failed: {e}")
-                            QMessageBox.critical(self, "Custom Field Error", f"Failed to preview file:\n{e}")
+                            QMessageBox.critical(
+                                self, "Custom Field Error", f"Failed to preview file:\n{e}"
+                            )
+
                     act_prev.triggered.connect(_do_prev)
                     menu.addAction(act_prev)
 
@@ -12316,7 +13367,9 @@ class App(QMainWindow):
                 menu.addSeparator()
                 act_attach = QAction("Attach/Replace File…", self)
                 act_attach.triggered.connect(
-                    lambda: self._attach_blob_for_cell(track_id, field_id, field.get("field_type"), field.get("name"))
+                    lambda: self._attach_blob_for_cell(
+                        track_id, field_id, field.get("field_type"), field.get("name")
+                    )
                 )
                 menu.addAction(act_attach)
 
@@ -12336,27 +13389,42 @@ class App(QMainWindow):
                     track_id = int(id_item.text())
                     if self.cf_has_blob(track_id, field["id"]):
                         act_del = QAction("Delete File…", self)
+
                         def _do_del():
-                            if QMessageBox.question(self, "Delete File", "Remove the stored file from this cell?", QMessageBox.Yes | QMessageBox.No) == QMessageBox.Yes:
+                            if (
+                                QMessageBox.question(
+                                    self,
+                                    "Delete File",
+                                    "Remove the stored file from this cell?",
+                                    QMessageBox.Yes | QMessageBox.No,
+                                )
+                                == QMessageBox.Yes
+                            ):
                                 try:
                                     self._run_snapshot_history_action(
                                         action_label=f"Delete Custom File: {field['name']}",
                                         action_type="custom_field.blob_delete",
                                         entity_type="CustomFieldValue",
                                         entity_id=f"{track_id}:{field['id']}",
-                                        payload={"track_id": track_id, "field_id": field["id"], "field_name": field["name"]},
+                                        payload={
+                                            "track_id": track_id,
+                                            "field_id": field["id"],
+                                            "field_name": field["name"],
+                                        },
                                         mutation=lambda: self.cf_delete_blob(track_id, field["id"]),
                                     )
                                     self.refresh_table_preserve_view(focus_id=track_id)
                                 except Exception as e:
                                     self.conn.rollback()
                                     self.logger.exception(f"Delete blob failed: {e}")
-                                    QMessageBox.critical(self, "Custom Field Error", f"Failed to delete file:\n{e}")
+                                    QMessageBox.critical(
+                                        self, "Custom Field Error", f"Failed to delete file:\n{e}"
+                                    )
+
                         act_del.triggered.connect(_do_del)
                         menu.addAction(act_del)
 
         menu.exec(self.table.viewport().mapToGlobal(pos))
-
 
     def _preview_blob_for_cell(self, row: int, col: int):
         """Directly preview the blob in the given cell (image/audio)."""
@@ -12400,7 +13468,9 @@ class App(QMainWindow):
             QMessageBox.critical(self, "Custom Field Error", f"Failed to preview file:\n{e}")
 
     def _do_prev(self, row, col):
-        self._preview_blob_for_cell(row, col)############################################################################
+        self._preview_blob_for_cell(
+            row, col
+        )  ############################################################################
 
     def _preview_blob_bytes(self, data, title: str) -> None:
         # Unwrap tuple returns: (bytes|memoryview, optional_mime)
@@ -12436,12 +13506,11 @@ class App(QMainWindow):
 
         self._open_audio_preview(data, audio_mime, title)
 
-
     def _detect_mime(self, b: bytes) -> str:
         # --- images ---
         if len(b) >= 8 and b[:8] == b"\x89PNG\r\n\x1a\n":
             return "image/png"
-        if len(b) >= 2 and b[:2] == b"\xFF\xD8":
+        if len(b) >= 2 and b[:2] == b"\xff\xd8":
             return "image/jpeg"
         if len(b) >= 6 and b[:6] in (b"GIF89a", b"GIF87a"):
             return "image/gif"
@@ -12547,14 +13616,17 @@ class App(QMainWindow):
         zoom_slider.valueChanged.connect(apply_zoom)
 
         _user_zoomed = {"touched": False}
+
         def on_slider_touched():
             _user_zoomed["touched"] = True
+
         zoom_slider.sliderPressed.connect(on_slider_touched)
 
         def on_resize(e):
             if not _user_zoomed["touched"]:
                 apply_zoom(fit_percent())
             QDialog.resizeEvent(dlg, e)
+
         dlg.resizeEvent = on_resize
 
         detected_mime = self._detect_mime(data) or "image/png"
@@ -12583,7 +13655,6 @@ class App(QMainWindow):
 
         dlg.exec()
 
-
     # =============================================================================
     # Copy selection helper
     # =============================================================================
@@ -12604,7 +13675,11 @@ class App(QMainWindow):
                     header_texts = []
                     for c in range(c0, c1 + 1):
                         header_item = view.horizontalHeaderItem(c)
-                        header_texts.append(header_item.text() if header_item is not None else str(view.model().headerData(c, Qt.Horizontal)))
+                        header_texts.append(
+                            header_item.text()
+                            if header_item is not None
+                            else str(view.model().headerData(c, Qt.Horizontal))
+                        )
                     rows_out.append("\t".join(header_texts))
                 for row in range(r0, r1 + 1):
                     cells = []
@@ -12626,7 +13701,11 @@ class App(QMainWindow):
             header_texts = []
             for c in range(c0, c1 + 1):
                 header_item = view.horizontalHeaderItem(c)
-                header_texts.append(header_item.text() if header_item is not None else str(view.model().headerData(c, Qt.Horizontal)))
+                header_texts.append(
+                    header_item.text()
+                    if header_item is not None
+                    else str(view.model().headerData(c, Qt.Horizontal))
+                )
             rows_out.append("\t".join(header_texts))
         for r in range(r0, r1 + 1):
             line = []
@@ -12664,7 +13743,9 @@ class App(QMainWindow):
         self.settings.sync()
 
     def _default_header_labels(self) -> list[str]:
-        return list(self.BASE_HEADERS) + [f["name"] for f in getattr(self, "active_custom_fields", [])]
+        return list(self.BASE_HEADERS) + [
+            f["name"] for f in getattr(self, "active_custom_fields", [])
+        ]
 
     def _apply_header_label_order(self, ordered_labels: list[str]) -> None:
         header = self.table.horizontalHeader()
@@ -12689,13 +13770,15 @@ class App(QMainWindow):
             if current_visual != -1 and current_visual != visual_pos:
                 header.moveSection(current_visual, visual_pos)
 
-
     def _toggle_columns_movable(self, enabled: bool):
         try:
+
             def mutation():
                 self.table.horizontalHeader().setSectionsMovable(bool(enabled))
                 self._save_header_state(record_history=False)
-                self.settings.setValue(f"{self._table_settings_prefix()}/columns_movable", bool(enabled))
+                self.settings.setValue(
+                    f"{self._table_settings_prefix()}/columns_movable", bool(enabled)
+                )
                 self.settings.sync()
 
             self._run_setting_bundle_history_action(
@@ -12777,7 +13860,9 @@ class App(QMainWindow):
             return
 
         header_item = self.table.horizontalHeaderItem(logical_index)
-        column_name = header_item.text() if header_item is not None else f"Column {logical_index + 1}"
+        column_name = (
+            header_item.text() if header_item is not None else f"Column {logical_index + 1}"
+        )
         action_label = f"{'Show' if visible else 'Hide'} Column: {column_name}"
 
         def mutation():
@@ -12817,7 +13902,9 @@ class App(QMainWindow):
         header = self.table.horizontalHeader()
         logical_indices = sorted(
             range(self.table.columnCount()),
-            key=lambda idx: header.visualIndex(idx) if header.visualIndex(idx) >= 0 else 10_000 + idx,
+            key=lambda idx: (
+                header.visualIndex(idx) if header.visualIndex(idx) >= 0 else 10_000 + idx
+            ),
         )
 
         for logical_index in logical_indices:
@@ -12835,6 +13922,7 @@ class App(QMainWindow):
 
     def _save_header_state(self, *, record_history: bool = True):
         try:
+
             def mutation():
                 header = self.table.horizontalHeader()
                 state = header.saveState()
@@ -12853,7 +13941,9 @@ class App(QMainWindow):
                 ]
                 self.settings.setValue(f"{prefix}/header_labels", labels_visual)
                 try:
-                    self.settings.setValue(f"{prefix}/header_labels_json", json.dumps(labels_visual))
+                    self.settings.setValue(
+                        f"{prefix}/header_labels_json", json.dumps(labels_visual)
+                    )
                 except Exception as e:
                     self.logger.warning("Failed to save header visual order JSON: %s", e)
 
@@ -12887,8 +13977,7 @@ class App(QMainWindow):
 
             # Current labels after (re)building headers — includes any new custom fields
             current_labels = [
-                self.table.horizontalHeaderItem(i).text()
-                for i in range(self.table.columnCount())
+                self.table.horizontalHeaderItem(i).text() for i in range(self.table.columnCount())
             ]
 
             if not any(self.settings.contains(key) for key in saved_order_keys):
@@ -13047,7 +14136,6 @@ class App(QMainWindow):
             ),
         )
 
-
     def restore_database(self):
         """Restore the database from a backup .db file.
 
@@ -13061,11 +14149,15 @@ class App(QMainWindow):
         if not path:
             return
 
-        if QMessageBox.question(
-            self, "Restore",
-            f"This will replace your current database with:\n{path}\n\nContinue?",
-            QMessageBox.Yes | QMessageBox.No
-        ) != QMessageBox.Yes:
+        if (
+            QMessageBox.question(
+                self,
+                "Restore",
+                f"This will replace your current database with:\n{path}\n\nContinue?",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            != QMessageBox.Yes
+        ):
             return
 
         current_db_path = str(self.current_db_path)
@@ -13083,13 +14175,17 @@ class App(QMainWindow):
             return {
                 "restored_path": str(result.restored_path),
                 "integrity_result": result.integrity_result,
-                "safety_copy_path": str(result.safety_copy_path) if result.safety_copy_path else None,
+                "safety_copy_path": (
+                    str(result.safety_copy_path) if result.safety_copy_path else None
+                ),
             }
 
         def _success(result):
             self.open_database(str(result["restored_path"]))
             self.refresh_table_preserve_view()
-            QMessageBox.information(self, "Restore", "Database restored successfully (schema + data).")
+            QMessageBox.information(
+                self, "Restore", "Database restored successfully (schema + data)."
+            )
             self._log_event(
                 "db.restore",
                 "Database restored from backup",
@@ -13118,7 +14214,9 @@ class App(QMainWindow):
                         "target_path": str(result["safety_copy_path"]),
                         "before_state": {
                             "target_path": str(result["safety_copy_path"]),
-                            "companion_suffixes": list(self.history_manager.FILE_COMPANION_SUFFIXES),
+                            "companion_suffixes": list(
+                                self.history_manager.FILE_COMPANION_SUFFIXES
+                            ),
                             "exists": False,
                             "files": [],
                         },
@@ -13161,7 +14259,9 @@ class App(QMainWindow):
             try:
                 self.open_database(current_db_path)
             except Exception as reopen_error:
-                self.logger.exception("Failed to reopen database after restore error: %s", reopen_error)
+                self.logger.exception(
+                    "Failed to reopen database after restore error: %s", reopen_error
+                )
             self._show_background_task_error(
                 "Restore Error",
                 failure,
@@ -13187,7 +14287,9 @@ class App(QMainWindow):
             self.reset_search()
         elif event.key() in (Qt.Key_Return, Qt.Key_Enter):
             # Only save when the Add Data panel is active AND focus is inside that panel
-            panel_enabled = getattr(self, "add_data_action", None) and self.add_data_action.isChecked()
+            panel_enabled = (
+                getattr(self, "add_data_action", None) and self.add_data_action.isChecked()
+            )
             if panel_enabled and self._form_has_focus():
                 self.save()
         else:
@@ -13212,9 +14314,9 @@ class App(QMainWindow):
         # Defer to base for unhandled events
         return super().eventFilter(source, event)
 
-# =============================================================================
-# Edit Dialog (with Copy ISO / Copy compact buttons) + compact sync
-# =============================================================================
+    # =============================================================================
+    # Edit Dialog (with Copy ISO / Copy compact buttons) + compact sync
+    # =============================================================================
 
     # ---------------------- Standard track media helpers ----------------------
     @staticmethod
@@ -13243,7 +14345,9 @@ class App(QMainWindow):
         return self.track_service.fetch_media_bytes(track_id, media_key, cursor=self.cursor)
 
     def track_set_media(self, track_id: int, media_key: str, source_path: str):
-        return self.track_service.set_media_path(track_id, media_key, source_path, cursor=self.cursor)
+        return self.track_service.set_media_path(
+            track_id, media_key, source_path, cursor=self.cursor
+        )
 
     def track_clear_media(self, track_id: int, media_key: str):
         self.track_service.clear_media(track_id, media_key, cursor=self.cursor)
@@ -13272,7 +14376,9 @@ class App(QMainWindow):
         header_label = "Audio File" if media_key == "audio_file" else "Album Art"
         confirm_text = f"Remove the stored {header_label.lower()} from this track?"
         if media_key == "album_art" and self.track_service is not None:
-            shared_track_ids = self.track_service.list_album_group_track_ids(track_id, cursor=self.cursor)
+            shared_track_ids = self.track_service.list_album_group_track_ids(
+                track_id, cursor=self.cursor
+            )
             if len(shared_track_ids) > 1:
                 confirm_text = (
                     f"Remove the shared album art for this album?\n"
@@ -13345,7 +14451,9 @@ class App(QMainWindow):
                 ext = ".bin"
 
         default_filename = f"{self._sanitize_filename(suggested_basename)}{ext}"
-        dest_path, _ = QFileDialog.getSaveFileName(parent_widget or self, dialog_title, default_filename, "All files (*)")
+        dest_path, _ = QFileDialog.getSaveFileName(
+            parent_widget or self, dialog_title, default_filename, "All files (*)"
+        )
         if not dest_path:
             return
 
@@ -13363,13 +14471,17 @@ class App(QMainWindow):
         except Exception as e:
             QMessageBox.critical(parent_widget or self, "Export failed", str(e))
 
-    def _export_standard_media_for_track(self, track_id: int, media_key: str, suggested_basename: str | None = None):
+    def _export_standard_media_for_track(
+        self, track_id: int, media_key: str, suggested_basename: str | None = None
+    ):
         try:
             data, mime = self.track_fetch_media(track_id, media_key)
         except Exception as e:
             QMessageBox.critical(self, "Export failed", str(e))
             return
-        default_basename = suggested_basename or self._sanitize_filename(self._get_track_title(track_id))
+        default_basename = suggested_basename or self._sanitize_filename(
+            self._get_track_title(track_id)
+        )
         self._export_bytes_with_picker(
             data,
             mime=mime or "",
@@ -13386,10 +14498,16 @@ class App(QMainWindow):
     def cf_get_field_type(self, field_def_id: int) -> str:
         return self.custom_field_definitions.get_field_type(field_def_id)
 
-    def cf_save_value(self, track_id: int, field_def_id: int, *, value=None, blob_path: str|None=None):
-        self.custom_field_values.save_value(track_id, field_def_id, value=value, blob_path=blob_path)
+    def cf_save_value(
+        self, track_id: int, field_def_id: int, *, value=None, blob_path: str | None = None
+    ):
+        self.custom_field_values.save_value(
+            track_id, field_def_id, value=value, blob_path=blob_path
+        )
 
-    def _attach_blob_for_cell(self, track_id: int, field_def_id: int, field_type: str, field_name: str):
+    def _attach_blob_for_cell(
+        self, track_id: int, field_def_id: int, field_type: str, field_name: str
+    ):
         if field_type == "blob_image":
             flt = "Images (*.png *.jpg *.jpeg *.webp *.gif *.bmp *.tif *.tiff);;All files (*)"
         else:
@@ -13404,7 +14522,9 @@ class App(QMainWindow):
                 entity_type="CustomFieldValue",
                 entity_id=f"{track_id}:{field_def_id}",
                 payload={"track_id": track_id, "field_id": field_def_id, "field_name": field_name},
-                mutation=lambda: self.cf_save_value(track_id, field_def_id, value=None, blob_path=p),
+                mutation=lambda: self.cf_save_value(
+                    track_id, field_def_id, value=None, blob_path=p
+                ),
             )
             self.refresh_table_preserve_view(focus_id=track_id)
         except Exception as e:
@@ -13425,7 +14545,13 @@ class App(QMainWindow):
     def cf_fetch_blob(self, track_id: int, field_def_id: int):
         return self.custom_field_values.fetch_blob(track_id, field_def_id)
 
-    def cf_export_blob(self, track_id: int, field_def_id: int, parent_widget=None, suggested_basename: str|None=None):
+    def cf_export_blob(
+        self,
+        track_id: int,
+        field_def_id: int,
+        parent_widget=None,
+        suggested_basename: str | None = None,
+    ):
         try:
             data, mime = self.cf_fetch_blob(track_id, field_def_id)
         except Exception as e:
@@ -13454,18 +14580,21 @@ class App(QMainWindow):
         except Exception:
             n = 0
         thresh = 1024.0
-        units = ["B","KB","MB","GB","TB"]
+        units = ["B", "KB", "MB", "GB", "TB"]
         u = 0
         val = float(n)
-        while val >= thresh and u < len(units)-1:
+        while val >= thresh and u < len(units) - 1:
             val /= thresh
             u += 1
-        return f"{val:.0f} {units[u]}" if u==0 else f"{val:.1f} {units[u]}"
+        return f"{val:.0f} {units[u]}" if u == 0 else f"{val:.1f} {units[u]}"
 
-    def _format_blob_badge(self, mime_type: str|None, size_bytes: int) -> str:
-        icon = "🖼️" if (mime_type and mime_type.startswith("image/")) else ("🎵" if (mime_type and mime_type.startswith("audio/")) else "📎")
+    def _format_blob_badge(self, mime_type: str | None, size_bytes: int) -> str:
+        icon = (
+            "🖼️"
+            if (mime_type and mime_type.startswith("image/"))
+            else ("🎵" if (mime_type and mime_type.startswith("audio/")) else "📎")
+        )
         return f"{icon} {self._human_size(size_bytes)}"
-
 
     def _row_for_id(self, track_id: int) -> int:
         for r in range(self.table.rowCount()):
@@ -13503,7 +14632,11 @@ class App(QMainWindow):
             meta = self.cf_get_value_meta(track_id, field_id)
         except Exception:
             meta = {"has_blob": False, "mime_type": None, "size_bytes": 0}
-        display = self._format_blob_badge(meta.get("mime_type"), meta.get("size_bytes", 0)) if meta.get("has_blob") else "—"
+        display = (
+            self._format_blob_badge(meta.get("mime_type"), meta.get("size_bytes", 0))
+            if meta.get("has_blob")
+            else "—"
+        )
         item = self.table.item(row, col)
         if item is None:
             item = QTableWidgetItem(display)
@@ -13609,7 +14742,6 @@ class App(QMainWindow):
                     item.setText(display)
                 item.setData(Qt.UserRole, (pk, cf["id"]) if has_blob else None)
 
-
     def _make_default_export_filename(self, track_id: int, field_def: dict, mime: str) -> str:
         # Use track title only
         title = self._get_track_title(track_id)
@@ -13632,15 +14764,17 @@ class App(QMainWindow):
 
         try:
             tf = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
-            tf.write(data); tf.flush(); tf.close()
+            tf.write(data)
+            tf.flush()
+            tf.close()
         except Exception as e:
             QMessageBox.critical(self, "Preview", f"Could not create temp file: {e}")
             return
 
         dlg = _AudioPreviewDialog(self, tf.name, title)
-        dlg.setAttribute(Qt.WA_DeleteOnClose, True)   # cleanup on close
-        dlg.setWindowFlag(Qt.Window, True)            # make it a top-level window
-        dlg.setModal(False)                           # explicitly non-modal
+        dlg.setAttribute(Qt.WA_DeleteOnClose, True)  # cleanup on close
+        dlg.setWindowFlag(Qt.Window, True)  # make it a top-level window
+        dlg.setModal(False)  # explicitly non-modal
         dlg.show()
         dlg._player.play()
 
@@ -13662,7 +14796,9 @@ class App(QMainWindow):
         dlg.exec()
 
     def open_licenses_browser(self, track_filter_id=None):
-        LicensesBrowserDialog(self.license_service, track_filter_id=track_filter_id, parent=self).exec()
+        LicensesBrowserDialog(
+            self.license_service, track_filter_id=track_filter_id, parent=self
+        ).exec()
 
 
 class _AlbumTrackSection(QWidget):
@@ -13790,7 +14926,9 @@ class _AlbumTrackSection(QWidget):
         self.audio_browse_button.setAutoDefault(False)
         self.dialog._apply_button_height(self.audio_browse_button)
         self.audio_browse_button.clicked.connect(
-            lambda: self.app._choose_media_into_line_edit("audio_file", self.audio_file, parent_widget=self.dialog)
+            lambda: self.app._choose_media_into_line_edit(
+                "audio_file", self.audio_file, parent_widget=self.dialog
+            )
         )
         self.audio_clear_button = QPushButton("Clear")
         self.audio_clear_button.setAutoDefault(False)
@@ -13967,7 +15105,9 @@ class AlbumEntryDialog(QDialog):
         summary_layout.addWidget(summary_label)
         album_details_layout.addWidget(summary_box)
 
-        overview_box, overview_layout = _create_standard_section(self.album_details_tab, "Album Overview")
+        overview_box, overview_layout = _create_standard_section(
+            self.album_details_tab, "Album Overview"
+        )
         overview_layout.setSpacing(10)
         self.album_title = self._build_album_combo()
         self._add_labeled_widget(overview_layout, "Album Title", self.album_title)
@@ -13996,7 +15136,9 @@ class AlbumEntryDialog(QDialog):
         self.album_art_browse_button.setAutoDefault(False)
         self._apply_button_height(self.album_art_browse_button)
         self.album_art_browse_button.clicked.connect(
-            lambda: self.app._choose_media_into_line_edit("album_art", self.album_art, parent_widget=self)
+            lambda: self.app._choose_media_into_line_edit(
+                "album_art", self.album_art, parent_widget=self
+            )
         )
         self.album_art_clear_button = QPushButton("Clear")
         self.album_art_clear_button.setAutoDefault(False)
@@ -14006,7 +15148,9 @@ class AlbumEntryDialog(QDialog):
         art_layout.addWidget(self.album_art_clear_button)
         self._add_labeled_widget(overview_layout, "Album Art", art_row)
 
-        self.use_release_year = QCheckBox("Use each track release year when auto-generating blank ISRC values")
+        self.use_release_year = QCheckBox(
+            "Use each track release year when auto-generating blank ISRC values"
+        )
         self.use_release_year.setChecked(False)
         self.use_release_year.setEnabled(self.auto_isrc_enabled)
         self.use_release_year.setToolTip(self.isrc_help_text)
@@ -14187,13 +15331,17 @@ class AlbumEntryDialog(QDialog):
         album_title = self.album_title.currentText().strip()
         if is_blank(album_title):
             self.primary_tabs.setCurrentWidget(self.album_details_tab)
-            QMessageBox.warning(self, "Missing Album Title", "Album Title is required when using Add Album.")
+            QMessageBox.warning(
+                self, "Missing Album Title", "Album Title is required when using Add Album."
+            )
             return None
 
         upc_raw = self.upc.currentText().strip()
         if upc_raw and not valid_upc_ean(upc_raw):
             self.primary_tabs.setCurrentWidget(self.album_details_tab)
-            QMessageBox.warning(self, "Invalid UPC/EAN", "UPC/EAN must be 12 or 13 digits (or leave empty).")
+            QMessageBox.warning(
+                self, "Invalid UPC/EAN", "UPC/EAN must be 12 or 13 digits (or leave empty)."
+            )
             return None
 
         genre = self.genre.currentText().strip() or None
@@ -14201,10 +15349,14 @@ class AlbumEntryDialog(QDialog):
         album_art_source_path = self.album_art.text().strip() or None
         use_release_year = bool(self.use_release_year.isChecked())
 
-        active_sections = [section for section in self._track_sections if not section.is_effectively_blank()]
+        active_sections = [
+            section for section in self._track_sections if not section.is_effectively_blank()
+        ]
         if not active_sections:
             self.primary_tabs.setCurrentWidget(self.track_workspace_tab)
-            QMessageBox.warning(self, "No Tracks", "Add at least one track before saving the album.")
+            QMessageBox.warning(
+                self, "No Tracks", "Add at least one track before saving the album."
+            )
             return None
 
         payloads: list[TrackCreatePayload] = []
@@ -14282,7 +15434,9 @@ class AlbumEntryDialog(QDialog):
                     isrc=iso_isrc,
                     track_title=track_title,
                     artist_name=artist_name,
-                    additional_artists=self.app._parse_additional_artists(section.additional_artists.currentText()),
+                    additional_artists=self.app._parse_additional_artists(
+                        section.additional_artists.currentText()
+                    ),
                     album_title=album_title,
                     release_date=section.release_date_iso(),
                     track_length_sec=section.track_length_seconds(),
@@ -14323,7 +15477,9 @@ class AlbumEntryDialog(QDialog):
                     release_ids=release_ids,
                 )
                 for track_id, payload in zip(created_track_ids, payloads):
-                    self.app._audit("CREATE", "Track", ref_id=track_id, details=f"isrc={payload.isrc}")
+                    self.app._audit(
+                        "CREATE", "Track", ref_id=track_id, details=f"isrc={payload.isrc}"
+                    )
                 self.app._audit_commit()
             except Exception as audit_err:
                 self.app.logger.warning(f"Album create audit failed: {audit_err}")
@@ -14364,7 +15520,14 @@ class EditDialog(QDialog):
     """Edits one or more Track rows, including promoted standard fields."""
 
     BULK_MIXED_TEXT = "{Multiple values}"
-    BULK_VIEW_ONLY_FIELDS = {"isrc", "iswc", "track_title", "audio_file", "track_length_sec", "buma_work_number"}
+    BULK_VIEW_ONLY_FIELDS = {
+        "isrc",
+        "iswc",
+        "track_title",
+        "audio_file",
+        "track_length_sec",
+        "buma_work_number",
+    }
     SINGLE_EDIT_ALBUM_SHARED_FIELDS = {
         "artist_name": "Artist",
         "album_title": "Album Title",
@@ -14374,9 +15537,7 @@ class EditDialog(QDialog):
         "catalog_number": "Catalog#",
         "album_art": "Album Art",
     }
-    BULK_MIXED_TOOLTIP = (
-        "Selected records currently have different values. Replace this field to update every selected record."
-    )
+    BULK_MIXED_TOOLTIP = "Selected records currently have different values. Replace this field to update every selected record."
 
     def __init__(self, track_id: int, parent: App, batch_track_ids: list[int] | None = None):
         super().__init__(parent)
@@ -14389,11 +15550,17 @@ class EditDialog(QDialog):
         self._bulk_focus_targets: dict[object, str] = {}
 
         self._bulk_snapshots = self._load_bulk_snapshots()
-        self.snapshot = next(snapshot for snapshot in self._bulk_snapshots if snapshot.track_id == self.track_id)
+        self.snapshot = next(
+            snapshot for snapshot in self._bulk_snapshots if snapshot.track_id == self.track_id
+        )
         self._build_bulk_field_states()
 
-        self._existing_audio_display_path = self._resolve_snapshot_media_display(self.snapshot.audio_file_path)
-        self._existing_album_art_display_path = self._resolve_snapshot_media_display(self.snapshot.album_art_path)
+        self._existing_audio_display_path = self._resolve_snapshot_media_display(
+            self.snapshot.audio_file_path
+        )
+        self._existing_album_art_display_path = self._resolve_snapshot_media_display(
+            self.snapshot.album_art_path
+        )
         self._clear_audio_file = False
         self._clear_album_art = False
 
@@ -14416,7 +15583,11 @@ class EditDialog(QDialog):
         _add_standard_dialog_header(
             main_layout,
             self,
-            title=f"Bulk Edit {len(self.batch_track_ids)} Tracks" if self._is_bulk_edit else "Edit Track",
+            title=(
+                f"Bulk Edit {len(self.batch_track_ids)} Tracks"
+                if self._is_bulk_edit
+                else "Edit Track"
+            ),
             subtitle=header_subtitle,
             help_topic_id="edit-entry",
         )
@@ -14549,7 +15720,9 @@ class EditDialog(QDialog):
         btn_audio_browse = QPushButton("Browse…")
         btn_audio_clear = QPushButton("Clear")
         btn_audio_browse.clicked.connect(
-            lambda: self._choose_track_media("audio_file", self.audio_file, clear_attr="_clear_audio_file")
+            lambda: self._choose_track_media(
+                "audio_file", self.audio_file, clear_attr="_clear_audio_file"
+            )
         )
         btn_audio_clear.clicked.connect(
             lambda: self._clear_track_media(self.audio_file, clear_attr="_clear_audio_file")
@@ -14576,7 +15749,9 @@ class EditDialog(QDialog):
         btn_art_browse = QPushButton("Browse…")
         btn_art_clear = QPushButton("Clear")
         btn_art_browse.clicked.connect(
-            lambda: self._choose_track_media("album_art", self.album_art, clear_attr="_clear_album_art")
+            lambda: self._choose_track_media(
+                "album_art", self.album_art, clear_attr="_clear_album_art"
+            )
         )
         btn_art_clear.clicked.connect(
             lambda: self._clear_track_media(self.album_art, clear_attr="_clear_album_art")
@@ -14586,7 +15761,9 @@ class EditDialog(QDialog):
         add_row(media_layout, "Album Art", art_row)
 
         self.catalog_number = QLineEdit()
-        self._configure_text_field(self.catalog_number, "catalog_number", self.snapshot.catalog_number or "")
+        self._configure_text_field(
+            self.catalog_number, "catalog_number", self.snapshot.catalog_number or ""
+        )
 
         self.buma_work_number = QLineEdit()
         self._configure_text_field(
@@ -14603,13 +15780,19 @@ class EditDialog(QDialog):
         if self._is_bulk_edit and not self._bulk_field_is_mixed("release_date"):
             release_iso = str(self._bulk_field_initial("release_date") or "")
         release_qdate = QDate.fromString(release_iso, "yyyy-MM-dd")
-        self.release_date.setSelectedDate(release_qdate if release_qdate.isValid() else QDate.currentDate())
+        self.release_date.setSelectedDate(
+            release_qdate if release_qdate.isValid() else QDate.currentDate()
+        )
         calendar_width = max(420, self.release_date.sizeHint().width())
         calendar_height = max(320, self.release_date.sizeHint().height())
         self.release_date.setFixedSize(calendar_width, calendar_height)
         if self._is_bulk_edit:
-            self.release_date.selectionChanged.connect(lambda: self._mark_bulk_field_modified("release_date"))
-            self.release_date.clicked.connect(lambda _date: self._mark_bulk_field_modified("release_date"))
+            self.release_date.selectionChanged.connect(
+                lambda: self._mark_bulk_field_modified("release_date")
+            )
+            self.release_date.clicked.connect(
+                lambda _date: self._mark_bulk_field_modified("release_date")
+            )
         release_widget = QWidget(self)
         release_layout = QVBoxLayout(release_widget)
         release_layout.setContentsMargins(0, 0, 0, 0)
@@ -14644,9 +15827,15 @@ class EditDialog(QDialog):
         except Exception:
             pass
         if self._is_bulk_edit:
-            self.len_h.valueChanged.connect(lambda _value: self._mark_bulk_field_modified("track_length_sec"))
-            self.len_m.valueChanged.connect(lambda _value: self._mark_bulk_field_modified("track_length_sec"))
-            self.len_s.valueChanged.connect(lambda _value: self._mark_bulk_field_modified("track_length_sec"))
+            self.len_h.valueChanged.connect(
+                lambda _value: self._mark_bulk_field_modified("track_length_sec")
+            )
+            self.len_m.valueChanged.connect(
+                lambda _value: self._mark_bulk_field_modified("track_length_sec")
+            )
+            self.len_s.valueChanged.connect(
+                lambda _value: self._mark_bulk_field_modified("track_length_sec")
+            )
         tl_group = QFrame(self)
         tl_group.setProperty("role", "compactControlGroup")
         tl_group.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
@@ -14714,7 +15903,9 @@ class EditDialog(QDialog):
         gs1_btn.setAutoDefault(False)
         gs1_btn.clicked.connect(self._open_gs1_metadata)
         if self._is_bulk_edit:
-            gs1_btn.setToolTip("Open GS1 metadata for the same selected tracks shown in this bulk edit window.")
+            gs1_btn.setToolTip(
+                "Open GS1 metadata for the same selected tracks shown in this bulk edit window."
+            )
         btns.addWidget(gs1_btn)
         btns.addStretch(1)
         save_btn = QPushButton("Apply Changes" if self._is_bulk_edit else "Save Changes")
@@ -14771,27 +15962,49 @@ class EditDialog(QDialog):
             return
         snapshots = self._bulk_snapshots
         self._set_bulk_field_state("isrc", [snapshot.isrc or "" for snapshot in snapshots])
-        self._set_bulk_field_state("db_entry_date", [snapshot.db_entry_date or "" for snapshot in snapshots])
-        self._set_bulk_field_state("track_title", [snapshot.track_title or "" for snapshot in snapshots])
-        self._set_bulk_field_state("artist_name", [snapshot.artist_name or "" for snapshot in snapshots])
+        self._set_bulk_field_state(
+            "db_entry_date", [snapshot.db_entry_date or "" for snapshot in snapshots]
+        )
+        self._set_bulk_field_state(
+            "track_title", [snapshot.track_title or "" for snapshot in snapshots]
+        )
+        self._set_bulk_field_state(
+            "artist_name", [snapshot.artist_name or "" for snapshot in snapshots]
+        )
         self._set_bulk_field_state(
             "additional_artists",
             [tuple(snapshot.additional_artists or []) for snapshot in snapshots],
         )
-        self._set_bulk_field_state("album_title", [snapshot.album_title or "" for snapshot in snapshots])
+        self._set_bulk_field_state(
+            "album_title", [snapshot.album_title or "" for snapshot in snapshots]
+        )
         self._set_bulk_field_state("genre", [snapshot.genre or "" for snapshot in snapshots])
         self._set_bulk_field_state(
             "audio_file",
-            [self._resolve_snapshot_media_display(snapshot.audio_file_path) for snapshot in snapshots],
+            [
+                self._resolve_snapshot_media_display(snapshot.audio_file_path)
+                for snapshot in snapshots
+            ],
         )
         self._set_bulk_field_state(
             "album_art",
-            [self._resolve_snapshot_media_display(snapshot.album_art_path) for snapshot in snapshots],
+            [
+                self._resolve_snapshot_media_display(snapshot.album_art_path)
+                for snapshot in snapshots
+            ],
         )
-        self._set_bulk_field_state("catalog_number", [snapshot.catalog_number or "" for snapshot in snapshots])
-        self._set_bulk_field_state("buma_work_number", [snapshot.buma_work_number or "" for snapshot in snapshots])
-        self._set_bulk_field_state("release_date", [snapshot.release_date or "" for snapshot in snapshots])
-        self._set_bulk_field_state("track_length_sec", [int(snapshot.track_length_sec or 0) for snapshot in snapshots])
+        self._set_bulk_field_state(
+            "catalog_number", [snapshot.catalog_number or "" for snapshot in snapshots]
+        )
+        self._set_bulk_field_state(
+            "buma_work_number", [snapshot.buma_work_number or "" for snapshot in snapshots]
+        )
+        self._set_bulk_field_state(
+            "release_date", [snapshot.release_date or "" for snapshot in snapshots]
+        )
+        self._set_bulk_field_state(
+            "track_length_sec", [int(snapshot.track_length_sec or 0) for snapshot in snapshots]
+        )
         self._set_bulk_field_state("iswc", [snapshot.iswc or "" for snapshot in snapshots])
         self._set_bulk_field_state("upc", [snapshot.upc or "" for snapshot in snapshots])
 
@@ -14869,7 +16082,9 @@ class EditDialog(QDialog):
         widget.setReadOnly(read_only or lock_in_bulk or self._is_bulk_locked_field(field_name))
         self._set_bulk_hint(widget, field_name)
         if self._is_bulk_edit and track_changes and not lock_in_bulk:
-            widget.textChanged.connect(lambda _text, name=field_name: self._mark_bulk_field_modified(name))
+            widget.textChanged.connect(
+                lambda _text, name=field_name: self._mark_bulk_field_modified(name)
+            )
             if not widget.isReadOnly():
                 self._register_bulk_focus_target(widget, field_name)
 
@@ -14877,7 +16092,9 @@ class EditDialog(QDialog):
         combo.setCurrentText(self._display_value_for_field(field_name, single_value))
         self._set_bulk_hint(combo, field_name)
         if self._is_bulk_edit:
-            combo.currentTextChanged.connect(lambda _text, name=field_name: self._mark_bulk_field_modified(name))
+            combo.currentTextChanged.connect(
+                lambda _text, name=field_name: self._mark_bulk_field_modified(name)
+            )
             line_edit = combo.lineEdit()
             if line_edit is not None:
                 self._set_bulk_hint(line_edit, field_name)
@@ -14961,7 +16178,9 @@ class EditDialog(QDialog):
             final_value=final_value,
         )
 
-    def _bulk_media_should_apply(self, field_name: str, final_path: str, *, clear_attr: str) -> bool:
+    def _bulk_media_should_apply(
+        self, field_name: str, final_path: str, *, clear_attr: str
+    ) -> bool:
         if self._is_bulk_locked_field(field_name):
             return False
         clear_requested = bool(getattr(self, clear_attr) and not final_path)
@@ -15022,9 +16241,15 @@ class EditDialog(QDialog):
 
     def _save_single_changes(self):
         new_isrc_raw = (self.isrc_field.text() or "").strip()
-        new_iswc_raw = (self.iswc.currentText() if hasattr(self.iswc, "currentText") else self.iswc.text()).strip()
-        new_upc_raw = (self.upc.currentText() if hasattr(self.upc, "currentText") else self.upc.text()).strip()
-        new_genre = (self.genre.currentText() if hasattr(self.genre, "currentText") else self.genre.text()).strip()
+        new_iswc_raw = (
+            self.iswc.currentText() if hasattr(self.iswc, "currentText") else self.iswc.text()
+        ).strip()
+        new_upc_raw = (
+            self.upc.currentText() if hasattr(self.upc, "currentText") else self.upc.text()
+        ).strip()
+        new_genre = (
+            self.genre.currentText() if hasattr(self.genre, "currentText") else self.genre.text()
+        ).strip()
         new_track_title = (self.track_title.text() or "").strip()
         new_artist_name = self.artist_name.currentText().strip()
         new_album_title = self.album_title.currentText().strip() or None
@@ -15044,7 +16269,9 @@ class EditDialog(QDialog):
             iso_isrc = to_iso_isrc(new_isrc_raw)
             comp = to_compact_isrc(iso_isrc)
             if not comp or not is_valid_isrc_compact_or_iso(iso_isrc):
-                QMessageBox.warning(self, "Invalid ISRC", "ISRC must look like CCXXXYYNNNNN or CC-XXX-YY-NNNNN.")
+                QMessageBox.warning(
+                    self, "Invalid ISRC", "ISRC must look like CCXXXYYNNNNN or CC-XXX-YY-NNNNN."
+                )
                 return
 
         iso_iswc = None
@@ -15063,7 +16290,9 @@ class EditDialog(QDialog):
             return
 
         if new_upc_raw and not valid_upc_ean(new_upc_raw):
-            QMessageBox.warning(self, "Invalid UPC/EAN", "UPC/EAN must be 12 or 13 digits (or leave empty).")
+            QMessageBox.warning(
+                self, "Invalid UPC/EAN", "UPC/EAN must be 12 or 13 digits (or leave empty)."
+            )
             return
 
         try:
@@ -15079,7 +16308,9 @@ class EditDialog(QDialog):
                 return
 
             if iso_isrc and parent.is_isrc_taken_normalized(iso_isrc, exclude_track_id=row_id):
-                QMessageBox.critical(self, "Duplicate ISRC", "Another record already uses this ISRC.")
+                QMessageBox.critical(
+                    self, "Duplicate ISRC", "Another record already uses this ISRC."
+                )
                 return
 
             audio_source_path = (self.audio_file.text() or "").strip()
@@ -15096,7 +16327,9 @@ class EditDialog(QDialog):
                 additional_artists=new_additional_artist,
                 album_title=new_album_title,
                 release_date=new_release_date,
-                track_length_sec=hms_to_seconds(self.len_h.value(), self.len_m.value(), self.len_s.value()),
+                track_length_sec=hms_to_seconds(
+                    self.len_h.value(), self.len_m.value(), self.len_s.value()
+                ),
                 iswc=(iso_iswc or None),
                 upc=(new_upc_raw or None),
                 genre=(new_genre or None),
@@ -15119,13 +16352,17 @@ class EditDialog(QDialog):
             )
             album_art_changed = self._single_edit_album_art_changed(album_art_source_path)
             album_group_track_ids = parent.track_service.list_album_group_track_ids(row_id)
-            propagated_track_ids = [track_id for track_id in album_group_track_ids if track_id != row_id]
+            propagated_track_ids = [
+                track_id for track_id in album_group_track_ids if track_id != row_id
+            ]
             album_shared_fields_changed = list(album_field_updates.keys())
             if album_art_changed:
                 album_shared_fields_changed.append("album_art")
 
             if propagated_track_ids and album_shared_fields_changed:
-                propagated_field_labels = self._display_album_shared_field_names(album_shared_fields_changed)
+                propagated_field_labels = self._display_album_shared_field_names(
+                    album_shared_fields_changed
+                )
 
                 def mutation():
                     with parent.conn:
@@ -15134,11 +16371,17 @@ class EditDialog(QDialog):
                         parent.track_service.apply_album_metadata_to_tracks(
                             propagated_track_ids,
                             field_updates=album_field_updates,
-                            album_art_source_path=album_art_source_path if not self._clear_album_art else None,
-                            clear_album_art=bool(self._clear_album_art and not album_art_source_path),
+                            album_art_source_path=(
+                                album_art_source_path if not self._clear_album_art else None
+                            ),
+                            clear_album_art=bool(
+                                self._clear_album_art and not album_art_source_path
+                            ),
                             cursor=cur,
                         )
-                        parent._sync_releases_for_tracks([row_id, *propagated_track_ids], cursor=cur)
+                        parent._sync_releases_for_tracks(
+                            [row_id, *propagated_track_ids], cursor=cur
+                        )
 
                     safe_wal_checkpoint(parent.conn, logger=parent.logger)
                     try:
@@ -15221,16 +16464,24 @@ class EditDialog(QDialog):
                         bundle.track_service.update_track(source_payload, cursor=cur)
                         sync_track_ids = [row_id]
                         if propagated_mode:
-                            ctx.report_progress(1, total_steps, message="Propagating shared album fields...")
+                            ctx.report_progress(
+                                1, total_steps, message="Propagating shared album fields..."
+                            )
                             bundle.track_service.apply_album_metadata_to_tracks(
                                 propagated_track_ids,
                                 field_updates=album_field_updates,
-                                album_art_source_path=album_art_source_path if not self._clear_album_art else None,
-                                clear_album_art=bool(self._clear_album_art and not album_art_source_path),
+                                album_art_source_path=(
+                                    album_art_source_path if not self._clear_album_art else None
+                                ),
+                                clear_album_art=bool(
+                                    self._clear_album_art and not album_art_source_path
+                                ),
                                 cursor=cur,
                             )
                             sync_track_ids = [row_id, *propagated_track_ids]
-                        ctx.report_progress(total_steps - 1, total_steps, message="Synchronizing release records...")
+                        ctx.report_progress(
+                            total_steps - 1, total_steps, message="Synchronizing release records..."
+                        )
                         parent._sync_releases_for_tracks(
                             sync_track_ids,
                             cursor=cur,
@@ -15326,38 +16577,56 @@ class EditDialog(QDialog):
 
         new_track_title = (self.track_title.text() or "").strip()
         new_artist_name = self.artist_name.currentText().strip()
-        new_additional_artist = self.parent._parse_additional_artists(self.additional_artist.currentText().strip())
+        new_additional_artist = self.parent._parse_additional_artists(
+            self.additional_artist.currentText().strip()
+        )
         new_album_title = self.album_title.currentText().strip()
         new_genre = self.genre.currentText().strip()
-        new_upc_raw = (self.upc.currentText() if hasattr(self.upc, "currentText") else self.upc.text()).strip()
+        new_upc_raw = (
+            self.upc.currentText() if hasattr(self.upc, "currentText") else self.upc.text()
+        ).strip()
         new_catalog_number = (self.catalog_number.text() or "").strip()
         new_buma_work_number = (self.buma_work_number.text() or "").strip()
         new_release_date = self.release_date.selectedDate().toString("yyyy-MM-dd")
-        new_track_length_sec = hms_to_seconds(self.len_h.value(), self.len_m.value(), self.len_s.value())
+        new_track_length_sec = hms_to_seconds(
+            self.len_h.value(), self.len_m.value(), self.len_s.value()
+        )
         new_audio_path = (self.audio_file.text() or "").strip()
         new_album_art_path = (self.album_art.text() or "").strip()
 
         apply_track_title = self._bulk_field_should_apply("track_title", new_track_title)
         apply_artist_name = self._bulk_field_should_apply("artist_name", new_artist_name)
-        apply_additional_artist = self._bulk_field_should_apply("additional_artists", tuple(new_additional_artist))
+        apply_additional_artist = self._bulk_field_should_apply(
+            "additional_artists", tuple(new_additional_artist)
+        )
         apply_album_title = self._bulk_field_should_apply("album_title", new_album_title)
         apply_genre = self._bulk_field_should_apply("genre", new_genre)
         apply_release_date = self._bulk_field_should_apply("release_date", new_release_date)
         apply_track_length = self._bulk_field_should_apply("track_length_sec", new_track_length_sec)
         apply_upc = self._bulk_field_should_apply("upc", new_upc_raw)
         apply_catalog_number = self._bulk_field_should_apply("catalog_number", new_catalog_number)
-        apply_buma_work_number = self._bulk_field_should_apply("buma_work_number", new_buma_work_number)
-        apply_audio = self._bulk_media_should_apply("audio_file", new_audio_path, clear_attr="_clear_audio_file")
-        apply_album_art = self._bulk_media_should_apply("album_art", new_album_art_path, clear_attr="_clear_album_art")
+        apply_buma_work_number = self._bulk_field_should_apply(
+            "buma_work_number", new_buma_work_number
+        )
+        apply_audio = self._bulk_media_should_apply(
+            "audio_file", new_audio_path, clear_attr="_clear_audio_file"
+        )
+        apply_album_art = self._bulk_media_should_apply(
+            "album_art", new_album_art_path, clear_attr="_clear_album_art"
+        )
 
         if apply_track_title and is_blank(new_track_title):
-            QMessageBox.warning(self, "Missing data", "Track Title cannot be blank when bulk editing.")
+            QMessageBox.warning(
+                self, "Missing data", "Track Title cannot be blank when bulk editing."
+            )
             return
         if apply_artist_name and is_blank(new_artist_name):
             QMessageBox.warning(self, "Missing data", "Artist cannot be blank when bulk editing.")
             return
         if apply_upc and new_upc_raw and not valid_upc_ean(new_upc_raw):
-            QMessageBox.warning(self, "Invalid UPC/EAN", "UPC/EAN must be 12 or 13 digits (or leave empty).")
+            QMessageBox.warning(
+                self, "Invalid UPC/EAN", "UPC/EAN must be 12 or 13 digits (or leave empty)."
+            )
             return
 
         changed_fields = []
@@ -15398,28 +16667,46 @@ class EditDialog(QDialog):
                 track_title=new_track_title if apply_track_title else snapshot.track_title,
                 artist_name=new_artist_name if apply_artist_name else snapshot.artist_name,
                 additional_artists=(
-                    new_additional_artist if apply_additional_artist else list(snapshot.additional_artists)
+                    new_additional_artist
+                    if apply_additional_artist
+                    else list(snapshot.additional_artists)
                 ),
-                album_title=(new_album_title or None) if apply_album_title else snapshot.album_title,
+                album_title=(
+                    (new_album_title or None) if apply_album_title else snapshot.album_title
+                ),
                 release_date=new_release_date if apply_release_date else snapshot.release_date,
                 track_length_sec=(
-                    new_track_length_sec if apply_track_length else int(snapshot.track_length_sec or 0)
+                    new_track_length_sec
+                    if apply_track_length
+                    else int(snapshot.track_length_sec or 0)
                 ),
                 iswc=snapshot.iswc,
                 upc=(new_upc_raw or None) if apply_upc else snapshot.upc,
                 genre=(new_genre or None) if apply_genre else snapshot.genre,
-                catalog_number=(new_catalog_number or None) if apply_catalog_number else snapshot.catalog_number,
+                catalog_number=(
+                    (new_catalog_number or None)
+                    if apply_catalog_number
+                    else snapshot.catalog_number
+                ),
                 buma_work_number=(
-                    new_buma_work_number or None
-                ) if apply_buma_work_number else snapshot.buma_work_number,
+                    (new_buma_work_number or None)
+                    if apply_buma_work_number
+                    else snapshot.buma_work_number
+                ),
                 audio_file_source_path=(
                     (new_audio_path or None) if apply_audio and not self._clear_audio_file else None
                 ),
                 album_art_source_path=(
-                    (new_album_art_path or None) if apply_album_art and not self._clear_album_art else None
+                    (new_album_art_path or None)
+                    if apply_album_art and not self._clear_album_art
+                    else None
                 ),
-                clear_audio_file=bool(apply_audio and self._clear_audio_file and not new_audio_path),
-                clear_album_art=bool(apply_album_art and self._clear_album_art and not new_album_art_path),
+                clear_audio_file=bool(
+                    apply_audio and self._clear_audio_file and not new_audio_path
+                ),
+                clear_album_art=bool(
+                    apply_album_art and self._clear_album_art and not new_album_art_path
+                ),
             )
             for snapshot in self._bulk_snapshots
         ]
@@ -15519,12 +16806,14 @@ class _AudioPreviewDialog(QDialog):
         _apply_standard_dialog_chrome(self, "audioPreviewDialog")
 
         if platform.system().lower() == "darwin":
-            os.environ.setdefault("PATH", "/opt/homebrew/bin:/usr/local/bin:" + os.environ.get("PATH", ""))
+            os.environ.setdefault(
+                "PATH", "/opt/homebrew/bin:/usr/local/bin:" + os.environ.get("PATH", "")
+            )
         elif platform.system().lower() == "windows":
             extra = [
                 r"C:\Program Files\ffmpeg\bin",
                 r"C:\ffmpeg\bin",
-                r"C:\ProgramData\chocolatey\bin",                  # choco install ffmpeg
+                r"C:\ProgramData\chocolatey\bin",  # choco install ffmpeg
                 os.path.expandvars(r"%USERPROFILE%\scoop\shims"),  # scoop install ffmpeg
             ]
             os.environ["PATH"] = ";".join([*extra, os.environ.get("PATH", "")])
@@ -15559,8 +16848,12 @@ class _AudioPreviewDialog(QDialog):
         )
         h = QHBoxLayout()
         h.setSpacing(8)
-        btn_play = QPushButton("Play"); btn_pause = QPushButton("Pause"); btn_stop = QPushButton("Stop")
-        h.addWidget(btn_play); h.addWidget(btn_pause); h.addWidget(btn_stop)
+        btn_play = QPushButton("Play")
+        btn_pause = QPushButton("Pause")
+        btn_stop = QPushButton("Stop")
+        h.addWidget(btn_play)
+        h.addWidget(btn_pause)
+        h.addWidget(btn_stop)
         h.addStretch(1)
         playback_layout.addLayout(h)
 
@@ -15582,7 +16875,11 @@ class _AudioPreviewDialog(QDialog):
         self._anim_timer.setInterval(16)
         self._anim_timer.timeout.connect(lambda: self.wave.set_playhead_ms(self._player.position()))
         self._player.playbackStateChanged.connect(
-            lambda st: self._anim_timer.start() if st == QMediaPlayer.PlayingState else self._anim_timer.stop()
+            lambda st: (
+                self._anim_timer.start()
+                if st == QMediaPlayer.PlayingState
+                else self._anim_timer.stop()
+            )
         )
 
         # slider + time
@@ -15653,6 +16950,7 @@ class _AudioPreviewDialog(QDialog):
         def fmt(ms):
             s = ms // 1000
             return f"{s//60}:{s%60:02d}"
+
         self._label_time.setText(f"{fmt(pos)} / {fmt(dur)}")
 
     # --- new: hard teardown that actually releases the backend ---
@@ -15694,7 +16992,6 @@ class _AudioPreviewDialog(QDialog):
         self._teardown_audio()
         super().reject()
 
-
     # --- key handling ---
     def keyPressEvent(self, e):
         STEP_MS = 5000  # 5 s per key press
@@ -15705,37 +17002,47 @@ class _AudioPreviewDialog(QDialog):
                 self._player.pause()
             else:
                 self._player.play()
-            e.accept(); return
+            e.accept()
+            return
 
         elif e.key() == Qt.Key_Right:
             # Scrub forward
             new_pos = min(self._player.duration(), self._player.position() + STEP_MS)
             self._player.setPosition(new_pos)
-            e.accept(); return
+            e.accept()
+            return
 
         elif e.key() == Qt.Key_Left:
             # Scrub backward
             new_pos = max(0, self._player.position() - STEP_MS)
             self._player.setPosition(new_pos)
-            e.accept(); return
+            e.accept()
+            return
 
         elif e.key() == Qt.Key_Escape:
             self.close()
-            e.accept(); return
+            e.accept()
+            return
 
         super().keyPressEvent(e)
 
 
-
 # ==== Licenses: helpers & actions ====
 def open_license_upload(self, preselect_track_id=None):
-    dlg = LicenseUploadDialog(self.license_service, self._list_all_tracks(), self._list_licensees(),
-                              preselect_track_id=preselect_track_id, parent=self)
+    dlg = LicenseUploadDialog(
+        self.license_service,
+        self._list_all_tracks(),
+        self._list_licensees(),
+        preselect_track_id=preselect_track_id,
+        parent=self,
+    )
     dlg.saved.connect(lambda: self.statusBar().showMessage("License saved", 3000))
     dlg.exec()
 
+
 def open_licenses_browser(self, track_filter_id=None):
     LicensesBrowserDialog(self.license_service, track_filter_id=track_filter_id, parent=self).exec()
+
 
 class WaveformWidget(QWidget):
     def __init__(self, parent=None):
@@ -15759,6 +17066,7 @@ class WaveformWidget(QWidget):
 
     def paintEvent(self, e):
         from PySide6.QtGui import QPainter, QPainterPath, QPen, QColor
+
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
         r = self.rect()
@@ -15793,6 +17101,7 @@ class WaveformWidget(QWidget):
             x = r.left() + (r.width() - 1) * (self._playhead / self._duration)
             p.setPen(QPen(playhead_color))
             p.drawLine(int(x), r.top(), int(x), r.bottom())
+
 
 def load_wav_peaks(path: str, width_px: int):
     """
@@ -15879,9 +17188,15 @@ def load_wav_peaks(path: str, width_px: int):
             if state["target_step"] is None:
                 sample_rate = fmt.sampleRate() or 44100
                 duration_ms = decoder.duration()
-                total_samples = int((sample_rate * duration_ms) / 1000) if duration_ms and duration_ms > 0 else None
+                total_samples = (
+                    int((sample_rate * duration_ms) / 1000)
+                    if duration_ms and duration_ms > 0
+                    else None
+                )
                 state["sample_rate"] = sample_rate
-                state["target_step"] = max(1, (total_samples // buckets) if total_samples else (sample_rate // 100))
+                state["target_step"] = max(
+                    1, (total_samples // buckets) if total_samples else (sample_rate // 100)
+                )
                 state["need"] = state["target_step"]
 
             raw = bytes(buf.data())
@@ -15944,6 +17259,7 @@ def load_wav_peaks(path: str, width_px: int):
     # --- helper: best-effort find a binary on common paths ---
     def _which(name: str):
         import shutil, os, platform
+
         p = shutil.which(name)
         if p:
             return p
@@ -15980,6 +17296,7 @@ def load_wav_peaks(path: str, width_px: int):
             head = f.read(12)
         if len(head) >= 12 and head[:4] == b"RIFF" and head[8:12] == b"WAVE":
             import wave
+
             with wave.open(path, "rb") as w:
                 ch = w.getnchannels()
                 sampwidth = w.getsampwidth()  # bytes: 2, 3, 4
@@ -16032,8 +17349,10 @@ def load_wav_peaks(path: str, width_px: int):
                         continue
                     lo = float(min(vals)) / fs
                     hi = float(max(vals)) / fs
-                    if lo < -1.0: lo = -1.0
-                    if hi >  1.0: hi =  1.0
+                    if lo < -1.0:
+                        lo = -1.0
+                    if hi > 1.0:
+                        hi = 1.0
                     peaks.append((lo, hi))
                 return peaks
     except Exception:
@@ -16048,11 +17367,23 @@ def load_wav_peaks(path: str, width_px: int):
         ffprobe = _which("ffprobe")
         if ffprobe:
             try:
-                out = subprocess.check_output(
-                    [ffprobe, "-v", "error", "-show_entries", "format=duration",
-                     "-of", "default=nw=1:nk=1", os.fspath(path)],
-                    stderr=subprocess.STDOUT
-                ).decode("utf-8", "replace").strip()
+                out = (
+                    subprocess.check_output(
+                        [
+                            ffprobe,
+                            "-v",
+                            "error",
+                            "-show_entries",
+                            "format=duration",
+                            "-of",
+                            "default=nw=1:nk=1",
+                            os.fspath(path),
+                        ],
+                        stderr=subprocess.STDOUT,
+                    )
+                    .decode("utf-8", "replace")
+                    .strip()
+                )
                 if out:
                     d = float(out)
                     if d > 0:
@@ -16060,13 +17391,32 @@ def load_wav_peaks(path: str, width_px: int):
             except Exception:
                 total_samples = None
 
-        target_step = max(1, (total_samples // buckets) if total_samples else (sr // 100))  # ~10 ms if unknown
+        target_step = max(
+            1, (total_samples // buckets) if total_samples else (sr // 100)
+        )  # ~10 ms if unknown
 
         try:
             p = subprocess.Popen(
-                [ffmpeg, "-v", "error", "-nostdin", "-vn", "-i", os.fspath(path),
-                 "-f", "s16le", "-acodec", "pcm_s16le", "-ac", "1", "-ar", str(sr), "-"],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                [
+                    ffmpeg,
+                    "-v",
+                    "error",
+                    "-nostdin",
+                    "-vn",
+                    "-i",
+                    os.fspath(path),
+                    "-f",
+                    "s16le",
+                    "-acodec",
+                    "pcm_s16le",
+                    "-ac",
+                    "1",
+                    "-ar",
+                    str(sr),
+                    "-",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
             )
 
             peaks = []
@@ -16088,14 +17438,19 @@ def load_wav_peaks(path: str, width_px: int):
 
                 off_samples = 0
                 import struct as _st
+
                 while n_samples > 0:
                     take = min(need, n_samples)
                     data_len = take * 2
-                    data = bytes(buf[off_samples * 2 : off_samples * 2 + data_len])  # copy; safe to resize buf
+                    data = bytes(
+                        buf[off_samples * 2 : off_samples * 2 + data_len]
+                    )  # copy; safe to resize buf
                     for i in range(0, len(data), 2):
                         v = _st.unpack_from("<h", data, i)[0] / fs
-                        if v < lo: lo = v
-                        if v > hi: hi = v
+                        if v < lo:
+                            lo = v
+                        if v > hi:
+                            hi = v
                     need -= take
                     off_samples += take
                     n_samples -= take
@@ -16106,7 +17461,7 @@ def load_wav_peaks(path: str, width_px: int):
                         need = target_step
 
                 # drop consumed bytes
-                del buf[:off_samples * 2]
+                del buf[: off_samples * 2]
 
             p.stdout.close()
             try:
@@ -16134,6 +17489,7 @@ def load_wav_peaks(path: str, width_px: int):
     # Python 3.13. Keep it only as a legacy fallback behind the Qt path.
     try:
         import audioread, struct as _st
+
         peaks = []
         with audioread.audio_open(path) as f:
             sr = f.samplerate or 44100
@@ -16142,7 +17498,9 @@ def load_wav_peaks(path: str, width_px: int):
             # frames = samples *per channel*; audioread blocks are interleaved across channels
             ch = max(1, getattr(f, "channels", 1))
             frame_bytes = 2 * ch  # 16-bit signed little-endian per sample * channels
-            target_step = max(1, (total_samples // buckets) if total_samples else (sr // 100))  # ~10 ms if unknown
+            target_step = max(
+                1, (total_samples // buckets) if total_samples else (sr // 100)
+            )  # ~10 ms if unknown
 
             fs = 32768.0
             need = target_step
@@ -16159,12 +17517,16 @@ def load_wav_peaks(path: str, width_px: int):
                 while frames > 0:
                     take = min(need, frames)
                     data_len = take * frame_bytes
-                    data = bytes(buf[off_frames * frame_bytes : off_frames * frame_bytes + data_len])  # copy
+                    data = bytes(
+                        buf[off_frames * frame_bytes : off_frames * frame_bytes + data_len]
+                    )  # copy
                     # pick channel 0 only → cheap mono
                     for i in range(0, len(data), frame_bytes):
                         v = _st.unpack_from("<h", data, i)[0] / fs
-                        if v < lo: lo = v
-                        if v > hi: hi = v
+                        if v < lo:
+                            lo = v
+                        if v > hi:
+                            hi = v
                     need -= take
                     off_frames += take
                     frames -= take
@@ -16173,7 +17535,7 @@ def load_wav_peaks(path: str, width_px: int):
                         lo, hi = +1.0, -1.0
                         need = target_step
 
-                del buf[:off_frames * frame_bytes]
+                del buf[: off_frames * frame_bytes]
 
             if lo <= hi:
                 peaks.append((max(-1.0, lo), min(1.0, hi)))
@@ -16207,5 +17569,5 @@ def main() -> int:
     return app.exec()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

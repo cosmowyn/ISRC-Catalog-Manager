@@ -84,6 +84,42 @@ class ReleaseServiceTests(unittest.TestCase):
         self.assertEqual([placement.track_id for placement in summary.tracks], [track_a, track_b])
         self.assertEqual([placement.track_number for placement in summary.tracks], [1, 2])
 
+    def test_create_release_persists_workflow_status_and_readiness_flags(self):
+        track_id = self._create_track(
+            isrc="NL-ABC-26-00003",
+            title="Workflow Track",
+            album="Workflow Album",
+            upc="036000291452",
+        )
+
+        release_id = self.release_service.create_release(
+            ReleasePayload(
+                title="Workflow Album",
+                primary_artist="Release Artist",
+                release_type="album",
+                repertoire_status="contract_pending",
+                metadata_complete=True,
+                contract_signed=False,
+                rights_verified=True,
+                placements=[
+                    ReleaseTrackPlacement(
+                        track_id=track_id,
+                        disc_number=1,
+                        track_number=1,
+                        sequence_number=1,
+                    )
+                ],
+            )
+        )
+
+        release = self.release_service.fetch_release(release_id)
+        self.assertIsNotNone(release)
+        assert release is not None
+        self.assertEqual(release.repertoire_status, "contract_pending")
+        self.assertTrue(release.metadata_complete)
+        self.assertFalse(release.contract_signed)
+        self.assertTrue(release.rights_verified)
+
     def test_add_tracks_to_release_appends_positions(self):
         track_a = self._create_track(isrc="NL-ABC-26-00011", title="Track A", album="Release Album")
         track_b = self._create_track(isrc="NL-ABC-26-00012", title="Track B", album="Release Album")

@@ -9,9 +9,21 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
+from isrc_manager.assets import AssetService
+from isrc_manager.contracts import (
+    ContractDocumentPayload,
+    ContractObligationPayload,
+    ContractPartyPayload,
+    ContractPayload,
+    ContractService,
+)
 from isrc_manager.domain.codes import barcode_validation_status, to_compact_isrc
+from isrc_manager.parties import PartyService
 from isrc_manager.releases import ReleaseService
+from isrc_manager.rights import RightsService
 from isrc_manager.services.tracks import TrackService
+from isrc_manager.services.repertoire_status import RepertoireWorkflowService
+from isrc_manager.works import WorkContributorPayload, WorkPayload, WorkService
 
 from .models import QualityIssue, QualityScanResult
 
@@ -31,6 +43,14 @@ class QualityDashboardService:
         self.track_service = track_service
         self.release_service = release_service
         self.data_root = Path(data_root) if data_root is not None else None
+        self.party_service = PartyService(conn)
+        self.work_service = WorkService(conn, party_service=self.party_service)
+        self.contract_service = ContractService(
+            conn, self.data_root, party_service=self.party_service
+        )
+        self.rights_service = RightsService(conn)
+        self.asset_service = AssetService(conn, self.data_root)
+        self.workflow_service = RepertoireWorkflowService(conn)
 
     def scan(self) -> QualityScanResult:
         issues: list[QualityIssue] = []
@@ -40,6 +60,12 @@ class QualityDashboardService:
         issues.extend(self._ordering_issues())
         issues.extend(self._license_issues())
         issues.extend(self._custom_field_issues())
+        issues.extend(self._work_issues())
+        issues.extend(self._contract_issues())
+        issues.extend(self._rights_issues())
+        issues.extend(self._party_issues())
+        issues.extend(self._asset_registry_issues())
+        issues.extend(self._repertoire_status_issues())
         counts_by_severity = Counter(issue.severity for issue in issues)
         counts_by_type = Counter(issue.issue_type for issue in issues)
         return QualityScanResult(
@@ -578,6 +604,404 @@ class QualityDashboardService:
                         track_id=int(track_id),
                     )
                 )
+        return issues
+
+    def _work_payload_from_detail(self, detail) -> WorkPayload:
+        return WorkPayload(
+            title=detail.work.title,
+            alternate_titles=list(detail.work.alternate_titles),
+            version_subtitle=detail.work.version_subtitle,
+            language=detail.work.language,
+            lyrics_flag=detail.work.lyrics_flag,
+            instrumental_flag=detail.work.instrumental_flag,
+            genre_notes=detail.work.genre_notes,
+            iswc=detail.work.iswc,
+            registration_number=detail.work.registration_number,
+            work_status=detail.work.work_status,
+            metadata_complete=detail.work.metadata_complete,
+            contract_signed=detail.work.contract_signed,
+            rights_verified=detail.work.rights_verified,
+            notes=detail.work.notes,
+            profile_name=detail.work.profile_name,
+            contributors=[
+                WorkContributorPayload(
+                    role=item.role,
+                    name=str(item.display_name or ""),
+                    share_percent=item.share_percent,
+                    role_share_percent=item.role_share_percent,
+                    party_id=item.party_id,
+                    notes=item.notes,
+                )
+                for item in detail.contributors
+            ],
+            track_ids=list(detail.track_ids),
+        )
+
+    def _work_issues(self) -> list[QualityIssue]:
+        issues: list[QualityIssue] = []
+        for work in self.work_service.list_works():
+            detail = self.work_service.fetch_work_detail(work.id)
+            if detail is None:
+                continue
+            validation_issues = self.work_service.validate_work(
+                self._work_payload_from_detail(detail),
+                work_id=work.id,
+            )
+            for issue in validation_issues:
+                issue_type = {
+                    "contributors": "work_missing_creators",
+                    "share_percent": "invalid_work_split_total",
+                    "role_share_percent": "invalid_work_role_split_total",
+                    "iswc": "duplicate_work_iswc",
+                }.get(issue.field_name, "work_validation_issue")
+                issues.append(
+                    QualityIssue(
+                        issue_type,
+                        issue.severity,
+                        issue.message,
+                        issue.message,
+                        "work",
+                        work.id,
+                    )
+                )
+            if work.track_count == 0:
+                issues.append(
+                    QualityIssue(
+                        "orphaned_work_recording_link",
+                        "warning",
+                        "Work Has No Linked Recording",
+                        "This work is not currently linked to any track/recording.",
+                        "work",
+                        work.id,
+                    )
+                )
+
+        duplicate_rows = self.conn.execute(
+            """
+            SELECT iswc, GROUP_CONCAT(id, ',')
+            FROM Works
+            WHERE iswc IS NOT NULL AND trim(iswc) != ''
+            GROUP BY iswc
+            HAVING COUNT(*) > 1
+            """
+        ).fetchall()
+        for iswc, ids in duplicate_rows:
+            for work_id in [int(value) for value in str(ids or "").split(",") if value]:
+                issues.append(
+                    QualityIssue(
+                        "duplicate_work_iswc",
+                        "warning",
+                        "Duplicate Work ISWC",
+                        f"ISWC {iswc} appears on more than one work.",
+                        "work",
+                        work_id,
+                    )
+                )
+        track_rows = self.conn.execute(
+            """
+            SELECT id, track_title
+            FROM Tracks
+            WHERE (
+                COALESCE(iswc, '') != ''
+                OR COALESCE(composer, '') != ''
+                OR COALESCE(publisher, '') != ''
+                OR COALESCE(buma_work_number, '') != ''
+            )
+              AND NOT EXISTS (
+                  SELECT 1 FROM WorkTrackLinks wt WHERE wt.track_id = Tracks.id
+              )
+            ORDER BY id
+            """
+        ).fetchall()
+        for track_id, title in track_rows:
+            issues.append(
+                QualityIssue(
+                    "track_missing_linked_work",
+                    "warning",
+                    "Track Missing Linked Work",
+                    f"Track '{title}' contains composition metadata but is not linked to any first-class work record.",
+                    "track",
+                    int(track_id),
+                    track_id=int(track_id),
+                )
+            )
+        return issues
+
+    def _contract_issues(self) -> list[QualityIssue]:
+        issues: list[QualityIssue] = []
+        for contract in self.contract_service.list_contracts():
+            detail = self.contract_service.fetch_contract_detail(contract.id)
+            if detail is None:
+                continue
+            validation_issues = self.contract_service.validate_contract(
+                ContractPayload(
+                    title=contract.title,
+                    contract_type=contract.contract_type,
+                    draft_date=contract.draft_date,
+                    signature_date=contract.signature_date,
+                    effective_date=contract.effective_date,
+                    start_date=contract.start_date,
+                    end_date=contract.end_date,
+                    renewal_date=contract.renewal_date,
+                    notice_deadline=contract.notice_deadline,
+                    option_periods=contract.option_periods,
+                    reversion_date=contract.reversion_date,
+                    termination_date=contract.termination_date,
+                    status=contract.status,
+                    supersedes_contract_id=contract.supersedes_contract_id,
+                    superseded_by_contract_id=contract.superseded_by_contract_id,
+                    summary=contract.summary,
+                    notes=contract.notes,
+                    profile_name=contract.profile_name,
+                    parties=[
+                        ContractPartyPayload(
+                            party_id=item.party_id,
+                            name=item.party_name,
+                            role_label=item.role_label,
+                            is_primary=item.is_primary,
+                            notes=item.notes,
+                        )
+                        for item in detail.parties
+                    ],
+                    obligations=[
+                        ContractObligationPayload(
+                            obligation_id=item.id,
+                            obligation_type=item.obligation_type,
+                            title=item.title,
+                            due_date=item.due_date,
+                            follow_up_date=item.follow_up_date,
+                            reminder_date=item.reminder_date,
+                            completed=item.completed,
+                            completed_at=item.completed_at,
+                            notes=item.notes,
+                        )
+                        for item in detail.obligations
+                    ],
+                    documents=[
+                        ContractDocumentPayload(
+                            document_id=item.id,
+                            title=item.title,
+                            document_type=item.document_type,
+                            version_label=item.version_label,
+                            created_date=item.created_date,
+                            received_date=item.received_date,
+                            signed_status=item.signed_status,
+                            signed_by_all_parties=item.signed_by_all_parties,
+                            active_flag=item.active_flag,
+                            supersedes_document_id=item.supersedes_document_id,
+                            superseded_by_document_id=item.superseded_by_document_id,
+                            stored_path=item.file_path,
+                            filename=item.filename,
+                            checksum_sha256=item.checksum_sha256,
+                            notes=item.notes,
+                        )
+                        for item in detail.documents
+                    ],
+                    work_ids=list(detail.work_ids),
+                    track_ids=list(detail.track_ids),
+                    release_ids=list(detail.release_ids),
+                )
+            )
+            for issue in validation_issues:
+                issue_type = {
+                    "signature_date": "contract_missing_signature",
+                    "parties": "contract_missing_parties",
+                    "documents": "contract_document_chain_issue",
+                }.get(issue.field_name, "contract_validation_issue")
+                issues.append(
+                    QualityIssue(
+                        issue_type,
+                        issue.severity,
+                        issue.message,
+                        issue.message,
+                        "contract",
+                        contract.id,
+                    )
+                )
+            if not detail.parties:
+                issues.append(
+                    QualityIssue(
+                        "contract_missing_parties",
+                        "warning",
+                        "Contract Missing Parties",
+                        "Contract is not linked to any party records.",
+                        "contract",
+                        contract.id,
+                    )
+                )
+            if contract.status == "active" and not (
+                detail.work_ids or detail.track_ids or detail.release_ids
+            ):
+                issues.append(
+                    QualityIssue(
+                        "active_contract_missing_assets",
+                        "warning",
+                        "Active Contract Missing Linked Assets",
+                        "Active contract does not link to any works, tracks, or releases.",
+                        "contract",
+                        contract.id,
+                    )
+                )
+            if contract.status == "active" and not any(
+                doc.document_type == "signed_agreement"
+                and doc.active_flag
+                and doc.signed_by_all_parties
+                for doc in detail.documents
+            ):
+                issues.append(
+                    QualityIssue(
+                        "contract_missing_signed_final_document",
+                        "warning",
+                        "Contract Missing Signed Final Document",
+                        "Active contract does not have an active signed-agreement document marked as signed by all parties.",
+                        "contract",
+                        contract.id,
+                    )
+                )
+        for deadline in self.contract_service.upcoming_deadlines(within_days=45):
+            issues.append(
+                QualityIssue(
+                    "contract_upcoming_deadline",
+                    "warning",
+                    "Upcoming Contract Deadline",
+                    f"{deadline.date_field.replace('_', ' ').title()} is due on {deadline.due_date}.",
+                    "contract",
+                    deadline.contract_id,
+                )
+            )
+        expired_rows = self.conn.execute(
+            """
+            SELECT id, title, end_date
+            FROM Contracts
+            WHERE status='active'
+              AND end_date IS NOT NULL
+              AND trim(end_date) != ''
+              AND end_date < date('now')
+            ORDER BY end_date
+            """
+        ).fetchall()
+        for contract_id, title, end_date in expired_rows:
+            issues.append(
+                QualityIssue(
+                    "contract_expired",
+                    "warning",
+                    "Contract End Date Has Passed",
+                    f"Contract '{title}' ended on {end_date} but still has active status.",
+                    "contract",
+                    int(contract_id),
+                )
+            )
+        return issues
+
+    def _rights_issues(self) -> list[QualityIssue]:
+        issues: list[QualityIssue] = []
+        for right in self.rights_service.rights_missing_source_contract():
+            issues.append(
+                QualityIssue(
+                    "rights_missing_source_contract",
+                    "warning",
+                    "Rights Grant Missing Source Contract",
+                    "Active or exclusive rights grant is missing a source contract reference.",
+                    "right",
+                    right.id,
+                )
+            )
+        for conflict in self.rights_service.detect_conflicts():
+            issues.append(
+                QualityIssue(
+                    "overlapping_exclusive_rights",
+                    "error",
+                    "Overlapping Exclusive Rights",
+                    conflict.message,
+                    "right",
+                    conflict.left_right_id,
+                )
+            )
+        return issues
+
+    def _party_issues(self) -> list[QualityIssue]:
+        issues: list[QualityIssue] = []
+        for duplicate in self.party_service.detect_duplicates():
+            issues.append(
+                QualityIssue(
+                    "duplicate_party",
+                    "warning",
+                    "Duplicate or Ambiguous Party",
+                    duplicate.detail,
+                    "party",
+                    duplicate.left_party_id,
+                )
+            )
+        return issues
+
+    def _asset_registry_issues(self) -> list[QualityIssue]:
+        issues: list[QualityIssue] = []
+        for issue in self.asset_service.validate_assets():
+            issues.append(
+                QualityIssue(
+                    issue.issue_type,
+                    issue.severity,
+                    issue.message,
+                    issue.message,
+                    "asset",
+                    issue.asset_id,
+                )
+            )
+        return issues
+
+    def _repertoire_status_issues(self) -> list[QualityIssue]:
+        issues: list[QualityIssue] = []
+        for table_name, entity_type, title_column, status_column in (
+            ("Works", "work", "title", "work_status"),
+            ("Tracks", "track", "track_title", "repertoire_status"),
+            ("Releases", "release", "title", "repertoire_status"),
+        ):
+            rows = self.conn.execute(
+                f"""
+                SELECT id, COALESCE({title_column}, ''), COALESCE({status_column}, ''), metadata_complete
+                FROM {table_name}
+                WHERE COALESCE({status_column}, '') IN ('blocked', 'metadata_incomplete')
+                   OR metadata_complete = 0
+                ORDER BY id
+                """
+            ).fetchall()
+            for entity_id, title, status, metadata_complete in rows:
+                issues.append(
+                    QualityIssue(
+                        "repertoire_blocked_or_incomplete",
+                        "info" if str(status or "") == "blocked" else "warning",
+                        "Blocked or Incomplete Repertoire Item",
+                        (
+                            f"{entity_type.title()} '{title}' is marked as blocked."
+                            if str(status or "") == "blocked"
+                            else f"{entity_type.title()} '{title}' is still incomplete."
+                        ),
+                        entity_type,
+                        int(entity_id),
+                        release_id=int(entity_id) if entity_type == "release" else None,
+                        track_id=int(entity_id) if entity_type == "track" else None,
+                    )
+                )
+                if not metadata_complete:
+                    readiness = self.workflow_service.readiness_snapshot(
+                        entity_type, int(entity_id)
+                    )
+                    missing_checks = [
+                        key.replace("_", " ") for key, value in readiness.items() if value is False
+                    ]
+                    if missing_checks:
+                        issues.append(
+                            QualityIssue(
+                                "repertoire_readiness_gap",
+                                "warning",
+                                "Repertoire Readiness Gap",
+                                f"{entity_type.title()} '{title}' is missing: {', '.join(missing_checks)}.",
+                                entity_type,
+                                int(entity_id),
+                                release_id=int(entity_id) if entity_type == "release" else None,
+                                track_id=int(entity_id) if entity_type == "track" else None,
+                            )
+                        )
         return issues
 
     def export_csv(self, result: QualityScanResult, path: str | Path) -> None:

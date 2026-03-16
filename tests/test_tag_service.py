@@ -3,8 +3,12 @@ import unittest
 import wave
 from pathlib import Path
 
-from mutagen.id3 import ID3
-from mutagen.mp4 import MP4Cover
+try:
+    from mutagen.id3 import ID3
+    from mutagen.mp4 import MP4Cover
+except Exception:  # pragma: no cover - optional in constrained local test envs
+    ID3 = None
+    MP4Cover = None
 
 from isrc_manager.tags import (
     ArtworkPayload,
@@ -61,6 +65,7 @@ class _DummyMp4:
         self.saved = True
 
 
+@unittest.skipIf(ID3 is None or MP4Cover is None, "mutagen is not installed")
 class AudioTagServiceTests(unittest.TestCase):
     def setUp(self):
         self.service = AudioTagService()

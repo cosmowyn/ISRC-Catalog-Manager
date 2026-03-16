@@ -59,6 +59,17 @@ class DatabaseSchemaServiceTests(unittest.TestCase):
         self.assertIn("GS1TemplateStorage", tables)
         self.assertIn("Releases", tables)
         self.assertIn("ReleaseTracks", tables)
+        self.assertIn("Parties", tables)
+        self.assertIn("Works", tables)
+        self.assertIn("WorkContributors", tables)
+        self.assertIn("WorkTrackLinks", tables)
+        self.assertIn("Contracts", tables)
+        self.assertIn("ContractParties", tables)
+        self.assertIn("ContractObligations", tables)
+        self.assertIn("ContractDocuments", tables)
+        self.assertIn("RightsRecords", tables)
+        self.assertIn("AssetVersions", tables)
+        self.assertIn("SavedSearches", tables)
         self.assertIn("vw_Licenses", tables)
         self.assertIn("contract_number", gs1_columns)
         self.assertTrue({"blob_value", "mime_type", "size_bytes"} <= value_columns)
@@ -84,6 +95,10 @@ class DatabaseSchemaServiceTests(unittest.TestCase):
                 "publisher",
                 "comments",
                 "lyrics",
+                "repertoire_status",
+                "metadata_complete",
+                "contract_signed",
+                "rights_verified",
             }
             <= track_columns
         )
@@ -93,6 +108,43 @@ class DatabaseSchemaServiceTests(unittest.TestCase):
         self.assertIn("idx_gs1_metadata_export_enabled", gs1_indexes)
         self.assertIn("idx_gs1_metadata_contract_number", gs1_indexes)
         self.assertIn("trg_auditlog_no_update", triggers)
+
+    def test_migrate_20_to_21_adds_repertoire_tables(self):
+        conn = sqlite3.connect(":memory:")
+        try:
+            service = DatabaseSchemaService(conn)
+            service.init_db()
+            conn.execute("PRAGMA user_version = 20")
+            conn.execute("DROP TABLE IF EXISTS Parties")
+            conn.execute("DROP TABLE IF EXISTS Works")
+            conn.execute("DROP TABLE IF EXISTS Contracts")
+            conn.execute("DROP TABLE IF EXISTS RightsRecords")
+            conn.execute("DROP TABLE IF EXISTS AssetVersions")
+            conn.execute("DROP TABLE IF EXISTS SavedSearches")
+            conn.commit()
+
+            service.migrate_schema()
+
+            tables = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            self.assertTrue(
+                {
+                    "Parties",
+                    "Works",
+                    "Contracts",
+                    "RightsRecords",
+                    "AssetVersions",
+                    "SavedSearches",
+                }
+                <= tables
+            )
+            self.assertEqual(service.get_db_version(), SCHEMA_TARGET)
+        finally:
+            conn.close()
 
     def test_migrate_12_to_13_promotes_default_custom_fields(self):
         with tempfile.TemporaryDirectory() as tmpdir:

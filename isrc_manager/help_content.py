@@ -41,22 +41,27 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "threading",
         ),
         content_html="""
-        <p><strong>ISRC Catalog Manager</strong> is a local-first desktop application for managing track metadata, first-class releases, optional or generated ISRC values, licensing files, GS1 workbook metadata, custom metadata columns, backups, snapshots, audio tag workflows, exchange formats, and quality checks from one workspace.</p>
+        <p><strong>ISRC Catalog Manager</strong> is a local-first desktop application for managing track metadata, first-class releases, first-class musical works, contract lifecycle records, rights ownership, reusable party records, managed documents, deliverable variants, GS1 workbook metadata, custom metadata columns, backups, snapshots, audio tag workflows, exchange formats, and quality checks from one workspace.</p>
         <p>The app is organized around a few core ideas:</p>
         <ul>
           <li><strong>Profiles</strong>: each profile is a separate catalog database.</li>
           <li><strong>Add Data</strong>: the dockable form used to create new tracks.</li>
           <li><strong>Add Album</strong>: a structured dialog for entering shared album metadata once and then saving multiple track rows in one pass.</li>
           <li><strong>Releases</strong>: a first-class release/product layer that keeps UPC/EAN, catalog numbers, release artwork, release order, and product-level metadata together.</li>
+          <li><strong>Works</strong>: a composition layer that stays separate from recordings so multiple tracks can point back to the same musical work.</li>
+          <li><strong>Parties</strong>: reusable person/company records for songwriters, publishers, labels, licensees, and other counterparties.</li>
+          <li><strong>Contracts and rights</strong>: lifecycle-aware agreements, linked obligations, document versions, and explicit rights grants tied back to works, tracks, releases, and parties.</li>
+          <li><strong>Assets</strong>: managed deliverable and artwork variants with approval and primary-version tracking.</li>
           <li><strong>Catalog Table</strong>: the searchable table used to browse, preview, single-edit, and bulk-edit existing tracks.</li>
+          <li><strong>Global Search</strong>: a cross-entity search and relationship explorer for navigating linked records quickly.</li>
           <li><strong>Exchange</strong>: CSV, XLSX, JSON, XML, and packaged exports for sharing or archiving the catalog safely.</li>
-          <li><strong>Quality Dashboard</strong>: an actionable scan view for missing metadata, duplicate codes, broken media links, and other export-readiness issues.</li>
+          <li><strong>Quality Dashboard</strong>: an actionable scan view for missing metadata, duplicate codes, broken media links, work/rights/contract gaps, and other export-readiness issues.</li>
           <li><strong>Action Ribbon</strong>: a customizable top-row quick-action bar built from your preferred menu actions.</li>
           <li><strong>Background tasks</strong>: longer imports, exports, scans, snapshots, and maintenance jobs now run outside the UI thread so the window remains responsive.</li>
           <li><strong>Settings</strong>: application identity, registration settings, snapshots, and themes.</li>
           <li><strong>History</strong>: undo, redo, manual snapshots, and restore points.</li>
         </ul>
-        <p>The menu bar mirrors those workflows. <strong>File</strong> handles profiles and import/export tasks, <strong>Edit</strong> handles direct track actions, <strong>Catalog</strong> now includes releases, tag import, GS1 metadata, quality checks, and reusable catalog data such as artists, albums, and licensees, <strong>Settings</strong> handles app and profile configuration, <strong>View</strong> controls layout and columns, <strong>History</strong> manages undo/snapshots, and <strong>Help</strong> provides diagnostics, logs, and this manual.</p>
+        <p>The menu bar mirrors those workflows. <strong>File</strong> handles profiles and import/export tasks, <strong>Edit</strong> handles direct track actions, <strong>Catalog</strong> now includes releases, works, parties, contracts, rights, asset versions, global relationship search, tag import, GS1 metadata, quality checks, and reusable catalog data such as artists, albums, and licensees, <strong>Settings</strong> handles app and profile configuration, <strong>View</strong> controls layout and columns, <strong>History</strong> manages undo/snapshots, and <strong>Help</strong> provides diagnostics, logs, and this manual.</p>
         """,
     ),
     HelpChapter(
@@ -319,6 +324,38 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         """,
     ),
     HelpChapter(
+        chapter_id="repertoire-knowledge",
+        title="Works, Rights, and Contracts",
+        summary="How the extended repertoire model separates compositions from recordings and ties together parties, contracts, rights, documents, and deliverables.",
+        keywords=(
+            "works",
+            "compositions",
+            "contracts",
+            "rights",
+            "parties",
+            "documents",
+            "deliverables",
+            "assets",
+            "relationship explorer",
+        ),
+        content_html="""
+        <p>The app now models more than recordings and releases. It treats the broader catalog as a connected local knowledge system:</p>
+        <ul>
+          <li><strong>Works</strong>: compositions live separately from recordings. A work can store alternate titles, subtitle/version, language, lyrics/instrumental flags, genre/style notes, ISWC, local registration numbers, creator roles, shares, and notes.</li>
+          <li><strong>Work creators and splits</strong>: songwriter, composer, lyricist, arranger, adaptor, publisher, and subpublisher roles can all be recorded. Split totals are validated so share mistakes are easy to spot.</li>
+          <li><strong>Track-to-work links</strong>: one work can link to many recordings, and one recording can link back to more than one work where needed. Tracks and releases continue to keep their own recording/product metadata.</li>
+          <li><strong>Parties</strong>: reusable people and companies can be linked as writers, publishers, contract counterparties, licensors, licensees, and rights holders.</li>
+          <li><strong>Contracts</strong>: draft, signature, effective, start, end, renewal, notice, reversion, and termination dates are stored as structured fields. Contracts can link to works, tracks, releases, and parties.</li>
+          <li><strong>Obligations and reminders</strong>: delivery, approval, exclusivity, notice, follow-up, and reminder obligations can be stored per contract.</li>
+          <li><strong>Document intelligence</strong>: a contract can keep multiple managed documents such as drafts, signed agreements, amendments, appendices, exhibits, correspondence, and scans, with version labels and active/superseded relationships.</li>
+          <li><strong>Rights matrix</strong>: rights records store the right type, exclusivity, territory, media/use scope, dates, source contract, and who granted, received, or retained the right.</li>
+          <li><strong>Assets and deliverables</strong>: tracks and releases can keep primary masters, alternates, derivatives, artwork variants, and approval state in one registry.</li>
+          <li><strong>Global Search and Relationships…</strong>: search across the full model and inspect everything linked to the selected record from one panel.</li>
+        </ul>
+        <p>This richer model is intentionally local-first and catalog-focused. It does <strong>not</strong> turn the app into a royalty accounting or release-pitching platform.</p>
+        """,
+    ),
+    HelpChapter(
         chapter_id="exchange-formats",
         title="Exchange Formats",
         summary="CSV, XLSX, JSON, XML, and packaged export/import workflows.",
@@ -343,6 +380,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Import modes</strong>: dry-run validation, create new rows, merge into existing matches, update existing matches only, or insert-new-when-duplicate-exists.</li>
           <li><strong>Matching options</strong>: internal ID, ISRC, UPC/EAN plus title, and optional title/artist heuristics.</li>
           <li><strong>JSON schema versioning</strong>: exported JSON includes an explicit schema version so future migrations stay manageable.</li>
+          <li><strong>Repertoire Exchange</strong>: a separate import/export workflow now covers parties, works, contracts, rights, asset versions, and their relationship references as JSON, XLSX, CSV bundles, or ZIP packages with managed files.</li>
         </ul>
         <p>Binary media is exported by file reference in plain tabular formats. ZIP package exports also copy referenced media into the package so the export remains portable without embedding raw blobs into CSV or XLSX, and those ZIP packages can be imported back into the app directly.</p>
         <p>Inspection, import, export, ZIP creation, and ZIP extraction now run in the background so larger exchange workflows stay responsive while they work.</p>
@@ -365,9 +403,9 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         <p>The <strong>Data Quality Dashboard</strong> scans the active profile for actionable issues and groups them by severity and rule type.</p>
         <ul>
           <li><strong>Headline counts</strong>: total issues plus error, warning, and informational totals.</li>
-          <li><strong>Rule coverage</strong>: missing or duplicate ISRCs, missing or duplicate release UPC/EANs, invalid barcode checksums, missing titles/artists/dates, missing artwork, broken media references, ordering issues, orphaned licenses, and required custom-field gaps where rules exist.</li>
+          <li><strong>Rule coverage</strong>: missing or duplicate ISRCs, missing or duplicate release UPC/EANs, invalid barcode checksums, missing titles/artists/dates, missing artwork, broken media references, ordering issues, orphaned licenses, required custom-field gaps, works without creators, invalid split totals, duplicate ISWC values, contract deadline risks, contracts without signed final documents, active rights without source contracts, overlapping exclusive rights, duplicate parties, missing linked works, broken asset references, missing approved masters, and blocked/incomplete repertoire states.</li>
           <li><strong>Filters</strong>: narrow the current issue list by severity, issue type, entity type, or release.</li>
-          <li><strong>Open Record</strong>: jump directly to the affected track or release editor from the selected issue row.</li>
+          <li><strong>Open Record</strong>: jump directly to the affected track or release editor from the selected issue row, then use the related managers and search tools to inspect linked works, contracts, rights, parties, and assets.</li>
           <li><strong>Suggested fixes</strong>: regenerate derived values, normalize date formats, relink missing media by filename, or fill blank track values from linked release metadata where appropriate.</li>
           <li><strong>Export</strong>: save the current issue list to CSV or JSON for reporting or offline cleanup planning.</li>
         </ul>
