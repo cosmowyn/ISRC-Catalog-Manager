@@ -1114,7 +1114,11 @@ class GS1MetadataDialog(QDialog):
         base_name = (
             self._current_group().display_title if not batch else f"selection_{len(self._groups)}"
         )
-        suffix = self._template_profile.template_suffix if self._template_profile is not None else ".xlsx"
+        suffix = (
+            self._template_profile.template_suffix
+            if self._template_profile is not None
+            else ".xlsx"
+        )
         if suffix.lower() not in {".xlsx", ".xlsm", ".xltx", ".xltm"}:
             suffix = ".xlsx"
         filename = (
