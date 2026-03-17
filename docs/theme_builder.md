@@ -47,7 +47,7 @@ The Theme page is split into:
 
 ## Live Preview
 
-The Theme page includes dedicated preview tabs with real controls. You can:
+The Theme page includes dedicated preview panes with real controls. The preview automatically follows the active builder section so you only see the relevant control family instead of one crowded all-in-one sample. You can:
 
 - hover and click buttons
 - focus fields

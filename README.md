@@ -154,7 +154,7 @@ The application provides:
   - inputs, focus styling, placeholders, and checkbox/radio indicators
   - tables, lists, selections, row hover states, scrollbars, progress bars, menus, and tabs
   - geometry such as font sizes, border widths, corner radii, control padding, help-button sizing, and scrollbar thickness
-- The builder includes live preview tabs inside the settings dialog, plus an optional app-wide live preview mode while editing.
+- The builder includes focused live preview panes inside the settings dialog that automatically switch with the active theme section, plus an optional app-wide live preview mode while editing.
 - Theme drafts can be saved to the internal theme library, exported to JSON, and imported back into another install.
 - Advanced QSS remains available for the remaining edge cases and is backed by a searchable selector catalog and syntax-aware autocomplete.
 - More detail is available in [docs/theme_builder.md](docs/theme_builder.md).

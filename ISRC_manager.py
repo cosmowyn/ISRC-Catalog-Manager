@@ -1022,6 +1022,7 @@ class ApplicationSettingsDialog(QDialog):
         theme_preview_layout.addWidget(self.theme_preview_status_label)
         self.theme_preview_tabs = QTabWidget(theme_preview_host)
         self.theme_preview_tabs.setDocumentMode(True)
+        self.theme_preview_tabs.tabBar().hide()
         theme_preview_layout.addWidget(self.theme_preview_tabs, 1)
         self._build_theme_preview_tabs()
 
@@ -1187,12 +1188,14 @@ class ApplicationSettingsDialog(QDialog):
         return grouped
 
     def _build_theme_builder_tabs(self) -> None:
+        self._theme_builder_page_keys = []
         for page_key, page_title, page_description in self.THEME_PAGE_SPECS:
             if page_key == "advanced":
                 page = self._build_theme_advanced_page()
             else:
                 page = self._build_theme_builder_page(page_key, page_description)
             self.theme_builder_tabs.addTab(page, page_title)
+            self._theme_builder_page_keys.append(page_key)
 
     def _build_theme_builder_page(self, page_key: str, description: str) -> QWidget:
         page = QWidget(self)
@@ -1369,72 +1372,193 @@ class ApplicationSettingsDialog(QDialog):
 
     def _build_theme_preview_tabs(self) -> None:
         self._theme_preview_roots = []
-        self.theme_preview_tabs.addTab(
-            self._build_theme_preview_controls_page(), "Dialogs & Controls"
-        )
-        self.theme_preview_tabs.addTab(
-            self._build_theme_preview_data_page(), "Data Views & Navigation"
-        )
+        self._theme_preview_tab_indices = {}
+        self._theme_preview_labels = {
+            "typography": "Typography",
+            "surfaces": "Surfaces",
+            "buttons": "Buttons",
+            "inputs": "Inputs",
+            "data_views": "Data Views",
+            "navigation": "Navigation",
+            "advanced": "Advanced QSS",
+        }
+        preview_factories = {
+            "typography": self._build_theme_preview_typography_page,
+            "surfaces": self._build_theme_preview_surfaces_page,
+            "buttons": self._build_theme_preview_buttons_page,
+            "inputs": self._build_theme_preview_inputs_page,
+            "data_views": self._build_theme_preview_data_views_page,
+            "navigation": self._build_theme_preview_navigation_page,
+            "advanced": self._build_theme_preview_advanced_page,
+        }
+        for page_key, _page_title, _page_description in self.THEME_PAGE_SPECS:
+            preview_page = preview_factories[page_key]()
+            preview_index = self.theme_preview_tabs.addTab(
+                preview_page, self._theme_preview_labels[page_key]
+            )
+            self._theme_preview_tab_indices[page_key] = preview_index
+        self.theme_builder_tabs.currentChanged.connect(self._sync_theme_preview_to_builder_tab)
+        self._sync_theme_preview_to_builder_tab(self.theme_builder_tabs.currentIndex())
         self._refresh_theme_previews()
 
-    def _build_theme_preview_controls_page(self) -> QWidget:
+    def _create_theme_preview_page(self, object_name: str) -> tuple[QWidget, QWidget, QVBoxLayout]:
         page = QWidget(self)
         page_layout = QVBoxLayout(page)
         page_layout.setContentsMargins(0, 0, 0, 0)
         page_layout.setSpacing(0)
 
         preview_root = QWidget(page)
-        preview_root.setObjectName("themePreviewControlsRoot")
+        preview_root.setObjectName(object_name)
         preview_root.setProperty("role", "panel")
         layout = QVBoxLayout(preview_root)
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(12)
 
-        hero_box = QGroupBox("Dialog Preview", preview_root)
+        page_layout.addWidget(self._wrap_tab_page(preview_root), 1)
+        self._theme_preview_roots.append(preview_root)
+        return page, preview_root, layout
+
+    def _build_theme_preview_typography_page(self) -> QWidget:
+        page, preview_root, layout = self._create_theme_preview_page("themePreviewTypographyRoot")
+
+        hero_box = QGroupBox("Text Hierarchy", preview_root)
         hero_layout = QVBoxLayout(hero_box)
         hero_layout.setContentsMargins(14, 18, 14, 14)
         hero_layout.setSpacing(8)
         title = QLabel("Theme Builder Preview", hero_box)
         title.setProperty("role", "dialogTitle")
         subtitle = QLabel(
-            "This mirrors standard dialog titles, support text, and grouped sections used throughout the app.",
+            "Review how the selected font and size scale across titles, subtitles, body text, and support text.",
             hero_box,
         )
         subtitle.setProperty("role", "dialogSubtitle")
         subtitle.setWordWrap(True)
         hero_layout.addWidget(title)
         hero_layout.addWidget(subtitle)
-        supporting = QLabel(
-            "Hover the buttons, focus the fields, switch the check states, and inspect the disabled controls.",
+        section_title = QLabel("Section Title Example", hero_box)
+        section_title.setProperty("role", "sectionTitle")
+        hero_layout.addWidget(section_title)
+        body = QLabel(
+            "Body text stays readable across the application and should remain comfortable for long metadata sessions.",
             hero_box,
         )
-        supporting.setProperty("role", "secondary")
-        supporting.setWordWrap(True)
-        hero_layout.addWidget(supporting)
+        body.setWordWrap(True)
+        hero_layout.addWidget(body)
+        secondary = QLabel(
+            "Secondary text, metadata captions, and helper text use a softer hierarchy without feeling disconnected.",
+            hero_box,
+        )
+        secondary.setProperty("role", "secondary")
+        secondary.setWordWrap(True)
+        hero_layout.addWidget(secondary)
+        hint = QLabel("Hint text sample used under forms and grouped settings.", hero_box)
+        hint.setProperty("role", "hint")
+        hint.setWordWrap(True)
+        hero_layout.addWidget(hint)
         layout.addWidget(hero_box)
 
-        button_box = QGroupBox("Buttons & Help", preview_root)
-        button_layout = QHBoxLayout(button_box)
+        controls_box = QGroupBox("Text In Controls", preview_root)
+        controls_layout = QVBoxLayout(controls_box)
+        controls_layout.setContentsMargins(14, 18, 14, 14)
+        controls_layout.setSpacing(10)
+        control_row = QWidget(controls_box)
+        control_row_layout = QHBoxLayout(control_row)
+        control_row_layout.setContentsMargins(0, 0, 0, 0)
+        control_row_layout.setSpacing(10)
+        line_edit = QLineEdit("Line edit text preview", control_row)
+        combo = FocusWheelComboBox(control_row)
+        combo.addItems(["Font sample", "Secondary sample", "Compact sample"])
+        combo.setCurrentIndex(0)
+        button = QPushButton("Button Label", control_row)
+        control_row_layout.addWidget(line_edit, 2)
+        control_row_layout.addWidget(combo, 1)
+        control_row_layout.addWidget(button)
+        controls_layout.addWidget(control_row)
+        layout.addWidget(controls_box)
+        layout.addStretch(1)
+        return page
+
+    def _build_theme_preview_surfaces_page(self) -> QWidget:
+        page, preview_root, layout = self._create_theme_preview_page("themePreviewSurfacesRoot")
+
+        primary_panel = QGroupBox("Primary Surface", preview_root)
+        primary_layout = QVBoxLayout(primary_panel)
+        primary_layout.setContentsMargins(14, 18, 14, 14)
+        primary_layout.setSpacing(8)
+        primary_layout.addWidget(
+            QLabel("Panels, borders, and helper text are previewed here.", primary_panel)
+        )
+        secondary = QLabel(
+            "Adjust surface colors, panel backgrounds, borders, overlays, tooltips, and supporting text without unrelated controls crowding the preview.",
+            primary_panel,
+        )
+        secondary.setProperty("role", "secondary")
+        secondary.setWordWrap(True)
+        primary_layout.addWidget(secondary)
+        layout.addWidget(primary_panel)
+
+        secondary_panel = QGroupBox("Secondary Surface", preview_root)
+        secondary_layout = QVBoxLayout(secondary_panel)
+        secondary_layout.setContentsMargins(14, 18, 14, 14)
+        secondary_layout.setSpacing(8)
+        hint = QLabel("Hint text example", secondary_panel)
+        hint.setProperty("role", "hint")
+        secondary_layout.addWidget(hint)
+        overlay = QLabel("Overlay hint example", secondary_panel)
+        overlay.setProperty("role", "overlayHint")
+        overlay.setAlignment(Qt.AlignCenter)
+        secondary_layout.addWidget(overlay, 0, Qt.AlignLeft)
+        layout.addWidget(secondary_panel)
+        layout.addStretch(1)
+        return page
+
+    def _build_theme_preview_buttons_page(self) -> QWidget:
+        page, preview_root, layout = self._create_theme_preview_page("themePreviewButtonsRoot")
+
+        button_box = QGroupBox("Button States", preview_root)
+        button_layout = QVBoxLayout(button_box)
         button_layout.setContentsMargins(14, 18, 14, 14)
         button_layout.setSpacing(10)
-        normal_btn = QPushButton("Primary Action", button_box)
-        tool_btn = QToolButton(button_box)
-        tool_btn.setText("Checked")
-        tool_btn.setCheckable(True)
-        tool_btn.setChecked(True)
-        disabled_btn = QPushButton("Disabled", button_box)
+        top_row = QWidget(button_box)
+        top_row_layout = QHBoxLayout(top_row)
+        top_row_layout.setContentsMargins(0, 0, 0, 0)
+        top_row_layout.setSpacing(10)
+        normal_btn = QPushButton("Primary Action", top_row)
+        checked_btn = QToolButton(top_row)
+        checked_btn.setText("Checked")
+        checked_btn.setCheckable(True)
+        checked_btn.setChecked(True)
+        disabled_btn = QPushButton("Disabled", top_row)
         disabled_btn.setEnabled(False)
-        help_btn = _create_round_help_button(self, "theme-settings")
-        help_btn.setParent(button_box)
-        help_btn.setToolTip("Round help button preview")
-        button_layout.addWidget(normal_btn)
-        button_layout.addWidget(tool_btn)
-        button_layout.addWidget(disabled_btn)
-        button_layout.addWidget(help_btn)
-        button_layout.addStretch(1)
-        layout.addWidget(button_box)
+        top_row_layout.addWidget(normal_btn)
+        top_row_layout.addWidget(checked_btn)
+        top_row_layout.addWidget(disabled_btn)
+        top_row_layout.addStretch(1)
+        button_layout.addWidget(top_row)
 
-        editor_box = QGroupBox("Editors & Indicators", preview_root)
+        help_row = QWidget(button_box)
+        help_row_layout = QHBoxLayout(help_row)
+        help_row_layout.setContentsMargins(0, 0, 0, 0)
+        help_row_layout.setSpacing(10)
+        help_btn = _create_round_help_button(self, "theme-settings")
+        help_btn.setParent(help_row)
+        help_btn.setToolTip("Round help button preview")
+        help_disabled = _create_round_help_button(self, "settings")
+        help_disabled.setParent(help_row)
+        help_disabled.setEnabled(False)
+        help_row_layout.addWidget(QLabel("Round Help Buttons", help_row))
+        help_row_layout.addWidget(help_btn)
+        help_row_layout.addWidget(help_disabled)
+        help_row_layout.addStretch(1)
+        button_layout.addWidget(help_row)
+        layout.addWidget(button_box)
+        layout.addStretch(1)
+        return page
+
+    def _build_theme_preview_inputs_page(self) -> QWidget:
+        page, preview_root, layout = self._create_theme_preview_page("themePreviewInputsRoot")
+
+        editor_box = QGroupBox("Editors", preview_root)
         editor_grid = QGridLayout(editor_box)
         self._configure_grid(editor_grid)
         preview_line_edit = QLineEdit("Focused line edit", editor_box)
@@ -1447,14 +1571,12 @@ class ApplicationSettingsDialog(QDialog):
         preview_spin.setValue(42)
         disabled_edit = QLineEdit("Disabled", editor_box)
         disabled_edit.setEnabled(False)
-        preview_check = QCheckBox("Checked checkbox", editor_box)
-        preview_check.setChecked(True)
-        preview_radio = QRadioButton("Radio option", editor_box)
-        preview_radio.setChecked(True)
         editor_grid.addWidget(self._make_label("Line Edit"), 0, 0)
         editor_grid.addWidget(preview_line_edit, 0, 1)
         editor_grid.addWidget(
-            self._make_hint("Use this field to test focus, placeholder, and border styling."), 0, 2
+            self._make_hint("Use this field to test focus, placeholder, and border styling."),
+            0,
+            2,
         )
         editor_grid.addWidget(self._make_label("Combo Box"), 1, 0)
         editor_grid.addWidget(preview_combo, 1, 1)
@@ -1479,80 +1601,29 @@ class ApplicationSettingsDialog(QDialog):
             3,
             2,
         )
-        indicator_row = QWidget(editor_box)
-        indicator_layout = QHBoxLayout(indicator_row)
-        indicator_layout.setContentsMargins(0, 0, 0, 0)
-        indicator_layout.setSpacing(12)
-        indicator_layout.addWidget(preview_check)
-        indicator_layout.addWidget(preview_radio)
-        indicator_disabled = QCheckBox("Disabled", indicator_row)
-        indicator_disabled.setEnabled(False)
-        indicator_layout.addWidget(indicator_disabled)
-        indicator_layout.addStretch(1)
-        editor_grid.addWidget(self._make_label("Indicators"), 4, 0)
-        editor_grid.addWidget(indicator_row, 4, 1)
-        editor_grid.addWidget(
-            self._make_hint(
-                "Checkboxes and radio buttons use the indicator palette and size controls."
-            ),
-            4,
-            2,
-        )
         layout.addWidget(editor_box)
 
-        note_box = QGroupBox("Support Text & Overlay", preview_root)
-        note_layout = QVBoxLayout(note_box)
-        note_layout.setContentsMargins(14, 18, 14, 14)
-        note_layout.setSpacing(8)
-        hint = QLabel(
-            "Hint text stays softer than primary labels and is used throughout the app for instructions.",
-            note_box,
-        )
-        hint.setProperty("role", "hint")
-        hint.setWordWrap(True)
-        note_layout.addWidget(hint)
-        overlay = QLabel("Overlay hint example", note_box)
-        overlay.setProperty("role", "overlayHint")
-        overlay.setAlignment(Qt.AlignCenter)
-        note_layout.addWidget(overlay, 0, Qt.AlignLeft)
-        layout.addWidget(note_box)
+        indicator_box = QGroupBox("Indicators", preview_root)
+        indicator_layout = QHBoxLayout(indicator_box)
+        indicator_layout.setContentsMargins(14, 18, 14, 14)
+        indicator_layout.setSpacing(12)
+        preview_check = QCheckBox("Checked checkbox", indicator_box)
+        preview_check.setChecked(True)
+        preview_radio = QRadioButton("Radio option", indicator_box)
+        preview_radio.setChecked(True)
+        indicator_disabled = QCheckBox("Disabled", indicator_box)
+        indicator_disabled.setEnabled(False)
+        indicator_layout.addWidget(preview_check)
+        indicator_layout.addWidget(preview_radio)
+        indicator_layout.addWidget(indicator_disabled)
+        indicator_layout.addStretch(1)
+        layout.addWidget(indicator_box)
         layout.addStretch(1)
-
-        page_layout.addWidget(self._wrap_tab_page(preview_root), 1)
-        self._theme_preview_roots.append(preview_root)
         preview_line_edit.setFocus(Qt.OtherFocusReason)
         return page
 
-    def _build_theme_preview_data_page(self) -> QWidget:
-        page = QWidget(self)
-        page_layout = QVBoxLayout(page)
-        page_layout.setContentsMargins(0, 0, 0, 0)
-        page_layout.setSpacing(0)
-
-        preview_root = QWidget(page)
-        preview_root.setObjectName("themePreviewDataRoot")
-        preview_root.setProperty("role", "panel")
-        layout = QVBoxLayout(preview_root)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(12)
-
-        menu_box = QGroupBox("Navigation Preview", preview_root)
-        menu_layout = QVBoxLayout(menu_box)
-        menu_layout.setContentsMargins(14, 18, 14, 14)
-        menu_layout.setSpacing(8)
-        preview_menu_bar = QMenuBar(menu_box)
-        preview_file_menu = preview_menu_bar.addMenu("File")
-        preview_file_menu.addAction("New")
-        preview_file_menu.addAction("Open")
-        preview_view_menu = preview_menu_bar.addMenu("View")
-        preview_view_menu.addAction("Theme")
-        menu_layout.addWidget(preview_menu_bar)
-        preview_tabs = QTabWidget(menu_box)
-        preview_tabs.setDocumentMode(True)
-        preview_tabs.addTab(QLabel("Selected tab content", preview_tabs), "Selected")
-        preview_tabs.addTab(QLabel("Inactive tab content", preview_tabs), "Other Tab")
-        menu_layout.addWidget(preview_tabs)
-        layout.addWidget(menu_box)
+    def _build_theme_preview_data_views_page(self) -> QWidget:
+        page, preview_root, layout = self._create_theme_preview_page("themePreviewDataViewsRoot")
 
         data_box = QGroupBox("Tables, Lists & Progress", preview_root)
         data_layout = QVBoxLayout(data_box)
@@ -1584,7 +1655,7 @@ class ApplicationSettingsDialog(QDialog):
         preview_list.setMinimumHeight(120)
         browser = QTextBrowser(list_row)
         browser.setPlainText(
-            "Text browsers and previews inherit the input palette, border geometry, and selection styling."
+            "Text browsers and previews inherit the table/list palette and selection styling."
         )
         browser.setMinimumHeight(120)
         list_row_layout.addWidget(preview_list, 1)
@@ -1596,10 +1667,95 @@ class ApplicationSettingsDialog(QDialog):
         data_layout.addWidget(progress)
         layout.addWidget(data_box)
         layout.addStretch(1)
-
-        page_layout.addWidget(self._wrap_tab_page(preview_root), 1)
-        self._theme_preview_roots.append(preview_root)
         return page
+
+    def _build_theme_preview_navigation_page(self) -> QWidget:
+        page, preview_root, layout = self._create_theme_preview_page("themePreviewNavigationRoot")
+
+        menu_box = QGroupBox("Menus & Tabs", preview_root)
+        menu_layout = QVBoxLayout(menu_box)
+        menu_layout.setContentsMargins(14, 18, 14, 14)
+        menu_layout.setSpacing(8)
+        preview_menu_bar = QMenuBar(menu_box)
+        preview_file_menu = preview_menu_bar.addMenu("File")
+        preview_file_menu.addAction("New")
+        preview_file_menu.addAction("Open")
+        preview_view_menu = preview_menu_bar.addMenu("View")
+        preview_view_menu.addAction("Theme")
+        menu_layout.addWidget(preview_menu_bar)
+        preview_tabs = QTabWidget(menu_box)
+        preview_tabs.setDocumentMode(True)
+        preview_tabs.addTab(QLabel("Selected tab content", preview_tabs), "Selected")
+        preview_tabs.addTab(QLabel("Inactive tab content", preview_tabs), "Other Tab")
+        menu_layout.addWidget(preview_tabs)
+        layout.addWidget(menu_box)
+
+        header_box = QGroupBox("Headers", preview_root)
+        header_layout = QVBoxLayout(header_box)
+        header_layout.setContentsMargins(14, 18, 14, 14)
+        header_layout.setSpacing(8)
+        header_table = QTableWidget(2, 2, header_box)
+        header_table.setHorizontalHeaderLabels(["Column", "Value"])
+        header_table.verticalHeader().setVisible(False)
+        header_table.setItem(0, 0, QTableWidgetItem("Status"))
+        header_table.setItem(0, 1, QTableWidgetItem("Active"))
+        header_table.setItem(1, 0, QTableWidgetItem("Owner"))
+        header_table.setItem(1, 1, QTableWidgetItem("Cosmowyn Records"))
+        header_layout.addWidget(header_table)
+        layout.addWidget(header_box)
+        layout.addStretch(1)
+        return page
+
+    def _build_theme_preview_advanced_page(self) -> QWidget:
+        page, preview_root, layout = self._create_theme_preview_page("themePreviewAdvancedRoot")
+
+        advanced_box = QGroupBox("Selector Playground", preview_root)
+        advanced_layout = QVBoxLayout(advanced_box)
+        advanced_layout.setContentsMargins(14, 18, 14, 14)
+        advanced_layout.setSpacing(8)
+        intro = QLabel(
+            "Use this compact playground while writing Advanced QSS. The preview follows the advanced tab so you can test selectors without the other theme categories crowding the pane.",
+            advanced_box,
+        )
+        intro.setProperty("role", "secondary")
+        intro.setWordWrap(True)
+        advanced_layout.addWidget(intro)
+        playground_row = QWidget(advanced_box)
+        playground_row.setObjectName("themePreviewPlayground")
+        playground_layout = QHBoxLayout(playground_row)
+        playground_layout.setContentsMargins(0, 0, 0, 0)
+        playground_layout.setSpacing(10)
+        advanced_button = QPushButton("Preview Button", playground_row)
+        advanced_button.setObjectName("themePreviewButton")
+        advanced_input = QLineEdit("Preview Field", playground_row)
+        advanced_input.setObjectName("themePreviewField")
+        advanced_help = _create_round_help_button(self, "theme-settings")
+        advanced_help.setParent(playground_row)
+        advanced_help.setObjectName("themePreviewHelpButton")
+        playground_layout.addWidget(advanced_button)
+        playground_layout.addWidget(advanced_input, 1)
+        playground_layout.addWidget(advanced_help)
+        advanced_layout.addWidget(playground_row)
+        selector_hint = QLabel(
+            "Example object names: `#themePreviewButton`, `#themePreviewField`, `#themePreviewHelpButton`, and `#themePreviewPlayground QPushButton`.",
+            advanced_box,
+        )
+        selector_hint.setProperty("role", "hint")
+        selector_hint.setWordWrap(True)
+        advanced_layout.addWidget(selector_hint)
+        layout.addWidget(advanced_box)
+        layout.addStretch(1)
+        return page
+
+    def _sync_theme_preview_to_builder_tab(self, index: int) -> None:
+        if not hasattr(self, "_theme_builder_page_keys") or not self._theme_builder_page_keys:
+            return
+        if index < 0 or index >= len(self._theme_builder_page_keys):
+            index = 0
+        page_key = self._theme_builder_page_keys[index]
+        preview_index = self._theme_preview_tab_indices.get(page_key, 0)
+        self.theme_preview_tabs.setCurrentIndex(preview_index)
+        self._queue_theme_preview_update()
 
     def _queue_theme_preview_update(self, *_args) -> None:
         if not self._theme_change_tracking_enabled:
@@ -1615,15 +1771,19 @@ class ApplicationSettingsDialog(QDialog):
         for widget in getattr(self, "_theme_preview_roots", []):
             widget.setStyleSheet(stylesheet)
             _repolish_qss_widget_tree(widget)
-        effective = build_effective_theme_settings(theme_values)
+        current_preview_name = self.theme_preview_tabs.tabText(
+            self.theme_preview_tabs.currentIndex()
+        )
         self.theme_preview_status_label.setText(
-            "Previewing "
+            "Showing the "
+            + current_preview_name.lower()
+            + " preview for "
             + (
                 f"saved theme '{self._current_theme_preset_name()}'"
                 if self._current_theme_preset_name()
                 else "the current custom draft"
             )
-            + f" with {len(self._theme_color_edits)} color slots and {len(self._theme_metric_spins)} geometry/typography controls."
+            + f". {len(self._theme_color_edits)} color slots and {len(self._theme_metric_spins)} geometry/typography controls are available in the builder."
         )
         if self.theme_live_preview_check.isChecked():
             self._apply_live_theme_preview(theme_values)

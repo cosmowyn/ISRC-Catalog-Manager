@@ -162,6 +162,62 @@ class ThemeBuilderTests(unittest.TestCase):
             dialog.close()
             host.close()
 
+    def test_theme_preview_switches_with_active_builder_tab(self):
+        host = _ThemePreviewHost()
+        dialog = app_module.ApplicationSettingsDialog(
+            window_title="Catalog",
+            icon_path="",
+            artist_code="00",
+            auto_snapshot_enabled=True,
+            auto_snapshot_interval_minutes=30,
+            isrc_prefix="NLABC",
+            sena_number="",
+            btw_number="",
+            buma_relatie_nummer="",
+            buma_ipi="",
+            gs1_template_asset=None,
+            gs1_contracts_csv_path="",
+            gs1_contract_entries=(),
+            gs1_active_contract_number="",
+            gs1_target_market="",
+            gs1_language="",
+            gs1_brand="",
+            gs1_subbrand="",
+            gs1_packaging_type="",
+            gs1_product_classification="",
+            theme_settings={},
+            stored_themes={},
+            current_profile_path="",
+            parent=host,
+        )
+        try:
+            buttons_index = next(
+                index
+                for index in range(dialog.theme_builder_tabs.count())
+                if dialog.theme_builder_tabs.tabText(index) == "Buttons"
+            )
+            dialog.theme_builder_tabs.setCurrentIndex(buttons_index)
+            self.app.processEvents()
+            self.assertEqual(
+                dialog.theme_preview_tabs.tabText(dialog.theme_preview_tabs.currentIndex()),
+                "Buttons",
+            )
+
+            inputs_index = next(
+                index
+                for index in range(dialog.theme_builder_tabs.count())
+                if dialog.theme_builder_tabs.tabText(index) == "Inputs"
+            )
+            dialog.theme_builder_tabs.setCurrentIndex(inputs_index)
+            self.app.processEvents()
+            self.assertEqual(
+                dialog.theme_preview_tabs.tabText(dialog.theme_preview_tabs.currentIndex()),
+                "Inputs",
+            )
+        finally:
+            dialog.close()
+            host.close()
+
     def test_live_preview_and_theme_export_import_round_trip(self):
         host = _ThemePreviewHost()
         dialog = app_module.ApplicationSettingsDialog(

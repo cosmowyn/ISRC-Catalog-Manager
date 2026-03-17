@@ -515,7 +515,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Inputs</strong>: control editor backgrounds, focus styling, disabled states, placeholders, and checkbox/radio indicators.</li>
           <li><strong>Data Views</strong>: theme tables, lists, row hover states, selections, scrollbars, and progress bars.</li>
           <li><strong>Navigation</strong>: theme menu bars, popup menus, dock titles, headers, and tabs with separate normal, hover, and selected states.</li>
-          <li><strong>Live Preview</strong>: preview the current draft inside the settings dialog, or enable real-time app-wide preview while editing and revert automatically on cancel.</li>
+          <li><strong>Live Preview</strong>: preview the current draft inside the settings dialog with a focused preview that follows the active theme section, or enable real-time app-wide preview while editing and revert automatically on cancel.</li>
           <li><strong>Advanced QSS</strong>: append custom Qt stylesheet rules only for the remaining edge cases that are not already covered by the GUI builder.</li>
           <li><strong>Selector Reference</strong>: browse a searchable catalog of selectors harvested from the currently open windows and dialogs, then copy or insert them into the QSS editor.</li>
           <li><strong>Autocomplete</strong>: press <strong>Ctrl+Space</strong> inside the advanced QSS editor for context-aware selector, pseudo-state, subcontrol, property, value, and full-template completion.</li>
