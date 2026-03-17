@@ -68,6 +68,24 @@ Create and maintain:
 
 The main catalog table supports fast searching, bulk selection, bulk edit, contextual actions, and direct handoff into related workflows.
 
+### A docked catalog workspace instead of popup juggling
+
+The app now treats the most track-table-dependent catalog tools as part of the main workspace rather than forcing you through a chain of blocking popups.
+
+Docked workspace panels include:
+
+- Release Browser
+- Work Manager
+- Catalog Managers
+- License Browser
+- Party Manager
+- Contract Manager
+- Rights Matrix
+- Deliverables and Asset Versions
+- Global Search and Relationships
+
+These panels open as tabbed workspace surfaces alongside the main catalog table so you can keep browsing tracks, changing selections, filtering the table, opening related records, and moving between catalog tools without closing one window to use the next.
+
 ### Works, rights, contracts, and parties
 
 The app models repertoire beyond recordings:
@@ -81,6 +99,8 @@ The app models repertoire beyond recordings:
 - conflict checks for overlapping exclusivity and missing source contracts
 
 This gives independent artists and labels a practical way to keep legal and operational context tied directly to the catalog.
+
+Just as importantly, those richer catalog surfaces are no longer isolated from the rest of the workflow. The managers for releases, works, parties, contracts, rights, assets, licenses, and global relationships can stay open as docked tabs while you continue working in the track table.
 
 ### Asset and deliverable management
 
@@ -195,6 +215,8 @@ Use the Add Data panel for single tracks or Add Album for grouped releases. Atta
 
 Create releases, works, parties, contracts, rights, and asset versions as first-class records. Link them across the catalog so tracks, compositions, agreements, and deliverables stay connected.
 
+Use the docked Catalog workspace panels to keep those managers open as tabbed companions to the track table rather than as one-at-a-time modal dialogs.
+
 ### 3. Validate before delivery or export
 
 Run the quality dashboard, inspect missing data, and jump directly into the affected record or manager to correct issues.
@@ -216,6 +238,17 @@ Use XML, CSV, XLSX, JSON, GS1 workbook export, or ZIP package export depending o
 ### Catalog Managers
 
 ![Catalog managers](docs/screenshots/catalog-managers.png)
+
+## Workspace Design
+
+ISRC Catalog Manager is built around a dockable desktop workspace rather than a fixed single-screen layout.
+
+- `Add Data` and the `Catalog Table` remain the two primary day-to-day docks.
+- Catalog tools that benefit from live track-table interaction now open as tabbed workspace panels.
+- Related views can stay open together, which makes release assignment, work linking, rights review, contract review, license lookup, and relationship browsing much faster.
+- Layout and dock state are remembered, so the app reopens the way you work.
+
+The result is a catalog environment that feels closer to a professional desktop workstation than a sequence of forms.
 
 ### History and Snapshots
 

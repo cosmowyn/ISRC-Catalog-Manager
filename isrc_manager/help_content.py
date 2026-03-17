@@ -55,6 +55,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Assets</strong>: managed deliverables and artwork variants with approval and primary-version tracking.</li>
           <li><strong>Catalog Table</strong>: the central browser for searching, selecting, bulk editing, and reviewing recording data.</li>
           <li><strong>Global Search</strong>: a relationship-aware search surface across works, tracks, releases, contracts, rights, parties, documents, and assets.</li>
+          <li><strong>Docked catalog workspace</strong>: release, work, license, party, contract, rights, asset, and search panels can stay open as tabbed workspace surfaces beside the catalog table.</li>
           <li><strong>Exchange</strong>: CSV, XLSX, JSON, XML, ZIP, and GS1 workflows for sharing, exporting, and archiving the catalog safely.</li>
           <li><strong>Quality Dashboard</strong>: a practical readiness view for metadata gaps, identifier conflicts, broken media links, rights risks, and operational blockers.</li>
           <li><strong>Action Ribbon</strong>: a customizable quick-action strip for your most-used commands.</li>
@@ -85,9 +86,10 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Action ribbon</strong>: a customizable strip of high-frequency actions. Use <strong>View &gt; Customize Action Ribbon…</strong> to make it match your workflow.</li>
           <li><strong>Profiles toolbar</strong>: switch databases, create a new profile, browse to an external profile, reload the profile list, or remove the selected entry.</li>
           <li><strong>Dockable panes</strong>: keep the window focused on your current task by showing only the panes you need.</li>
+          <li><strong>Tabbed catalog tools</strong>: the main Catalog managers now open as docked tabs beside the table so you can keep using the track browser while those panels remain open.</li>
           <li><strong>Saved layout</strong>: column layout, dock placement, and visibility preferences are remembered so the app opens the way you work.</li>
         </ul>
-        <p>Use the menus when you need the full surface of the product, or stay inside the docked views for everyday entry and review. The window title, branding, and appearance can be customized from <strong>Settings &gt; Application Settings</strong>.</p>
+        <p>Use the menus when you need the full surface of the product, or stay inside the docked views for everyday entry and review. The window title, branding, and appearance can be customized from <strong>Settings &gt; Application Settings</strong>. When you open multiple catalog tools, the app now prefers tabbed docking so the workspace stays compact and easier to navigate.</p>
         """,
     ),
     HelpChapter(
@@ -320,6 +322,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Release order</strong>: releases store disc number, track number, and sequence separately from the track metadata itself.</li>
           <li><strong>Add Album integration</strong>: saving a grouped album entry automatically creates or updates a real release and attaches the created tracks.</li>
           <li><strong>Release Browser…</strong>: browse releases, inspect the ordered track list, duplicate releases, add the current track selection, and filter the main catalog table to a chosen release.</li>
+          <li><strong>Docked workflow</strong>: the Release Browser stays open as a tabbed workspace panel, so you can keep changing the track-table selection while assigning or reviewing releases.</li>
           <li><strong>Single-track workflows</strong>: saving the Add Data panel or the Edit Entry dialog also keeps the corresponding release record synchronized when release-level fields change.</li>
         </ul>
         <p>Older databases are migrated additively. Existing catalog data remains usable, while release records are inferred where possible to give older profiles access to the richer product model without destructive change.</p>
@@ -353,6 +356,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Rights matrix</strong>: rights records store the right type, exclusivity, territory, media/use scope, dates, source contract, and who granted, received, or retained the right.</li>
           <li><strong>Assets and deliverables</strong>: tracks and releases can keep primary masters, alternates, derivatives, artwork variants, and approval state in one registry.</li>
           <li><strong>Global Search and Relationships…</strong>: search across the full model and inspect everything linked to the selected record from one panel.</li>
+          <li><strong>Docked managers</strong>: Work Manager, Party Manager, Contract Manager, Rights Matrix, Deliverables and Asset Versions, and Global Search now stay available as tabbed workspace panels instead of blocking dialogs.</li>
         </ul>
         <p>This richer model is intentionally catalog-focused. It gives independent teams a practical way to understand what they own, what is linked, and what is ready, without turning the app into a royalty or distribution platform.</p>
         """,
@@ -453,10 +457,10 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         summary="Upload signed license PDFs, browse them, update them, download them, and manage licensees.",
         keywords=("licenses", "licensees", "pdf", "upload", "download", "browse licenses"),
         content_html="""
-        <p>The app can store signed license PDFs alongside the catalog. The license workflow is split into a few focused dialogs:</p>
+        <p>The app can store signed license PDFs alongside the catalog. The license workflow is split into a few focused surfaces:</p>
         <ul>
           <li><strong>Add License (PDF)</strong>: attach a PDF to a track and assign a licensee.</li>
-          <li><strong>Licenses</strong>: browse all stored license records, preview them, download them, edit them, or delete them.</li>
+          <li><strong>Licenses</strong>: browse all stored license records, preview them, download them, edit them, or delete them from a docked catalog panel that can stay open beside the track table.</li>
           <li><strong>Manage Licensees</strong>: add, rename, and delete reusable licensee names.</li>
         </ul>
         <p>If you are moving into the richer contract system, <strong>Catalog &gt; Migrate Legacy Licenses to Contracts…</strong> converts the legacy license archive into Party records plus Contract records with managed contract documents. The migration copies each stored PDF into the newer contract-document archive, verifies the copied file, and only then removes the legacy rows and old managed license files. Before/after restore points are captured automatically so the migration can be rolled back safely.</p>
@@ -469,13 +473,13 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         summary="Manage reusable artist, album, and licensee data from one consolidated manager dialog.",
         keywords=("catalog managers", "artists", "albums", "licensees", "purge unused", "manage"),
         content_html="""
-        <p>The consolidated <strong>Catalog Managers</strong> dialog groups catalog maintenance tasks into dedicated tabs.</p>
+        <p>The consolidated <strong>Catalog Managers</strong> workspace groups catalog maintenance tasks into dedicated tabs and now opens as a docked panel instead of a blocking popup.</p>
         <ul>
           <li><strong>Artists</strong>: inspect artist usage counts and remove or purge only artists that are no longer used.</li>
           <li><strong>Albums</strong>: inspect album usage counts and remove or purge unused albums.</li>
           <li><strong>Licensees</strong>: maintain reusable licensee names used by license records.</li>
         </ul>
-        <p>These tools are intended for cleanup and normalization. The app prevents deletion of items that are still referenced by tracks or licenses where that would break data integrity.</p>
+        <p>These tools are intended for cleanup and normalization. The app prevents deletion of items that are still referenced by tracks or licenses where that would break data integrity. Because the manager is docked, you can keep it open while reviewing the main catalog table and related workspace panels.</p>
         """,
     ),
     HelpChapter(

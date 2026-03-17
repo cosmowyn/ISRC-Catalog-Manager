@@ -166,6 +166,10 @@ from isrc_manager.blob_icons import (
     icon_from_blob_icon_spec,
     normalize_blob_icon_settings,
 )
+from isrc_manager.catalog_workspace import (
+    ensure_catalog_workspace_dock,
+    refresh_catalog_workspace_docks,
+)
 from isrc_manager.main_window_shell import build_main_window_shell
 from isrc_manager.paths import DATA_DIR
 from isrc_manager.qss_autocomplete import QssCodeEditor
@@ -200,7 +204,7 @@ from isrc_manager.starter_themes import (
 )
 from isrc_manager.gs1_dialog import GS1MetadataDialog
 from isrc_manager.assets import AssetService
-from isrc_manager.assets.dialogs import AssetBrowserDialog
+from isrc_manager.assets.dialogs import AssetBrowserDialog, AssetBrowserPanel
 from isrc_manager.app_dialogs import (
     AboutDialog,
     ActionRibbonDialog,
@@ -210,13 +214,13 @@ from isrc_manager.app_dialogs import (
     HelpContentsDialog,
 )
 from isrc_manager.contracts import ContractService
-from isrc_manager.contracts.dialogs import ContractBrowserDialog
+from isrc_manager.contracts.dialogs import ContractBrowserDialog, ContractBrowserPanel
 from isrc_manager.exchange.dialogs import ExchangeImportDialog
 from isrc_manager.exchange.repertoire_service import RepertoireExchangeService
 from isrc_manager.exchange.models import ExchangeImportReport
 from isrc_manager.exchange.service import ExchangeService
 from isrc_manager.parties import PartyService
-from isrc_manager.parties.dialogs import PartyManagerDialog
+from isrc_manager.parties.dialogs import PartyManagerDialog, PartyManagerPanel
 from isrc_manager.quality.dialogs import QualityDashboardDialog
 from isrc_manager.quality.models import QualityIssue
 from isrc_manager.quality.service import QualityDashboardService
@@ -226,11 +230,11 @@ from isrc_manager.releases import (
     ReleaseService,
     ReleaseTrackPlacement,
 )
-from isrc_manager.releases.dialogs import ReleaseBrowserDialog, ReleaseEditorDialog
+from isrc_manager.releases.dialogs import ReleaseBrowserPanel, ReleaseEditorDialog
 from isrc_manager.rights import RightsService
-from isrc_manager.rights.dialogs import RightsBrowserDialog
+from isrc_manager.rights.dialogs import RightsBrowserDialog, RightsBrowserPanel
 from isrc_manager.search import GlobalSearchService, RelationshipExplorerService
-from isrc_manager.search.dialogs import GlobalSearchDialog
+from isrc_manager.search.dialogs import GlobalSearchPanel
 from isrc_manager.services.db_access import DatabaseWriteCoordinator, SQLiteConnectionFactory
 from isrc_manager.services.bulk_edit import MIXED_VALUE, shared_bulk_value, should_apply_bulk_change
 from isrc_manager.services.sqlite_utils import safe_wal_checkpoint
@@ -291,12 +295,13 @@ from isrc_manager.ui_common import (
     TwoDigitSpinBox,
     _add_standard_dialog_header,
     _apply_standard_dialog_chrome,
+    _apply_standard_widget_chrome,
     _compose_widget_stylesheet,
     _create_round_help_button,
     _create_standard_section,
 )
 from isrc_manager.works import WorkService
-from isrc_manager.works.dialogs import WorkBrowserDialog
+from isrc_manager.works.dialogs import WorkBrowserPanel
 
 
 class _JsonLogFormatter(logging.Formatter):
@@ -3418,15 +3423,15 @@ class LicenseUploadDialog(QDialog):
             QMessageBox.critical(self, "Error", str(e))
 
 
-class LicensesBrowserDialog(QDialog):
-    def __init__(self, license_service, track_filter_id=None, parent=None):
+class LicensesBrowserPanel(QWidget):
+    close_requested = Signal()
+
+    def __init__(self, *, app, license_service_provider, track_filter_id=None, parent=None):
         super().__init__(parent)
-        self.license_service = license_service
-        self.setWindowTitle("Licenses")
-        self.setModal(True)
-        self.resize(1080, 760)
-        self.setMinimumSize(980, 680)
-        _apply_standard_dialog_chrome(self, "licensesBrowserDialog")
+        self.app = app
+        self.license_service_provider = license_service_provider
+        self.setObjectName("licensesBrowserPanel")
+        _apply_standard_widget_chrome(self, "licensesBrowserPanel")
 
         # --- model/proxy ---
         self.model = QStandardItemModel(self)
@@ -3483,7 +3488,7 @@ class LicensesBrowserDialog(QDialog):
 
         # --- layout ---
         v = QVBoxLayout(self)
-        v.setContentsMargins(18, 18, 18, 18)
+        v.setContentsMargins(14, 14, 14, 14)
         v.setSpacing(14)
         _add_standard_dialog_header(
             v,
@@ -3535,9 +3540,12 @@ class LicensesBrowserDialog(QDialog):
         browser_layout.addWidget(self.tabs, 1)
         v.addWidget(browser_box, 1)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Close, Qt.Horizontal, self)
-        buttons.rejected.connect(self.reject)
-        v.addWidget(buttons)
+        close_row = QHBoxLayout()
+        close_row.addStretch(1)
+        close_button = QPushButton("Close")
+        close_button.clicked.connect(self.close_requested.emit)
+        close_row.addWidget(close_button)
+        v.addLayout(close_row)
 
         # --- init/load ---
         self._track_filter_id = track_filter_id
@@ -3550,6 +3558,13 @@ class LicensesBrowserDialog(QDialog):
         self.list.selectionModel().selectionChanged.connect(lambda *_: self._update_action_states())
         self.tabs.currentChanged.connect(lambda *_: self._update_action_states())
         self._update_action_states()
+
+    def _license_service(self):
+        return self.license_service_provider()
+
+    def set_track_filter_id(self, track_filter_id=None):
+        self._track_filter_id = track_filter_id
+        self.refresh_data()
 
     # ---------- helpers ----------
     def _update_action_states(self):
@@ -3578,10 +3593,14 @@ class LicensesBrowserDialog(QDialog):
         )
 
     def _load_rows(self, track_filter_id=None):
+        service = self._license_service()
         if track_filter_id is None:
             track_filter_id = self._track_filter_id
         self.model.removeRows(0, self.model.rowCount())
-        for row in self.license_service.list_rows(track_filter_id):
+        if service is None:
+            self._update_action_states()
+            return
+        for row in service.list_rows(track_filter_id):
             items = [
                 QStandardItem(row.licensee),
                 QStandardItem(row.track_title),
@@ -3661,7 +3680,11 @@ class LicensesBrowserDialog(QDialog):
         _, path = rec
 
         # resolve relative -> absolute
-        abs_path = self.license_service.resolve_path(path)
+        service = self._license_service()
+        if service is None:
+            QMessageBox.warning(self, "License Archive", "Open a profile first.")
+            return
+        abs_path = service.resolve_path(path)
         if not abs_path.exists():
             QMessageBox.warning(self, "Missing file", "The file could not be found.")
             return
@@ -3722,16 +3745,19 @@ class LicensesBrowserDialog(QDialog):
         if not rec:
             return
         _, path = rec
-        abs_path = self.license_service.resolve_path(path)
+        service = self._license_service()
+        if service is None:
+            QMessageBox.warning(self, "License Archive", "Open a profile first.")
+            return
+        abs_path = service.resolve_path(path)
         if not abs_path.exists():
             QMessageBox.warning(self, "Missing", "File not found.")
             return
         dst, _ = QFileDialog.getSaveFileName(self, "Save PDF as…", abs_path.name, "PDF (*.pdf)")
         if dst:
-            app = self.parentWidget()
             mutation = lambda: shutil.copy2(str(abs_path), dst)
-            if app is not None and hasattr(app, "_run_file_history_action"):
-                app._run_file_history_action(
+            if self.app is not None and hasattr(self.app, "_run_file_history_action"):
+                self.app._run_file_history_action(
                     action_label=f"Download License PDF: {Path(dst).name}",
                     action_type="file.download_license_pdf",
                     target_path=dst,
@@ -3747,8 +3773,12 @@ class LicensesBrowserDialog(QDialog):
         rec = self._selected_record()
         if not rec:
             return
+        service = self._license_service()
+        if service is None:
+            QMessageBox.warning(self, "License Archive", "Open a profile first.")
+            return
         rec_id, path = rec
-        record = self.license_service.fetch_license(rec_id)
+        record = service.fetch_license(rec_id)
         row = (record.track_id, record.licensee_id) if record else None
         if not row:
             return
@@ -3764,7 +3794,7 @@ class LicensesBrowserDialog(QDialog):
         lic_combo = FocusWheelComboBox()
         lic_combo.setEditable(True)
         # load licensees
-        for lid, name in self.license_service.list_licensee_choices():
+        for lid, name in service.list_licensee_choices():
             lic_combo.addItem(name, lid)
         idx = lic_combo.findData(licensee_id)
         if idx >= 0:
@@ -3822,14 +3852,13 @@ class LicensesBrowserDialog(QDialog):
         if not new_name:
             new_name = lic_combo.currentText().strip() or ""
         try:
-            app = self.parentWidget()
-            mutation = lambda: self.license_service.update_license(
+            mutation = lambda: service.update_license(
                 record_id=rec_id,
                 licensee_name=new_name,
                 replacement_pdf_path=new_path["p"],
             )
-            if app is not None and hasattr(app, "_run_snapshot_history_action"):
-                app._run_snapshot_history_action(
+            if self.app is not None and hasattr(self.app, "_run_snapshot_history_action"):
+                self.app._run_snapshot_history_action(
                     action_label="Edit License",
                     action_type="license.update",
                     entity_type="License",
@@ -3877,10 +3906,13 @@ class LicensesBrowserDialog(QDialog):
         )
 
         try:
-            app = self.parentWidget()
-            mutation = lambda: self.license_service.delete_licenses(ids, delete_files=delete_files)
-            if app is not None and hasattr(app, "_run_snapshot_history_action"):
-                app._run_snapshot_history_action(
+            service = self._license_service()
+            if service is None:
+                QMessageBox.warning(self, "Delete Licenses", "Open a profile first.")
+                return
+            mutation = lambda: service.delete_licenses(ids, delete_files=delete_files)
+            if self.app is not None and hasattr(self.app, "_run_snapshot_history_action"):
+                self.app._run_snapshot_history_action(
                     action_label=f"Delete Licenses: {len(ids)}",
                     action_type="license.delete",
                     entity_type="License",
@@ -3901,22 +3933,49 @@ class LicensesBrowserDialog(QDialog):
         self.refresh_data()
 
     def _migrate_to_contracts(self):
-        app = self.parentWidget()
-        if app is None or not hasattr(app, "migrate_legacy_licenses_to_contracts"):
+        if self.app is None or not hasattr(self.app, "migrate_legacy_licenses_to_contracts"):
             QMessageBox.information(
                 self,
                 "Legacy License Migration",
                 "This action is only available when the browser is opened from the main window.",
             )
             return
-        self.accept()
-        app.migrate_legacy_licenses_to_contracts()
+        self.close_requested.emit()
+        self.app.migrate_legacy_licenses_to_contracts()
 
     def eventFilter(self, obj, ev):
         if ev.type() == QEvent.KeyPress and ev.key() == Qt.Key_Space:
             self._preview_pdf()
             return True
         return super().eventFilter(obj, ev)
+
+
+class LicensesBrowserDialog(QDialog):
+    def __init__(self, license_service, track_filter_id=None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Licenses")
+        self.setModal(True)
+        self.resize(1080, 760)
+        self.setMinimumSize(980, 680)
+        _apply_standard_dialog_chrome(self, "licensesBrowserDialog")
+
+        v = QVBoxLayout(self)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(0)
+        self.panel = LicensesBrowserPanel(
+            app=parent,
+            license_service_provider=lambda: license_service,
+            track_filter_id=track_filter_id,
+            parent=self,
+        )
+        self.panel.close_requested.connect(self.accept)
+        v.addWidget(self.panel)
+
+    def __getattr__(self, name: str):
+        panel = self.__dict__.get("panel")
+        if panel is not None and hasattr(panel, name):
+            return getattr(panel, name)
+        raise AttributeError(name)
 
 
 class LicenseeManagerDialog(QDialog):
@@ -4087,7 +4146,10 @@ class _CatalogManagerPaneBase(QWidget):
     def __init__(self, app, parent=None):
         super().__init__(parent)
         self.app = app
-        self.catalog_service = app.catalog_service
+
+    @property
+    def catalog_service(self):
+        return self.app.catalog_service
 
     @staticmethod
     def _configure_table(table: QTableWidget) -> None:
@@ -4176,6 +4238,10 @@ class _CatalogArtistsPane(_CatalogManagerPaneBase):
         self.reload()
 
     def reload(self):
+        if self.catalog_service is None:
+            self.table.setRowCount(0)
+            self.summary_label.setText("Open a profile to manage stored artists.")
+            return
         artists = self.catalog_service.list_artists_with_usage()
         self.table.setRowCount(0)
         unused_count = 0
@@ -4257,6 +4323,9 @@ class _CatalogArtistsPane(_CatalogManagerPaneBase):
         self._after_mutation()
 
     def _purge_unused(self):
+        if self.catalog_service is None:
+            QMessageBox.warning(self, "Artists", "Open a profile first.")
+            return
         artist_ids = [
             artist.artist_id
             for artist in self.catalog_service.list_artists_with_usage()
@@ -4344,6 +4413,10 @@ class _CatalogAlbumsPane(_CatalogManagerPaneBase):
         self.reload()
 
     def reload(self):
+        if self.catalog_service is None:
+            self.table.setRowCount(0)
+            self.summary_label.setText("Open a profile to manage stored album titles.")
+            return
         albums = self.catalog_service.list_albums_with_usage()
         self.table.setRowCount(0)
         unused_count = 0
@@ -4422,6 +4495,9 @@ class _CatalogAlbumsPane(_CatalogManagerPaneBase):
         self._after_mutation()
 
     def _purge_unused(self):
+        if self.catalog_service is None:
+            QMessageBox.warning(self, "Albums", "Open a profile first.")
+            return
         album_ids = [
             album.album_id
             for album in self.catalog_service.list_albums_with_usage()
@@ -4529,6 +4605,11 @@ class _CatalogLicenseesPane(_CatalogManagerPaneBase):
         self.reload()
 
     def reload(self):
+        if self.catalog_service is None:
+            self.table.setRowCount(0)
+            self.summary_label.setText("Open a profile to manage stored licensees.")
+            self._update_button_states()
+            return
         licensees = self.catalog_service.list_licensees_with_usage()
         self.table.setRowCount(0)
         unused_count = 0
@@ -4579,6 +4660,9 @@ class _CatalogLicenseesPane(_CatalogManagerPaneBase):
         self.delete_btn.setEnabled(bool(selection and selection["license_count"] == 0))
 
     def _add(self):
+        if self.catalog_service is None:
+            QMessageBox.warning(self, "Add Licensee", "Open a profile first.")
+            return
         name = self.new_name_edit.text().strip()
         if not name:
             QMessageBox.information(self, "Missing Name", "Enter a licensee name first.")
@@ -4605,6 +4689,9 @@ class _CatalogLicenseesPane(_CatalogManagerPaneBase):
         self._after_mutation()
 
     def _rename(self):
+        if self.catalog_service is None:
+            QMessageBox.warning(self, "Rename Licensee", "Open a profile first.")
+            return
         selection = self._current_selection()
         if selection is None:
             return
@@ -4643,6 +4730,9 @@ class _CatalogLicenseesPane(_CatalogManagerPaneBase):
         self._after_mutation()
 
     def _delete(self):
+        if self.catalog_service is None:
+            QMessageBox.warning(self, "Delete Licensee", "Open a profile first.")
+            return
         selection = self._current_selection()
         if selection is None:
             return
@@ -4688,34 +4778,35 @@ class _CatalogLicenseesPane(_CatalogManagerPaneBase):
         self._after_mutation()
 
 
-class CatalogManagersDialog(QDialog):
+class CatalogManagersPanel(QWidget):
     TAB_ORDER = ("artists", "albums", "licensees")
 
     def __init__(self, app, *, initial_tab: str = "artists", parent=None):
         super().__init__(parent or app)
         self.app = app
-        self.setObjectName("catalogManagersDialog")
-        self.setWindowTitle("Catalog Managers")
-        self.setModal(True)
-        self.setMinimumSize(1100, 720)
-        self.resize(1180, 760)
+        self.setObjectName("catalogManagersPanel")
+        _apply_standard_widget_chrome(self, "catalogManagersPanel")
 
         self.setStyleSheet(
             _compose_widget_stylesheet(
                 self,
                 """
-                QDialog#catalogManagersDialog QLabel#catalogTitle {
+                QDialog#catalogManagersDialog QLabel#catalogTitle,
+                QWidget#catalogManagersPanel QLabel#catalogTitle {
                     font-size: 18px;
                     font-weight: 600;
                 }
-                QDialog#catalogManagersDialog QLabel#catalogSubtitle {
+                QDialog#catalogManagersDialog QLabel#catalogSubtitle,
+                QWidget#catalogManagersPanel QLabel#catalogSubtitle {
                     color: #5f6b76;
                 }
-                QDialog#catalogManagersDialog QGroupBox {
+                QDialog#catalogManagersDialog QGroupBox,
+                QWidget#catalogManagersPanel QGroupBox {
                     font-weight: 600;
                     margin-top: 10px;
                 }
-                QDialog#catalogManagersDialog QGroupBox::title {
+                QDialog#catalogManagersDialog QGroupBox::title,
+                QWidget#catalogManagersPanel QGroupBox::title {
                     subcontrol-origin: margin;
                     left: 10px;
                     padding: 0 4px;
@@ -4753,11 +4844,6 @@ class CatalogManagersDialog(QDialog):
         self.tabs.addTab(self.licensees_tab, "Licensees")
         root.addWidget(self.tabs, 1)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Close, Qt.Horizontal, self)
-        buttons.rejected.connect(self.reject)
-        buttons.accepted.connect(self.accept)
-        root.addWidget(buttons)
-
         self.focus_tab(initial_tab)
 
     def focus_tab(self, tab_name: str = "artists") -> None:
@@ -4766,6 +4852,43 @@ class CatalogManagersDialog(QDialog):
         except ValueError:
             index = 0
         self.tabs.setCurrentIndex(index)
+
+    def refresh(self) -> None:
+        self.artists_tab.reload()
+        self.albums_tab.reload()
+        self.licensees_tab.reload()
+
+
+class CatalogManagersDialog(QDialog):
+    TAB_ORDER = ("artists", "albums", "licensees")
+
+    def __init__(self, app, *, initial_tab: str = "artists", parent=None):
+        super().__init__(parent or app)
+        self.app = app
+        self.setObjectName("catalogManagersDialog")
+        self.setWindowTitle("Catalog Managers")
+        self.setModal(True)
+        self.setMinimumSize(1100, 720)
+        self.resize(1180, 760)
+        _apply_standard_dialog_chrome(self, "catalogManagersDialog")
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        self.panel = CatalogManagersPanel(app, initial_tab=initial_tab, parent=self)
+        self.tabs = self.panel.tabs
+        self.artists_tab = self.panel.artists_tab
+        self.albums_tab = self.panel.albums_tab
+        self.licensees_tab = self.panel.licensees_tab
+        root.addWidget(self.panel, 1)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Close, Qt.Horizontal, self)
+        buttons.rejected.connect(self.reject)
+        buttons.accepted.connect(self.accept)
+        root.addWidget(buttons)
+
+        self.focus_tab(initial_tab)
 
 
 class App(QMainWindow):
@@ -6696,8 +6819,13 @@ class App(QMainWindow):
             QMessageBox.critical(self, "Remove Error", f"Could not delete the database:\n{e}")
 
     def open_catalog_managers_dialog(self, *, initial_tab: str = "artists"):
-        dlg = CatalogManagersDialog(self, initial_tab=initial_tab, parent=self)
-        dlg.exec()
+        if self.catalog_service is None:
+            QMessageBox.warning(self, "Catalog Managers", "Open a profile first.")
+            return
+        dock = self._ensure_catalog_managers_dock()
+        panel = dock.show_panel()
+        panel.focus_tab(initial_tab)
+        self.catalog_managers_dialog = panel
         self.populate_all_comboboxes()
 
     def _manage_stored_artists(self):
@@ -6724,9 +6852,32 @@ class App(QMainWindow):
         self.blob_icon_settings_service = None
         self.gs1_settings_service = None
         self.gs1_integration_service = None
+        self.catalog_service = None
+        self.catalog_reads = None
+        self.license_service = None
+        self.custom_field_definitions = None
+        self.custom_field_values = None
+        self.xml_export_service = None
+        self.xml_import_service = None
+        self.release_service = None
+        self.party_service = None
+        self.work_service = None
+        self.contract_service = None
+        self.license_migration_service = None
+        self.rights_service = None
+        self.asset_service = None
+        self.repertoire_workflow_service = None
+        self.global_search_service = None
+        self.relationship_explorer_service = None
+        self.audio_tag_service = None
+        self.tagged_audio_export_service = None
+        self.exchange_service = None
+        self.repertoire_exchange_service = None
+        self.quality_service = None
         if hasattr(self, "background_service_factory"):
             self.background_service_factory.db_path = None
         self._background_write_lock = None
+        self._refresh_catalog_workspace_docks()
 
     def _configure_background_runtime(self) -> None:
         settings_path = self.settings.fileName() if hasattr(self, "settings") else None
@@ -6911,6 +7062,7 @@ class App(QMainWindow):
 
         self.blob_icon_settings = self._load_blob_icon_settings()
         self.active_custom_fields = self.load_active_custom_fields()
+        self._refresh_catalog_workspace_docks()
 
         # now it's safe to write AuditLog
         self._audit("PROFILE", "Database", ref_id=path, details="open_database()")
@@ -6998,6 +7150,7 @@ class App(QMainWindow):
         self.populate_all_comboboxes()
         self._update_add_data_generated_fields()
         self.refresh_table_preserve_view()
+        self._refresh_catalog_workspace_docks()
         self._refresh_auto_snapshot_schedule()
         self._last_auto_snapshot_marker = self._current_auto_snapshot_marker()
         self._refresh_history_actions()
@@ -7152,6 +7305,181 @@ class App(QMainWindow):
             dock.setVisible(enabled)
             if enabled:
                 dock.raise_()
+
+    def _create_release_browser_panel(self, parent: QWidget) -> ReleaseBrowserPanel:
+        panel = ReleaseBrowserPanel(
+            release_service_provider=lambda: self.release_service,
+            track_title_resolver=self._get_track_title,
+            parent=parent,
+        )
+        panel.filter_requested.connect(
+            lambda track_ids: self._set_explicit_track_filter(track_ids, source_label="release")
+        )
+        panel.open_track_requested.connect(self.open_selected_editor)
+        panel.edit_release_requested.connect(self.open_release_editor)
+        panel.duplicate_release_requested.connect(self.duplicate_release)
+        panel.add_selected_tracks_requested.connect(self.add_selected_tracks_to_specific_release)
+        panel.create_release_requested.connect(self.create_release_from_selection)
+        return panel
+
+    def _create_work_manager_panel(self, parent: QWidget) -> WorkBrowserPanel:
+        panel = WorkBrowserPanel(
+            work_service_provider=lambda: self.work_service,
+            track_title_resolver=self._get_track_title,
+            selected_track_ids_provider=self._selected_track_ids,
+            parent=parent,
+        )
+        panel.filter_requested.connect(
+            lambda track_ids: self._set_explicit_track_filter(track_ids, source_label="work")
+        )
+        return panel
+
+    def _create_global_search_panel(self, parent: QWidget) -> GlobalSearchPanel:
+        panel = GlobalSearchPanel(
+            search_service_provider=lambda: self.global_search_service,
+            relationship_service_provider=lambda: self.relationship_explorer_service,
+            parent=parent,
+        )
+        panel.open_entity_requested.connect(self._open_entity_from_relationship_search)
+        return panel
+
+    def _create_catalog_managers_panel(self, parent: QWidget) -> CatalogManagersPanel:
+        return CatalogManagersPanel(self, parent=parent)
+
+    def _create_license_browser_panel(self, parent: QWidget) -> LicensesBrowserPanel:
+        return LicensesBrowserPanel(
+            app=self,
+            license_service_provider=lambda: self.license_service,
+            parent=parent,
+        )
+
+    def _create_party_manager_panel(self, parent: QWidget) -> PartyManagerPanel:
+        return PartyManagerPanel(
+            party_service_provider=lambda: self.party_service,
+            parent=parent,
+        )
+
+    def _create_contract_manager_panel(self, parent: QWidget) -> ContractBrowserPanel:
+        return ContractBrowserPanel(
+            contract_service_provider=lambda: self.contract_service,
+            parent=parent,
+        )
+
+    def _create_rights_matrix_panel(self, parent: QWidget) -> RightsBrowserPanel:
+        return RightsBrowserPanel(
+            rights_service_provider=lambda: self.rights_service,
+            party_service_provider=lambda: self.party_service,
+            contract_service_provider=lambda: self.contract_service,
+            parent=parent,
+        )
+
+    def _create_asset_registry_panel(self, parent: QWidget) -> AssetBrowserPanel:
+        return AssetBrowserPanel(
+            asset_service_provider=lambda: self.asset_service,
+            parent=parent,
+        )
+
+    def _ensure_release_browser_dock(self) -> QDockWidget:
+        dock = ensure_catalog_workspace_dock(
+            self,
+            key="release_browser",
+            title="Release Browser",
+            object_name="releaseBrowserDock",
+            panel_factory=self._create_release_browser_panel,
+        )
+        self.release_browser_dock = dock
+        return dock
+
+    def _ensure_work_manager_dock(self) -> QDockWidget:
+        dock = ensure_catalog_workspace_dock(
+            self,
+            key="work_manager",
+            title="Work Manager",
+            object_name="workManagerDock",
+            panel_factory=self._create_work_manager_panel,
+        )
+        self.work_manager_dock = dock
+        return dock
+
+    def _ensure_global_search_dock(self) -> QDockWidget:
+        dock = ensure_catalog_workspace_dock(
+            self,
+            key="global_search",
+            title="Global Search and Relationships",
+            object_name="globalSearchDock",
+            panel_factory=self._create_global_search_panel,
+        )
+        self.global_search_dock = dock
+        return dock
+
+    def _ensure_catalog_managers_dock(self) -> QDockWidget:
+        dock = ensure_catalog_workspace_dock(
+            self,
+            key="catalog_managers",
+            title="Catalog Managers",
+            object_name="catalogManagersDock",
+            panel_factory=self._create_catalog_managers_panel,
+        )
+        self.catalog_managers_dock = dock
+        return dock
+
+    def _ensure_license_browser_dock(self) -> QDockWidget:
+        dock = ensure_catalog_workspace_dock(
+            self,
+            key="license_browser",
+            title="License Browser",
+            object_name="licenseBrowserDock",
+            panel_factory=self._create_license_browser_panel,
+        )
+        self.license_browser_dock = dock
+        return dock
+
+    def _ensure_party_manager_dock(self) -> QDockWidget:
+        dock = ensure_catalog_workspace_dock(
+            self,
+            key="party_manager",
+            title="Party Manager",
+            object_name="partyManagerDock",
+            panel_factory=self._create_party_manager_panel,
+        )
+        self.party_manager_dock = dock
+        return dock
+
+    def _ensure_contract_manager_dock(self) -> QDockWidget:
+        dock = ensure_catalog_workspace_dock(
+            self,
+            key="contract_manager",
+            title="Contract Manager",
+            object_name="contractManagerDock",
+            panel_factory=self._create_contract_manager_panel,
+        )
+        self.contract_manager_dock = dock
+        return dock
+
+    def _ensure_rights_matrix_dock(self) -> QDockWidget:
+        dock = ensure_catalog_workspace_dock(
+            self,
+            key="rights_matrix",
+            title="Rights Matrix",
+            object_name="rightsMatrixDock",
+            panel_factory=self._create_rights_matrix_panel,
+        )
+        self.rights_matrix_dock = dock
+        return dock
+
+    def _ensure_asset_registry_dock(self) -> QDockWidget:
+        dock = ensure_catalog_workspace_dock(
+            self,
+            key="asset_registry",
+            title="Deliverables and Asset Versions",
+            object_name="assetRegistryDock",
+            panel_factory=self._create_asset_registry_panel,
+        )
+        self.asset_registry_dock = dock
+        return dock
+
+    def _refresh_catalog_workspace_docks(self) -> None:
+        refresh_catalog_workspace_docks(self)
 
     @staticmethod
     def _action_shortcut_text(action: QAction | None) -> str:
@@ -9458,51 +9786,37 @@ class App(QMainWindow):
         if self.release_service is None:
             QMessageBox.warning(self, "Release Browser", "Open a profile first.")
             return
-        dlg = ReleaseBrowserDialog(
-            release_service=self.release_service,
-            track_title_resolver=self._get_track_title,
-            parent=self,
-        )
-        dlg.filter_requested.connect(
-            lambda track_ids: self._set_explicit_track_filter(track_ids, source_label="release")
-        )
-        dlg.open_track_requested.connect(self.open_selected_editor)
-        dlg.edit_release_requested.connect(self.open_release_editor)
-        dlg.duplicate_release_requested.connect(self.duplicate_release)
-        dlg.add_selected_tracks_requested.connect(self.add_selected_tracks_to_specific_release)
-        dlg.create_release_requested.connect(self.create_release_from_selection)
-        self.release_browser_dialog = dlg
-        dlg.exec()
+        dock = self._ensure_release_browser_dock()
+        self.release_browser_dialog = dock.show_panel()
 
     def open_work_manager(self, linked_track_id: int | None = None):
         if self.work_service is None:
             QMessageBox.warning(self, "Work Manager", "Open a profile first.")
             return
-        dlg = WorkBrowserDialog(
-            work_service=self.work_service,
-            track_title_resolver=self._get_track_title,
-            selected_track_ids_provider=self._selected_track_ids,
-            linked_track_id=linked_track_id,
-            parent=self,
-        )
-        dlg.filter_requested.connect(
-            lambda track_ids: self._set_explicit_track_filter(track_ids, source_label="work")
-        )
-        dlg.exec()
+        dock = self._ensure_work_manager_dock()
+        panel = dock.show_panel()
+        panel.set_linked_track_id(linked_track_id)
+        self.work_browser_dialog = panel
 
-    def open_party_manager(self):
+    def open_party_manager(self, party_id: int | None = None):
         if self.party_service is None:
             QMessageBox.warning(self, "Party Manager", "Open a profile first.")
             return
-        PartyManagerDialog(party_service=self.party_service, parent=self).exec()
+        dock = self._ensure_party_manager_dock()
+        panel = dock.show_panel()
+        panel.focus_party(party_id)
+        self.party_manager_dialog = panel
 
-    def open_contract_manager(self):
+    def open_contract_manager(self, contract_id: int | None = None):
         if self.contract_service is None:
             QMessageBox.warning(self, "Contract Manager", "Open a profile first.")
             return
-        ContractBrowserDialog(contract_service=self.contract_service, parent=self).exec()
+        dock = self._ensure_contract_manager_dock()
+        panel = dock.show_panel()
+        panel.focus_contract(contract_id)
+        self.contract_manager_dialog = panel
 
-    def open_rights_matrix(self):
+    def open_rights_matrix(self, right_id: int | None = None):
         if (
             self.rights_service is None
             or self.party_service is None
@@ -9510,30 +9824,26 @@ class App(QMainWindow):
         ):
             QMessageBox.warning(self, "Rights Matrix", "Open a profile first.")
             return
-        RightsBrowserDialog(
-            rights_service=self.rights_service,
-            party_service=self.party_service,
-            contract_service=self.contract_service,
-            parent=self,
-        ).exec()
+        dock = self._ensure_rights_matrix_dock()
+        panel = dock.show_panel()
+        panel.focus_right(right_id)
+        self.rights_browser_dialog = panel
 
-    def open_asset_registry(self):
+    def open_asset_registry(self, asset_id: int | None = None):
         if self.asset_service is None:
             QMessageBox.warning(self, "Asset Registry", "Open a profile first.")
             return
-        AssetBrowserDialog(asset_service=self.asset_service, parent=self).exec()
+        dock = self._ensure_asset_registry_dock()
+        panel = dock.show_panel()
+        panel.focus_asset(asset_id)
+        self.asset_browser_dialog = panel
 
     def open_global_search(self):
         if self.global_search_service is None or self.relationship_explorer_service is None:
             QMessageBox.warning(self, "Global Search", "Open a profile first.")
             return
-        dlg = GlobalSearchDialog(
-            search_service=self.global_search_service,
-            relationship_service=self.relationship_explorer_service,
-            parent=self,
-        )
-        dlg.open_entity_requested.connect(self._open_entity_from_relationship_search)
-        dlg.exec()
+        dock = self._ensure_global_search_dock()
+        self.global_search_dialog = dock.show_panel()
 
     def _open_entity_from_relationship_search(self, entity_type: str, entity_id: int):
         normalized = str(entity_type or "").strip().lower()
@@ -9547,16 +9857,16 @@ class App(QMainWindow):
             self.open_work_manager(linked_track_id=None)
             return
         if normalized == "contract":
-            self.open_contract_manager()
+            self.open_contract_manager(int(entity_id))
             return
         if normalized == "party":
-            self.open_party_manager()
+            self.open_party_manager(int(entity_id))
             return
         if normalized == "right":
-            self.open_rights_matrix()
+            self.open_rights_matrix(int(entity_id))
             return
         if normalized == "asset":
-            self.open_asset_registry()
+            self.open_asset_registry(int(entity_id))
             return
 
     def export_repertoire_exchange(self, format_name: str):
@@ -13537,9 +13847,13 @@ class App(QMainWindow):
         dlg.exec()
 
     def open_licenses_browser(self, track_filter_id=None):
-        LicensesBrowserDialog(
-            self.license_service, track_filter_id=track_filter_id, parent=self
-        ).exec()
+        if self.license_service is None:
+            QMessageBox.warning(self, "License Browser", "Open a profile first.")
+            return
+        dock = self._ensure_license_browser_dock()
+        panel = dock.show_panel()
+        panel.set_track_filter_id(track_filter_id)
+        self.licenses_browser_dialog = panel
 
 
 class _AlbumTrackSection(QWidget):
@@ -15901,7 +16215,13 @@ def open_license_upload(self, preselect_track_id=None):
 
 
 def open_licenses_browser(self, track_filter_id=None):
-    LicensesBrowserDialog(self.license_service, track_filter_id=track_filter_id, parent=self).exec()
+    if self.license_service is None:
+        QMessageBox.warning(self, "License Browser", "Open a profile first.")
+        return
+    dock = self._ensure_license_browser_dock()
+    panel = dock.show_panel()
+    panel.set_track_filter_id(track_filter_id)
+    self.licenses_browser_dialog = panel
 
 
 class WaveformWidget(QWidget):

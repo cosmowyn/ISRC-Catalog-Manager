@@ -90,29 +90,29 @@ def _create_round_help_button(
     return button
 
 
-def _standard_dialog_stylesheet(object_name: str, extra_qss: str = "") -> str:
+def _standard_container_stylesheet(selector: str, extra_qss: str = "") -> str:
     base_qss = f"""
-    QDialog#{object_name} QLabel[role="dialogTitle"] {{
+    {selector} QLabel[role="dialogTitle"] {{
         font-size: 26px;
         font-weight: 700;
     }}
-    QDialog#{object_name} QLabel[role="dialogSubtitle"] {{
+    {selector} QLabel[role="dialogSubtitle"] {{
         color: #64748b;
         font-size: 15px;
     }}
-    QDialog#{object_name} QLabel[role="sectionDescription"],
-    QDialog#{object_name} QLabel[role="supportingText"],
-    QDialog#{object_name} QLabel[role="secondary"],
-    QDialog#{object_name} QLabel[role="meta"],
-    QDialog#{object_name} QLabel[role="statusText"] {{
+    {selector} QLabel[role="sectionDescription"],
+    {selector} QLabel[role="supportingText"],
+    {selector} QLabel[role="secondary"],
+    {selector} QLabel[role="meta"],
+    {selector} QLabel[role="statusText"] {{
         color: #52606d;
     }}
-    QDialog#{object_name} QGroupBox {{
+    {selector} QGroupBox {{
         font-size: 15px;
         font-weight: 600;
         margin-top: 10px;
     }}
-    QDialog#{object_name} QGroupBox::title {{
+    {selector} QGroupBox::title {{
         subcontrol-origin: margin;
         left: 10px;
         padding: 0 6px;
@@ -123,6 +123,13 @@ def _standard_dialog_stylesheet(object_name: str, extra_qss: str = "") -> str:
     return base_qss
 
 
+def _standard_dialog_stylesheet(object_name: str, extra_qss: str = "") -> str:
+    return _standard_container_stylesheet(
+        f"QDialog#{object_name}",
+        extra_qss=extra_qss,
+    )
+
+
 def _apply_standard_dialog_chrome(
     dialog: QDialog, object_name: str, *, extra_qss: str = ""
 ) -> None:
@@ -131,6 +138,21 @@ def _apply_standard_dialog_chrome(
         _compose_widget_stylesheet(
             dialog,
             _standard_dialog_stylesheet(object_name, extra_qss=extra_qss),
+        )
+    )
+
+
+def _apply_standard_widget_chrome(
+    widget: QWidget, object_name: str, *, extra_qss: str = ""
+) -> None:
+    widget.setObjectName(object_name)
+    widget.setStyleSheet(
+        _compose_widget_stylesheet(
+            widget,
+            _standard_container_stylesheet(
+                f"QWidget#{object_name}",
+                extra_qss=extra_qss,
+            ),
         )
     )
 

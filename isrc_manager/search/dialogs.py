@@ -27,13 +27,14 @@ from isrc_manager.ui_common import (
     _add_standard_dialog_header,
     _apply_compact_dialog_control_heights,
     _apply_standard_dialog_chrome,
+    _apply_standard_widget_chrome,
     _create_standard_section,
 )
 
 from .service import GlobalSearchService, RelationshipExplorerService
 
 
-class GlobalSearchDialog(QDialog):
+class GlobalSearchPanel(QWidget):
     """Search across works, tracks, releases, contracts, rights, parties, documents, and assets."""
 
     open_entity_requested = Signal(str, int)
@@ -41,20 +42,18 @@ class GlobalSearchDialog(QDialog):
     def __init__(
         self,
         *,
-        search_service: GlobalSearchService,
-        relationship_service: RelationshipExplorerService,
+        search_service_provider,
+        relationship_service_provider,
         parent=None,
     ):
         super().__init__(parent)
-        self.search_service = search_service
-        self.relationship_service = relationship_service
-        self.setWindowTitle("Global Search and Relationship Explorer")
-        self.resize(1180, 760)
-        self.setMinimumSize(1040, 680)
-        _apply_standard_dialog_chrome(self, "globalSearchDialog")
+        self.search_service_provider = search_service_provider
+        self.relationship_service_provider = relationship_service_provider
+        self.setObjectName("globalSearchPanel")
+        _apply_standard_widget_chrome(self, "globalSearchPanel")
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(18, 18, 18, 18)
+        root.setContentsMargins(14, 14, 14, 14)
         root.setSpacing(14)
         _add_standard_dialog_header(
             root,
@@ -190,6 +189,14 @@ class GlobalSearchDialog(QDialog):
         _apply_compact_dialog_control_heights(self)
         self.refresh_saved_searches()
 
+    def _search_service(self) -> GlobalSearchService | None:
+        service = self.search_service_provider()
+        return service
+
+    def _relationship_service(self) -> RelationshipExplorerService | None:
+        service = self.relationship_service_provider()
+        return service
+
     def _entity_filter(self) -> list[str] | None:
         mapping = {
             "Works": ["work"],
@@ -205,7 +212,10 @@ class GlobalSearchDialog(QDialog):
 
     def refresh_saved_searches(self) -> None:
         self.saved_searches_list.clear()
-        for saved in self.search_service.list_saved_searches():
+        service = self._search_service()
+        if service is None:
+            return
+        for saved in service.list_saved_searches():
             item_text = f"{saved.name} | {saved.query_text}"
             self.saved_searches_list.addItem(item_text)
             self.saved_searches_list.item(self.saved_searches_list.count() - 1).setData(
@@ -219,7 +229,13 @@ class GlobalSearchDialog(QDialog):
             )
 
     def refresh_results(self) -> None:
-        results = self.search_service.search(
+        service = self._search_service()
+        if service is None:
+            self.results_table.setRowCount(0)
+            self.results_status_label.setText("Open a profile first to search the catalog.")
+            self.refresh_relationships()
+            return
+        results = service.search(
             self.search_edit.text(),
             entity_types=self._entity_filter(),
             limit=200,
@@ -262,10 +278,15 @@ class GlobalSearchDialog(QDialog):
             self.relationships_edit.setPlainText("Select a result to inspect its links.")
             return
         entity_type, entity_id = selected
+        relationship_service = self._relationship_service()
+        if relationship_service is None:
+            self.relationship_summary_label.setText("Open a profile first to inspect links.")
+            self.relationships_edit.setPlainText("Open a profile first to inspect links.")
+            return
         self.relationship_summary_label.setText(
             f"Showing links for {entity_type.title()} #{entity_id}."
         )
-        sections = self.relationship_service.describe_links(entity_type, entity_id)
+        sections = relationship_service.describe_links(entity_type, entity_id)
         if not sections:
             self.relationships_edit.setPlainText("No linked records found.")
             return
@@ -291,13 +312,17 @@ class GlobalSearchDialog(QDialog):
         self.open_entity_requested.emit(selected[0], selected[1])
 
     def save_current_search(self) -> None:
+        service = self._search_service()
+        if service is None:
+            QMessageBox.warning(self, "Global Search", "Open a profile first.")
+            return
         query = self.search_edit.text().strip()
         if not query:
             QMessageBox.information(self, "Global Search", "Enter a query first.")
             return
         name = query if len(query) <= 40 else query[:40]
         try:
-            self.search_service.save_search(name, query, self._entity_filter())
+            service.save_search(name, query, self._entity_filter())
         except Exception as exc:
             QMessageBox.critical(self, "Global Search", str(exc))
             return
@@ -328,9 +353,49 @@ class GlobalSearchDialog(QDialog):
         self.refresh_results()
 
     def delete_saved_search(self) -> None:
+        service = self._search_service()
+        if service is None:
+            QMessageBox.warning(self, "Global Search", "Open a profile first.")
+            return
         item = self.saved_searches_list.currentItem()
         if item is None:
             QMessageBox.information(self, "Global Search", "Select a saved search first.")
             return
-        self.search_service.delete_saved_search(int(item.data(Qt.UserRole)))
+        service.delete_saved_search(int(item.data(Qt.UserRole)))
         self.refresh_saved_searches()
+
+
+class GlobalSearchDialog(QDialog):
+    """Compatibility dialog wrapper around the reusable global search panel."""
+
+    open_entity_requested = Signal(str, int)
+
+    def __init__(
+        self,
+        *,
+        search_service: GlobalSearchService,
+        relationship_service: RelationshipExplorerService,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle("Global Search and Relationship Explorer")
+        self.resize(1180, 760)
+        self.setMinimumSize(1040, 680)
+        _apply_standard_dialog_chrome(self, "globalSearchDialog")
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+        self.panel = GlobalSearchPanel(
+            search_service_provider=lambda: search_service,
+            relationship_service_provider=lambda: relationship_service,
+            parent=self,
+        )
+        self.panel.open_entity_requested.connect(self.open_entity_requested.emit)
+        root.addWidget(self.panel)
+
+    def __getattr__(self, name: str):
+        panel = self.__dict__.get("panel")
+        if panel is not None and hasattr(panel, name):
+            return getattr(panel, name)
+        raise AttributeError(name)

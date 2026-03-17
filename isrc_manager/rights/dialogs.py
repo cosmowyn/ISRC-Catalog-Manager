@@ -30,6 +30,7 @@ from isrc_manager.ui_common import (
     _add_standard_dialog_header,
     _apply_compact_dialog_control_heights,
     _apply_standard_dialog_chrome,
+    _apply_standard_widget_chrome,
     _configure_standard_form_layout,
     _create_scrollable_dialog_content,
     _create_standard_section,
@@ -259,28 +260,26 @@ class RightEditorDialog(QDialog):
         )
 
 
-class RightsBrowserDialog(QDialog):
-    """Browse rights grants and conflicts."""
+class RightsBrowserPanel(QWidget):
+    """Browse rights grants and conflicts inside a workspace panel."""
 
     def __init__(
         self,
         *,
-        rights_service: RightsService,
-        party_service: PartyService,
-        contract_service: ContractService,
+        rights_service_provider,
+        party_service_provider,
+        contract_service_provider,
         parent=None,
     ):
         super().__init__(parent)
-        self.rights_service = rights_service
-        self.party_service = party_service
-        self.contract_service = contract_service
-        self.setWindowTitle("Rights Matrix")
-        self.resize(1080, 700)
-        self.setMinimumSize(960, 620)
-        _apply_standard_dialog_chrome(self, "rightsBrowserDialog")
+        self.rights_service_provider = rights_service_provider
+        self.party_service_provider = party_service_provider
+        self.contract_service_provider = contract_service_provider
+        self.setObjectName("rightsBrowserPanel")
+        _apply_standard_widget_chrome(self, "rightsBrowserPanel")
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(18, 18, 18, 18)
+        root.setContentsMargins(14, 14, 14, 14)
         root.setSpacing(14)
         _add_standard_dialog_header(
             root,
@@ -347,15 +346,52 @@ class RightsBrowserDialog(QDialog):
 
         self.refresh()
 
+    def _rights_service(self) -> RightsService | None:
+        return self.rights_service_provider()
+
+    def _party_service(self) -> PartyService | None:
+        return self.party_service_provider()
+
+    def _contract_service(self) -> ContractService | None:
+        return self.contract_service_provider()
+
+    def _restore_selection(self, right_id: int | None) -> None:
+        if not right_id:
+            return
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            if item is None:
+                continue
+            try:
+                current_right_id = int(item.text())
+            except Exception:
+                continue
+            if current_right_id != int(right_id):
+                continue
+            self.table.selectRow(row)
+            return
+
+    def focus_right(self, right_id: int | None) -> None:
+        self.table.clearSelection()
+        self._restore_selection(right_id)
+
     def _selected_right_id(self) -> int | None:
-        rows = self.table.selectionModel().selectedRows()
+        selection_model = self.table.selectionModel()
+        if selection_model is None:
+            return None
+        rows = selection_model.selectedRows()
         if not rows:
             return None
         item = self.table.item(rows[0].row(), 0)
         return int(item.text()) if item is not None else None
 
     def refresh(self) -> None:
-        rights = self.rights_service.list_rights(search_text=self.search_edit.text())
+        selected_right_id = self._selected_right_id()
+        service = self._rights_service()
+        if service is None:
+            self.table.setRowCount(0)
+            return
+        rights = service.list_rights(search_text=self.search_edit.text())
         self.table.setRowCount(0)
         for right in rights:
             row = self.table.rowCount()
@@ -372,49 +408,68 @@ class RightsBrowserDialog(QDialog):
             for column, value in enumerate(values):
                 self.table.setItem(row, column, QTableWidgetItem(value))
         self.table.resizeColumnsToContents()
+        self._restore_selection(selected_right_id)
 
     def create_right(self) -> None:
+        rights_service = self._rights_service()
+        party_service = self._party_service()
+        contract_service = self._contract_service()
+        if rights_service is None or party_service is None or contract_service is None:
+            QMessageBox.warning(self, "Rights Matrix", "Open a profile first.")
+            return
         dialog = RightEditorDialog(
-            rights_service=self.rights_service,
-            party_service=self.party_service,
-            contract_service=self.contract_service,
+            rights_service=rights_service,
+            party_service=party_service,
+            contract_service=contract_service,
             parent=self,
         )
         if dialog.exec() != QDialog.Accepted:
             return
         try:
-            self.rights_service.create_right(dialog.payload())
+            right_id = rights_service.create_right(dialog.payload())
         except Exception as exc:
             QMessageBox.critical(self, "Rights Matrix", str(exc))
             return
         self.refresh()
+        self.focus_right(right_id)
 
     def edit_selected(self) -> None:
+        rights_service = self._rights_service()
+        party_service = self._party_service()
+        contract_service = self._contract_service()
+        if rights_service is None or party_service is None or contract_service is None:
+            QMessageBox.warning(self, "Rights Matrix", "Open a profile first.")
+            return
         right_id = self._selected_right_id()
         if not right_id:
             QMessageBox.information(self, "Rights Matrix", "Select a rights record first.")
             return
-        right = self.rights_service.fetch_right(right_id)
+        right = rights_service.fetch_right(right_id)
         if right is None:
             self.refresh()
             return
         dialog = RightEditorDialog(
-            rights_service=self.rights_service,
-            party_service=self.party_service,
-            contract_service=self.contract_service,
+            rights_service=rights_service,
+            party_service=party_service,
+            contract_service=contract_service,
             right=right,
             parent=self,
         )
         if dialog.exec() != QDialog.Accepted:
             return
         try:
-            self.rights_service.update_right(right_id, dialog.payload())
+            rights_service.update_right(right_id, dialog.payload())
         except Exception as exc:
             QMessageBox.critical(self, "Rights Matrix", str(exc))
             return
         self.refresh()
+        self.focus_right(right_id)
 
     def delete_selected(self) -> None:
+        service = self._rights_service()
+        if service is None:
+            QMessageBox.warning(self, "Rights Matrix", "Open a profile first.")
+            return
         right_id = self._selected_right_id()
         if not right_id:
             QMessageBox.information(self, "Rights Matrix", "Select a rights record first.")
@@ -424,11 +479,15 @@ class RightsBrowserDialog(QDialog):
             != QMessageBox.Yes
         ):
             return
-        self.rights_service.delete_right(right_id)
+        service.delete_right(right_id)
         self.refresh()
 
     def show_conflicts(self) -> None:
-        conflicts = self.rights_service.detect_conflicts()
+        service = self._rights_service()
+        if service is None:
+            QMessageBox.warning(self, "Rights Matrix", "Open a profile first.")
+            return
+        conflicts = service.detect_conflicts()
         if not conflicts:
             QMessageBox.information(
                 self, "Rights Matrix", "No overlapping exclusive rights were detected."
@@ -436,3 +495,38 @@ class RightsBrowserDialog(QDialog):
             return
         lines = [conflict.message for conflict in conflicts]
         QMessageBox.warning(self, "Rights Conflicts", "\n\n".join(lines))
+
+
+class RightsBrowserDialog(QDialog):
+    """Compatibility dialog wrapper around the reusable rights browser panel."""
+
+    def __init__(
+        self,
+        *,
+        rights_service: RightsService,
+        party_service: PartyService,
+        contract_service: ContractService,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle("Rights Matrix")
+        self.resize(1080, 700)
+        self.setMinimumSize(960, 620)
+        _apply_standard_dialog_chrome(self, "rightsBrowserDialog")
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+        self.panel = RightsBrowserPanel(
+            rights_service_provider=lambda: rights_service,
+            party_service_provider=lambda: party_service,
+            contract_service_provider=lambda: contract_service,
+            parent=self,
+        )
+        root.addWidget(self.panel)
+
+    def __getattr__(self, name: str):
+        panel = self.__dict__.get("panel")
+        if panel is not None and hasattr(panel, name):
+            return getattr(panel, name)
+        raise AttributeError(name)

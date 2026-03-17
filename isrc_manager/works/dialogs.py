@@ -31,6 +31,7 @@ from isrc_manager.ui_common import (
     _add_standard_dialog_header,
     _apply_compact_dialog_control_heights,
     _apply_standard_dialog_chrome,
+    _apply_standard_widget_chrome,
     _configure_standard_form_layout,
     _create_scrollable_dialog_content,
     _create_standard_section,
@@ -388,32 +389,30 @@ class WorkEditorDialog(QDialog):
         )
 
 
-class WorkBrowserDialog(QDialog):
-    """Browse, create, duplicate, and link first-class work records."""
+class WorkBrowserPanel(QWidget):
+    """Browse, create, duplicate, and link first-class work records inside a workspace panel."""
 
     filter_requested = Signal(list)
 
     def __init__(
         self,
         *,
-        work_service: WorkService,
+        work_service_provider,
         track_title_resolver,
         selected_track_ids_provider,
         linked_track_id: int | None = None,
         parent=None,
     ):
         super().__init__(parent)
-        self.work_service = work_service
+        self.work_service_provider = work_service_provider
         self.track_title_resolver = track_title_resolver
         self.selected_track_ids_provider = selected_track_ids_provider
         self.linked_track_id = linked_track_id
-        self.setWindowTitle("Work Manager")
-        self.resize(1040, 700)
-        self.setMinimumSize(920, 620)
-        _apply_standard_dialog_chrome(self, "workBrowserDialog")
+        self.setObjectName("workBrowserPanel")
+        _apply_standard_widget_chrome(self, "workBrowserPanel")
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(18, 18, 18, 18)
+        root.setContentsMargins(14, 14, 14, 14)
         root.setSpacing(14)
         _add_standard_dialog_header(
             root,
@@ -491,6 +490,14 @@ class WorkBrowserDialog(QDialog):
 
         self.refresh()
 
+    def _work_service(self) -> WorkService | None:
+        service = self.work_service_provider()
+        return service
+
+    def set_linked_track_id(self, linked_track_id: int | None) -> None:
+        self.linked_track_id = int(linked_track_id) if linked_track_id is not None else None
+        self.refresh()
+
     def _selected_work_id(self) -> int | None:
         rows = self.table.selectionModel().selectedRows()
         if not rows:
@@ -498,8 +505,30 @@ class WorkBrowserDialog(QDialog):
         item = self.table.item(rows[0].row(), 0)
         return int(item.text()) if item is not None else None
 
+    def _restore_selection(self, work_id: int | None) -> None:
+        if not work_id:
+            return
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            if item is None:
+                continue
+            try:
+                current_work_id = int(item.text())
+            except Exception:
+                continue
+            if current_work_id != int(work_id):
+                continue
+            self.table.selectRow(row)
+            return
+
     def refresh(self) -> None:
-        rows = self.work_service.list_works(
+        selected_work_id = self._selected_work_id()
+        service = self._work_service()
+        if service is None:
+            self.table.setRowCount(0)
+            return
+
+        rows = service.list_works(
             search_text=self.search_edit.text(),
             linked_track_id=self.linked_track_id,
         )
@@ -521,9 +550,11 @@ class WorkBrowserDialog(QDialog):
                     item.setTextAlignment(Qt.AlignCenter)
                 self.table.setItem(row, column, item)
         self.table.resizeColumnsToContents()
+        self._restore_selection(selected_work_id)
 
     def _edit_dialog_for(self, work_id: int | None = None) -> WorkEditorDialog:
-        detail = self.work_service.fetch_work_detail(work_id) if work_id else None
+        service = self._work_service()
+        detail = service.fetch_work_detail(work_id) if service is not None and work_id else None
         contributors = []
         track_ids = []
         if detail is not None:
@@ -540,7 +571,7 @@ class WorkBrowserDialog(QDialog):
             ]
             track_ids = list(detail.track_ids)
         return WorkEditorDialog(
-            work_service=self.work_service,
+            work_service=service,
             track_title_resolver=self.track_title_resolver,
             selected_track_ids_provider=self.selected_track_ids_provider,
             work=detail.work if detail is not None else None,
@@ -550,17 +581,25 @@ class WorkBrowserDialog(QDialog):
         )
 
     def create_work(self) -> None:
+        service = self._work_service()
+        if service is None:
+            QMessageBox.warning(self, "Work Manager", "Open a profile first.")
+            return
         dialog = self._edit_dialog_for()
         if dialog.exec() != QDialog.Accepted:
             return
         try:
-            self.work_service.create_work(dialog.payload())
+            service.create_work(dialog.payload())
         except Exception as exc:
             QMessageBox.critical(self, "Work Manager", str(exc))
             return
         self.refresh()
 
     def edit_selected(self) -> None:
+        service = self._work_service()
+        if service is None:
+            QMessageBox.warning(self, "Work Manager", "Open a profile first.")
+            return
         work_id = self._selected_work_id()
         if not work_id:
             QMessageBox.information(self, "Work Manager", "Select a work first.")
@@ -569,25 +608,33 @@ class WorkBrowserDialog(QDialog):
         if dialog.exec() != QDialog.Accepted:
             return
         try:
-            self.work_service.update_work(work_id, dialog.payload())
+            service.update_work(work_id, dialog.payload())
         except Exception as exc:
             QMessageBox.critical(self, "Work Manager", str(exc))
             return
         self.refresh()
 
     def duplicate_selected(self) -> None:
+        service = self._work_service()
+        if service is None:
+            QMessageBox.warning(self, "Work Manager", "Open a profile first.")
+            return
         work_id = self._selected_work_id()
         if not work_id:
             QMessageBox.information(self, "Work Manager", "Select a work first.")
             return
         try:
-            self.work_service.duplicate_work(work_id)
+            service.duplicate_work(work_id)
         except Exception as exc:
             QMessageBox.critical(self, "Work Manager", str(exc))
             return
         self.refresh()
 
     def link_selected_tracks(self) -> None:
+        service = self._work_service()
+        if service is None:
+            QMessageBox.warning(self, "Work Manager", "Open a profile first.")
+            return
         work_id = self._selected_work_id()
         if not work_id:
             QMessageBox.information(self, "Work Manager", "Select a work first.")
@@ -598,10 +645,14 @@ class WorkBrowserDialog(QDialog):
                 self, "Work Manager", "Select one or more tracks in the main table first."
             )
             return
-        self.work_service.link_tracks_to_work(work_id, track_ids)
+        service.link_tracks_to_work(work_id, track_ids)
         self.refresh()
 
     def delete_selected(self) -> None:
+        service = self._work_service()
+        if service is None:
+            QMessageBox.warning(self, "Work Manager", "Open a profile first.")
+            return
         work_id = self._selected_work_id()
         if not work_id:
             QMessageBox.information(self, "Work Manager", "Select a work first.")
@@ -611,15 +662,59 @@ class WorkBrowserDialog(QDialog):
             != QMessageBox.Yes
         ):
             return
-        self.work_service.delete_work(work_id)
+        service.delete_work(work_id)
         self.refresh()
 
     def filter_by_work_tracks(self) -> None:
+        service = self._work_service()
+        if service is None:
+            QMessageBox.warning(self, "Work Manager", "Open a profile first.")
+            return
         work_id = self._selected_work_id()
         if not work_id:
             QMessageBox.information(self, "Work Manager", "Select a work first.")
             return
-        detail = self.work_service.fetch_work_detail(work_id)
+        detail = service.fetch_work_detail(work_id)
         if detail is None:
             return
         self.filter_requested.emit(list(detail.track_ids))
+
+
+class WorkBrowserDialog(QDialog):
+    """Compatibility dialog wrapper around the reusable work manager panel."""
+
+    filter_requested = Signal(list)
+
+    def __init__(
+        self,
+        *,
+        work_service: WorkService,
+        track_title_resolver,
+        selected_track_ids_provider,
+        linked_track_id: int | None = None,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle("Work Manager")
+        self.resize(1040, 700)
+        self.setMinimumSize(920, 620)
+        _apply_standard_dialog_chrome(self, "workBrowserDialog")
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+        self.panel = WorkBrowserPanel(
+            work_service_provider=lambda: work_service,
+            track_title_resolver=track_title_resolver,
+            selected_track_ids_provider=selected_track_ids_provider,
+            linked_track_id=linked_track_id,
+            parent=self,
+        )
+        self.panel.filter_requested.connect(self.filter_requested.emit)
+        root.addWidget(self.panel)
+
+    def __getattr__(self, name: str):
+        panel = self.__dict__.get("panel")
+        if panel is not None and hasattr(panel, name):
+            return getattr(panel, name)
+        raise AttributeError(name)

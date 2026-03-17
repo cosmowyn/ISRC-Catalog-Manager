@@ -27,6 +27,7 @@ from isrc_manager.ui_common import (
     _add_standard_dialog_header,
     _apply_compact_dialog_control_heights,
     _apply_standard_dialog_chrome,
+    _apply_standard_widget_chrome,
     _configure_standard_form_layout,
     _create_scrollable_dialog_content,
     _create_standard_section,
@@ -197,19 +198,17 @@ class AssetEditorDialog(QDialog):
         )
 
 
-class AssetBrowserDialog(QDialog):
-    """Browse registered master and deliverable variants."""
+class AssetBrowserPanel(QWidget):
+    """Browse registered master and deliverable variants inside a workspace panel."""
 
-    def __init__(self, *, asset_service: AssetService, parent=None):
+    def __init__(self, *, asset_service_provider, parent=None):
         super().__init__(parent)
-        self.asset_service = asset_service
-        self.setWindowTitle("Deliverables and Asset Versions")
-        self.resize(1060, 700)
-        self.setMinimumSize(940, 620)
-        _apply_standard_dialog_chrome(self, "assetBrowserDialog")
+        self.asset_service_provider = asset_service_provider
+        self.setObjectName("assetBrowserPanel")
+        _apply_standard_widget_chrome(self, "assetBrowserPanel")
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(18, 18, 18, 18)
+        root.setContentsMargins(14, 14, 14, 14)
         root.setSpacing(14)
         _add_standard_dialog_header(
             root,
@@ -275,15 +274,46 @@ class AssetBrowserDialog(QDialog):
 
         self.refresh()
 
+    def _asset_service(self) -> AssetService | None:
+        return self.asset_service_provider()
+
+    def _restore_selection(self, asset_id: int | None) -> None:
+        if not asset_id:
+            return
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            if item is None:
+                continue
+            try:
+                current_asset_id = int(item.text())
+            except Exception:
+                continue
+            if current_asset_id != int(asset_id):
+                continue
+            self.table.selectRow(row)
+            return
+
+    def focus_asset(self, asset_id: int | None) -> None:
+        self.table.clearSelection()
+        self._restore_selection(asset_id)
+
     def _selected_asset_id(self) -> int | None:
-        rows = self.table.selectionModel().selectedRows()
+        selection_model = self.table.selectionModel()
+        if selection_model is None:
+            return None
+        rows = selection_model.selectedRows()
         if not rows:
             return None
         item = self.table.item(rows[0].row(), 0)
         return int(item.text()) if item is not None else None
 
     def refresh(self) -> None:
-        assets = self.asset_service.list_assets(search_text=self.search_edit.text())
+        selected_asset_id = self._selected_asset_id()
+        service = self._asset_service()
+        if service is None:
+            self.table.setRowCount(0)
+            return
+        assets = service.list_assets(search_text=self.search_edit.text())
         self.table.setRowCount(0)
         for asset in assets:
             row = self.table.rowCount()
@@ -301,38 +331,53 @@ class AssetBrowserDialog(QDialog):
             for column, value in enumerate(values):
                 self.table.setItem(row, column, QTableWidgetItem(value))
         self.table.resizeColumnsToContents()
+        self._restore_selection(selected_asset_id)
 
     def create_asset(self) -> None:
-        dialog = AssetEditorDialog(asset_service=self.asset_service, parent=self)
+        service = self._asset_service()
+        if service is None:
+            QMessageBox.warning(self, "Asset Registry", "Open a profile first.")
+            return
+        dialog = AssetEditorDialog(asset_service=service, parent=self)
         if dialog.exec() != QDialog.Accepted:
             return
         try:
-            self.asset_service.create_asset(dialog.payload())
+            asset_id = service.create_asset(dialog.payload())
         except Exception as exc:
             QMessageBox.critical(self, "Asset Registry", str(exc))
             return
         self.refresh()
+        self.focus_asset(asset_id)
 
     def edit_selected(self) -> None:
+        service = self._asset_service()
+        if service is None:
+            QMessageBox.warning(self, "Asset Registry", "Open a profile first.")
+            return
         asset_id = self._selected_asset_id()
         if not asset_id:
             QMessageBox.information(self, "Asset Registry", "Select an asset first.")
             return
-        asset = self.asset_service.fetch_asset(asset_id)
+        asset = service.fetch_asset(asset_id)
         if asset is None:
             self.refresh()
             return
-        dialog = AssetEditorDialog(asset_service=self.asset_service, asset=asset, parent=self)
+        dialog = AssetEditorDialog(asset_service=service, asset=asset, parent=self)
         if dialog.exec() != QDialog.Accepted:
             return
         try:
-            self.asset_service.update_asset(asset_id, dialog.payload())
+            service.update_asset(asset_id, dialog.payload())
         except Exception as exc:
             QMessageBox.critical(self, "Asset Registry", str(exc))
             return
         self.refresh()
+        self.focus_asset(asset_id)
 
     def delete_selected(self) -> None:
+        service = self._asset_service()
+        if service is None:
+            QMessageBox.warning(self, "Asset Registry", "Open a profile first.")
+            return
         asset_id = self._selected_asset_id()
         if not asset_id:
             QMessageBox.information(self, "Asset Registry", "Select an asset first.")
@@ -342,13 +387,44 @@ class AssetBrowserDialog(QDialog):
             != QMessageBox.Yes
         ):
             return
-        self.asset_service.delete_asset(asset_id)
+        service.delete_asset(asset_id)
         self.refresh()
 
     def mark_primary(self) -> None:
+        service = self._asset_service()
+        if service is None:
+            QMessageBox.warning(self, "Asset Registry", "Open a profile first.")
+            return
         asset_id = self._selected_asset_id()
         if not asset_id:
             QMessageBox.information(self, "Asset Registry", "Select an asset first.")
             return
-        self.asset_service.mark_primary(asset_id)
+        service.mark_primary(asset_id)
         self.refresh()
+        self.focus_asset(asset_id)
+
+
+class AssetBrowserDialog(QDialog):
+    """Compatibility dialog wrapper around the reusable asset registry panel."""
+
+    def __init__(self, *, asset_service: AssetService, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Deliverables and Asset Versions")
+        self.resize(1060, 700)
+        self.setMinimumSize(940, 620)
+        _apply_standard_dialog_chrome(self, "assetBrowserDialog")
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+        self.panel = AssetBrowserPanel(
+            asset_service_provider=lambda: asset_service,
+            parent=self,
+        )
+        root.addWidget(self.panel)
+
+    def __getattr__(self, name: str):
+        panel = self.__dict__.get("panel")
+        if panel is not None and hasattr(panel, name):
+            return getattr(panel, name)
+        raise AttributeError(name)

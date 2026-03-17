@@ -26,6 +26,7 @@ from isrc_manager.ui_common import (
     _add_standard_dialog_header,
     _apply_compact_dialog_control_heights,
     _apply_standard_dialog_chrome,
+    _apply_standard_widget_chrome,
     _configure_standard_form_layout,
     _create_standard_section,
 )
@@ -178,16 +179,27 @@ class PartyEditorDialog(QDialog):
         )
 
 
-class PartyManagerDialog(QDialog):
-    """Browse, edit, and merge canonical party records."""
+class PartyManagerPanel(QWidget):
+    """Browse, edit, and merge canonical party records inside a workspace panel."""
 
-    def __init__(self, *, party_service: PartyService, parent=None):
+    def __init__(self, *, party_service_provider, parent=None):
         super().__init__(parent)
-        self.party_service = party_service
-        self.setWindowTitle("Party Manager")
-        self.resize(900, 620)
+        self.party_service_provider = party_service_provider
+        self.setObjectName("partyManagerPanel")
+        _apply_standard_widget_chrome(self, "partyManagerPanel")
 
         root = QVBoxLayout(self)
+        root.setContentsMargins(14, 14, 14, 14)
+        root.setSpacing(14)
+        _add_standard_dialog_header(
+            root,
+            self,
+            title="Party Manager",
+            subtitle=(
+                "Maintain one reusable record per important person or company, then "
+                "link it across works, contracts, and rights."
+            ),
+        )
         intro = QLabel(
             "Maintain one reusable record per important person or company, then link it across works, contracts, and rights."
         )
@@ -228,9 +240,43 @@ class PartyManagerDialog(QDialog):
 
         self.refresh()
 
+    def _party_service(self) -> PartyService | None:
+        return self.party_service_provider()
+
+    def _restore_selection(self, party_ids: list[int]) -> None:
+        if not party_ids:
+            return
+        selection_model = self.table.selectionModel()
+        if selection_model is None:
+            return
+        wanted = {int(party_id) for party_id in party_ids}
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            if item is None:
+                continue
+            try:
+                current_party_id = int(item.text())
+            except Exception:
+                continue
+            if current_party_id not in wanted:
+                continue
+            selection_model.select(
+                self.table.model().index(row, 0),
+                selection_model.SelectionFlag.Select | selection_model.SelectionFlag.Rows,
+            )
+
+    def focus_party(self, party_id: int | None) -> None:
+        self.table.clearSelection()
+        if party_id is None:
+            return
+        self._restore_selection([int(party_id)])
+
     def _selected_party_ids(self) -> list[int]:
         ids: list[int] = []
-        for index in self.table.selectionModel().selectedRows():
+        selection_model = self.table.selectionModel()
+        if selection_model is None:
+            return ids
+        for index in selection_model.selectedRows():
             item = self.table.item(index.row(), 0)
             if item is None:
                 continue
@@ -238,10 +284,15 @@ class PartyManagerDialog(QDialog):
         return ids
 
     def refresh(self) -> None:
-        records = self.party_service.list_parties(search_text=self.search_edit.text())
+        selected_ids = self._selected_party_ids()
+        service = self._party_service()
+        if service is None:
+            self.table.setRowCount(0)
+            return
+        records = service.list_parties(search_text=self.search_edit.text())
         self.table.setRowCount(0)
         for record in records:
-            usage = self.party_service.usage_summary(record.id)
+            usage = service.usage_summary(record.id)
             row = self.table.rowCount()
             self.table.insertRow(row)
             values = [
@@ -258,38 +309,52 @@ class PartyManagerDialog(QDialog):
                     item.setTextAlignment(Qt.AlignCenter)
                 self.table.setItem(row, column, item)
         self.table.resizeColumnsToContents()
+        self._restore_selection(selected_ids)
 
     def create_party(self) -> None:
-        dialog = PartyEditorDialog(party_service=self.party_service, parent=self)
+        service = self._party_service()
+        if service is None:
+            QMessageBox.warning(self, "Party Manager", "Open a profile first.")
+            return
+        dialog = PartyEditorDialog(party_service=service, parent=self)
         if dialog.exec() != QDialog.Accepted:
             return
         try:
-            self.party_service.create_party(dialog.payload())
+            self.focus_party(service.create_party(dialog.payload()))
         except Exception as exc:
             QMessageBox.critical(self, "Party Manager", str(exc))
             return
         self.refresh()
 
     def edit_selected(self) -> None:
+        service = self._party_service()
+        if service is None:
+            QMessageBox.warning(self, "Party Manager", "Open a profile first.")
+            return
         selected_ids = self._selected_party_ids()
         if not selected_ids:
             QMessageBox.information(self, "Party Manager", "Select a party first.")
             return
-        party = self.party_service.fetch_party(selected_ids[0])
+        party = service.fetch_party(selected_ids[0])
         if party is None:
             self.refresh()
             return
-        dialog = PartyEditorDialog(party_service=self.party_service, party=party, parent=self)
+        dialog = PartyEditorDialog(party_service=service, party=party, parent=self)
         if dialog.exec() != QDialog.Accepted:
             return
         try:
-            self.party_service.update_party(party.id, dialog.payload())
+            service.update_party(party.id, dialog.payload())
         except Exception as exc:
             QMessageBox.critical(self, "Party Manager", str(exc))
             return
         self.refresh()
+        self.focus_party(party.id)
 
     def delete_selected(self) -> None:
+        service = self._party_service()
+        if service is None:
+            QMessageBox.warning(self, "Party Manager", "Open a profile first.")
+            return
         selected_ids = self._selected_party_ids()
         if not selected_ids:
             QMessageBox.information(self, "Party Manager", "Select one or more parties first.")
@@ -305,21 +370,51 @@ class PartyManagerDialog(QDialog):
             return
         try:
             for party_id in selected_ids:
-                self.party_service.delete_party(party_id)
+                service.delete_party(party_id)
         except Exception as exc:
             QMessageBox.critical(self, "Party Manager", str(exc))
             return
         self.refresh()
 
     def merge_selected(self) -> None:
+        service = self._party_service()
+        if service is None:
+            QMessageBox.warning(self, "Party Manager", "Open a profile first.")
+            return
         selected_ids = self._selected_party_ids()
         if len(selected_ids) < 2:
             QMessageBox.information(self, "Party Manager", "Select at least two parties to merge.")
             return
         primary_id = selected_ids[0]
         try:
-            self.party_service.merge_parties(primary_id, selected_ids[1:])
+            service.merge_parties(primary_id, selected_ids[1:])
         except Exception as exc:
             QMessageBox.critical(self, "Party Manager", str(exc))
             return
         self.refresh()
+        self.focus_party(primary_id)
+
+
+class PartyManagerDialog(QDialog):
+    """Compatibility dialog wrapper around the reusable party manager panel."""
+
+    def __init__(self, *, party_service: PartyService, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Party Manager")
+        self.resize(900, 620)
+        _apply_standard_dialog_chrome(self, "partyManagerDialog")
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+        self.panel = PartyManagerPanel(
+            party_service_provider=lambda: party_service,
+            parent=self,
+        )
+        root.addWidget(self.panel)
+
+    def __getattr__(self, name: str):
+        panel = self.__dict__.get("panel")
+        if panel is not None and hasattr(panel, name):
+            return getattr(panel, name)
+        raise AttributeError(name)

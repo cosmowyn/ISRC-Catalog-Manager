@@ -32,6 +32,7 @@ from isrc_manager.ui_common import (
     _add_standard_dialog_header,
     _apply_compact_dialog_control_heights,
     _apply_standard_dialog_chrome,
+    _apply_standard_widget_chrome,
     _configure_standard_form_layout,
     _create_scrollable_dialog_content,
     _create_standard_section,
@@ -457,8 +458,8 @@ class ReleaseEditorDialog(QDialog):
         super().accept()
 
 
-class ReleaseBrowserDialog(QDialog):
-    """Browse, edit, and inspect first-class releases."""
+class ReleaseBrowserPanel(QWidget):
+    """Browse, edit, and inspect first-class releases inside a reusable workspace panel."""
 
     filter_requested = Signal(list)
     open_track_requested = Signal(int)
@@ -466,27 +467,26 @@ class ReleaseBrowserDialog(QDialog):
     duplicate_release_requested = Signal(int)
     add_selected_tracks_requested = Signal(int)
     create_release_requested = Signal()
+    close_requested = Signal()
 
     def __init__(
         self,
         *,
-        release_service: ReleaseService,
+        release_service_provider,
         track_title_resolver,
         parent=None,
     ):
         super().__init__(parent)
-        self.release_service = release_service
+        self.release_service_provider = release_service_provider
         self.track_title_resolver = track_title_resolver
         self._release_ids_by_row: list[int] = []
         self._current_summary: ReleaseSummary | None = None
 
-        self.setWindowTitle("Release Browser")
-        self.resize(1160, 780)
-        self.setMinimumSize(1020, 700)
-        _apply_standard_dialog_chrome(self, "releaseBrowserDialog")
+        self.setObjectName("releaseBrowserPanel")
+        _apply_standard_widget_chrome(self, "releaseBrowserPanel")
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(18, 18, 18, 18)
+        root.setContentsMargins(14, 14, 14, 14)
         root.setSpacing(14)
         _add_standard_dialog_header(
             root,
@@ -685,15 +685,29 @@ class ReleaseBrowserDialog(QDialog):
         buttons = QHBoxLayout()
         buttons.addStretch(1)
         close_button = QPushButton("Close")
-        close_button.clicked.connect(self.accept)
+        close_button.clicked.connect(self.close_requested.emit)
         buttons.addWidget(close_button)
         root.addLayout(buttons)
 
         _apply_compact_dialog_control_heights(self)
         self.refresh()
 
+    def _release_service(self) -> ReleaseService | None:
+        service = self.release_service_provider()
+        return service
+
     def refresh(self) -> None:
-        releases = self.release_service.list_releases(search_text=self.search_edit.text().strip())
+        service = self._release_service()
+        if service is None:
+            self._release_ids_by_row = []
+            self.release_table.setRowCount(0)
+            self.track_table.setRowCount(0)
+            self.release_count_label.setText("Open a profile first to browse releases.")
+            for label in self._summary_fields.values():
+                label.setText("")
+            return
+
+        releases = service.list_releases(search_text=self.search_edit.text().strip())
         self._release_ids_by_row = [release.id for release in releases]
         self.release_count_label.setText(
             f"{len(releases)} release{'s' if len(releases) != 1 else ''} shown."
@@ -725,14 +739,15 @@ class ReleaseBrowserDialog(QDialog):
         return int(self._release_ids_by_row[row])
 
     def _load_selected_release(self) -> None:
+        service = self._release_service()
         release_id = self._selected_release_id()
-        if release_id is None:
+        if service is None or release_id is None:
             self._current_summary = None
             for label in self._summary_fields.values():
                 label.setText("")
             self.track_table.setRowCount(0)
             return
-        self._current_summary = self.release_service.fetch_release_summary(release_id)
+        self._current_summary = service.fetch_release_summary(release_id)
         if self._current_summary is None:
             return
         release = self._current_summary.release
@@ -802,3 +817,50 @@ class ReleaseBrowserDialog(QDialog):
             return
         if track_id > 0:
             self.open_track_requested.emit(track_id)
+
+
+class ReleaseBrowserDialog(QDialog):
+    """Compatibility dialog wrapper around the reusable release browser panel."""
+
+    filter_requested = Signal(list)
+    open_track_requested = Signal(int)
+    edit_release_requested = Signal(int)
+    duplicate_release_requested = Signal(int)
+    add_selected_tracks_requested = Signal(int)
+    create_release_requested = Signal()
+
+    def __init__(
+        self,
+        *,
+        release_service: ReleaseService,
+        track_title_resolver,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle("Release Browser")
+        self.resize(1160, 780)
+        self.setMinimumSize(1020, 700)
+        _apply_standard_dialog_chrome(self, "releaseBrowserDialog")
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+        self.panel = ReleaseBrowserPanel(
+            release_service_provider=lambda: release_service,
+            track_title_resolver=track_title_resolver,
+            parent=self,
+        )
+        self.panel.filter_requested.connect(self.filter_requested.emit)
+        self.panel.open_track_requested.connect(self.open_track_requested.emit)
+        self.panel.edit_release_requested.connect(self.edit_release_requested.emit)
+        self.panel.duplicate_release_requested.connect(self.duplicate_release_requested.emit)
+        self.panel.add_selected_tracks_requested.connect(self.add_selected_tracks_requested.emit)
+        self.panel.create_release_requested.connect(self.create_release_requested.emit)
+        self.panel.close_requested.connect(self.accept)
+        root.addWidget(self.panel)
+
+    def __getattr__(self, name: str):
+        panel = self.__dict__.get("panel")
+        if panel is not None and hasattr(panel, name):
+            return getattr(panel, name)
+        raise AttributeError(name)

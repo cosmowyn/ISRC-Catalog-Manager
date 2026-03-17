@@ -4,6 +4,8 @@ ISRC Catalog Manager is no longer just a track table with a few extra fields. It
 
 This guide explains the product model behind that expansion.
 
+It also reflects the current workspace design: the major catalog-management surfaces for releases, works, licenses, parties, contracts, rights, assets, and relationship search can remain open as tabbed dock panels beside the track table instead of interrupting catalog work as blocking popups.
+
 ## Why This Layer Exists
 
 A serious music catalog is made up of more than recordings.
@@ -184,6 +186,8 @@ Typical relationships look like this:
 
 This is why the app includes both global search and a relationship explorer: once the model becomes richer, navigation needs to become richer as well.
 
+That same logic now shapes the workspace itself. The principal catalog managers can stay open beside the table as docked tabs, which means you can move from track selection to releases, works, rights, contracts, parties, licenses, and assets without closing one window to reach the next.
+
 ## Workflow State And Operational Readiness
 
 The app also tracks where an item stands operationally.
@@ -258,6 +262,7 @@ For an independent catalog owner, this means one application can now serve as:
 
 - the recording catalog
 - the release register
+- the docked catalog workspace for releases, works, licenses, and relationships
 - the composition register
 - the contract diary
 - the rights matrix

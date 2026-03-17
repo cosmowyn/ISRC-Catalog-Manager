@@ -21,12 +21,14 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QTabWidget,
     QVBoxLayout,
+    QWidget,
 )
 
 from isrc_manager.ui_common import (
     _add_standard_dialog_header,
     _apply_compact_dialog_control_heights,
     _apply_standard_dialog_chrome,
+    _apply_standard_widget_chrome,
     _configure_standard_form_layout,
     _create_scrollable_dialog_content,
     _create_standard_section,
@@ -385,19 +387,17 @@ class ContractEditorDialog(QDialog):
         )
 
 
-class ContractBrowserDialog(QDialog):
-    """Browse and edit contract lifecycle records."""
+class ContractBrowserPanel(QWidget):
+    """Browse and edit contract lifecycle records inside a workspace panel."""
 
-    def __init__(self, *, contract_service: ContractService, parent=None):
+    def __init__(self, *, contract_service_provider, parent=None):
         super().__init__(parent)
-        self.contract_service = contract_service
-        self.setWindowTitle("Contract Manager")
-        self.resize(1060, 700)
-        self.setMinimumSize(940, 620)
-        _apply_standard_dialog_chrome(self, "contractBrowserDialog")
+        self.contract_service_provider = contract_service_provider
+        self.setObjectName("contractBrowserPanel")
+        _apply_standard_widget_chrome(self, "contractBrowserPanel")
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(18, 18, 18, 18)
+        root.setContentsMargins(14, 14, 14, 14)
         root.setSpacing(14)
         _add_standard_dialog_header(
             root,
@@ -462,15 +462,46 @@ class ContractBrowserDialog(QDialog):
 
         self.refresh()
 
+    def _contract_service(self) -> ContractService | None:
+        return self.contract_service_provider()
+
+    def _restore_selection(self, contract_id: int | None) -> None:
+        if not contract_id:
+            return
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            if item is None:
+                continue
+            try:
+                current_contract_id = int(item.text())
+            except Exception:
+                continue
+            if current_contract_id != int(contract_id):
+                continue
+            self.table.selectRow(row)
+            return
+
+    def focus_contract(self, contract_id: int | None) -> None:
+        self.table.clearSelection()
+        self._restore_selection(contract_id)
+
     def _selected_contract_id(self) -> int | None:
-        rows = self.table.selectionModel().selectedRows()
+        selection_model = self.table.selectionModel()
+        if selection_model is None:
+            return None
+        rows = selection_model.selectedRows()
         if not rows:
             return None
         item = self.table.item(rows[0].row(), 0)
         return int(item.text()) if item is not None else None
 
     def refresh(self) -> None:
-        rows = self.contract_service.list_contracts(search_text=self.search_edit.text())
+        selected_contract_id = self._selected_contract_id()
+        service = self._contract_service()
+        if service is None:
+            self.table.setRowCount(0)
+            return
+        rows = service.list_contracts(search_text=self.search_edit.text())
         self.table.setRowCount(0)
         for record in rows:
             row = self.table.rowCount()
@@ -487,40 +518,53 @@ class ContractBrowserDialog(QDialog):
             for column, value in enumerate(values):
                 self.table.setItem(row, column, QTableWidgetItem(value))
         self.table.resizeColumnsToContents()
+        self._restore_selection(selected_contract_id)
 
     def create_contract(self) -> None:
-        dialog = ContractEditorDialog(contract_service=self.contract_service, parent=self)
+        service = self._contract_service()
+        if service is None:
+            QMessageBox.warning(self, "Contract Manager", "Open a profile first.")
+            return
+        dialog = ContractEditorDialog(contract_service=service, parent=self)
         if dialog.exec() != QDialog.Accepted:
             return
         try:
-            self.contract_service.create_contract(dialog.payload())
+            contract_id = service.create_contract(dialog.payload())
         except Exception as exc:
             QMessageBox.critical(self, "Contract Manager", str(exc))
             return
         self.refresh()
+        self.focus_contract(contract_id)
 
     def edit_selected(self) -> None:
+        service = self._contract_service()
+        if service is None:
+            QMessageBox.warning(self, "Contract Manager", "Open a profile first.")
+            return
         contract_id = self._selected_contract_id()
         if not contract_id:
             QMessageBox.information(self, "Contract Manager", "Select a contract first.")
             return
-        detail = self.contract_service.fetch_contract_detail(contract_id)
+        detail = service.fetch_contract_detail(contract_id)
         if detail is None:
             self.refresh()
             return
-        dialog = ContractEditorDialog(
-            contract_service=self.contract_service, detail=detail, parent=self
-        )
+        dialog = ContractEditorDialog(contract_service=service, detail=detail, parent=self)
         if dialog.exec() != QDialog.Accepted:
             return
         try:
-            self.contract_service.update_contract(contract_id, dialog.payload())
+            service.update_contract(contract_id, dialog.payload())
         except Exception as exc:
             QMessageBox.critical(self, "Contract Manager", str(exc))
             return
         self.refresh()
+        self.focus_contract(contract_id)
 
     def delete_selected(self) -> None:
+        service = self._contract_service()
+        if service is None:
+            QMessageBox.warning(self, "Contract Manager", "Open a profile first.")
+            return
         contract_id = self._selected_contract_id()
         if not contract_id:
             QMessageBox.information(self, "Contract Manager", "Select a contract first.")
@@ -530,16 +574,46 @@ class ContractBrowserDialog(QDialog):
             != QMessageBox.Yes
         ):
             return
-        self.contract_service.delete_contract(contract_id)
+        service.delete_contract(contract_id)
         self.refresh()
 
     def export_deadlines(self) -> None:
+        service = self._contract_service()
+        if service is None:
+            QMessageBox.warning(self, "Contract Manager", "Open a profile first.")
+            return
         path, _ = QFileDialog.getSaveFileName(
             self, "Export Upcoming Deadlines", "", "CSV Files (*.csv)"
         )
         if not path:
             return
         try:
-            self.contract_service.export_deadlines_csv(path)
+            service.export_deadlines_csv(path)
         except Exception as exc:
             QMessageBox.critical(self, "Contract Manager", str(exc))
+
+
+class ContractBrowserDialog(QDialog):
+    """Compatibility dialog wrapper around the reusable contract manager panel."""
+
+    def __init__(self, *, contract_service: ContractService, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Contract Manager")
+        self.resize(1060, 700)
+        self.setMinimumSize(940, 620)
+        _apply_standard_dialog_chrome(self, "contractBrowserDialog")
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+        self.panel = ContractBrowserPanel(
+            contract_service_provider=lambda: contract_service,
+            parent=self,
+        )
+        root.addWidget(self.panel)
+
+    def __getattr__(self, name: str):
+        panel = self.__dict__.get("panel")
+        if panel is not None and hasattr(panel, name):
+            return getattr(panel, name)
+        raise AttributeError(name)
