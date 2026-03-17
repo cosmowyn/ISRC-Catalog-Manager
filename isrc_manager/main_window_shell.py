@@ -620,10 +620,10 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     )
     app._dock_placeholder = QWidget()
     app._dock_placeholder.setObjectName("dockPlaceholder")
+    app._dock_placeholder.setProperty("role", "workspaceCanvas")
     app._dock_placeholder.setMinimumSize(0, 0)
-    app._dock_placeholder.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+    app._dock_placeholder.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     app.setCentralWidget(app._dock_placeholder)
-    app._dock_placeholder.hide()
 
     app.left_panel = QVBoxLayout()
     app.left_panel.setContentsMargins(14, 14, 14, 14)
@@ -927,6 +927,7 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.add_data_column.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
 
     app.left_widget_container = QWidget()
+    app.left_widget_container.setProperty("role", "workspaceCanvas")
     app.left_container_layout = QHBoxLayout(app.left_widget_container)
     app.left_container_layout.setContentsMargins(0, 0, 0, 0)
     app.left_container_layout.setSpacing(0)
@@ -953,6 +954,7 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     )
 
     app.table_panel_widget = QWidget()
+    app.table_panel_widget.setProperty("role", "workspaceCanvas")
     right_panel = QVBoxLayout(app.table_panel_widget)
     right_panel.setContentsMargins(0, 0, 0, 0)
     right_panel.setSpacing(8)

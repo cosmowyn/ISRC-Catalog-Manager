@@ -104,6 +104,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QGroupBox,
     QPlainTextEdit,
+    QStatusBar,
     QCheckBox,
     QColorDialog,
     QFontComboBox,
@@ -180,6 +181,12 @@ from isrc_manager.theme_builder import (
     shift_color as shift_theme_color,
     theme_setting_defaults as default_theme_settings,
     theme_setting_keys as app_theme_setting_keys,
+)
+from isrc_manager.starter_themes import (
+    STARTER_THEME_SPECS,
+    starter_theme_descriptions,
+    starter_theme_library,
+    starter_theme_names,
 )
 from isrc_manager.gs1_dialog import GS1MetadataDialog
 from isrc_manager.assets import AssetService
@@ -455,11 +462,17 @@ class ApplicationSettingsDialog(QDialog):
         self.setMinimumSize(1320, 880)
         self.resize(1400, 920)
         self._theme_settings = dict(theme_settings or {})
-        self._stored_themes = {
-            str(name): dict(values or {})
-            for name, values in dict(stored_themes or {}).items()
-            if str(name).strip()
-        }
+        self._bundled_theme_order = tuple(spec.name for spec in STARTER_THEME_SPECS)
+        self._bundled_theme_names = frozenset(self._bundled_theme_order)
+        self._bundled_theme_descriptions = starter_theme_descriptions()
+        self._stored_themes = starter_theme_library()
+        self._stored_themes.update(
+            {
+                str(name): dict(values or {})
+                for name, values in dict(stored_themes or {}).items()
+                if str(name).strip() and str(name) not in self._bundled_theme_names
+            }
+        )
         self._theme_color_edits = {}
         self._theme_color_swatches = {}
         self._theme_metric_spins = {}
@@ -545,6 +558,7 @@ class ApplicationSettingsDialog(QDialog):
         root.addWidget(self.tabs, 1)
 
         general_page = QWidget(self)
+        general_page.setProperty("role", "workspaceCanvas")
         general_layout = QVBoxLayout(general_page)
         general_layout.setContentsMargins(10, 10, 10, 10)
         general_layout.setSpacing(14)
@@ -732,6 +746,7 @@ class ApplicationSettingsDialog(QDialog):
         self.tabs.addTab(self._wrap_tab_page(general_page), "General")
 
         gs1_page = QWidget(self)
+        gs1_page.setProperty("role", "workspaceCanvas")
         gs1_layout = QVBoxLayout(gs1_page)
         gs1_layout.setContentsMargins(10, 10, 10, 10)
         gs1_layout.setSpacing(14)
@@ -915,11 +930,12 @@ class ApplicationSettingsDialog(QDialog):
         self.tabs.addTab(self._wrap_tab_page(gs1_page), "GS1")
 
         theme_page = QWidget(self)
+        theme_page.setProperty("role", "workspaceCanvas")
         theme_layout = QVBoxLayout(theme_page)
         theme_layout.setContentsMargins(10, 10, 10, 10)
         theme_layout.setSpacing(14)
 
-        theme_library_box = QGroupBox("Saved Themes")
+        theme_library_box = QGroupBox("Theme Library")
         theme_library_grid = QGridLayout(theme_library_box)
         self._configure_grid(theme_library_grid)
 
@@ -956,7 +972,7 @@ class ApplicationSettingsDialog(QDialog):
             0,
             "Theme Library",
             theme_preset_widget,
-            "Load a stored theme, save the current styling as a reusable preset, or remove presets you no longer need.",
+            "Bundled starter themes ship with the app. Load one, save a copy of it as a reusable preset, import/export shared themes, or remove custom themes you no longer need.",
         )
 
         self.theme_font_family_combo = FocusWheelFontComboBox(self)
@@ -983,7 +999,7 @@ class ApplicationSettingsDialog(QDialog):
         theme_layout.addWidget(theme_library_box)
 
         theme_intro = QLabel(
-            "The visual theme builder now covers the full application surface: typography, panels, buttons, inputs, data views, navigation chrome, help buttons, and state styling. "
+            "The visual theme builder now covers the full application surface: typography, workspace canvases, panels, group titles, compact frames, buttons, inputs, data views, tab panes, toolbar and status chrome, help buttons, and state styling. "
             "Use the grouped tabs for most styling work and keep Advanced QSS for the final edge cases."
         )
         theme_intro.setWordWrap(True)
@@ -1110,9 +1126,15 @@ class ApplicationSettingsDialog(QDialog):
 
     @staticmethod
     def _wrap_tab_page(content: QWidget) -> QScrollArea:
+        if content.property("role") is None:
+            content.setProperty("role", "workspaceCanvas")
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setProperty("role", "workspaceCanvas")
+        viewport = scroll.viewport()
+        if viewport is not None:
+            viewport.setProperty("role", "workspaceCanvas")
         scroll.setWidget(content)
         return scroll
 
@@ -1198,6 +1220,7 @@ class ApplicationSettingsDialog(QDialog):
 
     def _build_theme_builder_page(self, page_key: str, description: str) -> QWidget:
         page = QWidget(self)
+        page.setProperty("role", "workspaceCanvas")
         page_layout = QVBoxLayout(page)
         page_layout.setContentsMargins(0, 0, 0, 0)
         page_layout.setSpacing(12)
@@ -1259,6 +1282,7 @@ class ApplicationSettingsDialog(QDialog):
 
     def _build_theme_advanced_page(self) -> QWidget:
         advanced_page = QWidget(self)
+        advanced_page.setProperty("role", "workspaceCanvas")
         advanced_layout = QVBoxLayout(advanced_page)
         advanced_layout.setContentsMargins(0, 0, 0, 0)
         advanced_layout.setSpacing(10)
@@ -1285,6 +1309,7 @@ class ApplicationSettingsDialog(QDialog):
         advanced_layout.addWidget(self.theme_qss_tabs, 1)
 
         qss_editor_page = QWidget(self)
+        qss_editor_page.setProperty("role", "workspaceCanvas")
         qss_editor_layout = QVBoxLayout(qss_editor_page)
         qss_editor_layout.setContentsMargins(0, 0, 0, 0)
         qss_editor_layout.setSpacing(10)
@@ -1298,6 +1323,7 @@ class ApplicationSettingsDialog(QDialog):
         self.theme_qss_tabs.addTab(qss_editor_page, "Editor")
 
         qss_reference_page = QWidget(self)
+        qss_reference_page.setProperty("role", "workspaceCanvas")
         qss_reference_layout = QVBoxLayout(qss_reference_page)
         qss_reference_layout.setContentsMargins(0, 0, 0, 0)
         qss_reference_layout.setSpacing(10)
@@ -1500,6 +1526,20 @@ class ApplicationSettingsDialog(QDialog):
         secondary_layout = QVBoxLayout(secondary_panel)
         secondary_layout.setContentsMargins(14, 18, 14, 14)
         secondary_layout.setSpacing(8)
+        workspace_canvas = QFrame(secondary_panel)
+        workspace_canvas.setProperty("role", "workspaceCanvas")
+        workspace_canvas_layout = QVBoxLayout(workspace_canvas)
+        workspace_canvas_layout.setContentsMargins(10, 10, 10, 10)
+        workspace_canvas_layout.setSpacing(6)
+        workspace_canvas_layout.addWidget(QLabel("Workspace canvas preview", workspace_canvas))
+        workspace_note = QLabel(
+            "Use this color for large page backgrounds, dock canvases, and the empty workspace area.",
+            workspace_canvas,
+        )
+        workspace_note.setWordWrap(True)
+        workspace_note.setProperty("role", "secondary")
+        workspace_canvas_layout.addWidget(workspace_note)
+        secondary_layout.addWidget(workspace_canvas)
         hint = QLabel("Hint text example", secondary_panel)
         hint.setProperty("role", "hint")
         secondary_layout.addWidget(hint)
@@ -1507,6 +1547,17 @@ class ApplicationSettingsDialog(QDialog):
         overlay.setProperty("role", "overlayHint")
         overlay.setAlignment(Qt.AlignCenter)
         secondary_layout.addWidget(overlay, 0, Qt.AlignLeft)
+        compact_group = QFrame(secondary_panel)
+        compact_group.setProperty("role", "compactControlGroup")
+        compact_layout = QHBoxLayout(compact_group)
+        compact_layout.setContentsMargins(10, 8, 10, 8)
+        compact_layout.setSpacing(8)
+        compact_layout.addWidget(QLabel("Compact group preview", compact_group))
+        compact_chip = QLabel("Badge", compact_group)
+        compact_chip.setProperty("role", "overlayHint")
+        compact_layout.addWidget(compact_chip, 0, Qt.AlignLeft)
+        compact_layout.addStretch(1)
+        secondary_layout.addWidget(compact_group)
         layout.addWidget(secondary_panel)
         layout.addStretch(1)
         return page
@@ -1663,6 +1714,7 @@ class ApplicationSettingsDialog(QDialog):
         progress = QProgressBar(data_box)
         progress.setRange(0, 100)
         progress.setValue(68)
+        progress.setFormat("Indexing %p%")
         data_layout.addWidget(progress)
         layout.addWidget(data_box)
         layout.addStretch(1)
@@ -1687,6 +1739,19 @@ class ApplicationSettingsDialog(QDialog):
         preview_tabs.addTab(QLabel("Selected tab content", preview_tabs), "Selected")
         preview_tabs.addTab(QLabel("Inactive tab content", preview_tabs), "Other Tab")
         menu_layout.addWidget(preview_tabs)
+        preview_toolbar = QToolBar("Preview Toolbar", menu_box)
+        preview_toolbar.setObjectName("themePreviewToolbar")
+        preview_toolbar.addAction("Refresh")
+        preview_toolbar.addAction("Export")
+        preview_toolbar.addSeparator()
+        toolbar_label = QLabel("Toolbar label", preview_toolbar)
+        preview_toolbar.addWidget(toolbar_label)
+        menu_layout.addWidget(preview_toolbar)
+        preview_status = QStatusBar(menu_box)
+        preview_status.setObjectName("themePreviewStatusBar")
+        preview_status.showMessage("Status preview: 3 ready, 1 warning")
+        preview_status.addPermanentWidget(QLabel("Profile: Demo", preview_status))
+        menu_layout.addWidget(preview_status)
         layout.addWidget(menu_box)
 
         header_box = QGroupBox("Headers", preview_root)
@@ -2207,8 +2272,26 @@ class ApplicationSettingsDialog(QDialog):
         self.theme_preset_combo.blockSignals(True)
         self.theme_preset_combo.clear()
         self.theme_preset_combo.addItem(self.CUSTOM_THEME_LABEL, "")
-        for name in sorted(self._stored_themes):
+        for name in self._bundled_theme_order:
+            if name not in self._stored_themes:
+                continue
             self.theme_preset_combo.addItem(name, name)
+            self.theme_preset_combo.setItemData(
+                self.theme_preset_combo.count() - 1,
+                f"Starter theme: {self._bundled_theme_descriptions.get(name, '')}".strip(),
+                Qt.ToolTipRole,
+            )
+        for name in sorted(
+            theme_name
+            for theme_name in self._stored_themes
+            if theme_name not in self._bundled_theme_names
+        ):
+            self.theme_preset_combo.addItem(name, name)
+            self.theme_preset_combo.setItemData(
+                self.theme_preset_combo.count() - 1,
+                "Saved custom theme preset.",
+                Qt.ToolTipRole,
+            )
         self.theme_preset_combo.blockSignals(False)
         self._set_theme_preset_selection(current_name)
 
@@ -2226,9 +2309,17 @@ class ApplicationSettingsDialog(QDialog):
         return str(self.theme_preset_combo.currentData() or "").strip()
 
     def _update_theme_preset_actions(self, *_args) -> None:
-        has_named_theme = bool(self._current_theme_preset_name())
+        selected_name = self._current_theme_preset_name()
+        has_named_theme = bool(selected_name)
+        is_bundled_theme = selected_name in self._bundled_theme_names
         self.theme_load_button.setEnabled(has_named_theme)
-        self.theme_delete_button.setEnabled(has_named_theme)
+        self.theme_delete_button.setEnabled(has_named_theme and not is_bundled_theme)
+        if is_bundled_theme:
+            self.theme_delete_button.setToolTip(
+                "Starter themes are packaged with the app and cannot be deleted."
+            )
+        else:
+            self.theme_delete_button.setToolTip("Delete the selected saved theme.")
 
     def _mark_theme_selection_custom(self, *_args) -> None:
         if not self._theme_change_tracking_enabled:
@@ -2251,6 +2342,8 @@ class ApplicationSettingsDialog(QDialog):
 
     def _save_current_theme_preset(self) -> None:
         suggested_name = self._current_theme_preset_name() or "My Theme"
+        if suggested_name in self._bundled_theme_names:
+            suggested_name = f"{suggested_name} Copy"
         name, ok = QInputDialog.getText(self, "Save Theme", "Theme name:", text=suggested_name)
         if not ok:
             return
@@ -2258,6 +2351,13 @@ class ApplicationSettingsDialog(QDialog):
         if not clean_name:
             QMessageBox.warning(
                 self, "Theme Name Required", "Please enter a name for the saved theme."
+            )
+            return
+        if clean_name in self._bundled_theme_names:
+            QMessageBox.information(
+                self,
+                "Starter Theme Protected",
+                "Bundled starter themes cannot be overwritten. Save this draft under a new name instead.",
             )
             return
         if clean_name in self._stored_themes:
@@ -2279,6 +2379,13 @@ class ApplicationSettingsDialog(QDialog):
     def _delete_selected_theme_preset(self) -> None:
         selected_name = self._current_theme_preset_name()
         if not selected_name:
+            return
+        if selected_name in self._bundled_theme_names:
+            QMessageBox.information(
+                self,
+                "Starter Theme Protected",
+                "Bundled starter themes are packaged with the app and cannot be deleted.",
+            )
             return
         answer = QMessageBox.question(
             self,
@@ -5519,13 +5626,22 @@ class App(QMainWindow):
             parsed = {}
         if not isinstance(parsed, dict):
             parsed = {}
-        return self._sanitize_theme_library(parsed)
+        bundled = starter_theme_library()
+        custom = self._sanitize_theme_library(parsed)
+        custom = {name: values for name, values in custom.items() if name not in bundled}
+        merged = dict(bundled)
+        merged.update(custom)
+        return merged
 
     def _save_theme_library(
         self, library: dict[str, object] | None
     ) -> dict[str, dict[str, object]]:
         sanitized = self._sanitize_theme_library(library)
-        self.settings.setValue("theme/library_json", json.dumps(sanitized, sort_keys=True))
+        bundled_names = set(starter_theme_names())
+        custom_only = {
+            name: values for name, values in sanitized.items() if name not in bundled_names
+        }
+        self.settings.setValue("theme/library_json", json.dumps(custom_only, sort_keys=True))
         self.settings.sync()
         return sanitized
 
@@ -13310,6 +13426,7 @@ class AlbumEntryDialog(QDialog):
     @staticmethod
     def _create_tab_page(owner: QWidget) -> tuple[QWidget, QVBoxLayout]:
         page = QWidget(owner)
+        page.setProperty("role", "workspaceCanvas")
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 10, 0, 0)
         layout.setSpacing(14)
@@ -13570,12 +13687,17 @@ class AlbumEntryDialog(QDialog):
         section = _AlbumTrackSection(self, len(self._track_sections) + 1)
         self._track_sections.append(section)
         page = QWidget(self.track_tabs)
+        page.setProperty("role", "workspaceCanvas")
         page_layout = QVBoxLayout(page)
         page_layout.setContentsMargins(0, 6, 0, 0)
         page_layout.setSpacing(0)
         scroll = QScrollArea(page)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setProperty("role", "workspaceCanvas")
+        viewport = scroll.viewport()
+        if viewport is not None:
+            viewport.setProperty("role", "workspaceCanvas")
         scroll.setWidget(section)
         page_layout.addWidget(scroll)
         self._track_pages[section] = page
@@ -13905,6 +14027,7 @@ class EditDialog(QDialog):
 
         def create_tab(title: str, description: str) -> QVBoxLayout:
             page = QWidget(self.editor_tabs)
+            page.setProperty("role", "workspaceCanvas")
             page_layout = QVBoxLayout(page)
             page_layout.setContentsMargins(0, 0, 0, 0)
             page_layout.setSpacing(10)
@@ -13918,8 +14041,13 @@ class EditDialog(QDialog):
             scroll.setWidgetResizable(True)
             scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
             scroll.setFrameShape(QFrame.NoFrame)
+            scroll.setProperty("role", "workspaceCanvas")
+            viewport = scroll.viewport()
+            if viewport is not None:
+                viewport.setProperty("role", "workspaceCanvas")
 
             content = QWidget(scroll)
+            content.setProperty("role", "workspaceCanvas")
             content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
             content_layout = QVBoxLayout(content)
             content_layout.setContentsMargins(0, 0, 0, 0)

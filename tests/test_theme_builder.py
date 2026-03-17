@@ -10,6 +10,7 @@ try:
     from PySide6.QtWidgets import QMessageBox, QWidget
 
     import ISRC_manager as app_module
+    from isrc_manager.starter_themes import starter_theme_library, starter_theme_names
     from isrc_manager.theme_builder import (
         build_theme_stylesheet,
         effective_theme_settings,
@@ -45,6 +46,10 @@ class ThemeBuilderTests(unittest.TestCase):
         for key in (
             "dialog_title_font_size",
             "secondary_text_font_size",
+            "workspace_bg",
+            "group_title_fg",
+            "compact_group_bg",
+            "compact_group_border",
             "button_hover_bg",
             "button_pressed_border",
             "help_button_hover_bg",
@@ -52,7 +57,13 @@ class ThemeBuilderTests(unittest.TestCase):
             "indicator_checked_bg",
             "scrollbar_handle_bg",
             "menu_selected_bg",
+            "toolbar_bg",
+            "statusbar_bg",
+            "header_border",
             "tab_selected_border",
+            "tab_bar_bg",
+            "tab_pane_bg",
+            "progress_fg",
             "progress_chunk_bg",
             "help_button_size",
             "menu_radius",
@@ -60,6 +71,27 @@ class ThemeBuilderTests(unittest.TestCase):
             self.assertIn(key, defaults)
 
         self.assertEqual(set(defaults), set(theme_setting_keys()))
+
+    def test_starter_themes_expose_requested_bundled_presets(self):
+        library = starter_theme_library()
+        self.assertEqual(
+            starter_theme_names(),
+            (
+                "Apple Light",
+                "Apple Dark",
+                "High Visibility",
+                "Aeon Emerald Gold",
+                "Subconscious Cosmos",
+                "VS Code Dark",
+                "Pastel Studio",
+            ),
+        )
+        for name in starter_theme_names():
+            self.assertIn(name, library)
+            self.assertEqual(library[name]["selected_name"], "")
+            self.assertTrue(library[name]["window_bg"])
+            self.assertTrue(library[name]["window_fg"])
+            self.assertTrue(library[name]["accent"])
 
     def test_effective_theme_settings_derive_blank_state_values(self):
         effective = effective_theme_settings(
@@ -80,6 +112,14 @@ class ThemeBuilderTests(unittest.TestCase):
 
         self.assertEqual(effective["selection_bg"], "#0EA5E9")
         self.assertEqual(effective["help_button_bg"], "#0EA5E9")
+        self.assertEqual(effective["workspace_bg"], "#20242A")
+        self.assertEqual(effective["group_title_fg"], "#F7FAFC")
+        self.assertEqual(effective["compact_group_bg"], effective["panel_bg"])
+        self.assertEqual(effective["toolbar_bg"], effective["panel_bg"])
+        self.assertEqual(effective["statusbar_fg"], "#F7FAFC")
+        self.assertEqual(effective["tab_bar_bg"], "#20242A")
+        self.assertEqual(effective["tab_pane_bg"], effective["panel_bg"])
+        self.assertEqual(effective["progress_fg"], "#F9FAFB")
         self.assertTrue(effective["button_hover_bg"])
         self.assertTrue(effective["button_pressed_bg"])
         self.assertTrue(effective["input_focus_border"])
@@ -103,7 +143,19 @@ class ThemeBuilderTests(unittest.TestCase):
         self.assertIn("QCheckBox::indicator", stylesheet)
         self.assertIn("QScrollBar::handle:hover:vertical", stylesheet)
         self.assertIn("QProgressBar::chunk", stylesheet)
+        self.assertIn("color: #F9FAFB", stylesheet)
+        self.assertIn("QTabWidget {", stylesheet)
+        self.assertIn("QTabWidget::tab-bar {", stylesheet)
+        self.assertIn("qproperty-drawBase: 0", stylesheet)
+        self.assertIn("QTabBar {", stylesheet)
         self.assertIn("QTabBar::tab:selected", stylesheet)
+        self.assertIn("QTabWidget::pane", stylesheet)
+        self.assertIn('QWidget[role="workspaceCanvas"]', stylesheet)
+        self.assertIn("QHeaderView {", stylesheet)
+        self.assertIn("QTableCornerButton::section", stylesheet)
+        self.assertIn("QToolBar", stylesheet)
+        self.assertIn("QStatusBar", stylesheet)
+        self.assertIn('QFrame[role="compactControlGroup"]', stylesheet)
         self.assertIn("QMenuBar::item:selected", stylesheet)
         self.assertIn('QLabel[role="dialogTitle"]', stylesheet)
         self.assertIn("/* Advanced QSS */", stylesheet)
@@ -147,17 +199,78 @@ class ThemeBuilderTests(unittest.TestCase):
             self.assertIn("Data Views", labels)
             self.assertIn("Navigation", labels)
             self.assertIn("Advanced QSS", labels)
+            for key in (
+                "workspace_bg",
+                "group_title_fg",
+                "compact_group_bg",
+                "progress_fg",
+                "header_border",
+                "toolbar_bg",
+                "statusbar_bg",
+                "tab_bar_bg",
+                "tab_pane_bg",
+            ):
+                self.assertIn(key, dialog._theme_color_edits)
 
             dialog._theme_color_edits["button_hover_bg"].setText("#224488")
             dialog._theme_color_edits["menu_selected_bg"].setText("#BB5500")
+            dialog._theme_color_edits["toolbar_bg"].setText("#1F2937")
+            dialog._theme_color_edits["tab_pane_bg"].setText("#0F172A")
             dialog._theme_metric_spins["menu_radius"].setValue(14)
             dialog._theme_metric_spins["dialog_title_font_size"].setValue(22)
             values = dialog.values()["theme_settings"]
 
             self.assertEqual(values["button_hover_bg"], "#224488")
             self.assertEqual(values["menu_selected_bg"], "#BB5500")
+            self.assertEqual(values["toolbar_bg"], "#1F2937")
+            self.assertEqual(values["tab_pane_bg"], "#0F172A")
             self.assertEqual(values["menu_radius"], 14)
             self.assertEqual(values["dialog_title_font_size"], 22)
+        finally:
+            dialog.close()
+            host.close()
+
+    def test_application_settings_dialog_lists_bundled_themes_and_protects_delete(self):
+        host = _ThemePreviewHost()
+        dialog = app_module.ApplicationSettingsDialog(
+            window_title="Catalog",
+            icon_path="",
+            artist_code="00",
+            auto_snapshot_enabled=True,
+            auto_snapshot_interval_minutes=30,
+            isrc_prefix="NLABC",
+            sena_number="",
+            btw_number="",
+            buma_relatie_nummer="",
+            buma_ipi="",
+            gs1_template_asset=None,
+            gs1_contracts_csv_path="",
+            gs1_contract_entries=(),
+            gs1_active_contract_number="",
+            gs1_target_market="",
+            gs1_language="",
+            gs1_brand="",
+            gs1_subbrand="",
+            gs1_packaging_type="",
+            gs1_product_classification="",
+            theme_settings={},
+            stored_themes={},
+            current_profile_path="",
+            parent=host,
+        )
+        try:
+            combo_names = [
+                dialog.theme_preset_combo.itemText(index)
+                for index in range(dialog.theme_preset_combo.count())
+            ]
+            for name in starter_theme_names():
+                self.assertIn(name, combo_names)
+
+            apple_light_index = dialog.theme_preset_combo.findData("Apple Light")
+            self.assertGreaterEqual(apple_light_index, 0)
+            dialog.theme_preset_combo.setCurrentIndex(apple_light_index)
+            dialog._update_theme_preset_actions()
+            self.assertFalse(dialog.theme_delete_button.isEnabled())
         finally:
             dialog.close()
             host.close()

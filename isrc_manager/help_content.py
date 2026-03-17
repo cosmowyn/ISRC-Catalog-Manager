@@ -508,19 +508,20 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         content_html="""
         <p>The Theme page now acts as a full visual theme builder for the application.</p>
         <ul>
-          <li><strong>Saved Themes</strong>: load, save, delete, import, export, and reset theme drafts without leaving the dialog.</li>
+          <li><strong>Theme Library</strong>: packaged starter themes and saved custom presets can be loaded, exported, imported, reset, and managed without leaving the dialog.</li>
+          <li><strong>Starter presets</strong>: the app ships with Apple Light, Apple Dark, High Visibility, Aeon Emerald Gold, Subconscious Cosmos, VS Code Dark, and Pastel Studio as bundled starting points.</li>
           <li><strong>Typography</strong>: choose the application font and tune dialog titles, section headings, and supporting text sizes separately.</li>
-          <li><strong>Surfaces</strong>: style the window, panel, border, header, tooltip, overlay, accent, and supporting-text palette for the entire app.</li>
+          <li><strong>Surfaces</strong>: style the window, workspace-canvas, panel, group-title, compact-frame, border, tooltip, overlay, accent, and supporting-text palette for the entire app.</li>
           <li><strong>Buttons</strong>: configure normal, hover, pressed, checked, disabled, and round help-button states, plus radius and padding.</li>
           <li><strong>Inputs</strong>: control editor backgrounds, focus styling, disabled states, placeholders, and checkbox/radio indicators.</li>
-          <li><strong>Data Views</strong>: theme tables, lists, row hover states, selections, scrollbars, and progress bars.</li>
-          <li><strong>Navigation</strong>: theme menu bars, popup menus, dock titles, headers, and tabs with separate normal, hover, and selected states.</li>
+          <li><strong>Data Views</strong>: theme tables, lists, row hover states, selections, scrollbars, progress bars, progress text, and progress borders.</li>
+          <li><strong>Navigation</strong>: theme menu bars, popup menus, toolbars, status bars, dock titles, headers, tab strips, tab panes, and tabs with separate normal, hover, and selected states.</li>
           <li><strong>Live Preview</strong>: preview the current draft inside the settings dialog with a focused preview that follows the active theme section, or enable real-time app-wide preview while editing and revert automatically on cancel.</li>
           <li><strong>Advanced QSS</strong>: append custom Qt stylesheet rules only for the remaining edge cases that are not already covered by the GUI builder.</li>
           <li><strong>Selector Reference</strong>: browse a searchable catalog of selectors harvested from the currently open windows and dialogs, then copy or insert them into the QSS editor.</li>
           <li><strong>Autocomplete</strong>: press <strong>Ctrl+Space</strong> inside the advanced QSS editor for context-aware selector, pseudo-state, subcontrol, property, value, and full-template completion.</li>
         </ul>
-        <p>Most users should start with the visual controls and only move into Advanced QSS for selectors that still need hand-written rules. All visible controls receive object names automatically so advanced QSS can target specific widgets. Object-name suggestions are inserted as references, which means they safely append to an existing widget selector instead of silently rewriting it. If you want to style a dialog that is not currently open, open it first and refresh the selector catalog. Saved theme presets persist between launches and remain selectable from the theme dropdown, and imported/exported theme JSON files can be shared between installs.</p>
+        <p>Most users should start with the visual controls and only move into Advanced QSS for selectors that still need hand-written rules. All visible controls receive object names automatically so advanced QSS can target specific widgets. Object-name suggestions are inserted as references, which means they safely append to an existing widget selector instead of silently rewriting it. If you want to style a dialog that is not currently open, open it first and refresh the selector catalog. Bundled starter themes are packaged with the app, remain selectable on every install, and can be exported for sharing, while custom saved themes persist between launches in the normal theme library.</p>
         """,
     ),
     HelpChapter(

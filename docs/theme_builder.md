@@ -2,21 +2,35 @@
 
 The application now ships with a full visual theme builder in `Settings > Application Settings > Theme`.
 
+## Starter Themes
+
+The packaged theme library now includes seven starter presets so every build starts with useful options before you touch Advanced QSS:
+
+- `Apple Light`
+- `Apple Dark`
+- `High Visibility`
+- `Aeon Emerald Gold`
+- `Subconscious Cosmos`
+- `VS Code Dark`
+- `Pastel Studio`
+
+These starter themes are bundled with the app itself, so they are available in packaged binaries as well as source checkouts. They can be loaded and exported like any other preset, but they are protected from delete/overwrite inside the theme library. If you want to customize one, load it and save a copy under a new name.
+
 ## What It Covers
 
 The GUI builder now exposes styling controls for the full app surface, including:
 
 - typography
-- panels and surfaces
-- borders and headers
+- panels, surfaces, and workspace canvases
+- borders, group titles, and compact grouped frames
 - buttons and round help buttons
 - hover, pressed, checked, and disabled states
 - inputs and focus styling
 - placeholder text
 - checkbox and radio indicators
 - tables, lists, row hover states, and selection colors
-- menus, tabs, dock titles, and header chrome
-- scrollbars and progress bars
+- menus, tab strips, tabs, tab panes, dock titles, toolbar/status chrome, and header chrome
+- scrollbars, progress bars, progress text, and related borders
 - geometry values such as font sizes, radii, border width, padding, help-button size, and scrollbar thickness
 
 ## Builder Structure
@@ -25,6 +39,7 @@ The Theme page is split into:
 
 - `Saved Themes`
   - load, save, delete, import, export, and reset theme drafts
+  - includes packaged starter themes plus your own saved copies
   - optional real-time live preview across the running app
 - `Typography`
   - application font
@@ -33,15 +48,15 @@ The Theme page is split into:
   - section title size
   - secondary text size
 - `Surfaces`
-  - window, panel, border, accent, selection, tooltip, overlay, and helper-text colors
+  - window, workspace canvas, panel, group-title, compact-group, border, accent, selection, tooltip, overlay, and helper-text colors
 - `Buttons`
   - normal, hover, pressed/checked, disabled, and round help-button states
 - `Inputs`
   - default, focus, disabled, placeholder, and indicator styling
 - `Data Views`
-  - tables, lists, selection, hover, scrollbars, and progress bars
+  - tables, lists, selection, hover, scrollbars, and progress bars including progress text and borders
 - `Navigation`
-  - menubar, menus, headers, dock titles, and tabs
+  - menubar, toolbars, status bars, headers, dock titles, tab strips, tabs, and tab panes
 - `Advanced QSS`
   - for the remaining cases that are better handled with handwritten selectors
 

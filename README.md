@@ -149,13 +149,14 @@ The application provides:
 ## Theme Builder
 - The Settings dialog includes a full theme builder for the entire application, not just the main window.
 - Most widget families can now be themed without writing QSS:
-  - surfaces, borders, headers, tooltips, overlays, and supporting text
+  - surfaces, workspace canvases, borders, group titles, compact grouped frames, headers, tooltips, overlays, and supporting text
   - buttons, help buttons, hover states, pressed states, checked states, and disabled states
   - inputs, focus styling, placeholders, and checkbox/radio indicators
-  - tables, lists, selections, row hover states, scrollbars, progress bars, menus, and tabs
+  - tables, lists, selections, row hover states, scrollbars, progress bars, progress text, menus, tab strips, tabs, tab panes, toolbar chrome, and status bars
   - geometry such as font sizes, border widths, corner radii, control padding, help-button sizing, and scrollbar thickness
+- The packaged theme library includes starter presets for `Apple Light`, `Apple Dark`, `High Visibility`, `Aeon Emerald Gold`, `Subconscious Cosmos`, `VS Code Dark`, and `Pastel Studio`.
 - The builder includes focused live preview panes inside the settings dialog that automatically switch with the active theme section, plus an optional app-wide live preview mode while editing.
-- Theme drafts can be saved to the internal theme library, exported to JSON, and imported back into another install.
+- Starter themes are bundled with the app, can be loaded or exported like any other preset, and are protected from accidental delete/overwrite. Theme drafts can be saved to the internal theme library, exported to JSON, and imported back into another install.
 - Advanced QSS remains available for the remaining edge cases and is backed by a searchable selector catalog and syntax-aware autocomplete.
 - More detail is available in [docs/theme_builder.md](docs/theme_builder.md).
 

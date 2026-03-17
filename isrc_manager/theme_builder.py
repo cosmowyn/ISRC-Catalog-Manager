@@ -88,6 +88,13 @@ THEME_COLOR_FIELD_SPECS: tuple[ThemeColorFieldSpec, ...] = (
         placeholder="Palette default",
     ),
     ThemeColorFieldSpec(
+        "workspace_bg",
+        "surfaces",
+        "Core Surfaces",
+        "Workspace Canvas",
+        "Background used for tab pages, dock content canvases, scrollable form pages, and the empty main workspace area.",
+    ),
+    ThemeColorFieldSpec(
         "panel_bg",
         "surfaces",
         "Core Surfaces",
@@ -107,6 +114,27 @@ THEME_COLOR_FIELD_SPECS: tuple[ThemeColorFieldSpec, ...] = (
         "Core Surfaces",
         "Border Color",
         "Default border color for frames, groups, docks, and general separators.",
+    ),
+    ThemeColorFieldSpec(
+        "group_title_fg",
+        "surfaces",
+        "Core Surfaces",
+        "Group Title Text",
+        "Foreground used for group box titles and other boxed section labels.",
+    ),
+    ThemeColorFieldSpec(
+        "compact_group_bg",
+        "surfaces",
+        "Core Surfaces",
+        "Compact Group Background",
+        "Background used for compact grouped control clusters such as inline field frames.",
+    ),
+    ThemeColorFieldSpec(
+        "compact_group_border",
+        "surfaces",
+        "Core Surfaces",
+        "Compact Group Border",
+        "Border color used for compact grouped control clusters.",
     ),
     ThemeColorFieldSpec(
         "accent",
@@ -552,6 +580,20 @@ THEME_COLOR_FIELD_SPECS: tuple[ThemeColorFieldSpec, ...] = (
         "Fill color for progress bars.",
     ),
     ThemeColorFieldSpec(
+        "progress_fg",
+        "data_views",
+        "Scrollbars & Progress",
+        "Progress Text",
+        "Foreground used for progress bar labels and percentages.",
+    ),
+    ThemeColorFieldSpec(
+        "progress_border",
+        "data_views",
+        "Scrollbars & Progress",
+        "Progress Border",
+        "Border color used around progress bars.",
+    ),
+    ThemeColorFieldSpec(
         "menu_bg",
         "navigation",
         "Menus",
@@ -599,6 +641,55 @@ THEME_COLOR_FIELD_SPECS: tuple[ThemeColorFieldSpec, ...] = (
         "Headers & Dock Titles",
         "Header Text",
         "Foreground used for dock titles, table headers, and header-like chrome.",
+    ),
+    ThemeColorFieldSpec(
+        "header_border",
+        "navigation",
+        "Headers & Dock Titles",
+        "Header Border",
+        "Border color used for dock titles, table headers, and header-like chrome.",
+    ),
+    ThemeColorFieldSpec(
+        "toolbar_bg",
+        "navigation",
+        "Toolbars & Status",
+        "Toolbar Background",
+        "Background used for application toolbars and ribbons.",
+    ),
+    ThemeColorFieldSpec(
+        "toolbar_fg",
+        "navigation",
+        "Toolbars & Status",
+        "Toolbar Text",
+        "Foreground used on toolbar controls and labels.",
+    ),
+    ThemeColorFieldSpec(
+        "toolbar_border",
+        "navigation",
+        "Toolbars & Status",
+        "Toolbar Border",
+        "Border color used around toolbar chrome and separators.",
+    ),
+    ThemeColorFieldSpec(
+        "statusbar_bg",
+        "navigation",
+        "Toolbars & Status",
+        "Status Bar Background",
+        "Background used for status bars and bottom status strips.",
+    ),
+    ThemeColorFieldSpec(
+        "statusbar_fg",
+        "navigation",
+        "Toolbars & Status",
+        "Status Bar Text",
+        "Foreground used inside status bars and bottom status strips.",
+    ),
+    ThemeColorFieldSpec(
+        "statusbar_border",
+        "navigation",
+        "Toolbars & Status",
+        "Status Bar Border",
+        "Border color used around status bars and their top edge.",
     ),
     ThemeColorFieldSpec(
         "tab_bg",
@@ -662,6 +753,27 @@ THEME_COLOR_FIELD_SPECS: tuple[ThemeColorFieldSpec, ...] = (
         "Tabs",
         "Tab Selected Border",
         "Border color used for selected tabs.",
+    ),
+    ThemeColorFieldSpec(
+        "tab_bar_bg",
+        "navigation",
+        "Tabs",
+        "Tab Bar Background",
+        "Background used for the tab strip behind the individual tab buttons.",
+    ),
+    ThemeColorFieldSpec(
+        "tab_pane_bg",
+        "navigation",
+        "Tabs",
+        "Tab Pane Background",
+        "Background used behind tab content panes.",
+    ),
+    ThemeColorFieldSpec(
+        "tab_pane_border",
+        "navigation",
+        "Tabs",
+        "Tab Pane Border",
+        "Border color used around tab content panes.",
     ),
 )
 
@@ -998,9 +1110,13 @@ def theme_setting_defaults() -> dict[str, object]:
         "auto_contrast_enabled": True,
         "window_bg": palette.color(QPalette.Window).name().upper(),
         "window_fg": palette.color(QPalette.WindowText).name().upper(),
+        "workspace_bg": "",
         "panel_bg": "",
         "panel_alt_bg": "",
         "border_color": "",
+        "group_title_fg": "",
+        "compact_group_bg": "",
+        "compact_group_border": "",
         "accent": palette.color(QPalette.Highlight).name().upper(),
         "selection_bg": "",
         "selection_fg": "",
@@ -1063,6 +1179,8 @@ def theme_setting_defaults() -> dict[str, object]:
         "scrollbar_handle_hover_bg": "",
         "progress_bg": "",
         "progress_chunk_bg": "",
+        "progress_fg": "",
+        "progress_border": "",
         "menu_bg": "",
         "menu_fg": "",
         "menu_border": "",
@@ -1070,6 +1188,13 @@ def theme_setting_defaults() -> dict[str, object]:
         "menu_selected_fg": "",
         "header_bg": "",
         "header_fg": "",
+        "header_border": "",
+        "toolbar_bg": "",
+        "toolbar_fg": "",
+        "toolbar_border": "",
+        "statusbar_bg": "",
+        "statusbar_fg": "",
+        "statusbar_border": "",
         "tab_bg": "",
         "tab_fg": "",
         "tab_border": "",
@@ -1079,6 +1204,9 @@ def theme_setting_defaults() -> dict[str, object]:
         "tab_selected_bg": "",
         "tab_selected_fg": "",
         "tab_selected_border": "",
+        "tab_bar_bg": "",
+        "tab_pane_bg": "",
+        "tab_pane_border": "",
         "border_width": 1,
         "panel_radius": 8,
         "button_radius": 6,
@@ -1177,6 +1305,7 @@ def effective_theme_settings(raw_values: dict[str, object] | None = None) -> dic
 
     window_bg = _resolve_theme_color(normalized, defaults, "window_bg", str(defaults["window_bg"]))
     window_fg = _resolve_theme_color(normalized, defaults, "window_fg", str(defaults["window_fg"]))
+    workspace_bg = _resolve_theme_color(normalized, defaults, "workspace_bg", window_bg)
     accent = _resolve_theme_color(normalized, defaults, "accent", str(defaults["accent"]))
     selection_bg = _resolve_theme_color(normalized, defaults, "selection_bg", accent)
     selection_fg = _resolve_theme_color(
@@ -1202,6 +1331,11 @@ def effective_theme_settings(raw_values: dict[str, object] | None = None) -> dic
         defaults,
         "border_color",
         shift_color(window_bg, 88 if QColor(window_bg).lightnessF() >= 0.5 else 118),
+    )
+    group_title_fg = _resolve_theme_color(normalized, defaults, "group_title_fg", window_fg)
+    compact_group_bg = _resolve_theme_color(normalized, defaults, "compact_group_bg", panel_bg)
+    compact_group_border = _resolve_theme_color(
+        normalized, defaults, "compact_group_border", border_color
     )
     secondary_text = _resolve_theme_color(
         normalized,
@@ -1377,6 +1511,13 @@ def effective_theme_settings(raw_values: dict[str, object] | None = None) -> dic
     )
     progress_bg = _resolve_theme_color(normalized, defaults, "progress_bg", panel_alt_bg)
     progress_chunk_bg = _resolve_theme_color(normalized, defaults, "progress_chunk_bg", accent)
+    progress_fg = _resolve_theme_color(
+        normalized,
+        defaults,
+        "progress_fg",
+        pick_contrasting_color(progress_bg),
+    )
+    progress_border = _resolve_theme_color(normalized, defaults, "progress_border", border_color)
 
     menu_bg = _resolve_theme_color(normalized, defaults, "menu_bg", panel_bg)
     menu_fg = _resolve_theme_color(normalized, defaults, "menu_fg", window_fg)
@@ -1395,6 +1536,13 @@ def effective_theme_settings(raw_values: dict[str, object] | None = None) -> dic
         shift_color(window_bg, 108 if QColor(window_bg).lightnessF() < 0.5 else 92),
     )
     header_fg = _resolve_theme_color(normalized, defaults, "header_fg", window_fg)
+    header_border = _resolve_theme_color(normalized, defaults, "header_border", border_color)
+    toolbar_bg = _resolve_theme_color(normalized, defaults, "toolbar_bg", panel_bg)
+    toolbar_fg = _resolve_theme_color(normalized, defaults, "toolbar_fg", window_fg)
+    toolbar_border = _resolve_theme_color(normalized, defaults, "toolbar_border", border_color)
+    statusbar_bg = _resolve_theme_color(normalized, defaults, "statusbar_bg", panel_bg)
+    statusbar_fg = _resolve_theme_color(normalized, defaults, "statusbar_fg", window_fg)
+    statusbar_border = _resolve_theme_color(normalized, defaults, "statusbar_border", border_color)
     tab_bg = _resolve_theme_color(normalized, defaults, "tab_bg", panel_bg)
     tab_fg = _resolve_theme_color(normalized, defaults, "tab_fg", window_fg)
     tab_border = _resolve_theme_color(normalized, defaults, "tab_border", border_color)
@@ -1416,14 +1564,21 @@ def effective_theme_settings(raw_values: dict[str, object] | None = None) -> dic
     tab_selected_border = _resolve_theme_color(
         normalized, defaults, "tab_selected_border", button_pressed_border
     )
+    tab_bar_bg = _resolve_theme_color(normalized, defaults, "tab_bar_bg", workspace_bg)
+    tab_pane_bg = _resolve_theme_color(normalized, defaults, "tab_pane_bg", panel_bg)
+    tab_pane_border = _resolve_theme_color(normalized, defaults, "tab_pane_border", border_color)
 
     effective.update(
         {
             "window_bg": window_bg,
             "window_fg": window_fg,
+            "workspace_bg": workspace_bg,
             "panel_bg": panel_bg,
             "panel_alt_bg": panel_alt_bg,
             "border_color": border_color,
+            "group_title_fg": group_title_fg,
+            "compact_group_bg": compact_group_bg,
+            "compact_group_border": compact_group_border,
             "accent": accent,
             "selection_bg": selection_bg,
             "selection_fg": selection_fg,
@@ -1486,6 +1641,8 @@ def effective_theme_settings(raw_values: dict[str, object] | None = None) -> dic
             "scrollbar_handle_hover_bg": scrollbar_handle_hover_bg,
             "progress_bg": progress_bg,
             "progress_chunk_bg": progress_chunk_bg,
+            "progress_fg": progress_fg,
+            "progress_border": progress_border,
             "menu_bg": menu_bg,
             "menu_fg": menu_fg,
             "menu_border": menu_border,
@@ -1493,6 +1650,13 @@ def effective_theme_settings(raw_values: dict[str, object] | None = None) -> dic
             "menu_selected_fg": menu_selected_fg,
             "header_bg": header_bg,
             "header_fg": header_fg,
+            "header_border": header_border,
+            "toolbar_bg": toolbar_bg,
+            "toolbar_fg": toolbar_fg,
+            "toolbar_border": toolbar_border,
+            "statusbar_bg": statusbar_bg,
+            "statusbar_fg": statusbar_fg,
+            "statusbar_border": statusbar_border,
             "tab_bg": tab_bg,
             "tab_fg": tab_fg,
             "tab_border": tab_border,
@@ -1502,12 +1666,16 @@ def effective_theme_settings(raw_values: dict[str, object] | None = None) -> dic
             "tab_selected_bg": tab_selected_bg,
             "tab_selected_fg": tab_selected_fg,
             "tab_selected_border": tab_selected_border,
+            "tab_bar_bg": tab_bar_bg,
+            "tab_pane_bg": tab_pane_bg,
+            "tab_pane_border": tab_pane_border,
         }
     )
 
     if effective.get("auto_contrast_enabled", True):
         for bg_key, fg_key in (
             ("window_bg", "window_fg"),
+            ("workspace_bg", "window_fg"),
             ("selection_bg", "selection_fg"),
             ("button_bg", "button_fg"),
             ("button_hover_bg", "button_hover_fg"),
@@ -1524,9 +1692,12 @@ def effective_theme_settings(raw_values: dict[str, object] | None = None) -> dic
             ("menu_bg", "menu_fg"),
             ("menu_selected_bg", "menu_selected_fg"),
             ("header_bg", "header_fg"),
+            ("toolbar_bg", "toolbar_fg"),
+            ("statusbar_bg", "statusbar_fg"),
             ("tab_bg", "tab_fg"),
             ("tab_hover_bg", "tab_hover_fg"),
             ("tab_selected_bg", "tab_selected_fg"),
+            ("progress_bg", "progress_fg"),
             ("tooltip_bg", "tooltip_fg"),
             ("overlay_bg", "overlay_fg"),
         ):
@@ -1534,6 +1705,8 @@ def effective_theme_settings(raw_values: dict[str, object] | None = None) -> dic
             foreground = str(effective[fg_key])
             if contrast_ratio(foreground, background) < 4.5:
                 effective[fg_key] = pick_contrasting_color(background)
+        if contrast_ratio(str(effective["group_title_fg"]), str(effective["panel_bg"])) < 4.5:
+            effective["group_title_fg"] = pick_contrasting_color(str(effective["panel_bg"]))
 
     return effective
 
@@ -1561,6 +1734,10 @@ def build_theme_stylesheet(raw_values: dict[str, object] | None = None) -> str:
     QScrollArea,
     QStatusBar {{
         background-color: {theme["window_bg"]};
+        color: {theme["window_fg"]};
+    }}
+    QWidget[role="workspaceCanvas"] {{
+        background-color: {theme["workspace_bg"]};
         color: {theme["window_fg"]};
     }}
     QToolTip {{
@@ -1620,12 +1797,12 @@ def build_theme_stylesheet(raw_values: dict[str, object] | None = None) -> str:
         subcontrol-origin: margin;
         left: 10px;
         padding: 0 6px;
-        color: {theme["window_fg"]};
+        color: {theme["group_title_fg"]};
     }}
     QFrame[role="compactControlGroup"] {{
-        border: {int(theme["border_width"])}px solid {theme["border_color"]};
+        border: {int(theme["border_width"])}px solid {theme["compact_group_border"]};
         border-radius: {int(theme["panel_radius"])}px;
-        background: {theme["panel_bg"]};
+        background: {theme["compact_group_bg"]};
     }}
     QDockWidget {{
         border: {int(theme["border_width"])}px solid {theme["border_color"]};
@@ -1635,14 +1812,43 @@ def build_theme_stylesheet(raw_values: dict[str, object] | None = None) -> str:
         background-color: {theme["header_bg"]};
         color: {theme["header_fg"]};
         padding: {int(theme["header_padding_v"])}px {int(theme["header_padding_h"])}px;
-        border: {int(theme["border_width"])}px solid {theme["border_color"]};
+        border: {int(theme["border_width"])}px solid {theme["header_border"]};
     }}
-    QMenuBar,
-    QToolBar,
+    QHeaderView {{
+        background-color: {theme["header_bg"]};
+        color: {theme["header_fg"]};
+        border: {int(theme["border_width"])}px solid {theme["header_border"]};
+    }}
+    QTableCornerButton::section,
+    QTableView QTableCornerButton::section {{
+        background-color: {theme["header_bg"]};
+        border: {int(theme["border_width"])}px solid {theme["header_border"]};
+    }}
+    QMenuBar {{
+        background-color: {theme["toolbar_bg"]};
+        color: {theme["menu_fg"]};
+        border-bottom: {int(theme["border_width"])}px solid {theme["toolbar_border"]};
+    }}
+    QToolBar {{
+        background-color: {theme["toolbar_bg"]};
+        color: {theme["toolbar_fg"]};
+        border-bottom: {int(theme["border_width"])}px solid {theme["toolbar_border"]};
+    }}
+    QToolBar QLabel {{
+        color: {theme["toolbar_fg"]};
+    }}
+    QToolBar::separator {{
+        background: {theme["toolbar_border"]};
+        width: {max(1, int(theme["border_width"]))}px;
+        margin: 4px 6px;
+    }}
     QStatusBar {{
-        background-color: {theme["panel_bg"]};
-        color: {theme["window_fg"]};
-        border-bottom: {int(theme["border_width"])}px solid {theme["border_color"]};
+        background-color: {theme["statusbar_bg"]};
+        color: {theme["statusbar_fg"]};
+        border-top: {int(theme["border_width"])}px solid {theme["statusbar_border"]};
+    }}
+    QStatusBar QLabel {{
+        color: {theme["statusbar_fg"]};
     }}
     QMenuBar::item,
     QMenu::item {{
@@ -1664,11 +1870,22 @@ def build_theme_stylesheet(raw_values: dict[str, object] | None = None) -> str:
         border-radius: {int(theme["menu_radius"])}px;
         padding: 6px;
     }}
+    QTabWidget {{
+        background-color: {theme["tab_bar_bg"]};
+    }}
+    QTabWidget::tab-bar {{
+        background-color: {theme["tab_bar_bg"]};
+        left: 0px;
+    }}
     QTabWidget::pane {{
-        border: {int(theme["border_width"])}px solid {theme["border_color"]};
-        background: {theme["panel_bg"]};
+        border: {int(theme["border_width"])}px solid {theme["tab_pane_border"]};
+        background: {theme["tab_pane_bg"]};
         border-radius: {int(theme["panel_radius"])}px;
         top: -1px;
+    }}
+    QTabBar {{
+        background-color: {theme["tab_bar_bg"]};
+        qproperty-drawBase: 0;
     }}
     QTabBar::tab {{
         background-color: {theme["tab_bg"]};
@@ -1888,8 +2105,8 @@ def build_theme_stylesheet(raw_values: dict[str, object] | None = None) -> str:
     }}
     QProgressBar {{
         background-color: {theme["progress_bg"]};
-        color: {theme["window_fg"]};
-        border: {int(theme["border_width"])}px solid {theme["border_color"]};
+        color: {theme["progress_fg"]};
+        border: {int(theme["border_width"])}px solid {theme["progress_border"]};
         border-radius: {int(theme["progress_radius"])}px;
         text-align: center;
     }}

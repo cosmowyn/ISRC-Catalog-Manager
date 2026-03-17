@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 import unittest
@@ -10,9 +11,12 @@ from isrc_manager.services import (
     DatabaseSessionService,
     TrackCreatePayload,
 )
+from isrc_manager.starter_themes import starter_theme_names
 from tests.qt_test_helpers import require_qapplication
 
 try:
+    from PySide6.QtWidgets import QScrollArea
+
     import ISRC_manager as app_module
 except Exception as exc:  # pragma: no cover - environment-specific fallback
     app_module = None
@@ -111,6 +115,16 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.assertTrue(self.window.close())
         self.app.processEvents()
         self.assertFalse(self.window.isVisible())
+
+    def test_bundled_themes_are_available_and_not_persisted_as_user_library_entries(self):
+        library = self.window._load_theme_library()
+        for name in starter_theme_names():
+            self.assertIn(name, library)
+
+        self.window._save_theme_library(library)
+        stored_payload = json.loads(self.window.settings.value("theme/library_json", "{}", str))
+        for name in starter_theme_names():
+            self.assertNotIn(name, stored_payload)
 
     def test_create_new_profile_and_browse_profile_switch_workspace(self):
         created_path = self.window.database_dir / "Label_Test.db"
@@ -240,6 +254,9 @@ class AppShellIntegrationTests(unittest.TestCase):
                 "Media",
             ],
         )
+        self.assertEqual(self.window.left_widget_container.property("role"), "workspaceCanvas")
+        self.assertEqual(self.window.table_panel_widget.property("role"), "workspaceCanvas")
+        self.assertEqual(self.window.centralWidget().property("role"), "workspaceCanvas")
 
     def test_track_editor_uses_tabbed_sections(self):
         track_id = self.window.track_service.create_track(
@@ -271,6 +288,12 @@ class AppShellIntegrationTests(unittest.TestCase):
                     "Media",
                 ],
             )
+            self.assertEqual(tabs.currentWidget().property("role"), "workspaceCanvas")
+            scroll_areas = dialog.findChildren(QScrollArea)
+            self.assertTrue(scroll_areas)
+            self.assertTrue(
+                any(area.property("role") == "workspaceCanvas" for area in scroll_areas)
+            )
         finally:
             dialog.close()
 
@@ -287,6 +310,8 @@ class AppShellIntegrationTests(unittest.TestCase):
                     "Media",
                 ],
             )
+            current_page = dialog.primary_tabs.currentWidget()
+            self.assertEqual(current_page.property("role"), "workspaceCanvas")
         finally:
             dialog.close()
 

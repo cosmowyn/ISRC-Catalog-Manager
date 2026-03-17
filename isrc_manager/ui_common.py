@@ -200,8 +200,13 @@ def _create_scrollable_dialog_content(
     scroll_area.setWidgetResizable(True)
     scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
     scroll_area.setFrameShape(QFrame.NoFrame)
+    scroll_area.setProperty("role", "workspaceCanvas")
+    viewport = scroll_area.viewport()
+    if viewport is not None:
+        viewport.setProperty("role", "workspaceCanvas")
 
     content = QWidget(scroll_area)
+    content.setProperty("role", "workspaceCanvas")
     content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
 
     layout = QVBoxLayout(content)
