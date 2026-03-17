@@ -58,7 +58,6 @@ from PySide6.QtGui import (
     QStandardItem,
     QColor,
     QFont,
-    QPalette,
     QTextCursor,
     QTextDocument,
 )
@@ -2155,6 +2154,28 @@ class ApplicationSettingsDialog(QDialog):
             values[key] = int(spin.value())
         return values
 
+    def _theme_preview_value_payload(self) -> dict[str, object]:
+        values = dict(self._theme_settings or {})
+        values["selected_name"] = self._current_theme_preset_name()
+
+        font_combo = getattr(self, "theme_font_family_combo", None)
+        if font_combo is not None:
+            values["font_family"] = font_combo.currentFont().family().strip()
+
+        auto_contrast_check = getattr(self, "theme_auto_contrast_check", None)
+        if auto_contrast_check is not None:
+            values["auto_contrast_enabled"] = auto_contrast_check.isChecked()
+
+        custom_qss_edit = getattr(self, "theme_custom_qss_edit", None)
+        if custom_qss_edit is not None:
+            values["custom_qss"] = custom_qss_edit.toPlainText()
+
+        for theme_key, theme_edit in self._theme_color_edits.items():
+            values[theme_key] = theme_edit.text().strip()
+        for metric_key, spin in self._theme_metric_spins.items():
+            values[metric_key] = int(spin.value())
+        return values
+
     def _apply_theme_values_to_fields(
         self, theme_values: dict[str, object], *, selected_name: str = ""
     ) -> None:
@@ -2353,31 +2374,59 @@ class ApplicationSettingsDialog(QDialog):
         edit = self._theme_color_edits[key]
         swatch = self._theme_color_swatches[key]
         color_text = edit.text().strip()
-        palette = swatch.palette()
+
+        def apply_swatch(fill_color: QColor, text_color: QColor) -> None:
+            border_color = (
+                fill_color.darker(140)
+                if fill_color.lightnessF() >= 0.58
+                else fill_color.lighter(165)
+            )
+            swatch.setStyleSheet(
+                "; ".join(
+                    (
+                        f"background-color: {fill_color.name().upper()}",
+                        f"color: {text_color.name().upper()}",
+                        f"border: 1px solid {border_color.name().upper()}",
+                        "border-radius: 5px",
+                    )
+                )
+            )
+
         if not color_text:
-            palette.setColor(QPalette.Window, QColor("#d1d5db"))
-            palette.setColor(QPalette.WindowText, QColor("#111827"))
+            effective_value = str(
+                build_effective_theme_settings(self._theme_preview_value_payload()).get(key) or ""
+            )
+            effective_color = QColor(effective_value)
+            if effective_color.isValid():
+                fill_color = effective_color
+            else:
+                fill_color = QColor("#D1D5DB")
+            text_color = QColor("#111827") if fill_color.lightnessF() >= 0.55 else QColor("#F9FAFB")
             swatch.setText("A")
-            swatch.setToolTip("Using the automatic derived/default color for this slot.")
+            swatch.setToolTip(
+                "Using the automatic derived/default color for this slot."
+                + (
+                    f"\nResolved preview: {fill_color.name().upper()}"
+                    if fill_color.isValid()
+                    else ""
+                )
+            )
+            apply_swatch(fill_color, text_color)
         else:
             color = QColor(color_text)
             if color.isValid():
-                palette.setColor(QPalette.Window, color)
-                palette.setColor(
-                    QPalette.WindowText,
-                    QColor("#111827") if color.lightnessF() >= 0.55 else QColor("#f9fafb"),
-                )
+                text_color = QColor("#111827") if color.lightnessF() >= 0.55 else QColor("#F9FAFB")
                 swatch.setText("")
                 swatch.setToolTip(color.name().upper())
+                apply_swatch(color, text_color)
             else:
-                palette.setColor(QPalette.Window, QColor("#f87171"))
-                palette.setColor(QPalette.WindowText, QColor("#111827"))
+                fill_color = QColor("#F87171")
+                text_color = QColor("#111827")
                 swatch.setText("!")
                 swatch.setToolTip(
                     "Invalid color. Use values like #112233, #abc, or named Qt colors."
                 )
-        swatch.setAutoFillBackground(True)
-        swatch.setPalette(palette)
+                apply_swatch(fill_color, text_color)
 
     def _pick_theme_color(self, key: str) -> None:
         current_text = self._theme_color_edits[key].text().strip()

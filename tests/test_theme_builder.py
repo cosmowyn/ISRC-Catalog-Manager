@@ -162,6 +162,82 @@ class ThemeBuilderTests(unittest.TestCase):
             dialog.close()
             host.close()
 
+    def test_color_swatch_uses_explicit_color_fill(self):
+        host = _ThemePreviewHost()
+        dialog = app_module.ApplicationSettingsDialog(
+            window_title="Catalog",
+            icon_path="",
+            artist_code="00",
+            auto_snapshot_enabled=True,
+            auto_snapshot_interval_minutes=30,
+            isrc_prefix="NLABC",
+            sena_number="",
+            btw_number="",
+            buma_relatie_nummer="",
+            buma_ipi="",
+            gs1_template_asset=None,
+            gs1_contracts_csv_path="",
+            gs1_contract_entries=(),
+            gs1_active_contract_number="",
+            gs1_target_market="",
+            gs1_language="",
+            gs1_brand="",
+            gs1_subbrand="",
+            gs1_packaging_type="",
+            gs1_product_classification="",
+            theme_settings={},
+            stored_themes={},
+            current_profile_path="",
+            parent=host,
+        )
+        try:
+            dialog._theme_color_edits["button_hover_bg"].setText("#224488")
+            swatch = dialog._theme_color_swatches["button_hover_bg"]
+            self.assertEqual(swatch.text(), "")
+            self.assertIn("background-color: #224488".lower(), swatch.styleSheet().lower())
+            self.assertEqual(swatch.toolTip(), "#224488".upper())
+        finally:
+            dialog.close()
+            host.close()
+
+    def test_auto_color_swatch_uses_effective_resolved_color(self):
+        host = _ThemePreviewHost()
+        dialog = app_module.ApplicationSettingsDialog(
+            window_title="Catalog",
+            icon_path="",
+            artist_code="00",
+            auto_snapshot_enabled=True,
+            auto_snapshot_interval_minutes=30,
+            isrc_prefix="NLABC",
+            sena_number="",
+            btw_number="",
+            buma_relatie_nummer="",
+            buma_ipi="",
+            gs1_template_asset=None,
+            gs1_contracts_csv_path="",
+            gs1_contract_entries=(),
+            gs1_active_contract_number="",
+            gs1_target_market="",
+            gs1_language="",
+            gs1_brand="",
+            gs1_subbrand="",
+            gs1_packaging_type="",
+            gs1_product_classification="",
+            theme_settings={"accent": "#118AB2"},
+            stored_themes={},
+            current_profile_path="",
+            parent=host,
+        )
+        try:
+            dialog._theme_color_edits["help_button_bg"].clear()
+            swatch = dialog._theme_color_swatches["help_button_bg"]
+            self.assertEqual(swatch.text(), "A")
+            self.assertIn("background-color: #118ab2", swatch.styleSheet().lower())
+            self.assertIn("Resolved preview: #118AB2", swatch.toolTip())
+        finally:
+            dialog.close()
+            host.close()
+
     def test_theme_preview_switches_with_active_builder_tab(self):
         host = _ThemePreviewHost()
         dialog = app_module.ApplicationSettingsDialog(
