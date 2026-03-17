@@ -127,11 +127,16 @@ class GS1MetadataEditorPage(QWidget):
         summary_layout.addWidget(self.group_summary_label)
         root.addWidget(summary_box)
 
-        workflow_box, workflow_layout = self._create_section_box(
+        self.section_tabs = QTabWidget(self)
+        self.section_tabs.setObjectName("gs1MetadataEditorTabs")
+        self.section_tabs.setDocumentMode(True)
+        root.addWidget(self.section_tabs, 1)
+
+        workflow_layout = self._create_tabbed_section(
+            "Workflow",
             "Workflow & Export",
             "Controls that decide contract routing, export eligibility, and how this product is classified.",
         )
-        root.addWidget(workflow_box)
         workflow_layout.addWidget(
             self._build_form_pair(
                 "Contract Number", self.contract_combo, "Status", self.status_combo
@@ -146,11 +151,11 @@ class GS1MetadataEditorPage(QWidget):
             )
         )
 
-        identity_box, identity_layout = self._create_section_box(
+        identity_layout = self._create_tabbed_section(
+            "Identity",
             "Product Identity",
             "Core naming and branding fields that define the GS1 product itself.",
         )
-        root.addWidget(identity_box)
         identity_layout.addWidget(
             self._build_form_row("Product Description", self.description_edit)
         )
@@ -166,11 +171,11 @@ class GS1MetadataEditorPage(QWidget):
         quantity_unit_layout.addWidget(self.quantity_edit, 1)
         quantity_unit_layout.addWidget(self.unit_combo, 1)
 
-        market_box, market_layout = self._create_section_box(
+        market_layout = self._create_tabbed_section(
+            "Packaging",
             "Packaging & Market",
             "Commercial delivery details, territories, and optional product imagery.",
         )
-        root.addWidget(market_box)
         market_layout.addWidget(
             self._build_form_pair(
                 "Packaging Type", self.packaging_combo, "Target Market", self.market_combo
@@ -183,10 +188,12 @@ class GS1MetadataEditorPage(QWidget):
         )
         market_layout.addWidget(self._build_form_row("Image URL", self.image_url_edit))
 
-        notes_box, notes_layout = self._create_section_box("Internal Notes")
-        root.addWidget(notes_box)
+        notes_layout = self._create_tabbed_section(
+            "Notes",
+            "Internal Notes",
+            "Capture any profile-local notes that should travel with this GS1 record.",
+        )
         notes_layout.addWidget(self._build_form_row("Notes", self.notes_edit, top_aligned=True))
-        root.addStretch(1)
         _apply_compact_dialog_control_heights(self)
 
         self._connect_form_signals()
@@ -216,6 +223,23 @@ class GS1MetadataEditorPage(QWidget):
         self, title: str, description: str | None = None
     ) -> tuple[QGroupBox, QVBoxLayout]:
         return _create_standard_section(self, title, description)
+
+    def _create_tabbed_section(
+        self, tab_title: str, section_title: str, description: str | None = None
+    ) -> QVBoxLayout:
+        page = QWidget(self.section_tabs)
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.setSpacing(0)
+
+        scroll_area, _, content_layout = _create_scrollable_dialog_content(page)
+        page_layout.addWidget(scroll_area, 1)
+        box, box_layout = self._create_section_box(section_title, description)
+        content_layout.addWidget(box)
+        content_layout.addStretch(1)
+
+        self.section_tabs.addTab(page, tab_title)
+        return box_layout
 
     def _build_form_row(
         self, label_text: str, widget: QWidget, *, top_aligned: bool = False

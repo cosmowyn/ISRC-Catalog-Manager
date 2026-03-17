@@ -13,9 +13,11 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QTabWidget,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
+    QWidget,
 )
 
 from .models import ExchangeImportOptions, ExchangeInspection
@@ -52,6 +54,23 @@ class ExchangeImportDialog(QDialog):
         intro.setWordWrap(True)
         root.addWidget(intro)
 
+        self.content_tabs = QTabWidget(self)
+        self.content_tabs.setObjectName("exchangeImportTabs")
+        self.content_tabs.setDocumentMode(True)
+        root.addWidget(self.content_tabs, 1)
+
+        setup_page = QWidget(self.content_tabs)
+        setup_layout = QVBoxLayout(setup_page)
+        setup_layout.setContentsMargins(0, 0, 0, 0)
+        setup_layout.setSpacing(12)
+        self.content_tabs.addTab(setup_page, "Setup & Mapping")
+
+        preview_page = QWidget(self.content_tabs)
+        preview_layout = QVBoxLayout(preview_page)
+        preview_layout.setContentsMargins(0, 0, 0, 0)
+        preview_layout.setSpacing(12)
+        self.content_tabs.addTab(preview_page, "Source Preview")
+
         meta_row = QHBoxLayout()
         meta_row.setContentsMargins(0, 0, 0, 0)
         meta_row.setSpacing(8)
@@ -61,7 +80,7 @@ class ExchangeImportDialog(QDialog):
             warning_label = QLabel("Warnings: " + " | ".join(inspection.warnings))
             warning_label.setWordWrap(True)
             meta_row.addWidget(warning_label)
-        root.addLayout(meta_row)
+        setup_layout.addLayout(meta_row)
 
         preset_row = QHBoxLayout()
         preset_row.setContentsMargins(0, 0, 0, 0)
@@ -78,7 +97,7 @@ class ExchangeImportDialog(QDialog):
         save_preset_button = QPushButton("Save Preset")
         save_preset_button.clicked.connect(self._save_preset)
         preset_row.addWidget(save_preset_button)
-        root.addLayout(preset_row)
+        setup_layout.addLayout(preset_row)
 
         option_row = QHBoxLayout()
         option_row.setContentsMargins(0, 0, 0, 0)
@@ -105,29 +124,29 @@ class ExchangeImportDialog(QDialog):
         self.create_custom_checkbox = QCheckBox("Create missing text custom fields")
         self.create_custom_checkbox.setChecked(True)
         option_row.addWidget(self.create_custom_checkbox)
-        root.addLayout(option_row)
+        setup_layout.addLayout(option_row)
 
         self.mode_hint_label = QLabel()
         self.mode_hint_label.setWordWrap(True)
-        root.addWidget(self.mode_hint_label)
+        setup_layout.addWidget(self.mode_hint_label)
 
         mapping_label = QLabel("Column Mapping")
-        root.addWidget(mapping_label)
+        setup_layout.addWidget(mapping_label)
 
         self.mapping_table = QTableWidget(0, 2, self)
         self.mapping_table.setHorizontalHeaderLabels(["Source Column", "Map To"])
         self.mapping_table.verticalHeader().setVisible(False)
         self.mapping_table.horizontalHeader().setStretchLastSection(True)
-        root.addWidget(self.mapping_table, 1)
+        setup_layout.addWidget(self.mapping_table, 1)
 
         preview_label = QLabel("Source Preview")
-        root.addWidget(preview_label)
+        preview_layout.addWidget(preview_label)
         self.preview_table = QTableWidget(0, len(inspection.headers), self)
         self.preview_table.setHorizontalHeaderLabels(inspection.headers)
         self.preview_table.verticalHeader().setVisible(False)
         self.preview_table.horizontalHeader().setStretchLastSection(True)
         self.preview_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        root.addWidget(self.preview_table, 1)
+        preview_layout.addWidget(self.preview_table, 1)
 
         buttons = QHBoxLayout()
         buttons.addStretch(1)

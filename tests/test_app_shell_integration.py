@@ -228,6 +228,39 @@ class AppShellIntegrationTests(unittest.TestCase):
         selected_ids = self.window._selected_track_ids()
         self.assertEqual(len(selected_ids), len(visible_rows))
 
+    def test_track_editor_uses_tabbed_sections(self):
+        track_id = self.window.track_service.create_track(
+            TrackCreatePayload(
+                isrc="NL-TST-26-09001",
+                track_title="Tabbed Editor",
+                artist_name="Cosmowyn",
+                additional_artists=[],
+                album_title="Editor Layout",
+                release_date="2026-03-17",
+                track_length_sec=205,
+                iswc=None,
+                upc=None,
+                genre="Ambient",
+                catalog_number=None,
+            )
+        )
+
+        dialog = app_module.EditDialog(track_id, self.window)
+        try:
+            tabs = dialog.findChild(app_module.QTabWidget, "editDialogTabs")
+            self.assertIsNotNone(tabs)
+            self.assertEqual(
+                [tabs.tabText(index) for index in range(tabs.count())],
+                [
+                    "Track",
+                    "Release",
+                    "Codes",
+                    "Media",
+                ],
+            )
+        finally:
+            dialog.close()
+
 
 if __name__ == "__main__":
     unittest.main()

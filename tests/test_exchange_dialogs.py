@@ -1,7 +1,7 @@
 import unittest
 
 try:
-    from PySide6.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication, QTabWidget
 except ImportError as exc:  # pragma: no cover - environment-specific fallback
     QApplication = None
     QT_IMPORT_ERROR = exc
@@ -50,6 +50,15 @@ class ExchangeImportDialogTests(unittest.TestCase):
             self.assertEqual(dlg.mode_combo.currentData(), "create")
             self.assertEqual(dlg.import_button.text(), "Import Data")
             self.assertIn("writes rows into the current profile", dlg.mode_hint_label.text())
+            tabs = dlg.findChild(QTabWidget, "exchangeImportTabs")
+            self.assertIsNotNone(tabs)
+            self.assertEqual(
+                [tabs.tabText(i) for i in range(tabs.count())],
+                [
+                    "Setup & Mapping",
+                    "Source Preview",
+                ],
+            )
         finally:
             dlg.close()
 

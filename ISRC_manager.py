@@ -13812,15 +13812,42 @@ class EditDialog(QDialog):
             bulk_layout.addWidget(bulk_notice)
             main_layout.addWidget(bulk_box)
 
-        self._form_container = QWidget(self)
-        form_layout = QVBoxLayout()
-        form_layout.setContentsMargins(0, 0, 0, 0)
-        form_layout.setSpacing(12)
-        self._form_container.setLayout(form_layout)
+        self.editor_tabs = QTabWidget(self)
+        self.editor_tabs.setObjectName("editDialogTabs")
+        self.editor_tabs.setDocumentMode(True)
+        self.editor_tabs.setUsesScrollButtons(False)
+        main_layout.addWidget(self.editor_tabs, 1)
 
-        def create_section(title: str):
-            box, box_layout = _create_standard_section(self._form_container, title)
-            form_layout.addWidget(box)
+        def create_tab(title: str, description: str) -> QVBoxLayout:
+            page = QWidget(self.editor_tabs)
+            page_layout = QVBoxLayout(page)
+            page_layout.setContentsMargins(0, 0, 0, 0)
+            page_layout.setSpacing(10)
+
+            intro = QLabel(description, page)
+            intro.setWordWrap(True)
+            intro.setProperty("role", "secondary")
+            page_layout.addWidget(intro)
+
+            scroll = QScrollArea(page)
+            scroll.setWidgetResizable(True)
+            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            scroll.setFrameShape(QFrame.NoFrame)
+
+            content = QWidget(scroll)
+            content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+            content_layout = QVBoxLayout(content)
+            content_layout.setContentsMargins(0, 0, 0, 0)
+            content_layout.setSpacing(12)
+
+            scroll.setWidget(content)
+            page_layout.addWidget(scroll, 1)
+            self.editor_tabs.addTab(page, title)
+            return content_layout
+
+        def create_section(target_layout: QVBoxLayout, title: str, description: str | None = None):
+            box, box_layout = _create_standard_section(self, title, description)
+            target_layout.addWidget(box)
             return box_layout
 
         def add_row(target_layout, label_text, widget):
@@ -13846,14 +13873,57 @@ class EditDialog(QDialog):
             add_row(target_layout, label, cb)
             return cb
 
-        core_layout = create_section("Core Details")
-        album_release_layout = create_section("Album & Release")
-        codes_layout = create_section("Codes & Registration")
-        media_layout = create_section("Managed Media")
+        track_tab_layout = create_tab(
+            "Track",
+            "Edit the main track-facing fields here, including credits, title, and genre.",
+        )
+        release_tab_layout = create_tab(
+            "Release",
+            "Keep album grouping, release timing, and track duration together in one place.",
+        )
+        codes_tab_layout = create_tab(
+            "Codes",
+            "Manage identifiers, registration values, and catalog metadata used by exports and rights workflows.",
+        )
+        media_tab_layout = create_tab(
+            "Media",
+            "Review and replace the managed audio and artwork files linked to this track.",
+        )
+
+        core_layout = create_section(
+            track_tab_layout,
+            "Core Details",
+            "These fields describe the selected track directly and are shown throughout the catalog.",
+        )
+        album_release_layout = create_section(
+            release_tab_layout,
+            "Album & Release",
+            "Changes here can affect release synchronization and, in single-track edit mode, shared album metadata.",
+        )
+        identifiers_layout = create_section(
+            codes_tab_layout,
+            "Identifiers",
+            "ISRC and ISWC remain the primary recording and work identifiers for this track.",
+        )
+        registration_layout = create_section(
+            codes_tab_layout,
+            "Registration & Catalog",
+            "Product-level codes and registration values used for distribution, GS1, and collection-society workflows.",
+        )
+        audio_layout_section = create_section(
+            media_tab_layout,
+            "Managed Audio",
+            "Attach or replace the stored audio file used by preview and metadata workflows.",
+        )
+        artwork_layout_section = create_section(
+            media_tab_layout,
+            "Artwork & Shared Album Media",
+            "Album art can propagate to sibling tracks when you update shared album metadata.",
+        )
 
         self.isrc_field = QLineEdit()
         self._configure_text_field(self.isrc_field, "isrc", self.snapshot.isrc, lock_in_bulk=True)
-        add_row(codes_layout, "ISRC", self.isrc_field)
+        add_row(identifiers_layout, "ISRC", self.isrc_field)
 
         row_isrc_btns = QHBoxLayout()
         self.btn_isrc_copy_iso = QPushButton("Copy ISO")
@@ -13861,7 +13931,7 @@ class EditDialog(QDialog):
         row_isrc_btns.addWidget(self.btn_isrc_copy_iso)
         row_isrc_btns.addWidget(self.btn_isrc_copy_compact)
         row_isrc_btns.addStretch(1)
-        codes_layout.addLayout(row_isrc_btns)
+        identifiers_layout.addLayout(row_isrc_btns)
         self.btn_isrc_copy_iso.clicked.connect(self._copy_isrc_iso)
         self.btn_isrc_copy_iso.setDefault(False)
         self.btn_isrc_copy_compact.clicked.connect(self._copy_isrc_compact)
@@ -13936,7 +14006,7 @@ class EditDialog(QDialog):
             btn_audio_clear.setEnabled(False)
         audio_layout.addWidget(btn_audio_browse)
         audio_layout.addWidget(btn_audio_clear)
-        add_row(media_layout, "Audio File", audio_row)
+        add_row(audio_layout_section, "Audio File", audio_row)
 
         self.album_art = QLineEdit()
         self._configure_text_field(
@@ -13962,7 +14032,7 @@ class EditDialog(QDialog):
         )
         art_layout.addWidget(btn_art_browse)
         art_layout.addWidget(btn_art_clear)
-        add_row(media_layout, "Album Art", art_row)
+        add_row(artwork_layout_section, "Album Art", art_row)
 
         self.catalog_number = QLineEdit()
         self._configure_text_field(
@@ -14074,7 +14144,7 @@ class EditDialog(QDialog):
 
         self.iswc = QLineEdit()
         self._configure_text_field(self.iswc, "iswc", self.snapshot.iswc or "", lock_in_bulk=True)
-        add_row(codes_layout, "ISWC", self.iswc)
+        add_row(identifiers_layout, "ISWC", self.iswc)
 
         row_iswc_btns = QHBoxLayout()
         self.btn_iswc_copy_iso = QPushButton("Copy ISO")
@@ -14082,25 +14152,22 @@ class EditDialog(QDialog):
         row_iswc_btns.addWidget(self.btn_iswc_copy_iso)
         row_iswc_btns.addWidget(self.btn_iswc_copy_compact)
         row_iswc_btns.addStretch(1)
-        codes_layout.addLayout(row_iswc_btns)
+        identifiers_layout.addLayout(row_iswc_btns)
         self.btn_iswc_copy_iso.clicked.connect(self._copy_iswc_iso)
         self.btn_iswc_copy_iso.setDefault(False)
         self.btn_iswc_copy_compact.clicked.connect(self._copy_iswc_compact)
 
         self.upc = QLineEdit()
         self._configure_text_field(self.upc, "upc", self.snapshot.upc or "")
-        add_row(codes_layout, "UPC/EAN", self.upc)
-        add_row(codes_layout, "Catalog#", self.catalog_number)
-        add_row(codes_layout, "BUMA Wnr.", self.buma_work_number)
-        add_row(codes_layout, "Entry Date", self.entry_date_field)
+        add_row(registration_layout, "UPC/EAN", self.upc)
+        add_row(registration_layout, "Catalog#", self.catalog_number)
+        add_row(registration_layout, "BUMA Wnr.", self.buma_work_number)
+        add_row(registration_layout, "Entry Date", self.entry_date_field)
 
-        form_layout.addStretch(1)
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setWidget(self._form_container)
-        main_layout.addWidget(scroll, 1)
+        track_tab_layout.addStretch(1)
+        release_tab_layout.addStretch(1)
+        codes_tab_layout.addStretch(1)
+        media_tab_layout.addStretch(1)
 
         btns = QHBoxLayout()
         gs1_btn = QPushButton("GS1 Metadata…")

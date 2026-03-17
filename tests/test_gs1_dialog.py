@@ -1,7 +1,7 @@
 import unittest
 
 try:
-    from PySide6.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication, QTabWidget
 except ImportError as exc:  # pragma: no cover - environment-specific fallback
     QApplication = None
     QT_IMPORT_ERROR = exc
@@ -66,6 +66,18 @@ class GS1DialogTests(unittest.TestCase):
             contract_entries=[GS1ContractEntry(contract_number="NL-TEST-001")],
         )
         try:
+            tabs = page.findChild(QTabWidget, "gs1MetadataEditorTabs")
+            self.assertIsNotNone(tabs)
+            self.assertEqual(
+                [tabs.tabText(index) for index in range(tabs.count())],
+                [
+                    "Workflow",
+                    "Identity",
+                    "Packaging",
+                    "Notes",
+                ],
+            )
+
             line_height = page.description_edit.fontMetrics().lineSpacing()
             combo_line_height = page.contract_combo.fontMetrics().lineSpacing()
 
