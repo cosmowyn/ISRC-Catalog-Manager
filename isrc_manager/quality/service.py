@@ -74,10 +74,6 @@ class QualityDashboardService:
             counts_by_type=dict(counts_by_type),
         )
 
-    @staticmethod
-    def _normalize_release_identity_text(value: str | None) -> str:
-        return " ".join(str(value or "").split()).casefold()
-
     def _track_metadata_issues(self) -> list[QualityIssue]:
         issues: list[QualityIssue] = []
         rows = self.conn.execute(
@@ -378,29 +374,28 @@ class QualityDashboardService:
             SELECT
                 upc,
                 GROUP_CONCAT(id, ','),
-                GROUP_CONCAT(COALESCE(title, ''), char(31))
+                GROUP_CONCAT(COALESCE(title, ''), char(31)),
+                GROUP_CONCAT(COALESCE(release_type, ''), char(31))
             FROM Releases
             WHERE upc IS NOT NULL AND trim(upc) != ''
             GROUP BY upc
             HAVING COUNT(*) > 1
             """
         ).fetchall()
-        for upc, ids, titles in duplicate_upc_rows:
+        for upc, ids, titles, release_types in duplicate_upc_rows:
             release_ids = [int(value) for value in str(ids or "").split(",") if value]
             release_titles = str(titles or "").split(chr(31))
-            normalized_titles = {
-                self._normalize_release_identity_text(title)
-                for title in release_titles
-                if self._normalize_release_identity_text(title)
-            }
-            shared_release_family = len(normalized_titles) == 1 and bool(normalized_titles)
+            parsed_release_types = str(release_types or "").split(chr(31))
+            shared_release_family = self.release_service.releases_share_upc_family(
+                list(zip(release_titles, parsed_release_types, strict=False))
+            )
             issue_type = "shared_release_upc" if shared_release_family else "duplicate_release_upc"
             severity = "info" if shared_release_family else "error"
             issue_title = (
                 "Shared Release UPC/EAN" if shared_release_family else "Duplicate Release UPC/EAN"
             )
             details = (
-                f"UPC/EAN {upc} is shared across multiple release rows for the same titled release. "
+                f"UPC/EAN {upc} is shared across multiple release rows for the same release family. "
                 "This is often intentional for remix packages, compilations, or other multi-artist editions."
                 if shared_release_family
                 else f"UPC/EAN {upc} is used by multiple releases."

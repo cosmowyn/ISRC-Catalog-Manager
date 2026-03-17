@@ -5,7 +5,11 @@ from pathlib import Path
 from unittest import mock
 
 from isrc_manager.constants import APP_NAME
-from isrc_manager.services import DatabaseSchemaService, DatabaseSessionService
+from isrc_manager.services import (
+    DatabaseSchemaService,
+    DatabaseSessionService,
+    TrackCreatePayload,
+)
 from tests.qt_test_helpers import require_qapplication
 
 try:
@@ -181,6 +185,48 @@ class AppShellIntegrationTests(unittest.TestCase):
             for i in range(self.window.profile_combo.count())
         ]
         self.assertEqual(profiles, [Path(initial_path).name])
+
+    def test_filtered_select_all_counts_only_visible_tracks(self):
+        titles = [
+            "Crossroads of the Unwritten Self",
+            "Crossroads of the Unwritten Self (Remix)",
+            "Crossroads of the Unwritten Self - Live",
+            "Orbit Drift",
+        ]
+        for index, title in enumerate(titles, start=1):
+            self.window.track_service.create_track(
+                TrackCreatePayload(
+                    isrc=f"NL-TST-26-{index:05d}",
+                    track_title=title,
+                    artist_name="Cosmowyn",
+                    additional_artists=[],
+                    album_title="Selection Test",
+                    release_date="2026-03-17",
+                    track_length_sec=180,
+                    iswc=None,
+                    upc=None,
+                    genre="Ambient",
+                    catalog_number=None,
+                )
+            )
+
+        self.window.refresh_table()
+        self.window.search_field.setText("Crossroads of the Unwritten Self")
+        self.window.apply_search_filter()
+        self.app.processEvents()
+
+        visible_rows = [
+            row
+            for row in range(self.window.table.rowCount())
+            if not self.window.table.isRowHidden(row)
+        ]
+        self.assertEqual(len(visible_rows), 3)
+
+        self.window.table.selectAll()
+        self.app.processEvents()
+
+        selected_ids = self.window._selected_track_ids()
+        self.assertEqual(len(selected_ids), len(visible_rows))
 
 
 if __name__ == "__main__":

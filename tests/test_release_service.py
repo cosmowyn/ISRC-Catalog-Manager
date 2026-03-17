@@ -217,6 +217,29 @@ class ReleaseServiceTests(unittest.TestCase):
             any(issue.field_name == "upc" and issue.severity == "warning" for issue in issues)
         )
 
+    def test_remix_family_duplicate_upc_is_not_reported_as_warning(self):
+        self.release_service.create_release(
+            ReleasePayload(
+                title="Journeys Beyond the Finite",
+                primary_artist="Artist One",
+                release_type="album",
+                upc="036000291452",
+            )
+        )
+
+        issues = self.release_service.validate_release(
+            ReleasePayload(
+                title="Journeys Beyond the Finite - Remix Package",
+                primary_artist="Artist Two",
+                release_type="remix_package",
+                upc="036000291452",
+            )
+        )
+
+        self.assertFalse(
+            any(issue.field_name == "upc" and issue.severity == "warning" for issue in issues)
+        )
+
     def test_schema_migration_allows_duplicate_upc_across_inferred_releases(self):
         conn = sqlite3.connect(":memory:")
         conn.execute("PRAGMA foreign_keys = ON")

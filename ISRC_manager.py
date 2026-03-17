@@ -8561,34 +8561,40 @@ class App(QMainWindow):
         track_ids: list[int] = []
         seen: set[int] = set()
         candidate_rows: list[int] = []
+        candidate_row_set: set[int] = set()
+        has_hidden_rows = any(self.table.isRowHidden(row) for row in range(self.table.rowCount()))
+
+        def _remember_row(row_idx: int) -> None:
+            normalized_row = int(row_idx)
+            if normalized_row < 0:
+                return
+            if has_hidden_rows and self.table.isRowHidden(normalized_row):
+                return
+            if normalized_row in candidate_row_set:
+                return
+            candidate_row_set.add(normalized_row)
+            candidate_rows.append(normalized_row)
 
         sel_model = self.table.selectionModel()
         if sel_model is not None:
             for index in sel_model.selectedRows():
-                row_idx = int(index.row())
-                if row_idx not in candidate_rows:
-                    candidate_rows.append(row_idx)
+                _remember_row(index.row())
 
         for selection_range in self.table.selectedRanges():
             for row_idx in range(selection_range.topRow(), selection_range.bottomRow() + 1):
-                if row_idx not in candidate_rows:
-                    candidate_rows.append(int(row_idx))
+                _remember_row(row_idx)
 
         selected_items = self.table.selectedItems()
         for item in selected_items:
-            row_idx = int(item.row())
-            if row_idx not in candidate_rows:
-                candidate_rows.append(row_idx)
+            _remember_row(item.row())
 
         if sel_model is not None:
             for index in sel_model.selectedIndexes():
-                row_idx = int(index.row())
-                if row_idx not in candidate_rows:
-                    candidate_rows.append(row_idx)
+                _remember_row(index.row())
 
         current_row = self.table.currentRow()
         if not candidate_rows and current_row >= 0:
-            candidate_rows.insert(0, int(current_row))
+            _remember_row(current_row)
 
         for row_idx in candidate_rows:
             track_id = self._track_id_for_table_row(row_idx)

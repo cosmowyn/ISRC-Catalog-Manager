@@ -214,6 +214,35 @@ class QualityDashboardServiceTests(unittest.TestCase):
             any(issue.issue_type == "duplicate_release_upc" for issue in result.issues)
         )
 
+    def test_remix_family_duplicate_upc_is_reported_as_info_not_error(self):
+        self.release_service.create_release(
+            ReleasePayload(
+                title="Journeys Beyond the Finite",
+                primary_artist="Artist One",
+                release_type="album",
+                upc="8720892724625",
+            )
+        )
+        self.release_service.create_release(
+            ReleasePayload(
+                title="Journeys Beyond the Finite (Remixes)",
+                primary_artist="Artist Two",
+                release_type="remix_package",
+                upc="8720892724625",
+            )
+        )
+
+        result = self.service.scan()
+        shared_upc_issues = [
+            issue for issue in result.issues if issue.issue_type == "shared_release_upc"
+        ]
+
+        self.assertEqual(len(shared_upc_issues), 2)
+        self.assertTrue(all(issue.severity == "info" for issue in shared_upc_issues))
+        self.assertFalse(
+            any(issue.issue_type == "duplicate_release_upc" for issue in result.issues)
+        )
+
     def test_different_title_duplicate_upc_remains_error(self):
         self.release_service.create_release(
             ReleasePayload(

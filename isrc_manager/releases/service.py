@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import mimetypes
+import re
 import sqlite3
 import time
 from pathlib import Path
@@ -25,6 +26,22 @@ RELEASE_TYPE_CHOICES = ("single", "ep", "album", "compilation", "remix_package",
 class ReleaseService:
     """Owns first-class release CRUD, media handling, and track placement queries."""
 
+    _REMIX_MARKER_RE = re.compile(r"\b(remix(?:es|ed)?|rmx)\b", re.IGNORECASE)
+    _REMIX_BRACKETED_SEGMENT_RE = re.compile(
+        r"\s*[\(\[\{][^)\]}]*\b(?:remix(?:es|ed)?|rmx)\b[^)\]}]*[\)\]\}]\s*",
+        re.IGNORECASE,
+    )
+    _REMIX_SUFFIX_RE = re.compile(
+        r"""
+        (?:\s*[-:]\s*|\s+)
+        (?:(?:the|official)\s+)*
+        (?:remix(?:es|ed)?|rmx)
+        (?:\s+(?:package|album|edition|collection|set))?
+        \s*$
+        """,
+        re.IGNORECASE | re.VERBOSE,
+    )
+
     def __init__(self, conn: sqlite3.Connection, data_root: str | Path | None = None):
         self.conn = conn
         self.data_root = Path(data_root) if data_root is not None else None
@@ -45,6 +62,50 @@ class ReleaseService:
     @staticmethod
     def _normalize_release_identity_text(value: str | None) -> str:
         return " ".join(str(value or "").split()).casefold()
+
+    @classmethod
+    def _normalize_release_upc_family_title(cls, value: str | None) -> str:
+        normalized = cls._normalize_release_identity_text(value)
+        if not normalized:
+            return ""
+
+        family_title = cls._REMIX_BRACKETED_SEGMENT_RE.sub(" ", normalized)
+        while True:
+            updated = cls._REMIX_SUFFIX_RE.sub("", family_title).strip(" -:/")
+            updated = " ".join(updated.split())
+            if updated == family_title:
+                break
+            family_title = updated
+        return family_title or normalized
+
+    @classmethod
+    def releases_share_upc_family(
+        cls, releases: Iterable[tuple[str | None, str | None] | str | None]
+    ) -> bool:
+        normalized_titles: list[str] = []
+        family_titles: list[str] = []
+        variant_hint = False
+
+        for release in releases:
+            if isinstance(release, tuple):
+                title, release_type = release
+            else:
+                title, release_type = release, None
+            normalized_title = cls._normalize_release_identity_text(title)
+            if not normalized_title:
+                continue
+            normalized_titles.append(normalized_title)
+            family_title = cls._normalize_release_upc_family_title(title)
+            family_titles.append(family_title)
+            variant_hint = variant_hint or family_title != normalized_title
+            variant_hint = variant_hint or bool(cls._REMIX_MARKER_RE.search(str(title or "")))
+            variant_hint = variant_hint or cls._clean_release_type(release_type) == "remix_package"
+
+        if not normalized_titles:
+            return False
+        if len(set(normalized_titles)) == 1:
+            return True
+        return bool(family_titles) and len(set(family_titles)) == 1 and variant_hint
 
     @staticmethod
     def _normalize_track_placements(
@@ -193,19 +254,17 @@ class ReleaseService:
             issues.append(ReleaseValidationIssue("warning", "upc", "Release has no UPC/EAN yet."))
         if upc:
             params: list[object] = [upc]
-            sql = "SELECT id, title FROM Releases WHERE upc=?"
+            sql = "SELECT id, title, release_type FROM Releases WHERE upc=?"
             if release_id is not None:
                 sql += " AND id != ?"
                 params.append(int(release_id))
             sql += " ORDER BY id"
             duplicates = cur.execute(sql, params).fetchall()
             duplicate = duplicates[0] if duplicates else None
-            normalized_title = self._normalize_release_identity_text(payload.title)
-            has_conflicting_duplicate = any(
-                self._normalize_release_identity_text(row[1]) != normalized_title
-                for row in duplicates
+            shared_upc_family = self.releases_share_upc_family(
+                [(payload.title, payload.release_type), *[(row[1], row[2]) for row in duplicates]]
             )
-            if duplicate and has_conflicting_duplicate:
+            if duplicate and not shared_upc_family:
                 issues.append(
                     ReleaseValidationIssue(
                         "warning",
