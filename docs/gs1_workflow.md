@@ -1,61 +1,121 @@
-# GS1 Workflow Notes
+# GS1 Workflow Guide
 
-## Where the feature lives
+The GS1 workflow in ISRC Catalog Manager is designed for teams who need to prepare structured product data without losing the convenience of a local catalog workflow.
 
-- UI dialog: `isrc_manager/gs1_dialog.py`
-- Canonical models: `isrc_manager/services/gs1_models.py`
-- Profile/app settings: `isrc_manager/services/gs1_settings.py`
-- SQLite persistence: `isrc_manager/services/gs1_repository.py`
-- Validation rules: `isrc_manager/services/gs1_validation.py`
-- Workbook alias mapping and locale helpers: `isrc_manager/services/gs1_mapping.py`
-- Workbook verification: `isrc_manager/services/gs1_template.py`
-- Excel export transport: `isrc_manager/services/gs1_excel.py`
-- Facade used by the UI: `isrc_manager/services/gs1_integration.py`
+It helps you move from catalog metadata to official workbook export with fewer manual steps, fewer broken templates, and less dependency on external spreadsheets.
 
-The main window only wires these pieces together and opens the dialog from the catalog context.
+## What The GS1 Workflow Is Meant To Solve
 
-## Workbook verification
+GS1 data often lives in a fragile in-between state:
 
-The app does not generate a GS1 workbook from scratch. It requires the user to choose the official workbook from their GS1 portal or regional GS1 environment.
+- product information exists in the catalog
+- regional GS1 workbook templates change over time
+- teams duplicate spreadsheet work manually
+- workbook paths break when files are moved or renamed
 
-Verification works by:
+The GS1 tools in this application solve that by treating GS1 preparation as part of catalog maintenance, not as a disconnected export chore.
 
-1. opening the workbook as Excel, not by trusting the filename
-2. scanning sheets and candidate header rows
-3. matching workbook headers to canonical GS1 field names through alias scoring
-4. selecting the best target sheet by score plus sheet-name heuristics
-5. requiring the core GS1 columns needed for export before a workbook is accepted
+## How It Works
 
-This makes the flow tolerant to header wording/order differences while still rejecting arbitrary spreadsheets.
+### 1. Maintain GS1 metadata in the catalog
 
-## International header mapping
+You can open GS1 metadata for:
 
-The internal schema is canonical and language-neutral. Workbook handling uses an alias layer that maps canonical fields such as:
+- a single track
+- a selected group of tracks
+- grouped release selections that should become one product-level export row
 
-- `gtin_request_number`
-- `product_classification`
-- `consumer_unit_flag`
-- `target_market`
-- `product_description`
-- `brand`
-- `quantity`
-- `unit`
+The editor stores GS1 values in the profile database so the information stays with the catalog rather than living only in ad hoc spreadsheets.
 
-to workbook headers in regional variants. Dutch GS1 headers are supported as aliases, but the code is not tied to Dutch sheet names or sheet indexes.
+### 2. Keep an official workbook on file
 
-## Batch numbering
+The app does not invent a GS1 workbook format. Instead, it works with the official workbook supplied by your GS1 environment or regional portal.
 
-Batch export never stores temporary request numbers in the database. The Excel exporter computes them at write time and fills the detected GTIN/code column with:
+That workbook is:
 
-- first exported row: `1`
-- second exported row: `2`
-- third exported row: `3`
+- uploaded once into the app settings workflow
+- stored in the profile database
+- available for export later even if the original source file is moved or removed
 
-and so on in export order. This is the value GS1 uses to assign the next available GTINs during workbook upload.
+This removes a common failure point in spreadsheet-based GS1 workflows.
 
-## Template configuration
+### 3. Verify workbook structure before export
 
-- The default template path is stored in app-level `QSettings` under `gs1/template_path`.
-- Profile-specific GS1 defaults are stored in `app_kv`.
-- The GS1 dialog checks the configured template on open and prompts for a replacement if the file is missing or invalid.
-- The Application Settings dialog now includes a GS1 tab for the default template path plus default market/language/brand/subbrand/packaging/classification values.
+Before a workbook is accepted, the app validates it by:
+
+- opening it as a real Excel workbook
+- scanning candidate sheets and header rows
+- matching workbook headers against canonical GS1 fields
+- applying alias and language-aware mapping
+- selecting the best-fit export target sheet
+- rejecting incomplete or unrelated spreadsheets
+
+This means the workflow is tolerant to reasonable workbook variation, while still protecting the user from exporting into the wrong file.
+
+### 4. Export from the catalog into the workbook
+
+When you export, the app writes the current product data into the validated template and assigns batch request numbers in export order. Temporary request numbering is generated during export time rather than stored permanently in the database.
+
+## What The Editor Covers
+
+The GS1 editor is designed to keep the workflow clear and grouped. It covers areas such as:
+
+- product identity
+- brand and subbrand
+- target market and packaging context
+- language and commercial details
+- consumer-unit state
+- export readiness
+- grouped product rows for release-based selections
+
+The interface is tabbed so large GS1 datasets stay readable instead of becoming one long vertical form.
+
+## Why The Workbook Is Verified Instead Of Trusted By Name
+
+Simply choosing a file path is not enough for an export workflow that depends on a structured official spreadsheet.
+
+The app validates the workbook by structure rather than filename so it can safely handle:
+
+- renamed templates
+- region-specific header wording
+- workbook layouts that move fields around
+- multiple likely tabs within one workbook
+
+This makes the flow more reliable for real-world GS1 use.
+
+## International Header Mapping
+
+Internally, the GS1 layer uses canonical field names. Workbook export then maps those canonical fields onto the real workbook headers using an alias system.
+
+This helps the app stay:
+
+- language-aware
+- template-tolerant
+- easier to maintain across different GS1 workbook variants
+
+The result is a workflow that is grounded in your catalog data rather than hard-coded to one spreadsheet shape.
+
+## Profile-Based Defaults
+
+The GS1 workflow also supports profile-specific defaults for values such as:
+
+- target market
+- language
+- brand
+- subbrand
+- packaging type
+- classification
+
+That means repeated product exports can start from sensible defaults instead of requiring the same values to be typed over and over again.
+
+## Why This Matters Operationally
+
+For many small labels and independent catalog owners, GS1 preparation becomes a recurring administrative burden. By keeping the data inside the application:
+
+- product metadata stays connected to the catalog
+- workbook integrity is checked before export
+- templates stay available inside the profile
+- batch exports become more repeatable
+- errors caused by spreadsheet drift become much less likely
+
+In short, the GS1 workflow turns a fragile external spreadsheet step into a controlled part of catalog management.

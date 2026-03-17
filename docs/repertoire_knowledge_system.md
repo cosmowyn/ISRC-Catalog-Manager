@@ -1,239 +1,269 @@
 # Repertoire Knowledge System
 
-This document summarizes the extended local-first model that sits on top of the existing track, release, license, GS1, media, and exchange layers.
+ISRC Catalog Manager is no longer just a track table with a few extra fields. It is designed as a connected repertoire knowledge system for independent artists, labels, and catalog owners who need to understand not only what they have released, but what they control, how it is documented, and what is operationally ready.
 
-## Product Intent
+This guide explains the product model behind that expansion.
 
-The application now aims to be a complete indie catalog manager for artists and labels.
+## Why This Layer Exists
 
-It is intentionally:
+A serious music catalog is made up of more than recordings.
 
-- local-first
-- SQLite-backed
-- desktop-native with PySide6
-- focused on repertoire, rights, contracts, parties, documents, and deliverables
+You need to maintain:
 
-It is intentionally not:
+- the recording
+- the release it belongs to
+- the underlying musical work
+- the people and companies connected to it
+- the contract that governs it
+- the rights position that results from that agreement
+- the documents that prove it
+- the deliverables that are actually approved for use
 
-- a royalty accounting platform
-- a payment/distribution integration layer
-- a DSP/release-pitching workflow tool
+Most systems scatter that information across spreadsheets, folders, email threads, and memory. ISRC Catalog Manager brings it together in one local-first desktop workspace.
 
-## Core Entities
+## What The App Models
 
-### Work
+### Tracks
 
-A `Work` is the composition/songwriting layer and stays separate from recordings.
-
-Key fields:
+Tracks remain the recording-level foundation of the catalog. They carry the recording-facing metadata you expect:
 
 - title
+- artists
+- release date
+- ISRC
+- genre
+- managed audio
+- artwork
+- custom metadata
+
+Tracks continue to work exactly as they always have. The richer model expands around them rather than replacing them.
+
+### Releases
+
+Releases are product-level records that group tracks into commercial packages and product identities.
+
+Release records can carry:
+
+- title and subtitle
+- primary and album artist
+- release type
+- UPC/EAN
+- catalog number
+- release dates
+- artwork
+- release ordering
+- territory and status information
+
+This keeps product-level data separate from track-level recording data, which is essential for clean exports and consistent catalog maintenance.
+
+### Works
+
+Works represent the composition layer.
+
+They exist separately from recordings because one work can lead to multiple recordings, versions, edits, remixes, live cuts, and derivative releases. A work can store:
+
+- work title
 - alternate titles
 - subtitle/version
 - language
-- lyrics/instrumental flags
-- genre/style notes
+- lyrics and instrumental flags
+- genre and style notes
 - ISWC
 - local registration number
-- workflow status and checklist flags
+- status and readiness flags
 - notes
 
-Relationships:
+Works can link to multiple tracks, and tracks can link back to one or more works where needed.
 
-- `WorkContributors`
-- `WorkTrackLinks`
-- contract links
-- rights links
+### Parties
 
-### Party
+Parties are the reusable people and companies that appear throughout the catalog.
 
-A `Party` is the reusable person/company/contact registry.
+Instead of repeating free text everywhere, the app lets you maintain one canonical record for:
 
-Key fields:
+- artists
+- labels
+- publishers
+- subpublishers
+- managers
+- producers
+- licensees
+- lawyers
+- organizations
+- individuals
 
-- legal/display name
-- party type
-- contact details
-- location/tax/PRO/IPI metadata
-- notes
+Party records can be reused across works, contracts, rights, and other linked records.
 
-Relationships:
+### Contracts
 
-- work contributors
-- contract parties
-- rights holders / grantors / grantees
+Contracts are lifecycle-aware agreement records.
 
-### Contract
+They can track:
 
-A `Contract` is a lifecycle-aware agreement record.
+- draft, signature, effective, start, and end dates
+- renewal, notice, option, reversion, and termination dates
+- active, expired, draft, pending-signature, terminated, or superseded status
+- linked works, tracks, releases, and parties
+- obligations and reminders
+- notes and summaries
 
-Key fields:
+This makes the contract layer operational, not just archival.
 
-- contract type
-- draft/signature/effective/start/end/renewal/notice/reversion/termination dates
-- supersedes / superseded-by
-- status
-- summary/notes
+### Contract Documents
 
-Relationships:
+A contract record can hold multiple managed documents so the legal paper trail stays usable.
 
-- `ContractParties`
-- `ContractObligations`
-- `ContractDocuments`
-- works
-- tracks
-- releases
-- source rights grants
+That includes:
 
-Legacy note:
+- draft agreements
+- signed finals
+- amendments
+- appendices
+- exhibits
+- correspondence
+- scans
 
-- the older `Licenses` + `Licensees` tables still exist as the lightweight track-level PDF archive
-- `Catalog > Migrate Legacy Licenses to Contracts...` promotes those legacy records into `Parties`, `Contracts`, and `ContractDocuments`
-- the migration is explicit and checksum-verified; it does not silently reinterpret old data on profile open
+Each document can store version labels, received dates, signed state, active state, superseded relationships, checksums, and notes.
 
-### RightsRecord
+### Rights Records
 
-A `RightsRecord` stores a specific rights grant or retained control position.
+Rights records express the actual control position resulting from agreements.
 
-Key fields:
+They can capture:
 
 - right type
-- exclusive flag
+- exclusivity
 - territory
-- media/use type
-- start/end/perpetual
-- granted by / granted to / retained by
+- media or use type
+- start and end dates
+- perpetual state
+- granted by
+- granted to
+- retained by
 - source contract
-- linked work / track / release
+- linked work, track, or release
 
-### AssetVersion
+This makes it possible to answer practical questions such as:
 
-An `AssetVersion` stores one managed deliverable or artwork variant.
+- Who controls this master?
+- What rights are active in this territory?
+- Which contract granted this right?
 
-Key fields:
+### Asset Versions
 
-- asset type
-- managed file reference
-- checksum
-- duration / sample rate / bit depth where available
-- derived-from relationship
-- approved-for-use
-- primary flag
-- version status
+Asset versions give the app a real deliverables registry rather than a single file attachment slot.
 
-## Navigation
+You can track:
 
-Two services make the richer model navigable:
+- main masters
+- radio edits
+- instrumentals
+- clean versions
+- explicit versions
+- alternate masters
+- hi-res files
+- MP3 derivatives
+- artwork variants
+- promotional assets
 
-- `GlobalSearchService`
-- `RelationshipExplorerService`
+Each asset can store checksum, format, technical details, derivation links, approval state, primary designation, and notes.
 
-They work across:
+## How The Model Connects
 
-- works
-- tracks
-- releases
-- contracts
-- rights
-- parties
-- contract documents
-- asset versions
+The system is designed as a graph, not a stack of isolated tables.
 
-## Workflow State
+Typical relationships look like this:
 
-Tracks and releases now carry additive workflow/checklist columns:
+- a release contains many tracks
+- a track can point to one or more works
+- a work can have many contributors and publisher relationships
+- a contract can link to works, tracks, releases, and parties
+- a rights record can point back to a source contract
+- a contract can carry multiple governing documents over time
+- a track or release can carry multiple asset versions
 
-- `repertoire_status`
-- `metadata_complete`
-- `contract_signed`
-- `rights_verified`
+This is why the app includes both global search and a relationship explorer: once the model becomes richer, navigation needs to become richer as well.
 
-Works carry:
+## Workflow State And Operational Readiness
 
-- `work_status`
-- `metadata_complete`
-- `contract_signed`
-- `rights_verified`
+The app also tracks where an item stands operationally.
 
-Derived readiness flags, such as audio attached, artwork present, work linked, and creator linked, are surfaced through `RepertoireWorkflowService`.
+Works, tracks, and releases can store workflow and readiness signals such as:
 
-## Quality Coverage
+- idea
+- demo
+- in production
+- final master received
+- metadata incomplete
+- contract pending
+- contract signed
+- rights verified
+- cleared
+- blocked
+- archived
 
-The quality dashboard now includes:
+Readiness flags, linked assets, linked works, creator presence, and other validation signals are surfaced through the quality dashboard and related services.
 
-- works without creators
+## Quality And Risk Detection
+
+The richer model powers much more useful validation.
+
+The app can now detect:
+
+- duplicate ISWC values
+- missing work creators
 - invalid split totals
-- duplicate ISWC
-- contracts near notice deadlines
-- contracts missing signed final documents
-- active contracts without linked assets
-- rights missing source contracts
+- duplicate or ambiguous parties
+- contracts with risky notice windows
+- contracts without signed final documents
+- rights records missing source contracts
 - overlapping exclusive rights
-- duplicate parties
-- tracks missing linked works where composition metadata exists
 - broken asset references
-- missing approved master
-- blocked or incomplete repertoire items
+- missing approved masters
+- tracks missing linked works where composition metadata exists
 
-## Exchange
+This is one of the most important advantages of the repertoire layer: it turns scattered information into something that can be checked, trusted, and acted on.
 
-The regular track/release exchange service is unchanged.
+## Legacy Compatibility
 
-A separate `RepertoireExchangeService` now handles:
+The expansion is additive and backward-safe.
 
-- parties
-- works
-- contracts
-- rights
-- asset versions
-- relationship references
+Older databases remain valid because:
 
-Supported formats:
+- track and release workflows still work
+- legacy data is not destructively reinterpreted
+- new tables are added only where missing
+- new workflow fields are appended safely
+- older profiles can remain simple if the user wants them to
 
-- JSON
-- XLSX
-- CSV bundle directory
-- ZIP package with manifest plus managed contract/asset files
+The older license and licensee archive is also still supported for lightweight use. Users who want the richer model can explicitly migrate legacy licenses into structured parties, contracts, and contract documents with checksum verification and snapshot protection.
 
-## Migration Strategy
+## What This System Is Not
 
-The repertoire expansion is additive and preserves older workspaces:
+The repertoire model is intentionally deep, but it remains focused.
 
-- existing track/release/license rows are not reinterpreted destructively
-- new tables are created only if missing
-- workflow columns are appended to existing `Tracks` and `Releases`
-- foreign keys stay explicit
-- old databases remain valid even if no work/contract/right data exists yet
+It is not:
 
-Legacy license migration strategy:
+- a royalty accounting engine
+- a payment system
+- a distributor dashboard
+- a DSP API client
+- a pitching or campaign platform
 
-- legacy license rows can remain in place for users who prefer the simpler PDF archive workflow
-- a dedicated migration action copies each managed legacy PDF into `contract_documents`
-- the migrated document checksum is verified against the original managed file before cleanup
-- related `Party` records are created or reused from legacy `Licensees`
-- related `Work` and `Release` links are inferred from the original track where possible
-- legacy `Licenses`, `Licensees`, and old managed license files are removed only after verification succeeds
-- before/after history snapshots are recorded so the whole migration can be undone or redone safely
+Its job is to be the best possible local catalog system for maintaining music metadata, relationships, rights context, and operational readiness.
 
-## Package Layout
+## In Practice
 
-New packages introduced by this layer:
+For an independent catalog owner, this means one application can now serve as:
 
-- `isrc_manager.parties`
-- `isrc_manager.works`
-- `isrc_manager.contracts`
-- `isrc_manager.rights`
-- `isrc_manager.assets`
-- `isrc_manager.search`
+- the recording catalog
+- the release register
+- the composition register
+- the contract diary
+- the rights matrix
+- the party/contact registry
+- the document archive
+- the deliverables register
+- the readiness dashboard
 
-Additional service entrypoints added on top of the original service layer:
-
-- `LegacyLicenseMigrationService`
-- expanded `HistoryManager` snapshot coverage for repertoire tables and managed directories
-
-These packages follow the same pattern already used elsewhere in the project:
-
-- dataclass models
-- focused services
-- thin dialogs
-- additive schema migrations
+That is the product direction behind the repertoire knowledge system.

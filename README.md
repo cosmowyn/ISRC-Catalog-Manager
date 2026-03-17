@@ -1,446 +1,311 @@
-# ISRC Manager  
-Created by **M. van de Kleut**  
-22-aug-2025
+# ISRC Catalog Manager
 
----
+ISRC Catalog Manager is a local-first desktop application for artists, labels, managers, and catalog owners who need one place to maintain the full reality of a music catalog.
 
-ISRC Manager is a local-first desktop catalog application for managing tracks, first-class releases, musical works, rights, contracts, managed media, audio tag workflows, licenses, backups, snapshots, quality scans, and multi-format exchange workflows from one workspace.
+It combines track metadata, releases, musical works, contracts, rights, parties, documents, assets, GS1 product data, import/export tooling, quality control, and durable history into one professional workspace. Everything stays on your machine, in your files, and under your control.
 
-## Preview
+![Workspace overview](docs/screenshots/workspace-overview.png)
 
-<p align="center">
-  <img src="docs/screenshots/workspace-overview.png" alt="Workspace overview with docked add-data form and populated catalog table" width="48%" />
-  <img src="docs/screenshots/catalog-managers.png" alt="Catalog managers dialog with fictional licensee data" width="48%" />
-</p>
-<p align="center">
-  <img src="docs/screenshots/history-and-snapshots.png" alt="Persistent undo history and snapshot browser" width="48%" />
-  <img src="docs/screenshots/help-browser.png" alt="Searchable in-app help manual" width="48%" />
-</p>
+## What This App Is For
+
+Most catalog tools stop at track lists or release scheduling. ISRC Catalog Manager goes much further.
+
+It helps you manage:
+
+- recordings and track metadata
+- release and product records
+- musical works and composition metadata
+- contract lifecycle and obligations
+- rights ownership and licensing positions
+- reusable party and contact records
+- contract documents and amendments
+- deliverables, masters, artwork, and derived assets
+- GS1 workbook preparation
+- custom fields, exchange formats, and validation
+
+The result is a catalog system that answers practical questions quickly:
+
+- Which recordings belong to this release?
+- Which work is linked to this track?
+- Who controls the master in this territory?
+- Which contract granted this right?
+- Which amendment is currently governing?
+- Which asset is the approved master?
+- Which records are blocked, incomplete, or unsafe to export?
+
+## What Makes It Different
+
+### Local-first by design
+
+Your catalog lives in SQLite profile databases on your own machine. The app does not depend on a hosted backend, recurring subscriptions, or third-party platforms to remain usable.
+
+### Built for real catalog operations
+
+This is not just a metadata sheet with a pretty skin. It is designed for the day-to-day realities of independent catalog management:
+
+- maintaining clean identifiers
+- attaching managed media and documents
+- keeping releases and works distinct
+- storing agreement history and obligation dates
+- verifying readiness before export or delivery
+- preserving recoverable history and restore points
+
+### A richer model than a basic release manager
+
+The app is intentionally broader than a track/release tool and intentionally narrower than a royalty system. It is not trying to be a royalty accounting platform, distributor dashboard, payment tool, or DSP pitching system. It is focused on being an exceptional repertoire and catalog knowledge system.
+
+## Core Capabilities
+
+### Recording and release catalog
+
+Create and maintain:
+
+- single-track entries from the docked Add Data panel
+- multi-track projects through the Add Album workflow
+- first-class release records with ordered track lists
+- UPC/EAN, catalog number, explicit flags, artwork, and release sequencing
+- import/export-ready track metadata with managed media attachments
+
+The main catalog table supports fast searching, bulk selection, bulk edit, contextual actions, and direct handoff into related workflows.
+
+### Works, rights, contracts, and parties
+
+The app models repertoire beyond recordings:
+
+- first-class musical works with creator roles, shares, alternate titles, ISWC, and local registration numbers
+- reusable party records for writers, publishers, labels, managers, lawyers, licensees, and organizations
+- lifecycle-aware contracts with signature/effective/start/end/renewal/notice/reversion dates
+- obligations and reminders such as approvals, notice windows, and delivery requirements
+- versioned contract documents including drafts, signed finals, amendments, appendices, exhibits, and correspondence
+- rights records for master, publishing, sync, mechanical, performance, neighboring, promotional, and custom right types
+- conflict checks for overlapping exclusivity and missing source contracts
+
+This gives independent artists and labels a practical way to keep legal and operational context tied directly to the catalog.
+
+### Asset and deliverable management
+
+Tracks and releases can carry multiple managed asset versions, including:
+
+- main masters
+- radio edits
+- instrumentals
+- clean and explicit variants
+- alternate masters
+- hi-res deliverables
+- MP3 derivatives
+- artwork variants
+- promotional assets
+
+You can track approval state, mark the primary asset, preserve derivation relationships, and validate broken or duplicate asset references.
+
+### Quality control and operational readiness
+
+The Data Quality Dashboard helps you audit the catalog before export, delivery, or review. It can flag:
+
+- missing or duplicate identifiers
+- invalid barcodes
+- missing artwork or media
+- missing works or creators
+- invalid work split totals
+- contract lifecycle gaps
+- unsigned final documents
+- rights conflicts
+- duplicate parties
+- broken asset references
+- missing approved masters
+- blocked or incomplete repertoire items
+
+This is designed to surface action items, not abstract diagnostics.
+
+### GS1 workflow support
+
+The app includes a dedicated GS1 workflow for maintaining product metadata and exporting to official workbook templates. It verifies workbook structure, stores profile-specific defaults, and now persists the configured template in the profile database so the export setup remains stable even if a source file is moved.
+
+### Exchange and portability
+
+You can move catalog data in and out using:
+
+- XML
+- CSV
+- XLSX
+- JSON
+- ZIP packages with manifests and managed-file copies
+
+There is also a dedicated repertoire exchange workflow for works, parties, contracts, rights, assets, and their relationships, separate from the standard track/release exchange layer.
+
+### Undo, snapshots, and restore confidence
+
+ISRC Catalog Manager includes persistent history, undo/redo, manual snapshots, and restore paths for high-risk workflows. Legacy license migration, imports, restores, and other heavier operations are designed to be recoverable rather than one-way.
+
+### Theme builder and advanced QSS
+
+The app ships with a full visual theme builder covering typography, surfaces, buttons, inputs, navigation, data views, and geometry controls, plus starter themes bundled with the application:
+
+- Apple Light
+- Apple Dark
+- High Visibility
+- Aeon Emerald Gold
+- Subconscious Cosmos
+- VS Code Dark
+- Pastel Studio
+
+Advanced users can go further with a selector reference and syntax-aware QSS editor that supports safe autocomplete, rule templates, pseudo-states, subcontrols, and object-name targeting.
+
+## Who It Is For
+
+ISRC Catalog Manager is especially useful for:
+
+- independent artists maintaining their own release history
+- boutique labels managing a developing catalog
+- catalog managers cleaning up metadata across legacy projects
+- publishers and rights coordinators who need a reliable local reference
+- teams that want durable, local files instead of browser-only workflows
+
+## Product Scope
+
+The app is designed to be the catalog brain for independent music operations.
+
+It is intentionally not built for:
+
+- royalty accounting
+- royalty statement ingestion
+- distributor or DSP APIs
+- payment workflows
+- release pitching or distributor campaign management
+
+That focus is deliberate. The goal is depth and reliability in catalog maintenance, repertoire knowledge, and agreement tracking.
+
+## Workflow Overview
+
+### 1. Build the catalog
+
+Use the Add Data panel for single tracks or Add Album for grouped releases. Attach audio and artwork, generate or enter identifiers, and save records directly into the active profile.
+
+### 2. Organize the repertoire graph
+
+Create releases, works, parties, contracts, rights, and asset versions as first-class records. Link them across the catalog so tracks, compositions, agreements, and deliverables stay connected.
+
+### 3. Validate before delivery or export
+
+Run the quality dashboard, inspect missing data, and jump directly into the affected record or manager to correct issues.
+
+### 4. Export or archive safely
+
+Use XML, CSV, XLSX, JSON, GS1 workbook export, or ZIP package export depending on the workflow. Snapshots and restore paths help protect the catalog before major operations.
+
+## Screenshots
+
+### Workspace
+
+![Workspace overview](docs/screenshots/workspace-overview.png)
+
+### Custom Fields
+
+![Custom columns](docs/screenshots/custom-columns.png)
+
+### Catalog Managers
+
+![Catalog managers](docs/screenshots/catalog-managers.png)
+
+### History and Snapshots
+
+![History and snapshots](docs/screenshots/history-and-snapshots.png)
+
+### In-app Help
+
+![Help browser](docs/screenshots/help-browser.png)
+
+## Documentation
+
+The repository includes user-facing and developer-facing guides in `docs/`:
+
+- [Repertoire Knowledge System](docs/repertoire_knowledge_system.md)
+- [GS1 Workflow Guide](docs/gs1_workflow.md)
+- [Theme Builder Guide](docs/theme_builder.md)
+- [Undo, History, and Snapshots](docs/undo_redo_strategy.md)
+- [Modularization Strategy](docs/modularization_strategy.md)
+
+The application itself also includes a searchable in-app help browser that mirrors the major workflows.
 
 ## Demo Workspace
 
-The repository now includes reproducible demo tooling under [`demo/`](demo/) so you can generate a clean showcase workspace and refresh the README screenshots without using any real catalog data.
+The repository includes a demo database and sample media in the `demo/` folder so you can explore the workflow without starting from an empty profile.
 
-All demo data is fictional:
-- fictional artist names
-- fictional track titles
-- fictional artwork
-- fictional license PDFs
-- no personal or customer information
+## Installation
 
-Create the demo workspace:
+### Option 1: Use the guided builder
+
+Run:
 
 ```bash
-python demo/build_demo_workspace.py
-```
-
-Refresh the screenshots:
-
-```bash
-python demo/capture_demo_screenshots.py
-```
-
-The generated demo workspace is written to `demo/.runtime/` and is excluded from git. The committed screenshots live in `docs/screenshots/`.
-
----
-
-# IMPORTANT LEGAL NOTICE
-
-To legally generate and assign industry-standard registration codes, you must first acquire the correct registrant prefixes and identifiers from the relevant authorities. These codes are part of international systems for music identification and royalty collection.
-
-Using self-invented or fake codes is strictly prohibited.  
-Such codes are invalid and may cause:  
-- Rejection by digital distributors  
-- Loss of royalty payments  
-- Legal and contractual violations  
-- Damage to your reputation as an artist or label  
-
-Always ensure your codes are officially registered before use.
-
----
-
-# Worldwide Standards Overview
-
-## 1. ISRC (International Standard Recording Code)
-- Identifies individual sound recordings and music videos.  
-- Format: CC-XXX-YY-NNNNN  
-- Apply for an ISRC registrant prefix via your national ISRC agency.  
-- In countries without a national agency, apply via IFPI:  
-  https://isrc.ifpi.org
-
-## 2. UPC / EAN
-- Identifies complete releases as products.  
-- Required by distributors.  
-- Issued by GS1.
-
-## 3. ISWC (International Standard Musical Work Code)
-- Identifies compositions (songs).  
-- Assigned automatically by your local PRO when registering works.
-
-## 4. IPI/CAE
-- Identifies songwriters, composers, and publishers.  
-- Assigned when joining your local PRO.
-
----
-
-# Netherlands-Specific Responsibilities
-
-- ISRC: SENA — https://www.sena.nl  
-- UPC/EAN: GS1 Nederland — https://www.gs1.nl  
-- ISWC: BUMA/STEMRA — https://www.bumastemra.nl  
-- IPI/CAE: Assigned by BUMA/STEMRA  
-
----
-
-# ISRC Manager: Overview
-
-ISRC Manager is a desktop application for managing ISRCs, metadata, and release information.  
-It is designed for independent artists, producers, and small labels who require professional-grade catalog management without complex enterprise tools.
-
-The application provides:
-- Automatic ISRC generation in ISO 3901 format  
-- Optional blank-ISRC workflows for artists who rely on distributor-assigned or later-imported codes  
-- Metadata management with customizable fields  
-- A grouped Add Album dialog for entering shared album data once and creating multiple tracks in one pass  
-- A first-class release/product layer with release browsing, ordered track placements, UPC/EAN validation, release artwork, and release-level metadata  
-- A first-class work/composition layer with creator roles, split handling, duplicate ISWC detection, and work-to-recording linking  
-- Reusable party/contact records that can be linked across works, contracts, rights, and asset workflows  
-- Contract lifecycle tracking with dates, obligations, linked documents, version chains, and linked works/tracks/releases  
-- Rights and ownership records for masters, publishing/composition, sync, mechanical, performance, digital, promotional, and other grant types  
-- Deliverables and asset version tracking for masters, alternates, derivatives, artwork variants, and approval state  
-- Global search and a relationship explorer for navigating linked records across the complete local knowledge graph  
-- Bulk editing for selected catalog rows with field-by-field updates  
-- Audio metadata tag import and export for managed audio files, with preview-based conflict resolution  
-- CSV, XLSX, JSON, XML, and packaged ZIP exchange workflows  
-- A data-quality dashboard with actionable validation checks and safe repair tools across repertoire, contracts, rights, parties, and assets  
-- Audio and image preview capabilities  
-- Multiple profile support  
-- Persistent undo/redo history with manual and automatic snapshots  
-- Dockable views for the add-data form and catalog table  
-- GS1 metadata editing and grouped workbook export using the official GS1 template workflow  
-- Searchable in-app help with contextual help buttons  
-- Theme customization with a full visual builder for app-wide colors, states, radii, padding, typography, saved presets, live preview, advanced QSS, context-aware selector/property autocomplete, full rule templates, and an in-app selector reference catalog  
-- Full audit logging and backup system  
-- Import/export tools for XML metadata  
-- A built-in license management system  
-- A snapshot-protected migration path from the legacy license/licensee archive into the newer party/contract/document model  
-- A cross-platform icon factory for building distributable applications  
-
----
-
-# Features
-
-## ISRC Code Generation
-- Fully compliant with ISO 3901.  
-- Supports up to 99 independent profiles (artist/label/sublabel).  
-- Tracks last-used designation codes per profile.  
-- Automatically assigns ISRC year based on creation date.  
-- Allows reuse of the original ISRC year when importing older releases.
-- If no ISRC prefix is configured, the app no longer blocks data entry: auto-generation is simply disabled and tracks can be saved with blank ISRC values until codes are available.
-
-## Metadata Management
-- Supports standard and custom metadata fields.  
-- Built-in support for text, date, checkbox, dropdown, image blob, and audio blob fields.  
-- Audio and image files are managed alongside the catalog database with tracked metadata, preview, export, and restore support.
-- The Add Album dialog starts with shared album metadata and dynamic track sections so you can add or remove tracks as needed without leaving the main workflow.
-- Selected rows can be bulk edited from the catalog table. Mixed values stay untouched unless you explicitly replace them, and protected fields such as ISRC, ISWC, Track Title, Audio File, Track Length, and BUMA work number remain view-only during bulk edit.
-- Editing shared album/release fields from the track editor keeps the corresponding release record synchronized where appropriate.
-
-## Theme Builder
-- The Settings dialog includes a full theme builder for the entire application, not just the main window.
-- Most widget families can now be themed without writing QSS:
-  - surfaces, workspace canvases, borders, group titles, compact grouped frames, headers, tooltips, overlays, and supporting text
-  - buttons, help buttons, hover states, pressed states, checked states, and disabled states
-  - inputs, focus styling, placeholders, and checkbox/radio indicators
-  - tables, lists, selections, row hover states, scrollbars, progress bars, progress text, menus, tab strips, tabs, tab panes, toolbar chrome, and status bars
-  - geometry such as font sizes, border widths, corner radii, control padding, help-button sizing, and scrollbar thickness
-- The packaged theme library includes starter presets for `Apple Light`, `Apple Dark`, `High Visibility`, `Aeon Emerald Gold`, `Subconscious Cosmos`, `VS Code Dark`, and `Pastel Studio`.
-- The builder includes focused live preview panes inside the settings dialog that automatically switch with the active theme section, plus an optional app-wide live preview mode while editing.
-- Starter themes are bundled with the app, can be loaded or exported like any other preset, and are protected from accidental delete/overwrite. Theme drafts can be saved to the internal theme library, exported to JSON, and imported back into another install.
-- Advanced QSS remains available for the remaining edge cases and is backed by a searchable selector catalog and syntax-aware autocomplete.
-- More detail is available in [docs/theme_builder.md](docs/theme_builder.md).
-
-## Audio Metadata Tags
-- Reads embedded metadata from MP3/ID3, FLAC, OGG Vorbis/Opus, M4A/MP4, WAV, and AIFF where the format supports tags in practice.
-- Maps catalog fields to tags including title, artist, album, album artist, track/disc number, genre, composer, publisher/label, release date, ISRC, UPC/EAN, comments, lyrics, and artwork.
-- `Catalog > Import Tags from Audio…` previews tag-to-catalog conflicts before applying changes.
-- `Catalog > Write Tags to Exported Audio…` writes catalog metadata to exported audio copies without modifying the managed source files in place.
-- The default conflict policy is configurable per application profile and can be changed at import time.
-
-## Releases and Products
-- Releases are now stored as first-class records instead of only repeated track fields.
-- Each release keeps title, subtitle/version, primary artist, album artist, release type, release dates, label, sublabel, catalog number, UPC/EAN, barcode validation status, territory, explicit flag, notes, and release artwork.
-- Track placements are stored separately with disc number, track number, and sequence order.
-- `Catalog > Release Browser…` lets you browse releases, inspect track order, duplicate a release, add the current track selection, and filter the main catalog table to a release.
-- `Add Album` and normal track-save/edit flows automatically create or update release records when release-level metadata is present.
-
-## Repertoire, Rights, and Contracts
-- `Catalog > Work Manager…` stores compositions separately from recordings so one work can connect to many linked tracks.
-- Works support alternate titles, subtitles/versions, lyrics vs instrumental flags, language, style notes, ISWC, local registration numbers, creator roles, split percentages, and operational status.
-- `Catalog > Party Manager…` keeps one canonical person/company record per important counterparty and reuses it across works, contracts, and rights.
-- `Catalog > Contract Manager…` tracks draft/signature/effective/start/end/renewal/notice/reversion/termination dates, linked parties, obligations, and document version chains.
-- `Catalog > Rights Matrix…` stores ownership and grant records linked to works, tracks, releases, and source contracts, including exclusivity, territories, media-use scope, and control summaries.
-- `Catalog > Asset Version Registry…` tracks masters, alternates, derivatives, artwork variants, approval state, and primary deliverable designation.
-- `Catalog > Global Search and Relationships…` searches across works, tracks, releases, contracts, rights, parties, documents, and assets, then shows everything linked to the selected record.
-- `Catalog > Migrate Legacy Licenses to Contracts…` promotes the older track-level license PDF archive into Party + Contract + Contract Document records, verifies every copied PDF before cleanup, and wraps the migration in before/after restore points so it can be rolled back safely.
-
-## GS1 Metadata Workflow
-- Open GS1 metadata from the Catalog menu, the table context menu, or directly from the bulk edit dialog.
-- Works with single tracks and multi-track selections, including grouped album-style GS1 export rows where applicable.
-- Uses the official GS1 workbook template from your GS1 environment and validates the workbook structure before export.
-- Requires the `openpyxl` dependency from `requirements.txt` in the same Python environment that launches the app.
-
-## Database & Profile Handling
-- Independent ISRC sequences per profile.  
-- Each profile can store unique settings and field layouts.  
-- SQLite backend for stability and portability.
-- Background tasks now open their own SQLite connections instead of reusing the UI connection.
-- The app configures SQLite for `WAL` mode, `foreign_keys=ON`, and a busy timeout so long-running reads and writes remain safer under concurrent background work.
-
-## Responsive Background Tasks
-- Heavy workflows now run through a centralized Qt background-task manager instead of blocking the UI thread.
-- Long-running tasks report status through Qt signals and update the UI only on the main thread.
-- Write-heavy background jobs use per-profile write coordination so imports, snapshot restores, and other database mutations are serialized safely.
-- Each worker thread opens and closes its own SQLite connection. Connections are never shared across threads.
-- Failed worker writes roll back cleanly, and file-writing tasks still use history-aware rollback where supported.
-- The app prevents closing while background tasks are still running so database restores, imports, exports, snapshots, and other file/database operations cannot be interrupted unsafely.
-
-## Media Previews
-- Built-in audio preview window with waveform on macOS and Windows via the app's Qt multimedia decoder stack.  
-- Image preview window for artwork and promotional assets.  
-- Spacebar quick preview shortcut.
-
-## Auditing, Backups, and Logging
-- Automatic timestamped backups in the app data `backups/` folder.  
-- Daily human-readable logs plus structured trace logs in the app data `logs/` folder.  
-- Pre-restore backup creation before applying imported data.
-
-## Import/Export
-- Export metadata to XML for distribution or archival.  
-- Import XML catalogs with an optional dry-run validation mode.  
-- Detailed import result report with pass/fail breakdown.  
-- If the XML includes unknown custom fields, the app can offer to create those definitions before continuing with import.
-- Blank ISRC values in imported XML are accepted, matching the optional-ISRC workflow used in the main entry forms.
-- Export selected catalog rows to CSV, XLSX, JSON, or a ZIP package containing a JSON manifest plus referenced media copies.
-- Import CSV and XLSX through a column-mapping dialog with reusable mapping presets.
-- JSON exchange uses an explicit schema version and includes release data, custom fields, and media references.
-- Import modes now include dry run, create, merge, update existing matches only, and insert-new-when-duplicate-exists.
-- Match detection can use internal IDs, ISRC, UPC/EAN plus title, and optional title/artist heuristics.
-- Exchange inspections, imports, exports, packaged ZIP creation/extraction, XML import/export, database backup/restore, manual snapshots, snapshot restores, tagged-audio export, and quality scans now run off the main thread so the workspace stays responsive during heavier jobs.
-- `File > Repertoire Exchange` exports and imports the extended local knowledge model for parties, works, contracts, rights, assets, and relationship references as JSON, XLSX, CSV bundles, or ZIP packages with managed files.
-
-## Data Quality Dashboard
-- `Catalog > Data Quality Dashboard…` scans the active profile for metadata, release, media, and integrity issues.
-- Checks include missing or duplicate ISRCs, missing or duplicate release UPC/EANs, invalid barcode checksums, missing release titles/dates/artwork, missing audio files, broken media references, ordering problems, orphaned licenses, required custom-field gaps, works without creators, invalid splits, duplicate ISWCs, contracts near notice deadlines, missing signed final contract documents, rights conflicts, duplicate parties, missing linked works, broken asset references, missing approved masters, and blocked/incomplete repertoire items.
-- Suggested fixes include regenerating derived values, normalizing dates, relinking missing media by filename, and filling blank track fields from linked release metadata.
-- Issue lists can be exported to CSV or JSON for reporting or cleanup planning.
-
----
-
-# License Management System
-
-The License Manager allows you to:
-- Store multiple license records linked to track titles  
-- Associate licenses with profiles
-- Manage Licensee parties
-- See how many licenses are linked to a licensee
-
----
-
-# Icon Factory (Cross-Platform)
-
-A complete icon creation tool is integrated into the build workflow.  
-It supports:
-
-- macOS: `.icns`  
-- Windows: `.ico`  
-- Linux: `.png` (512×512)
-
-Features:
-- GUI file picker using Tkinter  
-- Automatic square cropping  
-- Optional centre-crop if the selected image is not 1:1  
-- Upscaling to meet platform-specific resolutions  
-- Multi-size ICO generation for Windows  
-- Automatic output directory grouping by OS  
-
-This allows users to generate branded application icons during the build process without external tools.
-
----
-
-# Build Script (build.py)
-
-The build script is designed to work safely on clean systems with no preinstalled dependencies.  
-It automatically handles:
-
-- Virtual environment creation  
-- Requirements installation  
-- PyInstaller setup  
-- Optional icon generation  
-- Application packaging  
-- Installation to a user-writable directory  
-
-## New Startup Workflow
-
-When launching the script, the user is presented with two options:
-
-### 1. Create Environment Only
-- Creates `.venv` inside the project  
-- Installs all required dependencies  
-- Skips PyInstaller build  
-- Skips icon generation  
-- Exits cleanly after environment setup  
-- Safe for users who want to prepare a development environment without building the app
-
-### 2. Full Build (Build Application Binary)
-- Performs everything in option 1  
-- Prompts for an icon (or uses the icon factory)  
-- Builds a distributable application using PyInstaller  
-- Prompts the user for an installation directory  
-- Copies the built app to the selected target  
-- Recreates the Windows project structure if applicable  
-
-Both flows use Tkinter dialogs when available and automatically fall back to console prompts if GUI elements are unavailable.
-
----
-
-# Installation
-
-## Prerequisites
-- macOS, Windows, or Linux  
-- Python 3.10+  
-
-## Running the Installer
-
-Navigate to the project folder and run:
-
-```
 python build.py
 ```
 
-You will be prompted to choose:
+The build tool can:
 
-- Create environment only  
-- Or build the full distributable application  
+- create or refresh the project virtual environment
+- install the required runtime dependencies
+- build a packaged application with PyInstaller
+- install the packaged application to a chosen location
 
-After a successful build, the installer will ask for a destination folder and install the packaged app there.
+The build flow is designed not to package or overwrite your existing profile databases.
 
-The install process will never overwrite your existing Database folder.
+### Option 2: Run from source
 
-## Development Checks
+Create an environment, install dependencies, and start the app directly:
 
-Run the lightweight verification suite with:
-
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python ISRC_manager.py
 ```
-python -m unittest discover -s tests -v
-python -m py_compile ISRC_manager.py build.py icon_factory.py
+
+On Windows, activate the environment with:
+
+```powershell
+.venv\Scripts\activate
 ```
 
-GitHub Actions also runs these checks automatically on pushes and pull requests.
+## Typical Use
 
----
+Once launched, you can:
 
-# Usage
+- create a new profile database
+- browse to an existing profile
+- add tracks and grouped album data
+- maintain releases, works, parties, contracts, rights, and assets
+- import or export metadata
+- open GS1 metadata for a single track or a selected batch
+- run quality checks and repair workflows
+- preview media, inspect logs, and create snapshots
 
-## Starting the Application
-You may start the app by either:
-- launching the built executable  
-- or running `python ISRC_manager.py` directly in the project environment  
+## Standards and Responsibility
 
-Upon first launch you will:
-- choose a project directory  
-- allow the database to initialize automatically  
+The app helps manage recognized industry identifiers and workflows such as ISRC, ISWC, UPC/EAN, GS1 workbook exports, and local registration metadata. It does not replace the responsibilities of your collection society, label operations, legal review, or official registration authority. It is best understood as the organized local system where you maintain and verify those details.
 
-## Profiles
-Each profile maintains:
-- its own ISRC sequences  
-- custom metadata layout  
-- license associations  
-- appearance settings  
+## Technology
 
-Switch between profiles at any time.
+ISRC Catalog Manager is built with:
 
-## Adding Records
-- Use the Add Data panel to create a single track. If a valid ISRC prefix is configured, the form previews and auto-generates the next code on save.
-- If no ISRC prefix is configured, the form still saves normally and leaves ISRC blank until you set or import one later.
-- Use `Edit > Add Album…`, the Add Album button, or the action ribbon to open the grouped album-entry dialog.
-- In Add Album, enter shared album fields once, then add or remove track sections as needed. Leaving a track ISRC blank will auto-generate it only when ISRC generation is configured.
-- Attach audio or artwork directly to the record if desired.
+- Python
+- PySide6
+- SQLite
+- openpyxl
+- mutagen
+- pillow
 
-## Editing Existing Records
-- Double-click a standard row in the catalog table to open the full editor for a single track.
-- Select multiple rows and use `Edit Selected`, the Edit menu, or the table context menu to open the bulk edit dialog.
-- Right-clicking inside an existing multi-row selection keeps that selection intact so bulk actions stay available from the context menu.
-- Use the `GS1 Metadata…` button from the edit dialog or bulk edit dialog to continue directly into the GS1 workflow for the same selected tracks.
+The architecture is local-first, desktop-native, and designed for safe background task execution with SQLite-aware threading patterns.
 
-## Custom Fields
-Available field types:
-- Text  
-- Checkbox  
-- Date  
-- Dropdown  
-- Blob_image  
-- Blob_audio  
+## Developer Workflow
 
-Custom fields appear as new columns in the table view and are stored in the database.
-
-## Backups
-Backups are created automatically and stored under:
-- `/Database/backups/`  
-Logs are stored in:
-- `/Database/logs/`  
-
-## Import/Export
-- Export to XML, CSV, XLSX, JSON, or a packaged ZIP archive  
-- Import XML, CSV, XLSX, and JSON with preview/mapping where applicable  
-- Import validates field structure, reports warnings/skips/failures, and can update or merge existing rows  
-- Use `File > Repertoire Exchange` to import or export parties, works, contracts, rights, deliverables, and their relationship references without mixing those flows into the regular track-exchange workflow.
-
-## Releases
-- Use `Catalog > Release Browser…` to browse or edit release/product records directly.
-- Saving `Add Album` creates a first-class release and ordered release-track rows automatically.
-- Single-track save/edit workflows also keep release-level values such as release title, UPC/EAN, release date, and artwork synchronized when possible.
-
-## Works, Rights, and Contracts
-- Use `Catalog > Work Manager…` to create and validate compositions separately from recordings, including linked creators and split totals.
-- Use `Catalog > Party Manager…` to maintain reusable songwriter, publisher, label, licensee, manager, lawyer, or organization records.
-- Use `Catalog > Contract Manager…` to track lifecycle dates, obligations, linked assets, and the currently governing signed/amended contract document version.
-- Use `Catalog > Rights Matrix…` to record which party controls master, publishing, sync, mechanical, performance, or other rights in each territory.
-- Use `Catalog > Asset Version Registry…` to register the primary master, derivatives, alternates, and artwork variants for one track or release.
-- Use `Catalog > Global Search and Relationships…` to search across the full local knowledge model and inspect linked records from one place.
-
-## Audio Tag Workflows
-- Use `Catalog > Import Tags From Audio…` to read embedded tags from the managed audio attached to the current selection.
-- Right-click a track row to import tags, open the linked release, or export tagged audio copies from the context menu.
-- Tagged audio export is available directly from `Catalog > Write Tags to Exported Audio…` and from the main table context menu for tracks that already have managed audio attached.
-
-## Quality Dashboard
-- Use `Catalog > Data Quality Dashboard…` to scan the current profile and jump directly to affected tracks or releases.
-- Export the current issue list to CSV or JSON from the dashboard.
-- The dashboard now also flags work-split problems, contract/document lifecycle gaps, party duplicates, rights conflicts, asset issues, and blocked/incomplete repertoire readiness.
-
-## Automatic Migration
-- Existing profile databases are migrated automatically on open.
-- Older album-style metadata is preserved and used to infer release records safely where possible.
-- Older track rows remain valid and usable; the migration does not destroy legacy data.
-- The repertoire/rights/contracts expansion is additive: older databases keep their existing track, release, and license data while new works, parties, rights, contracts, documents, assets, and saved searches are added through safe schema migration.
-
-## Runtime Dependencies
-- `PySide6`: GUI framework
-- `audioread`: legacy waveform/audio decode fallback
-- `openpyxl`: XLSX exchange and official GS1 workbook handling
-- `pillow`: image processing and icon tooling
-- `mutagen`: audio metadata tag read/write across common formats
-
-## Developer Quality Checks
-
-Install the development toolchain:
+Install developer tooling with:
 
 ```bash
 python -m pip install -r requirements-dev.txt
 ```
 
-Run the checks individually:
+Run the main quality checks with:
 
 ```bash
 python -m ruff check build.py isrc_manager tests
@@ -449,22 +314,9 @@ python -m mypy
 python -m unittest discover -s tests -p 'test_*.py'
 python -m coverage run -m unittest discover -s tests -p 'test_*.py'
 python -m coverage report
-python -m coverage xml
 ```
 
-Notes:
-
-- The test suite now includes headless Qt app-shell coverage for the real desktop startup path, dialog/controller integration tests for the release, work, and global-search flows, and workspace-level integration tests that exercise temporary SQLite profiles.
-- CI runs the Qt suite with `QT_QPA_PLATFORM=offscreen`; when reproducing Linux CI issues locally, make sure the same environment is set and that the Qt runtime libraries used by the workflow are installed.
-- The top-level desktop entry point remains `ISRC_manager.py`, while the measurable bootstrap path lives in [`isrc_manager/app_bootstrap.py`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/isrc_manager/app_bootstrap.py) so startup behavior can be tested without changing the end-user launch flow.
-
-Apply formatting fixes:
-
-```bash
-python -m black build.py isrc_manager tests
-```
-
-Or use the bundled `Makefile` shortcuts:
+Or use the bundled shortcuts:
 
 ```bash
 make lint
@@ -475,38 +327,25 @@ make coverage
 make all-checks
 ```
 
-## CI Quality Gates
+## CI and Reliability
 
-GitHub Actions now runs separate jobs for:
-- Python byte-compilation sanity checks
+GitHub Actions verifies the project with:
+
+- byte-compilation checks
 - Ruff linting
 - Black formatting checks
-- mypy type checking on the curated service/domain scope
-- unittest on Python 3.10 and 3.13
-- headless Qt app-shell and dialog integration coverage inside the unittest matrix
-- coverage XML generation with an 80% package-level threshold
-- a lightweight packaging smoke check for PyInstaller availability
+- mypy type checking
+- unit and integration tests on multiple Python versions
+- headless Qt app-shell coverage
+- coverage thresholds
+- packaging smoke validation
 
-The Ubuntu CI jobs also install the Qt multimedia/runtime libraries needed by the PySide6 shell tests, including `libpulse-mainloop-glib0`, so the startup-path coverage matches the real desktop dependencies more closely.
+The test suite includes service-level coverage, dialog/controller tests, app-shell integration coverage, workflow integration tests, migration coverage, and background-task safety checks.
 
----
+## Support
 
-# Keyboard Shortcuts
+If you find a bug or want to improve the project, open an issue or pull request on GitHub. The application is especially suitable for self-managed and independent catalog operations, and the repository is structured to support continued expansion without losing its local-first character.
 
-Audio Preview:
-- Space: Play / Pause  
-- Escape: Close  
-- Left Arrow: Scrub backwards  
-- Right Arrow: Scrub forwards  
+## License
 
----
-
-# Support
-- Bug reports may be submitted via GitHub Issues.  
-- Pull requests are welcome.  
-- This project is primarily intended for personal and independent use.
-
----
-
-# License
-Provided "as is" without warranty. Free to use, copy, and distribute for any purpose, provided that original credits are retained. Not for resale.
+See [license.md](license.md).

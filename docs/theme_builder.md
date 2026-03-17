@@ -1,113 +1,163 @@
-# Theme Builder
+# Theme Builder Guide
 
-The application now ships with a full visual theme builder in `Settings > Application Settings > Theme`.
+ISRC Catalog Manager includes a full visual theme builder so the application can be tailored without requiring hand-written QSS for every change.
 
-## Starter Themes
+The goal is simple: most appearance work should be possible from the GUI, while Advanced QSS remains available for the final edge cases.
 
-The packaged theme library now includes seven starter presets so every build starts with useful options before you touch Advanced QSS:
+## What The Theme Builder Covers
 
-- `Apple Light`
-- `Apple Dark`
-- `High Visibility`
-- `Aeon Emerald Gold`
-- `Subconscious Cosmos`
-- `VS Code Dark`
-- `Pastel Studio`
+The builder now exposes the full visible surface of the application, including:
 
-These starter themes are bundled with the app itself, so they are available in packaged binaries as well as source checkouts. They can be loaded and exported like any other preset, but they are protected from delete/overwrite inside the theme library. If you want to customize one, load it and save a copy under a new name.
-
-## What It Covers
-
-The GUI builder now exposes styling controls for the full app surface, including:
-
-- typography
-- panels, surfaces, and workspace canvases
-- borders, group titles, and compact grouped frames
-- buttons and round help buttons
+- application typography
+- window and workspace canvases
+- panel and grouped-container surfaces
+- buttons and help buttons
 - hover, pressed, checked, and disabled states
-- inputs and focus styling
-- placeholder text
-- checkbox and radio indicators
-- tables, lists, row hover states, and selection colors
-- menus, tab strips, tabs, tab panes, dock titles, toolbar/status chrome, and header chrome
-- scrollbars, progress bars, progress text, and related borders
-- geometry values such as font sizes, radii, border width, padding, help-button size, and scrollbar thickness
+- inputs, placeholders, and focus styling
+- tables, lists, headers, selections, and row hovers
+- progress bars, scrollbars, and status chrome
+- menus, toolbars, dock titles, headers, tab bars, tabs, and tab panes
+- geometry settings such as font sizes, padding, radii, border width, help-button size, and scrollbar thickness
+
+This is intended to give the user real visual control without turning every theme change into a stylesheet engineering task.
+
+## Bundled Starter Themes
+
+Every build ships with a starter library of professionally prepared presets:
+
+- Apple Light
+- Apple Dark
+- High Visibility
+- Aeon Emerald Gold
+- Subconscious Cosmos
+- VS Code Dark
+- Pastel Studio
+
+These presets are packaged with the application itself, so they are available in both source checkouts and packaged binaries. They can be loaded immediately, exported for sharing, and used as a foundation for custom presets.
+
+Bundled starter themes are protected from deletion or in-place overwrite. If you want to customize one, load it and save a copy under a new name.
 
 ## Builder Structure
 
-The Theme page is split into:
+The visual builder is organized into focused sections:
 
-- `Saved Themes`
-  - load, save, delete, import, export, and reset theme drafts
-  - includes packaged starter themes plus your own saved copies
-  - optional real-time live preview across the running app
-- `Typography`
-  - application font
-  - base font size
-  - dialog title size
-  - section title size
-  - secondary text size
-- `Surfaces`
-  - window, workspace canvas, panel, group-title, compact-group, border, accent, selection, tooltip, overlay, and helper-text colors
-- `Buttons`
-  - normal, hover, pressed/checked, disabled, and round help-button states
-- `Inputs`
-  - default, focus, disabled, placeholder, and indicator styling
-- `Data Views`
-  - tables, lists, selection, hover, scrollbars, and progress bars including progress text and borders
-- `Navigation`
-  - menubar, toolbars, status bars, headers, dock titles, tab strips, tabs, and tab panes
-- `Advanced QSS`
-  - for the remaining cases that are better handled with handwritten selectors
+### Typography
+
+Control the overall tone and readability of the app through:
+
+- application font family
+- base font size
+- dialog title size
+- section heading size
+- supporting text size
+
+### Surfaces
+
+This section controls the major planes and structural backgrounds of the UI, including:
+
+- window background
+- workspace canvas
+- panel background
+- compact grouped surfaces
+- group-title text
+- borders
+- overlays
+- tooltips
+- supporting and hint text
+- accent and selection surfaces
+
+### Buttons
+
+Theme normal buttons and round help buttons with full state coverage:
+
+- default
+- hover
+- pressed
+- checked
+- disabled
+
+### Inputs
+
+Control editor surfaces and state feedback such as:
+
+- input background and text
+- focus border
+- disabled state
+- placeholder text
+- checkbox and radio indicators
+
+### Data Views
+
+This section handles the catalog’s heavy-use surfaces:
+
+- table background
+- table text
+- alternate rows
+- row hover
+- selected rows
+- headers
+- scrollbars
+- progress bars
+- progress text and border
+
+### Navigation
+
+Style the surrounding application chrome, including:
+
+- menu bar and popup menus
+- toolbar and status bar
+- dock and header surfaces
+- tab buttons
+- tab bar background
+- tab pane background and border
+
+### Advanced QSS
+
+Advanced QSS remains available for precise selector work, but it now sits on top of a much deeper visual builder instead of compensating for missing basics.
 
 ## Live Preview
 
-The Theme page includes dedicated preview panes with real controls. The preview automatically follows the active builder section so you only see the relevant control family instead of one crowded all-in-one sample. You can:
+The builder includes a focused live preview system. Instead of showing every widget family at once, the preview adapts to the currently selected builder tab:
 
-- hover and click buttons
-- focus fields
-- inspect disabled controls
-- switch tabs
-- inspect tables, lists, scrollbars, and progress bars
+- typography previews show text hierarchy and text-bearing controls
+- button previews show interaction states
+- input previews show fields and indicators
+- navigation previews show tabs, menus, headers, and chrome
+- data view previews show lists, tables, scrollbars, and progress surfaces
 
-If you enable `Preview changes across the app while editing`, the running application updates in real time while the dialog is open. Canceling the settings dialog restores the original theme automatically.
+This keeps the preview clear and makes it easier to judge the effect of each change.
 
-## Automatic vs Explicit Values
+An optional live mode can also apply the draft theme across the running application while you edit. Canceling the settings dialog restores the previous theme automatically.
 
-Many state fields accept an empty value. When left empty, the theme engine derives a sensible value from the primary palette. Examples:
+## Automatic Versus Explicit Styling
 
-- `Button Hover Background` can derive from `Button Background`
-- `Help Button Background` can derive from `Accent`
-- `Input Focus Border` can derive from `Accent`
-- `Menu Selected Background` can derive from `Accent`
+Not every state has to be defined manually.
 
-This keeps the builder flexible: users can fully define every state, or set only the important anchor colors and let the rest derive automatically.
+Many theme fields can remain empty and be derived automatically from anchor colors such as the accent, button background, or panel background. This keeps the builder flexible:
 
-## Advanced QSS
+- beginners can set a few core colors and let the rest derive sensibly
+- advanced users can override every visible state explicitly
 
-Advanced QSS is still available, but it is now positioned as the last layer, not the primary workflow.
+## Advanced QSS And Selector Reference
 
-The editor includes:
+When a visual control still is not enough, the advanced editor provides:
 
-- syntax-aware autocomplete
-- full selector and rule-template insertion
+- context-aware autocomplete
+- selector completion
 - pseudo-state and subcontrol completion
-- safe object-name reference insertion
-- a live selector catalog harvested from open windows and dialogs
+- safe object-name insertion
+- rule-template insertion
+- a live selector reference harvested from currently open windows and dialogs
 
-Recommended workflow:
+This lets advanced users finish the last few percent of theme customization without guesswork.
 
-1. Use the visual builder first.
-2. Open the window or dialog you want to target.
-3. Refresh the selector catalog.
-4. Add only the remaining custom selectors in Advanced QSS.
+## Design Philosophy
 
-## Preset Portability
+The theme builder is not meant to be a novelty panel. It is intended to make the application feel owned:
 
-Theme drafts can be exported as JSON and imported into another installation. The export format stores:
+- closer to your brand
+- easier to read
+- more comfortable over long sessions
+- more accessible for different visual needs
 
-- the theme schema version
-- the preset name
-- the full theme payload
-
-This makes it practical to share themes across machines without editing raw QSS.
+That is why the builder now covers the full application surface, starter themes ship with the app, and Advanced QSS is positioned as the final layer rather than the starting point.

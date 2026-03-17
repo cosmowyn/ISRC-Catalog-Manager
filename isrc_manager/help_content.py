@@ -17,7 +17,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
     HelpChapter(
         chapter_id="overview",
         title="Overview",
-        summary="What the app does, how the workspace is organized, and the main workflows you will use every day.",
+        summary="A clear product overview of what the app manages, why it exists, and how the main workflows fit together.",
         keywords=(
             "overview",
             "introduction",
@@ -41,33 +41,33 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "threading",
         ),
         content_html="""
-        <p><strong>ISRC Catalog Manager</strong> is a local-first desktop application for managing track metadata, first-class releases, first-class musical works, contract lifecycle records, rights ownership, reusable party records, managed documents, deliverable variants, GS1 workbook metadata, custom metadata columns, backups, snapshots, audio tag workflows, exchange formats, and quality checks from one workspace.</p>
+        <p><strong>ISRC Catalog Manager</strong> is a local-first desktop workspace for building and maintaining a serious music catalog. It brings together recording metadata, release management, musical works, contracts, rights, parties, documents, deliverables, GS1 product data, history, and quality control in one application.</p>
+        <p>It is designed for independent artists, labels, managers, and catalog owners who need more than a basic track list and want a reliable system for both metadata and catalog operations.</p>
         <p>The app is organized around a few core ideas:</p>
         <ul>
-          <li><strong>Profiles</strong>: each profile is a separate catalog database.</li>
-          <li><strong>Add Data</strong>: the dockable form used to create new tracks.</li>
-          <li><strong>Add Album</strong>: a structured dialog for entering shared album metadata once and then saving multiple track rows in one pass.</li>
-          <li><strong>Releases</strong>: a first-class release/product layer that keeps UPC/EAN, catalog numbers, release artwork, release order, and product-level metadata together.</li>
-          <li><strong>Works</strong>: a composition layer that stays separate from recordings so multiple tracks can point back to the same musical work.</li>
-          <li><strong>Parties</strong>: reusable person/company records for songwriters, publishers, labels, licensees, and other counterparties.</li>
-          <li><strong>Contracts and rights</strong>: lifecycle-aware agreements, linked obligations, document versions, and explicit rights grants tied back to works, tracks, releases, and parties.</li>
-          <li><strong>Assets</strong>: managed deliverable and artwork variants with approval and primary-version tracking.</li>
-          <li><strong>Catalog Table</strong>: the searchable table used to browse, preview, single-edit, and bulk-edit existing tracks.</li>
-          <li><strong>Global Search</strong>: a cross-entity search and relationship explorer for navigating linked records quickly.</li>
-          <li><strong>Exchange</strong>: CSV, XLSX, JSON, XML, and packaged exports for sharing or archiving the catalog safely.</li>
-          <li><strong>Quality Dashboard</strong>: an actionable scan view for missing metadata, duplicate codes, broken media links, work/rights/contract gaps, and other export-readiness issues.</li>
-          <li><strong>Action Ribbon</strong>: a customizable top-row quick-action bar built from your preferred menu actions.</li>
-          <li><strong>Background tasks</strong>: longer imports, exports, scans, snapshots, and maintenance jobs now run outside the UI thread so the window remains responsive.</li>
-          <li><strong>Settings</strong>: application identity, registration settings, snapshots, and themes.</li>
-          <li><strong>History</strong>: undo, redo, manual snapshots, and restore points.</li>
+          <li><strong>Profiles</strong>: each profile is a self-contained catalog database, so separate catalogs remain clean and portable.</li>
+          <li><strong>Add Data</strong>: the dockable track-entry workspace for fast single-record creation.</li>
+          <li><strong>Add Album</strong>: a structured multi-track workflow for releases that share core metadata.</li>
+          <li><strong>Releases</strong>: first-class product records for UPC/EAN, release artwork, ordering, and release-level metadata.</li>
+          <li><strong>Works</strong>: a composition layer that stays distinct from recordings so the same work can connect to multiple tracks.</li>
+          <li><strong>Parties</strong>: reusable people and companies for writers, publishers, labels, managers, licensees, and organizations.</li>
+          <li><strong>Contracts and rights</strong>: lifecycle-aware agreement records, obligations, document versions, and explicit rights positions linked back to the catalog.</li>
+          <li><strong>Assets</strong>: managed deliverables and artwork variants with approval and primary-version tracking.</li>
+          <li><strong>Catalog Table</strong>: the central browser for searching, selecting, bulk editing, and reviewing recording data.</li>
+          <li><strong>Global Search</strong>: a relationship-aware search surface across works, tracks, releases, contracts, rights, parties, documents, and assets.</li>
+          <li><strong>Exchange</strong>: CSV, XLSX, JSON, XML, ZIP, and GS1 workflows for sharing, exporting, and archiving the catalog safely.</li>
+          <li><strong>Quality Dashboard</strong>: a practical readiness view for metadata gaps, identifier conflicts, broken media links, rights risks, and operational blockers.</li>
+          <li><strong>Action Ribbon</strong>: a customizable quick-action strip for your most-used commands.</li>
+          <li><strong>Background tasks</strong>: longer scans, imports, exports, snapshots, and file operations run outside the UI thread to keep the workspace responsive.</li>
+          <li><strong>Settings and history</strong>: identity, registration settings, themes, undo/redo, snapshots, diagnostics, and logs.</li>
         </ul>
-        <p>The menu bar mirrors those workflows. <strong>File</strong> handles profiles and import/export tasks, <strong>Edit</strong> handles direct track actions, <strong>Catalog</strong> now includes releases, works, parties, contracts, rights, asset versions, global relationship search, tag import, GS1 metadata, quality checks, and reusable catalog data such as artists, albums, and licensees, <strong>Settings</strong> handles app and profile configuration, <strong>View</strong> controls layout and columns, <strong>History</strong> manages undo/snapshots, and <strong>Help</strong> provides diagnostics, logs, and this manual.</p>
+        <p>The menu bar mirrors those workflows. <strong>File</strong> handles profiles and exchange, <strong>Edit</strong> focuses on direct catalog actions, <strong>Catalog</strong> opens the richer repertoire tools, <strong>Settings</strong> controls app and profile configuration, <strong>View</strong> manages layout and columns, <strong>History</strong> protects recoverability, and <strong>Help</strong> gives you diagnostics, logs, and this manual.</p>
         """,
     ),
     HelpChapter(
         chapter_id="main-window",
         title="Main Window",
-        summary="The main application window, dock layout, top toolbar, and general navigation.",
+        summary="How the main workspace is laid out, how the docks behave, and how to move through the app efficiently.",
         keywords=(
             "main window",
             "toolbar",
@@ -79,20 +79,20 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "quick actions",
         ),
         content_html="""
-        <p>The main window is built from dockable panes. By default, the left side contains the <strong>Add Data</strong> form and the right side contains the <strong>Catalog Table</strong>.</p>
+        <p>The main window is designed as a practical catalog workspace rather than a single fixed screen. By default, the left side contains the <strong>Add Data</strong> workspace and the right side contains the <strong>Catalog Table</strong>, but both can be shown, hidden, floated, and re-docked.</p>
         <ul>
-          <li><strong>Action ribbon</strong>: a customizable quick-action toolbar at the top of the window. Use <strong>View &gt; Customize Action Ribbon…</strong> to choose which actions appear and in what order.</li>
-          <li><strong>Profiles toolbar</strong>: switch between databases, create a new profile, browse to an external database, reload the profile list, or remove the selected profile.</li>
-          <li><strong>Dockable panes</strong>: the Add Data view and Catalog Table view can be shown, hidden, floated, and re-docked from the <strong>View</strong> menu.</li>
-          <li><strong>Saved layout</strong>: column layout, dock layout, and visibility preferences are remembered and participate in history where supported.</li>
+          <li><strong>Action ribbon</strong>: a customizable strip of high-frequency actions. Use <strong>View &gt; Customize Action Ribbon…</strong> to make it match your workflow.</li>
+          <li><strong>Profiles toolbar</strong>: switch databases, create a new profile, browse to an external profile, reload the profile list, or remove the selected entry.</li>
+          <li><strong>Dockable panes</strong>: keep the window focused on your current task by showing only the panes you need.</li>
+          <li><strong>Saved layout</strong>: column layout, dock placement, and visibility preferences are remembered so the app opens the way you work.</li>
         </ul>
-        <p>Use the menus for detailed actions, or work directly inside the docked views. The window title and icon can be customized from <strong>Settings &gt; Application Settings</strong>.</p>
+        <p>Use the menus when you need the full surface of the product, or stay inside the docked views for everyday entry and review. The window title, branding, and appearance can be customized from <strong>Settings &gt; Application Settings</strong>.</p>
         """,
     ),
     HelpChapter(
         chapter_id="profiles",
         title="Profiles and Databases",
-        summary="How profile databases work, how to create, remove, browse, restore, and switch between them.",
+        summary="How catalog profiles work, how to switch between them, and why they make the app safe and portable.",
         keywords=(
             "profiles",
             "database",
@@ -103,20 +103,20 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "switch",
         ),
         content_html="""
-        <p>A profile is a single SQLite catalog database. Each profile keeps its own tracks, settings stored in the profile database, history, and catalog metadata.</p>
+        <p>A profile is one self-contained SQLite catalog database. It gives you a clean boundary around a label, artist, catalog, client, or project so your data stays organized and portable.</p>
         <ul>
-          <li><strong>New…</strong>: create a new local profile database.</li>
-          <li><strong>Browse…</strong>: open an existing database file outside the default profile folder.</li>
+          <li><strong>New…</strong>: create a fresh local profile database.</li>
+          <li><strong>Browse…</strong>: open an existing database file from any location.</li>
           <li><strong>Reload List</strong>: refresh the known profile list from disk.</li>
-          <li><strong>Remove…</strong>: remove the selected profile from the list and optionally from disk.</li>
+          <li><strong>Remove…</strong>: remove the selected profile from the list and, if you choose, from disk as well.</li>
         </ul>
-        <p>Some settings, such as the visual theme library and remembered window layout, are stored in application settings so they remain available across profiles.</p>
+        <p>Profile-specific catalog data stays with the profile. Shared app-level conveniences such as saved themes and remembered layout settings stay available across profiles. That balance keeps the product practical for both single-catalog and multi-catalog use.</p>
         """,
     ),
     HelpChapter(
         chapter_id="background-tasks",
         title="Background Tasks",
-        summary="How long-running jobs stay responsive, how progress works, and what the app guarantees for SQLite safety.",
+        summary="How the app keeps long operations responsive and safe without risking the catalog database.",
         keywords=(
             "background tasks",
             "threading",
@@ -128,7 +128,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "exports",
         ),
         content_html="""
-        <p>The app now runs heavier workflows outside the UI thread so long jobs do not freeze the main workspace.</p>
+        <p>Long-running operations no longer have to compete with the interface. The app runs heavier workflows outside the UI thread so the workspace stays responsive while real work is happening.</p>
         <ul>
           <li><strong>Central task runner</strong>: imports, exports, ZIP packaging, snapshots, restores, quality scans, tagged-audio export, backup, and integrity checks are dispatched through one shared Qt background-task manager.</li>
           <li><strong>Main-thread UI updates only</strong>: worker threads report back through Qt signals, and dialogs, tables, messages, and status text are updated on the main thread only.</li>
@@ -137,13 +137,13 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Progress and cancellation</strong>: longer jobs show a progress dialog or in-place status text where practical. Some file-based jobs, such as tagged-audio export, can be cancelled safely.</li>
           <li><strong>Safe shutdown</strong>: the app blocks closing while background jobs are still running so restores, imports, and other file/database writes cannot be interrupted mid-operation.</li>
         </ul>
-        <p>If a background task fails, the app shows a clear error message and writes the details to the normal application log. Database writes roll back cleanly on failure, and file-writing tasks continue to use history-aware rollback where supported.</p>
+        <p>If a background task fails, the app reports it clearly, logs the details, and rolls database work back cleanly. The result is a system that feels responsive without becoming fragile.</p>
         """,
     ),
     HelpChapter(
         chapter_id="add-data",
         title="Add Data Panel",
-        summary="How to create a track, fill in standard metadata, generate ISRC values, and attach managed media.",
+        summary="How to add a track quickly, organize the entry flow by tab, and attach the metadata and media needed for a real catalog.",
         keywords=(
             "add data",
             "add track",
@@ -156,20 +156,20 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "dsp",
         ),
         content_html="""
-        <p>The Add Data panel is the primary entry form for new tracks. It is now organized into tabs so the dock stays compact while still exposing the full entry workflow:</p>
+        <p>The Add Data panel is the fastest way to create a new recording. It is organized into focused tabs so you can move quickly without losing access to the full metadata path.</p>
         <ul>
           <li><strong>Track</strong>: track title, main artist, additional artists, and genre.</li>
           <li><strong>Release</strong>: album title, release date, and track length.</li>
           <li><strong>Codes</strong>: preview-only generated values such as the future row ID, generated ISRC, and entry date, plus ISWC, UPC/EAN, catalog number, and BUMA work number.</li>
           <li><strong>Media</strong>: attach a local audio file and album art image that the app manages for the selected track.</li>
         </ul>
-        <p>Use <strong>Save Track</strong> to create the row, or <strong>Reset Form</strong> to clear the current entry form. If a valid ISRC prefix is configured, the generated ISRC preview updates from the current prefix, artist code, and release-date year rules. If no prefix is configured, the form still saves normally and leaves ISRC blank until you set or import one later.</p>
+        <p>Use <strong>Save Track</strong> to create the record, or <strong>Reset Form</strong> to clear the current draft. If ISRC generation is configured, the preview updates automatically from your active settings. If it is not configured yet, the track still saves cleanly and can be completed later.</p>
         """,
     ),
     HelpChapter(
         chapter_id="album-entry",
         title="Add Album Dialog",
-        summary="How to enter shared album metadata once and create multiple track rows from one dialog.",
+        summary="How to create a multi-track release efficiently by entering shared metadata once and saving the whole set together.",
         keywords=(
             "add album",
             "album dialog",
@@ -179,7 +179,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "shared metadata",
         ),
         content_html="""
-        <p>The <strong>Add Album</strong> dialog is designed for building a full release in one pass. It starts with shared album metadata at the top, followed by a tabbed track workspace so each track gets its own dedicated page.</p>
+        <p>The <strong>Add Album</strong> dialog is built for real release entry. Instead of retyping the same album data over and over, you enter the shared product details once and then complete each track on its own tab.</p>
         <ul>
           <li><strong>Album Overview</strong>: album title, UPC/EAN, genre, catalog number, album art, and the release-year rule used when auto-generating blank ISRC values.</li>
           <li><strong>Track Tabs</strong>: each tab stores one track title, main artist, additional artists, release date, track length, optional ISRC, optional ISWC, optional BUMA work number, and an audio file.</li>
@@ -187,13 +187,13 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Blank-tab handling</strong>: completely unused track tabs are ignored when you save, so you do not need to delete every spare tab before closing the dialog.</li>
           <li><strong>Shared album art</strong>: the selected album art is stored once and linked across the saved album tracks automatically.</li>
         </ul>
-        <p>If a valid ISRC prefix is configured, leaving a track ISRC blank lets the dialog auto-generate it during save. If no prefix is configured, blank ISRC values remain blank and the tracks are still created successfully.</p>
+        <p>If ISRC generation is configured, blank track ISRC fields can be generated automatically during save. If not, the dialog still creates the release and track rows successfully so you can complete identifiers later.</p>
         """,
     ),
     HelpChapter(
         chapter_id="catalog-table",
         title="Catalog Table",
-        summary="Search, preview, sort, hide columns, and work with existing tracks from the main table view.",
+        summary="How to browse, search, select, inspect, and bulk-operate on the existing catalog from the main table.",
         keywords=(
             "catalog table",
             "search",
@@ -207,7 +207,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "multi selection",
         ),
         content_html="""
-        <p>The Catalog Table shows all saved track rows. It supports sorting, filtering, column visibility, header layout persistence, and media preview shortcuts.</p>
+        <p>The Catalog Table is the operational center of the app once data has been entered. It is built for browsing, cleaning, selecting, and acting on real catalog records at speed.</p>
         <ul>
           <li><strong>Search controls</strong>: choose a target column or search all columns, then enter search text to filter the list.</li>
           <li><strong>Column visibility</strong>: use <strong>View &gt; Columns</strong> to show or hide visible columns without deleting them.</li>
@@ -215,7 +215,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Multi-row selection</strong>: select multiple rows and open <strong>Edit Selected</strong> or the context menu to launch bulk edit for the current batch.</li>
           <li><strong>Context menu and shortcuts</strong>: preview media, copy values, open GS1 metadata, and edit/delete the current selection. Right-clicking inside an existing multi-row selection keeps that batch selected.</li>
         </ul>
-        <p>Table layout, column widths, row-height mode, and column ordering can be saved and restored. Those preferences can also be reset or customized from the View menu.</p>
+        <p>Table layout, column widths, ordering, and visibility are remembered so the browser can feel tailored to your workflow rather than generic.</p>
         """,
     ),
     HelpChapter(
@@ -244,7 +244,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
     HelpChapter(
         chapter_id="edit-entry",
         title="Edit Entry",
-        summary="How the full track editor works for existing rows, including standard metadata, media replacement, and validation.",
+        summary="How the full editor works for existing tracks, including single-edit, bulk-edit, validation, and related handoff flows.",
         keywords=(
             "edit entry",
             "track editor",
@@ -258,7 +258,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "release sync",
         ),
         content_html="""
-        <p>The Edit Entry dialog opens the full editor for an existing track. When multiple table rows are selected, the same dialog switches into <strong>bulk edit</strong> mode and shows mixed-value placeholders where the selected records do not match.</p>
+        <p>The Edit Entry dialog is the full maintenance editor for existing records. When one row is selected, it behaves as a detailed track editor. When multiple rows are selected, it switches into <strong>bulk edit</strong> mode and protects fields that should not be overwritten casually.</p>
         <ul>
           <li><strong>Copy buttons</strong>: copy ISO or compact forms of ISRC and ISWC values.</li>
           <li><strong>Media replacement</strong>: browse for new audio or album art files, or clear the currently stored media.</li>
@@ -267,7 +267,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>GS1 handoff</strong>: the <strong>GS1 Metadata…</strong> button opens the GS1 dialog for the same current track or selected batch.</li>
           <li><strong>Validation</strong>: duplicate ISRCs, invalid ISWC values, and invalid UPC/EAN values are blocked before save.</li>
         </ul>
-        <p>Saving changes updates the current row, records the change in history, and keeps related catalog references such as artists, albums, and first-class release metadata synchronized where the edited values are shared at release level.</p>
+        <p>Saving changes updates the relevant rows, records the action in history, and keeps related catalog structures synchronized where shared release-level data is affected.</p>
         """,
     ),
     HelpChapter(
@@ -301,7 +301,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
     HelpChapter(
         chapter_id="releases",
         title="Releases",
-        summary="How first-class release records work, how they connect to tracks, and how to browse or edit them.",
+        summary="How product-level release records work and why they matter alongside track-level recording data.",
         keywords=(
             "releases",
             "release browser",
@@ -312,7 +312,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "track number",
         ),
         content_html="""
-        <p>The app now stores releases as first-class records instead of treating album-style metadata only as repeated track fields. A release can store product-level metadata and a separate ordered track list.</p>
+        <p>The app stores releases as first-class product records rather than repeating product metadata across individual tracks. This gives the catalog a cleaner commercial layer and makes exports, ordering, and release maintenance much easier to trust.</p>
         <ul>
           <li><strong>Release fields</strong>: title, subtitle/version, primary artist, album artist, release type, release dates, label, sublabel, catalog number, UPC/EAN, barcode validation status, territory, explicit flag, notes, and release artwork.</li>
           <li><strong>Release order</strong>: releases store disc number, track number, and sequence separately from the track metadata itself.</li>
@@ -320,13 +320,13 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Release Browser…</strong>: browse releases, inspect the ordered track list, duplicate releases, add the current track selection, and filter the main catalog table to a chosen release.</li>
           <li><strong>Single-track workflows</strong>: saving the Add Data panel or the Edit Entry dialog also keeps the corresponding release record synchronized when release-level fields change.</li>
         </ul>
-        <p>Older databases are migrated automatically. Existing album-like track groups remain usable, and the migration infers release records from stored album/release metadata where possible without deleting old track data.</p>
+        <p>Older databases are migrated additively. Existing catalog data remains usable, while release records are inferred where possible to give older profiles access to the richer product model without destructive change.</p>
         """,
     ),
     HelpChapter(
         chapter_id="repertoire-knowledge",
         title="Works, Rights, and Contracts",
-        summary="How the extended repertoire model separates compositions from recordings and ties together parties, contracts, rights, documents, and deliverables.",
+        summary="How the app expands beyond recordings into a connected repertoire, rights, and agreement system.",
         keywords=(
             "works",
             "compositions",
@@ -339,7 +339,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "relationship explorer",
         ),
         content_html="""
-        <p>The app now models more than recordings and releases. It treats the broader catalog as a connected local knowledge system:</p>
+        <p>The app now models more than recordings and releases. It treats the broader catalog as a connected knowledge system so operational, legal, and creative context can live in the same place.</p>
         <ul>
           <li><strong>Works</strong>: compositions live separately from recordings. A work can store alternate titles, subtitle/version, language, lyrics/instrumental flags, genre/style notes, ISWC, local registration numbers, creator roles, shares, and notes.</li>
           <li><strong>Work creators and splits</strong>: songwriter, composer, lyricist, arranger, adaptor, publisher, and subpublisher roles can all be recorded. Split totals are validated so share mistakes are easy to spot.</li>
@@ -352,13 +352,13 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Assets and deliverables</strong>: tracks and releases can keep primary masters, alternates, derivatives, artwork variants, and approval state in one registry.</li>
           <li><strong>Global Search and Relationships…</strong>: search across the full model and inspect everything linked to the selected record from one panel.</li>
         </ul>
-        <p>This richer model is intentionally local-first and catalog-focused. It does <strong>not</strong> turn the app into a royalty accounting or release-pitching platform.</p>
+        <p>This richer model is intentionally catalog-focused. It gives independent teams a practical way to understand what they own, what is linked, and what is ready, without turning the app into a royalty or distribution platform.</p>
         """,
     ),
     HelpChapter(
         chapter_id="exchange-formats",
         title="Exchange Formats",
-        summary="CSV, XLSX, JSON, XML, and packaged export/import workflows.",
+        summary="How the app moves metadata in and out safely through exchange formats built for both daily operations and durable archives.",
         keywords=(
             "csv",
             "xlsx",
@@ -371,7 +371,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "import report",
         ),
         content_html="""
-        <p>Beyond XML and the GS1 workbook workflow, the app now supports broader catalog exchange formats for local-first sharing and archive workflows.</p>
+        <p>The exchange layer is designed for real catalog portability. Whether you are sharing data, taking a structured backup, preparing downstream workflows, or moving a project between systems, the app gives you more than a single export button.</p>
         <ul>
           <li><strong>Export formats</strong>: CSV, XLSX, JSON, XML, and ZIP packages containing a JSON manifest plus copied media references.</li>
           <li><strong>Import formats</strong>: CSV, XLSX, JSON, ZIP packages, and XML.</li>
@@ -382,14 +382,13 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>JSON schema versioning</strong>: exported JSON includes an explicit schema version so future migrations stay manageable.</li>
           <li><strong>Repertoire Exchange</strong>: a separate import/export workflow now covers parties, works, contracts, rights, asset versions, and their relationship references as JSON, XLSX, CSV bundles, or ZIP packages with managed files.</li>
         </ul>
-        <p>Binary media is exported by file reference in plain tabular formats. ZIP package exports also copy referenced media into the package so the export remains portable without embedding raw blobs into CSV or XLSX, and those ZIP packages can be imported back into the app directly.</p>
-        <p>Inspection, import, export, ZIP creation, and ZIP extraction now run in the background so larger exchange workflows stay responsive while they work.</p>
+        <p>Binary media is referenced in plain tabular exports, while ZIP packages can include copied managed files for portability. Import preview, packaging, export, and extraction all run in the background so larger exchange jobs stay practical.</p>
         """,
     ),
     HelpChapter(
         chapter_id="quality-dashboard",
         title="Quality Dashboard",
-        summary="Scan the profile for metadata, release, media, and integrity issues, then export or fix them.",
+        summary="How to audit the profile for real operational issues and move directly from findings to fixes.",
         keywords=(
             "quality dashboard",
             "issues",
@@ -400,7 +399,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "export readiness",
         ),
         content_html="""
-        <p>The <strong>Data Quality Dashboard</strong> scans the active profile for actionable issues and groups them by severity and rule type.</p>
+        <p>The <strong>Data Quality Dashboard</strong> is designed as an operational review surface, not just a validator. It scans the active profile for issues that can materially affect catalog trust, export readiness, delivery, or rights clarity.</p>
         <ul>
           <li><strong>Headline counts</strong>: total issues plus error, warning, and informational totals.</li>
           <li><strong>Rule coverage</strong>: missing or duplicate ISRCs, missing or duplicate release UPC/EANs, invalid barcode checksums, missing titles/artists/dates, missing artwork, broken media references, ordering issues, orphaned licenses, required custom-field gaps, works without creators, invalid split totals, duplicate ISWC values, contract deadline risks, contracts without signed final documents, active rights without source contracts, overlapping exclusive rights, duplicate parties, missing linked works, broken asset references, missing approved masters, and blocked/incomplete repertoire states.</li>
@@ -409,13 +408,13 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Suggested fixes</strong>: regenerate derived values, normalize date formats, relink missing media by filename, or fill blank track values from linked release metadata where appropriate.</li>
           <li><strong>Export</strong>: save the current issue list to CSV or JSON for reporting or offline cleanup planning.</li>
         </ul>
-        <p>Quality scans run on demand in the background and are designed to surface practical export-readiness issues instead of generic diagnostics only.</p>
+        <p>Quality scans run on demand in the background and are meant to help you move from problem detection to action quickly.</p>
         """,
     ),
     HelpChapter(
         chapter_id="gs1-metadata",
         title="GS1 Metadata",
-        summary="How GS1 metadata editing works for single tracks, grouped releases, and official workbook export.",
+        summary="How the GS1 workflow connects catalog data, grouped product editing, and verified workbook export.",
         keywords=(
             "gs1",
             "gs1 metadata",
@@ -426,14 +425,14 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "official workbook",
         ),
         content_html="""
-        <p>The GS1 Metadata dialog can be opened for one track or for a selected batch of tracks. The dialog groups the current selection into one or more final GS1 product rows, depending on the release context.</p>
+        <p>The GS1 Metadata dialog turns catalog data into a structured GS1 workflow. It can be opened for a single track or for a selected batch, and it groups the current selection into one or more final product rows depending on release context.</p>
         <ul>
           <li><strong>Single track or batch</strong>: launch it from the Catalog menu, the table context menu, or the edit and bulk edit dialogs.</li>
           <li><strong>Grouped editing</strong>: album-style selections can appear as grouped GS1 product tabs, while singles remain separate export rows.</li>
           <li><strong>Official workbook</strong>: choose the official GS1 workbook from your GS1 environment. The app validates headers and sheet structure before export.</li>
           <li><strong>Python dependency</strong>: GS1 workbook validation and export require the <code>openpyxl</code> package in the same Python environment that starts the app.</li>
         </ul>
-        <p>Use <strong>Save</strong> to store GS1 metadata in the catalog, <strong>Export Current…</strong> to export the active product row, or <strong>Export Batch…</strong> to write the full selected batch to one workbook.</p>
+        <p>Use <strong>Save</strong> to keep GS1 data in the catalog, <strong>Export Current…</strong> to write the active product, or <strong>Export Batch…</strong> to generate a full workbook from the selected set.</p>
         """,
     ),
     HelpChapter(
@@ -480,7 +479,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
     HelpChapter(
         chapter_id="settings",
         title="Application Settings",
-        summary="The consolidated settings dialog for application identity, registration values, snapshots, and theme configuration.",
+        summary="The central settings workspace for branding, registration values, snapshots, GS1 defaults, and appearance.",
         keywords=(
             "settings",
             "application settings",
@@ -490,23 +489,22 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "snapshot interval",
         ),
         content_html="""
-        <p>The Application Settings dialog combines the app-level and profile-aware settings that used to live in separate dialogs.</p>
+        <p>The Application Settings dialog brings the app's most important configuration into one organized workspace so you do not have to hunt through multiple small dialogs.</p>
         <ul>
-          <li><strong>Application</strong>: window title and optional app icon file.</li>
-          <li><strong>Registration &amp; Codes</strong>: ISRC prefix, artist code, SENA number, VAT/BTW number, and BUMA/STEMRA identifiers.</li>
-          <li><strong>Snapshots</strong>: automatic snapshot enable/disable and interval settings.</li>
-          <li><strong>Theme</strong>: typography, colors, saved themes, and advanced QSS.</li>
+          <li><strong>General</strong>: window title, app icon, and core registration details.</li>
+          <li><strong>GS1</strong>: template storage and profile defaults for GS1 export workflows.</li>
+          <li><strong>Theme</strong>: the full visual theme builder, starter themes, live preview, and advanced QSS.</li>
         </ul>
-        <p>Saving settings updates the current app state immediately and records the change in history where supported.</p>
+        <p>Saving settings updates the current app state immediately, while supported settings changes are also recorded in history so major appearance and configuration changes remain recoverable.</p>
         """,
     ),
     HelpChapter(
         chapter_id="theme-settings",
         title="Theme Settings",
-        summary="Customize the complete app appearance with the visual theme builder, manage named theme presets, and target the last edge cases with advanced QSS.",
+        summary="Use the full visual theme builder to style the entire app, then finish the rare edge cases with advanced QSS.",
         keywords=("theme", "appearance", "font", "colors", "qss", "saved themes", "style"),
         content_html="""
-        <p>The Theme page now acts as a full visual theme builder for the application.</p>
+        <p>The Theme page is now a full visual theme builder rather than a small color editor. It is intended to give you real control over the application’s look and feel without forcing you into handwritten stylesheets for normal customization.</p>
         <ul>
           <li><strong>Theme Library</strong>: packaged starter themes and saved custom presets can be loaded, exported, imported, reset, and managed without leaving the dialog.</li>
           <li><strong>Starter presets</strong>: the app ships with Apple Light, Apple Dark, High Visibility, Aeon Emerald Gold, Subconscious Cosmos, VS Code Dark, and Pastel Studio as bundled starting points.</li>
@@ -521,39 +519,39 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Selector Reference</strong>: browse a searchable catalog of selectors harvested from the currently open windows and dialogs, then copy or insert them into the QSS editor.</li>
           <li><strong>Autocomplete</strong>: press <strong>Ctrl+Space</strong> inside the advanced QSS editor for context-aware selector, pseudo-state, subcontrol, property, value, and full-template completion.</li>
         </ul>
-        <p>Most users should start with the visual controls and only move into Advanced QSS for selectors that still need hand-written rules. All visible controls receive object names automatically so advanced QSS can target specific widgets. Object-name suggestions are inserted as references, which means they safely append to an existing widget selector instead of silently rewriting it. If you want to style a dialog that is not currently open, open it first and refresh the selector catalog. Bundled starter themes are packaged with the app, remain selectable on every install, and can be exported for sharing, while custom saved themes persist between launches in the normal theme library.</p>
+        <p>Most users should begin with the visual controls and only use Advanced QSS for the last few selectors that truly need custom rules. The selector reference and autocomplete tools exist to make that final layer safe and efficient rather than mysterious.</p>
         """,
     ),
     HelpChapter(
         chapter_id="history",
         title="Undo History and Snapshots",
-        summary="Use undo/redo, inspect history entries, create snapshots, and restore older states of a profile.",
+        summary="How to protect your work with undo, redo, snapshots, and restore paths built for real catalog operations.",
         keywords=("history", "undo", "redo", "snapshots", "restore", "history dialog"),
         content_html="""
-        <p>The app has a persistent history system for core data changes, settings changes, and many file-backed actions.</p>
+        <p>The app includes a persistent history system because catalog work should be recoverable. That matters especially for imports, large edits, settings changes, migrations, and file-backed actions.</p>
         <ul>
           <li><strong>Undo / Redo</strong>: revert or reapply the latest reversible action.</li>
           <li><strong>Show Undo History…</strong>: inspect session and profile history entries.</li>
           <li><strong>Create Snapshot…</strong>: save a manual restore point.</li>
           <li><strong>Restore Snapshot</strong>: roll the profile back to a previous state.</li>
         </ul>
-        <p>Snapshots capture the profile database, relevant settings, and managed file state where supported. The history dialog separates session-level actions from in-profile history entries.</p>
+        <p>Snapshots capture the profile database and related managed state where supported, giving heavier workflows a safer recovery path than a simple session-only undo stack.</p>
         """,
     ),
     HelpChapter(
         chapter_id="diagnostics",
         title="Diagnostics",
-        summary="Inspect environment details, schema health, managed files, snapshot integrity, and available repair actions.",
+        summary="Use diagnostics to verify the health of the application, the active profile, and the managed files around it.",
         keywords=("diagnostics", "integrity", "schema", "repair", "managed files", "checks"),
         content_html="""
-        <p>The Diagnostics window gives you a high-level health view of the current profile and application environment.</p>
+        <p>The Diagnostics window gives you a high-level health view of both the application environment and the active profile so you can verify that the workspace is still operating cleanly.</p>
         <ul>
           <li><strong>Environment</strong>: app version, schema version, profile path, data folder, log folder, snapshot count, platform, and Python version.</li>
           <li><strong>Checks</strong>: schema validation, SQLite integrity, foreign-key integrity, custom-value integrity, managed files, and snapshot storage.</li>
           <li><strong>Details</strong>: expanded explanation for the currently selected check.</li>
           <li><strong>Repair</strong>: preview or run supported repair actions when a check reports a repairable issue.</li>
         </ul>
-        <p>Use Diagnostics when the app reports something unexpected, after a restore, or when you want to verify that the catalog and managed files are still consistent.</p>
+        <p>Use Diagnostics after restores, before major exports, when troubleshooting a profile, or any time you want to verify that the catalog and its managed files are still aligned.</p>
         """,
     ),
     HelpChapter(
@@ -590,16 +588,16 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
     HelpChapter(
         chapter_id="about",
         title="About and Support Information",
-        summary="Version information, current workspace summary, and where to find local support data such as logs and data folders.",
+        summary="Where to find version information, local support resources, and the built-in tools that help you trust the current workspace.",
         keywords=("about", "version", "workspace", "support", "data folder", "logs folder"),
         content_html="""
-        <p>The About dialog summarizes the current app version, local-first design, and where your current workspace data lives.</p>
+        <p>The About dialog summarizes the current version, the local-first design of the app, and where the active workspace data lives on disk.</p>
         <p>Use the Help menu to reach:</p>
         <ul>
-          <li><strong>About ISRC Catalog Manager…</strong> for the current version and workspace overview.</li>
-          <li><strong>Diagnostics…</strong> for health checks and repair options.</li>
-          <li><strong>Application Log…</strong> for human and structured logs.</li>
-          <li><strong>Open Logs Folder…</strong> and <strong>Open Data Folder…</strong> to inspect files directly.</li>
+          <li><strong>About ISRC Catalog Manager…</strong> for version and workspace context.</li>
+          <li><strong>Diagnostics…</strong> for profile health checks and repair paths.</li>
+          <li><strong>Application Log…</strong> for readable and structured troubleshooting logs.</li>
+          <li><strong>Open Logs Folder…</strong> and <strong>Open Data Folder…</strong> for direct access to local support files.</li>
         </ul>
         """,
     ),
@@ -697,7 +695,7 @@ def render_help_html(app_name: str, version_text: str = "") -> str:
   <section class="hero">
     <h1>{escape(app_name)} Help</h1>
     {version_line}
-    <p>This manual is the full local help reference for the app. Use the table of contents to jump to a chapter, the keyword index to find a feature quickly, or the in-app Help viewer to search through the content.</p>
+    <p>This manual is the in-app guide to the full product. Use the table of contents to orient yourself, the keyword index to jump to a feature quickly, and the help viewer search tools to move straight to the workflow you need.</p>
   </section>
 
   <section class="panel" id="contents">
