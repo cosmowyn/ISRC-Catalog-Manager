@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QTableWidget,
+    QTabWidget,
     QToolBar,
     QVBoxLayout,
     QWidget,
@@ -656,6 +657,43 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.add_data_header_layout.addWidget(app.add_data_subtitle)
     app.left_panel.addWidget(app.add_data_header)
 
+    app.add_data_tabs = QTabWidget()
+    app.add_data_tabs.setObjectName("addDataTabs")
+    app.add_data_tabs.setDocumentMode(True)
+    app.add_data_tabs.setUsesScrollButtons(False)
+    app.left_panel.addWidget(app.add_data_tabs)
+
+    def create_add_data_tab(title: str, description: str) -> QVBoxLayout:
+        page = QWidget(app.add_data_tabs)
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.setSpacing(10)
+
+        intro = QLabel(description, page)
+        intro.setWordWrap(True)
+        intro.setProperty("role", "secondary")
+        page_layout.addWidget(intro)
+
+        app.add_data_tabs.addTab(page, title)
+        return page_layout
+
+    track_tab_layout = create_add_data_tab(
+        "Track",
+        "Capture the track-facing metadata that will be shown across the catalog and browsers.",
+    )
+    release_tab_layout = create_add_data_tab(
+        "Release",
+        "Keep album grouping, release timing, and track duration together while you enter the record.",
+    )
+    codes_tab_layout = create_add_data_tab(
+        "Codes",
+        "Review generated identifiers and enter the registration values used by exports and rights workflows.",
+    )
+    media_tab_layout = create_add_data_tab(
+        "Media",
+        "Attach the managed audio file and artwork stored with this track.",
+    )
+
     app.artist_label = QLabel("Artist")
     app.artist_field = FocusWheelComboBox()
     app.artist_field.setEditable(True)
@@ -810,10 +848,10 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     core_layout.addWidget(
         app._create_add_data_row(app.additional_artist_label, app.additional_artist_field)
     )
-    core_layout.addWidget(app._create_add_data_row(app.album_title_label, app.album_title_field))
     core_layout.addWidget(app._create_add_data_row(app.genre_label, app.genre_field))
 
-    release_group, release_layout = app._create_add_data_group("Release & Codes")
+    release_group, release_layout = app._create_add_data_group("Album & Release")
+    release_layout.addWidget(app._create_add_data_row(app.album_title_label, app.album_title_field))
     release_layout.addWidget(
         app._create_add_data_row(
             app.release_date_label,
@@ -822,12 +860,14 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
         )
     )
     release_layout.addWidget(app._create_add_data_row(app.track_len_label, app.track_length_row))
-    release_layout.addWidget(app._create_add_data_row(app.iswc_label, app.iswc_field))
-    release_layout.addWidget(app._create_add_data_row(app.upc_label, app.upc_field))
-    release_layout.addWidget(
+
+    codes_group, codes_layout = app._create_add_data_group("Identifiers & Catalog")
+    codes_layout.addWidget(app._create_add_data_row(app.iswc_label, app.iswc_field))
+    codes_layout.addWidget(app._create_add_data_row(app.upc_label, app.upc_field))
+    codes_layout.addWidget(
         app._create_add_data_row(app.catalog_number_label, app.catalog_number_field)
     )
-    release_layout.addWidget(
+    codes_layout.addWidget(
         app._create_add_data_row(app.buma_work_number_label, app.buma_work_number_field)
     )
 
@@ -835,8 +875,16 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     media_layout.addWidget(app._create_add_data_row(app.audio_file_label, app.audio_file_row))
     media_layout.addWidget(app._create_add_data_row(app.album_art_label, app.album_art_row))
 
-    for section in (status_group, core_group, release_group, media_group):
-        app.left_panel.addWidget(section)
+    track_tab_layout.addWidget(core_group)
+    track_tab_layout.addStretch(1)
+    release_tab_layout.addWidget(release_group)
+    release_tab_layout.addStretch(1)
+    codes_tab_layout.addWidget(status_group)
+    codes_tab_layout.addWidget(codes_group)
+    codes_tab_layout.addStretch(1)
+    media_tab_layout.addWidget(media_group)
+    media_tab_layout.addStretch(1)
+
     app.left_panel.addStretch(1)
 
     button_row = QHBoxLayout()

@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -62,8 +63,20 @@ class AssetEditorDialog(QDialog):
             ),
         )
 
-        scroll_area, _, content_layout = _create_scrollable_dialog_content(self)
-        root.addWidget(scroll_area, 1)
+        self.tabs = QTabWidget(self)
+        self.tabs.setObjectName("assetEditorTabs")
+        self.tabs.setDocumentMode(True)
+        root.addWidget(self.tabs, 1)
+
+        def create_tab(title: str) -> QVBoxLayout:
+            page = QWidget(self.tabs)
+            page_layout = QVBoxLayout(page)
+            page_layout.setContentsMargins(0, 0, 0, 0)
+            page_layout.setSpacing(0)
+            scroll_area, _, content_layout = _create_scrollable_dialog_content(page)
+            page_layout.addWidget(scroll_area, 1)
+            self.tabs.addTab(page, title)
+            return content_layout
 
         target_box, target_layout = _create_standard_section(
             self,
@@ -102,7 +115,9 @@ class AssetEditorDialog(QDialog):
         flags_row.addStretch(1)
         target_form.addRow("Flags", flags_widget)
         target_layout.addLayout(target_form)
-        content_layout.addWidget(target_box)
+        target_page_layout = create_tab("Target")
+        target_page_layout.addWidget(target_box)
+        target_page_layout.addStretch(1)
 
         source_box, source_layout = _create_standard_section(
             self,
@@ -123,7 +138,9 @@ class AssetEditorDialog(QDialog):
         file_layout.addWidget(browse_button)
         source_form.addRow("Source File", file_row)
         source_layout.addLayout(source_form)
-        content_layout.addWidget(source_box)
+        source_page_layout = create_tab("Source")
+        source_page_layout.addWidget(source_box)
+        source_page_layout.addStretch(1)
 
         notes_box, notes_layout = _create_standard_section(
             self,
@@ -133,8 +150,9 @@ class AssetEditorDialog(QDialog):
         self.notes_edit = QPlainTextEdit()
         self.notes_edit.setMinimumHeight(180)
         notes_layout.addWidget(self.notes_edit)
-        content_layout.addWidget(notes_box)
-        content_layout.addStretch(1)
+        notes_page_layout = create_tab("Notes")
+        notes_page_layout.addWidget(notes_box)
+        notes_page_layout.addStretch(1)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel, self)
         buttons.accepted.connect(self.accept)

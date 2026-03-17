@@ -7,6 +7,7 @@ try:
 
     from isrc_manager.assets.dialogs import AssetEditorDialog
     from isrc_manager.contracts.dialogs import ContractEditorDialog
+    from isrc_manager.parties.dialogs import PartyEditorDialog
     from isrc_manager.releases.dialogs import ReleaseBrowserDialog
     from isrc_manager.rights.dialogs import RightEditorDialog
     from isrc_manager.search.dialogs import GlobalSearchDialog
@@ -92,10 +93,38 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
         finally:
             dialog.close()
 
-    def test_asset_editor_uses_scrollable_sections(self):
+    def test_asset_editor_uses_tabbed_sections(self):
         dialog = AssetEditorDialog(asset_service=object())
         try:
             self.assertTrue(dialog.file_edit.isReadOnly())
+            tabs = dialog.findChild(QTabWidget, "assetEditorTabs")
+            self.assertIsNotNone(tabs)
+            self.assertEqual(
+                [tabs.tabText(index) for index in range(tabs.count())],
+                [
+                    "Target",
+                    "Source",
+                    "Notes",
+                ],
+            )
+            buttons = dialog.findChild(QDialogButtonBox)
+            self.assertIsNotNone(buttons)
+        finally:
+            dialog.close()
+
+    def test_party_editor_uses_identity_contact_and_notes_tabs(self):
+        dialog = PartyEditorDialog(party_service=object())
+        try:
+            tabs = dialog.findChild(QTabWidget, "partyEditorTabs")
+            self.assertIsNotNone(tabs)
+            self.assertEqual(
+                [tabs.tabText(index) for index in range(tabs.count())],
+                [
+                    "Identity",
+                    "Contact",
+                    "Notes",
+                ],
+            )
             buttons = dialog.findChild(QDialogButtonBox)
             self.assertIsNotNone(buttons)
         finally:

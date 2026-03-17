@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
     QDialog,
+    QDialogButtonBox,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -16,7 +17,17 @@ from PySide6.QtWidgets import (
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QVBoxLayout,
+    QWidget,
+)
+
+from isrc_manager.ui_common import (
+    _add_standard_dialog_header,
+    _apply_compact_dialog_control_heights,
+    _apply_standard_dialog_chrome,
+    _configure_standard_form_layout,
+    _create_standard_section,
 )
 
 from .models import PARTY_TYPE_CHOICES, PartyPayload, PartyRecord
@@ -33,59 +44,108 @@ class PartyEditorDialog(QDialog):
         self.party_service = party_service
         self.party = party
         self.setWindowTitle("Edit Party" if party is not None else "Create Party")
-        self.resize(560, 520)
+        self.resize(760, 620)
+        self.setMinimumSize(680, 560)
+        _apply_standard_dialog_chrome(self, "partyEditorDialog")
 
         root = QVBoxLayout(self)
-        form = QFormLayout()
-        form.setLabelAlignment(Qt.AlignLeft | Qt.AlignTop)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(14)
+        _add_standard_dialog_header(
+            root,
+            self,
+            title=self.windowTitle(),
+            subtitle=(
+                "Create one canonical person or company record, then reuse it across works, "
+                "contracts, rights, and the rest of the catalog."
+            ),
+        )
+
+        self.tabs = QTabWidget(self)
+        self.tabs.setObjectName("partyEditorTabs")
+        self.tabs.setDocumentMode(True)
+        root.addWidget(self.tabs, 1)
+
+        def create_form_tab(tab_title: str, section_title: str, description: str) -> QFormLayout:
+            page = QWidget(self.tabs)
+            page_layout = QVBoxLayout(page)
+            page_layout.setContentsMargins(0, 0, 0, 0)
+            page_layout.setSpacing(10)
+
+            box, box_layout = _create_standard_section(page, section_title, description)
+            form = QFormLayout()
+            _configure_standard_form_layout(form)
+            box_layout.addLayout(form)
+            page_layout.addWidget(box)
+            page_layout.addStretch(1)
+            self.tabs.addTab(page, tab_title)
+            return form
+
+        identity_form = create_form_tab(
+            "Identity",
+            "Party Identity",
+            "The core name and classification fields used when linking this record across the catalog.",
+        )
+        contact_form = create_form_tab(
+            "Contact",
+            "Contact & Registration",
+            "Store the main contact details and registry identifiers that help keep this party unique.",
+        )
+        notes_page = QWidget(self.tabs)
+        notes_layout = QVBoxLayout(notes_page)
+        notes_layout.setContentsMargins(0, 0, 0, 0)
+        notes_layout.setSpacing(10)
+        notes_box, notes_box_layout = _create_standard_section(
+            notes_page,
+            "Notes",
+            "Capture internal context about this party, its role, or any relationship details that should remain in the workspace.",
+        )
+        notes_layout.addWidget(notes_box)
+        notes_layout.addStretch(1)
+        self.tabs.addTab(notes_page, "Notes")
 
         self.legal_name_edit = QLineEdit()
-        form.addRow("Legal Name", self.legal_name_edit)
+        identity_form.addRow("Legal Name", self.legal_name_edit)
 
         self.display_name_edit = QLineEdit()
-        form.addRow("Display Name", self.display_name_edit)
+        identity_form.addRow("Display Name", self.display_name_edit)
 
         self.party_type_combo = QComboBox()
         self.party_type_combo.addItems(
             [item.replace("_", " ").title() for item in PARTY_TYPE_CHOICES]
         )
-        form.addRow("Party Type", self.party_type_combo)
-
-        self.contact_edit = QLineEdit()
-        form.addRow("Contact Person", self.contact_edit)
-
-        self.email_edit = QLineEdit()
-        form.addRow("Email", self.email_edit)
-
-        self.phone_edit = QLineEdit()
-        form.addRow("Phone", self.phone_edit)
-
-        self.website_edit = QLineEdit()
-        form.addRow("Website", self.website_edit)
+        identity_form.addRow("Party Type", self.party_type_combo)
 
         self.country_edit = QLineEdit()
-        form.addRow("Country", self.country_edit)
+        identity_form.addRow("Country", self.country_edit)
+
+        self.contact_edit = QLineEdit()
+        contact_form.addRow("Contact Person", self.contact_edit)
+
+        self.email_edit = QLineEdit()
+        contact_form.addRow("Email", self.email_edit)
+
+        self.phone_edit = QLineEdit()
+        contact_form.addRow("Phone", self.phone_edit)
+
+        self.website_edit = QLineEdit()
+        contact_form.addRow("Website", self.website_edit)
 
         self.pro_edit = QLineEdit()
-        form.addRow("PRO", self.pro_edit)
+        contact_form.addRow("PRO", self.pro_edit)
 
         self.ipi_edit = QLineEdit()
-        form.addRow("IPI / CAE", self.ipi_edit)
+        contact_form.addRow("IPI / CAE", self.ipi_edit)
 
         self.notes_edit = QPlainTextEdit()
         self.notes_edit.setMinimumHeight(120)
-        form.addRow("Notes", self.notes_edit)
-        root.addLayout(form)
+        notes_box_layout.addWidget(self.notes_edit)
 
-        buttons = QHBoxLayout()
-        buttons.addStretch(1)
-        save_button = QPushButton("Save")
-        save_button.clicked.connect(self.accept)
-        cancel_button = QPushButton("Cancel")
-        cancel_button.clicked.connect(self.reject)
-        buttons.addWidget(save_button)
-        buttons.addWidget(cancel_button)
-        root.addLayout(buttons)
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel, self)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        root.addWidget(buttons)
+        _apply_compact_dialog_control_heights(self)
 
         if party is not None:
             self.legal_name_edit.setText(party.legal_name)

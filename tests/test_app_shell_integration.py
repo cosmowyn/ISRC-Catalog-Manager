@@ -228,6 +228,19 @@ class AppShellIntegrationTests(unittest.TestCase):
         selected_ids = self.window._selected_track_ids()
         self.assertEqual(len(selected_ids), len(visible_rows))
 
+    def test_add_data_panel_uses_tabbed_sections(self):
+        tabs = self.window.findChild(app_module.QTabWidget, "addDataTabs")
+        self.assertIsNotNone(tabs)
+        self.assertEqual(
+            [tabs.tabText(index) for index in range(tabs.count())],
+            [
+                "Track",
+                "Release",
+                "Codes",
+                "Media",
+            ],
+        )
+
     def test_track_editor_uses_tabbed_sections(self):
         track_id = self.window.track_service.create_track(
             TrackCreatePayload(
@@ -256,6 +269,63 @@ class AppShellIntegrationTests(unittest.TestCase):
                     "Release",
                     "Codes",
                     "Media",
+                ],
+            )
+        finally:
+            dialog.close()
+
+    def test_album_entry_track_sections_use_internal_tabs(self):
+        dialog = app_module.AlbumEntryDialog(self.window)
+        try:
+            section_tabs = dialog.findChildren(app_module.QTabWidget, "albumTrackSectionTabs")
+            self.assertGreaterEqual(len(section_tabs), 1)
+            self.assertEqual(
+                [section_tabs[0].tabText(index) for index in range(section_tabs[0].count())],
+                [
+                    "Details",
+                    "Codes",
+                    "Media",
+                ],
+            )
+        finally:
+            dialog.close()
+
+    def test_gs1_dialog_uses_top_level_workflow_tabs(self):
+        track_id = self.window.track_service.create_track(
+            TrackCreatePayload(
+                isrc="NL-TST-26-09002",
+                track_title="GS1 Layout",
+                artist_name="Cosmowyn",
+                additional_artists=[],
+                album_title="GS1 Layout",
+                release_date="2026-03-17",
+                track_length_sec=185,
+                iswc=None,
+                upc="8720892724649",
+                genre="Ambient",
+                catalog_number=None,
+            )
+        )
+
+        with mock.patch.object(
+            app_module.GS1MetadataDialog, "_refresh_template_status", return_value=False
+        ):
+            dialog = app_module.GS1MetadataDialog(
+                app=self.window,
+                track_id=track_id,
+                batch_track_ids=[track_id],
+                parent=self.window,
+            )
+        try:
+            tabs = dialog.findChild(app_module.QTabWidget, "gs1MetadataDialogTabs")
+            self.assertIsNotNone(tabs)
+            self.assertEqual(
+                [tabs.tabText(index) for index in range(tabs.count())],
+                [
+                    "Overview",
+                    "Workbook",
+                    "Product Groups",
+                    "Readiness",
                 ],
             )
         finally:

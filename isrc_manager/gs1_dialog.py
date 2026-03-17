@@ -656,8 +656,20 @@ class GS1MetadataDialog(QDialog):
             help_topic_id="gs1-metadata",
         )
 
-        scroll_area, _, content_layout = _create_scrollable_dialog_content(self)
-        root.addWidget(scroll_area, 1)
+        self.content_tabs = QTabWidget(self)
+        self.content_tabs.setObjectName("gs1MetadataDialogTabs")
+        self.content_tabs.setDocumentMode(True)
+        root.addWidget(self.content_tabs, 1)
+
+        def create_content_tab(title: str) -> QVBoxLayout:
+            page = QWidget(self.content_tabs)
+            page_layout = QVBoxLayout(page)
+            page_layout.setContentsMargins(0, 0, 0, 0)
+            page_layout.setSpacing(0)
+            scroll_area, _, content_layout = _create_scrollable_dialog_content(page)
+            page_layout.addWidget(scroll_area, 1)
+            self.content_tabs.addTab(page, title)
+            return content_layout
 
         summary_box, summary_layout = _create_standard_section(
             self,
@@ -667,7 +679,9 @@ class GS1MetadataDialog(QDialog):
         self.summary_label.setWordWrap(True)
         self.summary_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         summary_layout.addWidget(self.summary_label)
-        content_layout.addWidget(summary_box)
+        overview_layout = create_content_tab("Overview")
+        overview_layout.addWidget(summary_box)
+        overview_layout.addStretch(1)
 
         template_box, template_layout = _create_standard_section(
             self,
@@ -704,7 +718,9 @@ class GS1MetadataDialog(QDialog):
         template_button_row.addWidget(self.settings_button)
         template_button_row.addStretch(1)
         template_layout.addLayout(template_button_row)
-        content_layout.addWidget(template_box)
+        workbook_layout = create_content_tab("Workbook")
+        workbook_layout.addWidget(template_box)
+        workbook_layout.addStretch(1)
 
         editor_box, editor_layout = _create_standard_section(
             self,
@@ -729,7 +745,9 @@ class GS1MetadataDialog(QDialog):
                 self._group_tabs.addTab(page, group.tab_title)
             else:
                 editor_layout.addWidget(page)
-        content_layout.addWidget(editor_box)
+        groups_layout = create_content_tab("Product Groups")
+        groups_layout.addWidget(editor_box)
+        groups_layout.addStretch(1)
 
         info_box, info_layout = _create_standard_section(
             self,
@@ -743,8 +761,9 @@ class GS1MetadataDialog(QDialog):
         )
         self.batch_note_label.setWordWrap(True)
         info_layout.addWidget(self.batch_note_label)
-        content_layout.addWidget(info_box)
-        content_layout.addStretch(1)
+        readiness_layout = create_content_tab("Readiness")
+        readiness_layout.addWidget(info_box)
+        readiness_layout.addStretch(1)
 
         if self._group_tabs is not None:
             self._group_tabs.currentChanged.connect(lambda *_args: self._update_readiness())

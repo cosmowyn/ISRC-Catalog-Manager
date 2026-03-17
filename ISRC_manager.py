@@ -13025,11 +13025,49 @@ class _AlbumTrackSection(QWidget):
         self.track_note.setWordWrap(True)
         root.addWidget(self.track_note)
 
-        details_box, details_layout = _create_standard_section(self, "Track Details")
-        codes_box, codes_layout = _create_standard_section(self, "Track Codes & Media")
-        for section_layout in (details_layout, codes_layout):
-            section_layout.setContentsMargins(14, 18, 14, 14)
-            section_layout.setSpacing(10)
+        self.section_tabs = QTabWidget(self)
+        self.section_tabs.setObjectName("albumTrackSectionTabs")
+        self.section_tabs.setDocumentMode(True)
+        self.section_tabs.setUsesScrollButtons(False)
+        root.addWidget(self.section_tabs, 1)
+
+        def create_tab(
+            tab_title: str, section_title: str, description: str | None = None
+        ) -> QVBoxLayout:
+            page = QWidget(self.section_tabs)
+            page_layout = QVBoxLayout(page)
+            page_layout.setContentsMargins(0, 0, 0, 0)
+            page_layout.setSpacing(10)
+
+            if description:
+                intro = QLabel(description, page)
+                intro.setWordWrap(True)
+                intro.setProperty("role", "secondary")
+                page_layout.addWidget(intro)
+
+            box, box_layout = _create_standard_section(page, section_title)
+            box_layout.setContentsMargins(14, 18, 14, 14)
+            box_layout.setSpacing(10)
+            page_layout.addWidget(box)
+            page_layout.addStretch(1)
+            self.section_tabs.addTab(page, tab_title)
+            return box_layout
+
+        details_layout = create_tab(
+            "Details",
+            "Track Details",
+            "Capture the track-facing metadata and timing for this album row.",
+        )
+        codes_layout = create_tab(
+            "Codes",
+            "Track Codes",
+            "Keep registration identifiers and export-facing codes together.",
+        )
+        media_layout = create_tab(
+            "Media",
+            "Managed Audio",
+            "Attach the source audio file used when saving these album tracks.",
+        )
 
         self.track_title = QLineEdit()
         self.track_title.setPlaceholderText("Track title")
@@ -13140,10 +13178,8 @@ class _AlbumTrackSection(QWidget):
         self.audio_clear_button.clicked.connect(self.audio_file.clear)
         audio_layout.addWidget(self.audio_browse_button)
         audio_layout.addWidget(self.audio_clear_button)
-        self._add_labeled_widget(codes_layout, "Audio File", audio_row)
+        self._add_labeled_widget(media_layout, "Audio File", audio_row)
 
-        root.addWidget(details_box)
-        root.addWidget(codes_box)
         root.addStretch(1)
         self.set_track_number(number)
 

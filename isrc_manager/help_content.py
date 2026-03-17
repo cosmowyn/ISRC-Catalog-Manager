@@ -156,12 +156,12 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "dsp",
         ),
         content_html="""
-        <p>The Add Data panel is the primary entry form for new tracks. It is grouped into sections:</p>
+        <p>The Add Data panel is the primary entry form for new tracks. It is now organized into tabs so the dock stays compact while still exposing the full entry workflow:</p>
         <ul>
-          <li><strong>Generated</strong>: preview-only values such as the future row ID, generated ISRC, and automatic entry date.</li>
-          <li><strong>Core Details</strong>: track title, artist, additional artists, album title, and genre.</li>
-          <li><strong>Release &amp; Codes</strong>: release date, track length, ISWC, UPC/EAN, catalog number, and BUMA work number.</li>
-          <li><strong>Managed Media</strong>: attach a local audio file and album art image that the app manages for the selected track.</li>
+          <li><strong>Track</strong>: track title, main artist, additional artists, and genre.</li>
+          <li><strong>Release</strong>: album title, release date, and track length.</li>
+          <li><strong>Codes</strong>: preview-only generated values such as the future row ID, generated ISRC, and entry date, plus ISWC, UPC/EAN, catalog number, and BUMA work number.</li>
+          <li><strong>Media</strong>: attach a local audio file and album art image that the app manages for the selected track.</li>
         </ul>
         <p>Use <strong>Save Track</strong> to create the row, or <strong>Reset Form</strong> to clear the current entry form. If a valid ISRC prefix is configured, the generated ISRC preview updates from the current prefix, artist code, and release-date year rules. If no prefix is configured, the form still saves normally and leaves ISRC blank until you set or import one later.</p>
         """,
