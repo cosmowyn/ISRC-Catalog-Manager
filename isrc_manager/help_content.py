@@ -615,7 +615,11 @@ def help_topic_title(chapter_id: str) -> str:
     return chapter.title if chapter is not None else "Help"
 
 
-def render_help_html(app_name: str, version_text: str = "") -> str:
+def render_help_html(
+    app_name: str,
+    version_text: str = "",
+    theme: dict[str, object] | None = None,
+) -> str:
     toc_items = []
     keyword_map: dict[str, list[HelpChapter]] = {}
     chapter_blocks = []
@@ -645,6 +649,17 @@ def render_help_html(app_name: str, version_text: str = "") -> str:
         keyword_rows.append(f"<tr><th>{escape(keyword)}</th><td>{links}</td></tr>")
 
     version_line = f"<p class='version'>Version {escape(version_text)}</p>" if version_text else ""
+    palette = dict(theme or {})
+    body_bg = str(palette.get("input_bg") or "#f8fafc")
+    body_fg = str(palette.get("window_fg") or "#18212b")
+    panel_bg = str(palette.get("panel_bg") or "#ffffff")
+    panel_border = str(palette.get("border_color") or "#dbe4ee")
+    heading_fg = str(palette.get("window_fg") or "#0f172a")
+    summary_fg = str(palette.get("secondary_text") or "#475569")
+    version_fg = str(palette.get("secondary_text") or "#52606d")
+    table_header_bg = str(palette.get("header_bg") or "#edf2f7")
+    table_header_fg = str(palette.get("header_fg") or heading_fg)
+    link_fg = str(palette.get("link_color") or "#0f62fe")
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -655,40 +670,41 @@ def render_help_html(app_name: str, version_text: str = "") -> str:
       font-family: "SF Pro Text", "Helvetica Neue", "Segoe UI", Arial, sans-serif;
       margin: 24px;
       line-height: 1.55;
-      color: #18212b;
-      background: #f8fafc;
+      color: {body_fg};
+      background: {body_bg};
     }}
-    h1, h2, h3 {{ color: #0f172a; }}
+    h1, h2, h3 {{ color: {heading_fg}; }}
     h1 {{ margin-bottom: 0.2em; }}
-    .summary {{ color: #475569; }}
+    .summary {{ color: {summary_fg}; }}
     .hero, .panel, .chapter {{
-      background: #ffffff;
-      border: 1px solid #dbe4ee;
+      background: {panel_bg};
+      border: 1px solid {panel_border};
       border-radius: 12px;
       padding: 18px 20px;
       margin-bottom: 18px;
       box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
     }}
     .hero p, .panel p, .chapter p {{ margin: 0.55em 0; }}
-    .version {{ color: #52606d; margin-top: 0; }}
+    .version {{ color: {version_fg}; margin-top: 0; }}
     ul {{ margin-top: 0.4em; }}
     table {{
       border-collapse: collapse;
       width: 100%;
-      background: #ffffff;
+      background: {panel_bg};
     }}
     th, td {{
-      border: 1px solid #dbe4ee;
+      border: 1px solid {panel_border};
       padding: 8px 10px;
       text-align: left;
       vertical-align: top;
     }}
     th {{
       width: 24%;
-      background: #edf2f7;
+      background: {table_header_bg};
+      color: {table_header_fg};
     }}
     a {{
-      color: #0f62fe;
+      color: {link_fg};
       text-decoration: none;
     }}
     a:hover {{ text-decoration: underline; }}

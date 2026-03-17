@@ -5044,7 +5044,11 @@ class App(QMainWindow):
         return "1.0.0"
 
     def _help_html(self) -> str:
-        return render_help_html("ISRC Catalog Manager", self._app_version_text())
+        return render_help_html(
+            "ISRC Catalog Manager",
+            self._app_version_text(),
+            theme=self._effective_theme_settings(),
+        )
 
     def _ensure_help_file(self) -> Path:
         self.help_dir.mkdir(parents=True, exist_ok=True)
@@ -13545,7 +13549,8 @@ class _AlbumTrackSection(QWidget):
         self.dialog = dialog
         self.app = dialog.app
         self._display_title = ""
-        self.setProperty("role", "albumTrackSection")
+        self.setObjectName("albumTrackSection")
+        self.setProperty("role", "tabPaneCanvas")
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
         root = QVBoxLayout(self)
@@ -13567,6 +13572,7 @@ class _AlbumTrackSection(QWidget):
             tab_title: str, section_title: str, description: str | None = None
         ) -> QVBoxLayout:
             page = QWidget(self.section_tabs)
+            page.setProperty("role", "tabPaneCanvas")
             page_layout = QVBoxLayout(page)
             page_layout.setContentsMargins(0, 0, 0, 0)
             page_layout.setSpacing(10)

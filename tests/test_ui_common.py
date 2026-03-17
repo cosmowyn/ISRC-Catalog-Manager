@@ -20,6 +20,7 @@ from isrc_manager.ui_common import (
     _configure_standard_form_layout,
     _create_round_help_button,
     _create_scrollable_dialog_content,
+    _standard_dialog_stylesheet,
 )
 
 
@@ -120,6 +121,11 @@ class UICommonTests(unittest.TestCase):
             )
         finally:
             owner.close()
+
+    def test_standard_dialog_stylesheet_does_not_override_compact_control_group_background(self):
+        stylesheet = _standard_dialog_stylesheet("demoDialog")
+        self.assertNotIn('QFrame[role="compactControlGroup"]', stylesheet)
+        self.assertNotIn("palette(base)", stylesheet)
 
 
 if __name__ == "__main__":

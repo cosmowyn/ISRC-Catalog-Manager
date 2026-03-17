@@ -1740,6 +1740,10 @@ def build_theme_stylesheet(raw_values: dict[str, object] | None = None) -> str:
         background-color: {theme["workspace_bg"]};
         color: {theme["window_fg"]};
     }}
+    QWidget[role="tabPaneCanvas"] {{
+        background-color: {theme["tab_pane_bg"]};
+        color: {theme["window_fg"]};
+    }}
     QToolTip {{
         background-color: {theme["tooltip_bg"]};
         color: {theme["tooltip_fg"]};

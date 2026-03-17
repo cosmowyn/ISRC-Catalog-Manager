@@ -151,6 +151,7 @@ class ThemeBuilderTests(unittest.TestCase):
         self.assertIn("QTabBar::tab:selected", stylesheet)
         self.assertIn("QTabWidget::pane", stylesheet)
         self.assertIn('QWidget[role="workspaceCanvas"]', stylesheet)
+        self.assertIn('QWidget[role="tabPaneCanvas"]', stylesheet)
         self.assertIn("QHeaderView {", stylesheet)
         self.assertIn("QTableCornerButton::section", stylesheet)
         self.assertIn("QToolBar", stylesheet)

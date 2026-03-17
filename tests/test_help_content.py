@@ -24,6 +24,28 @@ class HelpContentTests(unittest.TestCase):
             self.assertIn(f"id='{chapter.chapter_id}'", html)
             self.assertIn(f"href='#{chapter.chapter_id}'", html)
 
+    def test_rendered_help_can_follow_theme_palette(self):
+        html = render_help_html(
+            "ISRC Catalog Manager",
+            "1.2.3",
+            theme={
+                "input_bg": "#0F172A",
+                "window_fg": "#E2E8F0",
+                "panel_bg": "#13243B",
+                "border_color": "#29507A",
+                "secondary_text": "#8BA3C2",
+                "header_bg": "#17324E",
+                "header_fg": "#F8FAFC",
+                "link_color": "#38BDF8",
+            },
+        )
+
+        self.assertIn("background: #0F172A", html)
+        self.assertIn("background: #13243B", html)
+        self.assertIn("color: #E2E8F0", html)
+        self.assertIn("background: #17324E", html)
+        self.assertIn("color: #38BDF8", html)
+
 
 if __name__ == "__main__":
     unittest.main()

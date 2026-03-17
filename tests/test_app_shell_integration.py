@@ -310,6 +310,10 @@ class AppShellIntegrationTests(unittest.TestCase):
                     "Media",
                 ],
             )
+            self.assertEqual(section_tabs[0].currentWidget().property("role"), "tabPaneCanvas")
+            section_widget = dialog.findChild(app_module.QWidget, "albumTrackSection")
+            self.assertIsNotNone(section_widget)
+            self.assertEqual(section_widget.property("role"), "tabPaneCanvas")
             current_page = dialog.primary_tabs.currentWidget()
             self.assertEqual(current_page.property("role"), "workspaceCanvas")
         finally:

@@ -117,11 +117,6 @@ def _standard_dialog_stylesheet(object_name: str, extra_qss: str = "") -> str:
         left: 10px;
         padding: 0 6px;
     }}
-    QDialog#{object_name} QFrame[role="compactControlGroup"] {{
-        border: 1px solid palette(mid);
-        border-radius: 8px;
-        background: palette(base);
-    }}
     """
     if extra_qss.strip():
         return f"{base_qss}\n{extra_qss.strip()}\n"
