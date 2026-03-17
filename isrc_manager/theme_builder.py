@@ -1803,10 +1803,11 @@ def build_theme_stylesheet(raw_values: dict[str, object] | None = None) -> str:
         padding: 0 6px;
         color: {theme["group_title_fg"]};
     }}
-    QFrame[role="compactControlGroup"] {{
+    QFrame[role="compactControlGroup"],
+    QWidget[role="compactControlGroup"] {{
         border: {int(theme["border_width"])}px solid {theme["compact_group_border"]};
         border-radius: {int(theme["panel_radius"])}px;
-        background: {theme["compact_group_bg"]};
+        background-color: {theme["compact_group_bg"]};
     }}
     QDockWidget {{
         border: {int(theme["border_width"])}px solid {theme["border_color"]};

@@ -314,6 +314,18 @@ class AppShellIntegrationTests(unittest.TestCase):
             section_widget = dialog.findChild(app_module.QWidget, "albumTrackSection")
             self.assertIsNotNone(section_widget)
             self.assertEqual(section_widget.property("role"), "tabPaneCanvas")
+            compact_groups = [
+                frame
+                for frame in dialog.findChildren(app_module.QFrame)
+                if frame.property("role") == "compactControlGroup"
+            ]
+            self.assertTrue(compact_groups)
+            self.assertTrue(
+                any(
+                    group.testAttribute(app_module.Qt.WA_StyledBackground)
+                    for group in compact_groups
+                )
+            )
             current_page = dialog.primary_tabs.currentWidget()
             self.assertEqual(current_page.property("role"), "workspaceCanvas")
         finally:

@@ -157,6 +157,8 @@ class ThemeBuilderTests(unittest.TestCase):
         self.assertIn("QToolBar", stylesheet)
         self.assertIn("QStatusBar", stylesheet)
         self.assertIn('QFrame[role="compactControlGroup"]', stylesheet)
+        self.assertIn('QWidget[role="compactControlGroup"]', stylesheet)
+        self.assertIn("background-color:", stylesheet)
         self.assertIn("QMenuBar::item:selected", stylesheet)
         self.assertIn('QLabel[role="dialogTitle"]', stylesheet)
         self.assertIn("/* Advanced QSS */", stylesheet)
