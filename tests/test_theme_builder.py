@@ -198,6 +198,7 @@ class ThemeBuilderTests(unittest.TestCase):
             self.assertIn("Inputs", labels)
             self.assertIn("Data Views", labels)
             self.assertIn("Navigation", labels)
+            self.assertIn("Blob Icons", labels)
             self.assertIn("Advanced QSS", labels)
             for key in (
                 "workspace_bg",
@@ -218,14 +219,16 @@ class ThemeBuilderTests(unittest.TestCase):
             dialog._theme_color_edits["tab_pane_bg"].setText("#0F172A")
             dialog._theme_metric_spins["menu_radius"].setValue(14)
             dialog._theme_metric_spins["dialog_title_font_size"].setValue(22)
-            values = dialog.values()["theme_settings"]
+            dialog._blob_icon_editors["audio"].emoji_edit.setText("🎧")
+            values = dialog.values()
 
-            self.assertEqual(values["button_hover_bg"], "#224488")
-            self.assertEqual(values["menu_selected_bg"], "#BB5500")
-            self.assertEqual(values["toolbar_bg"], "#1F2937")
-            self.assertEqual(values["tab_pane_bg"], "#0F172A")
-            self.assertEqual(values["menu_radius"], 14)
-            self.assertEqual(values["dialog_title_font_size"], 22)
+            self.assertEqual(values["theme_settings"]["button_hover_bg"], "#224488")
+            self.assertEqual(values["theme_settings"]["menu_selected_bg"], "#BB5500")
+            self.assertEqual(values["theme_settings"]["toolbar_bg"], "#1F2937")
+            self.assertEqual(values["theme_settings"]["tab_pane_bg"], "#0F172A")
+            self.assertEqual(values["theme_settings"]["menu_radius"], 14)
+            self.assertEqual(values["theme_settings"]["dialog_title_font_size"], 22)
+            self.assertEqual(values["blob_icon_settings"]["audio"]["emoji"], "🎧")
         finally:
             dialog.close()
             host.close()
@@ -402,6 +405,18 @@ class ThemeBuilderTests(unittest.TestCase):
             self.assertEqual(
                 dialog.theme_preview_tabs.tabText(dialog.theme_preview_tabs.currentIndex()),
                 "Inputs",
+            )
+
+            blob_icons_index = next(
+                index
+                for index in range(dialog.theme_builder_tabs.count())
+                if dialog.theme_builder_tabs.tabText(index) == "Blob Icons"
+            )
+            dialog.theme_builder_tabs.setCurrentIndex(blob_icons_index)
+            self.app.processEvents()
+            self.assertEqual(
+                dialog.theme_preview_tabs.tabText(dialog.theme_preview_tabs.currentIndex()),
+                "Blob Icons",
             )
         finally:
             dialog.close()

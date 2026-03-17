@@ -28,6 +28,9 @@ class DatabaseSchemaServiceTests(unittest.TestCase):
         value_columns = {
             row[1] for row in self.conn.execute("PRAGMA table_info(CustomFieldValues)").fetchall()
         }
+        custom_field_columns = {
+            row[1] for row in self.conn.execute("PRAGMA table_info(CustomFieldDefs)").fetchall()
+        }
         album_columns = {
             row[1] for row in self.conn.execute("PRAGMA table_info(Albums)").fetchall()
         }
@@ -72,6 +75,7 @@ class DatabaseSchemaServiceTests(unittest.TestCase):
         self.assertIn("SavedSearches", tables)
         self.assertIn("vw_Licenses", tables)
         self.assertIn("contract_number", gs1_columns)
+        self.assertIn("blob_icon_payload", custom_field_columns)
         self.assertTrue({"blob_value", "mime_type", "size_bytes"} <= value_columns)
         self.assertTrue(
             {
@@ -142,6 +146,37 @@ class DatabaseSchemaServiceTests(unittest.TestCase):
                 }
                 <= tables
             )
+            self.assertEqual(service.get_db_version(), SCHEMA_TARGET)
+        finally:
+            conn.close()
+
+    def test_migrate_21_to_22_adds_blob_icon_payload_column(self):
+        conn = sqlite3.connect(":memory:")
+        try:
+            service = DatabaseSchemaService(conn)
+            service.init_db()
+            conn.execute("PRAGMA user_version = 21")
+            conn.execute("DROP TABLE IF EXISTS CustomFieldDefs")
+            conn.execute(
+                """
+                CREATE TABLE CustomFieldDefs (
+                    id INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL UNIQUE,
+                    active INTEGER NOT NULL DEFAULT 1,
+                    sort_order INTEGER,
+                    field_type TEXT NOT NULL DEFAULT 'text',
+                    options TEXT
+                )
+                """
+            )
+            conn.commit()
+
+            service.migrate_schema()
+
+            columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(CustomFieldDefs)").fetchall()
+            }
+            self.assertIn("blob_icon_payload", columns)
             self.assertEqual(service.get_db_version(), SCHEMA_TARGET)
         finally:
             conn.close()

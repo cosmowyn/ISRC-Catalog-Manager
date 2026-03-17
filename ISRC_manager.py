@@ -156,6 +156,16 @@ from isrc_manager.services.gs1_mapping import (
 )
 from isrc_manager.help_content import render_help_html
 from isrc_manager.app_bootstrap import run_desktop_application
+from isrc_manager.blob_icons import (
+    BlobIconDialog,
+    BlobIconEditorWidget,
+    BlobIconSettingsService,
+    default_blob_icon_settings,
+    describe_blob_icon_spec,
+    finalize_blob_icon_spec,
+    icon_from_blob_icon_spec,
+    normalize_blob_icon_settings,
+)
 from isrc_manager.main_window_shell import build_main_window_shell
 from isrc_manager.paths import DATA_DIR
 from isrc_manager.qss_autocomplete import QssCodeEditor
@@ -453,6 +463,7 @@ class ApplicationSettingsDialog(QDialog):
         theme_settings: dict[str, object] | None,
         stored_themes: dict[str, dict[str, object]] | None,
         current_profile_path: str,
+        blob_icon_settings: dict[str, object] | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -476,10 +487,23 @@ class ApplicationSettingsDialog(QDialog):
         self._theme_color_edits = {}
         self._theme_color_swatches = {}
         self._theme_metric_spins = {}
+        self._blob_icon_settings = normalize_blob_icon_settings(blob_icon_settings)
+        self._blob_icon_original_values = normalize_blob_icon_settings(blob_icon_settings)
+        self._blob_icon_editors: dict[str, BlobIconEditorWidget] = {}
+        self._blob_icon_preview_labels: dict[str, QLabel] = {}
         self._qss_reference_entries: list[QssReferenceEntry] = []
         self._qss_filtered_reference_entries: list[QssReferenceEntry] = []
         self._theme_change_tracking_enabled = True
         self._theme_original_values = normalize_app_theme_settings(self._theme_settings)
+        self._settings_builder_specs = (
+            *self.THEME_PAGE_SPECS[:-1],
+            (
+                "blob_icons",
+                "Blob Icons",
+                "Choose the audio and image badges shown when a record contains stored blob media. These settings stay separate from theme presets.",
+            ),
+            self.THEME_PAGE_SPECS[-1],
+        )
         self._theme_preview_timer = QTimer(self)
         self._theme_preview_timer.setSingleShot(True)
         self._theme_preview_timer.setInterval(120)
@@ -1000,7 +1024,7 @@ class ApplicationSettingsDialog(QDialog):
 
         theme_intro = QLabel(
             "The visual theme builder now covers the full application surface: typography, workspace canvases, panels, group titles, compact frames, buttons, inputs, data views, tab panes, toolbar and status chrome, help buttons, and state styling. "
-            "Use the grouped tabs for most styling work and keep Advanced QSS for the final edge cases."
+            "A dedicated Blob Icons tab keeps media badges separate from visual theme presets. Use the grouped tabs for most styling work and keep Advanced QSS for the final edge cases."
         )
         theme_intro.setWordWrap(True)
         theme_intro.setProperty("role", "secondary")
@@ -1210,9 +1234,11 @@ class ApplicationSettingsDialog(QDialog):
 
     def _build_theme_builder_tabs(self) -> None:
         self._theme_builder_page_keys = []
-        for page_key, page_title, page_description in self.THEME_PAGE_SPECS:
+        for page_key, page_title, page_description in self._settings_builder_specs:
             if page_key == "advanced":
                 page = self._build_theme_advanced_page()
+            elif page_key == "blob_icons":
+                page = self._build_blob_icon_builder_page(page_description)
             else:
                 page = self._build_theme_builder_page(page_key, page_description)
             self.theme_builder_tabs.addTab(page, page_title)
@@ -1277,6 +1303,63 @@ class ApplicationSettingsDialog(QDialog):
                 self._add_row(grid, row, spec.label, editor, spec.hint)
             page_layout.addWidget(group)
 
+        page_layout.addStretch(1)
+        return self._wrap_tab_page(page)
+
+    def _build_blob_icon_builder_page(self, description: str) -> QWidget:
+        page = QWidget(self)
+        page.setProperty("role", "workspaceCanvas")
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.setSpacing(12)
+
+        intro = QLabel(description, page)
+        intro.setWordWrap(True)
+        intro.setProperty("role", "secondary")
+        page_layout.addWidget(intro)
+
+        builder_box = QGroupBox("Blob Media Icons", page)
+        builder_grid = QGridLayout(builder_box)
+        self._configure_grid(builder_grid)
+
+        audio_editor = BlobIconEditorWidget(kind="audio", allow_inherit=False, parent=builder_box)
+        audio_editor.set_spec(self._blob_icon_settings.get("audio"))
+        self._blob_icon_editors["audio"] = audio_editor
+        self._add_row(
+            builder_grid,
+            0,
+            "Audio Blob Icon",
+            audio_editor,
+            "Shown when the Audio File column or an audio BLOB field contains stored media.",
+        )
+
+        image_editor = BlobIconEditorWidget(kind="image", allow_inherit=False, parent=builder_box)
+        image_editor.set_spec(self._blob_icon_settings.get("image"))
+        self._blob_icon_editors["image"] = image_editor
+        self._add_row(
+            builder_grid,
+            1,
+            "Image Blob Icon",
+            image_editor,
+            "Shown when Album Art or an image BLOB field contains stored media.",
+        )
+        page_layout.addWidget(builder_box)
+
+        note_box = QGroupBox("How It Works", page)
+        note_layout = QVBoxLayout(note_box)
+        note_layout.setContentsMargins(14, 18, 14, 14)
+        note_layout.setSpacing(8)
+        for text in (
+            "Blob icons are profile-specific and stay separate from visual theme presets.",
+            "Platform icons use the current operating system's built-in icon set through Qt.",
+            "Custom images are scaled down and compressed before they are written into the database, so large source files only occupy a small amount of storage.",
+            "Custom BLOB columns can either inherit these global defaults or define their own icon override.",
+        ):
+            label = QLabel(text, note_box)
+            label.setWordWrap(True)
+            label.setProperty("role", "secondary")
+            note_layout.addWidget(label)
+        page_layout.addWidget(note_box)
         page_layout.addStretch(1)
         return self._wrap_tab_page(page)
 
@@ -1405,6 +1488,7 @@ class ApplicationSettingsDialog(QDialog):
             "inputs": "Inputs",
             "data_views": "Data Views",
             "navigation": "Navigation",
+            "blob_icons": "Blob Icons",
             "advanced": "Advanced QSS",
         }
         preview_factories = {
@@ -1414,9 +1498,10 @@ class ApplicationSettingsDialog(QDialog):
             "inputs": self._build_theme_preview_inputs_page,
             "data_views": self._build_theme_preview_data_views_page,
             "navigation": self._build_theme_preview_navigation_page,
+            "blob_icons": self._build_theme_preview_blob_icons_page,
             "advanced": self._build_theme_preview_advanced_page,
         }
-        for page_key, _page_title, _page_description in self.THEME_PAGE_SPECS:
+        for page_key, _page_title, _page_description in self._settings_builder_specs:
             preview_page = preview_factories[page_key]()
             preview_index = self.theme_preview_tabs.addTab(
                 preview_page, self._theme_preview_labels[page_key]
@@ -1770,6 +1855,77 @@ class ApplicationSettingsDialog(QDialog):
         layout.addStretch(1)
         return page
 
+    def _build_theme_preview_blob_icons_page(self) -> QWidget:
+        page, preview_root, layout = self._create_theme_preview_page("themePreviewBlobIconsRoot")
+
+        preview_box = QGroupBox("Blob Badge Preview", preview_root)
+        preview_layout = QGridLayout(preview_box)
+        self._configure_grid(preview_layout)
+
+        audio_icon = QLabel(preview_box)
+        audio_icon.setFixedSize(34, 34)
+        audio_icon.setAlignment(Qt.AlignCenter)
+        audio_icon.setStyleSheet(
+            "border: 1px solid palette(mid); border-radius: 6px; background: palette(base);"
+        )
+        audio_text = QLabel("71.3 MB", preview_box)
+        audio_text.setProperty("role", "secondary")
+        audio_row = QWidget(preview_box)
+        audio_row_layout = QHBoxLayout(audio_row)
+        audio_row_layout.setContentsMargins(0, 0, 0, 0)
+        audio_row_layout.setSpacing(10)
+        audio_row_layout.addWidget(audio_icon)
+        audio_row_layout.addWidget(audio_text)
+        audio_row_layout.addStretch(1)
+        self._blob_icon_preview_labels["audio"] = audio_icon
+        self._add_row(
+            preview_layout,
+            0,
+            "Audio Column",
+            audio_row,
+            "Preview for the main Audio File column and inherited audio BLOB custom fields.",
+        )
+
+        image_icon = QLabel(preview_box)
+        image_icon.setFixedSize(34, 34)
+        image_icon.setAlignment(Qt.AlignCenter)
+        image_icon.setStyleSheet(
+            "border: 1px solid palette(mid); border-radius: 6px; background: palette(base);"
+        )
+        image_text = QLabel("2.4 MB", preview_box)
+        image_text.setProperty("role", "secondary")
+        image_row = QWidget(preview_box)
+        image_row_layout = QHBoxLayout(image_row)
+        image_row_layout.setContentsMargins(0, 0, 0, 0)
+        image_row_layout.setSpacing(10)
+        image_row_layout.addWidget(image_icon)
+        image_row_layout.addWidget(image_text)
+        image_row_layout.addStretch(1)
+        self._blob_icon_preview_labels["image"] = image_icon
+        self._add_row(
+            preview_layout,
+            1,
+            "Image Column",
+            image_row,
+            "Preview for Album Art and inherited image BLOB custom fields.",
+        )
+
+        custom_hint_box = QGroupBox("Custom Column Override", preview_root)
+        custom_hint_layout = QVBoxLayout(custom_hint_box)
+        custom_hint_layout.setContentsMargins(14, 18, 14, 14)
+        custom_hint_layout.setSpacing(8)
+        hint = QLabel(
+            "Each custom BLOB column can stay on the global icon or store its own override with the same system-icon, emoji, and custom-image options.",
+            custom_hint_box,
+        )
+        hint.setWordWrap(True)
+        hint.setProperty("role", "secondary")
+        custom_hint_layout.addWidget(hint)
+        layout.addWidget(preview_box)
+        layout.addWidget(custom_hint_box)
+        layout.addStretch(1)
+        return page
+
     def _build_theme_preview_advanced_page(self) -> QWidget:
         page, preview_root, layout = self._create_theme_preview_page("themePreviewAdvancedRoot")
 
@@ -1835,27 +1991,50 @@ class ApplicationSettingsDialog(QDialog):
         for widget in getattr(self, "_theme_preview_roots", []):
             widget.setStyleSheet(stylesheet)
             _repolish_qss_widget_tree(widget)
+        self._refresh_blob_icon_previews()
         current_preview_name = self.theme_preview_tabs.tabText(
             self.theme_preview_tabs.currentIndex()
         )
-        self.theme_preview_status_label.setText(
-            "Showing the "
-            + current_preview_name.lower()
-            + " preview for "
-            + (
-                f"saved theme '{self._current_theme_preset_name()}'"
-                if self._current_theme_preset_name()
-                else "the current custom draft"
+        if self._theme_builder_page_keys[self.theme_builder_tabs.currentIndex()] == "blob_icons":
+            self.theme_preview_status_label.setText(
+                "Showing the blob icons preview for the current profile draft. Audio and image media badges can use platform icons, emojis, or compressed custom images stored inside the database."
             )
-            + f". {len(self._theme_color_edits)} color slots and {len(self._theme_metric_spins)} geometry/typography controls are available in the builder."
-        )
+        else:
+            self.theme_preview_status_label.setText(
+                "Showing the "
+                + current_preview_name.lower()
+                + " preview for "
+                + (
+                    f"saved theme '{self._current_theme_preset_name()}'"
+                    if self._current_theme_preset_name()
+                    else "the current custom draft"
+                )
+                + f". {len(self._theme_color_edits)} color slots and {len(self._theme_metric_spins)} geometry/typography controls are available in the builder."
+            )
         if self.theme_live_preview_check.isChecked():
             self._apply_live_theme_preview(theme_values)
-        elif hasattr(self, "theme_preview_status_label"):
+        elif (
+            hasattr(self, "theme_preview_status_label")
+            and self._theme_builder_page_keys[self.theme_builder_tabs.currentIndex()]
+            != "blob_icons"
+        ):
             self.theme_preview_status_label.setText(
                 self.theme_preview_status_label.text()
                 + " Turn on Live Preview to apply the draft to the whole running app while you edit."
             )
+
+    def _refresh_blob_icon_previews(self) -> None:
+        specs = self._blob_icon_value_payload()
+        style = self.style() if hasattr(self, "style") else None
+        for kind, label in self._blob_icon_preview_labels.items():
+            icon = icon_from_blob_icon_spec(
+                specs.get(kind),
+                kind=kind,
+                style=style,
+                fallback_spec=self._blob_icon_original_values.get(kind),
+                size=22,
+            )
+            label.setPixmap(icon.pixmap(24, 24))
 
     def _apply_live_theme_preview(self, values: dict[str, object]) -> None:
         owner = self.parent()
@@ -2116,6 +2295,8 @@ class ApplicationSettingsDialog(QDialog):
         self.theme_font_family_combo.currentFontChanged.connect(self._queue_theme_preview_update)
         self.theme_auto_contrast_check.toggled.connect(self._queue_theme_preview_update)
         self.theme_custom_qss_edit.textChanged.connect(self._queue_theme_preview_update)
+        for editor in self._blob_icon_editors.values():
+            editor.specChanged.connect(self._queue_theme_preview_update)
         self.theme_preset_combo.currentIndexChanged.connect(self._update_theme_preset_actions)
         self.theme_load_button.clicked.connect(self._load_selected_theme_preset)
         self.theme_save_button.clicked.connect(self._save_current_theme_preset)
@@ -2218,6 +2399,12 @@ class ApplicationSettingsDialog(QDialog):
         for key, spin in self._theme_metric_spins.items():
             values[key] = int(spin.value())
         return values
+
+    def _blob_icon_value_payload(self) -> dict[str, dict[str, object]]:
+        values = dict(self._blob_icon_settings or {})
+        for kind, editor in self._blob_icon_editors.items():
+            values[kind] = editor.current_spec()
+        return normalize_blob_icon_settings(values)
 
     def _theme_preview_value_payload(self) -> dict[str, object]:
         values = dict(self._theme_settings or {})
@@ -2676,6 +2863,7 @@ class ApplicationSettingsDialog(QDialog):
 
     def values(self) -> dict[str, object]:
         theme_values = self._theme_value_payload()
+        blob_icon_values = self._blob_icon_value_payload()
         return {
             "window_title": self.window_title_edit.text().strip() or DEFAULT_WINDOW_TITLE,
             "icon_path": self.icon_path_edit.text().strip(),
@@ -2700,6 +2888,7 @@ class ApplicationSettingsDialog(QDialog):
             "gs1_product_classification": self.gs1_product_classification_edit.currentText().strip(),
             "theme_settings": theme_values,
             "theme_library": dict(self._stored_themes),
+            "blob_icon_settings": blob_icon_values,
         }
 
     def _accept_if_valid(self):
@@ -2740,6 +2929,27 @@ class ApplicationSettingsDialog(QDialog):
         ):
             if not self._import_gs1_contracts_csv(gs1_contracts_csv_path, show_errors=True):
                 self.focus_field("gs1_contracts_csv_path")
+                return
+        for kind, spec in normalize_blob_icon_settings(values.get("blob_icon_settings")).items():
+            mode = str(spec.get("mode") or "").strip().lower()
+            if mode == "emoji" and not str(spec.get("emoji") or "").strip():
+                QMessageBox.warning(
+                    self,
+                    "Blob Icon Required",
+                    f"Choose or type an emoji for the {kind} blob icon.",
+                )
+                self.tabs.setCurrentIndex(2)
+                return
+            if mode == "image" and not (
+                str(spec.get("image_path") or "").strip()
+                or str(spec.get("image_png_base64") or "").strip()
+            ):
+                QMessageBox.warning(
+                    self,
+                    "Blob Icon Required",
+                    f"Choose a custom image for the {kind} blob icon.",
+                )
+                self.tabs.setCurrentIndex(2)
                 return
         for key, edit in self._theme_color_edits.items():
             color_text = edit.text().strip()
@@ -4624,6 +4834,7 @@ class App(QMainWindow):
 
         self.identity = self._load_identity()
         self.theme_settings = self._load_theme_settings()
+        self.blob_icon_settings = default_blob_icon_settings()
         self._apply_identity()
 
         # --- Choose DB (last used or default) ---
@@ -4650,6 +4861,7 @@ class App(QMainWindow):
         self.track_service = None
         self.settings_reads = None
         self.settings_mutations = None
+        self.blob_icon_settings_service = None
         self.gs1_settings_service = None
         self.gs1_integration_service = None
         self.catalog_service = None
@@ -5416,6 +5628,9 @@ class App(QMainWindow):
         self.settings_mutations = (
             SettingsMutationService(self.conn, self.settings) if self.conn is not None else None
         )
+        self.blob_icon_settings_service = (
+            BlobIconSettingsService(self.conn) if self.conn is not None else None
+        )
         self.gs1_settings_service = (
             GS1SettingsService(self.conn, self.settings) if self.conn is not None else None
         )
@@ -5674,6 +5889,26 @@ class App(QMainWindow):
         self.theme_settings = normalized
         return normalized
 
+    @staticmethod
+    def _blob_icon_setting_defaults() -> dict[str, dict[str, object]]:
+        return default_blob_icon_settings()
+
+    def _load_blob_icon_settings(self) -> dict[str, dict[str, object]]:
+        if self.blob_icon_settings_service is None:
+            return self._blob_icon_setting_defaults()
+        return normalize_blob_icon_settings(self.blob_icon_settings_service.load_settings())
+
+    def _save_blob_icon_settings(
+        self, values: dict[str, object] | None
+    ) -> dict[str, dict[str, object]]:
+        normalized = normalize_blob_icon_settings(values)
+        if self.blob_icon_settings_service is not None:
+            normalized = normalize_blob_icon_settings(
+                self.blob_icon_settings_service.save_settings(normalized)
+            )
+        self.blob_icon_settings = normalized
+        return normalized
+
     def _active_custom_qss(self) -> str:
         return str((self.theme_settings or {}).get("custom_qss") or "")
 
@@ -5810,6 +6045,7 @@ class App(QMainWindow):
             "icon_path": self.identity.get("icon_path") or "",
             "theme_settings": dict(self.theme_settings or self._load_theme_settings()),
             "theme_library": self._load_theme_library(),
+            "blob_icon_settings": dict(self.blob_icon_settings or self._load_blob_icon_settings()),
             "artist_code": self.load_artist_code(),
             "auto_snapshot_enabled": auto_snapshot_enabled,
             "auto_snapshot_interval_minutes": auto_snapshot_interval_minutes,
@@ -5927,6 +6163,31 @@ class App(QMainWindow):
                         after_value=after_theme,
                     )
                 changed_count += 1
+
+            before_blob_icons = normalize_blob_icon_settings(
+                before_values.get("blob_icon_settings")
+            )
+            after_blob_icons = normalize_blob_icon_settings(after_values.get("blob_icon_settings"))
+            if after_blob_icons != before_blob_icons:
+                self._save_blob_icon_settings(after_blob_icons)
+                self.logger.info("Blob icon settings updated")
+                self._log_event(
+                    "settings.blob_icons",
+                    "Blob icon settings updated",
+                    audio=describe_blob_icon_spec(after_blob_icons.get("audio"), kind="audio"),
+                    image=describe_blob_icon_spec(after_blob_icons.get("image"), kind="image"),
+                )
+                if self.history_manager is not None:
+                    self.history_manager.record_setting_change(
+                        key="blob_icon_settings",
+                        label="Update Blob Icon Settings",
+                        before_value=before_blob_icons,
+                        after_value=after_blob_icons,
+                    )
+                changed_count += 1
+                if hasattr(self, "table"):
+                    self._apply_blob_badges()
+                    self.table.viewport().update()
 
             if after_values["artist_code"] != before_values["artist_code"]:
                 self.settings_mutations.set_artist_code(after_values["artist_code"])
@@ -6182,6 +6443,7 @@ class App(QMainWindow):
             gs1_product_classification=before_values["gs1_product_classification"],
             theme_settings=before_values["theme_settings"],
             stored_themes=before_values["theme_library"],
+            blob_icon_settings=before_values["blob_icon_settings"],
             current_profile_path=getattr(self, "current_db_path", ""),
             parent=self,
         )
@@ -6454,6 +6716,7 @@ class App(QMainWindow):
         self.profile_kv = None
         self.settings_reads = None
         self.settings_mutations = None
+        self.blob_icon_settings_service = None
         self.gs1_settings_service = None
         self.gs1_integration_service = None
         if hasattr(self, "background_service_factory"):
@@ -6641,6 +6904,7 @@ class App(QMainWindow):
             QMessageBox.critical(self, "Migration Error", f"Database migration failed:\n{e}")
             # keep going; DB might still be usable
 
+        self.blob_icon_settings = self._load_blob_icon_settings()
         self.active_custom_fields = self.load_active_custom_fields()
 
         # now it's safe to write AuditLog
@@ -6712,6 +6976,7 @@ class App(QMainWindow):
     def _refresh_after_history_change(self):
         self.identity = self._load_identity()
         self.theme_settings = self._load_theme_settings()
+        self.blob_icon_settings = self._load_blob_icon_settings()
         self._apply_identity()
         self._apply_theme()
         self.active_custom_fields = self.load_active_custom_fields()
@@ -11095,6 +11360,15 @@ class App(QMainWindow):
                 "name": field.get("name"),
                 "field_type": field.get("field_type"),
                 "options": field.get("options"),
+                "blob_icon_payload": (
+                    finalize_blob_icon_spec(
+                        field.get("blob_icon_payload"),
+                        kind="audio" if field.get("field_type") == "blob_audio" else "image",
+                        allow_inherit=True,
+                    )
+                    if field.get("field_type") in {"blob_audio", "blob_image"}
+                    else None
+                ),
             }
             for field in fields
         ]
@@ -11199,7 +11473,13 @@ class App(QMainWindow):
         if not ok:
             return None
 
-        new_field = {"id": None, "name": name, "field_type": field_type, "options": None}
+        new_field = {
+            "id": None,
+            "name": name,
+            "field_type": field_type,
+            "options": None,
+            "blob_icon_payload": None,
+        }
         if field_type == "dropdown":
             opts, ok = QInputDialog.getMultiLineText(
                 self, "Dropdown Options", "Enter options (one per line):"
@@ -11207,6 +11487,16 @@ class App(QMainWindow):
             if ok:
                 options = [option.strip() for option in (opts or "").splitlines() if option.strip()]
                 new_field["options"] = json.dumps(options) if options else json.dumps([])
+        elif field_type in {"blob_audio", "blob_image"}:
+            blob_icon_dialog = BlobIconDialog(
+                kind="audio" if field_type == "blob_audio" else "image",
+                title=f"Icon for {name}",
+                spec={"mode": "inherit"},
+                allow_inherit=True,
+                parent=self,
+            )
+            if blob_icon_dialog.exec() == QDialog.Accepted:
+                new_field["blob_icon_payload"] = blob_icon_dialog.current_spec()
         return new_field
 
     def add_custom_column(self):
@@ -12848,12 +13138,41 @@ class App(QMainWindow):
         return f"{val:.0f} {units[u]}" if u == 0 else f"{val:.1f} {units[u]}"
 
     def _format_blob_badge(self, mime_type: str | None, size_bytes: int) -> str:
-        icon = (
-            "🖼️"
-            if (mime_type and mime_type.startswith("image/"))
-            else ("🎵" if (mime_type and mime_type.startswith("audio/")) else "📎")
+        _mime_type = mime_type
+        return self._human_size(size_bytes)
+
+    def _blob_icon_spec_for_standard_media(self, media_key: str) -> dict[str, object]:
+        settings = normalize_blob_icon_settings(
+            getattr(self, "blob_icon_settings", None) or default_blob_icon_settings()
         )
-        return f"{icon} {self._human_size(size_bytes)}"
+        return settings["audio" if media_key == "audio_file" else "image"]
+
+    def _blob_icon_spec_for_custom_field(self, field: dict[str, object]) -> dict[str, object]:
+        field_type = str(field.get("field_type") or "").strip().lower()
+        kind = "audio" if field_type == "blob_audio" else "image"
+        override = field.get("blob_icon_payload")
+        if override:
+            return override
+        return self._blob_icon_spec_for_standard_media(
+            "audio_file" if kind == "audio" else "album_art"
+        )
+
+    def _resolve_blob_badge_icon(
+        self,
+        *,
+        spec: dict[str, object] | None,
+        kind: str,
+    ) -> QIcon:
+        return icon_from_blob_icon_spec(
+            spec,
+            kind=kind,
+            style=self.style() if hasattr(self, "style") else None,
+            fallback_spec=self._blob_icon_spec_for_standard_media(
+                "audio_file" if kind == "audio" else "album_art"
+            ),
+            allow_inherit=True,
+            size=18,
+        )
 
     def _row_for_id(self, track_id: int) -> int:
         for r in range(self.table.rowCount()):
@@ -12902,7 +13221,29 @@ class App(QMainWindow):
             self.table.setItem(row, col, item)
         else:
             item.setText(display)
-        # optional: set an icon here if you have one available
+        if meta.get("has_blob"):
+            field = next(
+                (
+                    candidate
+                    for candidate in self.active_custom_fields
+                    if candidate.get("id") == field_id
+                ),
+                None,
+            )
+            if field is not None:
+                kind = "audio" if field.get("field_type") == "blob_audio" else "image"
+                item.setIcon(
+                    self._resolve_blob_badge_icon(
+                        spec=self._blob_icon_spec_for_custom_field(field),
+                        kind=kind,
+                    )
+                )
+                item.setToolTip(
+                    f"{describe_blob_icon_spec(field.get('blob_icon_payload'), kind=kind, allow_inherit=True)}\nStored size: {display}"
+                )
+        else:
+            item.setIcon(QIcon())
+            item.setToolTip("")
         item.setData(Qt.UserRole, (track_id, field_id) if meta.get("has_blob") else None)
 
     def _get_row_pk(self, row: int) -> int | None:
@@ -12958,6 +13299,18 @@ class App(QMainWindow):
                     self.table.setItem(row_idx, col, item)
                 else:
                     item.setText(display)
+                if meta.get("has_media"):
+                    kind = "audio" if media_key == "audio_file" else "image"
+                    item.setIcon(
+                        self._resolve_blob_badge_icon(
+                            spec=self._blob_icon_spec_for_standard_media(media_key),
+                            kind=kind,
+                        )
+                    )
+                    item.setToolTip(f"Stored size: {display}")
+                else:
+                    item.setIcon(QIcon())
+                    item.setToolTip("")
                 item.setData(Qt.UserRole, (pk, media_key) if meta.get("has_media") else None)
 
             # Walk active custom fields by display order
@@ -12999,6 +13352,20 @@ class App(QMainWindow):
                     self.table.setItem(row_idx, col, item)
                 else:
                     item.setText(display)
+                if has_blob:
+                    kind = "audio" if ftype == "blob_audio" else "image"
+                    item.setIcon(
+                        self._resolve_blob_badge_icon(
+                            spec=self._blob_icon_spec_for_custom_field(cf),
+                            kind=kind,
+                        )
+                    )
+                    item.setToolTip(
+                        f"{describe_blob_icon_spec(cf.get('blob_icon_payload'), kind=kind, allow_inherit=True)}\nStored size: {display}"
+                    )
+                else:
+                    item.setIcon(QIcon())
+                    item.setToolTip("")
                 item.setData(Qt.UserRole, (pk, cf["id"]) if has_blob else None)
 
     def _make_default_export_filename(self, track_id: int, field_def: dict, mime: str) -> str:

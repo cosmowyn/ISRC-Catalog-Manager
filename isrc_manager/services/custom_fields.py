@@ -6,6 +6,7 @@ import json
 import mimetypes
 import sqlite3
 
+from isrc_manager.blob_icons import blob_icon_spec_from_storage, blob_icon_spec_to_storage
 from isrc_manager.media.blob_files import (
     _is_valid_audio_path,
     _is_valid_image_path,
@@ -19,10 +20,25 @@ class CustomFieldDefinitionService:
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
 
+    def _table_columns(self, table: str) -> set[str]:
+        return {
+            str(row[1])
+            for row in self.conn.execute(f"PRAGMA table_info({table})").fetchall()
+            if row and row[1]
+        }
+
+    def _has_blob_icon_payload_column(self) -> bool:
+        return "blob_icon_payload" in self._table_columns("CustomFieldDefs")
+
     def list_active_fields(self) -> list[dict]:
+        blob_icon_sql = (
+            "blob_icon_payload"
+            if self._has_blob_icon_payload_column()
+            else "NULL AS blob_icon_payload"
+        )
         rows = self.conn.execute(
-            """
-            SELECT id, name, field_type, options
+            f"""
+            SELECT id, name, field_type, options, {blob_icon_sql}
             FROM CustomFieldDefs
             WHERE active=1
             ORDER BY COALESCE(sort_order, 999999), name
@@ -34,12 +50,26 @@ class CustomFieldDefinitionService:
                 "name": row[1],
                 "field_type": row[2] or "text",
                 "options": row[3],
+                "blob_icon_payload": (
+                    blob_icon_spec_from_storage(
+                        row[4],
+                        kind=(
+                            "audio"
+                            if str(row[2] or "").strip().lower() == "blob_audio"
+                            else "image"
+                        ),
+                        allow_inherit=True,
+                    )
+                    if (row[2] or "").strip().lower() in {"blob_audio", "blob_image"}
+                    else None
+                ),
             }
             for row in rows
         ]
 
     def sync_fields(self, existing_fields: list[dict], new_fields: list[dict]) -> None:
         keep_ids = {field["id"] for field in new_fields if field["id"] is not None}
+        supports_blob_icon_payload = self._has_blob_icon_payload_column()
         with self.conn:
             for old in existing_fields:
                 if old["id"] not in keep_ids:
@@ -50,23 +80,50 @@ class CustomFieldDefinitionService:
                 name = field["name"].strip()
                 field_type = (field.get("field_type") or "text").strip()
                 options = field.get("options")
+                blob_icon_payload = None
+                if field_type in {"blob_audio", "blob_image"}:
+                    blob_icon_payload = blob_icon_spec_to_storage(
+                        field.get("blob_icon_payload"),
+                        kind="audio" if field_type == "blob_audio" else "image",
+                        allow_inherit=True,
+                    )
                 if field["id"] is None:
-                    self.conn.execute(
-                        """
-                        INSERT INTO CustomFieldDefs (name, active, sort_order, field_type, options)
-                        VALUES (?, 1, ?, ?, ?)
-                        """,
-                        (name, order, field_type, options),
-                    )
+                    if supports_blob_icon_payload:
+                        self.conn.execute(
+                            """
+                            INSERT INTO CustomFieldDefs
+                                (name, active, sort_order, field_type, options, blob_icon_payload)
+                            VALUES (?, 1, ?, ?, ?, ?)
+                            """,
+                            (name, order, field_type, options, blob_icon_payload),
+                        )
+                    else:
+                        self.conn.execute(
+                            """
+                            INSERT INTO CustomFieldDefs (name, active, sort_order, field_type, options)
+                            VALUES (?, 1, ?, ?, ?)
+                            """,
+                            (name, order, field_type, options),
+                        )
                 else:
-                    self.conn.execute(
-                        """
-                        UPDATE CustomFieldDefs
-                        SET name=?, active=1, sort_order=?, field_type=?, options=?
-                        WHERE id=?
-                        """,
-                        (name, order, field_type, options, field["id"]),
-                    )
+                    if supports_blob_icon_payload:
+                        self.conn.execute(
+                            """
+                            UPDATE CustomFieldDefs
+                            SET name=?, active=1, sort_order=?, field_type=?, options=?, blob_icon_payload=?
+                            WHERE id=?
+                            """,
+                            (name, order, field_type, options, blob_icon_payload, field["id"]),
+                        )
+                    else:
+                        self.conn.execute(
+                            """
+                            UPDATE CustomFieldDefs
+                            SET name=?, active=1, sort_order=?, field_type=?, options=?
+                            WHERE id=?
+                            """,
+                            (name, order, field_type, options, field["id"]),
+                        )
                 order += 1
 
     def ensure_fields(
@@ -88,15 +145,20 @@ class CustomFieldDefinitionService:
                     "name": name,
                     "field_type": field_type,
                     "options": field.get("options"),
+                    "blob_icon_payload": field.get("blob_icon_payload"),
                 }
             )
         if not normalized_fields:
             return []
 
         def _apply(cur: sqlite3.Cursor) -> list[dict]:
+            supports_blob_icon_payload = self._has_blob_icon_payload_column()
+            blob_icon_sql = (
+                "blob_icon_payload" if supports_blob_icon_payload else "NULL AS blob_icon_payload"
+            )
             rows = cur.execute(
-                """
-                SELECT id, name, active, sort_order, field_type, options
+                f"""
+                SELECT id, name, active, sort_order, field_type, options, {blob_icon_sql}
                 FROM CustomFieldDefs
                 ORDER BY COALESCE(sort_order, 999999), id
                 """
@@ -108,6 +170,7 @@ class CustomFieldDefinitionService:
                     "sort_order": row[3],
                     "field_type": row[4] or "text",
                     "options": row[5],
+                    "blob_icon_payload": row[6],
                 }
                 for row in rows
                 if row[1]
@@ -120,21 +183,50 @@ class CustomFieldDefinitionService:
 
             for field in normalized_fields:
                 existing = by_name.get(field["name"])
+                field_blob_icon_payload = None
+                if field["field_type"] in {"blob_audio", "blob_image"}:
+                    field_blob_icon_payload = blob_icon_spec_to_storage(
+                        field.get("blob_icon_payload"),
+                        kind="audio" if field["field_type"] == "blob_audio" else "image",
+                        allow_inherit=True,
+                    )
                 if existing is None:
                     next_sort_order += 1
-                    cur.execute(
-                        """
-                        INSERT INTO CustomFieldDefs (name, active, sort_order, field_type, options)
-                        VALUES (?, 1, ?, ?, ?)
-                        """,
-                        (field["name"], next_sort_order, field["field_type"], field.get("options")),
-                    )
+                    if supports_blob_icon_payload:
+                        cur.execute(
+                            """
+                            INSERT INTO CustomFieldDefs
+                                (name, active, sort_order, field_type, options, blob_icon_payload)
+                            VALUES (?, 1, ?, ?, ?, ?)
+                            """,
+                            (
+                                field["name"],
+                                next_sort_order,
+                                field["field_type"],
+                                field.get("options"),
+                                field_blob_icon_payload,
+                            ),
+                        )
+                    else:
+                        cur.execute(
+                            """
+                            INSERT INTO CustomFieldDefs (name, active, sort_order, field_type, options)
+                            VALUES (?, 1, ?, ?, ?)
+                            """,
+                            (
+                                field["name"],
+                                next_sort_order,
+                                field["field_type"],
+                                field.get("options"),
+                            ),
+                        )
                     ensured.append(
                         {
                             "id": int(cur.lastrowid),
                             "name": field["name"],
                             "field_type": field["field_type"],
                             "options": field.get("options"),
+                            "blob_icon_payload": field.get("blob_icon_payload"),
                             "created": True,
                         }
                     )
@@ -152,21 +244,52 @@ class CustomFieldDefinitionService:
                     if existing["options"] not in (None, "")
                     else field.get("options")
                 )
-                if int(existing["active"]) != 1 or merged_options != existing["options"]:
-                    cur.execute(
-                        """
-                        UPDATE CustomFieldDefs
-                        SET active=1, options=?
-                        WHERE id=?
-                        """,
-                        (merged_options, int(existing["id"])),
+                merged_blob_icon_payload = (
+                    existing["blob_icon_payload"]
+                    if existing["blob_icon_payload"] not in (None, "")
+                    else field_blob_icon_payload
+                )
+                if (
+                    int(existing["active"]) != 1
+                    or merged_options != existing["options"]
+                    or (
+                        supports_blob_icon_payload
+                        and merged_blob_icon_payload != existing["blob_icon_payload"]
                     )
+                ):
+                    if supports_blob_icon_payload:
+                        cur.execute(
+                            """
+                            UPDATE CustomFieldDefs
+                            SET active=1, options=?, blob_icon_payload=?
+                            WHERE id=?
+                            """,
+                            (merged_options, merged_blob_icon_payload, int(existing["id"])),
+                        )
+                    else:
+                        cur.execute(
+                            """
+                            UPDATE CustomFieldDefs
+                            SET active=1, options=?
+                            WHERE id=?
+                            """,
+                            (merged_options, int(existing["id"])),
+                        )
                 ensured.append(
                     {
                         "id": int(existing["id"]),
                         "name": field["name"],
                         "field_type": field["field_type"],
                         "options": merged_options,
+                        "blob_icon_payload": (
+                            blob_icon_spec_from_storage(
+                                merged_blob_icon_payload,
+                                kind="audio" if field["field_type"] == "blob_audio" else "image",
+                                allow_inherit=True,
+                            )
+                            if field["field_type"] in {"blob_audio", "blob_image"}
+                            else None
+                        ),
                         "created": False,
                     }
                 )

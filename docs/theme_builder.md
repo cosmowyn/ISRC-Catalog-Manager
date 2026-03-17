@@ -11,6 +11,7 @@ The builder now exposes the full visible surface of the application, including:
 - application typography
 - window and workspace canvases
 - panel and grouped-container surfaces
+- media badge icons for stored audio and image BLOBs
 - buttons and help buttons
 - hover, pressed, checked, and disabled states
 - inputs, placeholders, and focus styling
@@ -76,6 +77,22 @@ Theme normal buttons and round help buttons with full state coverage:
 - checked
 - disabled
 
+### Blob Icons
+
+The builder also includes a dedicated <strong>Blob Icons</strong> section for the small badges shown when records contain stored audio or image BLOB data.
+
+This area is intentionally separate from theme presets because it controls the meaning of media indicators, not the surrounding chrome.
+
+You can choose:
+
+- a separate global icon for stored audio
+- a separate global icon for stored images
+- platform-native system icons supplied through Qt
+- standardized emoji options
+- custom imported images that are scaled down and compressed into the profile database
+
+Custom `blob_audio` and `blob_image` columns can either inherit these global defaults or define their own field-specific icon from the same picker.
+
 ### Inputs
 
 Control editor surfaces and state feedback such as:
@@ -138,6 +155,11 @@ Many theme fields can remain empty and be derived automatically from anchor colo
 - beginners can set a few core colors and let the rest derive sensibly
 - advanced users can override every visible state explicitly
 
+The same principle applies to media badges:
+
+- use global audio and image icon defaults for consistency
+- override individual custom BLOB columns only when a field needs its own visual language
+
 ## Advanced QSS And Selector Reference
 
 When a visual control still is not enough, the advanced editor provides:
@@ -160,4 +182,4 @@ The theme builder is not meant to be a novelty panel. It is intended to make the
 - more comfortable over long sessions
 - more accessible for different visual needs
 
-That is why the builder now covers the full application surface, starter themes ship with the app, and Advanced QSS is positioned as the final layer rather than the starting point.
+That is why the builder now covers the full application surface, starter themes ship with the app, media badge icons can be configured visually, and Advanced QSS is positioned as the final layer rather than the starting point.

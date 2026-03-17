@@ -189,7 +189,8 @@ class DatabaseSchemaService:
                 active INTEGER NOT NULL DEFAULT 1,
                 sort_order INTEGER,
                 field_type TEXT NOT NULL DEFAULT 'text',
-                options TEXT
+                options TEXT,
+                blob_icon_payload TEXT
             )
             """
         )
@@ -281,6 +282,7 @@ class DatabaseSchemaService:
         self._ensure_gs1_template_storage_table()
         self._ensure_release_tables()
         self._ensure_repertoire_tables()
+        self._ensure_blob_icon_schema()
 
         self.conn.commit()
 
@@ -414,6 +416,9 @@ class DatabaseSchemaService:
             elif version == 20:
                 self._apply_migration(20, self._mig_20_to_21)
                 version = 21
+            elif version == 21:
+                self._apply_migration(21, self._mig_21_to_22)
+                version = 22
             else:
                 self.logger.warning("Unknown migration path from version %s", version)
                 break
@@ -847,6 +852,9 @@ class DatabaseSchemaService:
         self._ensure_release_tables()
         self._ensure_repertoire_tables()
 
+    def _mig_21_to_22(self) -> None:
+        self._ensure_blob_icon_schema()
+
     def _ensure_current_track_columns(self) -> None:
         cols = self._table_columns("Tracks")
         additions = (
@@ -905,6 +913,11 @@ class DatabaseSchemaService:
             """
         )
         self._ensure_optional_isrc_validation_triggers()
+
+    def _ensure_blob_icon_schema(self) -> None:
+        cols = self._table_columns("CustomFieldDefs")
+        if "blob_icon_payload" not in cols:
+            self.cursor.execute("ALTER TABLE CustomFieldDefs ADD COLUMN blob_icon_payload TEXT")
 
     def _ensure_optional_isrc_validation_triggers(self) -> None:
         self.cursor.execute("DROP TRIGGER IF EXISTS trg_tracks_isrc_validate_ins")

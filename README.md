@@ -149,6 +149,16 @@ The app ships with a full visual theme builder covering typography, surfaces, bu
 - VS Code Dark
 - Pastel Studio
 
+It also includes a dedicated BLOB icon builder for stored media indicators:
+
+- separate global badge icons for audio and image BLOBs
+- platform-native system icons exposed through Qt
+- standardized emoji choices for lightweight visual language
+- compressed custom-image badges stored directly in the profile database
+- per-column overrides for custom `blob_audio` and `blob_image` fields
+
+These media badge settings are intentionally kept separate from theme presets, so you can refine how stored files are represented in the catalog without changing the broader application theme.
+
 Advanced users can go further with a selector reference and syntax-aware QSS editor that supports safe autocomplete, rule templates, pseudo-states, subcontrols, and object-name targeting.
 
 ## Who It Is For

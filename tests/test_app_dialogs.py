@@ -1,13 +1,15 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 try:
     from PySide6.QtCore import Qt
-    from PySide6.QtWidgets import QApplication, QWidget
+    from PySide6.QtWidgets import QApplication, QDialog, QWidget
 except ImportError as exc:  # pragma: no cover - environment-specific fallback
     Qt = None
     QApplication = None
+    QDialog = None
     QWidget = None
     QT_IMPORT_ERROR = exc
 else:
@@ -74,6 +76,34 @@ class AppDialogsTests(unittest.TestCase):
             dialog.fields[0]["name"] = "Energy"
             self.assertEqual(fields[0]["name"], "Mood")
             self.assertEqual(dialog.get_fields()[0]["name"], "Energy")
+        finally:
+            dialog.close()
+
+    def test_custom_columns_dialog_enables_blob_icon_overrides_for_blob_fields(self):
+        fields = [
+            {
+                "id": 2,
+                "name": "Artwork",
+                "field_type": "blob_image",
+                "options": None,
+                "blob_icon_payload": {"mode": "inherit"},
+            }
+        ]
+        dialog = CustomColumnsDialog(fields)
+        try:
+            dialog.listw.setCurrentRow(0)
+            self.assertTrue(dialog.btn_blob_icon.isEnabled())
+            with (
+                mock.patch(
+                    "isrc_manager.app_dialogs.BlobIconDialog.exec", return_value=QDialog.Accepted
+                ),
+                mock.patch(
+                    "isrc_manager.app_dialogs.BlobIconDialog.current_spec",
+                    return_value={"mode": "emoji", "emoji": "🖼️"},
+                ),
+            ):
+                dialog._edit_blob_icon()
+            self.assertEqual(dialog.get_fields()[0]["blob_icon_payload"]["emoji"], "🖼️")
         finally:
             dialog.close()
 

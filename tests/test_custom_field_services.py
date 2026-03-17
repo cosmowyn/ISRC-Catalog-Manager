@@ -16,7 +16,8 @@ def make_custom_field_conn():
             active INTEGER NOT NULL DEFAULT 1,
             sort_order INTEGER,
             field_type TEXT NOT NULL DEFAULT 'text',
-            options TEXT
+            options TEXT,
+            blob_icon_payload TEXT
         );
         CREATE TABLE CustomFieldValues (
             track_id INTEGER NOT NULL,
@@ -77,6 +78,29 @@ class CustomFieldDefinitionServiceTests(unittest.TestCase):
             self.conn.execute("SELECT options FROM CustomFieldDefs WHERE id=1").fetchone(),
             ('["Happy", "Sad"]',),
         )
+
+    def test_sync_fields_persists_blob_icon_payload_for_blob_fields(self):
+        self.service.sync_fields(
+            existing_fields=self.service.list_active_fields(),
+            new_fields=[
+                {
+                    "id": 2,
+                    "name": "Artwork",
+                    "field_type": "blob_image",
+                    "options": None,
+                    "blob_icon_payload": {"mode": "emoji", "emoji": "📷"},
+                }
+            ],
+        )
+
+        row = self.conn.execute(
+            "SELECT blob_icon_payload FROM CustomFieldDefs WHERE id=2"
+        ).fetchone()
+        fields = self.service.list_active_fields()
+
+        self.assertIsNotNone(row)
+        self.assertIn('"emoji": "\\ud83d\\udcf7"', row[0])
+        self.assertEqual(fields[0]["blob_icon_payload"]["emoji"], "📷")
 
 
 class CustomFieldValueServiceTests(unittest.TestCase):

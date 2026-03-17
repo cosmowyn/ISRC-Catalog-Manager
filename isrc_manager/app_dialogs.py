@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from isrc_manager.blob_icons import BlobIconDialog, describe_blob_icon_spec
 from isrc_manager.constants import DEFAULT_WINDOW_TITLE, FIELD_TYPE_CHOICES
 from isrc_manager.help_content import HELP_CHAPTERS, HELP_CHAPTERS_BY_ID
 from isrc_manager.paths import DATA_DIR
@@ -60,7 +61,8 @@ class CustomColumnsDialog(QDialog):
         self.setMinimumSize(680, 500)
         _apply_standard_dialog_chrome(self, "customColumnsDialog")
 
-        # fields: [{"id": int|None, "name": str, "field_type": "text|dropdown|checkbox|date", "options": str|None}]
+        # fields: [{"id": int|None, "name": str, "field_type": "...", "options": str|None,
+        #           "blob_icon_payload": dict|None}]
         self.fields = [dict(f) for f in fields]
 
         self.listw = QListWidget()
@@ -92,11 +94,13 @@ class CustomColumnsDialog(QDialog):
         self.btn_rename = QPushButton("Rename…")
         self.btn_type = QPushButton("Change Type…")
         self.btn_opts = QPushButton("Edit Options…")
+        self.btn_blob_icon = QPushButton("Set BLOB Icon…")
         row1.addWidget(self.btn_add)
         row1.addWidget(self.btn_remove)
         row1.addWidget(self.btn_rename)
         row1.addWidget(self.btn_type)
         row1.addWidget(self.btn_opts)
+        row1.addWidget(self.btn_blob_icon)
         row1.addStretch(1)
         list_layout.addLayout(row1)
         layout.addWidget(list_box, 1)
@@ -117,18 +121,28 @@ class CustomColumnsDialog(QDialog):
         self.btn_rename.clicked.connect(self._rename)
         self.btn_type.clicked.connect(self._change_type)
         self.btn_opts.clicked.connect(self._edit_options)
+        self.btn_blob_icon.clicked.connect(self._edit_blob_icon)
+        self.listw.currentRowChanged.connect(self._update_button_states)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
 
         self._refresh_list()
+        self._update_button_states()
 
     def _refresh_list(self):
         self.listw.clear()
         for index, field in enumerate(self.fields):
             label = f"{field['name']}  ·  {field.get('field_type', 'text')}"
+            if field.get("field_type") in {"blob_audio", "blob_image"}:
+                label += "  ·  " + describe_blob_icon_spec(
+                    field.get("blob_icon_payload"),
+                    kind="audio" if field.get("field_type") == "blob_audio" else "image",
+                    allow_inherit=True,
+                )
             item = QListWidgetItem(label)
             item.setData(Qt.UserRole, index)
             self.listw.addItem(item)
+        self._update_button_states()
 
     def _current_index(self):
         item = self.listw.currentItem()
@@ -137,6 +151,19 @@ class CustomColumnsDialog(QDialog):
     def _current_field(self):
         index = self._current_index()
         return (self.fields[index] if index is not None else None), index
+
+    def _update_button_states(self, *_args) -> None:
+        current_field, _index = self._current_field()
+        is_dropdown = current_field is not None and current_field.get("field_type") == "dropdown"
+        is_blob = current_field is not None and current_field.get("field_type") in {
+            "blob_audio",
+            "blob_image",
+        }
+        self.btn_remove.setEnabled(current_field is not None)
+        self.btn_rename.setEnabled(current_field is not None)
+        self.btn_type.setEnabled(current_field is not None)
+        self.btn_opts.setEnabled(is_dropdown)
+        self.btn_blob_icon.setEnabled(is_blob)
 
     def _add(self):
         name, ok = QInputDialog.getText(self, "Add Column", "Column name:")
@@ -153,7 +180,13 @@ class CustomColumnsDialog(QDialog):
         if not ok:
             return
 
-        new_field = {"id": None, "name": name, "field_type": field_type, "options": None}
+        new_field = {
+            "id": None,
+            "name": name,
+            "field_type": field_type,
+            "options": None,
+            "blob_icon_payload": None,
+        }
 
         if field_type == "dropdown":
             options_text, options_ok = QInputDialog.getMultiLineText(
@@ -164,6 +197,16 @@ class CustomColumnsDialog(QDialog):
                     option.strip() for option in (options_text or "").splitlines() if option.strip()
                 ]
                 new_field["options"] = json.dumps(options) if options else json.dumps([])
+        elif field_type in {"blob_audio", "blob_image"}:
+            icon_dialog = BlobIconDialog(
+                kind="audio" if field_type == "blob_audio" else "image",
+                title=f"Default Icon for {name}",
+                spec={"mode": "inherit"},
+                allow_inherit=True,
+                parent=self,
+            )
+            if icon_dialog.exec() == QDialog.Accepted:
+                new_field["blob_icon_payload"] = icon_dialog.current_spec()
 
         self.fields.append(new_field)
         self._refresh_list()
@@ -243,6 +286,10 @@ class CustomColumnsDialog(QDialog):
                     option.strip() for option in (options_text or "").splitlines() if option.strip()
                 ]
                 self.fields[index]["options"] = json.dumps(options) if options else json.dumps([])
+        if field_type not in {"blob_audio", "blob_image"}:
+            self.fields[index]["blob_icon_payload"] = None
+        elif self.fields[index].get("blob_icon_payload") is None:
+            self.fields[index]["blob_icon_payload"] = {"mode": "inherit"}
 
         self._refresh_list()
         self.listw.setCurrentRow(index)
@@ -263,6 +310,26 @@ class CustomColumnsDialog(QDialog):
 
         options = [option.strip() for option in (options_text or "").splitlines() if option.strip()]
         self.fields[index]["options"] = json.dumps(options)
+        self._refresh_list()
+        self.listw.setCurrentRow(index)
+
+    def _edit_blob_icon(self):
+        current_field, index = self._current_field()
+        if current_field is None:
+            return
+        field_type = str(current_field.get("field_type") or "").strip().lower()
+        if field_type not in {"blob_audio", "blob_image"}:
+            return
+        dialog = BlobIconDialog(
+            kind="audio" if field_type == "blob_audio" else "image",
+            title=f"Icon for {current_field['name']}",
+            spec=current_field.get("blob_icon_payload") or {"mode": "inherit"},
+            allow_inherit=True,
+            parent=self,
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return
+        self.fields[index]["blob_icon_payload"] = dialog.current_spec()
         self._refresh_list()
         self.listw.setCurrentRow(index)
 
