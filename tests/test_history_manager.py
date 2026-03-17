@@ -18,6 +18,7 @@ from isrc_manager.services import (
     TrackService,
     TrackUpdatePayload,
 )
+from isrc_manager.theme_builder import theme_setting_defaults
 
 
 class HistoryManagerTests(unittest.TestCase):
@@ -139,6 +140,45 @@ class HistoryManagerTests(unittest.TestCase):
 
         self.history.redo()
         self.assertEqual(self.settings_reads.load_auto_snapshot_interval_minutes(), 45)
+
+    def test_expanded_theme_settings_undo_and_redo_restore_new_fields(self):
+        before_theme = theme_setting_defaults()
+        after_theme = dict(before_theme)
+        after_theme["button_hover_bg"] = "#224488"
+        after_theme["menu_radius"] = 14
+        after_theme["dialog_title_font_size"] = 22
+
+        for key, value in after_theme.items():
+            self.settings.setValue(f"theme/{key}", value)
+        self.settings.sync()
+        self.history.record_setting_change(
+            key="theme_settings",
+            label="Update Theme Settings",
+            before_value=before_theme,
+            after_value=after_theme,
+        )
+
+        self.history.undo()
+        self.assertEqual(
+            self.settings.value("theme/button_hover_bg", "", str) or "",
+            before_theme["button_hover_bg"],
+        )
+        self.assertEqual(
+            int(self.settings.value("theme/menu_radius", 0, int)),
+            int(before_theme["menu_radius"]),
+        )
+        self.assertEqual(
+            int(self.settings.value("theme/dialog_title_font_size", 0, int)),
+            int(before_theme["dialog_title_font_size"]),
+        )
+
+        self.history.redo()
+        self.assertEqual(
+            self.settings.value("theme/button_hover_bg", "", str),
+            "#224488",
+        )
+        self.assertEqual(int(self.settings.value("theme/menu_radius", 0, int)), 14)
+        self.assertEqual(int(self.settings.value("theme/dialog_title_font_size", 0, int)), 22)
 
     def test_track_create_delete_and_redo_work_through_history(self):
         track_id = self._create_track()

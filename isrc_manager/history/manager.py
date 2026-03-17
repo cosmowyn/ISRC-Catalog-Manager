@@ -19,6 +19,7 @@ from isrc_manager.services import (
     TrackService,
     TrackSnapshot,
 )
+from isrc_manager.theme_builder import theme_setting_keys
 
 from .models import HistoryEntry, SnapshotRecord
 
@@ -823,25 +824,7 @@ class HistoryManager:
         elif key == "theme_settings":
             if not isinstance(value, dict):
                 raise ValueError("Theme settings payload must be a dict")
-            theme_keys = (
-                "font_family",
-                "font_size",
-                "auto_contrast_enabled",
-                "window_bg",
-                "window_fg",
-                "accent",
-                "selection_bg",
-                "selection_fg",
-                "button_bg",
-                "button_fg",
-                "input_bg",
-                "input_fg",
-                "table_bg",
-                "table_fg",
-                "selected_name",
-                "custom_qss",
-            )
-            for theme_key in theme_keys:
+            for theme_key in theme_setting_keys():
                 self.settings.setValue(f"theme/{theme_key}", value.get(theme_key))
             self.settings.sync()
         elif key == "theme_library":

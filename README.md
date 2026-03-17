@@ -119,7 +119,7 @@ The application provides:
 - Dockable views for the add-data form and catalog table  
 - GS1 metadata editing and grouped workbook export using the official GS1 template workflow  
 - Searchable in-app help with contextual help buttons  
-- Theme customization with saved presets, advanced QSS, context-aware selector/property autocomplete, full rule templates, and an in-app selector reference catalog  
+- Theme customization with a full visual builder for app-wide colors, states, radii, padding, typography, saved presets, live preview, advanced QSS, context-aware selector/property autocomplete, full rule templates, and an in-app selector reference catalog  
 - Full audit logging and backup system  
 - Import/export tools for XML metadata  
 - A built-in license management system  
@@ -145,6 +145,19 @@ The application provides:
 - The Add Album dialog starts with shared album metadata and dynamic track sections so you can add or remove tracks as needed without leaving the main workflow.
 - Selected rows can be bulk edited from the catalog table. Mixed values stay untouched unless you explicitly replace them, and protected fields such as ISRC, ISWC, Track Title, Audio File, Track Length, and BUMA work number remain view-only during bulk edit.
 - Editing shared album/release fields from the track editor keeps the corresponding release record synchronized where appropriate.
+
+## Theme Builder
+- The Settings dialog includes a full theme builder for the entire application, not just the main window.
+- Most widget families can now be themed without writing QSS:
+  - surfaces, borders, headers, tooltips, overlays, and supporting text
+  - buttons, help buttons, hover states, pressed states, checked states, and disabled states
+  - inputs, focus styling, placeholders, and checkbox/radio indicators
+  - tables, lists, selections, row hover states, scrollbars, progress bars, menus, and tabs
+  - geometry such as font sizes, border widths, corner radii, control padding, help-button sizing, and scrollbar thickness
+- The builder includes live preview tabs inside the settings dialog, plus an optional app-wide live preview mode while editing.
+- Theme drafts can be saved to the internal theme library, exported to JSON, and imported back into another install.
+- Advanced QSS remains available for the remaining edge cases and is backed by a searchable selector catalog and syntax-aware autocomplete.
+- More detail is available in [docs/theme_builder.md](docs/theme_builder.md).
 
 ## Audio Metadata Tags
 - Reads embedded metadata from MP3/ID3, FLAC, OGG Vorbis/Opus, M4A/MP4, WAV, and AIFF where the format supports tags in practice.

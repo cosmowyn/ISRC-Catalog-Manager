@@ -503,21 +503,24 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
     HelpChapter(
         chapter_id="theme-settings",
         title="Theme Settings",
-        summary="Customize the app appearance, manage named theme presets, and target controls using advanced QSS.",
+        summary="Customize the complete app appearance with the visual theme builder, manage named theme presets, and target the last edge cases with advanced QSS.",
         keywords=("theme", "appearance", "font", "colors", "qss", "saved themes", "style"),
         content_html="""
-        <p>The Theme page lets you customize the visual appearance of the app.</p>
+        <p>The Theme page now acts as a full visual theme builder for the application.</p>
         <ul>
-          <li><strong>Typography</strong>: choose the application font and base font size.</li>
-          <li><strong>Contrast guard</strong>: automatically fix unreadable text colors against their backgrounds, unless you disable that guard.</li>
-          <li><strong>Application colors</strong>: set the window, text, accent, and selection colors.</li>
-          <li><strong>Controls &amp; Tables</strong>: set button, input, and table colors separately.</li>
-          <li><strong>Saved Themes</strong>: save the current theme under a name, load a stored theme, or delete saved presets.</li>
-          <li><strong>Advanced QSS</strong>: append custom Qt stylesheet rules that target object names or widget types directly.</li>
+          <li><strong>Saved Themes</strong>: load, save, delete, import, export, and reset theme drafts without leaving the dialog.</li>
+          <li><strong>Typography</strong>: choose the application font and tune dialog titles, section headings, and supporting text sizes separately.</li>
+          <li><strong>Surfaces</strong>: style the window, panel, border, header, tooltip, overlay, accent, and supporting-text palette for the entire app.</li>
+          <li><strong>Buttons</strong>: configure normal, hover, pressed, checked, disabled, and round help-button states, plus radius and padding.</li>
+          <li><strong>Inputs</strong>: control editor backgrounds, focus styling, disabled states, placeholders, and checkbox/radio indicators.</li>
+          <li><strong>Data Views</strong>: theme tables, lists, row hover states, selections, scrollbars, and progress bars.</li>
+          <li><strong>Navigation</strong>: theme menu bars, popup menus, dock titles, headers, and tabs with separate normal, hover, and selected states.</li>
+          <li><strong>Live Preview</strong>: preview the current draft inside the settings dialog, or enable real-time app-wide preview while editing and revert automatically on cancel.</li>
+          <li><strong>Advanced QSS</strong>: append custom Qt stylesheet rules only for the remaining edge cases that are not already covered by the GUI builder.</li>
           <li><strong>Selector Reference</strong>: browse a searchable catalog of selectors harvested from the currently open windows and dialogs, then copy or insert them into the QSS editor.</li>
           <li><strong>Autocomplete</strong>: press <strong>Ctrl+Space</strong> inside the advanced QSS editor for context-aware selector, pseudo-state, subcontrol, property, value, and full-template completion.</li>
         </ul>
-        <p>All visible controls receive object names automatically so advanced QSS can target specific widgets. Object-name suggestions are inserted as references, which means they safely append to an existing widget selector instead of silently rewriting it. If you want to style a dialog that is not currently open, open it first and refresh the selector catalog. Saved theme presets persist between launches and remain selectable from the theme dropdown.</p>
+        <p>Most users should start with the visual controls and only move into Advanced QSS for selectors that still need hand-written rules. All visible controls receive object names automatically so advanced QSS can target specific widgets. Object-name suggestions are inserted as references, which means they safely append to an existing widget selector instead of silently rewriting it. If you want to style a dialog that is not currently open, open it first and refresh the selector catalog. Saved theme presets persist between launches and remain selectable from the theme dropdown, and imported/exported theme JSON files can be shared between installs.</p>
         """,
     ),
     HelpChapter(

@@ -98,6 +98,7 @@ from PySide6.QtWidgets import (
     QSlider,
     QAbstractItemView,
     QFormLayout,
+    QProgressBar,
     QTableView,
     QTabWidget,
     QDialogButtonBox,
@@ -163,6 +164,23 @@ from isrc_manager.qss_reference import (
     collect_qss_reference_entries,
     ensure_widget_object_names as _ensure_qss_widget_object_names,
     repolish_widget_tree as _repolish_qss_widget_tree,
+)
+from isrc_manager.theme_builder import (
+    THEME_COLOR_FIELD_SPECS,
+    THEME_METRIC_FIELD_SPECS,
+    THEME_PAGE_SPECS,
+    build_theme_stylesheet as build_app_theme_stylesheet,
+    color_relative_luminance as theme_color_relative_luminance,
+    contrast_ratio as theme_contrast_ratio,
+    effective_theme_settings as build_effective_theme_settings,
+    normalize_theme_color as normalize_app_theme_color,
+    normalize_theme_font_family as normalize_app_theme_font_family,
+    normalize_theme_settings as normalize_app_theme_settings,
+    normalize_theme_string as normalize_app_theme_string,
+    pick_contrasting_color as pick_theme_contrasting_color,
+    shift_color as shift_theme_color,
+    theme_setting_defaults as default_theme_settings,
+    theme_setting_keys as app_theme_setting_keys,
 )
 from isrc_manager.gs1_dialog import GS1MetadataDialog
 from isrc_manager.assets import AssetService
@@ -399,39 +417,9 @@ class DraggableLabel(QLabel):
 # =============================================================================
 class ApplicationSettingsDialog(QDialog):
     CUSTOM_THEME_LABEL = "Custom Theme"
-    COLOR_FIELD_SPECS = (
-        (
-            "window_bg",
-            "Window Background",
-            "Base background for the main window, dialogs, menus, and dock areas.",
-        ),
-        (
-            "window_fg",
-            "Window Text",
-            "Primary text color used across labels, menus, and general content.",
-        ),
-        ("accent", "Accent", "Used for highlights, active states, and focus styling."),
-        (
-            "selection_bg",
-            "Selection Background",
-            "Used for selected rows, highlighted text, and active list items.",
-        ),
-        ("selection_fg", "Selection Text", "Text color used on top of the selection background."),
-        (
-            "button_bg",
-            "Button Background",
-            "Background color for push buttons and button-like controls.",
-        ),
-        ("button_fg", "Button Text", "Text color used for buttons."),
-        (
-            "input_bg",
-            "Input Background",
-            "Background for line edits, combo boxes, spin boxes, and editors.",
-        ),
-        ("input_fg", "Input Text", "Text color used inside editable controls."),
-        ("table_bg", "Table Background", "Background for tables and list views."),
-        ("table_fg", "Table Text", "Text color used inside tables and list views."),
-    )
+    COLOR_FIELD_SPECS = THEME_COLOR_FIELD_SPECS
+    METRIC_FIELD_SPECS = THEME_METRIC_FIELD_SPECS
+    THEME_PAGE_SPECS = THEME_PAGE_SPECS
 
     def __init__(
         self,
@@ -465,8 +453,8 @@ class ApplicationSettingsDialog(QDialog):
         self.setObjectName("applicationSettingsDialog")
         self.setWindowTitle("Application Settings")
         self.setModal(True)
-        self.setMinimumSize(1160, 820)
-        self.resize(1220, 860)
+        self.setMinimumSize(1320, 880)
+        self.resize(1400, 920)
         self._theme_settings = dict(theme_settings or {})
         self._stored_themes = {
             str(name): dict(values or {})
@@ -475,9 +463,15 @@ class ApplicationSettingsDialog(QDialog):
         }
         self._theme_color_edits = {}
         self._theme_color_swatches = {}
+        self._theme_metric_spins = {}
         self._qss_reference_entries: list[QssReferenceEntry] = []
         self._qss_filtered_reference_entries: list[QssReferenceEntry] = []
         self._theme_change_tracking_enabled = True
+        self._theme_original_values = normalize_app_theme_settings(self._theme_settings)
+        self._theme_preview_timer = QTimer(self)
+        self._theme_preview_timer.setSingleShot(True)
+        self._theme_preview_timer.setInterval(120)
+        self._theme_preview_timer.timeout.connect(self._refresh_theme_previews)
         self.gs1_integration_service = getattr(parent, "gs1_integration_service", None)
         self._gs1_template_profile = None
         self._gs1_template_asset = gs1_template_asset
@@ -926,10 +920,6 @@ class ApplicationSettingsDialog(QDialog):
         theme_layout.setContentsMargins(10, 10, 10, 10)
         theme_layout.setSpacing(14)
 
-        typography_box = QGroupBox("Typography")
-        typography_grid = QGridLayout(typography_box)
-        self._configure_grid(typography_grid)
-
         theme_library_box = QGroupBox("Saved Themes")
         theme_library_grid = QGridLayout(theme_library_box)
         self._configure_grid(theme_library_grid)
@@ -943,6 +933,12 @@ class ApplicationSettingsDialog(QDialog):
         self.theme_save_button.setAutoDefault(False)
         self.theme_delete_button = QPushButton("Delete Theme")
         self.theme_delete_button.setAutoDefault(False)
+        self.theme_import_button = QPushButton("Import Theme…")
+        self.theme_import_button.setAutoDefault(False)
+        self.theme_export_button = QPushButton("Export Theme…")
+        self.theme_export_button.setAutoDefault(False)
+        self.theme_reset_button = QPushButton("Reset to Defaults")
+        self.theme_reset_button.setAutoDefault(False)
 
         theme_preset_widget = QWidget(self)
         theme_preset_row = QHBoxLayout(theme_preset_widget)
@@ -952,6 +948,9 @@ class ApplicationSettingsDialog(QDialog):
         theme_preset_row.addWidget(self.theme_load_button)
         theme_preset_row.addWidget(self.theme_save_button)
         theme_preset_row.addWidget(self.theme_delete_button)
+        theme_preset_row.addWidget(self.theme_import_button)
+        theme_preset_row.addWidget(self.theme_export_button)
+        theme_preset_row.addWidget(self.theme_reset_button)
         theme_preset_row.addStretch(1)
         self._add_row(
             theme_library_grid,
@@ -960,7 +959,6 @@ class ApplicationSettingsDialog(QDialog):
             theme_preset_widget,
             "Load a stored theme, save the current styling as a reusable preset, or remove presets you no longer need.",
         )
-        theme_layout.addWidget(theme_library_box)
 
         self.theme_font_family_combo = FocusWheelFontComboBox(self)
         self.theme_font_family_combo.setMinimumWidth(260)
@@ -968,169 +966,71 @@ class ApplicationSettingsDialog(QDialog):
         font_family = str(self._theme_settings.get("font_family") or "").strip()
         if font_family:
             self.theme_font_family_combo.setCurrentFont(QFont(font_family))
-        self._add_row(
-            typography_grid,
-            0,
-            "Application Font",
-            self.theme_font_family_combo,
-            "Used across menus, dialogs, inputs, tables, and labels unless overridden by advanced QSS.",
-        )
-
-        self.theme_font_size_spin = FocusWheelSpinBox(self)
-        self.theme_font_size_spin.setRange(8, 36)
-        self.theme_font_size_spin.setValue(
-            max(8, min(36, int(self._theme_settings.get("font_size") or 10)))
-        )
-        self.theme_font_size_spin.setSuffix(" pt")
-        self.theme_font_size_spin.setMinimumWidth(160)
-        self.theme_font_size_spin.setMaximumWidth(220)
-        self._add_row(
-            typography_grid,
-            1,
-            "Base Font Size",
-            self.theme_font_size_spin,
-            "Applies as the default point size across the application.",
-        )
 
         self.theme_auto_contrast_check = QCheckBox("Auto-fix unreadable text colors")
         self.theme_auto_contrast_check.setChecked(
             bool(self._theme_settings.get("auto_contrast_enabled", True))
         )
+        self.theme_live_preview_check = QCheckBox("Preview changes across the app while editing")
+        self.theme_live_preview_check.setChecked(False)
         self._add_row(
-            typography_grid,
-            2,
-            "Text Contrast Guard",
-            self.theme_auto_contrast_check,
-            "Keeps foreground colors readable against their backgrounds. Turn this off to fully override colors yourself.",
+            theme_library_grid,
+            1,
+            "Live Preview",
+            self.theme_live_preview_check,
+            "When enabled, the current theme draft is applied to the running app in real time. Canceling the dialog restores the original theme.",
         )
-        theme_layout.addWidget(typography_box)
 
-        app_colors_box = QGroupBox("Application Colors")
-        app_colors_grid = QGridLayout(app_colors_box)
-        self._configure_grid(app_colors_grid)
-        theme_layout.addWidget(app_colors_box)
+        theme_layout.addWidget(theme_library_box)
 
-        control_colors_box = QGroupBox("Controls & Tables")
-        control_colors_grid = QGridLayout(control_colors_box)
-        self._configure_grid(control_colors_grid)
-        theme_layout.addWidget(control_colors_box)
-
-        left_keys = {"window_bg", "window_fg", "accent", "selection_bg", "selection_fg"}
-        left_row = 0
-        right_row = 0
-        for key, label_text, hint_text in self.COLOR_FIELD_SPECS:
-            editor = self._create_color_editor(key, str(self._theme_settings.get(key) or ""))
-            if key in left_keys:
-                self._add_row(app_colors_grid, left_row, label_text, editor, hint_text)
-                left_row += 1
-            else:
-                self._add_row(control_colors_grid, right_row, label_text, editor, hint_text)
-                right_row += 1
-
-        advanced_box = QGroupBox("Advanced QSS")
-        advanced_layout = QVBoxLayout(advanced_box)
-        advanced_layout.setContentsMargins(14, 18, 14, 14)
-        advanced_layout.setSpacing(10)
-        advanced_note = QLabel(
-            "All visible controls receive object names automatically, so you can target specific widgets here. "
-            "Attribute-backed widgets use their attribute name when available; other widgets receive generated names."
+        theme_intro = QLabel(
+            "The visual theme builder now covers the full application surface: typography, panels, buttons, inputs, data views, navigation chrome, help buttons, and state styling. "
+            "Use the grouped tabs for most styling work and keep Advanced QSS for the final edge cases."
         )
-        advanced_note.setProperty("role", "themeNote")
-        advanced_note.setWordWrap(True)
-        advanced_layout.addWidget(advanced_note)
+        theme_intro.setWordWrap(True)
+        theme_intro.setProperty("role", "secondary")
+        theme_layout.addWidget(theme_intro)
 
-        qss_help = QLabel(
-            "Example selectors: `QPushButton`, `QLineEdit`, `QDockWidget::title`, or `#profilesToolbar QPushButton`. "
-            "Press Ctrl+Space in the editor for context-aware autocomplete with selectors, pseudo-states, subcontrols, "
-            "property lines, value suggestions, and full rule templates."
+        theme_splitter = QSplitter(Qt.Horizontal, theme_page)
+
+        theme_editor_host = QWidget(theme_splitter)
+        theme_editor_layout = QVBoxLayout(theme_editor_host)
+        theme_editor_layout.setContentsMargins(0, 0, 0, 0)
+        theme_editor_layout.setSpacing(10)
+        self.theme_builder_tabs = QTabWidget(theme_editor_host)
+        self.theme_builder_tabs.setDocumentMode(True)
+        theme_editor_layout.addWidget(self.theme_builder_tabs, 1)
+        self._build_theme_builder_tabs()
+
+        theme_preview_host = QWidget(theme_splitter)
+        theme_preview_layout = QVBoxLayout(theme_preview_host)
+        theme_preview_layout.setContentsMargins(0, 0, 0, 0)
+        theme_preview_layout.setSpacing(10)
+        preview_title = QLabel("Live Preview", theme_preview_host)
+        preview_title.setProperty("role", "sectionTitle")
+        theme_preview_layout.addWidget(preview_title)
+        preview_subtitle = QLabel(
+            "Hover, click, switch tabs, focus fields, and inspect disabled states here before you save the theme.",
+            theme_preview_host,
         )
-        qss_help.setProperty("role", "hint")
-        qss_help.setWordWrap(True)
-        advanced_layout.addWidget(qss_help)
+        preview_subtitle.setProperty("role", "secondary")
+        preview_subtitle.setWordWrap(True)
+        theme_preview_layout.addWidget(preview_subtitle)
+        self.theme_preview_status_label = QLabel("", theme_preview_host)
+        self.theme_preview_status_label.setWordWrap(True)
+        self.theme_preview_status_label.setProperty("role", "secondary")
+        theme_preview_layout.addWidget(self.theme_preview_status_label)
+        self.theme_preview_tabs = QTabWidget(theme_preview_host)
+        self.theme_preview_tabs.setDocumentMode(True)
+        theme_preview_layout.addWidget(self.theme_preview_tabs, 1)
+        self._build_theme_preview_tabs()
 
-        self.theme_qss_tabs = QTabWidget(self)
-        self.theme_qss_tabs.setDocumentMode(True)
-        advanced_layout.addWidget(self.theme_qss_tabs, 1)
+        theme_splitter.addWidget(theme_editor_host)
+        theme_splitter.addWidget(theme_preview_host)
+        theme_splitter.setStretchFactor(0, 3)
+        theme_splitter.setStretchFactor(1, 2)
+        theme_layout.addWidget(theme_splitter, 1)
 
-        qss_editor_page = QWidget(self)
-        qss_editor_layout = QVBoxLayout(qss_editor_page)
-        qss_editor_layout.setContentsMargins(0, 0, 0, 0)
-        qss_editor_layout.setSpacing(10)
-        self.theme_custom_qss_edit = QssCodeEditor(self)
-        self.theme_custom_qss_edit.setPlaceholderText(
-            "/* Advanced QSS */\nQPushButton#saveButton {\n    font-weight: 600;\n}\n"
-        )
-        self.theme_custom_qss_edit.setMinimumHeight(220)
-        self.theme_custom_qss_edit.setPlainText(str(self._theme_settings.get("custom_qss") or ""))
-        qss_editor_layout.addWidget(self.theme_custom_qss_edit, 1)
-        self.theme_qss_tabs.addTab(qss_editor_page, "Editor")
-
-        qss_reference_page = QWidget(self)
-        qss_reference_layout = QVBoxLayout(qss_reference_page)
-        qss_reference_layout.setContentsMargins(0, 0, 0, 0)
-        qss_reference_layout.setSpacing(10)
-
-        qss_reference_note = QLabel(
-            "The reference catalog is built from the currently open app windows and dialogs. "
-            "Open the screen you want to style, then refresh the catalog to harvest its generated object names. "
-            "Object-name entries are inserted as references, so they append safely to an existing widget selector "
-            "instead of rewriting it."
-        )
-        qss_reference_note.setWordWrap(True)
-        qss_reference_note.setProperty("role", "hint")
-        qss_reference_layout.addWidget(qss_reference_note)
-
-        qss_reference_controls = QWidget(self)
-        qss_reference_controls_layout = QHBoxLayout(qss_reference_controls)
-        qss_reference_controls_layout.setContentsMargins(0, 0, 0, 0)
-        qss_reference_controls_layout.setSpacing(8)
-        self.qss_reference_filter_edit = QLineEdit(self)
-        self.qss_reference_filter_edit.setPlaceholderText(
-            "Filter selectors by widget type, object name, role, or note..."
-        )
-        self.qss_reference_filter_edit.setClearButtonEnabled(True)
-        self.qss_reference_filter_edit.textChanged.connect(self._apply_qss_reference_filter)
-        self.qss_reference_refresh_button = QPushButton("Refresh Catalog", self)
-        self.qss_reference_refresh_button.setAutoDefault(False)
-        self.qss_reference_refresh_button.clicked.connect(self._refresh_qss_selector_reference)
-        self.qss_reference_status_label = QLabel("", self)
-        self.qss_reference_status_label.setProperty("role", "secondary")
-        self.qss_reference_status_label.setWordWrap(True)
-        qss_reference_controls_layout.addWidget(self.qss_reference_filter_edit, 1)
-        qss_reference_controls_layout.addWidget(self.qss_reference_refresh_button)
-        qss_reference_layout.addWidget(qss_reference_controls)
-        qss_reference_layout.addWidget(self.qss_reference_status_label)
-
-        self.qss_reference_table = QTableWidget(0, 3, self)
-        self.qss_reference_table.setHorizontalHeaderLabels(["Category", "Selector", "Details"])
-        self.qss_reference_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.qss_reference_table.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.qss_reference_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.qss_reference_table.verticalHeader().setVisible(False)
-        self.qss_reference_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        self.qss_reference_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self.qss_reference_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
-        self.qss_reference_table.itemSelectionChanged.connect(self._update_qss_reference_actions)
-        self.qss_reference_table.doubleClicked.connect(lambda _index: self._insert_selected_qss_selector())
-        qss_reference_layout.addWidget(self.qss_reference_table, 1)
-
-        qss_reference_button_row = QHBoxLayout()
-        qss_reference_button_row.setContentsMargins(0, 0, 0, 0)
-        qss_reference_button_row.setSpacing(8)
-        qss_reference_button_row.addStretch(1)
-        self.qss_reference_copy_button = QPushButton("Copy Selector", self)
-        self.qss_reference_copy_button.setAutoDefault(False)
-        self.qss_reference_copy_button.clicked.connect(self._copy_selected_qss_selector)
-        self.qss_reference_insert_button = QPushButton("Insert Into Editor", self)
-        self.qss_reference_insert_button.setAutoDefault(False)
-        self.qss_reference_insert_button.clicked.connect(self._insert_selected_qss_selector)
-        qss_reference_button_row.addWidget(self.qss_reference_copy_button)
-        qss_reference_button_row.addWidget(self.qss_reference_insert_button)
-        qss_reference_layout.addLayout(qss_reference_button_row)
-        self.theme_qss_tabs.addTab(qss_reference_page, "Selector Reference")
-        theme_layout.addWidget(advanced_box, 1)
-
-        theme_layout.addStretch(1)
         self.tabs.addTab(self._wrap_tab_page(theme_page), "Theme")
 
         self.button_box = QDialogButtonBox(
@@ -1141,6 +1041,7 @@ class ApplicationSettingsDialog(QDialog):
         self.button_box.accepted.connect(self._accept_if_valid)
         self.button_box.rejected.connect(self.reject)
         root.addWidget(self.button_box)
+        self.finished.connect(self._handle_theme_dialog_finished)
 
         self._focus_map = {
             "window_title": (0, self.window_title_edit),
@@ -1223,7 +1124,7 @@ class ApplicationSettingsDialog(QDialog):
         if hint:
             grid.addWidget(self._make_hint(hint), row, 2)
 
-    def _create_color_editor(self, key: str, value: str) -> QWidget:
+    def _create_color_editor(self, key: str, value: str, *, placeholder: str = "Auto") -> QWidget:
         row = QWidget(self)
         layout = QHBoxLayout(row)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -1237,7 +1138,7 @@ class ApplicationSettingsDialog(QDialog):
 
         edit = QLineEdit(value.strip())
         edit.setClearButtonEnabled(True)
-        edit.setPlaceholderText("Default")
+        edit.setPlaceholderText(placeholder)
         edit.setMinimumWidth(170)
         edit.setMaximumWidth(230)
 
@@ -1259,6 +1160,499 @@ class ApplicationSettingsDialog(QDialog):
         clear_btn.clicked.connect(edit.clear)
         self._sync_color_swatch(key)
         return row
+
+    def _create_metric_editor(self, spec) -> FocusWheelSpinBox:
+        spin = FocusWheelSpinBox(self)
+        spin.setRange(spec.minimum, spec.maximum)
+        spin.setValue(
+            max(
+                spec.minimum,
+                min(spec.maximum, int(self._theme_settings.get(spec.key) or spec.default)),
+            )
+        )
+        if spec.suffix:
+            spin.setSuffix(spec.suffix)
+        spin.setMinimumWidth(160)
+        spin.setMaximumWidth(220)
+        self._theme_metric_spins[spec.key] = spin
+        if spec.key == "font_size":
+            self.theme_font_size_spin = spin
+        return spin
+
+    @staticmethod
+    def _group_theme_specs_by_section(specs):
+        grouped: dict[str, list[object]] = {}
+        for spec in specs:
+            grouped.setdefault(spec.section, []).append(spec)
+        return grouped
+
+    def _build_theme_builder_tabs(self) -> None:
+        for page_key, page_title, page_description in self.THEME_PAGE_SPECS:
+            if page_key == "advanced":
+                page = self._build_theme_advanced_page()
+            else:
+                page = self._build_theme_builder_page(page_key, page_description)
+            self.theme_builder_tabs.addTab(page, page_title)
+
+    def _build_theme_builder_page(self, page_key: str, description: str) -> QWidget:
+        page = QWidget(self)
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.setSpacing(12)
+
+        intro = QLabel(description, page)
+        intro.setWordWrap(True)
+        intro.setProperty("role", "secondary")
+        page_layout.addWidget(intro)
+
+        color_specs = [spec for spec in self.COLOR_FIELD_SPECS if spec.page == page_key]
+        metric_specs = [spec for spec in self.METRIC_FIELD_SPECS if spec.page == page_key]
+
+        if page_key == "typography":
+            typography_box = QGroupBox("Fonts & Readability", page)
+            typography_grid = QGridLayout(typography_box)
+            self._configure_grid(typography_grid)
+            self._add_row(
+                typography_grid,
+                0,
+                "Application Font",
+                self.theme_font_family_combo,
+                "Used across menus, dialogs, inputs, tables, and labels unless overridden by advanced QSS.",
+            )
+            self._add_row(
+                typography_grid,
+                1,
+                "Text Contrast Guard",
+                self.theme_auto_contrast_check,
+                "Keeps foreground colors readable against their backgrounds. Turn this off to fully override colors yourself.",
+            )
+            page_layout.addWidget(typography_box)
+
+        for section_title, section_specs in self._group_theme_specs_by_section(color_specs).items():
+            group = QGroupBox(section_title, page)
+            grid = QGridLayout(group)
+            self._configure_grid(grid)
+            for row, spec in enumerate(section_specs):
+                editor = self._create_color_editor(
+                    spec.key,
+                    str(self._theme_settings.get(spec.key) or ""),
+                    placeholder=spec.placeholder,
+                )
+                self._add_row(grid, row, spec.label, editor, spec.hint)
+            page_layout.addWidget(group)
+
+        for section_title, section_specs in self._group_theme_specs_by_section(
+            metric_specs
+        ).items():
+            group = QGroupBox(section_title, page)
+            grid = QGridLayout(group)
+            self._configure_grid(grid)
+            for row, spec in enumerate(section_specs):
+                editor = self._create_metric_editor(spec)
+                self._add_row(grid, row, spec.label, editor, spec.hint)
+            page_layout.addWidget(group)
+
+        page_layout.addStretch(1)
+        return self._wrap_tab_page(page)
+
+    def _build_theme_advanced_page(self) -> QWidget:
+        advanced_page = QWidget(self)
+        advanced_layout = QVBoxLayout(advanced_page)
+        advanced_layout.setContentsMargins(0, 0, 0, 0)
+        advanced_layout.setSpacing(10)
+
+        advanced_note = QLabel(
+            "All visible controls receive object names automatically, so you can target specific widgets here. "
+            "Attribute-backed widgets use their attribute name when available; other widgets receive generated names."
+        )
+        advanced_note.setProperty("role", "themeNote")
+        advanced_note.setWordWrap(True)
+        advanced_layout.addWidget(advanced_note)
+
+        qss_help = QLabel(
+            "Example selectors: `QPushButton`, `QLineEdit`, `QDockWidget::title`, or `#profilesToolbar QPushButton`. "
+            "Press Ctrl+Space in the editor for context-aware autocomplete with selectors, pseudo-states, subcontrols, "
+            "property lines, value suggestions, and full rule templates."
+        )
+        qss_help.setProperty("role", "hint")
+        qss_help.setWordWrap(True)
+        advanced_layout.addWidget(qss_help)
+
+        self.theme_qss_tabs = QTabWidget(self)
+        self.theme_qss_tabs.setDocumentMode(True)
+        advanced_layout.addWidget(self.theme_qss_tabs, 1)
+
+        qss_editor_page = QWidget(self)
+        qss_editor_layout = QVBoxLayout(qss_editor_page)
+        qss_editor_layout.setContentsMargins(0, 0, 0, 0)
+        qss_editor_layout.setSpacing(10)
+        self.theme_custom_qss_edit = QssCodeEditor(self)
+        self.theme_custom_qss_edit.setPlaceholderText(
+            "/* Advanced QSS */\nQPushButton#saveButton {\n    font-weight: 600;\n}\n"
+        )
+        self.theme_custom_qss_edit.setMinimumHeight(220)
+        self.theme_custom_qss_edit.setPlainText(str(self._theme_settings.get("custom_qss") or ""))
+        qss_editor_layout.addWidget(self.theme_custom_qss_edit, 1)
+        self.theme_qss_tabs.addTab(qss_editor_page, "Editor")
+
+        qss_reference_page = QWidget(self)
+        qss_reference_layout = QVBoxLayout(qss_reference_page)
+        qss_reference_layout.setContentsMargins(0, 0, 0, 0)
+        qss_reference_layout.setSpacing(10)
+
+        qss_reference_note = QLabel(
+            "The reference catalog is built from the currently open app windows and dialogs. "
+            "Open the screen you want to style, then refresh the catalog to harvest its generated object names. "
+            "Object-name entries are inserted as references, so they append safely to an existing widget selector "
+            "instead of rewriting it."
+        )
+        qss_reference_note.setWordWrap(True)
+        qss_reference_note.setProperty("role", "hint")
+        qss_reference_layout.addWidget(qss_reference_note)
+
+        qss_reference_controls = QWidget(self)
+        qss_reference_controls_layout = QHBoxLayout(qss_reference_controls)
+        qss_reference_controls_layout.setContentsMargins(0, 0, 0, 0)
+        qss_reference_controls_layout.setSpacing(8)
+        self.qss_reference_filter_edit = QLineEdit(self)
+        self.qss_reference_filter_edit.setPlaceholderText(
+            "Filter selectors by widget type, object name, role, or note..."
+        )
+        self.qss_reference_filter_edit.setClearButtonEnabled(True)
+        self.qss_reference_filter_edit.textChanged.connect(self._apply_qss_reference_filter)
+        self.qss_reference_refresh_button = QPushButton("Refresh Catalog", self)
+        self.qss_reference_refresh_button.setAutoDefault(False)
+        self.qss_reference_refresh_button.clicked.connect(self._refresh_qss_selector_reference)
+        self.qss_reference_status_label = QLabel("", self)
+        self.qss_reference_status_label.setProperty("role", "secondary")
+        self.qss_reference_status_label.setWordWrap(True)
+        qss_reference_controls_layout.addWidget(self.qss_reference_filter_edit, 1)
+        qss_reference_controls_layout.addWidget(self.qss_reference_refresh_button)
+        qss_reference_layout.addWidget(qss_reference_controls)
+        qss_reference_layout.addWidget(self.qss_reference_status_label)
+
+        self.qss_reference_table = QTableWidget(0, 3, self)
+        self.qss_reference_table.setHorizontalHeaderLabels(["Category", "Selector", "Details"])
+        self.qss_reference_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.qss_reference_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.qss_reference_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.qss_reference_table.verticalHeader().setVisible(False)
+        self.qss_reference_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeToContents
+        )
+        self.qss_reference_table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeToContents
+        )
+        self.qss_reference_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.qss_reference_table.itemSelectionChanged.connect(self._update_qss_reference_actions)
+        self.qss_reference_table.doubleClicked.connect(
+            lambda _index: self._insert_selected_qss_selector()
+        )
+        qss_reference_layout.addWidget(self.qss_reference_table, 1)
+
+        qss_reference_button_row = QHBoxLayout()
+        qss_reference_button_row.setContentsMargins(0, 0, 0, 0)
+        qss_reference_button_row.setSpacing(8)
+        qss_reference_button_row.addStretch(1)
+        self.qss_reference_copy_button = QPushButton("Copy Selector", self)
+        self.qss_reference_copy_button.setAutoDefault(False)
+        self.qss_reference_copy_button.clicked.connect(self._copy_selected_qss_selector)
+        self.qss_reference_insert_button = QPushButton("Insert Into Editor", self)
+        self.qss_reference_insert_button.setAutoDefault(False)
+        self.qss_reference_insert_button.clicked.connect(self._insert_selected_qss_selector)
+        qss_reference_button_row.addWidget(self.qss_reference_copy_button)
+        qss_reference_button_row.addWidget(self.qss_reference_insert_button)
+        qss_reference_layout.addLayout(qss_reference_button_row)
+        self.theme_qss_tabs.addTab(qss_reference_page, "Selector Reference")
+
+        return advanced_page
+
+    def _build_theme_preview_tabs(self) -> None:
+        self._theme_preview_roots = []
+        self.theme_preview_tabs.addTab(
+            self._build_theme_preview_controls_page(), "Dialogs & Controls"
+        )
+        self.theme_preview_tabs.addTab(
+            self._build_theme_preview_data_page(), "Data Views & Navigation"
+        )
+        self._refresh_theme_previews()
+
+    def _build_theme_preview_controls_page(self) -> QWidget:
+        page = QWidget(self)
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.setSpacing(0)
+
+        preview_root = QWidget(page)
+        preview_root.setObjectName("themePreviewControlsRoot")
+        preview_root.setProperty("role", "panel")
+        layout = QVBoxLayout(preview_root)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(12)
+
+        hero_box = QGroupBox("Dialog Preview", preview_root)
+        hero_layout = QVBoxLayout(hero_box)
+        hero_layout.setContentsMargins(14, 18, 14, 14)
+        hero_layout.setSpacing(8)
+        title = QLabel("Theme Builder Preview", hero_box)
+        title.setProperty("role", "dialogTitle")
+        subtitle = QLabel(
+            "This mirrors standard dialog titles, support text, and grouped sections used throughout the app.",
+            hero_box,
+        )
+        subtitle.setProperty("role", "dialogSubtitle")
+        subtitle.setWordWrap(True)
+        hero_layout.addWidget(title)
+        hero_layout.addWidget(subtitle)
+        supporting = QLabel(
+            "Hover the buttons, focus the fields, switch the check states, and inspect the disabled controls.",
+            hero_box,
+        )
+        supporting.setProperty("role", "secondary")
+        supporting.setWordWrap(True)
+        hero_layout.addWidget(supporting)
+        layout.addWidget(hero_box)
+
+        button_box = QGroupBox("Buttons & Help", preview_root)
+        button_layout = QHBoxLayout(button_box)
+        button_layout.setContentsMargins(14, 18, 14, 14)
+        button_layout.setSpacing(10)
+        normal_btn = QPushButton("Primary Action", button_box)
+        tool_btn = QToolButton(button_box)
+        tool_btn.setText("Checked")
+        tool_btn.setCheckable(True)
+        tool_btn.setChecked(True)
+        disabled_btn = QPushButton("Disabled", button_box)
+        disabled_btn.setEnabled(False)
+        help_btn = _create_round_help_button(self, "theme-settings")
+        help_btn.setParent(button_box)
+        help_btn.setToolTip("Round help button preview")
+        button_layout.addWidget(normal_btn)
+        button_layout.addWidget(tool_btn)
+        button_layout.addWidget(disabled_btn)
+        button_layout.addWidget(help_btn)
+        button_layout.addStretch(1)
+        layout.addWidget(button_box)
+
+        editor_box = QGroupBox("Editors & Indicators", preview_root)
+        editor_grid = QGridLayout(editor_box)
+        self._configure_grid(editor_grid)
+        preview_line_edit = QLineEdit("Focused line edit", editor_box)
+        preview_line_edit.setPlaceholderText("Placeholder preview")
+        preview_combo = FocusWheelComboBox(editor_box)
+        preview_combo.addItems(["Global", "Europe", "United States"])
+        preview_combo.setCurrentIndex(1)
+        preview_spin = FocusWheelSpinBox(editor_box)
+        preview_spin.setRange(0, 100)
+        preview_spin.setValue(42)
+        disabled_edit = QLineEdit("Disabled", editor_box)
+        disabled_edit.setEnabled(False)
+        preview_check = QCheckBox("Checked checkbox", editor_box)
+        preview_check.setChecked(True)
+        preview_radio = QRadioButton("Radio option", editor_box)
+        preview_radio.setChecked(True)
+        editor_grid.addWidget(self._make_label("Line Edit"), 0, 0)
+        editor_grid.addWidget(preview_line_edit, 0, 1)
+        editor_grid.addWidget(
+            self._make_hint("Use this field to test focus, placeholder, and border styling."), 0, 2
+        )
+        editor_grid.addWidget(self._make_label("Combo Box"), 1, 0)
+        editor_grid.addWidget(preview_combo, 1, 1)
+        editor_grid.addWidget(
+            self._make_hint("Dropdowns inherit the same input palette and focus rules."), 1, 2
+        )
+        editor_grid.addWidget(self._make_label("Spin Box"), 2, 0)
+        editor_grid.addWidget(preview_spin, 2, 1)
+        editor_grid.addWidget(
+            self._make_hint(
+                "Numeric editors preview the same QAbstractSpinBox chrome used elsewhere."
+            ),
+            2,
+            2,
+        )
+        editor_grid.addWidget(self._make_label("Disabled"), 3, 0)
+        editor_grid.addWidget(disabled_edit, 3, 1)
+        editor_grid.addWidget(
+            self._make_hint(
+                "Disabled fields preview their own background, text, and border settings."
+            ),
+            3,
+            2,
+        )
+        indicator_row = QWidget(editor_box)
+        indicator_layout = QHBoxLayout(indicator_row)
+        indicator_layout.setContentsMargins(0, 0, 0, 0)
+        indicator_layout.setSpacing(12)
+        indicator_layout.addWidget(preview_check)
+        indicator_layout.addWidget(preview_radio)
+        indicator_disabled = QCheckBox("Disabled", indicator_row)
+        indicator_disabled.setEnabled(False)
+        indicator_layout.addWidget(indicator_disabled)
+        indicator_layout.addStretch(1)
+        editor_grid.addWidget(self._make_label("Indicators"), 4, 0)
+        editor_grid.addWidget(indicator_row, 4, 1)
+        editor_grid.addWidget(
+            self._make_hint(
+                "Checkboxes and radio buttons use the indicator palette and size controls."
+            ),
+            4,
+            2,
+        )
+        layout.addWidget(editor_box)
+
+        note_box = QGroupBox("Support Text & Overlay", preview_root)
+        note_layout = QVBoxLayout(note_box)
+        note_layout.setContentsMargins(14, 18, 14, 14)
+        note_layout.setSpacing(8)
+        hint = QLabel(
+            "Hint text stays softer than primary labels and is used throughout the app for instructions.",
+            note_box,
+        )
+        hint.setProperty("role", "hint")
+        hint.setWordWrap(True)
+        note_layout.addWidget(hint)
+        overlay = QLabel("Overlay hint example", note_box)
+        overlay.setProperty("role", "overlayHint")
+        overlay.setAlignment(Qt.AlignCenter)
+        note_layout.addWidget(overlay, 0, Qt.AlignLeft)
+        layout.addWidget(note_box)
+        layout.addStretch(1)
+
+        page_layout.addWidget(self._wrap_tab_page(preview_root), 1)
+        self._theme_preview_roots.append(preview_root)
+        preview_line_edit.setFocus(Qt.OtherFocusReason)
+        return page
+
+    def _build_theme_preview_data_page(self) -> QWidget:
+        page = QWidget(self)
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.setSpacing(0)
+
+        preview_root = QWidget(page)
+        preview_root.setObjectName("themePreviewDataRoot")
+        preview_root.setProperty("role", "panel")
+        layout = QVBoxLayout(preview_root)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(12)
+
+        menu_box = QGroupBox("Navigation Preview", preview_root)
+        menu_layout = QVBoxLayout(menu_box)
+        menu_layout.setContentsMargins(14, 18, 14, 14)
+        menu_layout.setSpacing(8)
+        preview_menu_bar = QMenuBar(menu_box)
+        preview_file_menu = preview_menu_bar.addMenu("File")
+        preview_file_menu.addAction("New")
+        preview_file_menu.addAction("Open")
+        preview_view_menu = preview_menu_bar.addMenu("View")
+        preview_view_menu.addAction("Theme")
+        menu_layout.addWidget(preview_menu_bar)
+        preview_tabs = QTabWidget(menu_box)
+        preview_tabs.setDocumentMode(True)
+        preview_tabs.addTab(QLabel("Selected tab content", preview_tabs), "Selected")
+        preview_tabs.addTab(QLabel("Inactive tab content", preview_tabs), "Other Tab")
+        menu_layout.addWidget(preview_tabs)
+        layout.addWidget(menu_box)
+
+        data_box = QGroupBox("Tables, Lists & Progress", preview_root)
+        data_layout = QVBoxLayout(data_box)
+        data_layout.setContentsMargins(14, 18, 14, 14)
+        data_layout.setSpacing(10)
+        preview_table = QTableWidget(3, 3, data_box)
+        preview_table.setAlternatingRowColors(True)
+        preview_table.setHorizontalHeaderLabels(["ID", "Title", "Status"])
+        preview_table.verticalHeader().setVisible(False)
+        preview_table.setItem(0, 0, QTableWidgetItem("1"))
+        preview_table.setItem(0, 1, QTableWidgetItem("Orbit"))
+        preview_table.setItem(0, 2, QTableWidgetItem("Active"))
+        preview_table.setItem(1, 0, QTableWidgetItem("2"))
+        preview_table.setItem(1, 1, QTableWidgetItem("Subconscious"))
+        preview_table.setItem(1, 2, QTableWidgetItem("Pending"))
+        preview_table.setItem(2, 0, QTableWidgetItem("3"))
+        preview_table.setItem(2, 1, QTableWidgetItem("Guided Drift"))
+        preview_table.setItem(2, 2, QTableWidgetItem("Archived"))
+        preview_table.selectRow(1)
+        preview_table.setMinimumHeight(170)
+        data_layout.addWidget(preview_table)
+        list_row = QWidget(data_box)
+        list_row_layout = QHBoxLayout(list_row)
+        list_row_layout.setContentsMargins(0, 0, 0, 0)
+        list_row_layout.setSpacing(10)
+        preview_list = QListWidget(list_row)
+        preview_list.addItems(["Saved Theme", "Catalog Search", "History Snapshot"])
+        preview_list.setCurrentRow(0)
+        preview_list.setMinimumHeight(120)
+        browser = QTextBrowser(list_row)
+        browser.setPlainText(
+            "Text browsers and previews inherit the input palette, border geometry, and selection styling."
+        )
+        browser.setMinimumHeight(120)
+        list_row_layout.addWidget(preview_list, 1)
+        list_row_layout.addWidget(browser, 1)
+        data_layout.addWidget(list_row)
+        progress = QProgressBar(data_box)
+        progress.setRange(0, 100)
+        progress.setValue(68)
+        data_layout.addWidget(progress)
+        layout.addWidget(data_box)
+        layout.addStretch(1)
+
+        page_layout.addWidget(self._wrap_tab_page(preview_root), 1)
+        self._theme_preview_roots.append(preview_root)
+        return page
+
+    def _queue_theme_preview_update(self, *_args) -> None:
+        if not self._theme_change_tracking_enabled:
+            return
+        self._theme_preview_timer.start()
+
+    def _refresh_theme_previews(self) -> None:
+        try:
+            theme_values = self._theme_value_payload()
+        except Exception:
+            return
+        stylesheet = build_app_theme_stylesheet(theme_values)
+        for widget in getattr(self, "_theme_preview_roots", []):
+            widget.setStyleSheet(stylesheet)
+            _repolish_qss_widget_tree(widget)
+        effective = build_effective_theme_settings(theme_values)
+        self.theme_preview_status_label.setText(
+            "Previewing "
+            + (
+                f"saved theme '{self._current_theme_preset_name()}'"
+                if self._current_theme_preset_name()
+                else "the current custom draft"
+            )
+            + f" with {len(self._theme_color_edits)} color slots and {len(self._theme_metric_spins)} geometry/typography controls."
+        )
+        if self.theme_live_preview_check.isChecked():
+            self._apply_live_theme_preview(theme_values)
+        elif hasattr(self, "theme_preview_status_label"):
+            self.theme_preview_status_label.setText(
+                self.theme_preview_status_label.text()
+                + " Turn on Live Preview to apply the draft to the whole running app while you edit."
+            )
+
+    def _apply_live_theme_preview(self, values: dict[str, object]) -> None:
+        owner = self.parent()
+        if owner is not None and callable(getattr(owner, "_apply_theme", None)):
+            owner._apply_theme(values)
+
+    def _restore_original_application_theme(self) -> None:
+        owner = self.parent()
+        if owner is not None and callable(getattr(owner, "_apply_theme", None)):
+            owner._apply_theme(self._theme_original_values)
+
+    def _handle_theme_live_preview_toggled(self, checked: bool) -> None:
+        if checked:
+            self._refresh_theme_previews()
+        else:
+            self._restore_original_application_theme()
+
+    def _handle_theme_dialog_finished(self, result: int) -> None:
+        self._theme_preview_timer.stop()
+        if result != QDialog.Accepted:
+            self._restore_original_application_theme()
 
     def _create_gs1_default_combo(self, *, initial_text: str, placeholder: str) -> QComboBox:
         combo = FocusWheelComboBox(self)
@@ -1486,15 +1880,25 @@ class ApplicationSettingsDialog(QDialog):
 
     def _bind_theme_field_change_tracking(self) -> None:
         self.theme_font_family_combo.currentFontChanged.connect(self._mark_theme_selection_custom)
-        self.theme_font_size_spin.valueChanged.connect(self._mark_theme_selection_custom)
         self.theme_auto_contrast_check.toggled.connect(self._mark_theme_selection_custom)
+        self.theme_live_preview_check.toggled.connect(self._handle_theme_live_preview_toggled)
         self.theme_custom_qss_edit.textChanged.connect(self._mark_theme_selection_custom)
         for edit in self._theme_color_edits.values():
             edit.textChanged.connect(self._mark_theme_selection_custom)
+            edit.textChanged.connect(self._queue_theme_preview_update)
+        for spin in self._theme_metric_spins.values():
+            spin.valueChanged.connect(self._mark_theme_selection_custom)
+            spin.valueChanged.connect(self._queue_theme_preview_update)
+        self.theme_font_family_combo.currentFontChanged.connect(self._queue_theme_preview_update)
+        self.theme_auto_contrast_check.toggled.connect(self._queue_theme_preview_update)
+        self.theme_custom_qss_edit.textChanged.connect(self._queue_theme_preview_update)
         self.theme_preset_combo.currentIndexChanged.connect(self._update_theme_preset_actions)
         self.theme_load_button.clicked.connect(self._load_selected_theme_preset)
         self.theme_save_button.clicked.connect(self._save_current_theme_preset)
         self.theme_delete_button.clicked.connect(self._delete_selected_theme_preset)
+        self.theme_import_button.clicked.connect(self._import_theme_from_file)
+        self.theme_export_button.clicked.connect(self._export_theme_to_file)
+        self.theme_reset_button.clicked.connect(self._reset_theme_to_defaults)
 
     def _collect_qss_reference_entries(self) -> list[QssReferenceEntry]:
         app = QApplication.instance()
@@ -1581,13 +1985,14 @@ class ApplicationSettingsDialog(QDialog):
     def _theme_value_payload(self) -> dict[str, object]:
         values = {
             "font_family": self.theme_font_family_combo.currentFont().family().strip(),
-            "font_size": int(self.theme_font_size_spin.value()),
             "auto_contrast_enabled": self.theme_auto_contrast_check.isChecked(),
             "custom_qss": self.theme_custom_qss_edit.toPlainText(),
             "selected_name": self._current_theme_preset_name(),
         }
         for key in self._theme_color_edits:
             values[key] = self._theme_color_edits[key].text().strip()
+        for key, spin in self._theme_metric_spins.items():
+            values[key] = int(spin.value())
         return values
 
     def _apply_theme_values_to_fields(
@@ -1598,19 +2003,23 @@ class ApplicationSettingsDialog(QDialog):
             font_family = str(theme_values.get("font_family") or "").strip()
             if font_family:
                 self.theme_font_family_combo.setCurrentFont(QFont(font_family))
-            self.theme_font_size_spin.setValue(
-                max(8, min(36, int(theme_values.get("font_size") or 10)))
-            )
             self.theme_auto_contrast_check.setChecked(
                 bool(theme_values.get("auto_contrast_enabled", True))
             )
             self.theme_custom_qss_edit.setPlainText(str(theme_values.get("custom_qss") or ""))
             for key, edit in self._theme_color_edits.items():
                 edit.setText(str(theme_values.get(key) or "").strip())
+            for key, spin in self._theme_metric_spins.items():
+                try:
+                    value = int(theme_values.get(key) or spin.value())
+                except Exception:
+                    value = spin.value()
+                spin.setValue(max(spin.minimum(), min(spin.maximum(), value)))
             self._set_theme_preset_selection(selected_name)
         finally:
             self._theme_change_tracking_enabled = True
         self._update_theme_preset_actions()
+        self._refresh_theme_previews()
 
     def _refresh_theme_preset_combo(self) -> None:
         current_name = self._current_theme_preset_name()
@@ -1703,6 +2112,83 @@ class ApplicationSettingsDialog(QDialog):
         self._refresh_theme_preset_combo()
         self._set_theme_preset_selection("")
 
+    def _import_theme_from_file(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Theme",
+            str(Path.home()),
+            "Theme JSON (*.json)",
+        )
+        if not path:
+            return
+        try:
+            payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        except Exception as exc:
+            QMessageBox.warning(self, "Import Theme", f"Could not read theme file:\n{exc}")
+            return
+
+        theme_values = payload.get("theme") if isinstance(payload, dict) else None
+        if not isinstance(theme_values, dict):
+            theme_values = payload if isinstance(payload, dict) else None
+        if not isinstance(theme_values, dict):
+            QMessageBox.warning(
+                self,
+                "Import Theme",
+                "The selected file does not contain a valid theme payload.",
+            )
+            return
+        imported_name = ""
+        if isinstance(payload, dict):
+            imported_name = str(payload.get("name") or "").strip()
+        self._apply_theme_values_to_fields(theme_values, selected_name="")
+        self._set_theme_preset_selection("")
+        if imported_name:
+            self.theme_preview_status_label.setText(
+                f"Imported theme draft '{imported_name}'. Save it to the library if you want to keep it as a preset."
+            )
+
+    def _export_theme_to_file(self) -> None:
+        suggested_name = self._current_theme_preset_name() or "custom-theme"
+        safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", suggested_name.strip()) or "custom-theme"
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Theme",
+            str(Path.home() / f"{safe_name}.json"),
+            "Theme JSON (*.json)",
+        )
+        if not path:
+            return
+        payload = {
+            "schema": "isrc-manager-theme",
+            "version": 2,
+            "name": self._current_theme_preset_name() or "Custom Theme",
+            "theme": {
+                **normalize_app_theme_settings(self._theme_value_payload()),
+                "selected_name": "",
+            },
+        }
+        try:
+            Path(path).write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        except Exception as exc:
+            QMessageBox.warning(self, "Export Theme", f"Could not save theme file:\n{exc}")
+            return
+        QMessageBox.information(self, "Export Theme", f"Saved theme to:\n{path}")
+
+    def _reset_theme_to_defaults(self) -> None:
+        answer = QMessageBox.question(
+            self,
+            "Reset Theme",
+            "Reset the current theme draft back to the built-in defaults?\n\nThis does not remove any saved presets.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        defaults = default_theme_settings()
+        defaults["selected_name"] = ""
+        self._apply_theme_values_to_fields(defaults, selected_name="")
+        self._set_theme_preset_selection("")
+
     def _sync_color_swatch(self, key: str) -> None:
         edit = self._theme_color_edits[key]
         swatch = self._theme_color_swatches[key]
@@ -1711,8 +2197,8 @@ class ApplicationSettingsDialog(QDialog):
         if not color_text:
             palette.setColor(QPalette.Window, QColor("#d1d5db"))
             palette.setColor(QPalette.WindowText, QColor("#111827"))
-            swatch.setText("D")
-            swatch.setToolTip("Using the default theme color for this slot.")
+            swatch.setText("A")
+            swatch.setToolTip("Using the automatic derived/default color for this slot.")
         else:
             color = QColor(color_text)
             if color.isValid():
@@ -4762,52 +5248,23 @@ class App(QMainWindow):
 
     @staticmethod
     def _theme_setting_defaults() -> dict[str, object]:
-        app = QApplication.instance()
-        palette = app.palette() if app is not None else QApplication.palette()
-        font = app.font() if app is not None else QFont()
-        return {
-            "font_family": font.family(),
-            "font_size": max(8, int(font.pointSize() or 10)),
-            "auto_contrast_enabled": True,
-            "window_bg": palette.color(QPalette.Window).name().upper(),
-            "window_fg": palette.color(QPalette.WindowText).name().upper(),
-            "accent": palette.color(QPalette.Highlight).name().upper(),
-            "selection_bg": palette.color(QPalette.Highlight).name().upper(),
-            "selection_fg": palette.color(QPalette.HighlightedText).name().upper(),
-            "button_bg": palette.color(QPalette.Button).name().upper(),
-            "button_fg": palette.color(QPalette.ButtonText).name().upper(),
-            "input_bg": palette.color(QPalette.Base).name().upper(),
-            "input_fg": palette.color(QPalette.Text).name().upper(),
-            "table_bg": palette.color(QPalette.Base).name().upper(),
-            "table_fg": palette.color(QPalette.Text).name().upper(),
-            "selected_name": "",
-            "custom_qss": "",
-        }
+        return default_theme_settings()
 
     @classmethod
     def _theme_setting_keys(cls) -> tuple[str, ...]:
-        return tuple(cls._theme_setting_defaults().keys())
+        return app_theme_setting_keys()
 
     @staticmethod
     def _normalize_theme_string(value) -> str:
-        return str(value or "").strip()
+        return normalize_app_theme_string(value)
 
     @classmethod
     def _normalize_theme_font_family(cls, value, fallback) -> str:
-        text = cls._normalize_theme_string(value)
-        if text in {"-apple-system", "BlinkMacSystemFont", "system-ui"}:
-            return str(fallback)
-        return text or str(fallback)
+        return normalize_app_theme_font_family(value, fallback)
 
     @staticmethod
     def _normalize_theme_color(value) -> str:
-        text = str(value or "").strip()
-        if not text:
-            return ""
-        color = QColor(text)
-        if not color.isValid():
-            return ""
-        return color.name().upper()
+        return normalize_app_theme_color(value)
 
     def _load_theme_settings(self) -> dict[str, object]:
         defaults = self._theme_setting_defaults()
@@ -4827,27 +5284,7 @@ class App(QMainWindow):
         return self._normalize_theme_settings(loaded)
 
     def _normalize_theme_settings(self, values: dict[str, object] | None) -> dict[str, object]:
-        defaults = self._theme_setting_defaults()
-        source = dict(values or {})
-        normalized: dict[str, object] = {}
-        for key, default in defaults.items():
-            value = source.get(key, default)
-            if isinstance(default, bool):
-                normalized[key] = bool(value)
-            elif isinstance(default, int):
-                try:
-                    normalized[key] = max(8, min(36, int(value)))
-                except Exception:
-                    normalized[key] = int(default)
-            elif key == "custom_qss":
-                normalized[key] = str(value or "")
-            elif key == "selected_name":
-                normalized[key] = self._normalize_theme_string(value)
-            elif key == "font_family":
-                normalized[key] = self._normalize_theme_font_family(value, default)
-            else:
-                normalized[key] = self._normalize_theme_color(value)
-        return normalized
+        return normalize_app_theme_settings(values)
 
     def _stored_theme_payload(self, values: dict[str, object] | None) -> dict[str, object]:
         payload = self._normalize_theme_settings(values)
@@ -4885,69 +5322,24 @@ class App(QMainWindow):
 
     @staticmethod
     def _color_relative_luminance(color_value: str) -> float:
-        color = QColor(color_value)
-        if not color.isValid():
-            return 0.0
-
-        def _channel(value: float) -> float:
-            if value <= 0.03928:
-                return value / 12.92
-            return ((value + 0.055) / 1.055) ** 2.4
-
-        red = _channel(color.redF())
-        green = _channel(color.greenF())
-        blue = _channel(color.blueF())
-        return (0.2126 * red) + (0.7152 * green) + (0.0722 * blue)
+        return theme_color_relative_luminance(color_value)
 
     @classmethod
     def _contrast_ratio(cls, fg_value: str, bg_value: str) -> float:
-        fg_l = cls._color_relative_luminance(fg_value)
-        bg_l = cls._color_relative_luminance(bg_value)
-        lighter = max(fg_l, bg_l)
-        darker = min(fg_l, bg_l)
-        return (lighter + 0.05) / (darker + 0.05)
+        return theme_contrast_ratio(fg_value, bg_value)
 
     @classmethod
     def _pick_contrasting_color(cls, bg_value: str) -> str:
-        black = "#111827"
-        white = "#F9FAFB"
-        if cls._contrast_ratio(black, bg_value) >= cls._contrast_ratio(white, bg_value):
-            return black
-        return white
+        return pick_theme_contrasting_color(bg_value)
 
     @staticmethod
     def _shift_color(color_value: str, factor: int) -> str:
-        color = QColor(color_value)
-        if not color.isValid():
-            return color_value
-        shifted = color.lighter(factor) if factor >= 100 else color.darker(max(1, 200 - factor))
-        return shifted.name().upper()
+        return shift_theme_color(color_value, factor)
 
     def _effective_theme_settings(
         self, raw_values: dict[str, object] | None = None
     ) -> dict[str, object]:
-        defaults = self._theme_setting_defaults()
-        normalized = self._normalize_theme_settings(raw_values or self.theme_settings)
-        effective: dict[str, object] = dict(defaults)
-        for key, value in normalized.items():
-            if isinstance(value, str):
-                effective[key] = value or defaults[key]
-            else:
-                effective[key] = value
-
-        if effective.get("auto_contrast_enabled", True):
-            for bg_key, fg_key in (
-                ("window_bg", "window_fg"),
-                ("button_bg", "button_fg"),
-                ("input_bg", "input_fg"),
-                ("table_bg", "table_fg"),
-                ("selection_bg", "selection_fg"),
-            ):
-                background = str(effective.get(bg_key) or defaults[bg_key])
-                foreground = str(effective.get(fg_key) or defaults[fg_key])
-                if self._contrast_ratio(foreground, background) < 4.5:
-                    effective[fg_key] = self._pick_contrasting_color(background)
-        return effective
+        return build_effective_theme_settings(raw_values or self.theme_settings)
 
     def _save_theme_settings(self, values: dict[str, object]) -> dict[str, object]:
         normalized = self._normalize_theme_settings(values)
@@ -4961,137 +5353,7 @@ class App(QMainWindow):
         return str((self.theme_settings or {}).get("custom_qss") or "")
 
     def _build_theme_stylesheet(self, raw_values: dict[str, object] | None = None) -> str:
-        theme = self._effective_theme_settings(raw_values)
-        window_bg = str(theme["window_bg"])
-        window_fg = str(theme["window_fg"])
-        accent = str(theme["accent"])
-        selection_bg = str(theme["selection_bg"])
-        selection_fg = str(theme["selection_fg"])
-        button_bg = str(theme["button_bg"])
-        button_fg = str(theme["button_fg"])
-        input_bg = str(theme["input_bg"])
-        input_fg = str(theme["input_fg"])
-        table_bg = str(theme["table_bg"])
-        table_fg = str(theme["table_fg"])
-
-        border_color = self._shift_color(
-            window_bg, 88 if QColor(window_bg).lightnessF() >= 0.5 else 118
-        )
-        panel_bg = self._shift_color(window_bg, 104 if QColor(window_bg).lightnessF() < 0.5 else 98)
-        button_border = self._shift_color(
-            button_bg, 86 if QColor(button_bg).lightnessF() >= 0.5 else 118
-        )
-        input_border = self._shift_color(
-            input_bg, 86 if QColor(input_bg).lightnessF() >= 0.5 else 118
-        )
-        header_bg = self._shift_color(
-            window_bg, 108 if QColor(window_bg).lightnessF() < 0.5 else 92
-        )
-        secondary_text = self._shift_color(
-            window_fg, 140 if QColor(window_fg).lightnessF() < 0.5 else 72
-        )
-        accent_text = self._pick_contrasting_color(accent)
-        selection_text = str(selection_fg)
-        custom_qss = str(theme.get("custom_qss") or "").strip()
-        font_family_css = str(theme["font_family"]).replace('"', '\\"')
-
-        stylesheet = f"""
-        QWidget {{
-            color: {window_fg};
-            font-family: "{font_family_css}";
-            font-size: {int(theme['font_size'])}pt;
-        }}
-        QMainWindow, QDialog, QWidget#dockPlaceholder, QMenuBar, QMenu, QToolBar, QDockWidget, QGroupBox, QScrollArea, QWidget[role="panel"] {{
-            background-color: {window_bg};
-            color: {window_fg};
-        }}
-        QMenuBar {{
-            border-bottom: 1px solid {border_color};
-        }}
-        QMenuBar::item:selected, QMenu::item:selected, QTabBar::tab:selected, QToolButton:checked, QPushButton:pressed {{
-            background-color: {accent};
-            color: {accent_text};
-        }}
-        QMenu {{
-            border: 1px solid {border_color};
-        }}
-        QGroupBox {{
-            border: 1px solid {border_color};
-            border-radius: 8px;
-            margin-top: 12px;
-            padding-top: 10px;
-            background-color: {panel_bg};
-        }}
-        QDockWidget {{
-            border: 1px solid {border_color};
-        }}
-        QDockWidget::title, QHeaderView::section {{
-            background-color: {header_bg};
-            color: {window_fg};
-            padding: 6px 8px;
-            border: 1px solid {border_color};
-        }}
-        QPushButton, QToolButton, QDialogButtonBox QPushButton {{
-            background-color: {button_bg};
-            color: {button_fg};
-            border: 1px solid {button_border};
-            border-radius: 6px;
-            padding: 6px 12px;
-        }}
-        QToolButton[role="helpButton"] {{
-            min-width: 28px;
-            max-width: 28px;
-            min-height: 28px;
-            max-height: 28px;
-            border-radius: 14px;
-            padding: 0;
-            font-weight: 700;
-            background-color: {accent};
-            color: {accent_text};
-            border: 1px solid {button_border};
-        }}
-        QPushButton:hover, QToolButton:hover {{
-            border-color: {accent};
-        }}
-        QLineEdit, QPlainTextEdit, QTextBrowser, QComboBox, QSpinBox, QListWidget, QListView, QTableWidget, QTableView, QCalendarWidget QWidget {{
-            background-color: {input_bg};
-            color: {input_fg};
-            selection-background-color: {selection_bg};
-            selection-color: {selection_text};
-        }}
-        QLineEdit, QPlainTextEdit, QTextBrowser, QComboBox, QSpinBox, QCalendarWidget, QListWidget, QListView, QTableWidget, QTableView {{
-            border: 1px solid {input_border};
-            border-radius: 6px;
-            padding: 4px 6px;
-        }}
-        QTableWidget, QTableView, QListWidget, QListView {{
-            background-color: {table_bg};
-            color: {table_fg};
-            alternate-background-color: {self._shift_color(table_bg, 104 if QColor(table_bg).lightnessF() < 0.5 else 97)};
-            gridline-color: {border_color};
-        }}
-        QAbstractItemView {{
-            selection-background-color: {selection_bg};
-            selection-color: {selection_text};
-        }}
-        QLabel[role="hint"], QLabel[role="secondary"], QLabel[role="sectionHelp"], QLabel[role="themeNote"] {{
-            color: {secondary_text};
-        }}
-        QLabel[role="sectionTitle"] {{
-            font-size: {int(theme['font_size']) + 3}pt;
-            font-weight: 700;
-        }}
-        QLabel[role="overlayHint"] {{
-            background-color: rgba(0, 0, 0, 0.75);
-            color: #FFFFFF;
-            padding: 4px 8px;
-            border-radius: 6px;
-            font-size: 11px;
-        }}
-        """
-        if custom_qss:
-            stylesheet = f"{stylesheet}\n\n/* Advanced QSS */\n{custom_qss}\n"
-        return stylesheet
+        return build_app_theme_stylesheet(raw_values or self.theme_settings)
 
     def _apply_theme(self, raw_values: dict[str, object] | None = None) -> None:
         app = QApplication.instance()
