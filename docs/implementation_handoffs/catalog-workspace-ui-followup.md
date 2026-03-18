@@ -1,5 +1,7 @@
 # Catalog Workspace UI Follow-Up Handoff
 
+Current product version: `2.0.0`
+
 Date: 2026-03-18
 
 ## Status
@@ -358,4 +360,3 @@ Observed result:
 - add ribbon-button preview and export/import coverage if button tokenization is introduced
 - add more anchor-behavior tests for combinations involving floating workspace docks and visible Add Data docks
 - add any new scroll-reachability tests only for windows that are actually wrapped, not speculative future wrappers
-

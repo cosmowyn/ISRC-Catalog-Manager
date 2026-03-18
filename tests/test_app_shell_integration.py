@@ -85,6 +85,30 @@ class AppShellIntegrationTests(unittest.TestCase):
         path.mkdir(parents=True, exist_ok=True)
         return str(path)
 
+    def _drain_events(self, cycles: int = 4) -> None:
+        for _ in range(cycles):
+            self.app.processEvents()
+
+    def _close_window(self) -> str:
+        window = getattr(self, "window", None)
+        if window is None:
+            return ""
+        settings_path = window.settings.fileName()
+        window.close()
+        self._drain_events()
+        window._close_database_connection()
+        window.deleteLater()
+        self._drain_events()
+        self.window = None
+        return settings_path
+
+    def _reopen_window(self):
+        self._close_window()
+        self.window = app_module.App()
+        self.window.show()
+        self._drain_events()
+        return self.window
+
     def _create_profile_database(self, path: Path) -> None:
         session = DatabaseSessionService().open(path)
         try:
@@ -884,6 +908,113 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.assertTrue(self.window.work_manager_dock.isVisible())
         self.assertTrue(self.window.global_search_dock.isVisible())
         self.assertTrue(self.window.catalog_managers_dock.isVisible())
+
+    def test_workspace_layout_round_trip_restores_tabified_non_floating_docks(self):
+        self.window.open_release_browser()
+        self.window.open_work_manager()
+        self.window.open_global_search()
+        self._drain_events()
+
+        self._reopen_window()
+
+        tabified = set(self.window.tabifiedDockWidgets(self.window.catalog_table_dock))
+        self.assertIn(self.window.release_browser_dock, tabified)
+        self.assertIn(self.window.work_manager_dock, tabified)
+        self.assertIn(self.window.global_search_dock, tabified)
+        self.assertFalse(self.window.release_browser_dock.isFloating())
+        self.assertFalse(self.window.work_manager_dock.isFloating())
+        self.assertFalse(self.window.global_search_dock.isFloating())
+
+    def test_layout_change_persists_latest_arrangement_not_default_arrangement(self):
+        self.assertFalse(self.window.add_data_dock.isVisible())
+        self.window.add_data_action.trigger()
+        self.window.open_release_browser()
+        self._drain_events()
+
+        self.window.addDockWidget(app_module.Qt.LeftDockWidgetArea, self.window.release_browser_dock)
+        self.window.tabifyDockWidget(self.window.add_data_dock, self.window.release_browser_dock)
+        self.window.release_browser_dock.raise_()
+        self._drain_events()
+
+        self._reopen_window()
+
+        self.assertEqual(
+            self.window.dockWidgetArea(self.window.release_browser_dock),
+            app_module.Qt.LeftDockWidgetArea,
+        )
+        self.assertIn(
+            self.window.release_browser_dock,
+            set(self.window.tabifiedDockWidgets(self.window.add_data_dock)),
+        )
+        self.assertNotIn(
+            self.window.release_browser_dock,
+            set(self.window.tabifiedDockWidgets(self.window.catalog_table_dock)),
+        )
+
+    def test_hidden_catalog_table_round_trip_preserves_peer_tab_group(self):
+        self.window.catalog_table_action.trigger()
+        self.window.open_release_browser()
+        self.window.open_work_manager()
+        self.window.open_global_search()
+        self._drain_events()
+
+        self._reopen_window()
+
+        self.assertFalse(self.window.catalog_table_dock.isVisible())
+        peer_tabs = set(self.window.tabifiedDockWidgets(self.window.release_browser_dock))
+        self.assertIn(self.window.work_manager_dock, peer_tabs)
+        self.assertIn(self.window.global_search_dock, peer_tabs)
+        self.assertFalse(self.window.release_browser_dock.isFloating())
+
+    def test_startup_restore_is_not_overwritten_by_post_init_visibility_sync(self):
+        self.window.open_release_browser()
+        self._drain_events()
+
+        settings_path = self._close_window()
+        settings = app_module.QSettings(str(settings_path), app_module.QSettings.IniFormat)
+        settings.setFallbacksEnabled(False)
+        settings.setValue("display/catalog_table_panel", False)
+        settings.sync()
+
+        self.window = app_module.App()
+        self.window.show()
+        self._drain_events()
+
+        self.assertTrue(self.window.catalog_table_dock.isVisible())
+        self.assertIn(
+            self.window.release_browser_dock,
+            set(self.window.tabifiedDockWidgets(self.window.catalog_table_dock)),
+        )
+
+    def test_close_reopen_round_trip_preserves_core_panel_visibility_without_shutdown_corruption(self):
+        self.window.add_data_action.trigger()
+        self._drain_events()
+        self.assertTrue(self.window.add_data_dock.isVisible())
+        self.assertTrue(self.window.catalog_table_dock.isVisible())
+
+        settings_path = self._close_window()
+        settings = app_module.QSettings(str(settings_path), app_module.QSettings.IniFormat)
+        settings.setFallbacksEnabled(False)
+        self.assertTrue(settings.value("display/add_data_panel", False, bool))
+        self.assertTrue(settings.value("display/catalog_table_panel", False, bool))
+
+        self.window = app_module.App()
+        self.window.show()
+        self._drain_events()
+
+        self.assertTrue(self.window.add_data_dock.isVisible())
+        self.assertTrue(self.window.catalog_table_dock.isVisible())
+
+    def test_main_window_geometry_round_trip_restores_non_default_outer_state(self):
+        self.window.showNormal()
+        self.window.resize(1111, 777)
+        self._drain_events()
+
+        self._reopen_window()
+
+        self.assertFalse(self.window.isMaximized())
+        self.assertEqual(self.window.width(), 1111)
+        self.assertEqual(self.window.height(), 777)
 
     def test_license_browser_opens_as_tabified_dock_and_applies_track_filter(self):
         track_id = self._create_track(index=131, title="Licensed Track")

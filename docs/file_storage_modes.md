@@ -1,5 +1,7 @@
 # Attachment Storage Modes
 
+Current product version: `2.0.0`
+
 ISRC Catalog Manager now supports two storage modes for file-backed records across the catalog.
 
 The goal is simple: keep the user-facing workflow consistent while letting teams choose whether files should live inside the profile database or in app-managed local storage.

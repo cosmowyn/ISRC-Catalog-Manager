@@ -5227,6 +5227,14 @@ class App(QMainWindow):
         self._last_auto_snapshot_marker = None
         self._suspend_layout_history = False
         self._suspend_dock_state_sync = False
+        self._is_closing = False
+        self._is_restoring_workspace_layout = False
+        self._workspace_layout_restore_pending = True
+        self._workspace_layout_restore_scheduled = False
+        self._workspace_layout_restore_complete = False
+        self._restored_main_dock_state = False
+        self._dock_state_save_timer = None
+        self._window_geometry_save_timer = None
         self._header_layout_signals_bound = False
         self._col_hint_signal_bound = False
         self._row_hint_signal_bound = False
@@ -5263,8 +5271,12 @@ class App(QMainWindow):
             movable = False
 
         build_main_window_shell(self, last_db=last_db, movable=bool(movable))
+        self.tabifiedDockWidgetActivated.connect(
+            lambda *_args: self._schedule_main_dock_state_save()
+        )
+        self._ensure_persistent_workspace_dock_shells()
 
-        self._apply_saved_view_preferences()
+        self._apply_saved_view_preferences(apply_workspace_panel_visibility=False)
 
         self._update_add_data_generated_fields()
         self.resize(1280, 800)
@@ -5288,6 +5300,9 @@ class App(QMainWindow):
             )
             e.ignore()
             return
+        self._is_closing = True
+        self._save_main_window_geometry(sync=False)
+        self._store_workspace_panel_visibility_preferences(sync=False)
         self._save_main_dock_state(sync=False)
         self.settings.sync()
         self.logger.info("Settings synced to disk")
@@ -5413,7 +5428,7 @@ class App(QMainWindow):
                 continue
             except Exception:
                 break
-        return "1.0.0"
+        return "2.0.0"
 
     def _help_html(self) -> str:
         return render_help_html(
@@ -6442,18 +6457,37 @@ class App(QMainWindow):
             self._top_chrome_boundary_timer = timer
         timer.start(0)
 
+    def event(self, event):
+        if event.type() == QEvent.LayoutRequest:
+            self._schedule_main_dock_state_save()
+        return super().event(event)
+
     def showEvent(self, event):
         super().showEvent(event)
         self._queue_top_chrome_boundary_refresh()
+        if (
+            self._workspace_layout_restore_pending
+            and not self._workspace_layout_restore_scheduled
+        ):
+            self._workspace_layout_restore_pending = False
+            self._workspace_layout_restore_scheduled = True
+            QTimer.singleShot(0, self._restore_workspace_layout_on_first_show)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._queue_top_chrome_boundary_refresh()
+        self._schedule_main_window_geometry_save()
+
+    def moveEvent(self, event):
+        super().moveEvent(event)
+        self._schedule_main_window_geometry_save()
 
     def changeEvent(self, event):
         super().changeEvent(event)
         if event.type() in (QEvent.WindowStateChange, QEvent.ActivationChange):
             self._queue_top_chrome_boundary_refresh()
+        if event.type() == QEvent.WindowStateChange:
+            self._schedule_main_window_geometry_save()
 
     @staticmethod
     def _root_object_name(widget: QWidget) -> str:
@@ -7732,6 +7766,45 @@ class App(QMainWindow):
     def _dock_state_setting_key() -> str:
         return "display/main_window_dock_state"
 
+    @staticmethod
+    def _window_geometry_setting_key() -> str:
+        return "display/main_window_geometry"
+
+    @staticmethod
+    def _window_state_setting_key() -> str:
+        return "display/main_window_window_state"
+
+    def _schedule_main_dock_state_save(self) -> None:
+        if (
+            getattr(self, "_suspend_dock_state_sync", False)
+            or getattr(self, "_is_restoring_workspace_layout", False)
+            or getattr(self, "_is_closing", False)
+            or not getattr(self, "_workspace_layout_restore_complete", False)
+        ):
+            return
+        timer = getattr(self, "_dock_state_save_timer", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self._save_main_dock_state)
+            self._dock_state_save_timer = timer
+        timer.start(75)
+
+    def _schedule_main_window_geometry_save(self) -> None:
+        if (
+            getattr(self, "_is_restoring_workspace_layout", False)
+            or getattr(self, "_is_closing", False)
+            or not getattr(self, "_workspace_layout_restore_complete", False)
+        ):
+            return
+        timer = getattr(self, "_window_geometry_save_timer", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self._save_main_window_geometry)
+            self._window_geometry_save_timer = timer
+        timer.start(75)
+
     def _save_main_dock_state(self, *, sync: bool = True) -> None:
         if getattr(self, "_suspend_dock_state_sync", False):
             return
@@ -7742,29 +7815,113 @@ class App(QMainWindow):
         except Exception as e:
             self.logger.warning("Failed to save dock state: %s", e)
 
-    def _restore_main_dock_state(self) -> None:
+    def _restore_main_dock_state(self) -> bool:
         try:
             state = self.settings.value(self._dock_state_setting_key(), None, QByteArray)
         except Exception:
             state = None
         if not isinstance(state, QByteArray) or state.isEmpty():
-            return
+            return False
         previous_suspend_state = self._suspend_dock_state_sync
         self._suspend_dock_state_sync = True
+        restored = False
         try:
-            self.restoreState(state, 1)
+            restored = bool(self.restoreState(state, 1))
+            if not restored:
+                self.logger.warning("Qt rejected the saved dock state; keeping the default layout")
         except Exception as e:
             self.logger.warning("Failed to restore dock state: %s", e)
         finally:
             self._suspend_dock_state_sync = previous_suspend_state
+        return restored
+
+    def _save_main_window_geometry(self, *, sync: bool = True) -> None:
+        try:
+            self.settings.setValue(self._window_geometry_setting_key(), self.saveGeometry())
+            self.settings.setValue(
+                self._window_state_setting_key(),
+                self._current_main_window_state_marker(),
+            )
+            if sync:
+                self.settings.sync()
+        except Exception as e:
+            self.logger.warning("Failed to save main window geometry: %s", e)
+
+    def _restore_main_window_geometry(self) -> bool:
+        try:
+            geometry = self.settings.value(self._window_geometry_setting_key(), None, QByteArray)
+        except Exception:
+            geometry = None
+        try:
+            window_state_marker = self.settings.value(self._window_state_setting_key(), "", str)
+        except Exception:
+            window_state_marker = ""
+
+        has_geometry = isinstance(geometry, QByteArray) and not geometry.isEmpty()
+        marker = str(window_state_marker or "").strip().lower()
+        if not has_geometry and marker not in {"normal", "maximized", "fullscreen"}:
+            return False
+
+        restored = False
+        if has_geometry:
+            try:
+                restored = bool(self.restoreGeometry(geometry))
+            except Exception as e:
+                self.logger.warning("Failed to restore main window geometry: %s", e)
+
+        if marker == "fullscreen":
+            self.showFullScreen()
+            return True
+        if marker == "maximized":
+            self.showMaximized()
+            return True
+        if marker == "normal":
+            self.showNormal()
+            return True
+        return restored
+
+    def _current_main_window_state_marker(self) -> str:
+        window_state = self.windowState()
+        if window_state & Qt.WindowFullScreen:
+            return "fullscreen"
+        if window_state & Qt.WindowMaximized:
+            return "maximized"
+        return "normal"
+
+    def _store_workspace_panel_visibility_preferences(self, *, sync: bool = True) -> None:
+        try:
+            add_data_enabled = bool(
+                isinstance(getattr(self, "add_data_dock", None), QDockWidget)
+                and self.add_data_dock.isVisible()
+            )
+            catalog_table_enabled = bool(
+                isinstance(getattr(self, "catalog_table_dock", None), QDockWidget)
+                and self.catalog_table_dock.isVisible()
+            )
+            self.settings.setValue("display/add_data_panel", add_data_enabled)
+            self.settings.setValue("display/catalog_table_panel", catalog_table_enabled)
+            self._set_action_checked_silently(self.add_data_action, add_data_enabled)
+            self._set_action_checked_silently(
+                self.catalog_table_action,
+                catalog_table_enabled,
+            )
+            if sync:
+                self.settings.sync()
+        except Exception as e:
+            self.logger.warning("Failed to store workspace panel visibility: %s", e)
 
     def _sync_dock_visibility(self, action: QAction, setting_key: str, visible: bool) -> None:
         self._set_action_checked_silently(action, visible)
-        if getattr(self, "_suspend_dock_state_sync", False):
+        if (
+            getattr(self, "_suspend_dock_state_sync", False)
+            or getattr(self, "_is_restoring_workspace_layout", False)
+            or getattr(self, "_is_closing", False)
+            or not getattr(self, "_workspace_layout_restore_complete", False)
+        ):
             return
         try:
             self.settings.setValue(setting_key, bool(visible))
-            self._save_main_dock_state(sync=False)
+            self._schedule_main_dock_state_save()
             self.settings.sync()
         except Exception as e:
             self.logger.warning("Failed to sync dock visibility for %s: %s", setting_key, e)
@@ -7977,6 +8134,80 @@ class App(QMainWindow):
 
     def _refresh_catalog_workspace_docks(self) -> None:
         refresh_catalog_workspace_docks(self)
+
+    def _ensure_persistent_workspace_dock_shells(self) -> None:
+        previous_suspend_state = self._suspend_dock_state_sync
+        previous_restore_state = self._is_restoring_workspace_layout
+        self._suspend_dock_state_sync = True
+        self._is_restoring_workspace_layout = True
+        try:
+            for ensure_dock in (
+                self._ensure_release_browser_dock,
+                self._ensure_work_manager_dock,
+                self._ensure_global_search_dock,
+                self._ensure_catalog_managers_dock,
+                self._ensure_license_browser_dock,
+                self._ensure_party_manager_dock,
+                self._ensure_contract_manager_dock,
+                self._ensure_rights_matrix_dock,
+                self._ensure_asset_registry_dock,
+            ):
+                ensure_dock()
+        finally:
+            self._is_restoring_workspace_layout = previous_restore_state
+            self._suspend_dock_state_sync = previous_suspend_state
+
+    def _restore_workspace_layout_on_first_show(self) -> None:
+        if getattr(self, "_workspace_layout_restore_complete", False):
+            return
+        self._workspace_layout_restore_scheduled = False
+        previous_suspend_state = self._suspend_dock_state_sync
+        previous_restore_state = self._is_restoring_workspace_layout
+        self._suspend_dock_state_sync = True
+        self._is_restoring_workspace_layout = True
+        restored_dock_state = False
+        try:
+            self._restore_main_window_geometry()
+            restored_dock_state = self._restore_main_dock_state()
+            self._apply_saved_view_preferences(
+                apply_workspace_panel_visibility=not restored_dock_state
+            )
+            self._refresh_workspace_dock_default_placement_flags()
+            self._materialize_visible_workspace_dock_panels()
+        finally:
+            self._restored_main_dock_state = restored_dock_state
+            self._workspace_layout_restore_complete = True
+            self._is_restoring_workspace_layout = previous_restore_state
+            self._suspend_dock_state_sync = previous_suspend_state
+        self._store_workspace_panel_visibility_preferences(sync=False)
+        self._schedule_main_window_geometry_save()
+        self._schedule_main_dock_state_save()
+
+    def _materialize_visible_workspace_dock_panels(self) -> None:
+        registry = getattr(self, "_catalog_workspace_docks", {})
+        for dock in list(registry.values()):
+            if not isinstance(dock, QDockWidget):
+                continue
+            if not dock.isVisible() or getattr(dock, "_panel", None) is not None:
+                continue
+            panel_method = getattr(dock, "panel", None)
+            if callable(panel_method):
+                panel_method()
+            refresh_method = getattr(dock, "refresh_panel", None)
+            if callable(refresh_method):
+                refresh_method()
+
+    def _refresh_workspace_dock_default_placement_flags(self) -> None:
+        registry = getattr(self, "_catalog_workspace_docks", {})
+        for dock in list(registry.values()):
+            if not isinstance(dock, QDockWidget):
+                continue
+            default_area = getattr(dock, "_default_dock_area", Qt.RightDockWidgetArea)
+            has_tab_peers = bool(self.tabifiedDockWidgets(dock))
+            area = self.dockWidgetArea(dock)
+            dock._default_placement_pending = not (
+                dock.isVisible() or has_tab_peers or area != default_area
+            )
 
     @staticmethod
     def _action_shortcut_text(action: QAction | None) -> str:
@@ -8425,7 +8656,7 @@ class App(QMainWindow):
         menu.addAction(self.action_ribbon_visibility_action)
         menu.exec(toolbar.mapToGlobal(pos))
 
-    def _apply_saved_view_preferences(self):
+    def _apply_saved_view_preferences(self, *, apply_workspace_panel_visibility: bool = True):
         previous_suspend_state = self._suspend_layout_history
         self._suspend_layout_history = True
         try:
@@ -8439,6 +8670,14 @@ class App(QMainWindow):
             action_ribbon_visible = self.settings.value("display/action_ribbon_visible", True, bool)
             action_ribbon_ids = self._load_saved_action_ribbon_action_ids()
 
+            if not apply_workspace_panel_visibility:
+                add_data_dock = getattr(self, "add_data_dock", None)
+                catalog_table_dock = getattr(self, "catalog_table_dock", None)
+                if isinstance(add_data_dock, QDockWidget):
+                    add_data_enabled = bool(add_data_dock.isVisible())
+                if isinstance(catalog_table_dock, QDockWidget):
+                    catalog_table_enabled = bool(catalog_table_dock.isVisible())
+
             self._set_action_checked_silently(self.act_reorder_columns, columns_movable)
             self._set_action_checked_silently(self.col_width_action, col_width_enabled)
             self._set_action_checked_silently(self.row_height_action, row_height_enabled)
@@ -8451,8 +8690,9 @@ class App(QMainWindow):
             self._apply_columns_movable_state(columns_movable)
             self._apply_col_width_mode(col_width_enabled)
             self._apply_row_height_mode(row_height_enabled)
-            self._apply_add_data_panel_state(add_data_enabled)
-            self._apply_catalog_table_panel_state(catalog_table_enabled)
+            if apply_workspace_panel_visibility:
+                self._apply_add_data_panel_state(add_data_enabled)
+                self._apply_catalog_table_panel_state(catalog_table_enabled)
             self._apply_action_ribbon_configuration(action_ribbon_ids, action_ribbon_visible)
         finally:
             self._suspend_layout_history = previous_suspend_state

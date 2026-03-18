@@ -1,5 +1,7 @@
 Copyright (c) 2025 M. van de Kleut
 
+Current product version: `2.0.0`
+
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to use,
 copy, modify, merge, publish, and distribute the Software, subject to the

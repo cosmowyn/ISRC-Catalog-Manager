@@ -1,5 +1,7 @@
 # Demo Workspace
 
+Current product version: `2.0.0`
+
 This folder contains the reproducible demo tooling for the repository.
 
 The generated catalog uses only fictional names, codes, artwork, licenses, and media. Nothing in the demo bundle is taken from a real artist, label, or customer profile.

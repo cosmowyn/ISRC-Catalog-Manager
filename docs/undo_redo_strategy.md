@@ -1,5 +1,7 @@
 # Undo, History, and Snapshots
 
+Current product version: `2.0.0`
+
 ISRC Catalog Manager is built for work that should be recoverable.
 
 Catalog maintenance often involves high-consequence operations:

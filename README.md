@@ -1,5 +1,7 @@
 # ISRC Catalog Manager
 
+Current product version: `2.0.0`
+
 ISRC Catalog Manager is a local-first desktop application for artists, labels, managers, and catalog owners who need one place to maintain the full reality of a music catalog.
 
 It combines track metadata, releases, musical works, contracts, rights, parties, documents, assets, GS1 product data, import/export tooling, quality control, and durable history into one professional workspace. Everything stays on your machine, in your files, and under your control.

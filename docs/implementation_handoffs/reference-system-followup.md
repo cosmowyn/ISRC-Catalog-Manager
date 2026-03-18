@@ -1,5 +1,7 @@
 # Reference System Follow-Up Handoff
 
+Current product version: `2.0.0`
+
 Date: 2026-03-18
 
 ## Status

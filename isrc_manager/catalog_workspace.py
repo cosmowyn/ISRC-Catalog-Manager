@@ -23,6 +23,11 @@ class CatalogWorkspaceDock(QDockWidget):
         self.app = app
         self.panel_factory = panel_factory
         self._panel: QWidget | None = None
+        self._default_placement_pending = True
+        self._default_dock_area = Qt.RightDockWidgetArea
+        self._placeholder = QWidget(self)
+        self._placeholder.setObjectName(f"{dock_object_name}Placeholder")
+        self._placeholder.setProperty("role", "workspaceCanvas")
         self.setObjectName(dock_object_name)
         self.setProperty("role", "panel")
         self.setAllowedAreas(Qt.AllDockWidgetAreas)
@@ -31,6 +36,7 @@ class CatalogWorkspaceDock(QDockWidget):
             | QDockWidget.DockWidgetMovable
             | QDockWidget.DockWidgetFloatable
         )
+        self.setWidget(self._placeholder)
         self.visibilityChanged.connect(self._on_visibility_changed)
 
     def panel(self) -> QWidget:
@@ -42,6 +48,9 @@ class CatalogWorkspaceDock(QDockWidget):
             if close_requested is not None and hasattr(close_requested, "connect"):
                 close_requested.connect(self.hide)
             self.setWidget(self._panel)
+            if self._placeholder is not None:
+                self._placeholder.deleteLater()
+                self._placeholder = None
         return self._panel
 
     def refresh_panel(self) -> None:
@@ -53,11 +62,13 @@ class CatalogWorkspaceDock(QDockWidget):
 
     def show_panel(self) -> QWidget:
         panel = self.panel()
+        apply_default_placement = bool(self._default_placement_pending)
         previous_suspend_state = getattr(self.app, "_suspend_dock_state_sync", False)
         setattr(self.app, "_suspend_dock_state_sync", True)
         try:
             self.setVisible(True)
-            _tabify_catalog_workspace_dock(self.app, self)
+            if apply_default_placement:
+                _tabify_catalog_workspace_dock(self.app, self)
         finally:
             setattr(self.app, "_suspend_dock_state_sync", previous_suspend_state)
 
@@ -65,13 +76,17 @@ class CatalogWorkspaceDock(QDockWidget):
             suspended_state = getattr(self.app, "_suspend_dock_state_sync", False)
             setattr(self.app, "_suspend_dock_state_sync", True)
             try:
-                _tabify_catalog_workspace_dock(self.app, self)
-                self.raise_()
+                if apply_default_placement:
+                    _tabify_catalog_workspace_dock(self.app, self)
+                    self._default_placement_pending = False
+                if self.isVisible():
+                    self.raise_()
             finally:
                 setattr(self.app, "_suspend_dock_state_sync", suspended_state)
-            save_state = getattr(self.app, "_save_main_dock_state", None)
-            if callable(save_state):
-                save_state()
+            if self.isVisible():
+                schedule_save = getattr(self.app, "_schedule_main_dock_state_save", None)
+                if callable(schedule_save):
+                    schedule_save()
 
         QTimer.singleShot(0, _finalize_show_panel)
         refresh = getattr(panel, "refresh", None)
@@ -81,10 +96,12 @@ class CatalogWorkspaceDock(QDockWidget):
 
     def _on_visibility_changed(self, visible: bool) -> None:
         if visible:
+            if self._panel is None:
+                self.panel()
             self.refresh_panel()
-        save_state = getattr(self.app, "_save_main_dock_state", None)
-        if callable(save_state):
-            save_state()
+        schedule_save = getattr(self.app, "_schedule_main_dock_state_save", None)
+        if callable(schedule_save):
+            schedule_save()
 
 
 def ensure_catalog_workspace_dock(
@@ -111,6 +128,7 @@ def ensure_catalog_workspace_dock(
         dock_object_name=object_name,
         panel_factory=panel_factory,
     )
+    dock._default_dock_area = default_area
     registry[key] = dock
     anchor = _default_tab_anchor(app, dock)
     area = default_area
@@ -121,13 +139,10 @@ def ensure_catalog_workspace_dock(
     app.addDockWidget(area, dock)
 
     _tabify_catalog_workspace_dock(app, dock, anchor=anchor)
+    dock.hide()
 
-    dock.dockLocationChanged.connect(lambda *_args: app._save_main_dock_state())
-    dock.topLevelChanged.connect(lambda *_args: app._save_main_dock_state())
-
-    restore_state = getattr(app, "_restore_main_dock_state", None)
-    if callable(restore_state):
-        restore_state()
+    dock.dockLocationChanged.connect(lambda *_args: app._schedule_main_dock_state_save())
+    dock.topLevelChanged.connect(lambda *_args: app._schedule_main_dock_state_save())
     return dock
 
 

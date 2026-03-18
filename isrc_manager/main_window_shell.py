@@ -955,8 +955,10 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.add_data_dock.setMinimumWidth(320)
     app.add_data_dock.setWidget(app.left_scroll)
     app.addDockWidget(Qt.LeftDockWidgetArea, app.add_data_dock)
-    app.add_data_dock.dockLocationChanged.connect(lambda *_args: app._save_main_dock_state())
-    app.add_data_dock.topLevelChanged.connect(lambda *_args: app._save_main_dock_state())
+    app.add_data_dock.dockLocationChanged.connect(
+        lambda *_args: app._schedule_main_dock_state_save()
+    )
+    app.add_data_dock.topLevelChanged.connect(lambda *_args: app._schedule_main_dock_state_save())
     app.add_data_dock.visibilityChanged.connect(
         lambda visible: app._sync_dock_visibility(
             app.add_data_action, "display/add_data_panel", visible
@@ -1063,8 +1065,12 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.catalog_table_dock.setMinimumWidth(480)
     app.catalog_table_dock.setWidget(app.table_panel_widget)
     app.addDockWidget(Qt.RightDockWidgetArea, app.catalog_table_dock)
-    app.catalog_table_dock.dockLocationChanged.connect(lambda *_args: app._save_main_dock_state())
-    app.catalog_table_dock.topLevelChanged.connect(lambda *_args: app._save_main_dock_state())
+    app.catalog_table_dock.dockLocationChanged.connect(
+        lambda *_args: app._schedule_main_dock_state_save()
+    )
+    app.catalog_table_dock.topLevelChanged.connect(
+        lambda *_args: app._schedule_main_dock_state_save()
+    )
     app.catalog_table_dock.visibilityChanged.connect(
         lambda visible: app._sync_dock_visibility(
             app.catalog_table_action,
@@ -1074,4 +1080,3 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     )
 
     app.resizeDocks([app.add_data_dock, app.catalog_table_dock], [460, 820], Qt.Horizontal)
-    app._restore_main_dock_state()

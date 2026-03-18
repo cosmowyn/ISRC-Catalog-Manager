@@ -1,5 +1,7 @@
 # Modularization Strategy
 
+Current product version: `2.0.0`
+
 This document explains how the application is being modernized internally without changing its user-facing behavior.
 
 ISRC Catalog Manager has grown into a broad local-first catalog platform. That growth has been intentional, but it also means the codebase needs clear modular boundaries so the product can keep expanding without becoming brittle.

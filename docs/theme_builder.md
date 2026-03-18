@@ -1,5 +1,7 @@
 # Theme Builder Guide
 
+Current product version: `2.0.0`
+
 ISRC Catalog Manager includes a full visual theme builder so the application can be tailored without requiring hand-written QSS for every change.
 
 The goal is simple: most appearance work should be possible from the GUI, while Advanced QSS remains available for the final edge cases.
