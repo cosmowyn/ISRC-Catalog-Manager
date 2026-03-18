@@ -33,6 +33,7 @@ from isrc_manager.ui_common import (
     _create_scrollable_dialog_content,
     _create_standard_section,
 )
+from isrc_manager.file_storage import normalize_storage_mode
 
 from .models import (
     CONTRACT_STATUS_CHOICES,
@@ -218,7 +219,7 @@ class ContractEditorDialog(QDialog):
         documents_box, documents_box_layout = _create_standard_section(
             self,
             "Document Versions",
-            "Use one line per document in the form `title|type|version|source_path|signed_all|active`.",
+            "Use one line per document in the form `title|type|version|source_path|signed_all|active|storage_mode`.",
         )
         docs_label_row = QHBoxLayout()
         docs_label_row.setContentsMargins(0, 0, 0, 0)
@@ -231,7 +232,7 @@ class ContractEditorDialog(QDialog):
 
         self.documents_edit = QPlainTextEdit()
         self.documents_edit.setPlaceholderText(
-            "One line per document: title|type|version|source_path|signed_all|active"
+            "One line per document: title|type|version|source_path|signed_all|active|storage_mode"
         )
         self.documents_edit.setMinimumHeight(260)
         documents_box_layout.addWidget(self.documents_edit)
@@ -297,9 +298,22 @@ class ContractEditorDialog(QDialog):
                             item.title,
                             item.document_type,
                             item.version_label or "",
-                            item.file_path or "",
+                            (
+                                str(resolved)
+                                if (
+                                    item.file_path
+                                    and (
+                                        resolved := self.contract_service.resolve_document_path(
+                                            item.file_path
+                                        )
+                                    )
+                                    is not None
+                                )
+                                else ""
+                            ),
                             "1" if item.signed_by_all_parties else "0",
                             "1" if item.active_flag else "0",
+                            item.storage_mode or "",
                         ]
                     )
                     for item in detail.documents
@@ -311,7 +325,7 @@ class ContractEditorDialog(QDialog):
         if not path:
             return
         title = path.rsplit("/", 1)[-1]
-        line = f"{title}|signed_agreement||{path}|1|1"
+        line = f"{title}|signed_agreement||{path}|1|1|managed_file"
         current = self.documents_edit.toPlainText().strip()
         self.documents_edit.setPlainText(f"{current}\n{line}" if current else line)
 
@@ -351,6 +365,9 @@ class ContractEditorDialog(QDialog):
             if len(parts) < 1 or not parts[0]:
                 continue
             source_path = parts[3] if len(parts) > 3 and parts[3] else None
+            storage_mode = (
+                normalize_storage_mode(parts[6], default=None) if len(parts) > 6 else None
+            )
             documents.append(
                 ContractDocumentPayload(
                     title=parts[0],
@@ -360,6 +377,7 @@ class ContractEditorDialog(QDialog):
                     stored_path=None if source_path else None,
                     signed_by_all_parties=_parse_bool_token(parts[4]) if len(parts) > 4 else False,
                     active_flag=_parse_bool_token(parts[5]) if len(parts) > 5 else False,
+                    storage_mode=storage_mode,
                 )
             )
         return ContractPayload(

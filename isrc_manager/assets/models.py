@@ -27,6 +27,7 @@ class AssetVersionPayload:
     filename: str | None = None
     source_path: str | None = None
     stored_path: str | None = None
+    storage_mode: str | None = None
     checksum_sha256: str | None = None
     duration_sec: int | None = None
     sample_rate: int | None = None
@@ -47,6 +48,7 @@ class AssetVersionRecord:
     asset_type: str
     filename: str
     stored_path: str | None
+    storage_mode: str | None
     checksum_sha256: str | None
     duration_sec: int | None
     sample_rate: int | None

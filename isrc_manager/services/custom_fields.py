@@ -5,8 +5,18 @@ from __future__ import annotations
 import json
 import mimetypes
 import sqlite3
+from pathlib import Path
 
 from isrc_manager.blob_icons import blob_icon_spec_from_storage, blob_icon_spec_to_storage
+from isrc_manager.file_storage import (
+    ManagedFileStorage,
+    STORAGE_MODE_DATABASE,
+    STORAGE_MODE_MANAGED_FILE,
+    bytes_from_blob,
+    coalesce_filename,
+    infer_storage_mode,
+    normalize_storage_mode,
+)
 from isrc_manager.media.blob_files import (
     _is_valid_audio_path,
     _is_valid_image_path,
@@ -328,46 +338,197 @@ class CustomFieldDefinitionService:
 class CustomFieldValueService:
     """Centralizes custom field value and blob persistence."""
 
-    def __init__(self, conn: sqlite3.Connection, definitions: CustomFieldDefinitionService):
+    def __init__(
+        self,
+        conn: sqlite3.Connection,
+        definitions: CustomFieldDefinitionService,
+        data_root: str | Path | None = None,
+    ):
         self.conn = conn
         self.definitions = definitions
+        self.file_store = ManagedFileStorage(data_root=data_root, relative_root="custom_field_media")
+        self._ensure_storage_columns()
+
+    def _ensure_storage_columns(self) -> None:
+        columns = {
+            str(row[1])
+            for row in self.conn.execute("PRAGMA table_info(CustomFieldValues)").fetchall()
+            if row and row[1]
+        }
+        additions = (
+            ("blob_value", "BLOB"),
+            ("managed_file_path", "TEXT"),
+            ("storage_mode", "TEXT"),
+            ("filename", "TEXT"),
+            ("mime_type", "TEXT"),
+            ("size_bytes", "INTEGER NOT NULL DEFAULT 0"),
+        )
+        for column_name, column_sql in additions:
+            if column_name not in columns:
+                with self.conn:
+                    self.conn.execute(
+                        f"ALTER TABLE CustomFieldValues ADD COLUMN {column_name} {column_sql}"
+                    )
+
+    @staticmethod
+    def _blob_subdir(field_type: str) -> str:
+        return "audio" if field_type == "blob_audio" else "images"
+
+    def _validate_blob_source(self, field_type: str, blob_path: str) -> None:
+        if field_type == "blob_image":
+            if not _is_valid_image_path(blob_path):
+                raise ValueError("Selected file is not a recognized image")
+            return
+        if not _is_valid_audio_path(blob_path):
+            raise ValueError("Selected file is not a recognized audio format")
+
+    def _resolve_managed_path(self, stored_path: str | None) -> Path | None:
+        return self.file_store.resolve(stored_path)
+
+    def _delete_managed_file_if_unreferenced(
+        self,
+        stored_path: str | None,
+        *,
+        cursor: sqlite3.Cursor,
+    ) -> None:
+        clean_path = str(stored_path or "").strip()
+        if not clean_path or not self.file_store.is_managed(clean_path):
+            return
+        row = cursor.execute(
+            """
+            SELECT 1
+            FROM CustomFieldValues
+            WHERE managed_file_path=?
+            LIMIT 1
+            """,
+            (clean_path,),
+        ).fetchone()
+        if row:
+            return
+        resolved = self._resolve_managed_path(clean_path)
+        if resolved is None:
+            return
+        try:
+            resolved.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    def _fetch_blob_row(self, track_id: int, field_def_id: int):
+        return self.conn.execute(
+            """
+            SELECT
+                value,
+                blob_value,
+                managed_file_path,
+                storage_mode,
+                filename,
+                size_bytes,
+                mime_type
+            FROM CustomFieldValues
+            WHERE track_id=? AND field_def_id=?
+            """,
+            (int(track_id), int(field_def_id)),
+        ).fetchone()
 
     def save_value(
-        self, track_id: int, field_def_id: int, *, value=None, blob_path: str | None = None
+        self,
+        track_id: int,
+        field_def_id: int,
+        *,
+        value=None,
+        blob_path: str | None = None,
+        storage_mode: str | None = None,
     ) -> None:
         field_type = self.definitions.get_field_type(field_def_id)
         if field_type in ("blob_image", "blob_audio"):
             if blob_path is None:
                 return
-            if field_type == "blob_image":
-                if not _is_valid_image_path(blob_path):
-                    raise ValueError("Selected file is not a recognized image")
+            self._validate_blob_source(field_type, blob_path)
+            clean_mode = normalize_storage_mode(storage_mode, default=STORAGE_MODE_DATABASE)
+            source = Path(blob_path)
+            mime = mimetypes.guess_type(source.name)[0]
+            filename = coalesce_filename(source.name, default_stem=self.definitions.get_field_name(field_def_id))
+            if clean_mode == STORAGE_MODE_DATABASE:
+                blob_data = _read_blob_from_path(blob_path)
+                rel_path = None
+                sqlite_blob = sqlite3.Binary(blob_data)
             else:
-                if not _is_valid_audio_path(blob_path):
-                    raise ValueError("Selected file is not a recognized audio format")
-
-            blob_data = _read_blob_from_path(blob_path)
-            mime, _ = mimetypes.guess_type(blob_path)
+                if self.file_store.data_root is None:
+                    raise ValueError("Managed custom-field storage is not configured")
+                blob_data = source.read_bytes()
+                rel_path = self.file_store.write_bytes(
+                    blob_data,
+                    filename=filename,
+                    subdir=self._blob_subdir(field_type),
+                )
+                sqlite_blob = None
             size = len(blob_data)
             with self.conn:
+                current = self._fetch_blob_row(track_id, field_def_id)
                 self.conn.execute(
                     """
-                    INSERT INTO CustomFieldValues (track_id, field_def_id, value, blob_value, mime_type, size_bytes)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT INTO CustomFieldValues (
+                        track_id,
+                        field_def_id,
+                        value,
+                        blob_value,
+                        managed_file_path,
+                        storage_mode,
+                        filename,
+                        mime_type,
+                        size_bytes
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(track_id, field_def_id) DO UPDATE SET
-                    value=excluded.value, blob_value=excluded.blob_value, mime_type=excluded.mime_type, size_bytes=excluded.size_bytes
+                    value=excluded.value,
+                    blob_value=excluded.blob_value,
+                    managed_file_path=excluded.managed_file_path,
+                    storage_mode=excluded.storage_mode,
+                    filename=excluded.filename,
+                    mime_type=excluded.mime_type,
+                    size_bytes=excluded.size_bytes
                     """,
-                    (int(track_id), int(field_def_id), None, sqlite3.Binary(blob_data), mime, size),
+                    (
+                        int(track_id),
+                        int(field_def_id),
+                        None,
+                        sqlite_blob,
+                        rel_path,
+                        clean_mode,
+                        filename,
+                        mime,
+                        size,
+                    ),
                 )
+                if current:
+                    stale_path = str(current[2] or "").strip()
+                    if stale_path and stale_path != str(rel_path or "").strip():
+                        self._delete_managed_file_if_unreferenced(stale_path, cursor=self.conn.cursor())
             return
 
         with self.conn:
             self.conn.execute(
                 """
-                INSERT INTO CustomFieldValues (track_id, field_def_id, value, blob_value, mime_type, size_bytes)
-                VALUES (?, ?, ?, NULL, NULL, 0)
+                INSERT INTO CustomFieldValues (
+                    track_id,
+                    field_def_id,
+                    value,
+                    blob_value,
+                    managed_file_path,
+                    storage_mode,
+                    filename,
+                    mime_type,
+                    size_bytes
+                )
+                VALUES (?, ?, ?, NULL, NULL, NULL, NULL, NULL, 0)
                 ON CONFLICT(track_id, field_def_id) DO UPDATE SET
-                value=excluded.value, blob_value=NULL, mime_type=NULL, size_bytes=0
+                value=excluded.value,
+                blob_value=NULL,
+                managed_file_path=NULL,
+                storage_mode=NULL,
+                filename=NULL,
+                mime_type=NULL,
+                size_bytes=0
                 """,
                 (int(track_id), int(field_def_id), value),
             )
@@ -379,31 +540,45 @@ class CustomFieldValueService:
         ).fetchone()
         return row[0] if row and row[0] is not None else ""
 
-    def get_value_meta(self, track_id: int, field_def_id: int) -> dict:
-        row = self.conn.execute(
-            """
-            SELECT value, blob_value, size_bytes, mime_type
-            FROM CustomFieldValues
-            WHERE track_id=? AND field_def_id=?
-            """,
-            (int(track_id), int(field_def_id)),
-        ).fetchone()
+    def get_value_meta(
+        self,
+        track_id: int,
+        field_def_id: int,
+        *,
+        include_storage_details: bool = False,
+    ) -> dict:
+        row = self._fetch_blob_row(track_id, field_def_id)
         if not row:
-            return {"value": None, "has_blob": False, "size_bytes": 0, "mime_type": None}
-        value, blob_value, size_bytes, mime_type = row
-        return {
+            meta = {
+                "value": None,
+                "has_blob": False,
+                "size_bytes": 0,
+                "mime_type": None,
+            }
+            if include_storage_details:
+                meta["storage_mode"] = None
+                meta["filename"] = None
+            return meta
+        value, blob_value, managed_file_path, storage_mode, filename, size_bytes, mime_type = row
+        effective_mode = infer_storage_mode(
+            explicit_mode=storage_mode,
+            stored_path=managed_file_path,
+            blob_value=blob_value,
+        )
+        meta = {
             "value": value,
-            "has_blob": blob_value is not None,
+            "has_blob": bool(blob_value is not None or str(managed_file_path or "").strip()),
             "size_bytes": int(size_bytes or 0) if size_bytes is not None else 0,
             "mime_type": mime_type,
         }
+        if include_storage_details:
+            meta["storage_mode"] = effective_mode
+            meta["filename"] = filename
+        return meta
 
     def has_blob(self, track_id: int, field_def_id: int) -> bool:
-        row = self.conn.execute(
-            "SELECT blob_value FROM CustomFieldValues WHERE track_id=? AND field_def_id=?",
-            (int(track_id), int(field_def_id)),
-        ).fetchone()
-        return bool(row and row[0] is not None)
+        meta = self.get_value_meta(track_id, field_def_id)
+        return bool(meta["has_blob"])
 
     def blob_size(self, track_id: int, field_def_id: int) -> int:
         row = self.conn.execute(
@@ -413,17 +588,119 @@ class CustomFieldValueService:
         return int(row[0] or 0) if row else 0
 
     def fetch_blob(self, track_id: int, field_def_id: int):
-        row = self.conn.execute(
-            "SELECT blob_value, mime_type FROM CustomFieldValues WHERE track_id=? AND field_def_id=?",
-            (int(track_id), int(field_def_id)),
-        ).fetchone()
-        if not row or row[0] is None:
+        row = self._fetch_blob_row(track_id, field_def_id)
+        if not row:
             raise FileNotFoundError("No file stored for this field.")
-        return row[0], row[1]
+        _, blob_value, managed_file_path, storage_mode, filename, _, mime_type = row
+        effective_mode = infer_storage_mode(
+            explicit_mode=storage_mode,
+            stored_path=managed_file_path,
+            blob_value=blob_value,
+        )
+        if effective_mode == STORAGE_MODE_MANAGED_FILE:
+            resolved = self._resolve_managed_path(managed_file_path)
+            if resolved is None or not resolved.exists():
+                raise FileNotFoundError(managed_file_path or filename or "managed custom field file")
+            return resolved.read_bytes(), mime_type
+        if blob_value is None:
+            raise FileNotFoundError("No file stored for this field.")
+        return bytes_from_blob(blob_value), mime_type
+
+    def convert_storage_mode(
+        self,
+        track_id: int,
+        field_def_id: int,
+        target_mode: str,
+    ) -> dict:
+        clean_mode = normalize_storage_mode(target_mode)
+        row = self._fetch_blob_row(track_id, field_def_id)
+        if not row:
+            raise FileNotFoundError("No file stored for this field.")
+        value, blob_value, managed_file_path, storage_mode, filename, size_bytes, mime_type = row
+        current_mode = infer_storage_mode(
+            explicit_mode=storage_mode,
+            stored_path=managed_file_path,
+            blob_value=blob_value,
+        )
+        if current_mode is None:
+            raise FileNotFoundError("No file stored for this field.")
+        if current_mode == clean_mode:
+            return self.get_value_meta(track_id, field_def_id)
+
+        data, resolved_mime = self.fetch_blob(track_id, field_def_id)
+        clean_filename = coalesce_filename(
+            filename,
+            stored_path=managed_file_path,
+            default_stem=self.definitions.get_field_name(field_def_id),
+        )
+        stale_path = str(managed_file_path or "").strip()
+        if clean_mode == STORAGE_MODE_DATABASE:
+            with self.conn:
+                self.conn.execute(
+                    """
+                    UPDATE CustomFieldValues
+                    SET blob_value=?,
+                        managed_file_path=NULL,
+                        storage_mode=?,
+                        filename=?,
+                        mime_type=?,
+                        size_bytes=?
+                    WHERE track_id=? AND field_def_id=?
+                    """,
+                    (
+                        sqlite3.Binary(data),
+                        clean_mode,
+                        clean_filename,
+                        resolved_mime,
+                        int(size_bytes or len(data)),
+                        int(track_id),
+                        int(field_def_id),
+                    ),
+                )
+                if stale_path:
+                    self._delete_managed_file_if_unreferenced(stale_path, cursor=self.conn.cursor())
+            return self.get_value_meta(track_id, field_def_id)
+
+        if self.file_store.data_root is None:
+            raise ValueError("Managed custom-field storage is not configured")
+        rel_path = self.file_store.write_bytes(
+            data,
+            filename=clean_filename,
+            subdir=self._blob_subdir(self.definitions.get_field_type(field_def_id)),
+        )
+        with self.conn:
+            self.conn.execute(
+                """
+                UPDATE CustomFieldValues
+                SET blob_value=NULL,
+                    managed_file_path=?,
+                    storage_mode=?,
+                    filename=?,
+                    mime_type=?,
+                    size_bytes=?
+                WHERE track_id=? AND field_def_id=?
+                """,
+                (
+                    rel_path,
+                    clean_mode,
+                    clean_filename,
+                    resolved_mime,
+                    int(size_bytes or len(data)),
+                    int(track_id),
+                    int(field_def_id),
+                ),
+            )
+            if stale_path and stale_path != rel_path:
+                self._delete_managed_file_if_unreferenced(stale_path, cursor=self.conn.cursor())
+        return self.get_value_meta(track_id, field_def_id)
 
     def delete_blob(self, track_id: int, field_def_id: int) -> None:
+        row = self._fetch_blob_row(track_id, field_def_id)
+        stale_path = str(row[2] or "").strip() if row else ""
         with self.conn:
             self.conn.execute(
                 "DELETE FROM CustomFieldValues WHERE track_id=? AND field_def_id=?",
                 (int(track_id), int(field_def_id)),
             )
+            if stale_path:
+                self._delete_managed_file_if_unreferenced(stale_path, cursor=self.conn.cursor())

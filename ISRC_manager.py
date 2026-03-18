@@ -149,6 +149,12 @@ from isrc_manager.domain.standard_fields import (
     standard_media_specs_by_label,
 )
 from isrc_manager.domain.timecode import hms_to_seconds, parse_hms_text, seconds_to_hms
+from isrc_manager.file_storage import (
+    STORAGE_MODE_DATABASE,
+    STORAGE_MODE_MANAGED_FILE,
+    infer_storage_mode,
+    normalize_storage_mode,
+)
 from isrc_manager.services.gs1_mapping import (
     COMMON_CLASSIFICATION_CHOICES,
     COMMON_LANGUAGE_CHOICES,
@@ -341,6 +347,42 @@ class _JsonLogFormatter(logging.Formatter):
 
 
 _PREVIOUS_QT_MESSAGE_HANDLER = None
+
+
+def _storage_mode_choice_text(mode: str | None) -> str:
+    normalized = normalize_storage_mode(mode, default=None)
+    if normalized == STORAGE_MODE_DATABASE:
+        return "Store in Database"
+    return "Store as Managed File"
+
+
+def _prompt_storage_mode_choice(
+    parent,
+    *,
+    title: str,
+    subject: str,
+    default_mode: str | None = None,
+) -> str | None:
+    default_normalized = normalize_storage_mode(default_mode, default=STORAGE_MODE_MANAGED_FILE)
+    dialog = QMessageBox(parent)
+    dialog.setIcon(QMessageBox.Question)
+    dialog.setWindowTitle(title)
+    dialog.setText(f"How should {subject} be stored?")
+    dialog.setInformativeText(
+        "Database mode keeps the raw file bytes in the profile database. "
+        "Managed file mode copies the file into the app-controlled storage folder and stores only the managed path."
+    )
+    db_button = dialog.addButton("Store in Database", QMessageBox.AcceptRole)
+    file_button = dialog.addButton("Store as Managed File", QMessageBox.AcceptRole)
+    dialog.addButton(QMessageBox.Cancel)
+    dialog.setDefaultButton(file_button if default_normalized == STORAGE_MODE_MANAGED_FILE else db_button)
+    dialog.exec()
+    clicked = dialog.clickedButton()
+    if clicked is db_button:
+        return STORAGE_MODE_DATABASE
+    if clicked is file_button:
+        return STORAGE_MODE_MANAGED_FILE
+    return None
 
 
 def _install_qt_message_filter() -> None:
@@ -795,11 +837,15 @@ class ApplicationSettingsDialog(QDialog):
         self.gs1_template_export_btn = QPushButton("Export…")
         self.gs1_template_export_btn.setAutoDefault(False)
         self.gs1_template_export_btn.clicked.connect(self._export_gs1_template)
+        self.gs1_template_storage_combo = FocusWheelComboBox()
+        self.gs1_template_storage_combo.addItem("Store in Database", STORAGE_MODE_DATABASE)
+        self.gs1_template_storage_combo.addItem("Store as Managed File", STORAGE_MODE_MANAGED_FILE)
         gs1_template_widget = QWidget(self)
         gs1_template_row = QHBoxLayout(gs1_template_widget)
         gs1_template_row.setContentsMargins(0, 0, 0, 0)
         gs1_template_row.setSpacing(8)
         gs1_template_row.addWidget(self.gs1_template_path_edit, 1)
+        gs1_template_row.addWidget(self.gs1_template_storage_combo)
         gs1_template_row.addWidget(self.gs1_template_store_btn)
         gs1_template_row.addWidget(self.gs1_template_export_btn)
         self._add_row(
@@ -2161,18 +2207,16 @@ class ApplicationSettingsDialog(QDialog):
         if pending_path:
             self.gs1_template_path_edit.setText(pending_path)
             self.gs1_template_store_btn.setText("Replace…")
-            self.gs1_template_export_btn.setEnabled(
-                bool(asset is not None and asset.stored_in_database)
-            )
+            self.gs1_template_export_btn.setEnabled(bool(asset is not None))
             summary = self._gs1_template_profile_summary()
             if summary:
                 self.gs1_template_status_label.setText(
-                    "Selected replacement workbook. Save settings to store it in the profile database.\n\n"
+                    "Selected replacement workbook. Save settings to store it using the chosen storage mode.\n\n"
                     + summary
                 )
             else:
                 self.gs1_template_status_label.setText(
-                    "Selected replacement workbook. Save settings to store it in the profile database."
+                    "Selected replacement workbook. Save settings to store it using the chosen storage mode."
                 )
             return
 
@@ -2180,6 +2224,9 @@ class ApplicationSettingsDialog(QDialog):
             self.gs1_template_path_edit.clear()
             self.gs1_template_store_btn.setText("Upload…")
             self.gs1_template_export_btn.setEnabled(False)
+            self.gs1_template_storage_combo.setCurrentIndex(
+                max(0, self.gs1_template_storage_combo.findData(STORAGE_MODE_DATABASE))
+            )
             self.gs1_template_status_label.setText(
                 "No official GS1 workbook is stored in this profile yet."
             )
@@ -2187,14 +2234,16 @@ class ApplicationSettingsDialog(QDialog):
 
         self.gs1_template_path_edit.setText(asset.label)
         self.gs1_template_store_btn.setText("Replace…")
-        self.gs1_template_export_btn.setEnabled(bool(asset.stored_in_database))
+        self.gs1_template_export_btn.setEnabled(True)
+        storage_index = self.gs1_template_storage_combo.findData(
+            normalize_storage_mode(asset.storage_mode, default=STORAGE_MODE_DATABASE)
+        )
+        self.gs1_template_storage_combo.setCurrentIndex(max(0, storage_index))
         lines = []
         if asset.stored_in_database:
             lines.append("Workbook is stored inside the current profile database.")
         else:
-            lines.append(
-                "Using a legacy workbook path. Upload it once to store it in the profile database."
-            )
+            lines.append("Workbook is stored as a managed local file inside the app workspace.")
         if asset.filename:
             lines.append(f"Filename: {asset.filename}")
         if asset.size_bytes:
@@ -2769,11 +2818,11 @@ class ApplicationSettingsDialog(QDialog):
         if self.gs1_integration_service is None:
             return
         asset = self._gs1_template_asset
-        if asset is None or not asset.stored_in_database:
+        if asset is None:
             QMessageBox.information(
                 self,
                 "GS1 Workbook",
-                "No embedded GS1 workbook is stored in this profile yet.",
+                "No GS1 workbook is stored in this profile yet.",
             )
             return
         suggested_path = str(Path.home() / (asset.filename or "gs1-template.xlsx"))
@@ -2884,6 +2933,7 @@ class ApplicationSettingsDialog(QDialog):
             "buma_ipi": self.buma_ipi_edit.text().strip(),
             "gs1_template_asset": self._gs1_template_asset,
             "gs1_template_import_path": self._pending_gs1_template_path.strip(),
+            "gs1_template_storage_mode": self.gs1_template_storage_combo.currentData(),
             "gs1_contracts_csv_path": self.gs1_contracts_csv_edit.text().strip(),
             "gs1_contract_entries": tuple(self._gs1_contract_entries),
             "gs1_active_contract_number": self.gs1_active_contract_edit.currentText().strip(),
@@ -3316,6 +3366,10 @@ class LicenseUploadDialog(QDialog):
         self.lic_combo.setEditable(True)
         for lid, name in licensees:
             self.lic_combo.addItem(name, lid)
+        self.storage_mode_combo = FocusWheelComboBox()
+        self.storage_mode_combo.addItem("Store in Database", STORAGE_MODE_DATABASE)
+        self.storage_mode_combo.addItem("Store as Managed File", STORAGE_MODE_MANAGED_FILE)
+        self.storage_mode_combo.setCurrentIndex(1)
 
         self.file_label = QLabel("No signed PDF selected yet.")
         self.file_label.setProperty("role", "supportingText")
@@ -3330,7 +3384,7 @@ class LicenseUploadDialog(QDialog):
             main_layout,
             self,
             title="Attach Signed License PDF",
-            subtitle="Link a signed PDF to one catalog track and store it in the managed license archive.",
+            subtitle="Link a signed PDF to one catalog track and choose whether the file is stored in the database or in the managed license archive.",
             help_topic_id="licenses",
         )
 
@@ -3346,6 +3400,7 @@ class LicenseUploadDialog(QDialog):
         form.setVerticalSpacing(10)
         form.addRow("Track", self.track_combo)
         form.addRow("Licensee", self.lic_combo)
+        form.addRow("Storage", self.storage_mode_combo)
         details_layout.addLayout(form)
         main_layout.addWidget(details_box)
 
@@ -3406,6 +3461,7 @@ class LicenseUploadDialog(QDialog):
                 track_id=track_id,
                 licensee_name=lic_text,
                 source_pdf_path=self._picked_path,
+                storage_mode=self.storage_mode_combo.currentData(),
             )
             if app is not None and hasattr(app, "_run_snapshot_history_action"):
                 app._run_snapshot_history_action(
@@ -3487,6 +3543,16 @@ class LicensesBrowserPanel(QWidget):
         self.act_delete = QAction("Delete Selected", self)
         self.act_delete.triggered.connect(self._delete_selected)
 
+        self.act_store_db = QAction("Store in Database", self)
+        self.act_store_db.triggered.connect(
+            lambda: self._convert_selected_storage_mode(STORAGE_MODE_DATABASE)
+        )
+
+        self.act_store_file = QAction("Store as Managed File", self)
+        self.act_store_file.triggered.connect(
+            lambda: self._convert_selected_storage_mode(STORAGE_MODE_MANAGED_FILE)
+        )
+
         # --- layout ---
         v = QVBoxLayout(self)
         v.setContentsMargins(14, 14, 14, 14)
@@ -3522,18 +3588,28 @@ class LicensesBrowserPanel(QWidget):
         self.download_button = QPushButton("Download PDF…")
         self.edit_button = QPushButton("Edit…")
         self.delete_button = QPushButton("Delete Selected")
+        self.store_db_button = QPushButton("Store in Database")
+        self.store_file_button = QPushButton("Store as Managed File")
         self.migrate_button = QPushButton("Migrate to Contracts…")
         self.refresh_button = QPushButton("Refresh")
         self.preview_button.clicked.connect(self._preview_pdf)
         self.download_button.clicked.connect(self._download_pdf)
         self.edit_button.clicked.connect(self._edit_selected)
         self.delete_button.clicked.connect(self._delete_selected)
+        self.store_db_button.clicked.connect(
+            lambda: self._convert_selected_storage_mode(STORAGE_MODE_DATABASE)
+        )
+        self.store_file_button.clicked.connect(
+            lambda: self._convert_selected_storage_mode(STORAGE_MODE_MANAGED_FILE)
+        )
         self.migrate_button.clicked.connect(self._migrate_to_contracts)
         self.refresh_button.clicked.connect(self.refresh_data)
         action_row.addWidget(self.preview_button)
         action_row.addWidget(self.download_button)
         action_row.addWidget(self.edit_button)
         action_row.addWidget(self.delete_button)
+        action_row.addWidget(self.store_db_button)
+        action_row.addWidget(self.store_file_button)
         action_row.addWidget(self.migrate_button)
         action_row.addStretch(1)
         action_row.addWidget(self.refresh_button)
@@ -3570,13 +3646,22 @@ class LicensesBrowserPanel(QWidget):
     # ---------- helpers ----------
     def _update_action_states(self):
         has = bool(self._selected_record())
-        for a in (self.act_preview, self.act_download, self.act_edit, self.act_delete):
+        for a in (
+            self.act_preview,
+            self.act_download,
+            self.act_edit,
+            self.act_delete,
+            self.act_store_db,
+            self.act_store_file,
+        ):
             a.setEnabled(has)
         for button in (
             getattr(self, "preview_button", None),
             getattr(self, "download_button", None),
             getattr(self, "edit_button", None),
             getattr(self, "delete_button", None),
+            getattr(self, "store_db_button", None),
+            getattr(self, "store_file_button", None),
         ):
             if button is not None:
                 button.setEnabled(has)
@@ -3670,27 +3755,59 @@ class LicensesBrowserPanel(QWidget):
         menu.addSeparator()
         menu.addAction(self.act_edit)
         menu.addAction(self.act_delete)
+        menu.addSeparator()
+        menu.addAction(self.act_store_db)
+        menu.addAction(self.act_store_file)
         self._update_action_states()
         menu.exec(QCursor.pos())
 
-    # ---------- actions ----------
-    def _preview_pdf(self):
+    def _selected_license_record(self):
         rec = self._selected_record()
         if not rec:
-            return
-        _, path = rec
+            return None
+        service = self._license_service()
+        if service is None:
+            return None
+        record = service.fetch_license(rec[0])
+        if record is None:
+            return None
+        return record
 
-        # resolve relative -> absolute
+    def _materialize_license_pdf(self, record_id: int) -> tuple[Path, bool]:
+        service = self._license_service()
+        if service is None:
+            raise FileNotFoundError(record_id)
+        record = service.fetch_license(record_id)
+        if record is None:
+            raise FileNotFoundError(record_id)
+        if record.file_path and record.storage_mode != STORAGE_MODE_DATABASE:
+            resolved = service.resolve_path(record.file_path)
+            if resolved.exists():
+                return resolved, False
+        data, _mime = service.fetch_license_bytes(record_id)
+        suffix = Path(record.filename or "license.pdf").suffix or ".pdf"
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        with temp_file:
+            temp_file.write(data)
+        return Path(temp_file.name), True
+
+    # ---------- actions ----------
+    def _preview_pdf(self):
+        record = self._selected_license_record()
+        if record is None:
+            return
         service = self._license_service()
         if service is None:
             QMessageBox.warning(self, "License Archive", "Open a profile first.")
             return
-        abs_path = service.resolve_path(path)
-        if not abs_path.exists():
-            QMessageBox.warning(self, "Missing file", "The file could not be found.")
+        try:
+            abs_path, remove_after = self._materialize_license_pdf(record.record_id)
+        except FileNotFoundError:
+            QMessageBox.warning(self, "Missing file", "The stored PDF could not be found.")
             return
 
         try:
+            opened_externally = False
             from PySide6.QtPdfWidgets import QPdfView
             from PySide6.QtPdf import QPdfDocument
 
@@ -3739,24 +3856,32 @@ class LicensesBrowserPanel(QWidget):
 
             dlg.exec()
         except Exception:
+            opened_externally = True
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(abs_path)))
+        finally:
+            if remove_after and not opened_externally:
+                try:
+                    abs_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
 
     def _download_pdf(self):
-        rec = self._selected_record()
-        if not rec:
+        record = self._selected_license_record()
+        if record is None:
             return
-        _, path = rec
         service = self._license_service()
         if service is None:
             QMessageBox.warning(self, "License Archive", "Open a profile first.")
             return
-        abs_path = service.resolve_path(path)
-        if not abs_path.exists():
-            QMessageBox.warning(self, "Missing", "File not found.")
+        try:
+            data, _mime = service.fetch_license_bytes(record.record_id)
+        except FileNotFoundError:
+            QMessageBox.warning(self, "Missing", "The stored PDF could not be found.")
             return
-        dst, _ = QFileDialog.getSaveFileName(self, "Save PDF as…", abs_path.name, "PDF (*.pdf)")
+        suggested_name = record.filename or "license.pdf"
+        dst, _ = QFileDialog.getSaveFileName(self, "Save PDF as…", suggested_name, "PDF (*.pdf)")
         if dst:
-            mutation = lambda: shutil.copy2(str(abs_path), dst)
+            mutation = lambda: Path(dst).write_bytes(data)
             if self.app is not None and hasattr(self.app, "_run_file_history_action"):
                 self.app._run_file_history_action(
                     action_label=f"Download License PDF: {Path(dst).name}",
@@ -3765,7 +3890,7 @@ class LicensesBrowserPanel(QWidget):
                     mutation=mutation,
                     entity_type="License",
                     entity_id=str(dst),
-                    payload={"source_path": str(abs_path), "target_path": str(dst)},
+                    payload={"record_id": record.record_id, "target_path": str(dst)},
                 )
             else:
                 mutation()
@@ -3778,7 +3903,7 @@ class LicensesBrowserPanel(QWidget):
         if service is None:
             QMessageBox.warning(self, "License Archive", "Open a profile first.")
             return
-        rec_id, path = rec
+        rec_id, _path = rec
         record = service.fetch_license(rec_id)
         row = (record.track_id, record.licensee_id) if record else None
         if not row:
@@ -3800,7 +3925,15 @@ class LicensesBrowserPanel(QWidget):
         idx = lic_combo.findData(licensee_id)
         if idx >= 0:
             lic_combo.setCurrentIndex(idx)
-        file_lbl = QLabel(Path(path).name if path else "No file")
+        file_lbl = QLabel(record.filename or "No file")
+        storage_mode_combo = FocusWheelComboBox()
+        storage_mode_combo.addItem("Store in Database", STORAGE_MODE_DATABASE)
+        storage_mode_combo.addItem("Store as Managed File", STORAGE_MODE_MANAGED_FILE)
+        current_storage_mode = normalize_storage_mode(
+            record.storage_mode, default=STORAGE_MODE_MANAGED_FILE
+        )
+        current_storage_index = storage_mode_combo.findData(current_storage_mode)
+        storage_mode_combo.setCurrentIndex(max(0, current_storage_index))
         pick_btn = QPushButton("Replace PDF…")
         new_path = {"p": None}
 
@@ -3833,6 +3966,7 @@ class LicensesBrowserPanel(QWidget):
         form.setVerticalSpacing(10)
         form.addRow("Track", track_lbl)
         form.addRow("Licensee", lic_combo)
+        form.addRow("Storage", storage_mode_combo)
         h = QHBoxLayout()
         h.setSpacing(8)
         h.addWidget(file_lbl, 1)
@@ -3857,6 +3991,7 @@ class LicensesBrowserPanel(QWidget):
                 record_id=rec_id,
                 licensee_name=new_name,
                 replacement_pdf_path=new_path["p"],
+                storage_mode=storage_mode_combo.currentData(),
             )
             if self.app is not None and hasattr(self.app, "_run_snapshot_history_action"):
                 self.app._run_snapshot_history_action(
@@ -3876,6 +4011,38 @@ class LicensesBrowserPanel(QWidget):
             self.refresh_data()
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
+
+    def _convert_selected_storage_mode(self, target_mode: str) -> None:
+        record = self._selected_license_record()
+        if record is None:
+            return
+        service = self._license_service()
+        if service is None:
+            QMessageBox.warning(self, "License Archive", "Open a profile first.")
+            return
+        current_mode = normalize_storage_mode(record.storage_mode, default=None)
+        clean_target = normalize_storage_mode(target_mode)
+        if current_mode == clean_target:
+            return
+        try:
+            mutation = lambda: service.convert_storage_mode(record.record_id, clean_target)
+            if self.app is not None and hasattr(self.app, "_run_snapshot_history_action"):
+                self.app._run_snapshot_history_action(
+                    action_label=f"Convert License Storage: {record.filename or record.record_id}",
+                    action_type="license.convert_storage_mode",
+                    entity_type="License",
+                    entity_id=record.record_id,
+                    payload={
+                        "record_id": record.record_id,
+                        "target_mode": clean_target,
+                    },
+                    mutation=mutation,
+                )
+            else:
+                mutation()
+            self.refresh_data()
+        except Exception as exc:
+            QMessageBox.critical(self, "License Archive", str(exc))
 
     def _delete_selected(self):
         selected_records = self._selected_records()
@@ -5890,7 +6057,7 @@ class App(QMainWindow):
             CustomFieldDefinitionService(self.conn) if self.conn is not None else None
         )
         self.custom_field_values = (
-            CustomFieldValueService(self.conn, self.custom_field_definitions)
+            CustomFieldValueService(self.conn, self.custom_field_definitions, DATA_DIR())
             if self.conn is not None
             else None
         )
@@ -6571,20 +6738,47 @@ class App(QMainWindow):
                 pending_template_path = str(
                     after_values.get("gs1_template_import_path") or ""
                 ).strip()
+                requested_template_storage_mode = normalize_storage_mode(
+                    after_values.get("gs1_template_storage_mode"),
+                    default=STORAGE_MODE_DATABASE,
+                )
+                before_template_asset = before_values.get("gs1_template_asset")
+                before_template_storage_mode = normalize_storage_mode(
+                    getattr(before_template_asset, "storage_mode", None),
+                    default=STORAGE_MODE_DATABASE if before_template_asset is not None else None,
+                )
                 if pending_template_path:
                     if self.gs1_integration_service is not None:
                         stored_template = self.gs1_integration_service.import_template_workbook(
-                            pending_template_path
+                            pending_template_path,
+                            storage_mode=requested_template_storage_mode,
                         )
                     else:
                         stored_template = self.gs1_settings_service.import_template_from_path(
-                            pending_template_path
+                            pending_template_path,
+                            storage_mode=requested_template_storage_mode,
                         )
                     self._log_event(
                         "settings.gs1_template_workbook",
                         "GS1 template workbook stored",
                         template_path=stored_template.source_path,
                         stored_filename=stored_template.filename,
+                        storage_mode=stored_template.storage_mode,
+                    )
+                    changed_count += 1
+                elif (
+                    before_template_asset is not None
+                    and requested_template_storage_mode is not None
+                    and requested_template_storage_mode != before_template_storage_mode
+                ):
+                    stored_template = self.gs1_settings_service.convert_template_storage_mode(
+                        requested_template_storage_mode
+                    )
+                    self._log_event(
+                        "settings.gs1_template_workbook",
+                        "GS1 template workbook storage mode updated",
+                        stored_filename=stored_template.filename,
+                        storage_mode=stored_template.storage_mode,
                     )
                     changed_count += 1
 
@@ -9356,6 +9550,14 @@ class App(QMainWindow):
                 audio_file_source_path=(self.audio_file_field.text().strip() or None),
                 album_art_source_path=(self.album_art_field.text().strip() or None),
             )
+            media_modes = self._choose_track_media_storage_modes(
+                audio_source_path=payload.audio_file_source_path,
+                album_art_source_path=payload.album_art_source_path,
+                title="Save Track Media",
+            )
+            if media_modes is None:
+                return
+            payload.audio_file_storage_mode, payload.album_art_storage_mode = media_modes
 
             def mutation():
                 created_track_id = self.track_service.create_track(payload)
@@ -12105,6 +12307,14 @@ class App(QMainWindow):
             )
             if not new_path:
                 return
+            storage_mode = _prompt_storage_mode_choice(
+                self,
+                title=f"Attach {field['name']}",
+                subject=f"the file for {field['name']}",
+                default_mode=STORAGE_MODE_DATABASE,
+            )
+            if storage_mode is None:
+                return
             try:
                 self._run_snapshot_history_action(
                     action_label=f"Attach Custom File: {field['name']}",
@@ -12115,9 +12325,14 @@ class App(QMainWindow):
                         "track_id": track_id,
                         "field_id": field_id,
                         "field_name": field["name"],
+                        "storage_mode": storage_mode,
                     },
                     mutation=lambda: self.cf_save_value(
-                        track_id, field_id, value=None, blob_path=new_path
+                        track_id,
+                        field_id,
+                        value=None,
+                        blob_path=new_path,
+                        storage_mode=storage_mode,
                     ),
                 )
                 self.refresh_table_preserve_view(focus_id=track_id)
@@ -12336,6 +12551,27 @@ class App(QMainWindow):
                 )
                 menu.addAction(act_delete_standard)
 
+                current_mode = normalize_storage_mode(
+                    str(self.track_media_meta(track_id, standard_media_key).get("storage_mode") or ""),
+                    default=None,
+                )
+                if current_mode != STORAGE_MODE_DATABASE:
+                    act_convert_standard_db = QAction("Store in Database", self)
+                    act_convert_standard_db.triggered.connect(
+                        lambda checked=False, tid=track_id, key=standard_media_key: self._convert_standard_media_for_track(
+                            tid, key, STORAGE_MODE_DATABASE
+                        )
+                    )
+                    menu.addAction(act_convert_standard_db)
+                if current_mode != STORAGE_MODE_MANAGED_FILE:
+                    act_convert_standard_file = QAction("Store as Managed File", self)
+                    act_convert_standard_file.triggered.connect(
+                        lambda checked=False, tid=track_id, key=standard_media_key: self._convert_standard_media_for_track(
+                            tid, key, STORAGE_MODE_MANAGED_FILE
+                        )
+                    )
+                    menu.addAction(act_convert_standard_file)
+
             menu.addSeparator()
 
         # Preview file action for custom blob columns
@@ -12400,6 +12636,32 @@ class App(QMainWindow):
                     lambda: self.cf_export_blob(track_id, field_id, self, track_title)
                 )
                 menu.addAction(act_export)
+                meta = self.cf_get_value_meta(
+                    track_id,
+                    field_id,
+                    include_storage_details=True,
+                )
+                current_mode = normalize_storage_mode(meta.get("storage_mode"), default=None)
+                if current_mode != STORAGE_MODE_DATABASE:
+                    act_cf_db = QAction("Store in Database", self)
+                    act_cf_db.triggered.connect(
+                        lambda checked=False, tid=track_id, fid=field_id: self._convert_custom_blob_storage_mode(
+                            tid,
+                            fid,
+                            STORAGE_MODE_DATABASE,
+                        )
+                    )
+                    menu.addAction(act_cf_db)
+                if current_mode != STORAGE_MODE_MANAGED_FILE:
+                    act_cf_file = QAction("Store as Managed File", self)
+                    act_cf_file.triggered.connect(
+                        lambda checked=False, tid=track_id, fid=field_id: self._convert_custom_blob_storage_mode(
+                            tid,
+                            fid,
+                            STORAGE_MODE_MANAGED_FILE,
+                        )
+                    )
+                    menu.addAction(act_cf_file)
 
         # Delete blob action for custom blob columns
         if col >= len(self.BASE_HEADERS):
@@ -13405,27 +13667,90 @@ class App(QMainWindow):
     def track_fetch_media(self, track_id: int, media_key: str):
         return self.track_service.fetch_media_bytes(track_id, media_key, cursor=self.cursor)
 
-    def track_set_media(self, track_id: int, media_key: str, source_path: str):
+    def track_set_media(
+        self,
+        track_id: int,
+        media_key: str,
+        source_path: str,
+        *,
+        storage_mode: str | None = None,
+    ):
         return self.track_service.set_media_path(
-            track_id, media_key, source_path, cursor=self.cursor
+            track_id, media_key, source_path, storage_mode=storage_mode, cursor=self.cursor
         )
 
     def track_clear_media(self, track_id: int, media_key: str):
         self.track_service.clear_media(track_id, media_key, cursor=self.cursor)
+
+    def track_convert_media_storage_mode(self, track_id: int, media_key: str, target_mode: str):
+        return self.track_service.convert_media_storage_mode(
+            track_id,
+            media_key,
+            target_mode,
+            cursor=self.cursor,
+        )
+
+    def _choose_track_media_storage_modes(
+        self,
+        *,
+        audio_source_path: str | None = None,
+        album_art_source_path: str | None = None,
+        audio_default: str | None = None,
+        album_art_default: str | None = None,
+        title: str = "Choose Storage Mode",
+    ) -> tuple[str | None, str | None] | None:
+        audio_mode = audio_default
+        album_art_mode = album_art_default
+        if audio_source_path:
+            audio_mode = _prompt_storage_mode_choice(
+                self,
+                title=title,
+                subject="the audio file",
+                default_mode=audio_default,
+            )
+            if audio_mode is None:
+                return None
+        if album_art_source_path:
+            album_art_mode = _prompt_storage_mode_choice(
+                self,
+                title=title,
+                subject="the artwork file",
+                default_mode=album_art_default,
+            )
+            if album_art_mode is None:
+                return None
+        return audio_mode, album_art_mode
 
     def _attach_standard_media_for_track(self, track_id: int, media_key: str):
         path = self._browse_track_media_file(media_key)
         if not path:
             return
         header_label = "Audio File" if media_key == "audio_file" else "Album Art"
+        storage_mode = _prompt_storage_mode_choice(
+            self,
+            title=f"Attach {header_label}",
+            subject=header_label.lower(),
+            default_mode=STORAGE_MODE_MANAGED_FILE,
+        )
+        if storage_mode is None:
+            return
         try:
             self._run_snapshot_history_action(
                 action_label=f"Attach {header_label}",
                 action_type=f"track.{media_key}.attach",
                 entity_type="Track",
                 entity_id=track_id,
-                payload={"track_id": track_id, "media_key": media_key},
-                mutation=lambda: self.track_set_media(track_id, media_key, path),
+                payload={
+                    "track_id": track_id,
+                    "media_key": media_key,
+                    "storage_mode": storage_mode,
+                },
+                mutation=lambda: self.track_set_media(
+                    track_id,
+                    media_key,
+                    path,
+                    storage_mode=storage_mode,
+                ),
             )
             self.refresh_table_preserve_view(focus_id=track_id)
         except Exception as e:
@@ -13555,16 +13880,57 @@ class App(QMainWindow):
             payload={"track_id": track_id, "media_key": media_key},
         )
 
+    def _convert_standard_media_for_track(
+        self, track_id: int, media_key: str, target_mode: str
+    ) -> None:
+        try:
+            self._run_snapshot_history_action(
+                action_label=f"Convert {media_key.replace('_', ' ').title()} Storage",
+                action_type=f"track.{media_key}.convert_storage_mode",
+                entity_type="Track",
+                entity_id=track_id,
+                payload={
+                    "track_id": track_id,
+                    "media_key": media_key,
+                    "target_mode": target_mode,
+                },
+                mutation=lambda: self.track_convert_media_storage_mode(
+                    track_id, media_key, target_mode
+                ),
+            )
+            self.refresh_table_preserve_view(focus_id=track_id)
+        except Exception as exc:
+            self.conn.rollback()
+            self.logger.exception("Convert %s storage failed: %s", media_key, exc)
+            QMessageBox.critical(
+                self,
+                "Track Media Error",
+                f"Failed to convert storage mode:\n{exc}",
+            )
+
     # ---------------------- BLOB CF helpers (DB IO + export) ----------------------
     def cf_get_field_type(self, field_def_id: int) -> str:
         return self.custom_field_definitions.get_field_type(field_def_id)
 
     def cf_save_value(
-        self, track_id: int, field_def_id: int, *, value=None, blob_path: str | None = None
+        self,
+        track_id: int,
+        field_def_id: int,
+        *,
+        value=None,
+        blob_path: str | None = None,
+        storage_mode: str | None = None,
     ):
         self.custom_field_values.save_value(
-            track_id, field_def_id, value=value, blob_path=blob_path
+            track_id,
+            field_def_id,
+            value=value,
+            blob_path=blob_path,
+            storage_mode=storage_mode,
         )
+
+    def cf_convert_blob_storage_mode(self, track_id: int, field_def_id: int, target_mode: str):
+        return self.custom_field_values.convert_storage_mode(track_id, field_def_id, target_mode)
 
     def _attach_blob_for_cell(
         self, track_id: int, field_def_id: int, field_type: str, field_name: str
@@ -13576,15 +13942,32 @@ class App(QMainWindow):
         p, _ = QFileDialog.getOpenFileName(self, f"Attach file: {field_name}", "", flt)
         if not p:
             return
+        storage_mode = _prompt_storage_mode_choice(
+            self,
+            title=f"Attach {field_name}",
+            subject=f"the file for {field_name}",
+            default_mode=STORAGE_MODE_DATABASE,
+        )
+        if storage_mode is None:
+            return
         try:
             self._run_snapshot_history_action(
                 action_label=f"Attach Custom File: {field_name}",
                 action_type="custom_field.blob_attach",
                 entity_type="CustomFieldValue",
                 entity_id=f"{track_id}:{field_def_id}",
-                payload={"track_id": track_id, "field_id": field_def_id, "field_name": field_name},
+                payload={
+                    "track_id": track_id,
+                    "field_id": field_def_id,
+                    "field_name": field_name,
+                    "storage_mode": storage_mode,
+                },
                 mutation=lambda: self.cf_save_value(
-                    track_id, field_def_id, value=None, blob_path=p
+                    track_id,
+                    field_def_id,
+                    value=None,
+                    blob_path=p,
+                    storage_mode=storage_mode,
                 ),
             )
             self.refresh_table_preserve_view(focus_id=track_id)
@@ -13594,8 +13977,18 @@ class App(QMainWindow):
             QMessageBox.critical(self, "Custom Field Error", f"Failed to attach file:\n{e}")
 
     # ---------------------- BLOB CF helpers v2 (get/export/delete/format) ----------------------
-    def cf_get_value_meta(self, track_id: int, field_def_id: int):
-        return self.custom_field_values.get_value_meta(track_id, field_def_id)
+    def cf_get_value_meta(
+        self,
+        track_id: int,
+        field_def_id: int,
+        *,
+        include_storage_details: bool = False,
+    ):
+        return self.custom_field_values.get_value_meta(
+            track_id,
+            field_def_id,
+            include_storage_details=include_storage_details,
+        )
 
     def cf_has_blob(self, track_id: int, field_def_id: int) -> bool:
         return self.custom_field_values.has_blob(track_id, field_def_id)
@@ -13634,6 +14027,37 @@ class App(QMainWindow):
 
     def cf_delete_blob(self, track_id: int, field_def_id: int):
         self.custom_field_values.delete_blob(track_id, field_def_id)
+
+    def _convert_custom_blob_storage_mode(
+        self, track_id: int, field_def_id: int, target_mode: str
+    ) -> None:
+        try:
+            field_name = self.custom_field_definitions.get_field_name(field_def_id)
+            self._run_snapshot_history_action(
+                action_label=f"Convert Custom File Storage: {field_name}",
+                action_type="custom_field.blob_convert_storage_mode",
+                entity_type="CustomFieldValue",
+                entity_id=f"{track_id}:{field_def_id}",
+                payload={
+                    "track_id": track_id,
+                    "field_id": field_def_id,
+                    "target_mode": target_mode,
+                },
+                mutation=lambda: self.cf_convert_blob_storage_mode(
+                    track_id,
+                    field_def_id,
+                    target_mode,
+                ),
+            )
+            self.refresh_table_preserve_view(focus_id=track_id)
+        except Exception as exc:
+            self.conn.rollback()
+            self.logger.exception("Convert custom blob storage failed: %s", exc)
+            QMessageBox.critical(
+                self,
+                "Custom Field Error",
+                f"Failed to convert storage mode:\n{exc}",
+            )
 
     def _human_size(self, n: int) -> str:
         try:
@@ -14645,6 +15069,18 @@ class AlbumEntryDialog(QDialog):
         catalog_number = self.catalog_number.text().strip() or None
         album_art_source_path = self.album_art.text().strip() or None
         use_release_year = bool(self.use_release_year.isChecked())
+        any_audio_source_path = any(
+            (section.audio_file.text() or "").strip()
+            for section in self._track_sections
+        )
+        media_modes = self.app._choose_track_media_storage_modes(
+            audio_source_path="present" if any_audio_source_path else None,
+            album_art_source_path=album_art_source_path,
+            title="Save Album Media",
+        )
+        if media_modes is None:
+            return None
+        default_audio_storage_mode, album_art_storage_mode = media_modes
 
         active_sections = [
             section for section in self._track_sections if not section.is_effectively_blank()
@@ -14743,7 +15179,11 @@ class AlbumEntryDialog(QDialog):
                     catalog_number=catalog_number,
                     buma_work_number=(section.buma_work_number.text().strip() or None),
                     audio_file_source_path=(section.audio_file.text().strip() or None),
+                    audio_file_storage_mode=(
+                        default_audio_storage_mode if (section.audio_file.text() or "").strip() else None
+                    ),
                     album_art_source_path=album_art_source_path if index == 1 else None,
+                    album_art_storage_mode=album_art_storage_mode if index == 1 else None,
                 )
             )
 
@@ -15690,6 +16130,14 @@ class EditDialog(QDialog):
                 audio_source_path = None
             if album_art_source_path == self._existing_album_art_display_path:
                 album_art_source_path = None
+            media_modes = parent._choose_track_media_storage_modes(
+                audio_source_path=audio_source_path,
+                album_art_source_path=album_art_source_path,
+                title="Update Track Media",
+            )
+            if media_modes is None:
+                return
+            audio_storage_mode, album_art_storage_mode = media_modes
             source_payload = TrackUpdatePayload(
                 track_id=row_id,
                 isrc=iso_isrc,
@@ -15707,7 +16155,9 @@ class EditDialog(QDialog):
                 catalog_number=new_catalog_number,
                 buma_work_number=new_buma_work_number,
                 audio_file_source_path=audio_source_path,
+                audio_file_storage_mode=audio_storage_mode,
                 album_art_source_path=album_art_source_path,
+                album_art_storage_mode=album_art_storage_mode,
                 clear_audio_file=bool(self._clear_audio_file and not audio_source_path),
                 clear_album_art=bool(self._clear_album_art and not album_art_source_path),
             )
@@ -16030,6 +16480,19 @@ class EditDialog(QDialog):
             QMessageBox.information(self, "Bulk Edit", "No editable fields were changed.")
             return
 
+        media_modes = parent._choose_track_media_storage_modes(
+            audio_source_path=(new_audio_path or None) if apply_audio and not self._clear_audio_file else None,
+            album_art_source_path=(
+                (new_album_art_path or None)
+                if apply_album_art and not self._clear_album_art
+                else None
+            ),
+            title="Bulk Update Media",
+        )
+        if media_modes is None:
+            return
+        bulk_audio_storage_mode, bulk_album_art_storage_mode = media_modes
+
         profile_name = parent._current_profile_name()
         update_payloads = [
             TrackUpdatePayload(
@@ -16067,9 +16530,19 @@ class EditDialog(QDialog):
                 audio_file_source_path=(
                     (new_audio_path or None) if apply_audio and not self._clear_audio_file else None
                 ),
+                audio_file_storage_mode=(
+                    bulk_audio_storage_mode
+                    if apply_audio and not self._clear_audio_file and new_audio_path
+                    else None
+                ),
                 album_art_source_path=(
                     (new_album_art_path or None)
                     if apply_album_art and not self._clear_album_art
+                    else None
+                ),
+                album_art_storage_mode=(
+                    bulk_album_art_storage_mode
+                    if apply_album_art and not self._clear_album_art and new_album_art_path
                     else None
                 ),
                 clear_audio_file=bool(

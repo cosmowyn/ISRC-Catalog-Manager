@@ -39,12 +39,21 @@ The result is a catalog system that answers practical questions quickly:
 
 Your catalog lives in SQLite profile databases on your own machine. The app does not depend on a hosted backend, recurring subscriptions, or third-party platforms to remain usable.
 
+### Flexible attachment storage
+
+File-backed records no longer have to follow a single storage rule. The app now supports two storage modes across the catalog:
+
+- `Database` mode stores the raw file data directly in the profile database
+- `Managed file` mode copies the file into an app-controlled local storage folder and stores the managed path in the database
+
+This applies across standard track media, release artwork, custom binary fields, license PDFs, contract documents, asset versions, and GS1 workbook templates. Existing records remain readable, and supported records can be converted between modes without changing the normal UI workflow for preview, export, replace, or delete.
+
 ### Built for real catalog operations
 
 This is not just a metadata sheet with a pretty skin. It is designed for the day-to-day realities of independent catalog management:
 
 - maintaining clean identifiers
-- attaching managed media and documents
+- attaching files in either database or managed-file mode
 - keeping releases and works distinct
 - storing agreement history and obligation dates
 - verifying readiness before export or delivery
@@ -64,7 +73,7 @@ Create and maintain:
 - multi-track projects through the Add Album workflow
 - first-class release records with ordered track lists
 - UPC/EAN, catalog number, explicit flags, artwork, and release sequencing
-- import/export-ready track metadata with managed media attachments
+- import/export-ready track metadata with portable media attachments in database or managed-file storage
 
 The main catalog table supports fast searching, bulk selection, bulk edit, contextual actions, and direct handoff into related workflows.
 
@@ -116,7 +125,7 @@ Tracks and releases can carry multiple managed asset versions, including:
 - artwork variants
 - promotional assets
 
-You can track approval state, mark the primary asset, preserve derivation relationships, and validate broken or duplicate asset references.
+You can track approval state, mark the primary asset, preserve derivation relationships, validate broken or duplicate asset references, and choose whether the underlying asset file lives in the database or in app-managed local storage.
 
 ### Quality control and operational readiness
 
@@ -139,7 +148,7 @@ This is designed to surface action items, not abstract diagnostics.
 
 ### GS1 workflow support
 
-The app includes a dedicated GS1 workflow for maintaining product metadata and exporting to official workbook templates. It verifies workbook structure, stores profile-specific defaults, and now persists the configured template in the profile database so the export setup remains stable even if a source file is moved.
+The app includes a dedicated GS1 workflow for maintaining product metadata and exporting to official workbook templates. It verifies workbook structure, stores profile-specific defaults, and now lets the configured workbook template live either inside the profile database or as a managed local file so the export setup remains stable even if the original source file is moved.
 
 ### Exchange and portability
 
@@ -149,9 +158,9 @@ You can move catalog data in and out using:
 - CSV
 - XLSX
 - JSON
-- ZIP packages with manifests and managed-file copies
+- ZIP packages with manifests and materialized attachment copies
 
-There is also a dedicated repertoire exchange workflow for works, parties, contracts, rights, assets, and their relationships, separate from the standard track/release exchange layer.
+There is also a dedicated repertoire exchange workflow for works, parties, contracts, rights, assets, and their relationships, separate from the standard track/release exchange layer. Package export/import now preserves both database-backed and managed-file-backed attachments by materializing portable copies and restoring the recorded storage mode on import.
 
 ### Undo, snapshots, and restore confidence
 
@@ -209,7 +218,7 @@ That focus is deliberate. The goal is depth and reliability in catalog maintenan
 
 ### 1. Build the catalog
 
-Use the Add Data panel for single tracks or Add Album for grouped releases. Attach audio and artwork, generate or enter identifiers, and save records directly into the active profile.
+Use the Add Data panel for single tracks or Add Album for grouped releases. Attach audio and artwork, choose whether new file-backed records should live in the database or in managed local storage, generate or enter identifiers, and save records directly into the active profile.
 
 ### 2. Organize the repertoire graph
 
@@ -262,6 +271,7 @@ The result is a catalog environment that feels closer to a professional desktop 
 
 The repository includes user-facing and developer-facing guides in `docs/`:
 
+- [Attachment Storage Modes](docs/file_storage_modes.md)
 - [Repertoire Knowledge System](docs/repertoire_knowledge_system.md)
 - [GS1 Workflow Guide](docs/gs1_workflow.md)
 - [Theme Builder Guide](docs/theme_builder.md)

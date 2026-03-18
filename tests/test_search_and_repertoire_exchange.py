@@ -401,6 +401,134 @@ class SearchAndRepertoireExchangeTests(unittest.TestCase):
         finally:
             new_conn.close()
 
+    def test_repertoire_exchange_package_round_trip_preserves_database_backed_files(self):
+        label_party_id = self.party_service.create_party(
+            PartyPayload(legal_name="Blob Label", email="blob@label.test")
+        )
+        work_id = self.work_service.create_work(
+            WorkPayload(
+                title="Binary Agreement Work",
+                contributors=[
+                    WorkContributorPayload(
+                        role="songwriter",
+                        name="Blob Label",
+                        party_id=label_party_id,
+                        share_percent=100,
+                    )
+                ],
+            )
+        )
+        track_id = self.track_service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00027",
+                track_title="Binary Attachment",
+                artist_name="Blob Label",
+                additional_artists=[],
+                album_title="Binary Release",
+                release_date="2026-03-16",
+                track_length_sec=180,
+                iswc=None,
+                upc="036000291452",
+                genre="Synth",
+            )
+        )
+        release_id = self.release_service.create_release(
+            ReleasePayload(
+                title="Binary Release",
+                primary_artist="Blob Label",
+                release_type="single",
+                release_date="2026-03-16",
+                upc="036000291452",
+                placements=[
+                    ReleaseTrackPlacement(
+                        track_id=track_id,
+                        disc_number=1,
+                        track_number=1,
+                        sequence_number=1,
+                    )
+                ],
+            )
+        )
+        document_path = self.data_root / "blob-contract.pdf"
+        document_path.write_bytes(b"%PDF-blob-contract")
+        contract_id = self.contract_service.create_contract(
+            ContractPayload(
+                title="Blob Contract",
+                contract_type="distribution",
+                status="active",
+                parties=[
+                    ContractPartyPayload(
+                        party_id=label_party_id,
+                        role_label="label",
+                        is_primary=True,
+                    )
+                ],
+                documents=[
+                    ContractDocumentPayload(
+                        title="Blob PDF",
+                        document_type="signed_agreement",
+                        source_path=str(document_path),
+                        storage_mode="database",
+                        signed_by_all_parties=True,
+                        active_flag=True,
+                    )
+                ],
+                work_ids=[work_id],
+                track_ids=[track_id],
+                release_ids=[release_id],
+            )
+        )
+        asset_path = self.data_root / "blob-asset.wav"
+        asset_path.write_bytes(b"RIFFblobasset")
+        self.asset_service.create_asset(
+            AssetVersionPayload(
+                asset_type="main_master",
+                source_path=str(asset_path),
+                storage_mode="database",
+                approved_for_use=True,
+                primary_flag=True,
+                track_id=track_id,
+                release_id=release_id,
+            )
+        )
+
+        package_path = self.data_root / "repertoire-blob-package.zip"
+        self.exchange_service.export_package(package_path)
+
+        with ZipFile(package_path, "r") as archive:
+            names = set(archive.namelist())
+
+        self.assertTrue(any(name.startswith("files/contracts/") for name in names))
+        self.assertTrue(any(name.startswith("files/assets/") for name in names))
+
+        target_root = Path(tempfile.mkdtemp(prefix="repertoire-blob-import-"))
+        self.addCleanup(shutil.rmtree, target_root, True)
+        new_conn, new_services, _track_id, _release_id = self._prepare_import_target(target_root)
+        try:
+            new_services["exchange_service"].import_package(package_path)
+
+            imported_detail = new_services["contract_service"].fetch_contract_detail(contract_id)
+            self.assertIsNotNone(imported_detail)
+            assert imported_detail is not None
+            self.assertEqual(len(imported_detail.documents), 1)
+            imported_document = imported_detail.documents[0]
+            self.assertEqual(imported_document.storage_mode, "database")
+            self.assertIsNone(imported_document.file_path)
+            document_bytes, _ = new_services["contract_service"].fetch_document_bytes(
+                imported_document.id
+            )
+            self.assertEqual(document_bytes, b"%PDF-blob-contract")
+
+            imported_asset = new_services["asset_service"].fetch_asset(1)
+            self.assertIsNotNone(imported_asset)
+            assert imported_asset is not None
+            self.assertEqual(imported_asset.storage_mode, "database")
+            self.assertIsNone(imported_asset.stored_path)
+            asset_bytes, _ = new_services["asset_service"].fetch_asset_bytes(imported_asset.id)
+            self.assertEqual(asset_bytes, b"RIFFblobasset")
+        finally:
+            new_conn.close()
+
     def test_repertoire_exchange_xlsx_csv_and_schema_validation(self):
         self._seed_repertoire()
         xlsx_path = self.data_root / "repertoire.xlsx"

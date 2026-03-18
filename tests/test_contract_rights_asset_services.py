@@ -259,9 +259,63 @@ class ContractRightsAssetServiceTests(unittest.TestCase):
         self.assertEqual(exported_lines[0], "contract_id,title,date_field,due_date")
         self.assertTrue(any("South Agency Agreement" in line for line in exported_lines[1:]))
 
+    def test_contract_documents_support_managed_and_database_storage_modes(self):
+        managed_path = self.data_root / "managed-doc.txt"
+        database_path = self.data_root / "database-doc.txt"
+        managed_path.write_text("managed version", encoding="utf-8")
+        database_path.write_text("database version", encoding="utf-8")
+
+        contract_id = self.contract_service.create_contract(
+            ContractPayload(
+                title="Storage Mode Contract",
+                documents=[
+                    ContractDocumentPayload(
+                        title="Managed Copy",
+                        document_type="draft",
+                        source_path=str(managed_path),
+                        storage_mode="managed_file",
+                    ),
+                    ContractDocumentPayload(
+                        title="Database Copy",
+                        document_type="draft",
+                        source_path=str(database_path),
+                        storage_mode="database",
+                    ),
+                ],
+            )
+        )
+
+        detail = self.contract_service.fetch_contract_detail(contract_id)
+        self.assertIsNotNone(detail)
+        assert detail is not None
+        managed_doc = next(doc for doc in detail.documents if doc.title == "Managed Copy")
+        database_doc = next(doc for doc in detail.documents if doc.title == "Database Copy")
+
+        self.assertEqual(managed_doc.storage_mode, "managed_file")
+        self.assertIsNotNone(managed_doc.file_path)
+        self.assertTrue(self.contract_service.resolve_document_path(managed_doc.file_path).exists())
+        self.assertEqual(database_doc.storage_mode, "database")
+        self.assertIsNone(database_doc.file_path)
+
+        converted_database = self.contract_service.convert_document_storage_mode(
+            managed_doc.id, "database"
+        )
+        self.assertEqual(converted_database.storage_mode, "database")
+        self.assertIsNone(converted_database.file_path)
+
+        converted_managed = self.contract_service.convert_document_storage_mode(
+            converted_database.id, "managed_file"
+        )
+        self.assertEqual(converted_managed.storage_mode, "managed_file")
+        self.assertIsNotNone(converted_managed.file_path)
+        converted_path = self.contract_service.resolve_document_path(converted_managed.file_path)
+        self.assertTrue(
+            converted_path.exists()
+        )
+
         self.contract_service.delete_contract(contract_id)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Contracts").fetchone()[0], 0)
-        self.assertFalse(updated_path.exists())
+        self.assertFalse(converted_path.exists())
 
     def test_contract_validation_rejects_invalid_date_ranges(self):
         with self.assertRaises(ValueError):
@@ -410,6 +464,40 @@ class ContractRightsAssetServiceTests(unittest.TestCase):
 
         issues = self.asset_service.validate_assets()
         self.assertTrue(any(issue.issue_type == "missing_approved_master" for issue in issues))
+
+    def test_asset_can_round_trip_between_database_and_managed_file_modes(self):
+        track_id, release_id = self._create_track_and_release()
+        master_path = self.data_root / "db-master.wav"
+        master_path.write_bytes(b"RIFFdatabase")
+
+        asset_id = self.asset_service.create_asset(
+            AssetVersionPayload(
+                asset_type="main_master",
+                source_path=str(master_path),
+                storage_mode="database",
+                approved_for_use=True,
+                primary_flag=True,
+                version_status="delivered",
+                track_id=track_id,
+                release_id=release_id,
+            )
+        )
+
+        asset = self.asset_service.fetch_asset(asset_id)
+        assert asset is not None
+        self.assertEqual(asset.storage_mode, "database")
+        data, _ = self.asset_service.fetch_asset_bytes(asset_id)
+        self.assertEqual(data, b"RIFFdatabase")
+
+        converted = self.asset_service.convert_asset_storage_mode(asset_id, "managed_file")
+
+        self.assertEqual(converted.storage_mode, "managed_file")
+        self.assertTrue(converted.stored_path)
+        self.assertTrue(self.asset_service.resolve_asset_path(converted.stored_path).exists())
+        self.assertEqual(
+            self.asset_service.resolve_asset_path(converted.stored_path).read_bytes(),
+            b"RIFFdatabase",
+        )
 
     def test_asset_update_listing_validation_and_delete_cleanup(self):
         track_id, release_id = self._create_track_and_release()

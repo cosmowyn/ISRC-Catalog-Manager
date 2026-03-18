@@ -61,6 +61,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Action Ribbon</strong>: a customizable quick-action strip for your most-used commands.</li>
           <li><strong>Background tasks</strong>: longer scans, imports, exports, snapshots, and file operations run outside the UI thread to keep the workspace responsive.</li>
           <li><strong>Settings and history</strong>: identity, registration settings, themes, undo/redo, snapshots, diagnostics, and logs.</li>
+          <li><strong>Flexible file storage</strong>: file-backed records can be kept as database BLOBs or as managed local files without changing the surrounding UI workflow.</li>
           <li><strong>Media badge icons</strong>: separate visual indicators for stored audio and image BLOBs can be configured with system icons, emoji, or compressed custom images.</li>
         </ul>
         <p>The menu bar mirrors those workflows. <strong>File</strong> handles profiles and exchange, <strong>Edit</strong> focuses on direct catalog actions, <strong>Catalog</strong> opens the richer repertoire tools, <strong>Settings</strong> controls app and profile configuration, <strong>View</strong> manages layout and columns, <strong>History</strong> protects recoverability, and <strong>Help</strong> gives you diagnostics, logs, and this manual.</p>
@@ -164,7 +165,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Track</strong>: track title, main artist, additional artists, and genre.</li>
           <li><strong>Release</strong>: album title, release date, and track length.</li>
           <li><strong>Codes</strong>: preview-only generated values such as the future row ID, generated ISRC, and entry date, plus ISWC, UPC/EAN, catalog number, and BUMA work number.</li>
-          <li><strong>Media</strong>: attach a local audio file and album art image that the app manages for the selected track.</li>
+          <li><strong>Media</strong>: attach a local audio file and album art image, then choose whether each file should be stored in the database or in managed local storage.</li>
         </ul>
         <p>Use <strong>Save Track</strong> to create the record, or <strong>Reset Form</strong> to clear the current draft. If ISRC generation is configured, the preview updates automatically from your active settings. If it is not configured yet, the track still saves cleanly and can be completed later.</p>
         """,
@@ -184,8 +185,8 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         content_html="""
         <p>The <strong>Add Album</strong> dialog is built for real release entry. Instead of retyping the same album data over and over, you enter the shared product details once and then complete each track on its own tab.</p>
         <ul>
-          <li><strong>Album Overview</strong>: album title, UPC/EAN, genre, catalog number, album art, and the release-year rule used when auto-generating blank ISRC values.</li>
-          <li><strong>Track Tabs</strong>: each tab stores one track title, main artist, additional artists, release date, track length, optional ISRC, optional ISWC, optional BUMA work number, and an audio file.</li>
+          <li><strong>Album Overview</strong>: album title, UPC/EAN, genre, catalog number, album art, album-art storage choice, and the release-year rule used when auto-generating blank ISRC values.</li>
+          <li><strong>Track Tabs</strong>: each tab stores one track title, main artist, additional artists, release date, track length, optional ISRC, optional ISWC, optional BUMA work number, an audio file, and its storage choice.</li>
           <li><strong>Dynamic layout</strong>: the dialog opens with two track tabs by default, but you can add more or remove the current tab at any time.</li>
           <li><strong>Blank-tab handling</strong>: completely unused track tabs are ignored when you save, so you do not need to delete every spare tab before closing the dialog.</li>
           <li><strong>Shared album art</strong>: the selected album art is stored once and linked across the saved album tracks automatically.</li>
@@ -265,7 +266,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         <p>The Edit Entry dialog is the full maintenance editor for existing records. When one row is selected, it behaves as a detailed track editor. When multiple rows are selected, it switches into <strong>bulk edit</strong> mode and protects fields that should not be overwritten casually.</p>
         <ul>
           <li><strong>Copy buttons</strong>: copy ISO or compact forms of ISRC and ISWC values.</li>
-          <li><strong>Media replacement</strong>: browse for new audio or album art files, or clear the currently stored media.</li>
+          <li><strong>Media replacement</strong>: browse for new audio or album art files, choose database or managed-file storage for replacements, or clear the currently stored media.</li>
           <li><strong>Bulk edit safeguards</strong>: only fields you actually change are written back to every selected row.</li>
           <li><strong>Bulk edit locked fields</strong>: ISRC, ISWC, Track Title, Audio File, Track Length, and BUMA work number remain view-only during multi-row editing.</li>
           <li><strong>GS1 handoff</strong>: the <strong>GS1 Metadata…</strong> button opens the GS1 dialog for the same current track or selected batch.</li>
@@ -362,6 +363,36 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         """,
     ),
     HelpChapter(
+        chapter_id="storage-modes",
+        title="File Storage Modes",
+        summary="How database-backed and managed-file-backed attachments work across the catalog, and how conversions stay backward-safe.",
+        keywords=(
+            "storage mode",
+            "database mode",
+            "managed file",
+            "blob",
+            "attachment",
+            "convert storage",
+            "license pdf",
+            "contract document",
+            "asset file",
+            "gs1 template",
+        ),
+        content_html="""
+        <p>The app now supports two storage modes for file-backed records across the catalog.</p>
+        <ul>
+          <li><strong>Database mode</strong>: the raw file bytes are stored directly inside the profile database.</li>
+          <li><strong>Managed file mode</strong>: the app copies the file into an app-controlled local storage folder and stores the managed path in the database.</li>
+          <li><strong>Covered record types</strong>: standard track audio, track and album artwork, release artwork, custom <code>blob_audio</code> and <code>blob_image</code> values, license PDFs, contract documents, asset versions, and GS1 workbook templates.</li>
+          <li><strong>Safe imports</strong>: managed-file mode never depends on the original file staying in place after import. The app stores its own managed copy first.</li>
+          <li><strong>Conversions</strong>: supported editors, browser panels, and context menus can move existing records between the two modes while keeping open, preview, export, replace, and delete behavior consistent.</li>
+          <li><strong>Legacy compatibility</strong>: older records remain readable because the app can infer storage mode from existing BLOB or managed-path data when a legacy row has no explicit mode yet.</li>
+          <li><strong>Portable packages</strong>: ZIP package export/import materializes both database-backed and managed-file-backed records into portable files and preserves the recorded storage mode on import.</li>
+        </ul>
+        <p>The storage layer preserves the file bytes plus catalog metadata such as filename, MIME type, size, and checksums where supported. Format-aware tag writing remains a separate export workflow rather than something the app silently rewrites during every storage conversion.</p>
+        """,
+    ),
+    HelpChapter(
         chapter_id="exchange-formats",
         title="Exchange Formats",
         summary="How the app moves metadata in and out safely through exchange formats built for both daily operations and durable archives.",
@@ -379,7 +410,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         content_html="""
         <p>The exchange layer is designed for real catalog portability. Whether you are sharing data, taking a structured backup, preparing downstream workflows, or moving a project between systems, the app gives you more than a single export button.</p>
         <ul>
-          <li><strong>Export formats</strong>: CSV, XLSX, JSON, XML, and ZIP packages containing a JSON manifest plus copied media references.</li>
+          <li><strong>Export formats</strong>: CSV, XLSX, JSON, XML, and ZIP packages containing a JSON manifest plus materialized attachment copies.</li>
           <li><strong>Import formats</strong>: CSV, XLSX, JSON, ZIP packages, and XML.</li>
           <li><strong>Import preview</strong>: CSV and XLSX imports open a mapping dialog so you can confirm how source columns map to standard or custom fields before running the import.</li>
           <li><strong>Saved mapping presets</strong>: frequently used column mappings can be saved per format and reused later.</li>
@@ -388,7 +419,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>JSON schema versioning</strong>: exported JSON includes an explicit schema version so future migrations stay manageable.</li>
           <li><strong>Repertoire Exchange</strong>: a separate import/export workflow now covers parties, works, contracts, rights, asset versions, and their relationship references as JSON, XLSX, CSV bundles, or ZIP packages with managed files.</li>
         </ul>
-        <p>Binary media is referenced in plain tabular exports, while ZIP packages can include copied managed files for portability. Import preview, packaging, export, and extraction all run in the background so larger exchange jobs stay practical.</p>
+        <p>Binary media is referenced in plain tabular exports, while ZIP packages materialize both database-backed and managed-file-backed records into portable files and preserve the recorded storage mode on import. Import preview, packaging, export, and extraction all run in the background so larger exchange jobs stay practical.</p>
         """,
     ),
     HelpChapter(
@@ -435,10 +466,10 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         <ul>
           <li><strong>Single track or batch</strong>: launch it from the Catalog menu, the table context menu, or the edit and bulk edit dialogs.</li>
           <li><strong>Grouped editing</strong>: album-style selections can appear as grouped GS1 product tabs, while singles remain separate export rows.</li>
-          <li><strong>Official workbook</strong>: choose the official GS1 workbook from your GS1 environment. The app validates headers and sheet structure before export.</li>
+          <li><strong>Official workbook</strong>: choose the official GS1 workbook from your GS1 environment. The app validates headers and sheet structure before export, then keeps the template either in the database or as a managed local file.</li>
           <li><strong>Python dependency</strong>: GS1 workbook validation and export require the <code>openpyxl</code> package in the same Python environment that starts the app.</li>
         </ul>
-        <p>Use <strong>Save</strong> to keep GS1 data in the catalog, <strong>Export Current…</strong> to write the active product, or <strong>Export Batch…</strong> to generate a full workbook from the selected set.</p>
+        <p>Use <strong>Save</strong> to keep GS1 data in the catalog, <strong>Export Current…</strong> to write the active product, or <strong>Export Batch…</strong> to generate a full workbook from the selected set. If storage needs change later, the saved template can be converted between database and managed-file storage without reselecting the original source workbook.</p>
         """,
     ),
     HelpChapter(
@@ -459,8 +490,8 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         content_html="""
         <p>The app can store signed license PDFs alongside the catalog. The license workflow is split into a few focused surfaces:</p>
         <ul>
-          <li><strong>Add License (PDF)</strong>: attach a PDF to a track and assign a licensee.</li>
-          <li><strong>Licenses</strong>: browse all stored license records, preview them, download them, edit them, or delete them from a docked catalog panel that can stay open beside the track table.</li>
+          <li><strong>Add License (PDF)</strong>: attach a PDF to a track, assign a licensee, and choose whether the file should be stored in the database or as a managed local file.</li>
+          <li><strong>Licenses</strong>: browse all stored license records, preview them, download them, edit them, convert their storage mode, or delete them from a docked catalog panel that can stay open beside the track table.</li>
           <li><strong>Manage Licensees</strong>: add, rename, and delete reusable licensee names.</li>
         </ul>
         <p>If you are moving into the richer contract system, <strong>Catalog &gt; Migrate Legacy Licenses to Contracts…</strong> converts the legacy license archive into Party records plus Contract records with managed contract documents. The migration copies each stored PDF into the newer contract-document archive, verifies the copied file, and only then removes the legacy rows and old managed license files. Before/after restore points are captured automatically so the migration can be rolled back safely.</p>
@@ -498,7 +529,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         <p>The Application Settings dialog brings the app's most important configuration into one organized workspace so you do not have to hunt through multiple small dialogs.</p>
         <ul>
           <li><strong>General</strong>: window title, app icon, and core registration details.</li>
-          <li><strong>GS1</strong>: template storage and profile defaults for GS1 export workflows.</li>
+          <li><strong>GS1</strong>: template storage mode plus profile defaults for GS1 export workflows.</li>
           <li><strong>Theme</strong>: the full visual theme builder, starter themes, live preview, and advanced QSS.</li>
         </ul>
         <p>Saving settings updates the current app state immediately, while supported settings changes are also recorded in history so major appearance and configuration changes remain recoverable. Media badge icon choices for stored audio and image BLOBs are managed from the Theme workspace but are kept separate from reusable theme presets.</p>
@@ -554,7 +585,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         <p>The Diagnostics window gives you a high-level health view of both the application environment and the active profile so you can verify that the workspace is still operating cleanly.</p>
         <ul>
           <li><strong>Environment</strong>: app version, schema version, profile path, data folder, log folder, snapshot count, platform, and Python version.</li>
-          <li><strong>Checks</strong>: schema validation, SQLite integrity, foreign-key integrity, custom-value integrity, managed files, and snapshot storage.</li>
+          <li><strong>Checks</strong>: schema validation, SQLite integrity, foreign-key integrity, custom-value integrity, managed files for path-backed records, and snapshot storage.</li>
           <li><strong>Details</strong>: expanded explanation for the currently selected check.</li>
           <li><strong>Repair</strong>: preview or run supported repair actions when a check reports a repairable issue.</li>
         </ul>
@@ -583,7 +614,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         summary="Preview album-art images, audio files, and stored media directly from the catalog.",
         keywords=("media preview", "audio preview", "image preview", "waveform", "album art"),
         content_html="""
-        <p>The app can preview managed media directly from the catalog.</p>
+        <p>The app can preview file-backed media directly from the catalog regardless of whether the underlying record is stored in the database or as a managed file.</p>
         <ul>
           <li><strong>Image preview</strong>: zoom and inspect stored image data such as album art.</li>
           <li><strong>Audio preview</strong>: play attached audio with waveform preview, playhead, and transport controls.</li>

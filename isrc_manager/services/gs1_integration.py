@@ -240,12 +240,25 @@ class GS1IntegrationService:
     def load_template_asset(self) -> GS1TemplateAsset | None:
         return self.settings_service.load_template_asset()
 
-    def import_template_workbook(self, template_path: str | Path) -> GS1TemplateAsset:
+    def import_template_workbook(
+        self,
+        template_path: str | Path,
+        *,
+        storage_mode: str | None = None,
+    ) -> GS1TemplateAsset:
         self.template_verification_service.verify(template_path)
-        return self.settings_service.import_template_from_path(template_path)
+        return self.settings_service.import_template_from_path(
+            template_path,
+            storage_mode=storage_mode,
+        )
 
-    def replace_template_workbook(self, template_path: str | Path) -> GS1TemplateAsset:
-        return self.import_template_workbook(template_path)
+    def replace_template_workbook(
+        self,
+        template_path: str | Path,
+        *,
+        storage_mode: str | None = None,
+    ) -> GS1TemplateAsset:
+        return self.import_template_workbook(template_path, storage_mode=storage_mode)
 
     def export_template_workbook(self, destination_path: str | Path) -> Path:
         return self.settings_service.export_stored_template(destination_path)

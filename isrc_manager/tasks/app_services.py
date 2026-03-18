@@ -148,7 +148,11 @@ class BackgroundAppServiceFactory:
         release_service = ReleaseService(conn, self.data_root)
         license_service = LicenseService(conn, self.data_root)
         custom_field_definitions = CustomFieldDefinitionService(conn)
-        custom_field_values = CustomFieldValueService(conn, custom_field_definitions)
+        custom_field_values = CustomFieldValueService(
+            conn,
+            custom_field_definitions,
+            self.data_root,
+        )
         catalog_reads = CatalogReadService(conn)
         settings_reads = SettingsReadService(conn)
         settings_mutations = SettingsMutationService(conn, settings)

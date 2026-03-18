@@ -72,6 +72,7 @@ class ContractDocumentPayload:
     superseded_by_document_id: int | None = None
     source_path: str | None = None
     stored_path: str | None = None
+    storage_mode: str | None = None
     filename: str | None = None
     checksum_sha256: str | None = None
     notes: str | None = None
@@ -177,6 +178,7 @@ class ContractDocumentRecord:
     checksum_sha256: str | None
     notes: str | None
     uploaded_at: str | None
+    storage_mode: str | None = None
 
 
 @dataclass(slots=True)

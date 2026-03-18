@@ -16,6 +16,13 @@ class XMLExportService:
     def __init__(self, conn):
         self.conn = conn
 
+    def _table_columns(self, table: str) -> set[str]:
+        return {
+            str(row[1])
+            for row in self.conn.execute(f"PRAGMA table_info({table})").fetchall()
+            if row and len(row) > 1 and row[1]
+        }
+
     def export_all(self, path: str | Path) -> int:
         cols, rows = self._fetch_base_rows()
         track_ids = [row[0] for row in rows]
@@ -104,6 +111,10 @@ class XMLExportService:
         else:
             where_clause = ""
             params = []
+        album_columns = self._table_columns("Albums")
+        album_art_blob_sql = (
+            "al.album_art_blob" if "album_art_blob" in album_columns else "NULL"
+        )
 
         rows = self.conn.execute(
             f"""
@@ -133,7 +144,7 @@ class XMLExportService:
                     WHEN t.album_id IS NOT NULL
                      AND TRIM(COALESCE(al.title, '')) != ''
                      AND LOWER(TRIM(COALESCE(al.title, ''))) != 'single'
-                     AND COALESCE(al.album_art_path, '') != ''
+                     AND (COALESCE(al.album_art_path, '') != '' OR {album_art_blob_sql} IS NOT NULL)
                     THEN COALESCE(al.album_art_mime_type, '')
                     ELSE COALESCE(t.album_art_mime_type, '')
                 END AS album_art_mime_type,
@@ -141,7 +152,7 @@ class XMLExportService:
                     WHEN t.album_id IS NOT NULL
                      AND TRIM(COALESCE(al.title, '')) != ''
                      AND LOWER(TRIM(COALESCE(al.title, ''))) != 'single'
-                     AND COALESCE(al.album_art_path, '') != ''
+                     AND (COALESCE(al.album_art_path, '') != '' OR {album_art_blob_sql} IS NOT NULL)
                     THEN COALESCE(al.album_art_size_bytes, 0)
                     ELSE COALESCE(t.album_art_size_bytes, 0)
                 END AS album_art_size_bytes

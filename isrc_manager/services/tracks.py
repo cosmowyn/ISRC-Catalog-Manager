@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import mimetypes
 import sqlite3
 import time
@@ -11,7 +12,17 @@ from typing import Iterable
 
 from isrc_manager.domain.codes import is_blank, to_compact_isrc
 from isrc_manager.domain.standard_fields import standard_media_specs_by_key
+from isrc_manager.file_storage import (
+    ManagedFileStorage,
+    STORAGE_MODE_DATABASE,
+    STORAGE_MODE_MANAGED_FILE,
+    bytes_from_blob,
+    coalesce_filename,
+    infer_storage_mode,
+    normalize_storage_mode,
+)
 from isrc_manager.media.blob_files import _is_valid_audio_path, _is_valid_image_path
+from isrc_manager.media.blob_files import _read_blob_from_path
 
 
 def _build_media_fields() -> dict[str, dict[str, object]]:
@@ -22,6 +33,9 @@ def _build_media_fields() -> dict[str, dict[str, object]]:
     return {
         media_key: {
             "path_column": spec.path_column,
+            "storage_mode_column": spec.path_column.replace("_path", "_storage_mode"),
+            "blob_column": spec.path_column.replace("_path", "_blob"),
+            "filename_column": spec.path_column.replace("_path", "_filename"),
             "mime_column": spec.mime_column,
             "size_column": spec.size_column,
             "subdir": "audio" if spec.field_type == "blob_audio" else "images",
@@ -50,7 +64,9 @@ class TrackCreatePayload:
     comments: str | None = None
     lyrics: str | None = None
     audio_file_source_path: str | None = None
+    audio_file_storage_mode: str | None = None
     album_art_source_path: str | None = None
+    album_art_storage_mode: str | None = None
 
 
 @dataclass(slots=True)
@@ -73,7 +89,9 @@ class TrackUpdatePayload:
     comments: str | None = None
     lyrics: str | None = None
     audio_file_source_path: str | None = None
+    audio_file_storage_mode: str | None = None
     album_art_source_path: str | None = None
+    album_art_storage_mode: str | None = None
     clear_audio_file: bool = False
     clear_album_art: bool = False
 
@@ -98,12 +116,18 @@ class TrackSnapshot:
     publisher: str | None
     comments: str | None
     lyrics: str | None
-    audio_file_path: str | None
-    audio_file_mime_type: str | None
-    audio_file_size_bytes: int
-    album_art_path: str | None
-    album_art_mime_type: str | None
-    album_art_size_bytes: int
+    audio_file_path: str | None = None
+    audio_file_storage_mode: str | None = None
+    audio_file_filename: str | None = None
+    audio_file_blob_b64: str | None = None
+    audio_file_mime_type: str | None = None
+    audio_file_size_bytes: int = 0
+    album_art_path: str | None = None
+    album_art_storage_mode: str | None = None
+    album_art_filename: str | None = None
+    album_art_blob_b64: str | None = None
+    album_art_mime_type: str | None = None
+    album_art_size_bytes: int = 0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -128,6 +152,40 @@ class TrackService:
         self.conn = conn
         self.data_root = Path(data_root) if data_root is not None else None
         self.media_root = self.data_root / "track_media" if self.data_root is not None else None
+        self.media_store = ManagedFileStorage(data_root=data_root, relative_root="track_media")
+        self._ensure_storage_columns()
+
+    def _ensure_storage_columns(self) -> None:
+        track_columns = {
+            str(row[1])
+            for row in self.conn.execute("PRAGMA table_info(Tracks)").fetchall()
+            if row and row[1]
+        }
+        album_columns = {
+            str(row[1])
+            for row in self.conn.execute("PRAGMA table_info(Albums)").fetchall()
+            if row and row[1]
+        }
+        track_additions = (
+            ("audio_file_storage_mode", "TEXT"),
+            ("audio_file_blob", "BLOB"),
+            ("audio_file_filename", "TEXT"),
+            ("album_art_storage_mode", "TEXT"),
+            ("album_art_blob", "BLOB"),
+            ("album_art_filename", "TEXT"),
+        )
+        album_additions = (
+            ("album_art_storage_mode", "TEXT"),
+            ("album_art_blob", "BLOB"),
+            ("album_art_filename", "TEXT"),
+        )
+        with self.conn:
+            for column_name, column_sql in track_additions:
+                if column_name not in track_columns:
+                    self.conn.execute(f"ALTER TABLE Tracks ADD COLUMN {column_name} {column_sql}")
+            for column_name, column_sql in album_additions:
+                if column_name not in album_columns:
+                    self.conn.execute(f"ALTER TABLE Albums ADD COLUMN {column_name} {column_sql}")
 
     @staticmethod
     def parse_additional_artists(text: str) -> list[str]:
@@ -220,29 +278,46 @@ class TrackService:
         return bool(row)
 
     def resolve_media_path(self, stored_path: str | None) -> Path | None:
-        clean_path = (stored_path or "").strip()
-        if not clean_path:
+        return self.media_store.resolve(stored_path)
+
+    @staticmethod
+    def _encode_blob_b64(blob_value: bytes | None) -> str | None:
+        if not blob_value:
             return None
-        path = Path(clean_path)
-        if path.is_absolute():
-            return path
-        if self.data_root is None:
-            raise ValueError("Track media root is not configured")
-        return self.data_root / path
+        return base64.b64encode(blob_value).decode("ascii")
+
+    @staticmethod
+    def _decode_blob_b64(encoded_value: str | None) -> bytes | None:
+        clean = str(encoded_value or "").strip()
+        if not clean:
+            return None
+        return base64.b64decode(clean.encode("ascii"))
 
     @staticmethod
     def _normalize_media_meta(
         path_value: str | None,
+        storage_mode: str | None,
+        filename: str | None,
         mime_type: str | None,
         size_bytes: int | None,
+        *,
+        blob_present: bool = False,
         **extra: object,
     ) -> dict[str, str | int | bool | object]:
         clean_path = str(path_value or "").strip()
+        clean_mode = infer_storage_mode(
+            explicit_mode=storage_mode,
+            stored_path=clean_path,
+            blob_value=b"\x00" if blob_present else None,
+        )
         payload: dict[str, str | int | bool | object] = {
-            "has_media": bool(clean_path),
+            "has_media": bool(clean_path or blob_present),
             "path": clean_path,
+            "storage_mode": clean_mode,
+            "filename": str(filename or "").strip() or None,
             "mime_type": str(mime_type or "").strip(),
             "size_bytes": int(size_bytes or 0),
+            "blob_present": bool(blob_present),
         }
         payload.update(extra)
         return payload
@@ -288,7 +363,13 @@ class TrackService:
         cur = cursor or self.conn.cursor()
         row = cur.execute(
             f"""
-            SELECT {config['path_column']}, {config['mime_column']}, {config['size_column']}
+            SELECT
+                {config['path_column']},
+                {config['storage_mode_column']},
+                {config['filename_column']},
+                {config['mime_column']},
+                {config['size_column']},
+                CASE WHEN {config['blob_column']} IS NOT NULL THEN 1 ELSE 0 END
             FROM Tracks
             WHERE id=?
             """,
@@ -296,12 +377,21 @@ class TrackService:
         ).fetchone()
         if not row:
             return self._normalize_media_meta(
-                "", "", 0, owner_scope="track", owner_id=int(track_id)
+                "",
+                None,
+                None,
+                "",
+                0,
+                owner_scope="track",
+                owner_id=int(track_id),
             )
         return self._normalize_media_meta(
             row[0],
             row[1],
             row[2],
+            row[3],
+            row[4],
+            blob_present=bool(row[5]),
             owner_scope="track",
             owner_id=int(track_id),
         )
@@ -315,7 +405,13 @@ class TrackService:
         cur = cursor or self.conn.cursor()
         row = cur.execute(
             """
-            SELECT album_art_path, album_art_mime_type, album_art_size_bytes
+            SELECT
+                album_art_path,
+                album_art_storage_mode,
+                album_art_filename,
+                album_art_mime_type,
+                album_art_size_bytes,
+                CASE WHEN album_art_blob IS NOT NULL THEN 1 ELSE 0 END
             FROM Albums
             WHERE id=?
             """,
@@ -323,12 +419,21 @@ class TrackService:
         ).fetchone()
         if not row:
             return self._normalize_media_meta(
-                "", "", 0, owner_scope="album", owner_id=int(album_id)
+                "",
+                None,
+                None,
+                "",
+                0,
+                owner_scope="album",
+                owner_id=int(album_id),
             )
         return self._normalize_media_meta(
             row[0],
             row[1],
             row[2],
+            row[3],
+            row[4],
+            blob_present=bool(row[5]),
             owner_scope="album",
             owner_id=int(album_id),
         )
@@ -342,11 +447,20 @@ class TrackService:
         cur = cursor or self.conn.cursor()
         row = cur.execute(
             """
-            SELECT id, album_art_path, album_art_mime_type, album_art_size_bytes
+            SELECT
+                id,
+                album_art_path,
+                album_art_storage_mode,
+                album_art_filename,
+                album_art_mime_type,
+                album_art_size_bytes,
+                CASE WHEN album_art_blob IS NOT NULL THEN 1 ELSE 0 END
             FROM Tracks
             WHERE album_id=?
-              AND album_art_path IS NOT NULL
-              AND album_art_path != ''
+              AND (
+                  (album_art_path IS NOT NULL AND album_art_path != '')
+                  OR album_art_blob IS NOT NULL
+              )
             ORDER BY id
             LIMIT 1
             """,
@@ -354,16 +468,126 @@ class TrackService:
         ).fetchone()
         if not row:
             return self._normalize_media_meta(
-                "", "", 0, owner_scope="album_track", owner_id=None, album_id=int(album_id)
+                "",
+                None,
+                None,
+                "",
+                0,
+                owner_scope="album_track",
+                owner_id=None,
+                album_id=int(album_id),
             )
         return self._normalize_media_meta(
             row[1],
             row[2],
             row[3],
+            row[4],
+            row[5],
+            blob_present=bool(row[6]),
             owner_scope="album_track",
             owner_id=int(row[0]),
             album_id=int(album_id),
         )
+
+    def _fetch_track_row_media_blob(
+        self,
+        track_id: int,
+        media_key: str,
+        *,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> bytes | None:
+        config = self.MEDIA_FIELDS[media_key]
+        cur = cursor or self.conn.cursor()
+        row = cur.execute(
+            f"SELECT {config['blob_column']} FROM Tracks WHERE id=?",
+            (int(track_id),),
+        ).fetchone()
+        if not row or row[0] is None:
+            return None
+        return bytes_from_blob(row[0])
+
+    def _fetch_album_art_blob(
+        self,
+        album_id: int,
+        *,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> bytes | None:
+        cur = cursor or self.conn.cursor()
+        row = cur.execute(
+            "SELECT album_art_blob FROM Albums WHERE id=?",
+            (int(album_id),),
+        ).fetchone()
+        if not row or row[0] is None:
+            return None
+        return bytes_from_blob(row[0])
+
+    def _fetch_media_blob_for_meta(
+        self,
+        media_key: str,
+        meta: dict[str, str | int | bool | object],
+        *,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> bytes | None:
+        owner_scope = str(meta.get("owner_scope") or "")
+        owner_id = meta.get("owner_id")
+        if owner_id is None:
+            return None
+        if owner_scope == "album":
+            return self._fetch_album_art_blob(int(owner_id), cursor=cursor)
+        return self._fetch_track_row_media_blob(int(owner_id), media_key, cursor=cursor)
+
+    def _build_media_storage_payload_from_source(
+        self,
+        media_key: str,
+        source_path: str | Path,
+        *,
+        storage_mode: str | None = None,
+    ) -> tuple[str | None, str, bytes | None, str, int]:
+        config = self.MEDIA_FIELDS[media_key]
+        source = Path(source_path)
+        if not source.exists():
+            raise FileNotFoundError(source)
+        if not config["validator"](str(source)):
+            raise ValueError(f"Selected file is not a valid {media_key.replace('_', ' ')}")
+        clean_mode = normalize_storage_mode(storage_mode, default=STORAGE_MODE_MANAGED_FILE)
+        filename = coalesce_filename(source.name, default_stem=media_key.replace("_", "-"))
+        mime_type = mimetypes.guess_type(source.name)[0] or ""
+        if clean_mode == STORAGE_MODE_DATABASE:
+            blob_data = _read_blob_from_path(str(source))
+            return None, filename, blob_data, mime_type, len(blob_data)
+        if self.media_root is None or self.data_root is None:
+            raise ValueError("Track media root is not configured")
+        data = source.read_bytes()
+        rel_path = self.media_store.write_bytes(
+            data,
+            filename=filename,
+            subdir=config["subdir"],
+        )
+        return rel_path, filename, None, mime_type, len(data)
+
+    def _build_media_storage_payload_from_bytes(
+        self,
+        media_key: str,
+        data: bytes,
+        *,
+        filename: str | None,
+        storage_mode: str,
+        mime_type: str | None = None,
+    ) -> tuple[str | None, str, bytes | None, str, int]:
+        config = self.MEDIA_FIELDS[media_key]
+        clean_mode = normalize_storage_mode(storage_mode)
+        clean_filename = coalesce_filename(filename, default_stem=media_key.replace("_", "-"))
+        resolved_mime = str(mime_type or mimetypes.guess_type(clean_filename)[0] or "").strip()
+        if clean_mode == STORAGE_MODE_DATABASE:
+            return None, clean_filename, data, resolved_mime, len(data)
+        if self.media_root is None or self.data_root is None:
+            raise ValueError("Track media root is not configured")
+        rel_path = self.media_store.write_bytes(
+            data,
+            filename=clean_filename,
+            subdir=config["subdir"],
+        )
+        return rel_path, clean_filename, None, resolved_mime, len(data)
 
     def _update_track_media_reference(
         self,
@@ -371,6 +595,9 @@ class TrackService:
         media_key: str,
         *,
         stored_path: str | None,
+        storage_mode: str | None,
+        blob_data: bytes | None,
+        filename: str | None,
         mime_type: str | None,
         size_bytes: int,
         cursor: sqlite3.Cursor,
@@ -379,11 +606,19 @@ class TrackService:
         cursor.execute(
             f"""
             UPDATE Tracks
-            SET {config['path_column']}=?, {config['mime_column']}=?, {config['size_column']}=?
+            SET {config['path_column']}=?,
+                {config['storage_mode_column']}=?,
+                {config['blob_column']}=?,
+                {config['filename_column']}=?,
+                {config['mime_column']}=?,
+                {config['size_column']}=?
             WHERE id=?
             """,
             (
                 str(stored_path or "").strip() or None,
+                normalize_storage_mode(storage_mode, default=None),
+                sqlite3.Binary(blob_data) if blob_data is not None else None,
+                str(filename or "").strip() or None,
                 str(mime_type or "").strip() or None,
                 int(size_bytes or 0),
                 int(track_id),
@@ -395,6 +630,9 @@ class TrackService:
         album_id: int,
         *,
         stored_path: str | None,
+        storage_mode: str | None,
+        blob_data: bytes | None,
+        filename: str | None,
         mime_type: str | None,
         size_bytes: int,
         cursor: sqlite3.Cursor,
@@ -402,11 +640,19 @@ class TrackService:
         cursor.execute(
             """
             UPDATE Albums
-            SET album_art_path=?, album_art_mime_type=?, album_art_size_bytes=?
+            SET album_art_path=?,
+                album_art_storage_mode=?,
+                album_art_blob=?,
+                album_art_filename=?,
+                album_art_mime_type=?,
+                album_art_size_bytes=?
             WHERE id=?
             """,
             (
                 str(stored_path or "").strip() or None,
+                normalize_storage_mode(storage_mode, default=None),
+                sqlite3.Binary(blob_data) if blob_data is not None else None,
+                str(filename or "").strip() or None,
                 str(mime_type or "").strip() or None,
                 int(size_bytes or 0),
                 int(album_id),
@@ -422,7 +668,12 @@ class TrackService:
         cursor.execute(
             """
             UPDATE Tracks
-            SET album_art_path=NULL, album_art_mime_type=NULL, album_art_size_bytes=0
+            SET album_art_path=NULL,
+                album_art_storage_mode=NULL,
+                album_art_blob=NULL,
+                album_art_filename=NULL,
+                album_art_mime_type=NULL,
+                album_art_size_bytes=0
             WHERE album_id=?
             """,
             (int(album_id),),
@@ -455,43 +706,8 @@ class TrackService:
         paths.extend(str(path) for (path,) in track_rows if path)
         return paths
 
-    def _write_media_file(
-        self,
-        media_key: str,
-        source_path: str | Path,
-    ) -> tuple[str, str, int]:
-        config = self.MEDIA_FIELDS[media_key]
-        source = Path(source_path)
-        if not source.exists():
-            raise FileNotFoundError(source)
-        if not config["validator"](str(source)):
-            raise ValueError(f"Selected file is not a valid {media_key.replace('_', ' ')}")
-        if self.media_root is None or self.data_root is None:
-            raise ValueError("Track media root is not configured")
-
-        destination_dir = self.media_root / config["subdir"]
-        destination_dir.mkdir(parents=True, exist_ok=True)
-        destination = destination_dir / f"{int(time.time_ns())}_{source.name}"
-        destination.write_bytes(source.read_bytes())
-
-        mime_type = mimetypes.guess_type(source.name)[0] or ""
-        size_bytes = destination.stat().st_size
-        rel_path = str(destination.relative_to(self.data_root))
-        return rel_path, mime_type, int(size_bytes)
-
     def _is_managed_media_path(self, stored_path: str) -> bool:
-        clean_path = str(stored_path or "").strip()
-        if not clean_path or self.media_root is None or self.data_root is None:
-            return False
-        if Path(clean_path).is_absolute():
-            return False
-        resolved = (self.data_root / clean_path).resolve()
-        media_root = self.media_root.resolve()
-        try:
-            resolved.relative_to(media_root)
-            return True
-        except ValueError:
-            return False
+        return self.media_store.is_managed(stored_path)
 
     def _delete_unreferenced_media_files(
         self,
@@ -564,6 +780,12 @@ class TrackService:
         cursor: sqlite3.Cursor | None = None,
     ) -> tuple[bytes, str]:
         meta = self.get_media_meta(track_id, media_key, cursor=cursor)
+        storage_mode = str(meta.get("storage_mode") or "")
+        if storage_mode == STORAGE_MODE_DATABASE:
+            blob_data = self._fetch_media_blob_for_meta(media_key, meta, cursor=cursor)
+            if blob_data is None:
+                raise FileNotFoundError(f"{media_key} for track {track_id}")
+            return blob_data, str(meta.get("mime_type") or "")
         stored_path = str(meta.get("path") or "")
         resolved = self.resolve_media_path(stored_path)
         if not resolved or not resolved.exists():
@@ -576,6 +798,7 @@ class TrackService:
         media_key: str,
         source_path: str | Path,
         *,
+        storage_mode: str | None = None,
         cursor: sqlite3.Cursor | None = None,
     ) -> dict[str, str | int | bool]:
         cur = cursor or self.conn.cursor()
@@ -584,28 +807,33 @@ class TrackService:
             album_id, album_title = self._fetch_album_context(track_id, cursor=cur)
             if self._album_supports_shared_art(album_id, album_title):
                 current_shared_meta = self._get_album_art_meta(int(album_id), cursor=cur)
-                current_shared_path = str(current_shared_meta.get("path") or "")
-                if current_shared_path:
-                    current_resolved = self.resolve_media_path(current_shared_path)
-                    source = Path(source_path)
-                    if current_resolved is not None and current_resolved.exists():
-                        try:
-                            if current_resolved.read_bytes() == source.read_bytes():
-                                self._clear_album_track_art_references(int(album_id), cursor=cur)
-                                return self._normalize_media_meta(
-                                    current_shared_path,
-                                    str(current_shared_meta.get("mime_type") or ""),
-                                    int(current_shared_meta.get("size_bytes") or 0),
-                                    owner_scope="album",
-                                    owner_id=int(album_id),
-                                )
-                        except Exception:
-                            pass
-                rel_path, mime_type, size_bytes = self._write_media_file(media_key, source_path)
+                source = Path(source_path)
+                if bool(current_shared_meta.get("has_media")):
+                    try:
+                        current_bytes, _ = self.fetch_media_bytes(
+                            track_id,
+                            media_key,
+                            cursor=cur,
+                        )
+                        if current_bytes == source.read_bytes():
+                            self._clear_album_track_art_references(int(album_id), cursor=cur)
+                            return current_shared_meta
+                    except Exception:
+                        pass
+                rel_path, filename, blob_data, mime_type, size_bytes = (
+                    self._build_media_storage_payload_from_source(
+                        media_key,
+                        source_path,
+                        storage_mode=storage_mode,
+                    )
+                )
                 stale_paths = self._collect_album_art_paths_for_album(int(album_id), cursor=cur)
                 self._update_album_art_reference(
                     int(album_id),
                     stored_path=rel_path,
+                    storage_mode=storage_mode,
+                    blob_data=blob_data,
+                    filename=filename,
                     mime_type=mime_type,
                     size_bytes=size_bytes,
                     cursor=cur,
@@ -614,18 +842,28 @@ class TrackService:
                 self._delete_unreferenced_media_files(stale_paths, cursor=cur)
                 return self._normalize_media_meta(
                     rel_path,
+                    storage_mode,
+                    filename,
                     mime_type,
                     size_bytes,
+                    blob_present=blob_data is not None,
                     owner_scope="album",
                     owner_id=int(album_id),
                 )
 
-        rel_path, mime_type, size_bytes = self._write_media_file(media_key, source_path)
+        rel_path, filename, blob_data, mime_type, size_bytes = self._build_media_storage_payload_from_source(
+            media_key,
+            source_path,
+            storage_mode=storage_mode,
+        )
         stale_meta = self._get_track_row_media_meta(track_id, media_key, cursor=cur)
         self._update_track_media_reference(
             track_id,
             media_key,
             stored_path=rel_path,
+            storage_mode=storage_mode,
+            blob_data=blob_data,
+            filename=filename,
             mime_type=mime_type,
             size_bytes=size_bytes,
             cursor=cur,
@@ -633,8 +871,11 @@ class TrackService:
         self._delete_unreferenced_media_files([str(stale_meta.get("path") or "")], cursor=cur)
         return self._normalize_media_meta(
             rel_path,
+            storage_mode,
+            filename,
             mime_type,
             size_bytes,
+            blob_present=blob_data is not None,
             owner_scope="track",
             owner_id=int(track_id),
         )
@@ -650,6 +891,9 @@ class TrackService:
                 self._update_album_art_reference(
                     int(album_id),
                     stored_path=None,
+                    storage_mode=None,
+                    blob_data=None,
+                    filename=None,
                     mime_type=None,
                     size_bytes=0,
                     cursor=cur,
@@ -663,11 +907,73 @@ class TrackService:
             track_id,
             media_key,
             stored_path=None,
+            storage_mode=None,
+            blob_data=None,
+            filename=None,
             mime_type=None,
             size_bytes=0,
             cursor=cur,
         )
         self._delete_unreferenced_media_files([str(stale_meta.get("path") or "")], cursor=cur)
+
+    def convert_media_storage_mode(
+        self,
+        track_id: int,
+        media_key: str,
+        target_mode: str,
+        *,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> dict[str, str | int | bool]:
+        cur = cursor or self.conn.cursor()
+        meta = self.get_media_meta(track_id, media_key, cursor=cur)
+        if not bool(meta.get("has_media")):
+            raise FileNotFoundError(f"{media_key} for track {track_id}")
+        clean_mode = normalize_storage_mode(target_mode)
+        current_mode = normalize_storage_mode(str(meta.get("storage_mode") or ""), default=None)
+        if current_mode == clean_mode:
+            return meta
+
+        data, mime_type = self.fetch_media_bytes(track_id, media_key, cursor=cur)
+        rel_path, filename, blob_data, resolved_mime, size_bytes = (
+            self._build_media_storage_payload_from_bytes(
+                media_key,
+                data,
+                filename=str(meta.get("filename") or "") or None,
+                storage_mode=clean_mode,
+                mime_type=mime_type,
+            )
+        )
+        stale_path = str(meta.get("path") or "")
+        owner_scope = str(meta.get("owner_scope") or "")
+        owner_id = meta.get("owner_id")
+        if owner_scope == "album" and owner_id is not None:
+            self._update_album_art_reference(
+                int(owner_id),
+                stored_path=rel_path,
+                storage_mode=clean_mode,
+                blob_data=blob_data,
+                filename=filename,
+                mime_type=resolved_mime,
+                size_bytes=size_bytes,
+                cursor=cur,
+            )
+        elif owner_id is not None:
+            self._update_track_media_reference(
+                int(owner_id),
+                media_key,
+                stored_path=rel_path,
+                storage_mode=clean_mode,
+                blob_data=blob_data,
+                filename=filename,
+                mime_type=resolved_mime,
+                size_bytes=size_bytes,
+                cursor=cur,
+            )
+        else:
+            raise FileNotFoundError(f"{media_key} for track {track_id}")
+        if stale_path and stale_path != str(rel_path or ""):
+            self._delete_unreferenced_media_files([stale_path], cursor=cur)
+        return self.get_media_meta(track_id, media_key, cursor=cur)
 
     def fetch_track_title(self, track_id: int, *, cursor: sqlite3.Cursor | None = None) -> str:
         cur = cursor or self.conn.cursor()
@@ -713,14 +1019,8 @@ class TrackService:
                 t.id,
                 t.db_entry_date,
                 t.isrc,
-                t.audio_file_path,
-                t.audio_file_mime_type,
-                t.audio_file_size_bytes,
                 t.track_title,
                 t.catalog_number,
-                t.album_art_path,
-                t.album_art_mime_type,
-                t.album_art_size_bytes,
                 main_artist.name,
                 t.buma_work_number,
                 album.title,
@@ -732,7 +1032,12 @@ class TrackService:
                 t.composer,
                 t.publisher,
                 t.comments,
-                t.lyrics
+                t.lyrics,
+                t.audio_file_path,
+                t.audio_file_storage_mode,
+                t.audio_file_filename,
+                t.audio_file_mime_type,
+                t.audio_file_size_bytes
             FROM Tracks t
             JOIN Artists main_artist ON main_artist.id = t.main_artist_id
             LEFT JOIN Albums album ON album.id = t.album_id
@@ -753,31 +1058,52 @@ class TrackService:
             """,
             (int(track_id),),
         ).fetchall()
+        audio_meta = self._normalize_media_meta(
+            row[17],
+            row[18],
+            row[19],
+            row[20],
+            row[21],
+            blob_present=self._fetch_track_row_media_blob(track_id, "audio_file", cursor=cur)
+            is not None,
+            owner_scope="track",
+            owner_id=int(track_id),
+        )
         album_art_meta = self.get_media_meta(track_id, "album_art", cursor=cur)
 
         return TrackSnapshot(
             track_id=int(row[0]),
             db_entry_date=row[1],
             isrc=row[2] or "",
-            track_title=row[6] or "",
-            artist_name=row[11] or "",
+            track_title=row[3] or "",
+            artist_name=row[5] or "",
             additional_artists=[name for (name,) in additional_rows if name],
-            album_title=row[13],
-            release_date=row[14],
-            track_length_sec=int(row[15] or 0),
-            iswc=row[16],
-            upc=row[17],
-            genre=row[18],
-            composer=row[19],
-            publisher=row[20],
-            comments=row[21],
-            lyrics=row[22],
-            catalog_number=row[7],
-            buma_work_number=row[12],
-            audio_file_path=row[3],
-            audio_file_mime_type=row[4],
-            audio_file_size_bytes=int(row[5] or 0),
+            album_title=row[7],
+            release_date=row[8],
+            track_length_sec=int(row[9] or 0),
+            iswc=row[10],
+            upc=row[11],
+            genre=row[12],
+            composer=row[13],
+            publisher=row[14],
+            comments=row[15],
+            lyrics=row[16],
+            catalog_number=row[4],
+            buma_work_number=row[6],
+            audio_file_path=str(audio_meta.get("path") or "") or None,
+            audio_file_storage_mode=str(audio_meta.get("storage_mode") or "") or None,
+            audio_file_filename=str(audio_meta.get("filename") or "") or None,
+            audio_file_blob_b64=self._encode_blob_b64(
+                self._fetch_track_row_media_blob(track_id, "audio_file", cursor=cur)
+            ),
+            audio_file_mime_type=str(audio_meta.get("mime_type") or "") or None,
+            audio_file_size_bytes=int(audio_meta.get("size_bytes") or 0),
             album_art_path=str(album_art_meta.get("path") or "") or None,
+            album_art_storage_mode=str(album_art_meta.get("storage_mode") or "") or None,
+            album_art_filename=str(album_art_meta.get("filename") or "") or None,
+            album_art_blob_b64=self._encode_blob_b64(
+                self._fetch_media_blob_for_meta("album_art", album_art_meta, cursor=cur)
+            ),
             album_art_mime_type=str(album_art_meta.get("mime_type") or "") or None,
             album_art_size_bytes=int(album_art_meta.get("size_bytes") or 0),
         )
@@ -789,6 +1115,8 @@ class TrackService:
         main_artist_id = self.get_or_create_artist(snapshot.artist_name, cursor=cur)
         album_id = self.get_or_create_album(snapshot.album_title, cursor=cur)
         compact_isrc = to_compact_isrc(snapshot.isrc)
+        audio_blob = self._decode_blob_b64(snapshot.audio_file_blob_b64)
+        album_art_blob = self._decode_blob_b64(snapshot.album_art_blob_b64)
         existing = cur.execute(
             "SELECT 1 FROM Tracks WHERE id=?", (int(snapshot.track_id),)
         ).fetchone()
@@ -800,11 +1128,17 @@ class TrackService:
                     isrc=?,
                     isrc_compact=?,
                     audio_file_path=?,
+                    audio_file_storage_mode=?,
+                    audio_file_blob=?,
+                    audio_file_filename=?,
                     audio_file_mime_type=?,
                     audio_file_size_bytes=?,
                     track_title=?,
                     catalog_number=?,
                     album_art_path=?,
+                    album_art_storage_mode=?,
+                    album_art_blob=?,
+                    album_art_filename=?,
                     album_art_mime_type=?,
                     album_art_size_bytes=?,
                     main_artist_id=?,
@@ -826,11 +1160,17 @@ class TrackService:
                     snapshot.isrc,
                     compact_isrc,
                     snapshot.audio_file_path,
+                    snapshot.audio_file_storage_mode,
+                    sqlite3.Binary(audio_blob) if audio_blob is not None else None,
+                    snapshot.audio_file_filename,
                     snapshot.audio_file_mime_type,
                     int(snapshot.audio_file_size_bytes or 0),
                     snapshot.track_title,
                     snapshot.catalog_number,
                     snapshot.album_art_path,
+                    snapshot.album_art_storage_mode,
+                    sqlite3.Binary(album_art_blob) if album_art_blob is not None else None,
+                    snapshot.album_art_filename,
                     snapshot.album_art_mime_type,
                     int(snapshot.album_art_size_bytes or 0),
                     main_artist_id,
@@ -853,14 +1193,16 @@ class TrackService:
                 """
                 INSERT INTO Tracks (
                     id, db_entry_date, isrc, isrc_compact,
-                    audio_file_path, audio_file_mime_type, audio_file_size_bytes,
+                    audio_file_path, audio_file_storage_mode, audio_file_blob, audio_file_filename,
+                    audio_file_mime_type, audio_file_size_bytes,
                     track_title, catalog_number,
-                    album_art_path, album_art_mime_type, album_art_size_bytes,
+                    album_art_path, album_art_storage_mode, album_art_blob, album_art_filename,
+                    album_art_mime_type, album_art_size_bytes,
                     main_artist_id, buma_work_number, album_id,
                     release_date, track_length_sec, iswc, upc, genre,
                     composer, publisher, comments, lyrics
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     int(snapshot.track_id),
@@ -868,11 +1210,17 @@ class TrackService:
                     snapshot.isrc,
                     compact_isrc,
                     snapshot.audio_file_path,
+                    snapshot.audio_file_storage_mode,
+                    sqlite3.Binary(audio_blob) if audio_blob is not None else None,
+                    snapshot.audio_file_filename,
                     snapshot.audio_file_mime_type,
                     int(snapshot.audio_file_size_bytes or 0),
                     snapshot.track_title,
                     snapshot.catalog_number,
                     snapshot.album_art_path,
+                    snapshot.album_art_storage_mode,
+                    sqlite3.Binary(album_art_blob) if album_art_blob is not None else None,
+                    snapshot.album_art_filename,
                     snapshot.album_art_mime_type,
                     int(snapshot.album_art_size_bytes or 0),
                     main_artist_id,
@@ -893,6 +1241,9 @@ class TrackService:
             self._update_album_art_reference(
                 int(album_id),
                 stored_path=snapshot.album_art_path,
+                storage_mode=snapshot.album_art_storage_mode,
+                blob_data=album_art_blob,
+                filename=snapshot.album_art_filename,
                 mime_type=snapshot.album_art_mime_type,
                 size_bytes=int(snapshot.album_art_size_bytes or 0),
                 cursor=cur,
@@ -901,6 +1252,9 @@ class TrackService:
                 snapshot.track_id,
                 "album_art",
                 stored_path=None,
+                storage_mode=None,
+                blob_data=None,
+                filename=None,
                 mime_type=None,
                 size_bytes=0,
                 cursor=cur,
@@ -965,23 +1319,31 @@ class TrackService:
                 """
                 INSERT INTO Tracks (
                     isrc, isrc_compact,
-                    audio_file_path, audio_file_mime_type, audio_file_size_bytes,
+                    audio_file_path, audio_file_storage_mode, audio_file_blob, audio_file_filename,
+                    audio_file_mime_type, audio_file_size_bytes,
                     track_title, catalog_number,
-                    album_art_path, album_art_mime_type, album_art_size_bytes,
+                    album_art_path, album_art_storage_mode, album_art_blob, album_art_filename,
+                    album_art_mime_type, album_art_size_bytes,
                     main_artist_id, buma_work_number, album_id,
                     release_date, track_length_sec, iswc, upc, genre,
                     composer, publisher, comments, lyrics
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     clean_isrc,
                     compact_isrc,
                     None,
                     None,
+                    None,
+                    None,
+                    None,
                     0,
                     payload.track_title.strip(),
                     payload.catalog_number,
+                    None,
+                    None,
+                    None,
                     None,
                     None,
                     0,
@@ -1002,11 +1364,19 @@ class TrackService:
             track_id = int(cur.lastrowid)
             if payload.audio_file_source_path:
                 self.set_media_path(
-                    track_id, "audio_file", payload.audio_file_source_path, cursor=cur
+                    track_id,
+                    "audio_file",
+                    payload.audio_file_source_path,
+                    storage_mode=payload.audio_file_storage_mode,
+                    cursor=cur,
                 )
             if payload.album_art_source_path:
                 self.set_media_path(
-                    track_id, "album_art", payload.album_art_source_path, cursor=cur
+                    track_id,
+                    "album_art",
+                    payload.album_art_source_path,
+                    storage_mode=payload.album_art_storage_mode,
+                    cursor=cur,
                 )
             self.replace_additional_artists(track_id, payload.additional_artists, cursor=cur)
             return track_id
@@ -1019,19 +1389,28 @@ class TrackService:
         current_audio = self._get_track_row_media_meta(
             payload.track_id, "audio_file", cursor=cursor
         )
+        current_audio_blob = self._fetch_track_row_media_blob(
+            payload.track_id, "audio_file", cursor=cursor
+        )
         current_track_art = self._get_track_row_media_meta(
             payload.track_id, "album_art", cursor=cursor
         )
+        current_track_art_blob = self._fetch_track_row_media_blob(
+            payload.track_id, "album_art", cursor=cursor
+        )
         current_effective_art = self.get_media_meta(payload.track_id, "album_art", cursor=cursor)
+        current_effective_art_blob = self._fetch_media_blob_for_meta(
+            "album_art", current_effective_art, cursor=cursor
+        )
         shared_album_art = self._album_supports_shared_art(album_id, payload.album_title)
 
         cursor.execute(
             """
             UPDATE Tracks SET
                 isrc=?, isrc_compact=?,
-                audio_file_path=?, audio_file_mime_type=?, audio_file_size_bytes=?,
+                audio_file_path=?, audio_file_storage_mode=?, audio_file_blob=?, audio_file_filename=?, audio_file_mime_type=?, audio_file_size_bytes=?,
                 track_title=?, catalog_number=?,
-                album_art_path=?, album_art_mime_type=?, album_art_size_bytes=?,
+                album_art_path=?, album_art_storage_mode=?, album_art_blob=?, album_art_filename=?, album_art_mime_type=?, album_art_size_bytes=?,
                 main_artist_id=?, buma_work_number=?, album_id=?, release_date=?,
                 track_length_sec=?, iswc=?, upc=?, genre=?, composer=?, publisher=?, comments=?, lyrics=?
             WHERE id=?
@@ -1040,11 +1419,21 @@ class TrackService:
                 clean_isrc,
                 compact_isrc,
                 str(current_audio.get("path") or "") or None,
+                str(current_audio.get("storage_mode") or "") or None,
+                sqlite3.Binary(current_audio_blob) if current_audio_blob is not None else None,
+                str(current_audio.get("filename") or "") or None,
                 str(current_audio.get("mime_type") or "") or None,
                 int(current_audio.get("size_bytes") or 0),
                 payload.track_title.strip(),
                 payload.catalog_number,
                 (None if shared_album_art else (str(current_track_art.get("path") or "") or None)),
+                (None if shared_album_art else (str(current_track_art.get("storage_mode") or "") or None)),
+                (
+                    None
+                    if shared_album_art or current_track_art_blob is None
+                    else sqlite3.Binary(current_track_art_blob)
+                ),
+                (None if shared_album_art else (str(current_track_art.get("filename") or "") or None)),
                 (
                     None
                     if shared_album_art
@@ -1071,14 +1460,22 @@ class TrackService:
             self.clear_media(payload.track_id, "audio_file", cursor=cursor)
         elif payload.audio_file_source_path:
             self.set_media_path(
-                payload.track_id, "audio_file", payload.audio_file_source_path, cursor=cursor
+                payload.track_id,
+                "audio_file",
+                payload.audio_file_source_path,
+                storage_mode=payload.audio_file_storage_mode,
+                cursor=cursor,
             )
 
         if payload.clear_album_art:
             self.clear_media(payload.track_id, "album_art", cursor=cursor)
         elif payload.album_art_source_path:
             self.set_media_path(
-                payload.track_id, "album_art", payload.album_art_source_path, cursor=cursor
+                payload.track_id,
+                "album_art",
+                payload.album_art_source_path,
+                storage_mode=payload.album_art_storage_mode,
+                cursor=cursor,
             )
         elif shared_album_art:
             stale_track_art_path = str(current_track_art.get("path") or "")
@@ -1087,20 +1484,27 @@ class TrackService:
                     payload.track_id,
                     "album_art",
                     stored_path=None,
+                    storage_mode=None,
+                    blob_data=None,
+                    filename=None,
                     mime_type=None,
                     size_bytes=0,
                     cursor=cursor,
                 )
                 self._delete_unreferenced_media_files([stale_track_art_path], cursor=cursor)
         else:
-            effective_art_path = str(current_effective_art.get("path") or "")
-            if effective_art_path and effective_art_path != str(
-                current_track_art.get("path") or ""
+            if bool(current_effective_art.get("has_media")) and (
+                str(current_effective_art.get("path") or "") != str(current_track_art.get("path") or "")
+                or str(current_effective_art.get("storage_mode") or "")
+                != str(current_track_art.get("storage_mode") or "")
             ):
                 self._update_track_media_reference(
                     payload.track_id,
                     "album_art",
-                    stored_path=effective_art_path,
+                    stored_path=str(current_effective_art.get("path") or "") or None,
+                    storage_mode=str(current_effective_art.get("storage_mode") or "") or None,
+                    blob_data=current_effective_art_blob,
+                    filename=str(current_effective_art.get("filename") or "") or None,
                     mime_type=str(current_effective_art.get("mime_type") or "") or None,
                     size_bytes=int(current_effective_art.get("size_bytes") or 0),
                     cursor=cursor,

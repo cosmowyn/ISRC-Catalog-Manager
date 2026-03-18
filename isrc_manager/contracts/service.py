@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-import shutil
+import mimetypes
 import sqlite3
 import time
 from dataclasses import asdict
@@ -11,6 +11,16 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from isrc_manager.domain.repertoire import clean_text, parse_iso_date
+from isrc_manager.file_storage import (
+    ManagedFileStorage,
+    STORAGE_MODE_DATABASE,
+    STORAGE_MODE_MANAGED_FILE,
+    bytes_from_blob,
+    coalesce_filename,
+    infer_storage_mode,
+    normalize_storage_mode,
+    sha256_digest,
+)
 from isrc_manager.parties import PartyService
 
 from .models import (
@@ -46,7 +56,11 @@ class ContractService:
         self.documents_root = (
             self.data_root / "contract_documents" if self.data_root is not None else None
         )
+        self.document_store = ManagedFileStorage(
+            data_root=data_root, relative_root="contract_documents"
+        )
         self.party_service = party_service
+        self._ensure_storage_columns()
 
     @staticmethod
     def _clean_status(value: str | None) -> str:
@@ -68,6 +82,82 @@ class ContractService:
         if clean not in DOCUMENT_TYPE_CHOICES:
             return "other"
         return clean
+
+    def _ensure_storage_columns(self) -> None:
+        columns = {
+            str(row[1])
+            for row in self.conn.execute("PRAGMA table_info(ContractDocuments)").fetchall()
+            if row and row[1]
+        }
+        additions = (
+            ("storage_mode", "TEXT"),
+            ("file_blob", "BLOB"),
+        )
+        with self.conn:
+            for column_name, column_sql in additions:
+                if column_name not in columns:
+                    self.conn.execute(
+                        f"ALTER TABLE ContractDocuments ADD COLUMN {column_name} {column_sql}"
+                    )
+
+    def _fetch_document_row(self, document_id: int):
+        return self.conn.execute(
+            """
+            SELECT
+                id,
+                contract_id,
+                title,
+                document_type,
+                version_label,
+                created_date,
+                received_date,
+                signed_status,
+                signed_by_all_parties,
+                active_flag,
+                supersedes_document_id,
+                superseded_by_document_id,
+                file_path,
+                filename,
+                storage_mode,
+                file_blob,
+                checksum_sha256,
+                notes,
+                uploaded_at
+            FROM ContractDocuments
+            WHERE id=?
+            """,
+            (int(document_id),),
+        ).fetchone()
+
+    def _document_blob_bytes(self, document_id: int) -> bytes | None:
+        row = self.conn.execute(
+            "SELECT file_blob FROM ContractDocuments WHERE id=?",
+            (int(document_id),),
+        ).fetchone()
+        if not row or row[0] is None:
+            return None
+        return bytes_from_blob(row[0])
+
+    def fetch_document_bytes(self, document_id: int) -> tuple[bytes, str]:
+        row = self._fetch_document_row(document_id)
+        if row is None:
+            raise FileNotFoundError(document_id)
+        storage_mode = infer_storage_mode(
+            explicit_mode=row[14],
+            stored_path=row[12],
+            blob_value=row[15],
+        )
+        filename = clean_text(row[13]) or Path(str(row[12] or "")).name or "contract-document"
+        mime_type = mimetypes.guess_type(filename)[0] or ""
+        if storage_mode == STORAGE_MODE_DATABASE:
+            blob_data = self._document_blob_bytes(document_id)
+            if blob_data is None:
+                raise FileNotFoundError(filename or document_id)
+            return blob_data, mime_type
+        resolved = self.resolve_document_path(row[12])
+        if resolved is None or not resolved.exists():
+            raise FileNotFoundError(row[12] or filename or document_id)
+        return resolved.read_bytes(), mime_type
 
     @staticmethod
     def _row_to_contract(row) -> ContractRecord:
@@ -139,9 +229,10 @@ class ContractService:
             superseded_by_document_id=int(row[11]) if row[11] is not None else None,
             file_path=clean_text(row[12]),
             filename=clean_text(row[13]),
-            checksum_sha256=clean_text(row[14]),
-            notes=clean_text(row[15]),
-            uploaded_at=clean_text(row[16]),
+            storage_mode=clean_text(row[14]),
+            checksum_sha256=clean_text(row[16]),
+            notes=clean_text(row[17]),
+            uploaded_at=clean_text(row[18]),
         )
 
     def _hash_file(self, path: Path) -> str:
@@ -151,16 +242,11 @@ class ContractService:
                 digest.update(chunk)
         return digest.hexdigest()
 
+    def _is_managed_document_path(self, stored_path: str | None) -> bool:
+        return self.document_store.is_managed(stored_path)
+
     def resolve_document_path(self, stored_path: str | None) -> Path | None:
-        clean_path = clean_text(stored_path)
-        if not clean_path:
-            return None
-        path = Path(clean_path)
-        if path.is_absolute():
-            return path
-        if self.data_root is None:
-            return None
-        return self.data_root / path
+        return self.document_store.resolve(stored_path)
 
     def _write_document_file(self, source_path: str | Path) -> tuple[str, str, str]:
         source = Path(source_path)
@@ -168,14 +254,68 @@ class ContractService:
             raise FileNotFoundError(source)
         if self.documents_root is None or self.data_root is None:
             raise ValueError("Contract document storage is not configured.")
-        self.documents_root.mkdir(parents=True, exist_ok=True)
-        destination = self.documents_root / f"{int(time.time_ns())}_{source.name}"
-        shutil.copy2(source, destination)
-        return (
-            str(destination.relative_to(self.data_root)),
-            source.name,
-            self._hash_file(destination),
+        data = source.read_bytes()
+        filename = coalesce_filename(source.name, default_stem="contract-document")
+        rel_path = self.document_store.write_bytes(
+            data,
+            filename=filename,
+            subdir=None,
         )
+        destination = self.data_root / rel_path
+        return rel_path, filename, self._hash_file(destination)
+
+    def _write_document_blob(self, source_path: str | Path) -> tuple[bytes, str, str]:
+        source = Path(source_path)
+        if not source.exists():
+            raise FileNotFoundError(source)
+        data = source.read_bytes()
+        filename = coalesce_filename(source.name, default_stem="contract-document")
+        return data, filename, sha256_digest(data)
+
+    def _build_document_storage_payload(
+        self,
+        *,
+        source_path: str | Path | None = None,
+        stored_path: str | None = None,
+        filename: str | None = None,
+        checksum_sha256: str | None = None,
+        storage_mode: str | None = None,
+        existing_file_blob: object | None = None,
+    ) -> tuple[str | None, bytes | None, str, str | None, str | None]:
+        clean_mode = normalize_storage_mode(storage_mode, default=STORAGE_MODE_MANAGED_FILE)
+        if source_path:
+            source = Path(source_path)
+            if clean_mode == STORAGE_MODE_DATABASE:
+                blob_data, resolved_filename, resolved_checksum = self._write_document_blob(source)
+                resolved_mime = mimetypes.guess_type(resolved_filename)[0] or ""
+                return None, blob_data, resolved_filename, resolved_checksum, resolved_mime
+            rel_path, resolved_filename, resolved_checksum = self._write_document_file(source)
+            resolved_mime = mimetypes.guess_type(resolved_filename)[0] or ""
+            return rel_path, None, resolved_filename, resolved_checksum, resolved_mime
+
+        clean_stored_path = clean_text(stored_path)
+        clean_filename = coalesce_filename(
+            filename,
+            stored_path=clean_stored_path,
+            default_stem="contract-document",
+        )
+        clean_checksum = clean_text(checksum_sha256)
+        if clean_mode == STORAGE_MODE_DATABASE:
+            blob_data = bytes_from_blob(existing_file_blob)
+            if existing_file_blob is None:
+                raise FileNotFoundError("No document blob is stored for this record.")
+            resolved_checksum = clean_checksum or sha256_digest(blob_data)
+            resolved_mime = mimetypes.guess_type(clean_filename)[0] or ""
+            return None, blob_data, clean_filename, resolved_checksum, resolved_mime
+
+        if not clean_stored_path:
+            raise FileNotFoundError("No managed document path is stored for this record.")
+        resolved_path = self.resolve_document_path(clean_stored_path)
+        if resolved_path is None or not resolved_path.exists():
+            raise FileNotFoundError(clean_stored_path)
+        resolved_checksum = clean_checksum or self._hash_file(resolved_path)
+        resolved_mime = mimetypes.guess_type(clean_filename)[0] or ""
+        return clean_stored_path, None, clean_filename, resolved_checksum, resolved_mime
 
     def _delete_document_if_unreferenced(
         self,
@@ -192,6 +332,8 @@ class ContractService:
         ).fetchone()
         if row:
             return
+        if not self._is_managed_document_path(clean_path):
+            return
         resolved = self.resolve_document_path(clean_path)
         if resolved is None:
             return
@@ -199,6 +341,142 @@ class ContractService:
             resolved.unlink(missing_ok=True)
         except Exception:
             pass
+
+    def _document_current_storage_mode(self, document_id: int) -> str | None:
+        row = self.conn.execute(
+            "SELECT storage_mode, file_path, file_blob FROM ContractDocuments WHERE id=?",
+            (int(document_id),),
+        ).fetchone()
+        if not row:
+            return None
+        return infer_storage_mode(
+            explicit_mode=row[0],
+            stored_path=row[1],
+            blob_value=row[2],
+        )
+
+    def convert_document_storage_mode(
+        self, document_id: int, target_mode: str, *, cursor: sqlite3.Cursor | None = None
+    ) -> ContractDocumentRecord:
+        clean_mode = normalize_storage_mode(target_mode)
+        cur = cursor or self.conn.cursor()
+        row = self._fetch_document_row(document_id)
+        if row is None:
+            raise ValueError(f"Contract document {document_id} not found")
+        current_mode = infer_storage_mode(
+            explicit_mode=row[14],
+            stored_path=row[12],
+            blob_value=row[15],
+        )
+        if current_mode == clean_mode:
+            return self._row_to_document(row)
+
+        old_path = clean_text(row[12])
+        filename = clean_text(row[13]) or (Path(old_path).name if old_path else "contract-document")
+        checksum = clean_text(row[16])
+
+        if clean_mode == STORAGE_MODE_DATABASE:
+            if current_mode == STORAGE_MODE_DATABASE:
+                return self._row_to_document(row)
+            managed_path = clean_text(row[12])
+            resolved = self.resolve_document_path(managed_path)
+            if resolved is None or not resolved.exists():
+                raise FileNotFoundError(managed_path or f"contract document {document_id}")
+            data = resolved.read_bytes()
+            verified_checksum = sha256_digest(data)
+            with self.conn:
+                cur.execute(
+                    """
+                    UPDATE ContractDocuments
+                    SET file_path=NULL,
+                        storage_mode=?,
+                        file_blob=?,
+                        filename=?,
+                        checksum_sha256=?
+                    WHERE id=?
+                    """,
+                    (
+                        clean_mode,
+                        sqlite3.Binary(data),
+                        filename,
+                        verified_checksum,
+                        int(document_id),
+                    ),
+                )
+            if managed_path and self._is_managed_document_path(managed_path):
+                self._delete_document_if_unreferenced(managed_path, cursor=cur)
+            updated = self._fetch_document_row(document_id)
+            if updated is None:
+                raise RuntimeError(f"Contract document {document_id} disappeared after conversion")
+            return self._row_to_document(updated)
+
+        if current_mode == STORAGE_MODE_DATABASE:
+            blob_data = bytes_from_blob(row[15])
+            if blob_data is None:
+                raise FileNotFoundError(f"Contract document {document_id} has no stored blob")
+            if self.documents_root is None or self.data_root is None:
+                raise ValueError("Contract document storage is not configured.")
+            rel_path = self.document_store.write_bytes(
+                blob_data,
+                filename=filename,
+                subdir=None,
+            )
+            resolved = self.resolve_document_path(rel_path)
+            if resolved is None or not resolved.exists() or resolved.read_bytes() != blob_data:
+                raise RuntimeError("Managed document conversion verification failed")
+            with self.conn:
+                cur.execute(
+                    """
+                    UPDATE ContractDocuments
+                    SET file_path=?,
+                        storage_mode=?,
+                        file_blob=NULL,
+                        filename=?,
+                        checksum_sha256=?
+                    WHERE id=?
+                    """,
+                    (
+                        rel_path,
+                        clean_mode,
+                        filename,
+                        checksum or sha256_digest(blob_data),
+                        int(document_id),
+                    ),
+                )
+            updated = self._fetch_document_row(document_id)
+            if updated is None:
+                raise RuntimeError(f"Contract document {document_id} disappeared after conversion")
+            return self._row_to_document(updated)
+
+        if not old_path:
+            raise FileNotFoundError(f"Contract document {document_id} has no stored path")
+        resolved = self.resolve_document_path(old_path)
+        if resolved is None or not resolved.exists():
+            raise FileNotFoundError(old_path)
+        data = resolved.read_bytes()
+        verified_checksum = sha256_digest(data)
+        with self.conn:
+            cur.execute(
+                """
+                UPDATE ContractDocuments
+                SET storage_mode=?,
+                    file_blob=?,
+                    checksum_sha256=?
+                WHERE id=?
+                """,
+                (
+                    clean_mode,
+                    sqlite3.Binary(data),
+                    verified_checksum,
+                    int(document_id),
+                ),
+            )
+        if old_path and self._is_managed_document_path(old_path):
+            self._delete_document_if_unreferenced(old_path, cursor=cur)
+        updated = self._fetch_document_row(document_id)
+        if updated is None:
+            raise RuntimeError(f"Contract document {document_id} disappeared after conversion")
+        return self._row_to_document(updated)
 
     def _resolve_party_id(
         self, item: ContractPartyPayload, *, cursor: sqlite3.Cursor
@@ -534,23 +812,82 @@ class ContractService:
         cursor: sqlite3.Cursor,
     ) -> None:
         existing_rows = cursor.execute(
-            "SELECT id, file_path FROM ContractDocuments WHERE contract_id=?",
+            "SELECT id, file_path, storage_mode, file_blob, filename, checksum_sha256 FROM ContractDocuments WHERE contract_id=?",
             (int(contract_id),),
         ).fetchall()
-        existing_paths = {int(row[0]): clean_text(row[1]) for row in existing_rows}
+        existing_by_id = {
+            int(row[0]): {
+                "file_path": clean_text(row[1]),
+                "storage_mode": clean_text(row[2]),
+                "file_blob": row[3],
+                "filename": clean_text(row[4]),
+                "checksum_sha256": clean_text(row[5]),
+            }
+            for row in existing_rows
+        }
         seen_ids: set[int] = set()
         for item in documents:
             title = clean_text(item.title)
             if not title:
                 continue
-            file_path = clean_text(item.stored_path)
+            current = existing_by_id.get(int(item.document_id)) if item.document_id else None
+            requested_mode = normalize_storage_mode(item.storage_mode, default=None)
+            current_mode = infer_storage_mode(
+                explicit_mode=current["storage_mode"] if current else None,
+                stored_path=current["file_path"] if current else None,
+                blob_value=current["file_blob"] if current else None,
+            )
+            desired_mode = requested_mode or current_mode or STORAGE_MODE_MANAGED_FILE
+            stored_path = clean_text(item.stored_path) if item.stored_path else None
             filename = clean_text(item.filename)
             checksum = clean_text(item.checksum_sha256)
+            file_blob = None
             if clean_text(item.source_path):
-                file_path, filename, checksum = self._write_document_file(str(item.source_path))
-            if item.document_id and int(item.document_id) in existing_paths:
+                stored_path, file_blob, filename, checksum, _ = self._build_document_storage_payload(
+                    source_path=item.source_path,
+                    storage_mode=desired_mode,
+                )
+            elif current is not None:
+                stored_path = stored_path or current["file_path"]
+                filename = filename or current["filename"]
+                checksum = checksum or current["checksum_sha256"]
+                if desired_mode == STORAGE_MODE_DATABASE and current_mode != STORAGE_MODE_DATABASE:
+                    payload = self._build_document_storage_payload(
+                        stored_path=current["file_path"],
+                        filename=filename,
+                        checksum_sha256=checksum,
+                        storage_mode=STORAGE_MODE_DATABASE,
+                        existing_file_blob=current["file_blob"],
+                    )
+                    stored_path, file_blob, filename, checksum, _ = payload
+                elif desired_mode == STORAGE_MODE_MANAGED_FILE and current_mode == STORAGE_MODE_DATABASE:
+                    blob_data = bytes_from_blob(current["file_blob"])
+                    if not blob_data:
+                        raise FileNotFoundError("No document blob is stored for this record.")
+                    if self.documents_root is None or self.data_root is None:
+                        raise ValueError("Contract document storage is not configured.")
+                    filename = filename or current["filename"]
+                    stored_path = self.document_store.write_bytes(
+                        blob_data,
+                        filename=filename or "contract-document",
+                        subdir=None,
+                    )
+                    checksum = checksum or sha256_digest(blob_data)
+                    file_blob = None
+                else:
+                    file_blob = current["file_blob"]
+            else:
+                if not stored_path:
+                    desired_mode = None
+                    filename = filename or None
+                    checksum = checksum or None
+                elif not filename:
+                    filename = Path(stored_path).name
+
+            if item.document_id and int(item.document_id) in existing_by_id:
                 document_id = int(item.document_id)
-                old_path = existing_paths.get(document_id)
+                old = existing_by_id.get(document_id) or {}
+                old_path = old.get("file_path")
                 cursor.execute(
                     """
                     UPDATE ContractDocuments
@@ -566,6 +903,8 @@ class ContractService:
                         superseded_by_document_id=?,
                         file_path=?,
                         filename=?,
+                        storage_mode=?,
+                        file_blob=?,
                         checksum_sha256=?,
                         notes=?
                     WHERE id=?
@@ -581,16 +920,22 @@ class ContractService:
                         1 if item.active_flag else 0,
                         item.supersedes_document_id,
                         item.superseded_by_document_id,
-                        file_path,
+                        stored_path,
                         filename,
+                        desired_mode,
+                        sqlite3.Binary(file_blob) if file_blob is not None else None,
                         checksum,
                         clean_text(item.notes),
                         document_id,
                     ),
                 )
                 seen_ids.add(document_id)
-                if clean_text(item.source_path) and old_path and old_path != file_path:
-                    cursor.execute("DELETE FROM ContractDocuments WHERE id=0")
+                if (
+                    clean_text(item.source_path)
+                    and old_path
+                    and old_path != stored_path
+                    and self._is_managed_document_path(old_path)
+                ):
                     self._delete_document_if_unreferenced(old_path, cursor=cursor)
                 continue
             cursor.execute(
@@ -609,10 +954,12 @@ class ContractService:
                     superseded_by_document_id,
                     file_path,
                     filename,
+                    storage_mode,
+                    file_blob,
                     checksum_sha256,
                     notes
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     int(contract_id),
@@ -626,16 +973,18 @@ class ContractService:
                     1 if item.active_flag else 0,
                     item.supersedes_document_id,
                     item.superseded_by_document_id,
-                    file_path,
+                    stored_path,
                     filename,
+                    desired_mode,
+                    sqlite3.Binary(file_blob) if file_blob is not None else None,
                     checksum,
                     clean_text(item.notes),
                 ),
             )
             seen_ids.add(int(cursor.lastrowid))
-        stale_ids = set(existing_paths) - seen_ids
+        stale_ids = set(existing_by_id) - seen_ids
         for document_id in stale_ids:
-            stale_path = existing_paths.get(document_id)
+            stale_path = existing_by_id.get(document_id, {}).get("file_path")
             cursor.execute("DELETE FROM ContractDocuments WHERE id=?", (int(document_id),))
             self._delete_document_if_unreferenced(stale_path, cursor=cursor)
 
@@ -731,6 +1080,8 @@ class ContractService:
                 superseded_by_document_id,
                 file_path,
                 filename,
+                storage_mode,
+                NULL AS file_blob,
                 checksum_sha256,
                 notes,
                 uploaded_at
@@ -841,9 +1192,10 @@ class ContractService:
             self.conn.execute("DELETE FROM Contracts WHERE id=?", (int(contract_id),))
             if detail is not None:
                 for document in detail.documents:
-                    self._delete_document_if_unreferenced(
-                        document.file_path, cursor=self.conn.cursor()
-                    )
+                    if self._is_managed_document_path(document.file_path):
+                        self._delete_document_if_unreferenced(
+                            document.file_path, cursor=self.conn.cursor()
+                        )
 
     def upcoming_deadlines(self, *, within_days: int = 60) -> list[ContractDeadline]:
         today = date.today()

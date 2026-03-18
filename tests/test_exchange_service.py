@@ -338,6 +338,106 @@ class ExchangeServiceTests(unittest.TestCase):
         finally:
             new_conn.close()
 
+    def test_package_round_trip_preserves_database_backed_media_modes(self):
+        audio_path = self.data_root / "blob-track.wav"
+        audio_path.write_bytes(b"RIFFblobtrack")
+        artwork_path = self.data_root / "blob-release.png"
+        artwork_path.write_bytes(
+            bytes.fromhex(
+                "89504E470D0A1A0A"
+                "0000000D49484452000000010000000108060000001F15C489"
+                "0000000D49444154789C63F8FFFF3F0005FE02FEA7D6059F"
+                "0000000049454E44AE426082"
+            )
+        )
+        track_id = self.track_service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00026",
+                track_title="Blob Orbit",
+                artist_name="Cosmowyn",
+                additional_artists=[],
+                album_title="Blob Release",
+                release_date="2026-03-15",
+                track_length_sec=180,
+                iswc=None,
+                upc="036000291452",
+                genre="Ambient",
+                catalog_number="CAT-005",
+                audio_file_source_path=str(audio_path),
+                audio_file_storage_mode="database",
+            )
+        )
+        self.release_service.create_release(
+            ReleasePayload(
+                title="Blob Release",
+                primary_artist="Cosmowyn",
+                album_artist="Cosmowyn",
+                release_type="album",
+                release_date="2026-03-15",
+                upc="036000291452",
+                artwork_source_path=str(artwork_path),
+                artwork_storage_mode="database",
+                placements=[
+                    ReleaseTrackPlacement(
+                        track_id=track_id,
+                        disc_number=1,
+                        track_number=1,
+                        sequence_number=1,
+                    )
+                ],
+            )
+        )
+
+        package_path = self.data_root / "blob-package.zip"
+        self.service.export_package(package_path)
+
+        with ZipFile(package_path, "r") as archive:
+            names = set(archive.namelist())
+            manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+
+        self.assertTrue(any(name.startswith("media/embedded/track/") for name in names))
+        self.assertTrue(any(name.startswith("media/embedded/release/") for name in names))
+        self.assertEqual(manifest["rows"][0]["audio_file_storage_mode"], "database")
+        self.assertEqual(manifest["rows"][0]["release_artwork_storage_mode"], "database")
+
+        new_root = self.data_root / "blob-imported"
+        new_root.mkdir(parents=True, exist_ok=True)
+        new_conn = sqlite3.connect(":memory:")
+        try:
+            DatabaseSchemaService(new_conn, data_root=new_root).init_db()
+            DatabaseSchemaService(new_conn, data_root=new_root).migrate_schema()
+            new_service = ExchangeService(
+                new_conn,
+                TrackService(new_conn, new_root),
+                ReleaseService(new_conn, new_root),
+                CustomFieldDefinitionService(new_conn),
+                new_root,
+            )
+
+            report = new_service.import_package(
+                package_path, options=ExchangeImportOptions(mode="create")
+            )
+
+            self.assertEqual(report.failed, 0)
+            self.assertEqual(
+                new_conn.execute(
+                    "SELECT audio_file_storage_mode, audio_file_path FROM Tracks"
+                ).fetchone(),
+                ("database", None),
+            )
+            self.assertEqual(
+                new_conn.execute(
+                    "SELECT artwork_storage_mode, artwork_path FROM Releases"
+                ).fetchone(),
+                ("database", None),
+            )
+            audio_bytes, _ = new_service.track_service.fetch_media_bytes(1, "audio_file")
+            artwork_bytes, _ = new_service.release_service.fetch_artwork_bytes(1)
+            self.assertEqual(audio_bytes, b"RIFFblobtrack")
+            self.assertEqual(artwork_bytes, artwork_path.read_bytes())
+        finally:
+            new_conn.close()
+
     def test_package_import_supports_legacy_relative_media_without_index(self):
         package_path = self.data_root / "legacy-package.zip"
         rows = [

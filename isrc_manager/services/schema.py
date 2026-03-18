@@ -11,6 +11,10 @@ from typing import Callable
 
 from isrc_manager.constants import PROMOTED_CUSTOM_FIELDS, SCHEMA_BASELINE, SCHEMA_TARGET
 from isrc_manager.domain.codes import barcode_validation_status, to_compact_isrc
+from isrc_manager.file_storage import (
+    STORAGE_MODE_DATABASE,
+    STORAGE_MODE_MANAGED_FILE,
+)
 
 
 class DatabaseSchemaService:
@@ -55,6 +59,9 @@ class DatabaseSchemaService:
                 id INTEGER PRIMARY KEY,
                 title TEXT NOT NULL,
                 album_art_path TEXT,
+                album_art_storage_mode TEXT,
+                album_art_blob BLOB,
+                album_art_filename TEXT,
                 album_art_mime_type TEXT,
                 album_art_size_bytes INTEGER NOT NULL DEFAULT 0
             )
@@ -71,11 +78,17 @@ class DatabaseSchemaService:
                 isrc_compact TEXT,
                 db_entry_date DATE DEFAULT CURRENT_DATE,
                 audio_file_path TEXT,
+                audio_file_storage_mode TEXT,
+                audio_file_blob BLOB,
+                audio_file_filename TEXT,
                 audio_file_mime_type TEXT,
                 audio_file_size_bytes INTEGER NOT NULL DEFAULT 0,
                 track_title TEXT NOT NULL,
                 catalog_number TEXT,
                 album_art_path TEXT,
+                album_art_storage_mode TEXT,
+                album_art_blob BLOB,
+                album_art_filename TEXT,
                 album_art_mime_type TEXT,
                 album_art_size_bytes INTEGER NOT NULL DEFAULT 0,
                 main_artist_id INTEGER NOT NULL,
@@ -142,14 +155,19 @@ class DatabaseSchemaService:
                 id INTEGER PRIMARY KEY,
                 track_id INTEGER NOT NULL,
                 licensee_id INTEGER NOT NULL,
-                file_path TEXT NOT NULL,
+                file_path TEXT,
                 filename TEXT NOT NULL,
+                storage_mode TEXT,
+                file_blob BLOB,
+                mime_type TEXT,
+                size_bytes INTEGER NOT NULL DEFAULT 0,
                 uploaded_at TEXT NOT NULL DEFAULT (datetime('now')),
                 FOREIGN KEY(track_id) REFERENCES Tracks(id) ON DELETE CASCADE,
                 FOREIGN KEY(licensee_id) REFERENCES Licensees(id) ON DELETE RESTRICT
             )
             """
         )
+        self._ensure_license_columns()
         self.cursor.execute(
             """
             CREATE VIEW IF NOT EXISTS vw_Licenses AS
@@ -200,12 +218,19 @@ class DatabaseSchemaService:
                 track_id INTEGER NOT NULL,
                 field_def_id INTEGER NOT NULL,
                 value TEXT,
+                blob_value BLOB,
+                managed_file_path TEXT,
+                storage_mode TEXT,
+                filename TEXT,
+                mime_type TEXT,
+                size_bytes INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (track_id, field_def_id),
                 FOREIGN KEY (track_id) REFERENCES Tracks(id) ON DELETE CASCADE,
                 FOREIGN KEY (field_def_id) REFERENCES CustomFieldDefs(id) ON DELETE CASCADE
             )
             """
         )
+        self._ensure_current_custom_field_value_schema()
 
         # Settings (single-row)
         self.cursor.execute(
@@ -297,6 +322,7 @@ class DatabaseSchemaService:
         self._ensure_release_tables()
         self._ensure_repertoire_tables()
         self._ensure_blob_icon_schema()
+        self._backfill_dual_storage_defaults()
 
         self.conn.commit()
 
@@ -439,6 +465,9 @@ class DatabaseSchemaService:
             elif version == 23:
                 self._apply_migration(23, self._mig_23_to_24)
                 version = 24
+            elif version == 24:
+                self._apply_migration(24, self._mig_24_to_25)
+                version = 25
             else:
                 self.logger.warning("Unknown migration path from version %s", version)
                 break
@@ -650,105 +679,7 @@ class DatabaseSchemaService:
             )
 
     def _mig_9_to_10(self) -> None:
-        cols = [
-            row[1] for row in self.cursor.execute("PRAGMA table_info(CustomFieldValues)").fetchall()
-        ]
-        if "blob_value" not in cols:
-            self.cursor.execute("ALTER TABLE CustomFieldValues ADD COLUMN blob_value BLOB")
-        if "mime_type" not in cols:
-            self.cursor.execute("ALTER TABLE CustomFieldValues ADD COLUMN mime_type TEXT")
-        if "size_bytes" not in cols:
-            self.cursor.execute(
-                "ALTER TABLE CustomFieldValues ADD COLUMN size_bytes INTEGER NOT NULL DEFAULT 0"
-            )
-
-        self.cursor.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_cfvalues_track_field
-            ON CustomFieldValues(track_id, field_def_id)
-            """
-        )
-        self.cursor.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_cfvalues_field_track
-            ON CustomFieldValues(field_def_id, track_id)
-            """
-        )
-
-        self.cursor.execute("DROP TRIGGER IF EXISTS trg_cfvalues_blob_enforce_ins")
-        self.cursor.execute("DROP TRIGGER IF EXISTS trg_cfvalues_blob_enforce_upd")
-        self.cursor.execute("DROP TRIGGER IF EXISTS trg_cfvalues_text_enforce_ins")
-        self.cursor.execute("DROP TRIGGER IF EXISTS trg_cfvalues_text_enforce_upd")
-
-        self.cursor.execute(
-            """
-            CREATE TRIGGER IF NOT EXISTS trg_cfvalues_blob_enforce_ins
-            BEFORE INSERT ON CustomFieldValues
-            FOR EACH ROW
-            WHEN EXISTS (
-                SELECT 1 FROM CustomFieldDefs d
-                WHERE d.id = NEW.field_def_id AND d.field_type IN ('blob_image','blob_audio')
-            )
-            AND (
-                NEW.blob_value IS NULL
-                OR NEW.value IS NOT NULL
-                OR NEW.size_bytes < 0
-            )
-            BEGIN
-                SELECT RAISE(ABORT, 'BLOB field requires blob_value (and NULL text); size_bytes must be >= 0');
-            END
-            """
-        )
-        self.cursor.execute(
-            """
-            CREATE TRIGGER IF NOT EXISTS trg_cfvalues_blob_enforce_upd
-            BEFORE UPDATE ON CustomFieldValues
-            FOR EACH ROW
-            WHEN EXISTS (
-                SELECT 1 FROM CustomFieldDefs d
-                WHERE d.id = NEW.field_def_id AND d.field_type IN ('blob_image','blob_audio')
-            )
-            AND (
-                NEW.blob_value IS NULL
-                OR NEW.value IS NOT NULL
-                OR NEW.size_bytes < 0
-            )
-            BEGIN
-                SELECT RAISE(ABORT, 'BLOB field requires blob_value (and NULL text); size_bytes must be >= 0');
-            END
-            """
-        )
-
-        self.cursor.execute(
-            """
-            CREATE TRIGGER IF NOT EXISTS trg_cfvalues_text_enforce_ins
-            BEFORE INSERT ON CustomFieldValues
-            FOR EACH ROW
-            WHEN EXISTS (
-                SELECT 1 FROM CustomFieldDefs d
-                WHERE d.id = NEW.field_def_id AND d.field_type NOT IN ('blob_image','blob_audio')
-            )
-            AND NEW.blob_value IS NOT NULL
-            BEGIN
-                SELECT RAISE(ABORT, 'Non-BLOB field must not store blob_value');
-            END
-            """
-        )
-        self.cursor.execute(
-            """
-            CREATE TRIGGER IF NOT EXISTS trg_cfvalues_text_enforce_upd
-            BEFORE UPDATE ON CustomFieldValues
-            FOR EACH ROW
-            WHEN EXISTS (
-                SELECT 1 FROM CustomFieldDefs d
-                WHERE d.id = NEW.field_def_id AND d.field_type NOT IN ('blob_image','blob_audio')
-            )
-            AND NEW.blob_value IS NOT NULL
-            BEGIN
-                SELECT RAISE(ABORT, 'Non-BLOB field must not store blob_value');
-            END
-            """
-        )
+        self._ensure_current_custom_field_value_schema()
 
     def _mig_10_to_11(self) -> None:
         self.cursor.execute(
@@ -765,14 +696,19 @@ class DatabaseSchemaService:
                 id INTEGER PRIMARY KEY,
                 track_id INTEGER NOT NULL,
                 licensee_id INTEGER NOT NULL,
-                file_path TEXT NOT NULL,
+                file_path TEXT,
                 filename TEXT NOT NULL,
+                storage_mode TEXT,
+                file_blob BLOB,
+                mime_type TEXT,
+                size_bytes INTEGER NOT NULL DEFAULT 0,
                 uploaded_at TEXT NOT NULL DEFAULT (datetime('now')),
                 FOREIGN KEY(track_id) REFERENCES Tracks(id) ON DELETE CASCADE,
                 FOREIGN KEY(licensee_id) REFERENCES Licensees(id) ON DELETE RESTRICT
             )
             """
         )
+        self._ensure_license_columns()
         self.cursor.execute(
             """
             CREATE VIEW IF NOT EXISTS vw_Licenses AS
@@ -920,6 +856,360 @@ class DatabaseSchemaService:
                 "ALTER TABLE HistoryEntries ADD COLUMN visible_in_history INTEGER NOT NULL DEFAULT 1"
             )
 
+    def _mig_24_to_25(self) -> None:
+        self._ensure_current_album_columns()
+        self._ensure_current_track_columns()
+        self._ensure_current_custom_field_value_schema()
+        self._ensure_license_columns()
+        self._ensure_gs1_template_storage_table()
+        self._ensure_release_tables()
+        self._ensure_repertoire_tables()
+        self._backfill_dual_storage_defaults()
+
+    def _ensure_current_custom_field_value_schema(self) -> None:
+        cols = self._table_columns("CustomFieldValues")
+        additions = (
+            ("blob_value", "BLOB"),
+            ("managed_file_path", "TEXT"),
+            ("storage_mode", "TEXT"),
+            ("filename", "TEXT"),
+            ("mime_type", "TEXT"),
+            ("size_bytes", "INTEGER NOT NULL DEFAULT 0"),
+        )
+        for column_name, column_sql in additions:
+            if column_name not in cols:
+                self.cursor.execute(
+                    f"ALTER TABLE CustomFieldValues ADD COLUMN {column_name} {column_sql}"
+                )
+
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_cfvalues_track_field
+            ON CustomFieldValues(track_id, field_def_id)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_cfvalues_field_track
+            ON CustomFieldValues(field_def_id, track_id)
+            """
+        )
+
+        self.cursor.execute("DROP TRIGGER IF EXISTS trg_cfvalues_blob_enforce_ins")
+        self.cursor.execute("DROP TRIGGER IF EXISTS trg_cfvalues_blob_enforce_upd")
+        self.cursor.execute("DROP TRIGGER IF EXISTS trg_cfvalues_text_enforce_ins")
+        self.cursor.execute("DROP TRIGGER IF EXISTS trg_cfvalues_text_enforce_upd")
+
+        blob_guard = f"""
+            CREATE TRIGGER IF NOT EXISTS {{name}}
+            BEFORE {{verb}} ON CustomFieldValues
+            FOR EACH ROW
+            WHEN EXISTS (
+                SELECT 1 FROM CustomFieldDefs d
+                WHERE d.id = NEW.field_def_id AND d.field_type IN ('blob_image','blob_audio')
+            )
+            AND (
+                NEW.value IS NOT NULL
+                OR NEW.size_bytes < 0
+                OR COALESCE(trim(NEW.storage_mode), '') NOT IN (
+                    '',
+                    '{STORAGE_MODE_DATABASE}',
+                    '{STORAGE_MODE_MANAGED_FILE}'
+                )
+                OR (
+                    COALESCE(trim(NEW.storage_mode), '') = '{STORAGE_MODE_DATABASE}'
+                    AND NEW.blob_value IS NULL
+                )
+                OR (
+                    COALESCE(trim(NEW.storage_mode), '') = '{STORAGE_MODE_MANAGED_FILE}'
+                    AND COALESCE(trim(NEW.managed_file_path), '') = ''
+                )
+                OR (
+                    COALESCE(trim(NEW.storage_mode), '') = ''
+                    AND NEW.blob_value IS NULL
+                    AND COALESCE(trim(NEW.managed_file_path), '') = ''
+                )
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'BLOB field requires either blob_value or managed_file_path; size_bytes must be >= 0');
+            END
+        """
+        self.cursor.execute(blob_guard.format(name="trg_cfvalues_blob_enforce_ins", verb="INSERT"))
+        self.cursor.execute(blob_guard.format(name="trg_cfvalues_blob_enforce_upd", verb="UPDATE"))
+
+        text_guard = """
+            CREATE TRIGGER IF NOT EXISTS {name}
+            BEFORE {verb} ON CustomFieldValues
+            FOR EACH ROW
+            WHEN EXISTS (
+                SELECT 1 FROM CustomFieldDefs d
+                WHERE d.id = NEW.field_def_id AND d.field_type NOT IN ('blob_image','blob_audio')
+            )
+            AND (
+                NEW.blob_value IS NOT NULL
+                OR COALESCE(trim(NEW.managed_file_path), '') != ''
+                OR COALESCE(trim(NEW.storage_mode), '') != ''
+                OR COALESCE(trim(NEW.filename), '') != ''
+                OR COALESCE(trim(NEW.mime_type), '') != ''
+                OR NEW.size_bytes != 0
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'Non-BLOB field must not store binary attachment state');
+            END
+        """
+        self.cursor.execute(text_guard.format(name="trg_cfvalues_text_enforce_ins", verb="INSERT"))
+        self.cursor.execute(text_guard.format(name="trg_cfvalues_text_enforce_upd", verb="UPDATE"))
+
+    def _ensure_license_columns(self) -> None:
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS Licenses (
+                id INTEGER PRIMARY KEY,
+                track_id INTEGER NOT NULL,
+                licensee_id INTEGER NOT NULL,
+                file_path TEXT,
+                filename TEXT NOT NULL,
+                storage_mode TEXT,
+                file_blob BLOB,
+                mime_type TEXT,
+                size_bytes INTEGER NOT NULL DEFAULT 0,
+                uploaded_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY(track_id) REFERENCES Tracks(id) ON DELETE CASCADE,
+                FOREIGN KEY(licensee_id) REFERENCES Licensees(id) ON DELETE RESTRICT
+            )
+            """
+        )
+        table_info = {
+            str(row[1]): row
+            for row in self.cursor.execute("PRAGMA table_info(Licenses)").fetchall()
+            if row and row[1]
+        }
+        file_path_info = table_info.get("file_path")
+        file_path_notnull = bool(file_path_info and int(file_path_info[3] or 0))
+        if file_path_notnull:
+            self.cursor.execute("DROP VIEW IF EXISTS vw_Licenses")
+            self.cursor.execute("ALTER TABLE Licenses RENAME TO Licenses_legacy")
+            self.cursor.execute(
+                """
+                CREATE TABLE Licenses (
+                    id INTEGER PRIMARY KEY,
+                    track_id INTEGER NOT NULL,
+                    licensee_id INTEGER NOT NULL,
+                    file_path TEXT,
+                    filename TEXT NOT NULL,
+                    storage_mode TEXT,
+                    file_blob BLOB,
+                    mime_type TEXT,
+                    size_bytes INTEGER NOT NULL DEFAULT 0,
+                    uploaded_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    FOREIGN KEY(track_id) REFERENCES Tracks(id) ON DELETE CASCADE,
+                    FOREIGN KEY(licensee_id) REFERENCES Licensees(id) ON DELETE RESTRICT
+                )
+                """
+            )
+            legacy_cols = {
+                str(row[1])
+                for row in self.cursor.execute("PRAGMA table_info(Licenses_legacy)").fetchall()
+                if row and row[1]
+            }
+            storage_expr = (
+                "storage_mode"
+                if "storage_mode" in legacy_cols
+                else (
+                    f"CASE WHEN COALESCE(file_path, '') != '' THEN '{STORAGE_MODE_MANAGED_FILE}' "
+                    f"WHEN file_blob IS NOT NULL THEN '{STORAGE_MODE_DATABASE}' ELSE NULL END"
+                    if "file_blob" in legacy_cols
+                    else (
+                        f"CASE WHEN COALESCE(file_path, '') != '' THEN '{STORAGE_MODE_MANAGED_FILE}' "
+                        "ELSE NULL END"
+                    )
+                )
+            )
+            file_blob_expr = "file_blob" if "file_blob" in legacy_cols else "NULL"
+            mime_expr = "mime_type" if "mime_type" in legacy_cols else "NULL"
+            size_expr = "size_bytes" if "size_bytes" in legacy_cols else "0"
+            self.cursor.execute(
+                f"""
+                INSERT INTO Licenses (
+                    id,
+                    track_id,
+                    licensee_id,
+                    file_path,
+                    filename,
+                    storage_mode,
+                    file_blob,
+                    mime_type,
+                    size_bytes,
+                    uploaded_at
+                )
+                SELECT
+                    id,
+                    track_id,
+                    licensee_id,
+                    file_path,
+                    filename,
+                    {storage_expr},
+                    {file_blob_expr},
+                    {mime_expr},
+                    {size_expr},
+                    uploaded_at
+                FROM Licenses_legacy
+                """
+            )
+            self.cursor.execute("DROP TABLE Licenses_legacy")
+            table_info = {
+                str(row[1]): row
+                for row in self.cursor.execute("PRAGMA table_info(Licenses)").fetchall()
+                if row and row[1]
+            }
+
+        additions = (
+            ("storage_mode", "TEXT"),
+            ("file_blob", "BLOB"),
+            ("mime_type", "TEXT"),
+            ("size_bytes", "INTEGER NOT NULL DEFAULT 0"),
+        )
+        for column_name, column_sql in additions:
+            if column_name not in table_info:
+                self.cursor.execute(f"ALTER TABLE Licenses ADD COLUMN {column_name} {column_sql}")
+
+        self.cursor.execute("DROP VIEW IF EXISTS vw_Licenses")
+        self.cursor.execute(
+            """
+            CREATE VIEW IF NOT EXISTS vw_Licenses AS
+            SELECT l.id,
+                lic.name AS licensee,
+                t.track_title AS tracktitle,
+                l.uploaded_at,
+                l.filename,
+                l.file_path,
+                l.track_id,
+                l.licensee_id
+            FROM Licenses l
+            JOIN Licensees lic ON lic.id = l.licensee_id
+            JOIN Tracks t ON t.id = l.track_id
+            """
+        )
+
+    def _backfill_storage_fields(
+        self,
+        *,
+        table_name: str,
+        id_columns: tuple[str, ...],
+        path_column: str,
+        storage_mode_column: str,
+        filename_column: str | None = None,
+        blob_column: str | None = None,
+    ) -> None:
+        select_parts = [*id_columns, path_column, storage_mode_column]
+        if filename_column:
+            select_parts.append(filename_column)
+        if blob_column:
+            select_parts.append(f"CASE WHEN {blob_column} IS NOT NULL THEN 1 ELSE 0 END AS has_blob")
+        rows = self.cursor.execute(
+            f"SELECT {', '.join(select_parts)} FROM {table_name}"
+        ).fetchall()
+        for row in rows:
+            values = list(row)
+            row_ids = values[: len(id_columns)]
+            offset = len(id_columns)
+            stored_path = str(values[offset] or "").strip()
+            storage_mode = str(values[offset + 1] or "").strip()
+            filename = (
+                str(values[offset + 2] or "").strip() if filename_column is not None else ""
+            )
+            blob_present = bool(values[-1]) if blob_column is not None else False
+            updates: dict[str, object] = {}
+            if not storage_mode:
+                if stored_path:
+                    updates[storage_mode_column] = STORAGE_MODE_MANAGED_FILE
+                elif blob_present:
+                    updates[storage_mode_column] = STORAGE_MODE_DATABASE
+            if filename_column and not filename and stored_path:
+                updates[filename_column] = Path(stored_path).name
+            if not updates:
+                continue
+            set_sql = ", ".join(f"{column}=?" for column in updates)
+            where_sql = " AND ".join(f"{column}=?" for column in id_columns)
+            self.cursor.execute(
+                f"UPDATE {table_name} SET {set_sql} WHERE {where_sql}",
+                [*updates.values(), *row_ids],
+            )
+
+    def _backfill_dual_storage_defaults(self) -> None:
+        self._backfill_storage_fields(
+            table_name="Tracks",
+            id_columns=("id",),
+            path_column="audio_file_path",
+            storage_mode_column="audio_file_storage_mode",
+            filename_column="audio_file_filename",
+            blob_column="audio_file_blob",
+        )
+        self._backfill_storage_fields(
+            table_name="Tracks",
+            id_columns=("id",),
+            path_column="album_art_path",
+            storage_mode_column="album_art_storage_mode",
+            filename_column="album_art_filename",
+            blob_column="album_art_blob",
+        )
+        self._backfill_storage_fields(
+            table_name="Albums",
+            id_columns=("id",),
+            path_column="album_art_path",
+            storage_mode_column="album_art_storage_mode",
+            filename_column="album_art_filename",
+            blob_column="album_art_blob",
+        )
+        self._backfill_storage_fields(
+            table_name="CustomFieldValues",
+            id_columns=("track_id", "field_def_id"),
+            path_column="managed_file_path",
+            storage_mode_column="storage_mode",
+            filename_column="filename",
+            blob_column="blob_value",
+        )
+        self._backfill_storage_fields(
+            table_name="Licenses",
+            id_columns=("id",),
+            path_column="file_path",
+            storage_mode_column="storage_mode",
+            filename_column="filename",
+            blob_column="file_blob",
+        )
+        self._backfill_storage_fields(
+            table_name="GS1TemplateStorage",
+            id_columns=("id",),
+            path_column="managed_file_path",
+            storage_mode_column="storage_mode",
+            filename_column="filename",
+            blob_column="workbook_blob",
+        )
+        self._backfill_storage_fields(
+            table_name="Releases",
+            id_columns=("id",),
+            path_column="artwork_path",
+            storage_mode_column="artwork_storage_mode",
+            filename_column="artwork_filename",
+            blob_column="artwork_blob",
+        )
+        self._backfill_storage_fields(
+            table_name="ContractDocuments",
+            id_columns=("id",),
+            path_column="file_path",
+            storage_mode_column="storage_mode",
+            filename_column="filename",
+            blob_column="file_blob",
+        )
+        self._backfill_storage_fields(
+            table_name="AssetVersions",
+            id_columns=("id",),
+            path_column="stored_path",
+            storage_mode_column="storage_mode",
+            filename_column="filename",
+            blob_column="file_blob",
+        )
+
     def _ensure_current_track_columns(self) -> None:
         cols = self._table_columns("Tracks")
         additions = (
@@ -927,10 +1217,16 @@ class DatabaseSchemaService:
             ("isrc_compact", "TEXT"),
             ("track_length_sec", "INTEGER NOT NULL DEFAULT 0"),
             ("audio_file_path", "TEXT"),
+            ("audio_file_storage_mode", "TEXT"),
+            ("audio_file_blob", "BLOB"),
+            ("audio_file_filename", "TEXT"),
             ("audio_file_mime_type", "TEXT"),
             ("audio_file_size_bytes", "INTEGER NOT NULL DEFAULT 0"),
             ("catalog_number", "TEXT"),
             ("album_art_path", "TEXT"),
+            ("album_art_storage_mode", "TEXT"),
+            ("album_art_blob", "BLOB"),
+            ("album_art_filename", "TEXT"),
             ("album_art_mime_type", "TEXT"),
             ("album_art_size_bytes", "INTEGER NOT NULL DEFAULT 0"),
             ("buma_work_number", "TEXT"),
@@ -1037,6 +1333,9 @@ class DatabaseSchemaService:
                 id INTEGER PRIMARY KEY,
                 title TEXT NOT NULL,
                 album_art_path TEXT,
+                album_art_storage_mode TEXT,
+                album_art_blob BLOB,
+                album_art_filename TEXT,
                 album_art_mime_type TEXT,
                 album_art_size_bytes INTEGER NOT NULL DEFAULT 0
             )
@@ -1045,6 +1344,9 @@ class DatabaseSchemaService:
         cols = self._table_columns("Albums")
         additions = (
             ("album_art_path", "TEXT"),
+            ("album_art_storage_mode", "TEXT"),
+            ("album_art_blob", "BLOB"),
+            ("album_art_filename", "TEXT"),
             ("album_art_mime_type", "TEXT"),
             ("album_art_size_bytes", "INTEGER NOT NULL DEFAULT 0"),
         )
@@ -1099,7 +1401,9 @@ class DatabaseSchemaService:
                 id INTEGER PRIMARY KEY CHECK(id = 1),
                 filename TEXT NOT NULL,
                 source_path TEXT,
-                workbook_blob BLOB NOT NULL,
+                managed_file_path TEXT,
+                storage_mode TEXT,
+                workbook_blob BLOB,
                 mime_type TEXT,
                 size_bytes INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -1107,6 +1411,98 @@ class DatabaseSchemaService:
             )
             """
         )
+        table_info = {
+            str(row[1]): row
+            for row in self.cursor.execute("PRAGMA table_info(GS1TemplateStorage)").fetchall()
+            if row and row[1]
+        }
+        workbook_blob_info = table_info.get("workbook_blob")
+        workbook_blob_notnull = bool(workbook_blob_info and int(workbook_blob_info[3] or 0))
+        if workbook_blob_notnull:
+            self.cursor.execute("ALTER TABLE GS1TemplateStorage RENAME TO GS1TemplateStorage_legacy")
+            self.cursor.execute(
+                """
+                CREATE TABLE GS1TemplateStorage (
+                    id INTEGER PRIMARY KEY CHECK(id = 1),
+                    filename TEXT NOT NULL,
+                    source_path TEXT,
+                    managed_file_path TEXT,
+                    storage_mode TEXT,
+                    workbook_blob BLOB,
+                    mime_type TEXT,
+                    size_bytes INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+                """
+            )
+            legacy_cols = {
+                str(row[1])
+                for row in self.cursor.execute(
+                    "PRAGMA table_info(GS1TemplateStorage_legacy)"
+                ).fetchall()
+                if row and row[1]
+            }
+            storage_expr = (
+                "storage_mode"
+                if "storage_mode" in legacy_cols
+                else (
+                    f"CASE WHEN COALESCE(managed_file_path, '') != '' THEN '{STORAGE_MODE_MANAGED_FILE}' "
+                    f"WHEN workbook_blob IS NOT NULL THEN '{STORAGE_MODE_DATABASE}' ELSE NULL END"
+                    if "managed_file_path" in legacy_cols
+                    else f"CASE WHEN workbook_blob IS NOT NULL THEN '{STORAGE_MODE_DATABASE}' ELSE NULL END"
+                )
+            )
+            managed_path_expr = (
+                "managed_file_path" if "managed_file_path" in legacy_cols else "NULL"
+            )
+            self.cursor.execute(
+                f"""
+                INSERT INTO GS1TemplateStorage (
+                    id,
+                    filename,
+                    source_path,
+                    managed_file_path,
+                    storage_mode,
+                    workbook_blob,
+                    mime_type,
+                    size_bytes,
+                    created_at,
+                    updated_at
+                )
+                SELECT
+                    id,
+                    filename,
+                    source_path,
+                    {managed_path_expr},
+                    {storage_expr},
+                    workbook_blob,
+                    mime_type,
+                    size_bytes,
+                    created_at,
+                    updated_at
+                FROM GS1TemplateStorage_legacy
+                """
+            )
+            self.cursor.execute("DROP TABLE GS1TemplateStorage_legacy")
+            table_info = {
+                str(row[1]): row
+                for row in self.cursor.execute("PRAGMA table_info(GS1TemplateStorage)").fetchall()
+                if row and row[1]
+            }
+
+        additions = (
+            ("managed_file_path", "TEXT"),
+            ("storage_mode", "TEXT"),
+            ("workbook_blob", "BLOB"),
+            ("mime_type", "TEXT"),
+            ("size_bytes", "INTEGER NOT NULL DEFAULT 0"),
+        )
+        for column_name, column_sql in additions:
+            if column_name not in table_info:
+                self.cursor.execute(
+                    f"ALTER TABLE GS1TemplateStorage ADD COLUMN {column_name} {column_sql}"
+                )
 
     def _ensure_release_tables(self) -> None:
         self.cursor.execute(
@@ -1129,6 +1525,9 @@ class DatabaseSchemaService:
                 explicit_flag INTEGER NOT NULL DEFAULT 0,
                 release_notes TEXT,
                 artwork_path TEXT,
+                artwork_storage_mode TEXT,
+                artwork_blob BLOB,
+                artwork_filename TEXT,
                 artwork_mime_type TEXT,
                 artwork_size_bytes INTEGER NOT NULL DEFAULT 0,
                 profile_name TEXT,
@@ -1141,6 +1540,9 @@ class DatabaseSchemaService:
         )
         release_columns = self._table_columns("Releases")
         release_additions = (
+            ("artwork_storage_mode", "TEXT"),
+            ("artwork_blob", "BLOB"),
+            ("artwork_filename", "TEXT"),
             ("repertoire_status", "TEXT"),
             ("metadata_complete", "INTEGER NOT NULL DEFAULT 0"),
             ("contract_signed", "INTEGER NOT NULL DEFAULT 0"),
@@ -1399,6 +1801,8 @@ class DatabaseSchemaService:
                 superseded_by_document_id INTEGER,
                 file_path TEXT,
                 filename TEXT,
+                storage_mode TEXT,
+                file_blob BLOB,
                 checksum_sha256 TEXT,
                 notes TEXT,
                 uploaded_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -1408,6 +1812,15 @@ class DatabaseSchemaService:
             )
             """
         )
+        contract_document_columns = self._table_columns("ContractDocuments")
+        for column_name, column_sql in (
+            ("storage_mode", "TEXT"),
+            ("file_blob", "BLOB"),
+        ):
+            if column_name not in contract_document_columns:
+                self.cursor.execute(
+                    f"ALTER TABLE ContractDocuments ADD COLUMN {column_name} {column_sql}"
+                )
         self.cursor.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_contract_documents_contract_id
@@ -1509,6 +1922,8 @@ class DatabaseSchemaService:
                 asset_type TEXT NOT NULL,
                 filename TEXT NOT NULL,
                 stored_path TEXT,
+                storage_mode TEXT,
+                file_blob BLOB,
                 checksum_sha256 TEXT,
                 duration_sec INTEGER,
                 sample_rate INTEGER,
@@ -1527,6 +1942,15 @@ class DatabaseSchemaService:
             )
             """
         )
+        asset_columns = self._table_columns("AssetVersions")
+        for column_name, column_sql in (
+            ("storage_mode", "TEXT"),
+            ("file_blob", "BLOB"),
+        ):
+            if column_name not in asset_columns:
+                self.cursor.execute(
+                    f"ALTER TABLE AssetVersions ADD COLUMN {column_name} {column_sql}"
+                )
         self.cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_asset_versions_track_id ON AssetVersions(track_id)"
         )

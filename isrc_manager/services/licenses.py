@@ -3,12 +3,21 @@
 from __future__ import annotations
 
 import logging
-import shutil
 import sqlite3
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
+
+from isrc_manager.file_storage import (
+    ManagedFileStorage,
+    STORAGE_MODE_DATABASE,
+    STORAGE_MODE_MANAGED_FILE,
+    bytes_from_blob,
+    coalesce_filename,
+    infer_storage_mode,
+    normalize_storage_mode,
+)
+from isrc_manager.media.blob_files import _read_blob_from_path
 
 from .catalog_admin import CatalogAdminService
 
@@ -28,8 +37,11 @@ class LicenseRecord:
     record_id: int
     track_id: int
     licensee_id: int
-    file_path: str
+    file_path: str | None
     filename: str
+    storage_mode: str | None = None
+    mime_type: str | None = None
+    size_bytes: int = 0
 
 
 class LicenseService:
@@ -39,7 +51,26 @@ class LicenseService:
         self.conn = conn
         self.data_dir = Path(data_dir)
         self.licenses_dir = self.data_dir / "licenses"
+        self.file_store = ManagedFileStorage(data_root=self.data_dir, relative_root="licenses")
         self.catalog_admin = CatalogAdminService(conn)
+        self._ensure_storage_columns()
+
+    def _ensure_storage_columns(self) -> None:
+        columns = {
+            str(row[1])
+            for row in self.conn.execute("PRAGMA table_info(Licenses)").fetchall()
+            if row and row[1]
+        }
+        additions = (
+            ("storage_mode", "TEXT"),
+            ("file_blob", "BLOB"),
+            ("mime_type", "TEXT"),
+            ("size_bytes", "INTEGER NOT NULL DEFAULT 0"),
+        )
+        with self.conn:
+            for column_name, column_sql in additions:
+                if column_name not in columns:
+                    self.conn.execute(f"ALTER TABLE Licenses ADD COLUMN {column_name} {column_sql}")
 
     def list_rows(self, track_filter_id: int | None = None) -> list[LicenseRow]:
         if track_filter_id is None:
@@ -77,7 +108,11 @@ class LicenseService:
 
     def fetch_license(self, record_id: int) -> LicenseRecord | None:
         row = self.conn.execute(
-            "SELECT id, track_id, licensee_id, file_path, filename FROM Licenses WHERE id=?",
+            """
+            SELECT id, track_id, licensee_id, file_path, filename, storage_mode, mime_type, size_bytes
+            FROM Licenses
+            WHERE id=?
+            """,
             (int(record_id),),
         ).fetchone()
         if not row:
@@ -86,8 +121,11 @@ class LicenseService:
             record_id=int(row[0]),
             track_id=int(row[1]),
             licensee_id=int(row[2]),
-            file_path=row[3] or "",
+            file_path=row[3] or None,
             filename=row[4] or "",
+            storage_mode=infer_storage_mode(explicit_mode=row[5], stored_path=row[3]),
+            mime_type=row[6] or None,
+            size_bytes=int(row[7] or 0),
         )
 
     def resolve_path(self, stored_path: str) -> Path:
@@ -111,17 +149,91 @@ class LicenseService:
         except Exception:
             return False
 
-    def add_license(self, *, track_id: int, licensee_name: str, source_pdf_path: str | Path) -> int:
+    def _fetch_license_blob(self, record_id: int) -> bytes | None:
+        row = self.conn.execute(
+            "SELECT file_blob FROM Licenses WHERE id=?",
+            (int(record_id),),
+        ).fetchone()
+        if not row or row[0] is None:
+            return None
+        return bytes_from_blob(row[0])
+
+    def fetch_license_bytes(self, record_id: int) -> tuple[bytes, str]:
+        record = self.fetch_license(record_id)
+        if record is None:
+            raise FileNotFoundError(record_id)
+        if record.storage_mode == STORAGE_MODE_DATABASE:
+            blob_data = self._fetch_license_blob(record_id)
+            if blob_data is None:
+                raise FileNotFoundError(record.filename or record_id)
+            return blob_data, str(record.mime_type or "").strip()
+        if not record.file_path:
+            raise FileNotFoundError(record.filename or record_id)
+        resolved = self.resolve_path(record.file_path)
+        if not resolved.exists():
+            raise FileNotFoundError(record.file_path)
+        return resolved.read_bytes(), str(record.mime_type or "").strip()
+
+    def _store_license_source(
+        self,
+        source_pdf_path: str | Path,
+        *,
+        storage_mode: str | None = None,
+    ) -> tuple[str | None, str, bytes | None, str | None, int]:
+        source_path = Path(source_pdf_path)
+        if not source_path.exists():
+            raise FileNotFoundError(source_path)
+        clean_mode = normalize_storage_mode(storage_mode, default=STORAGE_MODE_MANAGED_FILE)
+        filename = coalesce_filename(source_path.name, default_stem="license")
+        if clean_mode == STORAGE_MODE_DATABASE:
+            data = _read_blob_from_path(str(source_path))
+            return None, filename, data, "application/pdf", len(data)
+        data = source_path.read_bytes()
+        rel_path = self.file_store.write_bytes(data, filename=filename)
+        return rel_path, filename, None, "application/pdf", len(data)
+
+    def add_license(
+        self,
+        *,
+        track_id: int,
+        licensee_name: str,
+        source_pdf_path: str | Path,
+        storage_mode: str | None = None,
+    ) -> int:
         source_path = Path(source_pdf_path)
         if not source_path.exists():
             raise FileNotFoundError(source_path)
         with self.conn:
             cur = self.conn.cursor()
             licensee_id = self.catalog_admin.ensure_licensee(licensee_name, cursor=cur)
-            filename, rel_path = self._copy_into_store(source_path)
+            rel_path, filename, blob_data, mime_type, size_bytes = self._store_license_source(
+                source_path,
+                storage_mode=storage_mode,
+            )
             cur.execute(
-                "INSERT INTO Licenses(track_id, licensee_id, file_path, filename) VALUES (?,?,?,?)",
-                (int(track_id), licensee_id, rel_path, filename),
+                """
+                INSERT INTO Licenses(
+                    track_id,
+                    licensee_id,
+                    file_path,
+                    filename,
+                    storage_mode,
+                    file_blob,
+                    mime_type,
+                    size_bytes
+                )
+                VALUES (?,?,?,?,?,?,?,?)
+                """,
+                (
+                    int(track_id),
+                    licensee_id,
+                    rel_path,
+                    filename,
+                    normalize_storage_mode(storage_mode, default=STORAGE_MODE_MANAGED_FILE),
+                    sqlite3.Binary(blob_data) if blob_data is not None else None,
+                    mime_type,
+                    size_bytes,
+                ),
             )
             return int(cur.lastrowid)
 
@@ -131,6 +243,7 @@ class LicenseService:
         record_id: int,
         licensee_name: str,
         replacement_pdf_path: str | Path | None = None,
+        storage_mode: str | None = None,
     ) -> LicenseRecord:
         current = self.fetch_license(record_id)
         if current is None:
@@ -145,11 +258,37 @@ class LicenseService:
                 licensee_id = current.licensee_id
             file_path = current.file_path
             filename = current.filename
+            mime_type = current.mime_type
+            size_bytes = current.size_bytes
+            clean_mode = normalize_storage_mode(storage_mode, default=current.storage_mode)
+            blob_data = self._fetch_license_blob(record_id) if current.storage_mode == STORAGE_MODE_DATABASE else None
             if replacement_pdf_path:
-                filename, file_path = self._copy_into_store(Path(replacement_pdf_path))
+                file_path, filename, blob_data, mime_type, size_bytes = self._store_license_source(
+                    Path(replacement_pdf_path),
+                    storage_mode=clean_mode,
+                )
             cur.execute(
-                "UPDATE Licenses SET licensee_id=?, file_path=?, filename=? WHERE id=?",
-                (licensee_id, file_path, filename, int(record_id)),
+                """
+                UPDATE Licenses
+                SET licensee_id=?,
+                    file_path=?,
+                    filename=?,
+                    storage_mode=?,
+                    file_blob=?,
+                    mime_type=?,
+                    size_bytes=?
+                WHERE id=?
+                """,
+                (
+                    licensee_id,
+                    file_path,
+                    filename,
+                    clean_mode,
+                    sqlite3.Binary(blob_data) if blob_data is not None else None,
+                    mime_type,
+                    int(size_bytes or 0),
+                    int(record_id),
+                ),
             )
 
         updated = self.fetch_license(record_id)
@@ -187,11 +326,44 @@ class LicenseService:
 
         return len(ids)
 
-    def _copy_into_store(self, source_path: Path) -> tuple[str, str]:
-        if not source_path.exists():
-            raise FileNotFoundError(source_path)
-        self.licenses_dir.mkdir(parents=True, exist_ok=True)
-        filename = f"{int(time.time())}_{source_path.name}"
-        destination = self.licenses_dir / filename
-        shutil.copy2(source_path, destination)
-        return filename, str(destination.relative_to(self.data_dir))
+    def convert_storage_mode(self, record_id: int, target_mode: str) -> LicenseRecord:
+        current = self.fetch_license(record_id)
+        if current is None:
+            raise ValueError(f"License record {record_id} not found")
+        clean_mode = normalize_storage_mode(target_mode)
+        if current.storage_mode == clean_mode:
+            return current
+        data, mime_type = self.fetch_license_bytes(record_id)
+        rel_path = current.file_path
+        filename = current.filename
+        blob_data: bytes | None
+        if clean_mode == STORAGE_MODE_DATABASE:
+            rel_path = None
+            blob_data = data
+        else:
+            rel_path = self.file_store.write_bytes(data, filename=filename)
+            blob_data = None
+        with self.conn:
+            self.conn.execute(
+                """
+                UPDATE Licenses
+                SET file_path=?,
+                    storage_mode=?,
+                    file_blob=?,
+                    mime_type=?,
+                    size_bytes=?
+                WHERE id=?
+                """,
+                (
+                    rel_path,
+                    clean_mode,
+                    sqlite3.Binary(blob_data) if blob_data is not None else None,
+                    mime_type,
+                    len(data),
+                    int(record_id),
+                ),
+            )
+        updated = self.fetch_license(record_id)
+        if updated is None:
+            raise RuntimeError(f"License record {record_id} disappeared after conversion")
+        return updated

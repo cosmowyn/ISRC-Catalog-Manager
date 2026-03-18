@@ -137,6 +137,25 @@ class GS1SettingsServiceTests(unittest.TestCase):
         self.assertEqual(saved_path, exported_path)
         self.assertEqual(exported_path.read_bytes(), template_path.read_bytes())
 
+    def test_template_workbook_can_be_stored_as_managed_file_and_converted_back(self):
+        template_path = Path(self.tmpdir.name) / "managed-gs1-template.xlsx"
+        build_template(template_path)
+
+        stored = self.service.import_template_from_path(
+            template_path, storage_mode="managed_file"
+        )
+
+        self.assertEqual(stored.storage_mode, "managed_file")
+        self.assertFalse(stored.stored_in_database)
+        self.assertTrue(stored.managed_file_path.startswith("gs1_templates/"))
+        self.assertEqual(self.service.load_stored_template_bytes(), template_path.read_bytes())
+
+        converted = self.service.convert_template_storage_mode("database")
+
+        self.assertTrue(converted.stored_in_database)
+        self.assertEqual(converted.storage_mode, "database")
+        self.assertEqual(self.service.load_stored_template_bytes(), template_path.read_bytes())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -171,6 +171,8 @@ class GS1TemplateSheetProfile:
 class GS1TemplateAsset:
     filename: str = ""
     source_path: str = ""
+    managed_file_path: str = ""
+    storage_mode: str = "database"
     mime_type: str = ""
     size_bytes: int = 0
     created_at: str | None = None
@@ -179,7 +181,12 @@ class GS1TemplateAsset:
 
     @property
     def label(self) -> str:
-        return (self.source_path or self.filename or "Official GS1 workbook").strip()
+        return (
+            self.managed_file_path
+            or self.source_path
+            or self.filename
+            or "Official GS1 workbook"
+        ).strip()
 
     @property
     def suffix(self) -> str:

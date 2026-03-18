@@ -34,8 +34,9 @@ The app does not invent a GS1 workbook format. Instead, it works with the offici
 That workbook is:
 
 - uploaded once into the app settings workflow
-- stored in the profile database
+- stored either in the profile database or as a managed local file
 - available for export later even if the original source file is moved or removed
+- convertible later if your profile should switch storage mode
 
 This removes a common failure point in spreadsheet-based GS1 workflows.
 
@@ -114,7 +115,7 @@ For many small labels and independent catalog owners, GS1 preparation becomes a 
 
 - product metadata stays connected to the catalog
 - workbook integrity is checked before export
-- templates stay available inside the profile
+- templates stay available inside the profile in either database or managed-file storage
 - batch exports become more repeatable
 - errors caused by spreadsheet drift become much less likely
 

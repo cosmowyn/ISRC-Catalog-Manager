@@ -34,6 +34,7 @@ class ReleasePayload:
     rights_verified: bool = False
     notes: str | None = None
     artwork_source_path: str | None = None
+    artwork_storage_mode: str | None = None
     clear_artwork: bool = False
     profile_name: str | None = None
     placements: list[ReleaseTrackPlacement] = field(default_factory=list)
@@ -61,10 +62,12 @@ class ReleaseRecord:
     contract_signed: bool
     rights_verified: bool
     notes: str | None
-    artwork_path: str | None
-    artwork_mime_type: str | None
-    artwork_size_bytes: int
-    profile_name: str | None
+    artwork_path: str | None = None
+    artwork_storage_mode: str | None = None
+    artwork_filename: str | None = None
+    artwork_mime_type: str | None = None
+    artwork_size_bytes: int = 0
+    profile_name: str | None = None
     track_count: int = 0
 
     def to_dict(self) -> dict[str, object]:

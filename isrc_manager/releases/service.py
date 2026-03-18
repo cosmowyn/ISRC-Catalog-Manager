@@ -5,12 +5,21 @@ from __future__ import annotations
 import mimetypes
 import re
 import sqlite3
-import time
 from pathlib import Path
 from typing import Iterable
 
 from isrc_manager.domain.codes import barcode_validation_status
+from isrc_manager.file_storage import (
+    ManagedFileStorage,
+    STORAGE_MODE_DATABASE,
+    STORAGE_MODE_MANAGED_FILE,
+    bytes_from_blob,
+    coalesce_filename,
+    infer_storage_mode,
+    normalize_storage_mode,
+)
 from isrc_manager.media.blob_files import _is_valid_image_path
+from isrc_manager.media.blob_files import _read_blob_from_path
 
 from .models import (
     ReleasePayload,
@@ -46,6 +55,24 @@ class ReleaseService:
         self.conn = conn
         self.data_root = Path(data_root) if data_root is not None else None
         self.media_root = self.data_root / "release_media" if self.data_root is not None else None
+        self.media_store = ManagedFileStorage(data_root=data_root, relative_root="release_media")
+        self._ensure_storage_columns()
+
+    def _ensure_storage_columns(self) -> None:
+        columns = {
+            str(row[1])
+            for row in self.conn.execute("PRAGMA table_info(Releases)").fetchall()
+            if row and row[1]
+        }
+        additions = (
+            ("artwork_storage_mode", "TEXT"),
+            ("artwork_blob", "BLOB"),
+            ("artwork_filename", "TEXT"),
+        )
+        with self.conn:
+            for column_name, column_sql in additions:
+                if column_name not in columns:
+                    self.conn.execute(f"ALTER TABLE Releases ADD COLUMN {column_name} {column_sql}")
 
     @staticmethod
     def _clean_text(value: str | None) -> str | None:
@@ -145,49 +172,57 @@ class ReleaseService:
             )
         return clean_placements
 
-    def _write_artwork_file(self, source_path: str | Path) -> tuple[str, str, int]:
+    def _store_artwork_source(
+        self,
+        source_path: str | Path,
+        *,
+        storage_mode: str | None = None,
+    ) -> tuple[str | None, str, bytes | None, str, int]:
         source = Path(source_path)
         if not source.exists():
             raise FileNotFoundError(source)
         if not _is_valid_image_path(str(source)):
             raise ValueError("Selected release artwork is not a valid image")
+        clean_mode = normalize_storage_mode(storage_mode, default=STORAGE_MODE_MANAGED_FILE)
+        filename = coalesce_filename(source.name, default_stem="release-artwork")
+        mime_type = mimetypes.guess_type(source.name)[0] or ""
+        if clean_mode == STORAGE_MODE_DATABASE:
+            data = _read_blob_from_path(str(source))
+            return None, filename, data, mime_type, len(data)
         if self.media_root is None or self.data_root is None:
             raise ValueError("Release media root is not configured")
-
-        destination_dir = self.media_root / "images"
-        destination_dir.mkdir(parents=True, exist_ok=True)
-        destination = destination_dir / f"{int(time.time_ns())}_{source.name}"
-        destination.write_bytes(source.read_bytes())
-
-        mime_type = mimetypes.guess_type(source.name)[0] or ""
-        size_bytes = destination.stat().st_size
-        rel_path = str(destination.relative_to(self.data_root))
-        return rel_path, mime_type, int(size_bytes)
+        data = source.read_bytes()
+        rel_path = self.media_store.write_bytes(data, filename=filename, subdir="images")
+        return rel_path, filename, None, mime_type, len(data)
 
     def resolve_artwork_path(self, stored_path: str | None) -> Path | None:
-        clean_path = str(stored_path or "").strip()
-        if not clean_path:
-            return None
-        path = Path(clean_path)
-        if path.is_absolute():
-            return path
-        if self.data_root is None:
-            raise ValueError("Release media root is not configured")
-        return self.data_root / path
+        return self.media_store.resolve(stored_path)
 
     def _is_managed_release_media_path(self, stored_path: str | None) -> bool:
-        clean_path = str(stored_path or "").strip()
-        if not clean_path or self.data_root is None or self.media_root is None:
-            return False
-        if Path(clean_path).is_absolute():
-            return False
-        resolved = (self.data_root / clean_path).resolve()
-        media_root = self.media_root.resolve()
-        try:
-            resolved.relative_to(media_root)
-            return True
-        except ValueError:
-            return False
+        return self.media_store.is_managed(stored_path)
+
+    def _fetch_artwork_blob(self, release_id: int) -> bytes | None:
+        row = self.conn.execute(
+            "SELECT artwork_blob FROM Releases WHERE id=?",
+            (int(release_id),),
+        ).fetchone()
+        if not row or row[0] is None:
+            return None
+        return bytes_from_blob(row[0])
+
+    def fetch_artwork_bytes(self, release_id: int) -> tuple[bytes, str]:
+        release = self.fetch_release(release_id)
+        if release is None:
+            raise FileNotFoundError(release_id)
+        if release.artwork_storage_mode == STORAGE_MODE_DATABASE:
+            blob_data = self._fetch_artwork_blob(release_id)
+            if blob_data is None:
+                raise FileNotFoundError(release.artwork_filename or release_id)
+            return blob_data, str(release.artwork_mime_type or "").strip()
+        resolved = self.resolve_artwork_path(release.artwork_path)
+        if resolved is None or not resolved.exists():
+            raise FileNotFoundError(release.artwork_path or release_id)
+        return resolved.read_bytes(), str(release.artwork_mime_type or "").strip()
 
     def _delete_unreferenced_artwork(
         self, stored_path: str | None, *, cursor: sqlite3.Cursor
@@ -382,31 +417,60 @@ class ReleaseService:
         barcode_status = barcode_validation_status(upc)
         stale_artwork_path = None
         current_artwork_path = None
+        current_artwork_mode = None
+        current_artwork_filename = None
         current_artwork_mime = None
         current_artwork_size = 0
+        current_artwork_blob = None
 
         if release_id is not None:
             current = cursor.execute(
-                "SELECT artwork_path, artwork_mime_type, artwork_size_bytes FROM Releases WHERE id=?",
+                """
+                SELECT
+                    artwork_path,
+                    artwork_storage_mode,
+                    artwork_filename,
+                    artwork_mime_type,
+                    artwork_size_bytes
+                FROM Releases
+                WHERE id=?
+                """,
                 (int(release_id),),
             ).fetchone()
             if not current:
                 raise ValueError(f"Release {release_id} not found")
             current_artwork_path = str(current[0] or "") or None
-            current_artwork_mime = str(current[1] or "") or None
-            current_artwork_size = int(current[2] or 0)
+            current_artwork_mode = infer_storage_mode(explicit_mode=current[1], stored_path=current[0])
+            current_artwork_filename = str(current[2] or "") or None
+            current_artwork_mime = str(current[3] or "") or None
+            current_artwork_size = int(current[4] or 0)
+            if current_artwork_mode == STORAGE_MODE_DATABASE:
+                current_artwork_blob = self._fetch_artwork_blob(int(release_id))
 
         artwork_path = current_artwork_path
+        artwork_mode = current_artwork_mode
+        artwork_filename = current_artwork_filename
         artwork_mime = current_artwork_mime
         artwork_size = current_artwork_size
+        artwork_blob = current_artwork_blob
         if payload.clear_artwork:
             stale_artwork_path = artwork_path
             artwork_path = None
+            artwork_mode = None
+            artwork_filename = None
             artwork_mime = None
             artwork_size = 0
+            artwork_blob = None
         elif payload.artwork_source_path:
-            artwork_path, artwork_mime, artwork_size = self._write_artwork_file(
-                payload.artwork_source_path
+            artwork_path, artwork_filename, artwork_blob, artwork_mime, artwork_size = (
+                self._store_artwork_source(
+                    payload.artwork_source_path,
+                    storage_mode=payload.artwork_storage_mode,
+                )
+            )
+            artwork_mode = normalize_storage_mode(
+                payload.artwork_storage_mode,
+                default=STORAGE_MODE_MANAGED_FILE,
             )
             stale_artwork_path = current_artwork_path
 
@@ -431,6 +495,9 @@ class ReleaseService:
             1 if payload.rights_verified else 0,
             self._clean_text(payload.notes),
             artwork_path,
+            artwork_mode,
+            sqlite3.Binary(artwork_blob) if artwork_blob is not None else None,
+            artwork_filename,
             artwork_mime,
             artwork_size,
             self._clean_text(payload.profile_name),
@@ -460,11 +527,14 @@ class ReleaseService:
                     rights_verified,
                     release_notes,
                     artwork_path,
+                    artwork_storage_mode,
+                    artwork_blob,
+                    artwork_filename,
                     artwork_mime_type,
                     artwork_size_bytes,
                     profile_name
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 values,
             )
@@ -493,6 +563,9 @@ class ReleaseService:
                     rights_verified=?,
                     release_notes=?,
                     artwork_path=?,
+                    artwork_storage_mode=?,
+                    artwork_blob=?,
+                    artwork_filename=?,
                     artwork_mime_type=?,
                     artwork_size_bytes=?,
                     profile_name=?
@@ -525,6 +598,51 @@ class ReleaseService:
         with self.conn:
             cur = self.conn.cursor()
             return self._persist_release(payload, release_id=int(release_id), cursor=cur)
+
+    def convert_artwork_storage_mode(self, release_id: int, target_mode: str) -> ReleaseRecord:
+        release = self.fetch_release(release_id)
+        if release is None:
+            raise ValueError(f"Release {release_id} not found")
+        clean_mode = normalize_storage_mode(target_mode)
+        if release.artwork_storage_mode == clean_mode:
+            return release
+        data, mime_type = self.fetch_artwork_bytes(release_id)
+        if clean_mode == STORAGE_MODE_DATABASE:
+            artwork_path = None
+            artwork_blob = data
+        else:
+            artwork_path = self.media_store.write_bytes(
+                data,
+                filename=coalesce_filename(release.artwork_filename, default_stem="release-artwork"),
+                subdir="images",
+            )
+            artwork_blob = None
+        with self.conn:
+            self.conn.execute(
+                """
+                UPDATE Releases
+                SET artwork_path=?,
+                    artwork_storage_mode=?,
+                    artwork_blob=?,
+                    artwork_filename=?,
+                    artwork_mime_type=?,
+                    artwork_size_bytes=?
+                WHERE id=?
+                """,
+                (
+                    artwork_path,
+                    clean_mode,
+                    sqlite3.Binary(artwork_blob) if artwork_blob is not None else None,
+                    coalesce_filename(release.artwork_filename, default_stem="release-artwork"),
+                    mime_type,
+                    len(data),
+                    int(release_id),
+                ),
+            )
+        updated = self.fetch_release(release_id)
+        if updated is None:
+            raise RuntimeError(f"Release {release_id} disappeared after conversion")
+        return updated
 
     def duplicate_release(self, release_id: int) -> int:
         summary = self.fetch_release_summary(release_id)
@@ -673,9 +791,12 @@ class ReleaseService:
                 r.rights_verified,
                 r.release_notes,
                 r.artwork_path,
+                r.artwork_storage_mode,
+                r.artwork_filename,
                 r.artwork_mime_type,
                 r.artwork_size_bytes,
                 r.profile_name,
+                CASE WHEN r.artwork_blob IS NOT NULL THEN 1 ELSE 0 END,
                 COUNT(rt.track_id) AS track_count
             FROM Releases r
             LEFT JOIN ReleaseTracks rt ON rt.release_id = r.id
@@ -686,7 +807,8 @@ class ReleaseService:
                 r.sublabel, r.catalog_number, r.upc, r.barcode_validation_status,
                 r.territory, r.explicit_flag, r.repertoire_status, r.metadata_complete,
                 r.contract_signed, r.rights_verified, r.release_notes, r.artwork_path,
-                r.artwork_mime_type, r.artwork_size_bytes, r.profile_name
+                r.artwork_storage_mode, r.artwork_filename, r.artwork_mime_type,
+                r.artwork_size_bytes, r.profile_name, r.artwork_blob
             """,
             (int(release_id),),
         ).fetchone()
@@ -714,10 +836,16 @@ class ReleaseService:
             rights_verified=bool(int(row[18] or 0)),
             notes=self._clean_text(row[19]),
             artwork_path=self._clean_text(row[20]),
-            artwork_mime_type=self._clean_text(row[21]),
-            artwork_size_bytes=int(row[22] or 0),
-            profile_name=self._clean_text(row[23]),
-            track_count=int(row[24] or 0),
+            artwork_storage_mode=infer_storage_mode(
+                explicit_mode=row[21],
+                stored_path=row[20],
+                blob_value=b"\x00" if int(row[26] or 0) else None,
+            ),
+            artwork_filename=self._clean_text(row[22]),
+            artwork_mime_type=self._clean_text(row[23]),
+            artwork_size_bytes=int(row[24] or 0),
+            profile_name=self._clean_text(row[25]),
+            track_count=int(row[27] or 0),
         )
 
     def list_release_tracks(
@@ -790,9 +918,12 @@ class ReleaseService:
                 r.rights_verified,
                 r.release_notes,
                 r.artwork_path,
+                r.artwork_storage_mode,
+                r.artwork_filename,
                 r.artwork_mime_type,
                 r.artwork_size_bytes,
                 r.profile_name,
+                CASE WHEN r.artwork_blob IS NOT NULL THEN 1 ELSE 0 END,
                 COUNT(rt.track_id) AS track_count
             FROM Releases r
             LEFT JOIN ReleaseTracks rt ON rt.release_id = r.id
@@ -803,7 +934,8 @@ class ReleaseService:
                 r.sublabel, r.catalog_number, r.upc, r.barcode_validation_status,
                 r.territory, r.explicit_flag, r.repertoire_status, r.metadata_complete,
                 r.contract_signed, r.rights_verified, r.release_notes, r.artwork_path,
-                r.artwork_mime_type, r.artwork_size_bytes, r.profile_name
+                r.artwork_storage_mode, r.artwork_filename, r.artwork_mime_type,
+                r.artwork_size_bytes, r.profile_name, r.artwork_blob
             ORDER BY COALESCE(r.release_date, ''), r.title COLLATE NOCASE, r.id
             """,
             params,
@@ -831,10 +963,16 @@ class ReleaseService:
                 rights_verified=bool(int(row[18] or 0)),
                 notes=self._clean_text(row[19]),
                 artwork_path=self._clean_text(row[20]),
-                artwork_mime_type=self._clean_text(row[21]),
-                artwork_size_bytes=int(row[22] or 0),
-                profile_name=self._clean_text(row[23]),
-                track_count=int(row[24] or 0),
+                artwork_storage_mode=infer_storage_mode(
+                    explicit_mode=row[21],
+                    stored_path=row[20],
+                    blob_value=b"\x00" if int(row[26] or 0) else None,
+                ),
+                artwork_filename=self._clean_text(row[22]),
+                artwork_mime_type=self._clean_text(row[23]),
+                artwork_size_bytes=int(row[24] or 0),
+                profile_name=self._clean_text(row[25]),
+                track_count=int(row[27] or 0),
             )
             for row in rows
         ]

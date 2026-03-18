@@ -23,6 +23,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from isrc_manager.file_storage import (
+    STORAGE_MODE_DATABASE,
+    STORAGE_MODE_MANAGED_FILE,
+    normalize_storage_mode,
+)
 from isrc_manager.ui_common import (
     _add_standard_dialog_header,
     _apply_compact_dialog_control_heights,
@@ -105,6 +110,11 @@ class AssetEditorDialog(QDialog):
         self.format_edit = QLineEdit()
         target_form.addRow("Format", self.format_edit)
 
+        self.storage_mode_combo = QComboBox()
+        self.storage_mode_combo.addItem("Database (BLOB)", STORAGE_MODE_DATABASE)
+        self.storage_mode_combo.addItem("Managed file", STORAGE_MODE_MANAGED_FILE)
+        target_form.addRow("Storage Mode", self.storage_mode_combo)
+
         flags_widget = QWidget(self)
         flags_row = QHBoxLayout(flags_widget)
         flags_row.setContentsMargins(0, 0, 0, 0)
@@ -173,9 +183,19 @@ class AssetEditorDialog(QDialog):
             self.file_edit.setText(str(resolved) if resolved is not None else "")
             self.status_edit.setText(asset.version_status or "")
             self.format_edit.setText(asset.format or "")
+            self.storage_mode_combo.setCurrentIndex(
+                0
+                if normalize_storage_mode(
+                    asset.storage_mode, default=STORAGE_MODE_MANAGED_FILE
+                )
+                == STORAGE_MODE_DATABASE
+                else 1
+            )
             self.approved_checkbox.setChecked(asset.approved_for_use)
             self.primary_checkbox.setChecked(asset.primary_flag)
             self.notes_edit.setPlainText(asset.notes or "")
+        else:
+            self.storage_mode_combo.setCurrentIndex(1)
 
     def _pick_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Select Asset File", "")
@@ -186,6 +206,7 @@ class AssetEditorDialog(QDialog):
         return AssetVersionPayload(
             asset_type=self.asset_type_combo.currentText().strip().lower().replace(" ", "_"),
             source_path=self.file_edit.text().strip() or None,
+            storage_mode=self.storage_mode_combo.currentData(),
             format=self.format_edit.text().strip() or None,
             approved_for_use=self.approved_checkbox.isChecked(),
             primary_flag=self.primary_checkbox.isChecked(),

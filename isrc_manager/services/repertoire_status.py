@@ -113,7 +113,7 @@ class RepertoireWorkflowService:
                     metadata_complete,
                     contract_signed,
                     rights_verified,
-                    COALESCE(audio_file_path, '') != ''
+                    (COALESCE(audio_file_path, '') != '' OR audio_file_blob IS NOT NULL)
                 FROM Tracks
                 WHERE id=?
                 """,
@@ -137,7 +137,7 @@ class RepertoireWorkflowService:
                     metadata_complete,
                     contract_signed,
                     rights_verified,
-                    COALESCE(artwork_path, '') != ''
+                    (COALESCE(artwork_path, '') != '' OR artwork_blob IS NOT NULL)
                 FROM Releases
                 WHERE id=?
                 """,

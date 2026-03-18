@@ -34,8 +34,8 @@ Tracks remain the recording-level foundation of the catalog. They carry the reco
 - release date
 - ISRC
 - genre
-- managed audio
-- artwork
+- audio stored either in the database or as a managed file
+- artwork stored either in the database or as a managed file
 - custom metadata
 
 Tracks continue to work exactly as they always have. The richer model expands around them rather than replacing them.
@@ -52,7 +52,7 @@ Release records can carry:
 - UPC/EAN
 - catalog number
 - release dates
-- artwork
+- artwork stored either in the database or as a managed file
 - release ordering
 - territory and status information
 
@@ -127,6 +127,8 @@ That includes:
 
 Each document can store version labels, received dates, signed state, active state, superseded relationships, checksums, and notes.
 
+Those documents can now live either as database-backed binary records or as managed local files controlled by the app.
+
 ### Rights Records
 
 Rights records express the actual control position resulting from agreements.
@@ -169,6 +171,26 @@ You can track:
 - promotional assets
 
 Each asset can store checksum, format, technical details, derivation links, approval state, primary designation, and notes.
+
+Asset versions can also switch between database-backed and managed-file-backed storage without changing the surrounding workflow for approval, preview, export, or validation.
+
+## Attachment Storage Modes
+
+The richer repertoire model now uses one dual-storage rule for file-backed records across the application.
+
+Where appropriate, the app can store a file-backed record in one of two ways:
+
+- `Database` mode keeps the raw file bytes in the profile database
+- `Managed file` mode copies the file into an app-controlled local storage area and stores the managed path
+
+This applies across track media, release artwork, custom binary values, license PDFs, contract documents, asset versions, and GS1 workbook templates.
+
+The important operational result is consistency:
+
+- existing records stay readable even if they predate explicit storage-mode tracking
+- managed-file mode never depends on the original user-selected file staying in place
+- supported records can be converted between modes safely
+- package export/import preserves the intended storage mode instead of flattening everything into one representation
 
 ## How The Model Connects
 

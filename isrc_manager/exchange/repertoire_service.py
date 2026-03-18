@@ -19,6 +19,7 @@ from isrc_manager.contracts import (
     ContractPayload,
     ContractService,
 )
+from isrc_manager.file_storage import coalesce_filename
 from isrc_manager.parties import PartyPayload, PartyService
 from isrc_manager.rights import RightPayload, RightsService
 from isrc_manager.works import WorkContributorPayload, WorkPayload, WorkService
@@ -126,24 +127,61 @@ class RepertoireExchangeService:
         package_path.parent.mkdir(parents=True, exist_ok=True)
         with ZipFile(package_path, "w", compression=ZIP_DEFLATED) as archive:
             for contract in payload["contracts"]:
+                contract_id = int(contract.get("id") or 0)
                 for document in contract.get("documents", []):
                     stored_path = str(document.get("file_path") or "").strip()
+                    document_id = int(document.get("id") or 0)
                     abs_path = self.contract_service.resolve_document_path(stored_path)
-                    if not stored_path or abs_path is None or not abs_path.exists():
+                    if stored_path and abs_path is not None and abs_path.exists():
+                        package_key = stored_path
+                        arcname = f"files/contracts/{Path(stored_path).name}"
+                        if arcname not in packaged_files.values():
+                            archive.write(abs_path, arcname=arcname)
+                        packaged_files[package_key] = arcname
                         continue
-                    arcname = f"files/contracts/{Path(stored_path).name}"
+                    if document_id <= 0:
+                        continue
+                    try:
+                        data, _ = self.contract_service.fetch_document_bytes(document_id)
+                    except Exception:
+                        continue
+                    filename = coalesce_filename(
+                        document.get("filename"),
+                        default_stem=f"contract-document-{document_id or contract_id or 'file'}",
+                    )
+                    package_key = f"embedded/contracts/{contract_id or 'contract'}/{document_id}/{filename}"
+                    arcname = f"files/contracts/{document_id}_{filename}"
                     if arcname not in packaged_files.values():
-                        archive.write(abs_path, arcname=arcname)
-                    packaged_files[stored_path] = arcname
+                        archive.writestr(arcname, data)
+                    document["file_path"] = package_key
+                    packaged_files[package_key] = arcname
             for asset in payload["assets"]:
                 stored_path = str(asset.get("stored_path") or "").strip()
+                asset_id = int(asset.get("id") or 0)
                 abs_path = self.asset_service.resolve_asset_path(stored_path)
-                if not stored_path or abs_path is None or not abs_path.exists():
+                if stored_path and abs_path is not None and abs_path.exists():
+                    package_key = stored_path
+                    arcname = f"files/assets/{Path(stored_path).name}"
+                    if arcname not in packaged_files.values():
+                        archive.write(abs_path, arcname=arcname)
+                    packaged_files[package_key] = arcname
                     continue
-                arcname = f"files/assets/{Path(stored_path).name}"
+                if asset_id <= 0:
+                    continue
+                try:
+                    data, _ = self.asset_service.fetch_asset_bytes(asset_id)
+                except Exception:
+                    continue
+                filename = coalesce_filename(
+                    asset.get("filename"),
+                    default_stem=f"asset-{asset_id}",
+                )
+                package_key = f"embedded/assets/{asset_id}/{filename}"
+                arcname = f"files/assets/{asset_id}_{filename}"
                 if arcname not in packaged_files.values():
-                    archive.write(abs_path, arcname=arcname)
-                packaged_files[stored_path] = arcname
+                    archive.writestr(arcname, data)
+                asset["stored_path"] = package_key
+                packaged_files[package_key] = arcname
             payload["packaged_files"] = packaged_files
             archive.writestr("manifest.json", json.dumps(payload, indent=2, ensure_ascii=False))
 
@@ -384,6 +422,7 @@ class RepertoireExchangeService:
                             active_flag=bool(item.get("active_flag")),
                             source_path=item.get("source_path"),
                             stored_path=item.get("file_path"),
+                            storage_mode=item.get("storage_mode"),
                             filename=item.get("filename"),
                             checksum_sha256=item.get("checksum_sha256"),
                             notes=item.get("notes"),
@@ -519,6 +558,7 @@ class RepertoireExchangeService:
                         filename=source.get("filename"),
                         source_path=source.get("source_path"),
                         stored_path=source.get("stored_path"),
+                        storage_mode=source.get("storage_mode"),
                         checksum_sha256=source.get("checksum_sha256"),
                         duration_sec=(
                             int(source["duration_sec"])

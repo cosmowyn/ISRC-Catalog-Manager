@@ -18,6 +18,7 @@ from isrc_manager.contracts import (
     ContractService,
 )
 from isrc_manager.domain.codes import barcode_validation_status, to_compact_isrc
+from isrc_manager.file_storage import STORAGE_MODE_MANAGED_FILE, infer_storage_mode
 from isrc_manager.parties import PartyService
 from isrc_manager.releases import ReleaseService
 from isrc_manager.rights import RightsService
@@ -85,6 +86,8 @@ class QualityDashboardService:
                 COALESCE(t.isrc, ''),
                 COALESCE(t.release_date, ''),
                 COALESCE(t.audio_file_path, ''),
+                COALESCE(t.audio_file_storage_mode, ''),
+                CASE WHEN t.audio_file_blob IS NOT NULL THEN 1 ELSE 0 END,
                 COALESCE(t.upc, ''),
                 COALESCE(t.catalog_number, ''),
                 COALESCE(t.isrc_compact, '')
@@ -100,6 +103,8 @@ class QualityDashboardService:
             isrc,
             release_date,
             audio_file_path,
+            audio_file_storage_mode,
+            audio_blob_present,
             upc,
             catalog_number,
             compact_isrc,
@@ -169,13 +174,14 @@ class QualityDashboardService:
                         fix_key="regenerate_derived",
                     )
                 )
-            if not str(audio_file_path or "").strip():
+            has_audio = bool(str(audio_file_path or "").strip()) or bool(int(audio_blob_present or 0))
+            if not has_audio:
                 issues.append(
                     QualityIssue(
                         "missing_audio_attachment",
                         "warning",
                         "Missing Audio Attachment",
-                        "No managed audio file is attached to this track.",
+                        "No audio file is attached to this track.",
                         "track",
                         int(track_id),
                         track_id=int(track_id),
@@ -418,15 +424,32 @@ class QualityDashboardService:
         issues: list[QualityIssue] = []
         track_rows = self.conn.execute(
             """
-            SELECT id, COALESCE(audio_file_path, ''), COALESCE(album_art_path, '')
+            SELECT
+                id,
+                COALESCE(audio_file_path, ''),
+                COALESCE(audio_file_storage_mode, ''),
+                CASE WHEN audio_file_blob IS NOT NULL THEN 1 ELSE 0 END,
+                COALESCE(album_art_path, ''),
+                COALESCE(album_art_storage_mode, ''),
+                CASE WHEN album_art_blob IS NOT NULL THEN 1 ELSE 0 END
             FROM Tracks
             ORDER BY id
             """
         ).fetchall()
-        for track_id, audio_path, album_art_path in track_rows:
-            for media_key, stored_path in (("audio", audio_path), ("album_art", album_art_path)):
+        for track_id, audio_path, audio_mode, audio_blob_present, album_art_path, album_art_mode, album_art_blob_present in track_rows:
+            for media_key, stored_path, storage_mode, blob_present in (
+                ("audio", audio_path, audio_mode, audio_blob_present),
+                ("album_art", album_art_path, album_art_mode, album_art_blob_present),
+            ):
                 clean_path = str(stored_path or "").strip()
                 if not clean_path or self.data_root is None:
+                    continue
+                inferred_mode = infer_storage_mode(
+                    explicit_mode=storage_mode,
+                    stored_path=clean_path,
+                    blob_value=b"\x00" if int(blob_present or 0) else None,
+                )
+                if inferred_mode != STORAGE_MODE_MANAGED_FILE:
                     continue
                 path = Path(clean_path)
                 if not path.is_absolute():
@@ -447,14 +470,25 @@ class QualityDashboardService:
 
         release_rows = self.conn.execute(
             """
-            SELECT id, COALESCE(artwork_path, '')
+            SELECT
+                id,
+                COALESCE(artwork_path, ''),
+                COALESCE(artwork_storage_mode, ''),
+                CASE WHEN artwork_blob IS NOT NULL THEN 1 ELSE 0 END
             FROM Releases
             ORDER BY id
             """
         ).fetchall()
-        for release_id, artwork_path in release_rows:
+        for release_id, artwork_path, storage_mode, blob_present in release_rows:
             clean_path = str(artwork_path or "").strip()
             if not clean_path or self.data_root is None:
+                continue
+            inferred_mode = infer_storage_mode(
+                explicit_mode=storage_mode,
+                stored_path=clean_path,
+                blob_value=b"\x00" if int(blob_present or 0) else None,
+            )
+            if inferred_mode != STORAGE_MODE_MANAGED_FILE:
                 continue
             path = Path(clean_path)
             if not path.is_absolute():

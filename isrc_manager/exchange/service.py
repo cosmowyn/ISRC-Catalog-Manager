@@ -16,6 +16,7 @@ from openpyxl import Workbook, load_workbook
 
 from isrc_manager.domain.codes import is_blank, to_compact_isrc, to_iso_isrc
 from isrc_manager.domain.timecode import parse_hms_text, seconds_to_hms
+from isrc_manager.file_storage import coalesce_filename, infer_storage_mode
 from isrc_manager.releases import ReleasePayload, ReleaseService, ReleaseTrackPlacement
 from isrc_manager.services.custom_fields import CustomFieldDefinitionService
 from isrc_manager.services.tracks import TrackCreatePayload, TrackService, TrackUpdatePayload
@@ -48,7 +49,9 @@ class ExchangeService:
         "comments",
         "lyrics",
         "audio_file_path",
+        "audio_file_storage_mode",
         "album_art_path",
+        "album_art_storage_mode",
         "release_id",
         "release_title",
         "release_version_subtitle",
@@ -66,6 +69,7 @@ class ExchangeService:
         "release_explicit_flag",
         "release_notes",
         "release_artwork_path",
+        "release_artwork_storage_mode",
         "disc_number",
         "track_number",
         "sequence_number",
@@ -112,6 +116,8 @@ class ExchangeService:
                 r.explicit_flag,
                 r.release_notes,
                 r.artwork_path,
+                r.artwork_storage_mode,
+                CASE WHEN r.artwork_blob IS NOT NULL THEN 1 ELSE 0 END,
                 rt.disc_number,
                 rt.track_number,
                 rt.sequence_number
@@ -141,9 +147,15 @@ class ExchangeService:
                     "release_explicit_flag": int(row[15] or 0),
                     "release_notes": row[16] or "",
                     "release_artwork_path": row[17] or "",
-                    "disc_number": int(row[18] or 1),
-                    "track_number": int(row[19] or 1),
-                    "sequence_number": int(row[20] or 1),
+                    "release_artwork_storage_mode": infer_storage_mode(
+                        explicit_mode=row[18],
+                        stored_path=row[17],
+                        blob_value=b"\x00" if int(row[19] or 0) else None,
+                    )
+                    or "",
+                    "disc_number": int(row[20] or 1),
+                    "track_number": int(row[21] or 1),
+                    "sequence_number": int(row[22] or 1),
                 }
             )
         return by_track
@@ -183,6 +195,12 @@ class ExchangeService:
             str(artwork_meta.get("path") or "").strip(),
         )
 
+    @staticmethod
+    def _synthetic_media_key(*parts: object, filename: str, default_stem: str) -> str:
+        clean_parts = [str(part).strip().strip("/") for part in parts if str(part).strip()]
+        clean_filename = coalesce_filename(filename, default_stem=default_stem)
+        return "/".join([*clean_parts, clean_filename])
+
     def _resolve_packaged_media_source(self, stored_path: str) -> Path | None:
         clean_path = str(stored_path or "").strip()
         if not clean_path:
@@ -202,6 +220,98 @@ class ExchangeService:
             digest = hashlib.sha1(clean_path.encode("utf-8")).hexdigest()[:12]
             return f"media/external/{digest}_{path.name}"
         return f"media/{path.as_posix()}"
+
+    def _package_track_media(
+        self,
+        archive: ZipFile,
+        *,
+        row: dict[str, object],
+        field_name: str,
+        track_id: int,
+        media_key: str,
+        written_media: set[str],
+        packaged_media_index: dict[str, str],
+    ) -> None:
+        meta = self.track_service.get_media_meta(int(track_id), media_key)
+        if not bool(meta.get("has_media")):
+            return
+        package_key = str(meta.get("path") or "").strip()
+        if not package_key:
+            owner_scope = str(meta.get("owner_scope") or "track")
+            owner_id = meta.get("owner_id") or track_id
+            package_key = self._synthetic_media_key(
+                "embedded",
+                owner_scope,
+                owner_id,
+                media_key,
+                filename=str(meta.get("filename") or ""),
+                default_stem=media_key.replace("_", "-"),
+            )
+        arcname = self._package_media_arcname(package_key)
+        if arcname not in written_media:
+            stored_path = str(meta.get("path") or "").strip()
+            if stored_path:
+                abs_path = self._resolve_packaged_media_source(stored_path)
+                if abs_path is not None and abs_path.exists():
+                    archive.write(abs_path, arcname=arcname)
+                else:
+                    data, _ = self.track_service.fetch_media_bytes(int(track_id), media_key)
+                    archive.writestr(arcname, data)
+            else:
+                data, _ = self.track_service.fetch_media_bytes(int(track_id), media_key)
+                archive.writestr(arcname, data)
+            written_media.add(arcname)
+        packaged_media_index[package_key] = arcname
+        row[field_name] = package_key
+        row[field_name.replace("_path", "_storage_mode")] = str(meta.get("storage_mode") or "")
+
+    def _package_release_artwork(
+        self,
+        archive: ZipFile,
+        *,
+        row: dict[str, object],
+        written_media: set[str],
+        packaged_media_index: dict[str, str],
+    ) -> None:
+        try:
+            release_id = int(row.get("release_id") or 0)
+        except Exception:
+            release_id = 0
+        if release_id <= 0:
+            return
+        release = self.release_service.fetch_release(release_id)
+        if release is None:
+            return
+        storage_mode = str(release.artwork_storage_mode or "").strip()
+        stored_path = str(release.artwork_path or "").strip()
+        if not storage_mode and not stored_path:
+            return
+        package_key = stored_path
+        if not package_key:
+            package_key = self._synthetic_media_key(
+                "embedded",
+                "release",
+                release_id,
+                "artwork",
+                filename=release.artwork_filename or "",
+                default_stem="release-artwork",
+            )
+        arcname = self._package_media_arcname(package_key)
+        if arcname not in written_media:
+            if stored_path:
+                abs_path = self._resolve_packaged_media_source(stored_path)
+                if abs_path is not None and abs_path.exists():
+                    archive.write(abs_path, arcname=arcname)
+                else:
+                    data, _ = self.release_service.fetch_artwork_bytes(release_id)
+                    archive.writestr(arcname, data)
+            else:
+                data, _ = self.release_service.fetch_artwork_bytes(release_id)
+                archive.writestr(arcname, data)
+            written_media.add(arcname)
+        packaged_media_index[package_key] = arcname
+        row["release_artwork_path"] = package_key
+        row["release_artwork_storage_mode"] = storage_mode
 
     def export_rows(
         self, track_ids: list[int] | None = None
@@ -262,9 +372,10 @@ class ExchangeService:
         exported_rows: list[dict[str, object]] = []
         for row in rows:
             track_id = int(row[0])
-            effective_audio_path, effective_album_art_path = self._effective_track_media_paths(
-                track_id
-            )
+            audio_meta = self.track_service.get_media_meta(track_id, "audio_file")
+            artwork_meta = self.track_service.get_media_meta(track_id, "album_art")
+            effective_audio_path = str(audio_meta.get("path") or "").strip()
+            effective_album_art_path = str(artwork_meta.get("path") or "").strip()
             base = {
                 "track_id": track_id,
                 "isrc": row[1] or "",
@@ -285,7 +396,9 @@ class ExchangeService:
                 "comments": row[15] or "",
                 "lyrics": row[16] or "",
                 "audio_file_path": effective_audio_path,
+                "audio_file_storage_mode": str(audio_meta.get("storage_mode") or ""),
                 "album_art_path": effective_album_art_path,
+                "album_art_storage_mode": str(artwork_meta.get("storage_mode") or ""),
                 "license_files": license_map.get(track_id, ""),
             }
             placements = release_map.get(track_id) or [
@@ -307,6 +420,7 @@ class ExchangeService:
                     "release_explicit_flag": 0,
                     "release_notes": "",
                     "release_artwork_path": "",
+                    "release_artwork_storage_mode": "",
                     "disc_number": "",
                     "track_number": "",
                     "sequence_number": "",
@@ -367,22 +481,37 @@ class ExchangeService:
         headers, rows = self.export_rows(track_ids)
         packaged_media_index: dict[str, str] = {}
         with ZipFile(zip_path, "w", compression=ZIP_DEFLATED) as archive:
-            if self.data_root is not None:
-                written_media: set[str] = set()
-                for row in rows:
-                    for key in ("audio_file_path", "album_art_path", "release_artwork_path"):
-                        rel_path = str(row.get(key) or "").strip()
-                        if not rel_path:
-                            continue
-                        abs_path = self._resolve_packaged_media_source(rel_path)
-                        if abs_path is None or not abs_path.exists():
-                            continue
-                        arcname = self._package_media_arcname(rel_path)
-                        if arcname in written_media:
-                            continue
-                        archive.write(abs_path, arcname=arcname)
-                        written_media.add(arcname)
-                        packaged_media_index[rel_path] = arcname
+            written_media: set[str] = set()
+            for row in rows:
+                try:
+                    track_id = int(row.get("track_id") or 0)
+                except Exception:
+                    track_id = 0
+                if track_id > 0:
+                    self._package_track_media(
+                        archive,
+                        row=row,
+                        field_name="audio_file_path",
+                        track_id=track_id,
+                        media_key="audio_file",
+                        written_media=written_media,
+                        packaged_media_index=packaged_media_index,
+                    )
+                    self._package_track_media(
+                        archive,
+                        row=row,
+                        field_name="album_art_path",
+                        track_id=track_id,
+                        media_key="album_art",
+                        written_media=written_media,
+                        packaged_media_index=packaged_media_index,
+                    )
+                self._package_release_artwork(
+                    archive,
+                    row=row,
+                    written_media=written_media,
+                    packaged_media_index=packaged_media_index,
+                )
             payload = {
                 "schema_version": JSON_SCHEMA_VERSION,
                 "exported_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
@@ -779,6 +908,8 @@ class ExchangeService:
             artwork_source_path=self._resolve_media_path(
                 source_dir, row.get("release_artwork_path")
             ),
+            artwork_storage_mode=str(row.get("release_artwork_storage_mode") or "").strip()
+            or None,
             placements=[placement],
         )
         if existing_id is None:
@@ -886,9 +1017,13 @@ class ExchangeService:
                     audio_file_source_path=self._resolve_media_path(
                         source_dir, row.get("audio_file_path")
                     ),
+                    audio_file_storage_mode=str(row.get("audio_file_storage_mode") or "").strip()
+                    or None,
                     album_art_source_path=self._resolve_media_path(
                         source_dir, row.get("album_art_path")
                     ),
+                    album_art_storage_mode=str(row.get("album_art_storage_mode") or "").strip()
+                    or None,
                 )
                 if row.get("audio_file_path") and payload_kwargs["audio_file_source_path"] is None:
                     warnings.append(

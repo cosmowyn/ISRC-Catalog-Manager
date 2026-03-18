@@ -389,7 +389,7 @@ def build_demo_workspace(base_dir: Path) -> dict[str, Path]:
 
     track_service = TrackService(conn, data_root)
     custom_defs = CustomFieldDefinitionService(conn)
-    custom_values = CustomFieldValueService(conn, custom_defs)
+    custom_values = CustomFieldValueService(conn, custom_defs, data_root)
     license_service = LicenseService(conn, data_root)
     catalog_admin = CatalogAdminService(conn)
     profile_kv = ProfileKVService(conn)

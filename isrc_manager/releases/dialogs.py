@@ -27,6 +27,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from isrc_manager.file_storage import (
+    STORAGE_MODE_DATABASE,
+    STORAGE_MODE_MANAGED_FILE,
+    normalize_storage_mode,
+)
 from isrc_manager.services.repertoire_status import REPERTOIRE_STATUS_CHOICES
 from isrc_manager.ui_common import (
     _add_standard_dialog_header,
@@ -173,6 +178,11 @@ class ReleaseEditorDialog(QDialog):
         artwork_layout.addWidget(clear_button)
         form.addRow("Artwork", artwork_row)
 
+        self.artwork_storage_mode_combo = QComboBox()
+        self.artwork_storage_mode_combo.addItem("Database (BLOB)", STORAGE_MODE_DATABASE)
+        self.artwork_storage_mode_combo.addItem("Managed file", STORAGE_MODE_MANAGED_FILE)
+        form.addRow("Artwork Storage", self.artwork_storage_mode_combo)
+
         self.notes_edit = QPlainTextEdit()
         self.notes_edit.setMinimumHeight(120)
         form.addRow("Release Notes", self.notes_edit)
@@ -258,6 +268,7 @@ class ReleaseEditorDialog(QDialog):
     ) -> None:
         if release is None:
             self.release_type_combo.setCurrentText("Album")
+            self.artwork_storage_mode_combo.setCurrentIndex(1)
             self._original_artwork_display_path = ""
             self._load_placements(placements)
             return
@@ -287,6 +298,14 @@ class ReleaseEditorDialog(QDialog):
         artwork_path = self.release_service.resolve_artwork_path(release.artwork_path)
         self._original_artwork_display_path = str(artwork_path) if artwork_path is not None else ""
         self.artwork_path_edit.setText(self._original_artwork_display_path)
+        self.artwork_storage_mode_combo.setCurrentIndex(
+            0
+            if normalize_storage_mode(
+                release.artwork_storage_mode, default=STORAGE_MODE_MANAGED_FILE
+            )
+            == STORAGE_MODE_DATABASE
+            else 1
+        )
         self._load_placements(placements)
 
     def _load_placements(self, placements: list[ReleaseTrackPlacement]) -> None:
@@ -414,6 +433,9 @@ class ReleaseEditorDialog(QDialog):
         artwork_source_path = self.artwork_path_edit.text().strip() or None
         if artwork_source_path == self._original_artwork_display_path:
             artwork_source_path = None
+        artwork_storage_mode = self.artwork_storage_mode_combo.currentData()
+        if not artwork_source_path and self._clear_artwork_requested:
+            artwork_storage_mode = None
         return ReleasePayload(
             title=self.title_edit.text().strip(),
             version_subtitle=self.subtitle_edit.text().strip() or None,
@@ -435,6 +457,7 @@ class ReleaseEditorDialog(QDialog):
             rights_verified=self.rights_checkbox.isChecked(),
             notes=self.notes_edit.toPlainText().strip() or None,
             artwork_source_path=artwork_source_path,
+            artwork_storage_mode=artwork_storage_mode,
             clear_artwork=bool(self._clear_artwork_requested and not artwork_source_path),
             profile_name=self.profile_name,
             placements=self.placements(),
