@@ -70,9 +70,20 @@ class CatalogAdminService:
         ]
 
     def delete_artists(self, artist_ids: Iterable[int]) -> None:
-        ids = [(int(artist_id),) for artist_id in artist_ids]
-        if not ids:
+        normalized_ids = sorted({int(artist_id) for artist_id in artist_ids if int(artist_id) > 0})
+        if not normalized_ids:
             return
+        usage_by_id = {artist.artist_id: artist for artist in self.list_artists_with_usage()}
+        blocked = [
+            usage_by_id[artist_id].name
+            for artist_id in normalized_ids
+            if usage_by_id.get(artist_id) is not None and usage_by_id[artist_id].total_uses > 0
+        ]
+        if blocked:
+            raise ValueError(
+                "Artist still linked to tracks: " + ", ".join(sorted(set(blocked), key=str.casefold))
+            )
+        ids = [(artist_id,) for artist_id in normalized_ids]
         with self.conn:
             self.conn.executemany("DELETE FROM Artists WHERE id=?", ids)
 
@@ -110,9 +121,20 @@ class CatalogAdminService:
         ]
 
     def delete_albums(self, album_ids: Iterable[int]) -> None:
-        ids = [(int(album_id),) for album_id in album_ids]
-        if not ids:
+        normalized_ids = sorted({int(album_id) for album_id in album_ids if int(album_id) > 0})
+        if not normalized_ids:
             return
+        usage_by_id = {album.album_id: album for album in self.list_albums_with_usage()}
+        blocked = [
+            usage_by_id[album_id].title
+            for album_id in normalized_ids
+            if usage_by_id.get(album_id) is not None and usage_by_id[album_id].uses > 0
+        ]
+        if blocked:
+            raise ValueError(
+                "Album still linked to tracks: " + ", ".join(sorted(set(blocked), key=str.casefold))
+            )
+        ids = [(album_id,) for album_id in normalized_ids]
         with self.conn:
             self.conn.executemany("DELETE FROM Albums WHERE id=?", ids)
 

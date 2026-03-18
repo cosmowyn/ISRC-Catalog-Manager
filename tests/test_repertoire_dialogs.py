@@ -3,14 +3,15 @@ import unittest
 from tests.qt_test_helpers import require_qapplication
 
 try:
-    from PySide6.QtWidgets import QDialogButtonBox, QTabWidget
+    from PySide6.QtWidgets import QComboBox, QDialogButtonBox, QScrollArea, QTabWidget
 
     from isrc_manager.assets.dialogs import AssetEditorDialog
     from isrc_manager.contracts.dialogs import ContractEditorDialog
     from isrc_manager.parties.dialogs import PartyEditorDialog
-    from isrc_manager.releases.dialogs import ReleaseBrowserDialog
+    from isrc_manager.releases.dialogs import ReleaseBrowserDialog, ReleaseEditorDialog
     from isrc_manager.rights.dialogs import RightEditorDialog
     from isrc_manager.search.dialogs import GlobalSearchDialog
+    from isrc_manager.selection_scope import SelectionScopeBanner
     from isrc_manager.works.dialogs import WorkEditorDialog
 except Exception as exc:  # pragma: no cover - environment-specific fallback
     REPERTOIRE_IMPORT_ERROR = exc
@@ -38,6 +39,9 @@ class _EmptySearchService:
         return []
 
     def search(self, *_args, **_kwargs):
+        return []
+
+    def browse_default_view(self, *_args, **_kwargs):
         return []
 
 
@@ -76,6 +80,7 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
             self.assertEqual(tabs.count(), 4)
             buttons = dialog.findChild(QDialogButtonBox)
             self.assertIsNotNone(buttons)
+            self.assertLess(dialog.documents_editor.minimumSizeHint().width(), 960)
         finally:
             dialog.close()
 
@@ -109,6 +114,10 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
             )
             buttons = dialog.findChild(QDialogButtonBox)
             self.assertIsNotNone(buttons)
+            self.assertIsInstance(dialog.track_id_edit, QComboBox)
+            self.assertTrue(dialog.track_id_edit.isEditable())
+            self.assertIsInstance(dialog.release_id_edit, QComboBox)
+            self.assertTrue(dialog.release_id_edit.isEditable())
         finally:
             dialog.close()
 
@@ -127,8 +136,31 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
             )
             buttons = dialog.findChild(QDialogButtonBox)
             self.assertIsNotNone(buttons)
+            scroll_areas = dialog.findChildren(QScrollArea)
+            self.assertTrue(scroll_areas)
         finally:
             dialog.close()
+
+    def test_release_editor_uses_stored_value_combos_for_catalog_number_and_upc(self):
+        dialog = ReleaseEditorDialog(
+            release_service=object(),
+            track_title_resolver=lambda track_id: f"Track {track_id}",
+            selected_track_ids_provider=lambda: [],
+        )
+        try:
+            self.assertIsInstance(dialog.catalog_number_edit, QComboBox)
+            self.assertTrue(dialog.catalog_number_edit.isEditable())
+            self.assertIsInstance(dialog.upc_edit, QComboBox)
+            self.assertTrue(dialog.upc_edit.isEditable())
+        finally:
+            dialog.close()
+
+    def test_selection_scope_banner_wraps_action_buttons_more_compactly(self):
+        banner = SelectionScopeBanner()
+        try:
+            self.assertLess(banner.minimumSizeHint().width(), 380)
+        finally:
+            banner.close()
 
     def test_release_browser_initializes_cleanly_with_empty_service(self):
         dialog = ReleaseBrowserDialog(
@@ -150,7 +182,7 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
             tabs = dialog.findChild(QTabWidget)
             self.assertIsNotNone(tabs)
             self.assertEqual(tabs.count(), 2)
-            self.assertIn("Enter a query", dialog.results_status_label.text())
+            self.assertIn("No catalog records", dialog.results_status_label.text())
         finally:
             dialog.close()
 

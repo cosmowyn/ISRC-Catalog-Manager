@@ -59,6 +59,7 @@ class QualityDashboardService:
         issues.extend(self._release_issues())
         issues.extend(self._media_issues())
         issues.extend(self._ordering_issues())
+        issues.extend(self._release_backfill_issues())
         issues.extend(self._license_issues())
         issues.extend(self._custom_field_issues())
         issues.extend(self._work_issues())
@@ -74,6 +75,87 @@ class QualityDashboardService:
             counts_by_severity=dict(counts_by_severity),
             counts_by_type=dict(counts_by_type),
         )
+
+    @staticmethod
+    def _issue_track_id(issue: QualityIssue | None) -> int | None:
+        if issue is None:
+            return None
+        if issue.track_id is not None:
+            return int(issue.track_id)
+        if issue.entity_type == "track" and issue.entity_id is not None:
+            return int(issue.entity_id)
+        return None
+
+    @staticmethod
+    def _issue_release_id(issue: QualityIssue | None) -> int | None:
+        if issue is None:
+            return None
+        if issue.release_id is not None:
+            return int(issue.release_id)
+        if issue.entity_type == "release" and issue.entity_id is not None:
+            return int(issue.entity_id)
+        return None
+
+    def _track_release_backfill_candidates(
+        self, *, track_ids: set[int] | None = None
+    ) -> list[dict[str, object]]:
+        params: list[object] = []
+        where_sql = ""
+        if track_ids:
+            placeholders = ", ".join("?" for _ in track_ids)
+            where_sql = f"WHERE t.id IN ({placeholders})"
+            params.extend(sorted(int(track_id) for track_id in track_ids))
+        rows = self.conn.execute(
+            f"""
+            SELECT
+                t.id,
+                COALESCE(t.track_title, ''),
+                COALESCE(t.release_date, ''),
+                COALESCE(t.upc, ''),
+                COALESCE(t.catalog_number, ''),
+                COALESCE(al.title, ''),
+                r.id,
+                COALESCE(r.release_date, ''),
+                COALESCE(r.upc, ''),
+                COALESCE(r.catalog_number, ''),
+                COALESCE(r.title, '')
+            FROM Tracks t
+            LEFT JOIN Albums al ON al.id = t.album_id
+            JOIN ReleaseTracks rt ON rt.track_id = t.id
+            JOIN Releases r ON r.id = rt.release_id
+            {where_sql}
+            ORDER BY t.id, COALESCE(rt.sequence_number, 999999), r.id
+            """,
+            tuple(params),
+        ).fetchall()
+        seen: set[int] = set()
+        candidates: list[dict[str, object]] = []
+        for row in rows:
+            track_id = int(row[0])
+            if track_id in seen:
+                continue
+            seen.add(track_id)
+            fill_values: dict[str, str] = {}
+            if not str(row[2] or "").strip() and str(row[7] or "").strip():
+                fill_values["release_date"] = str(row[7])
+            if not str(row[3] or "").strip() and str(row[8] or "").strip():
+                fill_values["upc"] = str(row[8])
+            if not str(row[4] or "").strip() and str(row[9] or "").strip():
+                fill_values["catalog_number"] = str(row[9])
+            if not str(row[5] or "").strip() and str(row[10] or "").strip():
+                fill_values["album_title"] = str(row[10])
+            if not fill_values:
+                continue
+            candidates.append(
+                {
+                    "track_id": track_id,
+                    "track_title": str(row[1] or ""),
+                    "release_id": int(row[6]),
+                    "release_title": str(row[10] or ""),
+                    "fill_values": fill_values,
+                }
+            )
+        return candidates
 
     def _track_metadata_issues(self) -> list[QualityIssue]:
         issues: list[QualityIssue] = []
@@ -645,6 +727,37 @@ class QualityDashboardService:
                 )
         return issues
 
+    def _release_backfill_issues(self) -> list[QualityIssue]:
+        issues: list[QualityIssue] = []
+        for candidate in self._track_release_backfill_candidates():
+            field_labels = [
+                {
+                    "release_date": "release date",
+                    "upc": "UPC/EAN",
+                    "catalog_number": "catalog number",
+                    "album_title": "album title",
+                }[field_name]
+                for field_name in candidate["fill_values"].keys()
+            ]
+            release_title = str(candidate["release_title"] or "").strip() or "linked release"
+            issues.append(
+                QualityIssue(
+                    "track_can_fill_from_release",
+                    "info",
+                    "Track Can Inherit Release Metadata",
+                    (
+                        f"Track '{candidate['track_title']}' can fill blank "
+                        f"{', '.join(field_labels)} from release '{release_title}'."
+                    ),
+                    "track",
+                    int(candidate["track_id"]),
+                    release_id=int(candidate["release_id"]),
+                    track_id=int(candidate["track_id"]),
+                    fix_key="fill_from_release",
+                )
+            )
+        return issues
+
     def _work_payload_from_detail(self, detail) -> WorkPayload:
         return WorkPayload(
             title=detail.work.title,
@@ -1076,12 +1189,19 @@ class QualityDashboardService:
         }
         output_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
-    def apply_fix(self, fix_key: str) -> str:
+    def apply_fix(self, fix_key: str, *, issue: QualityIssue | None = None) -> str:
         if fix_key == "regenerate_derived":
             updated_tracks = 0
             updated_releases = 0
             with self.conn:
-                rows = self.conn.execute("SELECT id, isrc FROM Tracks").fetchall()
+                track_id = self._issue_track_id(issue)
+                if track_id is None:
+                    rows = self.conn.execute("SELECT id, isrc FROM Tracks").fetchall()
+                else:
+                    rows = self.conn.execute(
+                        "SELECT id, isrc FROM Tracks WHERE id=?",
+                        (int(track_id),),
+                    ).fetchall()
                 for track_id, isrc in rows:
                     compact = to_compact_isrc(str(isrc or ""))
                     self.conn.execute(
@@ -1089,7 +1209,14 @@ class QualityDashboardService:
                         (compact, int(track_id)),
                     )
                     updated_tracks += 1
-                release_rows = self.conn.execute("SELECT id, upc FROM Releases").fetchall()
+                release_id = self._issue_release_id(issue)
+                if release_id is None:
+                    release_rows = self.conn.execute("SELECT id, upc FROM Releases").fetchall()
+                else:
+                    release_rows = self.conn.execute(
+                        "SELECT id, upc FROM Releases WHERE id=?",
+                        (int(release_id),),
+                    ).fetchall()
                 for release_id, upc in release_rows:
                     self.conn.execute(
                         "UPDATE Releases SET barcode_validation_status=? WHERE id=?",
@@ -1101,10 +1228,22 @@ class QualityDashboardService:
         if fix_key == "normalize_dates":
             updated = 0
             with self.conn:
-                for table_name in ("Tracks", "Releases"):
-                    rows = self.conn.execute(
-                        f"SELECT id, release_date FROM {table_name} WHERE release_date IS NOT NULL AND trim(release_date) != ''"
-                    ).fetchall()
+                scopes = [
+                    ("Tracks", self._issue_track_id(issue)),
+                    ("Releases", self._issue_release_id(issue)),
+                ]
+                if issue is None:
+                    scopes = [("Tracks", None), ("Releases", None)]
+                for table_name, row_id in scopes:
+                    if row_id is None:
+                        rows = self.conn.execute(
+                            f"SELECT id, release_date FROM {table_name} WHERE release_date IS NOT NULL AND trim(release_date) != ''"
+                        ).fetchall()
+                    else:
+                        rows = self.conn.execute(
+                            f"SELECT id, release_date FROM {table_name} WHERE id=? AND release_date IS NOT NULL AND trim(release_date) != ''",
+                            (int(row_id),),
+                        ).fetchall()
                     for row_id, raw_value in rows:
                         normalized = self._normalize_date(raw_value)
                         if normalized and normalized != raw_value:
@@ -1119,15 +1258,40 @@ class QualityDashboardService:
             relinked = 0
             if self.data_root is None:
                 return "No data root is configured, so media relinking is unavailable."
+            track_id = self._issue_track_id(issue)
+            release_id = self._issue_release_id(issue)
             with self.conn:
-                for table_name, column_name in (
-                    ("Tracks", "audio_file_path"),
-                    ("Tracks", "album_art_path"),
-                    ("Releases", "artwork_path"),
-                ):
-                    rows = self.conn.execute(
-                        f"SELECT id, {column_name} FROM {table_name} WHERE {column_name} IS NOT NULL AND trim({column_name}) != ''"
-                    ).fetchall()
+                media_targets: list[tuple[str, str, int | None]] = []
+                if issue is None:
+                    media_targets = [
+                        ("Tracks", "audio_file_path", None),
+                        ("Tracks", "album_art_path", None),
+                        ("Releases", "artwork_path", None),
+                    ]
+                elif track_id is not None:
+                    issue_title = str(issue.title or "").casefold()
+                    if "audio" in issue_title:
+                        media_targets = [("Tracks", "audio_file_path", int(track_id))]
+                    elif "album art" in issue_title:
+                        media_targets = [("Tracks", "album_art_path", int(track_id))]
+                    else:
+                        media_targets = [
+                            ("Tracks", "audio_file_path", int(track_id)),
+                            ("Tracks", "album_art_path", int(track_id)),
+                        ]
+                elif release_id is not None:
+                    media_targets = [("Releases", "artwork_path", int(release_id))]
+
+                for table_name, column_name, row_id in media_targets:
+                    if row_id is None:
+                        rows = self.conn.execute(
+                            f"SELECT id, {column_name} FROM {table_name} WHERE {column_name} IS NOT NULL AND trim({column_name}) != ''"
+                        ).fetchall()
+                    else:
+                        rows = self.conn.execute(
+                            f"SELECT id, {column_name} FROM {table_name} WHERE id=? AND {column_name} IS NOT NULL AND trim({column_name}) != ''",
+                            (int(row_id),),
+                        ).fetchall()
                     for row_id, stored_path in rows:
                         clean = str(stored_path or "").strip()
                         if not clean:
@@ -1151,41 +1315,24 @@ class QualityDashboardService:
         if fix_key == "fill_from_release":
             updated = 0
             with self.conn:
-                rows = self.conn.execute(
-                    """
-                    SELECT
-                        t.id,
-                        COALESCE(t.release_date, ''),
-                        COALESCE(t.upc, ''),
-                        COALESCE(t.catalog_number, ''),
-                        COALESCE(al.title, ''),
-                        r.release_date,
-                        r.upc,
-                        r.catalog_number,
-                        r.title
-                    FROM Tracks t
-                    LEFT JOIN Albums al ON al.id = t.album_id
-                    LEFT JOIN ReleaseTracks rt ON rt.track_id = t.id
-                    LEFT JOIN Releases r ON r.id = rt.release_id
-                    ORDER BY t.id, rt.sequence_number
-                    """
-                ).fetchall()
-                seen: set[int] = set()
-                for row in rows:
-                    track_id = int(row[0])
-                    if track_id in seen:
-                        continue
-                    seen.add(track_id)
+                track_scope = self._issue_track_id(issue)
+                candidates = self._track_release_backfill_candidates(
+                    track_ids={int(track_scope)} if track_scope is not None else None
+                )
+                for candidate in candidates:
+                    track_id = int(candidate["track_id"])
+                    fill_values = dict(candidate["fill_values"])
                     updates = {}
-                    if not str(row[1] or "").strip() and str(row[5] or "").strip():
-                        updates["release_date"] = row[5]
-                    if not str(row[2] or "").strip() and str(row[6] or "").strip():
-                        updates["upc"] = row[6]
-                    if not str(row[3] or "").strip() and str(row[7] or "").strip():
-                        updates["catalog_number"] = row[7]
-                    if not str(row[4] or "").strip() and str(row[8] or "").strip():
+                    if fill_values.get("release_date"):
+                        updates["release_date"] = fill_values["release_date"]
+                    if fill_values.get("upc"):
+                        updates["upc"] = fill_values["upc"]
+                    if fill_values.get("catalog_number"):
+                        updates["catalog_number"] = fill_values["catalog_number"]
+                    if fill_values.get("album_title"):
                         album_id = self.track_service.get_or_create_album(
-                            str(row[8]), cursor=self.conn.cursor()
+                            str(fill_values["album_title"]),
+                            cursor=self.conn.cursor(),
                         )
                         updates["album_id"] = album_id
                     if updates:

@@ -20,6 +20,12 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from isrc_manager.ui_common import (
+    _add_standard_dialog_header,
+    _apply_compact_dialog_control_heights,
+    _apply_standard_dialog_chrome,
+)
+
 from .models import QualityIssue, QualityScanResult
 
 
@@ -62,16 +68,19 @@ class QualityDashboardDialog(QDialog):
 
         self.setWindowTitle("Data Quality Dashboard")
         self.resize(1180, 780)
+        _apply_standard_dialog_chrome(self, "qualityDashboardDialog")
 
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(12)
-
-        header = QLabel(
-            "Scan the current profile for metadata, release, media, ordering, and integrity issues."
+        _add_standard_dialog_header(
+            root,
+            self,
+            title="Data Quality Dashboard",
+            subtitle=(
+                "Scan the current profile for metadata, release, media, ordering, and integrity issues."
+            ),
         )
-        header.setWordWrap(True)
-        root.addWidget(header)
 
         stats_grid = QGridLayout()
         stats_grid.setHorizontalSpacing(12)
@@ -80,6 +89,13 @@ class QualityDashboardDialog(QDialog):
         self.error_label = QLabel("Errors: 0")
         self.warning_label = QLabel("Warnings: 0")
         self.info_label = QLabel("Info: 0")
+        for label in (
+            self.total_label,
+            self.error_label,
+            self.warning_label,
+            self.info_label,
+        ):
+            label.setProperty("role", "meta")
         stats_grid.addWidget(self.total_label, 0, 0)
         stats_grid.addWidget(self.error_label, 0, 1)
         stats_grid.addWidget(self.warning_label, 0, 2)
@@ -134,9 +150,11 @@ class QualityDashboardDialog(QDialog):
         actions.setSpacing(8)
         self.open_button = QPushButton("Open Record")
         self.open_button.clicked.connect(self._open_selected_issue)
+        self.open_button.setEnabled(False)
         actions.addWidget(self.open_button)
         self.fix_button = QPushButton("Apply Suggested Fix")
         self.fix_button.clicked.connect(self._apply_selected_fix)
+        self.fix_button.setEnabled(False)
         actions.addWidget(self.fix_button)
         actions.addStretch(1)
         export_csv_button = QPushButton("Export CSV…")
@@ -150,12 +168,14 @@ class QualityDashboardDialog(QDialog):
         actions.addWidget(close_button)
         root.addLayout(actions)
 
+        _apply_compact_dialog_control_heights(self)
         self.refresh_scan()
 
     def refresh_scan(self) -> None:
         if self._active_scan_task_id is not None:
             return
         self.refresh_button.setEnabled(False)
+        self._set_issue_actions_enabled(None)
         self.details.setPlainText("Scanning the current profile...")
         self.issue_table.setRowCount(0)
         if self.task_manager is None:
@@ -216,6 +236,7 @@ class QualityDashboardDialog(QDialog):
         self._populate_issue_table()
 
     def _fail_scan(self, message: str) -> None:
+        self._set_issue_actions_enabled(None)
         self.details.setPlainText(message)
         QMessageBox.critical(self, "Quality Scan", f"Could not complete the scan:\n{message}")
 
@@ -256,8 +277,10 @@ class QualityDashboardDialog(QDialog):
                 self.issue_table.setItem(row, column, item)
         if issues:
             self.issue_table.selectRow(0)
+            self._load_issue_details()
         else:
             self.details.clear()
+            self._set_issue_actions_enabled(None)
 
     def _selected_issue(self) -> QualityIssue | None:
         row = self.issue_table.currentRow()
@@ -269,10 +292,16 @@ class QualityDashboardDialog(QDialog):
         issue = item.data(Qt.UserRole)
         return issue if isinstance(issue, QualityIssue) else None
 
+    def _set_issue_actions_enabled(self, issue: QualityIssue | None) -> None:
+        has_issue = issue is not None
+        self.open_button.setEnabled(has_issue)
+        self.fix_button.setEnabled(bool(issue is not None and issue.fix_key))
+
     def _load_issue_details(self) -> None:
         issue = self._selected_issue()
         if issue is None:
             self.details.clear()
+            self._set_issue_actions_enabled(None)
             return
         self.details.setPlainText(
             "\n".join(
@@ -287,7 +316,7 @@ class QualityDashboardDialog(QDialog):
                 ]
             )
         )
-        self.fix_button.setEnabled(bool(issue.fix_key))
+        self._set_issue_actions_enabled(issue)
 
     def _open_selected_issue(self) -> None:
         issue = self._selected_issue()
@@ -300,7 +329,7 @@ class QualityDashboardDialog(QDialog):
         if issue is None or not issue.fix_key:
             return
         try:
-            message = self.apply_fix_callback(issue.fix_key)
+            message = self.apply_fix_callback(issue)
         except Exception as exc:
             QMessageBox.critical(self, "Quality Fix", f"Could not apply the suggested fix:\n{exc}")
             return

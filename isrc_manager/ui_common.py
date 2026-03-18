@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QFontComboBox,
     QFormLayout,
     QFrame,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -97,7 +98,6 @@ def _standard_container_stylesheet(selector: str, extra_qss: str = "") -> str:
         font-weight: 700;
     }}
     {selector} QLabel[role="dialogSubtitle"] {{
-        color: #64748b;
         font-size: 15px;
     }}
     {selector} QLabel[role="sectionDescription"],
@@ -105,7 +105,6 @@ def _standard_container_stylesheet(selector: str, extra_qss: str = "") -> str:
     {selector} QLabel[role="secondary"],
     {selector} QLabel[role="meta"],
     {selector} QLabel[role="statusText"] {{
-        color: #52606d;
     }}
     {selector} QGroupBox {{
         font-size: 15px;
@@ -134,6 +133,8 @@ def _apply_standard_dialog_chrome(
     dialog: QDialog, object_name: str, *, extra_qss: str = ""
 ) -> None:
     dialog.setObjectName(object_name)
+    dialog.setProperty("role", "panel")
+    dialog.setAttribute(Qt.WA_StyledBackground, True)
     dialog.setStyleSheet(
         _compose_widget_stylesheet(
             dialog,
@@ -206,6 +207,7 @@ def _create_standard_section(
 def _configure_standard_form_layout(form: QFormLayout) -> None:
     form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
     form.setLabelAlignment(Qt.AlignLeft | Qt.AlignTop)
+    form.setRowWrapPolicy(QFormLayout.WrapLongRows)
     form.setHorizontalSpacing(12)
     form.setVerticalSpacing(10)
 
@@ -215,16 +217,17 @@ def _create_scrollable_dialog_content(
 ) -> tuple[QScrollArea, QWidget, QVBoxLayout]:
     scroll_area = QScrollArea(owner)
     scroll_area.setWidgetResizable(True)
-    scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
     scroll_area.setFrameShape(QFrame.NoFrame)
     scroll_area.setProperty("role", "workspaceCanvas")
+    scroll_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     viewport = scroll_area.viewport()
     if viewport is not None:
         viewport.setProperty("role", "workspaceCanvas")
 
     content = QWidget(scroll_area)
     content.setProperty("role", "workspaceCanvas")
-    content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+    content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
     layout = QVBoxLayout(content)
     layout.setContentsMargins(0, 0, 0, 0)
@@ -246,12 +249,28 @@ def _apply_compact_dialog_control_heights(owner: QWidget) -> None:
 
         if isinstance(widget, QPushButton):
             target_height = max(widget.minimumHeight(), widget.fontMetrics().lineSpacing() + 14)
-            target_width = max(
-                widget.minimumWidth(),
-                widget.fontMetrics().horizontalAdvance(widget.text() or "") + 28,
-            )
             widget.setMinimumHeight(target_height)
-            widget.setMinimumWidth(target_width)
+
+
+def _create_action_button_grid(
+    owner: QWidget,
+    buttons: list[QPushButton],
+    *,
+    columns: int = 2,
+) -> QWidget:
+    container = QWidget(owner)
+    container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+    layout = QGridLayout(container)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setHorizontalSpacing(12)
+    layout.setVerticalSpacing(10)
+    total_columns = max(1, int(columns or 1))
+    for column in range(total_columns):
+        layout.setColumnStretch(column, 1)
+    for index, button in enumerate(buttons):
+        button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        layout.addWidget(button, index // total_columns, index % total_columns)
+    return container
 
 
 class _WheelIntentMixin:

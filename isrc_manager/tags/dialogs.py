@@ -13,6 +13,12 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from isrc_manager.ui_common import (
+    _add_standard_dialog_header,
+    _apply_compact_dialog_control_heights,
+    _apply_standard_dialog_chrome,
+)
+
 TAG_POLICY_CHOICES = (
     ("merge_blanks", "Merge blanks only"),
     ("prefer_file_tags", "Prefer file tags"),
@@ -37,19 +43,24 @@ class TagPreviewDialog(QDialog):
         self.setWindowTitle(title)
         self.resize(980, 640)
         self._rows = rows
+        _apply_standard_dialog_chrome(self, "tagPreviewDialog")
 
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(12)
-
-        intro_label = QLabel(intro)
-        intro_label.setWordWrap(True)
-        root.addWidget(intro_label)
+        _add_standard_dialog_header(
+            root,
+            self,
+            title=title,
+            subtitle=intro,
+        )
 
         policy_row = QHBoxLayout()
         policy_row.setContentsMargins(0, 0, 0, 0)
         policy_row.setSpacing(8)
-        policy_row.addWidget(QLabel("Conflict policy"))
+        policy_label = QLabel("Conflict policy")
+        policy_label.setProperty("role", "secondary")
+        policy_row.addWidget(policy_label)
         self.policy_combo = QComboBox()
         for key, label in TAG_POLICY_CHOICES:
             self.policy_combo.addItem(label, key)
@@ -81,6 +92,7 @@ class TagPreviewDialog(QDialog):
         root.addLayout(buttons)
 
         self.populate_rows(rows)
+        _apply_compact_dialog_control_heights(self)
 
     def populate_rows(self, rows: list[dict[str, object]]) -> None:
         self._rows = rows

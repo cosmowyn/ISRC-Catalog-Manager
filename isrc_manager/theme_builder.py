@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from urllib.parse import quote
 
 from PySide6.QtGui import QColor, QFont, QPalette
 from PySide6.QtWidgets import QApplication
@@ -1046,6 +1047,19 @@ THEME_METRIC_FIELD_SPECS: tuple[ThemeMetricFieldSpec, ...] = (
 )
 
 
+def _svg_data_uri(svg_markup: str) -> str:
+    return f"data:image/svg+xml;utf8,{quote(svg_markup)}"
+
+
+def _combo_arrow_data_uri(color: str) -> str:
+    svg_markup = (
+        "<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'>"
+        f"<path fill='{color}' d='M1.41.59 6 5.17 10.59.59 12 2l-6 6-6-6z'/>"
+        "</svg>"
+    )
+    return _svg_data_uri(svg_markup)
+
+
 THEME_COLOR_KEYS = tuple(spec.key for spec in THEME_COLOR_FIELD_SPECS)
 THEME_METRIC_KEYS = tuple(spec.key for spec in THEME_METRIC_FIELD_SPECS)
 THEME_METRIC_SPECS_BY_KEY = {spec.key: spec for spec in THEME_METRIC_FIELD_SPECS}
@@ -1711,6 +1725,47 @@ def effective_theme_settings(raw_values: dict[str, object] | None = None) -> dic
     return effective
 
 
+def build_theme_palette(raw_values: dict[str, object] | None = None) -> QPalette:
+    theme = effective_theme_settings(raw_values)
+    palette = QPalette()
+    window_bg = QColor(str(theme["window_bg"]))
+    window_fg = QColor(str(theme["window_fg"]))
+    panel_bg = QColor(str(theme["panel_bg"]))
+    table_bg = QColor(str(theme["table_bg"]))
+    button_bg = QColor(str(theme["button_bg"]))
+    button_fg = QColor(str(theme["button_fg"]))
+    selection_bg = QColor(str(theme["selection_bg"]))
+    selection_fg = QColor(str(theme["selection_fg"]))
+    tooltip_bg = QColor(str(theme["tooltip_bg"]))
+    tooltip_fg = QColor(str(theme["tooltip_fg"]))
+    placeholder_fg = QColor(str(theme["placeholder_fg"]))
+    disabled_fg = QColor(str(theme["button_disabled_fg"]))
+    disabled_bg = QColor(str(theme["input_disabled_bg"]))
+    link_fg = QColor(str(theme["link_color"]))
+
+    palette.setColor(QPalette.Window, window_bg)
+    palette.setColor(QPalette.WindowText, window_fg)
+    palette.setColor(QPalette.Base, table_bg)
+    palette.setColor(QPalette.AlternateBase, panel_bg)
+    palette.setColor(QPalette.Text, QColor(str(theme["table_fg"])))
+    palette.setColor(QPalette.Button, button_bg)
+    palette.setColor(QPalette.ButtonText, button_fg)
+    palette.setColor(QPalette.Highlight, selection_bg)
+    palette.setColor(QPalette.HighlightedText, selection_fg)
+    palette.setColor(QPalette.ToolTipBase, tooltip_bg)
+    palette.setColor(QPalette.ToolTipText, tooltip_fg)
+    palette.setColor(QPalette.PlaceholderText, placeholder_fg)
+    palette.setColor(QPalette.Link, link_fg)
+    palette.setColor(QPalette.Mid, QColor(str(theme["border_color"])))
+    palette.setColor(QPalette.Midlight, QColor(str(theme["panel_alt_bg"])))
+    palette.setColor(QPalette.Disabled, QPalette.WindowText, disabled_fg)
+    palette.setColor(QPalette.Disabled, QPalette.Text, disabled_fg)
+    palette.setColor(QPalette.Disabled, QPalette.ButtonText, disabled_fg)
+    palette.setColor(QPalette.Disabled, QPalette.Button, disabled_bg)
+    palette.setColor(QPalette.Disabled, QPalette.Base, disabled_bg)
+    return palette
+
+
 def build_theme_stylesheet(raw_values: dict[str, object] | None = None) -> str:
     theme = effective_theme_settings(raw_values)
     custom_qss = str(theme.get("custom_qss") or "").strip()
@@ -1736,7 +1791,19 @@ def build_theme_stylesheet(raw_values: dict[str, object] | None = None) -> str:
         background-color: {theme["window_bg"]};
         color: {theme["window_fg"]};
     }}
+    QDockWidget,
+    QDockWidget > QWidget {{
+        background-color: {theme["window_bg"]};
+        color: {theme["window_fg"]};
+    }}
     QWidget[role="workspaceCanvas"] {{
+        background-color: {theme["workspace_bg"]};
+        color: {theme["window_fg"]};
+    }}
+    QDockWidget QWidget[role="workspaceCanvas"],
+    QDockWidget QScrollArea,
+    QDockWidget QAbstractScrollArea,
+    QDockWidget QAbstractScrollArea::viewport {{
         background-color: {theme["workspace_bg"]};
         color: {theme["window_fg"]};
     }}
@@ -2020,9 +2087,47 @@ def build_theme_stylesheet(raw_values: dict[str, object] | None = None) -> str:
     QTextEdit {{
         placeholder-text-color: {theme["placeholder_fg"]};
     }}
-    QComboBox::drop-down {{
-        border: 0;
-        width: 24px;
+    QComboBox::drop-down,
+    QFontComboBox::drop-down {{
+        subcontrol-origin: padding;
+        subcontrol-position: top right;
+        width: 28px;
+        border-left: {int(theme["border_width"])}px solid {theme["input_border"]};
+        border-top-right-radius: {int(theme["input_radius"])}px;
+        border-bottom-right-radius: {int(theme["input_radius"])}px;
+        background-color: {theme["panel_alt_bg"]};
+    }}
+    QComboBox::down-arrow,
+    QFontComboBox::down-arrow {{
+        image: url("{_combo_arrow_data_uri(theme["input_fg"])}");
+        width: 12px;
+        height: 8px;
+    }}
+    QComboBox:focus::drop-down,
+    QFontComboBox:focus::drop-down {{
+        border-left-color: {theme["input_focus_border"]};
+        background-color: {theme["input_focus_bg"]};
+    }}
+    QComboBox:disabled::drop-down,
+    QFontComboBox:disabled::drop-down {{
+        border-left-color: {theme["input_disabled_border"]};
+        background-color: {theme["input_disabled_bg"]};
+    }}
+    QComboBox:disabled::down-arrow,
+    QFontComboBox:disabled::down-arrow {{
+        image: url("{_combo_arrow_data_uri(theme["input_disabled_fg"])}");
+    }}
+    QComboBox QAbstractItemView,
+    QFontComboBox QAbstractItemView {{
+        background-color: {theme["menu_bg"]};
+        color: {theme["menu_fg"]};
+        border: {int(theme["border_width"])}px solid {theme["menu_border"]};
+        selection-background-color: {theme["menu_selected_bg"]};
+        selection-color: {theme["menu_selected_fg"]};
+    }}
+    QComboBox QAbstractItemView::item,
+    QFontComboBox QAbstractItemView::item {{
+        padding: 4px 8px;
     }}
     QCheckBox,
     QRadioButton {{

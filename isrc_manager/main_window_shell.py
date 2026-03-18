@@ -263,19 +263,6 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     edit_menu.addAction(app.copy_with_headers_action)
 
     catalog_menu = app.menu_bar.addMenu("Catalog")
-    app.license_browser_action = app._create_action(
-        "License Browser…",
-        slot=lambda: app.open_licenses_browser(track_filter_id=None),
-        shortcuts=("Ctrl+L", "Meta+L"),
-    )
-    catalog_menu.addAction(app.license_browser_action)
-    app.legacy_license_migration_action = app._create_action(
-        "Migrate Legacy Licenses to Contracts…",
-        slot=app.migrate_legacy_licenses_to_contracts,
-    )
-    catalog_menu.addAction(app.legacy_license_migration_action)
-    catalog_menu.addSeparator()
-
     app.catalog_managers_action = app._create_action(
         "Catalog Managers…",
         slot=app.open_catalog_managers_dialog,
@@ -324,16 +311,27 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         shortcuts=("Ctrl+Alt+F", "Meta+Alt+F"),
     )
     catalog_menu.addAction(app.global_search_action)
+    catalog_menu.addSeparator()
+    legacy_menu = catalog_menu.addMenu("Legacy License Archive")
+    app.license_browser_action = app._create_action(
+        "License Browser…",
+        slot=lambda: app.open_licenses_browser(track_filter_id=None),
+        shortcuts=("Ctrl+L", "Meta+L"),
+    )
+    legacy_menu.addAction(app.license_browser_action)
+    app.legacy_license_migration_action = app._create_action(
+        "Migrate Legacy Licenses to Contracts…",
+        slot=app.migrate_legacy_licenses_to_contracts,
+    )
+    legacy_menu.addAction(app.legacy_license_migration_action)
     app.create_release_action = app._create_action(
         "Create Release from Selection…",
         slot=app.create_release_from_selection,
     )
-    catalog_menu.addAction(app.create_release_action)
     app.add_selected_to_release_action = app._create_action(
         "Add Selected Tracks to Release…",
         slot=app.add_selected_tracks_to_release,
     )
-    catalog_menu.addAction(app.add_selected_to_release_action)
     catalog_menu.addSeparator()
     app.import_tags_action = app._create_action(
         "Import Tags from Audio…",
@@ -697,23 +695,23 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.artist_label = QLabel("Artist")
     app.artist_field = FocusWheelComboBox()
     app.artist_field.setEditable(True)
-    app.artist_field.setMinimumWidth(240)
+    app.artist_field.setMinimumWidth(180)
 
     app.additional_artist_label = QLabel("Additional Artists")
     app.additional_artist_field = FocusWheelComboBox()
     app.additional_artist_field.setEditable(True)
-    app.additional_artist_field.setMinimumWidth(240)
+    app.additional_artist_field.setMinimumWidth(180)
 
     app.track_title_label = QLabel("Track Title")
     app.track_title_field = QLineEdit()
-    app.track_title_field.setMinimumWidth(240)
+    app.track_title_field.setMinimumWidth(180)
 
     app.album_title_label = QLabel("Album Title")
     app.album_title_field = FocusWheelComboBox()
     app.album_title_field.setEditable(True)
     app.album_title_field.setCurrentText("")
     app.album_title_field.currentTextChanged.connect(app.autofill_album_metadata)
-    app.album_title_field.setMinimumWidth(240)
+    app.album_title_field.setMinimumWidth(180)
 
     app.record_id_label = QLabel("ID")
     app.record_id_field = app._create_add_data_status_field(
@@ -734,7 +732,7 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.audio_file_field = QLineEdit()
     app.audio_file_field.setReadOnly(True)
     app.audio_file_field.setPlaceholderText("No audio file selected")
-    app.audio_file_field.setMinimumWidth(260)
+    app.audio_file_field.setMinimumWidth(200)
     app.audio_file_browse_button = QPushButton("Browse…")
     app.audio_file_browse_button.clicked.connect(
         lambda: app._choose_media_into_line_edit("audio_file", app.audio_file_field)
@@ -760,33 +758,34 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
 
     app.iswc_label = QLabel("ISWC")
     app.iswc_field = QLineEdit()
-    app.iswc_field.setMinimumWidth(220)
+    app.iswc_field.setMinimumWidth(170)
 
     app.upc_label = QLabel("UPC / EAN")
     app.upc_field = FocusWheelComboBox()
     app.upc_field.setEditable(True)
     app.upc_field.setCurrentText("")
-    app.upc_field.setMinimumWidth(220)
+    app.upc_field.setMinimumWidth(170)
 
     app.genre_label = QLabel("Genre")
     app.genre_field = FocusWheelComboBox()
     app.genre_field.setEditable(True)
     app.genre_field.setCurrentText("")
-    app.genre_field.setMinimumWidth(220)
+    app.genre_field.setMinimumWidth(170)
 
     app.catalog_number_label = QLabel("Catalog#")
-    app.catalog_number_field = QLineEdit()
-    app.catalog_number_field.setMinimumWidth(220)
+    app.catalog_number_field = FocusWheelComboBox()
+    app.catalog_number_field.setEditable(True)
+    app.catalog_number_field.setMinimumWidth(170)
 
     app.buma_work_number_label = QLabel("BUMA Wnr.")
     app.buma_work_number_field = QLineEdit()
-    app.buma_work_number_field.setMinimumWidth(220)
+    app.buma_work_number_field.setMinimumWidth(170)
 
     app.album_art_label = QLabel("Album Art")
     app.album_art_field = QLineEdit()
     app.album_art_field.setReadOnly(True)
     app.album_art_field.setPlaceholderText("No album art selected")
-    app.album_art_field.setMinimumWidth(260)
+    app.album_art_field.setMinimumWidth(200)
     app.album_art_browse_button = QPushButton("Browse…")
     app.album_art_browse_button.clicked.connect(
         lambda: app._choose_media_into_line_edit("album_art", app.album_art_field)
@@ -922,8 +921,8 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
 
     app.add_data_column = QWidget()
     app.add_data_column.setLayout(app.left_panel)
-    app.add_data_column.setMinimumWidth(620)
-    app.add_data_column.setMaximumWidth(940)
+    app.add_data_column.setMinimumWidth(420)
+    app.add_data_column.setMaximumWidth(16777215)
     app.add_data_column.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
 
     app.left_widget_container = QWidget()
@@ -937,12 +936,12 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.left_scroll = QScrollArea()
     app.left_scroll.setWidgetResizable(True)
     app.left_scroll.setWidget(app.left_widget_container)
-    app.left_scroll.setMinimumWidth(420)
+    app.left_scroll.setMinimumWidth(300)
     app.add_data_dock = QDockWidget("Add Data", app)
     app.add_data_dock.setObjectName("addDataDock")
     app.add_data_dock.setAllowedAreas(Qt.AllDockWidgetAreas)
     app.add_data_dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
-    app.add_data_dock.setMinimumWidth(440)
+    app.add_data_dock.setMinimumWidth(320)
     app.add_data_dock.setWidget(app.left_scroll)
     app.addDockWidget(Qt.LeftDockWidgetArea, app.add_data_dock)
     app.add_data_dock.dockLocationChanged.connect(lambda *_args: app._save_main_dock_state())
@@ -962,23 +961,24 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
 
     app.search_column_combo = FocusWheelComboBox()
     app.search_column_combo.setFixedHeight(25)
-    app.search_column_combo.setMinimumWidth(180)
+    app.search_column_combo.setMinimumWidth(140)
     app.search_layout.addWidget(app.search_column_combo)
 
     app.search_field = QLineEdit()
     app.search_field.setPlaceholderText("Search...")
-    app.search_field.setFixedSize(300, 25)
+    app.search_field.setMinimumHeight(25)
+    app.search_field.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
     app.search_button = QPushButton("Reset")
-    app.search_button.setFixedSize(100, 25)
+    app.search_button.setMinimumHeight(25)
 
     app.count_label = QLabel("showing: 0 records")
     app.count_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-    app.count_label.setMinimumWidth(160)
+    app.count_label.setMinimumWidth(110)
     app.count_label.setProperty("role", "secondary")
     app.duration_label = QLabel("total: 00:00:00")
     app.duration_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-    app.duration_label.setMinimumWidth(180)
+    app.duration_label.setMinimumWidth(130)
     app.duration_label.setProperty("role", "secondary")
 
     app.search_field.textChanged.connect(app.apply_search_filter)
@@ -1037,6 +1037,7 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.row_hint_label = None
 
     app.table.itemDoubleClicked.connect(app._on_item_double_clicked)
+    app.table.itemSelectionChanged.connect(app._on_catalog_selection_changed)
     app.table.setContextMenuPolicy(Qt.CustomContextMenu)
     app.table.customContextMenuRequested.connect(app._on_table_context_menu)
 
@@ -1048,7 +1049,7 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.catalog_table_dock.setFeatures(
         QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable
     )
-    app.catalog_table_dock.setMinimumWidth(700)
+    app.catalog_table_dock.setMinimumWidth(480)
     app.catalog_table_dock.setWidget(app.table_panel_widget)
     app.addDockWidget(Qt.RightDockWidgetArea, app.catalog_table_dock)
     app.catalog_table_dock.dockLocationChanged.connect(lambda *_args: app._save_main_dock_state())

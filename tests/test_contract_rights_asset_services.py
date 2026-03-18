@@ -15,6 +15,12 @@ from isrc_manager.parties import PartyPayload, PartyService
 from isrc_manager.releases import ReleasePayload, ReleaseService, ReleaseTrackPlacement
 from isrc_manager.rights import RightPayload, RightsService
 from isrc_manager.services import DatabaseSchemaService, TrackCreatePayload, TrackService
+from tests.qt_test_helpers import require_qapplication
+
+try:
+    from isrc_manager.contracts.dialogs import ContractDocumentEditor
+except Exception:  # pragma: no cover - environment-specific fallback
+    ContractDocumentEditor = None
 
 
 class ContractRightsAssetServiceTests(unittest.TestCase):
@@ -72,6 +78,27 @@ class ContractRightsAssetServiceTests(unittest.TestCase):
             )
         )
         return track_id, release_id
+
+    @staticmethod
+    def _document_payload_from_record(record):
+        return ContractDocumentPayload(
+            document_id=record.id,
+            title=record.title,
+            document_type=record.document_type,
+            version_label=record.version_label,
+            created_date=record.created_date,
+            received_date=record.received_date,
+            signed_status=record.signed_status,
+            signed_by_all_parties=record.signed_by_all_parties,
+            active_flag=record.active_flag,
+            supersedes_document_id=record.supersedes_document_id,
+            superseded_by_document_id=record.superseded_by_document_id,
+            stored_path=record.file_path,
+            storage_mode=record.storage_mode,
+            filename=record.filename,
+            checksum_sha256=record.checksum_sha256,
+            notes=record.notes,
+        )
 
     def test_contract_deadlines_and_document_validation(self):
         party_id = self.party_service.create_party(PartyPayload(legal_name="North Label"))
@@ -314,6 +341,202 @@ class ContractRightsAssetServiceTests(unittest.TestCase):
         self.contract_service.delete_contract(contract_id)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Contracts").fetchone()[0], 0)
         self.assertFalse(converted_path.exists())
+
+    def test_contract_document_update_preserves_storage_metadata_on_noop_save(self):
+        document_path = self.data_root / "round-trip.docx"
+        document_path.write_text("contract round trip", encoding="utf-8")
+
+        contract_id = self.contract_service.create_contract(
+            ContractPayload(
+                title="Round Trip Contract",
+                documents=[
+                    ContractDocumentPayload(
+                        title="Round Trip Copy",
+                        document_type="signed_agreement",
+                        source_path=str(document_path),
+                        storage_mode="managed_file",
+                        signed_by_all_parties=True,
+                        active_flag=True,
+                    )
+                ],
+            )
+        )
+
+        detail = self.contract_service.fetch_contract_detail(contract_id)
+        self.assertIsNotNone(detail)
+        assert detail is not None
+        original = detail.documents[0]
+        payload = ContractPayload(
+            title=detail.contract.title,
+            status=detail.contract.status,
+            documents=[
+                self._document_payload_from_record(original),
+            ],
+        )
+        self.contract_service.update_contract(contract_id, payload)
+
+        updated = self.contract_service.fetch_contract_detail(contract_id)
+        self.assertIsNotNone(updated)
+        assert updated is not None
+        refreshed = updated.documents[0]
+        self.assertEqual(refreshed.file_path, original.file_path)
+        self.assertEqual(refreshed.filename, original.filename)
+        self.assertEqual(refreshed.checksum_sha256, original.checksum_sha256)
+        self.assertEqual(refreshed.storage_mode, original.storage_mode)
+        self.assertEqual(refreshed.supersedes_document_id, original.supersedes_document_id)
+        self.assertEqual(refreshed.superseded_by_document_id, original.superseded_by_document_id)
+
+    def test_contract_document_storage_mode_round_trip_via_update(self):
+        document_path = self.data_root / "mode-switch.txt"
+        document_path.write_text("managed bytes", encoding="utf-8")
+
+        contract_id = self.contract_service.create_contract(
+            ContractPayload(
+                title="Mode Switch Contract",
+                documents=[
+                    ContractDocumentPayload(
+                        title="Mode Switch Copy",
+                        document_type="draft",
+                        source_path=str(document_path),
+                        storage_mode="managed_file",
+                    )
+                ],
+            )
+        )
+
+        detail = self.contract_service.fetch_contract_detail(contract_id)
+        self.assertIsNotNone(detail)
+        assert detail is not None
+        original = detail.documents[0]
+        managed_bytes = document_path.read_bytes()
+
+        self.contract_service.update_contract(
+            contract_id,
+            ContractPayload(
+                title=detail.contract.title,
+                status=detail.contract.status,
+                documents=[
+                    ContractDocumentPayload(
+                        document_id=original.id,
+                        title=original.title,
+                        document_type=original.document_type,
+                        version_label=original.version_label,
+                        created_date=original.created_date,
+                        received_date=original.received_date,
+                        signed_status=original.signed_status,
+                        signed_by_all_parties=original.signed_by_all_parties,
+                        active_flag=original.active_flag,
+                        supersedes_document_id=original.supersedes_document_id,
+                        superseded_by_document_id=original.superseded_by_document_id,
+                        stored_path=original.file_path,
+                        storage_mode="database",
+                        filename=original.filename,
+                        checksum_sha256=original.checksum_sha256,
+                        notes=original.notes,
+                    )
+                ],
+            ),
+        )
+        converted = self.contract_service.fetch_contract_detail(contract_id)
+        self.assertIsNotNone(converted)
+        assert converted is not None
+        database_doc = converted.documents[0]
+        self.assertEqual(database_doc.storage_mode, "database")
+        self.assertIsNone(database_doc.file_path)
+        db_bytes, _ = self.contract_service.fetch_document_bytes(database_doc.id)
+        self.assertEqual(db_bytes, managed_bytes)
+
+        self.contract_service.update_contract(
+            contract_id,
+            ContractPayload(
+                title=detail.contract.title,
+                status=detail.contract.status,
+                documents=[
+                    ContractDocumentPayload(
+                        document_id=database_doc.id,
+                        title=database_doc.title,
+                        document_type=database_doc.document_type,
+                        version_label=database_doc.version_label,
+                        created_date=database_doc.created_date,
+                        received_date=database_doc.received_date,
+                        signed_status=database_doc.signed_status,
+                        signed_by_all_parties=database_doc.signed_by_all_parties,
+                        active_flag=database_doc.active_flag,
+                        supersedes_document_id=database_doc.supersedes_document_id,
+                        superseded_by_document_id=database_doc.superseded_by_document_id,
+                        storage_mode="managed_file",
+                        filename=database_doc.filename,
+                        checksum_sha256=database_doc.checksum_sha256,
+                        notes=database_doc.notes,
+                    )
+                ],
+            ),
+        )
+        restored = self.contract_service.fetch_contract_detail(contract_id)
+        self.assertIsNotNone(restored)
+        assert restored is not None
+        restored_doc = restored.documents[0]
+        self.assertEqual(restored_doc.storage_mode, "managed_file")
+        self.assertIsNotNone(restored_doc.file_path)
+        restored_path = self.contract_service.resolve_document_path(restored_doc.file_path)
+        self.assertIsNotNone(restored_path)
+        assert restored_path is not None
+        self.assertTrue(restored_path.exists())
+        self.assertEqual(restored_path.read_bytes(), managed_bytes)
+
+    def test_contract_document_editor_open_and_export_helpers(self):
+        if ContractDocumentEditor is None:
+            self.skipTest("Contract document editor unavailable")
+        require_qapplication()
+
+        managed_path = self.data_root / "open-managed.txt"
+        database_path = self.data_root / "open-database.txt"
+        managed_path.write_text("managed open", encoding="utf-8")
+        database_path.write_text("database open", encoding="utf-8")
+
+        contract_id = self.contract_service.create_contract(
+            ContractPayload(
+                title="Open Helper Contract",
+                documents=[
+                    ContractDocumentPayload(
+                        title="Managed Helper",
+                        document_type="draft",
+                        source_path=str(managed_path),
+                        storage_mode="managed_file",
+                    ),
+                    ContractDocumentPayload(
+                        title="Database Helper",
+                        document_type="draft",
+                        source_path=str(database_path),
+                        storage_mode="database",
+                    ),
+                ],
+            )
+        )
+
+        detail = self.contract_service.fetch_contract_detail(contract_id)
+        self.assertIsNotNone(detail)
+        assert detail is not None
+        editor = ContractDocumentEditor(contract_service=self.contract_service)
+        try:
+            editor.load_documents(detail.documents)
+
+            for row in range(editor.documents_table.rowCount()):
+                editor.documents_table.selectRow(row)
+                editor._load_document_into_form(row)
+                document = editor._current_document()[1]
+                assert document is not None
+                preview_path = editor._materialize_document(document)
+                self.assertTrue(preview_path.exists())
+                self.assertEqual(preview_path.read_bytes(), self.contract_service.fetch_document_bytes(document.document_id)[0])
+
+                export_path = self.data_root / f"exported-{row}.bin"
+                written = editor._export_selected_document(export_path)
+                self.assertEqual(written, export_path)
+                self.assertTrue(export_path.exists())
+                self.assertEqual(export_path.read_bytes(), preview_path.read_bytes())
+        finally:
+            editor.close()
 
     def test_contract_validation_rejects_invalid_date_ranges(self):
         with self.assertRaises(ValueError):

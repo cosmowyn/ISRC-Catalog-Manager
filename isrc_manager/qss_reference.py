@@ -70,6 +70,13 @@ STATIC_QSS_REFERENCE_ENTRIES: tuple[QssReferenceEntry, ...] = (
         widget_class="QToolBar",
     ),
     QssReferenceEntry(
+        "Widget",
+        "QDockWidget",
+        "Dock roots, including floating catalog workspace panels.",
+        selector_kind="widget_type",
+        widget_class="QDockWidget",
+    ),
+    QssReferenceEntry(
         "Pseudo State",
         ":hover",
         "Hovered widget state.",
@@ -100,6 +107,14 @@ STATIC_QSS_REFERENCE_ENTRIES: tuple[QssReferenceEntry, ...] = (
         selector_kind="typed_role",
         widget_class="QLabel",
         role_name="secondary",
+    ),
+    QssReferenceEntry(
+        "Example",
+        '#releaseBrowserDock QWidget[role="workspaceCanvas"]',
+        "Workspace canvas inside a floating or docked release browser.",
+        selector_kind="example",
+        object_name="releaseBrowserDock",
+        role_name="workspaceCanvas",
     ),
 )
 

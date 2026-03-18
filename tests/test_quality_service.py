@@ -175,7 +175,13 @@ class QualityDashboardServiceTests(unittest.TestCase):
         )
         self.assertGreater(release_id, 0)
 
-        message = self.service.apply_fix("fill_from_release")
+        result = self.service.scan()
+        issue = next(
+            issue
+            for issue in result.issues
+            if issue.track_id == track_id and issue.fix_key == "fill_from_release"
+        )
+        message = self.service.apply_fix("fill_from_release", issue=issue)
         row = self.conn.execute(
             "SELECT release_date, upc, catalog_number, album_id FROM Tracks WHERE id=?",
             (track_id,),
@@ -186,6 +192,69 @@ class QualityDashboardServiceTests(unittest.TestCase):
         self.assertEqual(row[1], "036000291452")
         self.assertEqual(row[2], "CAT-777")
         self.assertIsNotNone(row[3])
+
+    def test_fill_from_release_selected_issue_only_updates_target_track(self):
+        first_track_id = self._create_track(isrc="NL-ABC-26-00003", title="First Orbit")
+        second_track_id = self._create_track(isrc="NL-ABC-26-00004", title="Second Orbit")
+        self.conn.execute(
+            "UPDATE Tracks SET release_date='', upc='', catalog_number='', album_id=NULL WHERE id IN (?, ?)",
+            (first_track_id, second_track_id),
+        )
+        self.release_service.create_release(
+            ReleasePayload(
+                title="First Orbit Release",
+                primary_artist="Cosmowyn",
+                release_type="album",
+                release_date="2026-03-15",
+                catalog_number="CAT-101",
+                upc="036000291452",
+                placements=[
+                    ReleaseTrackPlacement(
+                        track_id=first_track_id,
+                        disc_number=1,
+                        track_number=1,
+                        sequence_number=1,
+                    )
+                ],
+            )
+        )
+        self.release_service.create_release(
+            ReleasePayload(
+                title="Second Orbit Release",
+                primary_artist="Cosmowyn",
+                release_type="album",
+                release_date="2026-03-16",
+                catalog_number="CAT-202",
+                upc="042100005264",
+                placements=[
+                    ReleaseTrackPlacement(
+                        track_id=second_track_id,
+                        disc_number=1,
+                        track_number=1,
+                        sequence_number=1,
+                    )
+                ],
+            )
+        )
+
+        issue = next(
+            issue
+            for issue in self.service.scan().issues
+            if issue.track_id == first_track_id and issue.fix_key == "fill_from_release"
+        )
+
+        self.service.apply_fix("fill_from_release", issue=issue)
+
+        first_row = self.conn.execute(
+            "SELECT release_date, upc, catalog_number FROM Tracks WHERE id=?",
+            (first_track_id,),
+        ).fetchone()
+        second_row = self.conn.execute(
+            "SELECT release_date, upc, catalog_number FROM Tracks WHERE id=?",
+            (second_track_id,),
+        ).fetchone()
+        self.assertEqual(first_row, ("2026-03-15", "036000291452", "CAT-101"))
+        self.assertEqual(second_row, ("", "", ""))
 
     def test_same_title_duplicate_upc_is_reported_as_info_not_error(self):
         self.release_service.create_release(

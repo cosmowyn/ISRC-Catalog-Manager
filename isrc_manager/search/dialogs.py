@@ -188,6 +188,7 @@ class GlobalSearchPanel(QWidget):
 
         _apply_compact_dialog_control_heights(self)
         self.refresh_saved_searches()
+        self.refresh_results()
 
     def _search_service(self) -> GlobalSearchService | None:
         service = self.search_service_provider()
@@ -209,6 +210,100 @@ class GlobalSearchPanel(QWidget):
             "Assets": ["asset"],
         }
         return mapping.get(self.entity_combo.currentText())
+
+    def _entity_filter_label(self) -> str | None:
+        mapping = {
+            "Works": "work",
+            "Tracks": "track",
+            "Releases": "release",
+            "Contracts": "contract",
+            "Rights": "right",
+            "Parties": "party",
+            "Documents": "document",
+            "Assets": "asset",
+        }
+        return mapping.get(self.entity_combo.currentText())
+
+    @staticmethod
+    def _pluralize_entity(entity_type: str) -> str:
+        mapping = {
+            "work": "works",
+            "track": "tracks",
+            "release": "releases",
+            "contract": "contracts",
+            "right": "rights",
+            "party": "parties",
+            "document": "documents",
+            "asset": "assets",
+        }
+        return mapping.get(entity_type, entity_type + "s")
+
+    def _default_status_text(
+        self, *, query: str, results: list["GlobalSearchResult"]
+    ) -> str:
+        if query:
+            return (
+                f"Showing {len(results)} search result{'s' if len(results) != 1 else ''} "
+                f"for '{query}'."
+                if results
+                else f"No results found for '{query}'."
+            )
+
+        entity_filter = self._entity_filter_label()
+        if not results:
+            if entity_filter is None:
+                return "No catalog records are available yet. Type to search once data is added."
+            return (
+                f"No {self._pluralize_entity(entity_filter)} are available yet. "
+                "Type to search once data is added."
+            )
+
+        if entity_filter is not None:
+            count = len(results)
+            return f"Showing {count} {entity_filter} preview{'s' if count != 1 else ''}. Type to narrow results."
+
+        counts: dict[str, int] = {}
+        for result in results:
+            counts[result.entity_type] = counts.get(result.entity_type, 0) + 1
+        ordered_types = [
+            "work",
+            "track",
+            "release",
+            "contract",
+            "right",
+            "party",
+            "document",
+            "asset",
+        ]
+        preview_parts = [
+            f"{counts[entity_type]} {self._pluralize_entity(entity_type)}"
+            for entity_type in ordered_types
+            if entity_type in counts
+        ]
+        if len(preview_parts) > 4:
+            preview_text = ", ".join(preview_parts[:4]) + f", and {len(preview_parts) - 4} more types"
+        else:
+            preview_text = ", ".join(preview_parts)
+        return f"Showing catalog overview: {preview_text}. Type to narrow results."
+
+    def _browse_results(self, service: GlobalSearchService) -> list["GlobalSearchResult"]:
+        entity_filter = self._entity_filter()
+        if entity_filter is None:
+            return service.browse_default_view(limit=200, preview_limit=8)
+        return service.browse_default_view(
+            entity_types=entity_filter,
+            limit=200,
+            preview_limit=24,
+        )
+
+    def _clear_result_selection(self) -> None:
+        self.results_table.clearSelection()
+        selection_model = self.results_table.selectionModel()
+        if selection_model is not None:
+            try:
+                selection_model.clearCurrentIndex()
+            except Exception:
+                pass
 
     def refresh_saved_searches(self) -> None:
         self.saved_searches_list.clear()
@@ -232,19 +327,21 @@ class GlobalSearchPanel(QWidget):
         service = self._search_service()
         if service is None:
             self.results_table.setRowCount(0)
-            self.results_status_label.setText("Open a profile first to search the catalog.")
+            self.results_status_label.setText(
+                "Open a profile first to search or browse the catalog."
+            )
+            self._clear_result_selection()
             self.refresh_relationships()
             return
-        results = service.search(
-            self.search_edit.text(),
-            entity_types=self._entity_filter(),
-            limit=200,
-        )
-        self.results_status_label.setText(
-            f"Showing {len(results)} result{'s' if len(results) != 1 else ''}."
-            if self.search_edit.text().strip()
-            else "Enter a query to search the catalog."
-        )
+        query = self.search_edit.text().strip()
+        if query:
+            results = service.search(
+                query,
+                entity_types=self._entity_filter(),
+                limit=200,
+            )
+        else:
+            results = self._browse_results(service)
         self.results_table.setRowCount(0)
         for result in results:
             row = self.results_table.rowCount()
@@ -258,6 +355,10 @@ class GlobalSearchPanel(QWidget):
             ]
             for column, value in enumerate(values):
                 self.results_table.setItem(row, column, QTableWidgetItem(value))
+        self._clear_result_selection()
+        self.results_status_label.setText(
+            self._default_status_text(query=query, results=results)
+        )
         self.refresh_relationships()
 
     def _selected_result(self) -> tuple[str, int] | None:

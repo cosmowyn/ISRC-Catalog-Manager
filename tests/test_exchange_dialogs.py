@@ -50,6 +50,7 @@ class ExchangeImportDialogTests(unittest.TestCase):
             self.assertEqual(dlg.mode_combo.currentData(), "create")
             self.assertEqual(dlg.import_button.text(), "Import Data")
             self.assertIn("writes rows into the current profile", dlg.mode_hint_label.text())
+            self.assertEqual(dlg.property("role"), "panel")
             tabs = dlg.findChild(QTabWidget, "exchangeImportTabs")
             self.assertIsNotNone(tabs)
             self.assertEqual(
@@ -59,6 +60,8 @@ class ExchangeImportDialogTests(unittest.TestCase):
                     "Source Preview",
                 ],
             )
+            self.assertEqual(tabs.widget(0).property("role"), "workspaceCanvas")
+            self.assertEqual(tabs.widget(1).property("role"), "workspaceCanvas")
         finally:
             dlg.close()
 

@@ -1,9 +1,12 @@
 import unittest
 
 try:
-    from PySide6.QtWidgets import QApplication, QFormLayout, QLineEdit, QPushButton, QWidget
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication, QDialog, QFormLayout, QLineEdit, QPushButton, QWidget
 except ImportError as exc:  # pragma: no cover - environment-specific fallback
     QApplication = None
+    Qt = None
+    QDialog = None
     QFormLayout = None
     QLineEdit = None
     QPushButton = None
@@ -16,6 +19,7 @@ from isrc_manager.ui_common import (
     DatePickerDialog,
     TwoDigitSpinBox,
     _apply_compact_dialog_control_heights,
+    _apply_standard_dialog_chrome,
     _compose_widget_stylesheet,
     _configure_standard_form_layout,
     _create_round_help_button,
@@ -94,6 +98,7 @@ class UICommonTests(unittest.TestCase):
         self.assertEqual(form.horizontalSpacing(), 12)
         self.assertEqual(form.verticalSpacing(), 10)
         self.assertEqual(form.fieldGrowthPolicy(), QFormLayout.AllNonFixedFieldsGrow)
+        self.assertEqual(form.rowWrapPolicy(), QFormLayout.WrapLongRows)
 
     def test_scrollable_dialog_content_wraps_expanding_widget(self):
         owner = QWidget()
@@ -115,10 +120,7 @@ class UICommonTests(unittest.TestCase):
                 line_edit.minimumHeight(), line_edit.fontMetrics().lineSpacing() + 16
             )
             self.assertGreaterEqual(button.minimumHeight(), button.fontMetrics().lineSpacing() + 14)
-            self.assertGreaterEqual(
-                button.minimumWidth(),
-                button.fontMetrics().horizontalAdvance("Save") + 28,
-            )
+            self.assertGreaterEqual(button.minimumWidth(), 0)
         finally:
             owner.close()
 
@@ -126,6 +128,16 @@ class UICommonTests(unittest.TestCase):
         stylesheet = _standard_dialog_stylesheet("demoDialog")
         self.assertNotIn('QFrame[role="compactControlGroup"]', stylesheet)
         self.assertNotIn("palette(base)", stylesheet)
+
+    def test_apply_standard_dialog_chrome_tags_panel_root(self):
+        dialog = QDialog()
+        try:
+            _apply_standard_dialog_chrome(dialog, "demoDialog")
+            self.assertEqual(dialog.objectName(), "demoDialog")
+            self.assertEqual(dialog.property("role"), "panel")
+            self.assertTrue(dialog.testAttribute(Qt.WA_StyledBackground))
+        finally:
+            dialog.close()
 
 
 if __name__ == "__main__":

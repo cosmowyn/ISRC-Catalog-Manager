@@ -59,6 +59,7 @@ from PySide6.QtGui import (
     QStandardItem,
     QColor,
     QFont,
+    QPalette,
     QTextCursor,
     QTextDocument,
 )
@@ -190,6 +191,7 @@ from isrc_manager.theme_builder import (
     THEME_COLOR_FIELD_SPECS,
     THEME_METRIC_FIELD_SPECS,
     THEME_PAGE_SPECS,
+    build_theme_palette as build_app_theme_palette,
     build_theme_stylesheet as build_app_theme_stylesheet,
     color_relative_luminance as theme_color_relative_luminance,
     contrast_ratio as theme_contrast_ratio,
@@ -242,6 +244,7 @@ from isrc_manager.rights import RightsService
 from isrc_manager.rights.dialogs import RightsBrowserDialog, RightsBrowserPanel
 from isrc_manager.search import GlobalSearchService, RelationshipExplorerService
 from isrc_manager.search.dialogs import GlobalSearchPanel
+from isrc_manager.selection_scope import TrackChoice
 from isrc_manager.services.db_access import DatabaseWriteCoordinator, SQLiteConnectionFactory
 from isrc_manager.services.bulk_edit import MIXED_VALUE, shared_bulk_value, should_apply_bulk_change
 from isrc_manager.services.sqlite_utils import safe_wal_checkpoint
@@ -304,11 +307,12 @@ from isrc_manager.ui_common import (
     _apply_standard_dialog_chrome,
     _apply_standard_widget_chrome,
     _compose_widget_stylesheet,
+    _create_action_button_grid,
     _create_round_help_button,
     _create_standard_section,
 )
 from isrc_manager.works import WorkService
-from isrc_manager.works.dialogs import WorkBrowserPanel
+from isrc_manager.works.dialogs import WorkBrowserPanel, WorkEditorDialog
 
 
 class _JsonLogFormatter(logging.Formatter):
@@ -563,6 +567,8 @@ class ApplicationSettingsDialog(QDialog):
         self._gs1_default_option_combos: dict[str, QComboBox] = {}
         self._gs1_contract_entries = tuple(gs1_contract_entries or ())
         self._gs1_contracts_csv_path = str(gs1_contracts_csv_path or "").strip()
+        self.setProperty("role", "panel")
+        self.setAttribute(Qt.WA_StyledBackground, True)
 
         self.setStyleSheet(
             _compose_widget_stylesheet(
@@ -573,16 +579,12 @@ class ApplicationSettingsDialog(QDialog):
                     font-weight: 600;
                 }
                 QDialog#applicationSettingsDialog QLabel#settingsSubtitle {
-                    color: #5f6b76;
                 }
                 QDialog#applicationSettingsDialog QLabel[role="hint"] {
-                    color: #6b7280;
                 }
                 QDialog#applicationSettingsDialog QLabel[role="sectionHelp"] {
-                    color: #52606d;
                 }
                 QDialog#applicationSettingsDialog QLabel[role="themeNote"] {
-                    color: #52606d;
                 }
                 QDialog#applicationSettingsDialog QGroupBox {
                     font-weight: 600;
@@ -616,12 +618,14 @@ class ApplicationSettingsDialog(QDialog):
 
         title_lbl = QLabel("Application Settings")
         title_lbl.setObjectName("settingsTitle")
+        title_lbl.setProperty("role", "dialogTitle")
         root.addWidget(title_lbl)
 
         subtitle_lbl = QLabel(
             "Edit application identity, theme styling, and profile-specific registration settings in one place."
         )
         subtitle_lbl.setObjectName("settingsSubtitle")
+        subtitle_lbl.setProperty("role", "dialogSubtitle")
         subtitle_lbl.setWordWrap(True)
         root.addWidget(subtitle_lbl)
 
@@ -3087,18 +3091,17 @@ class _ManageArtistsDialog(QDialog):
         )
         table_layout.addWidget(self.tbl, 1)
 
-        h = QHBoxLayout()
-        h.setSpacing(8)
         btn_refresh = QPushButton("Refresh")
         btn_purge = QPushButton("Purge All Unused")
         btn_delete = QPushButton("Delete Selected")
         btn_close = QPushButton("Close")
-        h.addWidget(btn_refresh)
-        h.addWidget(btn_purge)
-        h.addWidget(btn_delete)
-        h.addStretch(1)
-        h.addWidget(btn_close)
-        table_layout.addLayout(h)
+        table_layout.addWidget(
+            _create_action_button_grid(
+                self,
+                [btn_refresh, btn_purge, btn_delete, btn_close],
+                columns=2,
+            )
+        )
         v.addWidget(table_box, 1)
 
         btn_refresh.clicked.connect(self._load)
@@ -3236,18 +3239,17 @@ class _ManageAlbumsDialog(QDialog):
         )
         table_layout.addWidget(self.tbl, 1)
 
-        h = QHBoxLayout()
-        h.setSpacing(8)
         btn_refresh = QPushButton("Refresh")
         btn_purge = QPushButton("Purge All Unused")
         btn_delete = QPushButton("Delete Selected")
         btn_close = QPushButton("Close")
-        h.addWidget(btn_refresh)
-        h.addWidget(btn_purge)
-        h.addWidget(btn_delete)
-        h.addStretch(1)
-        h.addWidget(btn_close)
-        table_layout.addLayout(h)
+        table_layout.addWidget(
+            _create_action_button_grid(
+                self,
+                [btn_refresh, btn_purge, btn_delete, btn_close],
+                columns=2,
+            )
+        )
         v.addWidget(table_box, 1)
 
         btn_refresh.clicked.connect(self._load)
@@ -3582,8 +3584,6 @@ class LicensesBrowserPanel(QWidget):
             "Stored License Records",
             "Use the action buttons or the context menu to preview, download, edit, or delete the selected license records.",
         )
-        action_row = QHBoxLayout()
-        action_row.setSpacing(8)
         self.preview_button = QPushButton("Preview")
         self.download_button = QPushButton("Download PDF…")
         self.edit_button = QPushButton("Edit…")
@@ -3604,16 +3604,22 @@ class LicensesBrowserPanel(QWidget):
         )
         self.migrate_button.clicked.connect(self._migrate_to_contracts)
         self.refresh_button.clicked.connect(self.refresh_data)
-        action_row.addWidget(self.preview_button)
-        action_row.addWidget(self.download_button)
-        action_row.addWidget(self.edit_button)
-        action_row.addWidget(self.delete_button)
-        action_row.addWidget(self.store_db_button)
-        action_row.addWidget(self.store_file_button)
-        action_row.addWidget(self.migrate_button)
-        action_row.addStretch(1)
-        action_row.addWidget(self.refresh_button)
-        browser_layout.addLayout(action_row)
+        browser_layout.addWidget(
+            _create_action_button_grid(
+                self,
+                [
+                    self.preview_button,
+                    self.download_button,
+                    self.edit_button,
+                    self.delete_button,
+                    self.store_db_button,
+                    self.store_file_button,
+                    self.migrate_button,
+                    self.refresh_button,
+                ],
+                columns=4,
+            )
+        )
         browser_layout.addWidget(self.tabs, 1)
         v.addWidget(browser_box, 1)
 
@@ -4186,14 +4192,13 @@ class LicenseeManagerDialog(QDialog):
         )
         list_layout.addWidget(self.list, 1)
 
-        h = QHBoxLayout()
-        h.setSpacing(8)
-        h.addWidget(btn_add)
-        h.addWidget(btn_ren)
-        h.addWidget(btn_del)
-        h.addStretch(1)
-        h.addWidget(btn_close)
-        list_layout.addLayout(h)
+        list_layout.addWidget(
+            _create_action_button_grid(
+                self,
+                [btn_add, btn_ren, btn_del, btn_close],
+                columns=2,
+            )
+        )
         v.addWidget(list_box, 1)
 
         btn_close.clicked.connect(self.accept)
@@ -4997,7 +5002,7 @@ class CatalogManagersPanel(QWidget):
         root.addWidget(title_label)
 
         subtitle_label = QLabel(
-            "Manage stored artists, album names, and licensees from a single workspace."
+            "Manage stored artists and album names here, and keep the legacy license archive separate but still accessible."
         )
         subtitle_label.setObjectName("catalogSubtitle")
         subtitle_label.setWordWrap(True)
@@ -5009,7 +5014,7 @@ class CatalogManagersPanel(QWidget):
         self.licensees_tab = _CatalogLicenseesPane(app, self)
         self.tabs.addTab(self.artists_tab, "Artists")
         self.tabs.addTab(self.albums_tab, "Albums")
-        self.tabs.addTab(self.licensees_tab, "Licensees")
+        self.tabs.addTab(self.licensees_tab, "Legacy Licensees")
         root.addWidget(self.tabs, 1)
 
         self.focus_tab(initial_tab)
@@ -6336,6 +6341,9 @@ class App(QMainWindow):
         font = QFont(str(effective["font_family"]))
         font.setPointSize(int(effective["font_size"]))
         app.setFont(font)
+        palette = build_app_theme_palette(raw_values or self.theme_settings)
+        app.setPalette(palette)
+        self.setPalette(palette)
         app.setStyleSheet(self._build_theme_stylesheet(raw_values))
 
     @staticmethod
@@ -7678,15 +7686,21 @@ class App(QMainWindow):
         panel = ReleaseBrowserPanel(
             release_service_provider=lambda: self.release_service,
             track_title_resolver=self._get_track_title,
+            selected_track_ids_provider=self._selected_track_ids,
+            track_choice_provider=self._catalog_track_choices,
             parent=parent,
         )
         panel.filter_requested.connect(
-            lambda track_ids: self._set_explicit_track_filter(track_ids, source_label="release")
+            lambda track_ids: self._replace_catalog_track_filter(track_ids, source_label="release")
         )
         panel.open_track_requested.connect(self.open_selected_editor)
         panel.edit_release_requested.connect(self.open_release_editor)
         panel.duplicate_release_requested.connect(self.duplicate_release)
-        panel.add_selected_tracks_requested.connect(self.add_selected_tracks_to_specific_release)
+        panel.add_selected_tracks_requested.connect(
+            lambda release_id, track_ids: self.add_selected_tracks_to_specific_release(
+                release_id, track_ids
+            )
+        )
         panel.create_release_requested.connect(self.create_release_from_selection)
         return panel
 
@@ -7695,11 +7709,17 @@ class App(QMainWindow):
             work_service_provider=lambda: self.work_service,
             track_title_resolver=self._get_track_title,
             selected_track_ids_provider=self._selected_track_ids,
+            track_choice_provider=self._catalog_track_choices,
             parent=parent,
         )
         panel.filter_requested.connect(
-            lambda track_ids: self._set_explicit_track_filter(track_ids, source_label="work")
+            lambda track_ids: self._replace_catalog_track_filter(track_ids, source_label="work")
         )
+        panel.create_requested.connect(self.create_work)
+        panel.update_requested.connect(self.update_work)
+        panel.duplicate_requested.connect(self.duplicate_work)
+        panel.link_tracks_requested.connect(self.link_tracks_to_work)
+        panel.delete_requested.connect(self.delete_work)
         return panel
 
     def _create_global_search_panel(self, parent: QWidget) -> GlobalSearchPanel:
@@ -8083,20 +8103,6 @@ class App(QMainWindow):
                 "description": "Browse, edit, duplicate, and attach tracks to first-class releases.",
                 "action": self.release_browser_action,
                 "default": True,
-            },
-            {
-                "id": "create_release",
-                "label": "Create Release",
-                "category": "Catalog",
-                "description": "Create a release using the current selected track batch.",
-                "action": self.create_release_action,
-            },
-            {
-                "id": "add_selected_to_release",
-                "label": "Add Selected to Release",
-                "category": "Catalog",
-                "description": "Attach the current selected tracks to an existing release.",
-                "action": self.add_selected_to_release_action,
             },
             {
                 "id": "import_tags",
@@ -8984,6 +8990,16 @@ class App(QMainWindow):
 
     @staticmethod
     def _catalog_combo_values_from_connection(conn: sqlite3.Connection) -> dict[str, list[str]]:
+        def _values(query: str) -> list[str]:
+            try:
+                return [
+                    str(row[0] or "").strip()
+                    for row in conn.execute(query).fetchall()
+                    if str(row[0] or "").strip()
+                ]
+            except sqlite3.OperationalError:
+                return []
+
         return {
             "artists": [
                 r[0]
@@ -8997,18 +9013,42 @@ class App(QMainWindow):
                     "SELECT DISTINCT title FROM Albums WHERE title IS NOT NULL AND title != '' ORDER BY title"
                 ).fetchall()
             ],
-            "upcs": [
-                r[0]
-                for r in conn.execute(
-                    "SELECT DISTINCT upc FROM Tracks WHERE upc IS NOT NULL AND upc != '' ORDER BY upc"
-                ).fetchall()
-            ],
+            "upcs": _values(
+                """
+                SELECT value
+                FROM (
+                    SELECT upc AS value
+                    FROM Tracks
+                    WHERE upc IS NOT NULL AND upc != ''
+                    UNION
+                    SELECT upc AS value
+                    FROM Releases
+                    WHERE upc IS NOT NULL AND upc != ''
+                )
+                ORDER BY value
+                """
+            ),
             "genres": [
                 r[0]
                 for r in conn.execute(
                     "SELECT DISTINCT genre FROM Tracks WHERE genre IS NOT NULL AND genre != '' ORDER BY genre"
                 ).fetchall()
             ],
+            "catalog_numbers": _values(
+                """
+                SELECT value
+                FROM (
+                    SELECT catalog_number AS value
+                    FROM Tracks
+                    WHERE catalog_number IS NOT NULL AND catalog_number != ''
+                    UNION
+                    SELECT catalog_number AS value
+                    FROM Releases
+                    WHERE catalog_number IS NOT NULL AND catalog_number != ''
+                )
+                ORDER BY value
+                """
+            ),
         }
 
     def _apply_catalog_combo_values(self, combo_values: dict[str, list[str]]) -> None:
@@ -9021,6 +9061,11 @@ class App(QMainWindow):
         )
         self._populate_combobox(self.upc_field, combo_values.get("upcs", []), allow_empty=True)
         self._populate_combobox(self.genre_field, combo_values.get("genres", []), allow_empty=True)
+        self._populate_combobox(
+            self.catalog_number_field,
+            combo_values.get("catalog_numbers", []),
+            allow_empty=True,
+        )
 
     def populate_all_comboboxes(self):
         if self.conn is None:
@@ -9047,7 +9092,7 @@ class App(QMainWindow):
         self.release_date_field.setSelectedDate(QDate.currentDate())
         self.iswc_field.clear()
         self.upc_field.setCurrentText("")
-        self.catalog_number_field.clear()
+        self.catalog_number_field.setCurrentText("")
         self.buma_work_number_field.clear()
         self.genre_field.setCurrentText("")
         self.prev_release_toggle.setChecked(False)
@@ -9098,6 +9143,7 @@ class App(QMainWindow):
         self._update_count_label()
 
         self._update_duration_label()
+        self._refresh_workspace_selection_scopes()
 
     # =============================================================================
     # Header label helpers for robust persistence (rev09)
@@ -9128,6 +9174,7 @@ class App(QMainWindow):
         self.refresh_table()
         self._update_count_label()
         self._update_duration_label()
+        self._refresh_workspace_selection_scopes()
 
     def _load_catalog_ui_dataset(
         self,
@@ -9552,7 +9599,7 @@ class App(QMainWindow):
                 iswc=(iso_iswc or None),
                 upc=(self.upc_field.currentText().strip() or None),
                 genre=(self.genre_field.currentText().strip() or None),
-                catalog_number=(self.catalog_number_field.text().strip() or None),
+                catalog_number=(self.catalog_number_field.currentText().strip() or None),
                 buma_work_number=(self.buma_work_number_field.text().strip() or None),
                 audio_file_source_path=(self.audio_file_field.text().strip() or None),
                 album_art_source_path=(self.album_art_field.text().strip() or None),
@@ -9813,6 +9860,78 @@ class App(QMainWindow):
             return self._normalize_track_ids(visible_ids)
         return self._normalize_track_ids(self._selected_track_ids())
 
+    def _catalog_track_choices(self) -> list[TrackChoice]:
+        header_names = {
+            str(self.table.horizontalHeaderItem(column).text() or ""): column
+            for column in range(self.table.columnCount())
+            if self.table.horizontalHeaderItem(column) is not None
+        }
+        title_column = header_names.get("Track Title")
+        artist_column = header_names.get("Artist")
+        album_column = header_names.get("Album Title")
+        choices: list[TrackChoice] = []
+        for row in range(self.table.rowCount()):
+            if self.table.isRowHidden(row):
+                continue
+            track_id = self._track_id_for_table_row(row)
+            if track_id is None:
+                continue
+            title_item = self.table.item(row, title_column) if title_column is not None else None
+            artist_item = self.table.item(row, artist_column) if artist_column is not None else None
+            album_item = self.table.item(row, album_column) if album_column is not None else None
+            title = (
+                str(title_item.text() or "").strip()
+                if title_item is not None
+                else self._get_track_title(track_id)
+            )
+            subtitle = " / ".join(
+                part
+                for part in (
+                    str(artist_item.text() or "").strip() if artist_item is not None else "",
+                    str(album_item.text() or "").strip() if album_item is not None else "",
+                )
+                if part
+            )
+            choices.append(TrackChoice(track_id=int(track_id), title=title, subtitle=subtitle))
+        return choices
+
+    def _select_track_ids_in_table(self, track_ids, *, replace: bool = True) -> None:
+        normalized_ids = set(self._normalize_track_ids(track_ids))
+        selection_model = self.table.selectionModel()
+        if selection_model is None:
+            return
+        if replace:
+            self.table.clearSelection()
+        current_index = None
+        for row in range(self.table.rowCount()):
+            if self.table.isRowHidden(row):
+                continue
+            track_id = self._track_id_for_table_row(row)
+            if track_id not in normalized_ids:
+                continue
+            index = self.table.model().index(row, 0)
+            selection_model.select(
+                index,
+                QItemSelectionModel.Select | QItemSelectionModel.Rows,
+            )
+            if current_index is None:
+                current_index = index
+        if current_index is not None:
+            selection_model.setCurrentIndex(current_index, QItemSelectionModel.NoUpdate)
+
+    def _refresh_workspace_selection_scopes(self) -> None:
+        panels = [
+            getattr(self, "release_browser_dialog", None),
+            getattr(self, "work_browser_dialog", None),
+        ]
+        for panel in panels:
+            refresh_scope = getattr(panel, "refresh_selection_scope", None)
+            if callable(refresh_scope):
+                refresh_scope()
+
+    def _on_catalog_selection_changed(self) -> None:
+        self._refresh_workspace_selection_scopes()
+
     def _set_explicit_track_filter(
         self, track_ids: list[int] | None, *, source_label: str | None = None
     ) -> None:
@@ -9828,6 +9947,33 @@ class App(QMainWindow):
             )
             if self.statusBar() is not None:
                 self.statusBar().showMessage(message, 5000)
+
+    def _replace_catalog_track_filter(
+        self, track_ids: list[int] | None, *, source_label: str | None = None
+    ) -> None:
+        normalized_ids = self._normalize_track_ids(track_ids)
+        self.search_field.blockSignals(True)
+        self.search_field.clear()
+        self.search_field.blockSignals(False)
+        self.search_column_combo.blockSignals(True)
+        all_columns_index = self.search_column_combo.findData(-1)
+        self.search_column_combo.setCurrentIndex(all_columns_index if all_columns_index != -1 else 0)
+        self.search_column_combo.blockSignals(False)
+        self._explicit_row_filter_track_ids = set(normalized_ids) if normalized_ids else None
+        self.apply_search_filter()
+        if normalized_ids:
+            self._select_track_ids_in_table(normalized_ids)
+        elif self.table.rowCount():
+            self.table.clearSelection()
+        if source_label and self.statusBar() is not None:
+            count = len(normalized_ids)
+            message = (
+                f"Filtered catalog to {count} track{'s' if count != 1 else ''} from {source_label}."
+                if normalized_ids
+                else f"Cleared explicit filter from {source_label}."
+            )
+            self.statusBar().showMessage(message, 5000)
+        self._refresh_workspace_selection_scopes()
 
     def _release_choices(self) -> list[tuple[int, str]]:
         if self.release_service is None:
@@ -9970,9 +10116,6 @@ class App(QMainWindow):
             snapshots[0].track_title,
         )
         clean_title = str(title or "").strip()
-        is_single = len(snapshots) == 1 and (
-            not clean_title or clean_title.casefold() == "single" or not snapshots[0].album_title
-        )
         placements: list[ReleaseTrackPlacement] = []
         existing_placements = {
             placement.track_id: placement
@@ -10021,7 +10164,10 @@ class App(QMainWindow):
             release_type=(
                 existing_release.release_type
                 if existing_release is not None and existing_release.release_type
-                else ("single" if is_single else "album")
+                else ReleaseService.infer_release_type(
+                    title=clean_title,
+                    track_count=len(snapshots),
+                )
             ),
             release_date=self._first_non_blank(
                 existing_release.release_date if existing_release is not None else None,
@@ -10142,7 +10288,11 @@ class App(QMainWindow):
             QMessageBox.warning(self, "Release Browser", "Open a profile first.")
             return
         dock = self._ensure_release_browser_dock()
-        self.release_browser_dialog = dock.show_panel()
+        panel = dock.show_panel()
+        refresh_scope = getattr(panel, "refresh_selection_scope", None)
+        if callable(refresh_scope):
+            refresh_scope()
+        self.release_browser_dialog = panel
 
     def open_work_manager(self, linked_track_id: int | None = None):
         if self.work_service is None:
@@ -10151,6 +10301,9 @@ class App(QMainWindow):
         dock = self._ensure_work_manager_dock()
         panel = dock.show_panel()
         panel.set_linked_track_id(linked_track_id)
+        refresh_scope = getattr(panel, "refresh_selection_scope", None)
+        if callable(refresh_scope):
+            refresh_scope()
         self.work_browser_dialog = panel
 
     def open_party_manager(self, party_id: int | None = None):
@@ -10301,17 +10454,26 @@ class App(QMainWindow):
         if self.statusBar() is not None:
             self.statusBar().showMessage("Repertoire import complete.", 5000)
 
-    def open_release_editor(self, release_id: int | None = None):
+    def open_release_editor(
+        self,
+        release_id: int | None = None,
+        selected_track_ids: list[int] | None = None,
+    ):
         if self.release_service is None:
             QMessageBox.warning(self, "Release Editor", "Open a profile first.")
             return
         summary = (
             self.release_service.fetch_release_summary(int(release_id)) if release_id else None
         )
+        normalized_selection = self._normalize_track_ids(selected_track_ids)
         dlg = ReleaseEditorDialog(
             release_service=self.release_service,
             track_title_resolver=self._get_track_title,
-            selected_track_ids_provider=self._selected_track_ids,
+            selected_track_ids_provider=(
+                (lambda: list(normalized_selection))
+                if normalized_selection
+                else self._selected_track_ids
+            ),
             release=summary.release if summary is not None else None,
             placements=list(summary.tracks) if summary is not None else None,
             profile_name=self._current_profile_name(),
@@ -10392,8 +10554,8 @@ class App(QMainWindow):
             ),
         )
 
-    def create_release_from_selection(self):
-        selected_ids = self._selected_track_ids()
+    def create_release_from_selection(self, track_ids: list[int] | None = None):
+        selected_ids = self._normalize_track_ids(track_ids or self._selected_track_ids())
         if not selected_ids:
             QMessageBox.information(
                 self,
@@ -10401,7 +10563,7 @@ class App(QMainWindow):
                 "Select one or more tracks first, then create the release from that selection.",
             )
             return
-        self.open_release_editor()
+        self.open_release_editor(selected_track_ids=selected_ids)
 
     def _prompt_for_release_choice(self, *, title: str, prompt: str) -> int | None:
         choices = self._release_choices()
@@ -10417,20 +10579,22 @@ class App(QMainWindow):
                 return int(release_id)
         return None
 
-    def add_selected_tracks_to_release(self):
+    def add_selected_tracks_to_release(self, track_ids: list[int] | None = None):
         release_id = self._prompt_for_release_choice(
             title="Add Selected Tracks to Release",
             prompt="Choose the release that should receive the current selection:",
         )
         if release_id is None:
             return
-        self.add_selected_tracks_to_specific_release(release_id)
+        self.add_selected_tracks_to_specific_release(release_id, track_ids)
 
-    def add_selected_tracks_to_specific_release(self, release_id: int):
+    def add_selected_tracks_to_specific_release(
+        self, release_id: int, track_ids: list[int] | None = None
+    ):
         if self.release_service is None:
             QMessageBox.warning(self, "Release Browser", "Open a profile first.")
             return
-        selected_ids = self._selected_track_ids()
+        selected_ids = self._normalize_track_ids(track_ids or self._selected_track_ids())
         if not selected_ids:
             QMessageBox.information(self, "Release Browser", "Select one or more tracks first.")
             return
@@ -10480,6 +10644,196 @@ class App(QMainWindow):
             "Release Browser",
             f"Added {len(added_track_ids or [])} track{'s' if len(added_track_ids or []) != 1 else ''} to '{summary.release.title}'.",
         )
+
+    def _refresh_work_manager_panel(self) -> None:
+        panel = getattr(self, "work_browser_dialog", None)
+        if panel is not None and panel.isVisible():
+            panel.refresh()
+            refresh_scope = getattr(panel, "refresh_selection_scope", None)
+            if callable(refresh_scope):
+                refresh_scope()
+
+    def create_work(self, payload: WorkPayload):
+        if self.work_service is None:
+            QMessageBox.warning(self, "Work Manager", "Open a profile first.")
+            return
+        payload.profile_name = payload.profile_name or self._current_profile_name()
+        try:
+            work_id = self._run_snapshot_history_action(
+                action_label=f"Create Work: {payload.title or 'Untitled Work'}",
+                action_type="work.create",
+                entity_type="Work",
+                entity_id=payload.title or "new",
+                payload={
+                    "title": payload.title,
+                    "track_count": len(payload.track_ids),
+                },
+                mutation=lambda: self.work_service.create_work(payload),
+            )
+            self._log_event(
+                "work.create",
+                "Work created",
+                work_id=work_id,
+                title=payload.title,
+                track_ids=list(payload.track_ids),
+            )
+            self._audit("CREATE", "Work", ref_id=work_id, details=f"title={payload.title}")
+            self._audit_commit()
+        except Exception as exc:
+            self.conn.rollback()
+            self.logger.exception(f"Create work failed: {exc}")
+            QMessageBox.critical(self, "Work Manager", f"Could not create the work:\n{exc}")
+            return
+        self._refresh_history_actions()
+        self._refresh_work_manager_panel()
+
+    def update_work(self, work_id: int, payload: WorkPayload):
+        if self.work_service is None:
+            QMessageBox.warning(self, "Work Manager", "Open a profile first.")
+            return
+        payload.profile_name = payload.profile_name or self._current_profile_name()
+        detail = self.work_service.fetch_work_detail(int(work_id))
+        if detail is None:
+            QMessageBox.warning(self, "Work Manager", "The selected work could not be loaded.")
+            return
+        try:
+            self._run_snapshot_history_action(
+                action_label=f"Update Work: {payload.title or detail.work.title}",
+                action_type="work.update",
+                entity_type="Work",
+                entity_id=work_id,
+                payload={
+                    "work_id": int(work_id),
+                    "title": payload.title,
+                    "track_count": len(payload.track_ids),
+                },
+                mutation=lambda: self.work_service.update_work(int(work_id), payload),
+            )
+            self._log_event(
+                "work.update",
+                "Work updated",
+                work_id=int(work_id),
+                title=payload.title,
+                track_ids=list(payload.track_ids),
+            )
+            self._audit("UPDATE", "Work", ref_id=work_id, details=f"title={payload.title}")
+            self._audit_commit()
+        except Exception as exc:
+            self.conn.rollback()
+            self.logger.exception(f"Update work failed: {exc}")
+            QMessageBox.critical(self, "Work Manager", f"Could not update the work:\n{exc}")
+            return
+        self._refresh_history_actions()
+        self._refresh_work_manager_panel()
+
+    def duplicate_work(self, work_id: int):
+        if self.work_service is None:
+            QMessageBox.warning(self, "Work Manager", "Open a profile first.")
+            return
+        detail = self.work_service.fetch_work_detail(int(work_id))
+        if detail is None:
+            QMessageBox.warning(self, "Work Manager", "The selected work could not be loaded.")
+            return
+        try:
+            new_work_id = self._run_snapshot_history_action(
+                action_label=f"Duplicate Work: {detail.work.title}",
+                action_type="work.duplicate",
+                entity_type="Work",
+                entity_id=work_id,
+                payload={"work_id": int(work_id), "title": detail.work.title},
+                mutation=lambda: self.work_service.duplicate_work(int(work_id)),
+            )
+            self._log_event(
+                "work.duplicate",
+                "Work duplicated",
+                source_work_id=int(work_id),
+                new_work_id=new_work_id,
+                title=detail.work.title,
+            )
+            self._audit("CREATE", "Work", ref_id=new_work_id, details=f"duplicated_from={work_id}")
+            self._audit_commit()
+        except Exception as exc:
+            self.conn.rollback()
+            self.logger.exception(f"Duplicate work failed: {exc}")
+            QMessageBox.critical(self, "Work Manager", f"Could not duplicate the work:\n{exc}")
+            return
+        self._refresh_history_actions()
+        self._refresh_work_manager_panel()
+
+    def link_tracks_to_work(self, work_id: int, track_ids: list[int]):
+        if self.work_service is None:
+            QMessageBox.warning(self, "Work Manager", "Open a profile first.")
+            return
+        normalized_ids = self._normalize_track_ids(track_ids)
+        if not normalized_ids:
+            QMessageBox.information(self, "Work Manager", "Select one or more tracks first.")
+            return
+        detail = self.work_service.fetch_work_detail(int(work_id))
+        if detail is None:
+            QMessageBox.warning(self, "Work Manager", "The selected work could not be loaded.")
+            return
+        try:
+            self._run_snapshot_history_action(
+                action_label=f"Link Tracks to Work: {detail.work.title}",
+                action_type="work.link_tracks",
+                entity_type="Work",
+                entity_id=work_id,
+                payload={"work_id": int(work_id), "track_ids": normalized_ids},
+                mutation=lambda: self.work_service.link_tracks_to_work(int(work_id), normalized_ids),
+            )
+            self._log_event(
+                "work.link_tracks",
+                "Linked tracks to work",
+                work_id=int(work_id),
+                track_ids=normalized_ids,
+            )
+            self._audit(
+                "UPDATE",
+                "Work",
+                ref_id=work_id,
+                details=f"track_ids={','.join(str(track_id) for track_id in normalized_ids)}",
+            )
+            self._audit_commit()
+        except Exception as exc:
+            self.conn.rollback()
+            self.logger.exception(f"Link tracks to work failed: {exc}")
+            QMessageBox.critical(self, "Work Manager", f"Could not link the tracks:\n{exc}")
+            return
+        self._refresh_history_actions()
+        self._refresh_work_manager_panel()
+
+    def delete_work(self, work_id: int):
+        if self.work_service is None:
+            QMessageBox.warning(self, "Work Manager", "Open a profile first.")
+            return
+        detail = self.work_service.fetch_work_detail(int(work_id))
+        if detail is None:
+            QMessageBox.warning(self, "Work Manager", "The selected work could not be loaded.")
+            return
+        try:
+            self._run_snapshot_history_action(
+                action_label=f"Delete Work: {detail.work.title}",
+                action_type="work.delete",
+                entity_type="Work",
+                entity_id=work_id,
+                payload={"work_id": int(work_id), "title": detail.work.title},
+                mutation=lambda: self.work_service.delete_work(int(work_id)),
+            )
+            self._log_event(
+                "work.delete",
+                "Work deleted",
+                work_id=int(work_id),
+                title=detail.work.title,
+            )
+            self._audit("DELETE", "Work", ref_id=work_id, details=f"title={detail.work.title}")
+            self._audit_commit()
+        except Exception as exc:
+            self.conn.rollback()
+            self.logger.exception(f"Delete work failed: {exc}")
+            QMessageBox.critical(self, "Work Manager", f"Could not delete the work:\n{exc}")
+            return
+        self._refresh_history_actions()
+        self._refresh_work_manager_panel()
 
     def duplicate_release(self, release_id: int):
         if self.release_service is None:
@@ -11302,16 +11656,27 @@ class App(QMainWindow):
         with self.background_service_factory.open_bundle() as bundle:
             return bundle.quality_service.scan()
 
-    def _apply_quality_fix(self, fix_key: str) -> str:
+    def _apply_quality_fix(self, issue: QualityIssue) -> str:
+        fix_key = str(issue.fix_key or "").strip()
+        if not fix_key:
+            raise ValueError("The selected quality issue does not expose a suggested fix.")
+
         def mutation():
-            return self.quality_service.apply_fix(fix_key)
+            return self.quality_service.apply_fix(fix_key, issue=issue)
 
         message = self._run_snapshot_history_action(
             action_label=f"Quality Fix: {fix_key}",
             action_type="quality.fix",
             entity_type="QualityIssue",
             entity_id=fix_key,
-            payload={"fix_key": fix_key},
+            payload={
+                "fix_key": fix_key,
+                "issue_type": issue.issue_type,
+                "entity_type": issue.entity_type,
+                "entity_id": issue.entity_id,
+                "release_id": issue.release_id,
+                "track_id": issue.track_id,
+            },
             mutation=mutation,
         )
         self._log_event("quality.fix", "Applied quality fix", fix_key=fix_key, message_text=message)
@@ -14841,9 +15206,8 @@ class AlbumEntryDialog(QDialog):
         self.genre = self._build_genre_combo()
         self._add_labeled_widget(overview_layout, "Genre", self.genre)
 
-        self.catalog_number = QLineEdit()
-        self.catalog_number.setPlaceholderText("Optional catalog number")
-        self._apply_input_height(self.catalog_number)
+        self.catalog_number = self._build_catalog_number_combo()
+        self.catalog_number.setCurrentText("")
         self._add_labeled_widget(overview_layout, "Catalog#", self.catalog_number)
 
         self.album_art = QLineEdit()
@@ -14965,13 +15329,39 @@ class AlbumEntryDialog(QDialog):
 
     def _build_upc_combo(self) -> FocusWheelComboBox:
         return self._combo_from_query(
-            "SELECT DISTINCT upc FROM Tracks WHERE upc IS NOT NULL AND upc != '' ORDER BY upc",
+            """
+            SELECT value
+            FROM (
+                SELECT upc AS value FROM Tracks WHERE upc IS NOT NULL AND upc != ''
+                UNION
+                SELECT upc AS value FROM Releases WHERE upc IS NOT NULL AND upc != ''
+            )
+            ORDER BY value
+            """,
             allow_empty=True,
         )
 
     def _build_genre_combo(self) -> FocusWheelComboBox:
         return self._combo_from_query(
             "SELECT DISTINCT genre FROM Tracks WHERE genre IS NOT NULL AND genre != '' ORDER BY genre",
+            allow_empty=True,
+        )
+
+    def _build_catalog_number_combo(self) -> FocusWheelComboBox:
+        return self._combo_from_query(
+            """
+            SELECT value
+            FROM (
+                SELECT catalog_number AS value
+                FROM Tracks
+                WHERE catalog_number IS NOT NULL AND catalog_number != ''
+                UNION
+                SELECT catalog_number AS value
+                FROM Releases
+                WHERE catalog_number IS NOT NULL AND catalog_number != ''
+            )
+            ORDER BY value
+            """,
             allow_empty=True,
         )
 
@@ -15408,7 +15798,21 @@ class EditDialog(QDialog):
         def combo(target_layout, label, field_name, value, source_query, allow_empty=True):
             cb = FocusWheelComboBox()
             cb.setEditable(True)
-            items = [r[0] for r in self.parent.cursor.execute(source_query).fetchall()]
+            items: list[str] = []
+            seen: set[str] = set()
+            for row in self.parent.cursor.execute(source_query).fetchall():
+                text = str(row[0] or "").strip()
+                if not text or text in seen:
+                    continue
+                seen.add(text)
+                items.append(text)
+            display_value = self._display_value_for_field(field_name, value).strip()
+            if (
+                display_value
+                and display_value != self.BULK_MIXED_TEXT
+                and display_value not in seen
+            ):
+                items.append(display_value)
             if allow_empty:
                 cb.addItem("")
             cb.addItems(items)
@@ -15580,9 +15984,17 @@ class EditDialog(QDialog):
         art_layout.addWidget(btn_art_clear)
         add_row(artwork_layout_section, "Album Art", art_row)
 
-        self.catalog_number = QLineEdit()
-        self._configure_text_field(
-            self.catalog_number, "catalog_number", self.snapshot.catalog_number or ""
+        self.catalog_number = combo(
+            registration_layout,
+            "Catalog#",
+            "catalog_number",
+            self.snapshot.catalog_number or "",
+            """
+            SELECT DISTINCT catalog_number
+            FROM Tracks
+            WHERE catalog_number IS NOT NULL AND catalog_number != ''
+            ORDER BY catalog_number
+            """,
         )
 
         self.buma_work_number = QLineEdit()
@@ -15704,10 +16116,22 @@ class EditDialog(QDialog):
         self.btn_iswc_copy_iso.setDefault(False)
         self.btn_iswc_copy_compact.clicked.connect(self._copy_iswc_compact)
 
-        self.upc = QLineEdit()
-        self._configure_text_field(self.upc, "upc", self.snapshot.upc or "")
-        add_row(registration_layout, "UPC/EAN", self.upc)
-        add_row(registration_layout, "Catalog#", self.catalog_number)
+        self.upc = combo(
+            registration_layout,
+            "UPC/EAN",
+            "upc",
+            self.snapshot.upc or "",
+            """
+            SELECT value
+            FROM (
+                SELECT upc AS value FROM Tracks WHERE upc IS NOT NULL AND upc != ''
+                UNION
+                SELECT upc AS value FROM Releases WHERE upc IS NOT NULL AND upc != ''
+            )
+            ORDER BY value
+            """,
+        )
+        self.upc.setInsertPolicy(QComboBox.NoInsert)
         add_row(registration_layout, "BUMA Wnr.", self.buma_work_number)
         add_row(registration_layout, "Entry Date", self.entry_date_field)
 
@@ -16072,7 +16496,11 @@ class EditDialog(QDialog):
         new_artist_name = self.artist_name.currentText().strip()
         new_album_title = self.album_title.currentText().strip() or None
         new_release_date = self.release_date.selectedDate().toString("yyyy-MM-dd")
-        new_catalog_number = self.catalog_number.text().strip() or None
+        new_catalog_number = (
+            self.catalog_number.currentText()
+            if hasattr(self.catalog_number, "currentText")
+            else self.catalog_number.text()
+        ).strip() or None
         new_buma_work_number = self.buma_work_number.text().strip() or None
         new_additional_artist = self.parent._parse_additional_artists(
             (
@@ -16249,6 +16677,7 @@ class EditDialog(QDialog):
                     },
                     mutation=mutation,
                 )
+                parent.populate_all_comboboxes()
                 parent.refresh_table_preserve_view(focus_id=row_id)
                 self.accept()
                 return
@@ -16372,6 +16801,7 @@ class EditDialog(QDialog):
                     )
                     parent._audit("UPDATE", "Track", ref_id=row_id, details=f"isrc={iso_isrc}")
                 parent._audit_commit()
+                parent.populate_all_comboboxes()
                 parent.refresh_table_preserve_view(focus_id=row_id)
                 self.accept()
 
@@ -16413,7 +16843,11 @@ class EditDialog(QDialog):
         new_upc_raw = (
             self.upc.currentText() if hasattr(self.upc, "currentText") else self.upc.text()
         ).strip()
-        new_catalog_number = (self.catalog_number.text() or "").strip()
+        new_catalog_number = (
+            self.catalog_number.currentText()
+            if hasattr(self.catalog_number, "currentText")
+            else self.catalog_number.text()
+        ).strip()
         new_buma_work_number = (self.buma_work_number.text() or "").strip()
         new_release_date = self.release_date.selectedDate().toString("yyyy-MM-dd")
         new_track_length_sec = hms_to_seconds(
@@ -16623,6 +17057,7 @@ class EditDialog(QDialog):
                 ),
             )
             parent._audit_commit()
+            parent.populate_all_comboboxes()
             parent.refresh_table_preserve_view(focus_id=result.get("focus_id"))
             self.accept()
 

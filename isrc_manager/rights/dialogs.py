@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,
+    QCompleter,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -32,6 +34,7 @@ from isrc_manager.ui_common import (
     _apply_standard_dialog_chrome,
     _apply_standard_widget_chrome,
     _configure_standard_form_layout,
+    _create_action_button_grid,
     _create_scrollable_dialog_content,
     _create_standard_section,
 )
@@ -79,6 +82,9 @@ class RightEditorDialog(QDialog):
         self.granted_to_combo = QComboBox()
         self.retained_by_combo = QComboBox()
         self.contract_combo = QComboBox()
+        self.work_combo = QComboBox()
+        self.track_combo = QComboBox()
+        self.release_combo = QComboBox()
         self._populate_reference_combos()
 
         tabs = QTabWidget(self)
@@ -165,12 +171,9 @@ class RightEditorDialog(QDialog):
         )
         repertoire_form = QFormLayout()
         _configure_standard_form_layout(repertoire_form)
-        self.work_id_edit = QLineEdit()
-        repertoire_form.addRow("Work ID", self.work_id_edit)
-        self.track_id_edit = QLineEdit()
-        repertoire_form.addRow("Track ID", self.track_id_edit)
-        self.release_id_edit = QLineEdit()
-        repertoire_form.addRow("Release ID", self.release_id_edit)
+        repertoire_form.addRow("Work", self.work_combo)
+        repertoire_form.addRow("Track", self.track_combo)
+        repertoire_form.addRow("Release", self.release_combo)
         repertoire_layout.addLayout(repertoire_form)
         links_layout.addWidget(repertoire_box)
 
@@ -209,9 +212,9 @@ class RightEditorDialog(QDialog):
             self._set_combo_id(self.granted_to_combo, right.granted_to_party_id)
             self._set_combo_id(self.retained_by_combo, right.retained_by_party_id)
             self._set_combo_id(self.contract_combo, right.source_contract_id)
-            self.work_id_edit.setText(str(right.work_id or ""))
-            self.track_id_edit.setText(str(right.track_id or ""))
-            self.release_id_edit.setText(str(right.release_id or ""))
+            self._set_combo_id(self.work_combo, right.work_id)
+            self._set_combo_id(self.track_combo, right.track_id)
+            self._set_combo_id(self.release_combo, right.release_id)
             self.notes_edit.setPlainText(right.notes or "")
 
     def _populate_reference_combos(self) -> None:
@@ -220,8 +223,12 @@ class RightEditorDialog(QDialog):
             self.granted_to_combo,
             self.retained_by_combo,
             self.contract_combo,
+            self.work_combo,
+            self.track_combo,
+            self.release_combo,
         ):
             combo.addItem("", None)
+            combo.setEditable(True)
         for party in self.party_service.list_parties():
             label = party.display_name or party.legal_name
             self.granted_by_combo.addItem(label, party.id)
@@ -229,6 +236,56 @@ class RightEditorDialog(QDialog):
             self.retained_by_combo.addItem(label, party.id)
         for contract in self.contract_service.list_contracts():
             self.contract_combo.addItem(contract.title, contract.id)
+        conn = getattr(self.rights_service, "conn", None)
+        if conn is not None:
+            for work_id, title, iswc in conn.execute(
+                """
+                SELECT id, title, COALESCE(iswc, '')
+                FROM Works
+                ORDER BY title, id
+                """
+            ).fetchall():
+                label = " / ".join(part for part in (str(title or ""), str(iswc or "")) if part)
+                self.work_combo.addItem(label, int(work_id))
+            for track_id, track_title, artist_name in conn.execute(
+                """
+                SELECT
+                    t.id,
+                    t.track_title,
+                    COALESCE(a.name, '')
+                FROM Tracks t
+                LEFT JOIN Artists a ON a.id = t.main_artist_id
+                ORDER BY t.track_title, t.id
+                """
+            ).fetchall():
+                label = " / ".join(
+                    part for part in (str(track_title or ""), str(artist_name or "")) if part
+                )
+                self.track_combo.addItem(label, int(track_id))
+            for release_id, title, primary_artist in conn.execute(
+                """
+                SELECT id, title, COALESCE(primary_artist, '')
+                FROM Releases
+                ORDER BY title, id
+                """
+            ).fetchall():
+                label = " / ".join(
+                    part for part in (str(title or ""), str(primary_artist or "")) if part
+                )
+                self.release_combo.addItem(label, int(release_id))
+        for combo in (
+            self.granted_by_combo,
+            self.granted_to_combo,
+            self.retained_by_combo,
+            self.contract_combo,
+            self.work_combo,
+            self.track_combo,
+            self.release_combo,
+        ):
+            labels = [combo.itemText(index) for index in range(combo.count()) if combo.itemText(index)]
+            completer = QCompleter(labels, combo)
+            completer.setCaseSensitivity(Qt.CaseInsensitive)
+            combo.setCompleter(completer)
 
     @staticmethod
     def _set_combo_id(combo: QComboBox, value: int | None) -> None:
@@ -251,11 +308,9 @@ class RightEditorDialog(QDialog):
             granted_to_party_id=self.granted_to_combo.currentData(),
             retained_by_party_id=self.retained_by_combo.currentData(),
             source_contract_id=self.contract_combo.currentData(),
-            work_id=int(self.work_id_edit.text()) if self.work_id_edit.text().strip() else None,
-            track_id=int(self.track_id_edit.text()) if self.track_id_edit.text().strip() else None,
-            release_id=(
-                int(self.release_id_edit.text()) if self.release_id_edit.text().strip() else None
-            ),
+            work_id=self.work_combo.currentData(),
+            track_id=self.track_combo.currentData(),
+            release_id=self.release_combo.currentData(),
             notes=self.notes_edit.toPlainText().strip() or None,
         )
 
@@ -298,13 +353,15 @@ class RightsBrowserPanel(QWidget):
         )
         controls = QHBoxLayout()
         controls.setContentsMargins(0, 0, 0, 0)
-        controls.setSpacing(8)
+        controls.setSpacing(10)
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText(
             "Search rights by type, territory, contract, or party..."
         )
         self.search_edit.textChanged.connect(self.refresh)
         controls.addWidget(self.search_edit, 1)
+        controls_layout.addLayout(controls)
+        action_buttons: list[QPushButton] = []
         for label, handler in (
             ("Add", self.create_right),
             ("Edit", self.edit_selected),
@@ -314,8 +371,8 @@ class RightsBrowserPanel(QWidget):
         ):
             button = QPushButton(label)
             button.clicked.connect(handler)
-            controls.addWidget(button)
-        controls_layout.addLayout(controls)
+            action_buttons.append(button)
+        controls_layout.addWidget(_create_action_button_grid(self, action_buttons, columns=3))
         root.addWidget(controls_box)
 
         table_box, table_layout = _create_standard_section(

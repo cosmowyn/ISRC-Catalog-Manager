@@ -102,6 +102,13 @@ class CatalogAdminServiceTests(unittest.TestCase):
         self.assertIsNone(self.conn.execute("SELECT id FROM Artists WHERE id=3").fetchone())
         self.assertIsNone(self.conn.execute("SELECT id FROM Albums WHERE id=2").fetchone())
 
+    def test_delete_used_artists_and_albums_is_blocked(self):
+        with self.assertRaises(ValueError):
+            self.service.delete_artists([1])
+
+        with self.assertRaises(ValueError):
+            self.service.delete_albums([1])
+
     def test_licensee_management_preserves_usage_rules(self):
         created_id = self.service.ensure_licensee("New Licensee")
         same_id = self.service.ensure_licensee("New Licensee")

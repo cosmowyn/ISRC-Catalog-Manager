@@ -862,7 +862,14 @@ class ContractService:
                 filename = filename or current["filename"]
                 checksum = checksum or current["checksum_sha256"]
                 if desired_mode == STORAGE_MODE_DATABASE and current_mode != STORAGE_MODE_DATABASE:
+                    source_path = None
+                    if current_mode == STORAGE_MODE_MANAGED_FILE:
+                        resolved = self.resolve_document_path(current["file_path"])
+                        if resolved is None or not resolved.exists():
+                            raise FileNotFoundError(current["file_path"])
+                        source_path = resolved
                     payload = self._build_document_storage_payload(
+                        source_path=source_path,
                         stored_path=current["file_path"],
                         filename=filename,
                         checksum_sha256=checksum,
@@ -943,12 +950,7 @@ class ContractService:
                     ),
                 )
                 seen_ids.add(document_id)
-                if (
-                    clean_text(item.source_path)
-                    and old_path
-                    and old_path != stored_path
-                    and self._is_managed_document_path(old_path)
-                ):
+                if old_path and old_path != stored_path and self._is_managed_document_path(old_path):
                     self._delete_document_if_unreferenced(old_path, cursor=cursor)
                 continue
             cursor.execute(

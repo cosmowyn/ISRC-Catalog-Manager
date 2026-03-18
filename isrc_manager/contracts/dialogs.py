@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
+
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
     QGridLayout,
+    QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -17,6 +24,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QSplitter,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -24,20 +32,27 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from isrc_manager.file_storage import normalize_storage_mode
+from isrc_manager.file_storage import (
+    STORAGE_MODE_DATABASE,
+    STORAGE_MODE_MANAGED_FILE,
+    normalize_storage_mode,
+)
 from isrc_manager.ui_common import (
     _add_standard_dialog_header,
     _apply_compact_dialog_control_heights,
     _apply_standard_dialog_chrome,
     _apply_standard_widget_chrome,
     _configure_standard_form_layout,
+    _create_action_button_grid,
     _create_scrollable_dialog_content,
     _create_standard_section,
 )
 
 from .models import (
     CONTRACT_STATUS_CHOICES,
+    DOCUMENT_TYPE_CHOICES,
     ContractDocumentPayload,
+    ContractDocumentRecord,
     ContractObligationPayload,
     ContractPartyPayload,
     ContractPayload,
@@ -57,6 +72,595 @@ def _parse_int_list(text: str) -> list[int]:
             continue
         values.append(int(part))
     return values
+
+
+def _parse_optional_int(text: str) -> int | None:
+    clean = str(text or "").strip()
+    if not clean:
+        return None
+    return int(clean)
+
+
+class ContractDocumentEditor(QWidget):
+    """Structured editor for contract documents and storage metadata."""
+
+    def __init__(self, *, contract_service: ContractService, parent=None):
+        super().__init__(parent)
+        self.contract_service = contract_service
+        self._documents: list[ContractDocumentPayload] = []
+        self._current_row: int = -1
+        self._suspend_updates = False
+        self._preview_dir = tempfile.TemporaryDirectory(prefix="isrc_contract_documents_")
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(12)
+
+        self.add_file_button = QPushButton("Add File…")
+        self.add_file_button.clicked.connect(self._append_document_file)
+        self.open_button = QPushButton("Open Selected")
+        self.open_button.clicked.connect(self.open_selected_document)
+        self.export_button = QPushButton("Export Selected…")
+        self.export_button.clicked.connect(self._export_selected_document)
+        self.database_button = QPushButton("Store as Database")
+        self.database_button.clicked.connect(
+            lambda: self._set_selected_storage_mode(STORAGE_MODE_DATABASE)
+        )
+        self.managed_button = QPushButton("Store as Managed File")
+        self.managed_button.clicked.connect(
+            lambda: self._set_selected_storage_mode(STORAGE_MODE_MANAGED_FILE)
+        )
+        self.remove_button = QPushButton("Remove Selected")
+        self.remove_button.clicked.connect(self._remove_selected_document)
+        root.addWidget(
+            _create_action_button_grid(
+                self,
+                [
+                    self.add_file_button,
+                    self.open_button,
+                    self.export_button,
+                    self.database_button,
+                    self.managed_button,
+                    self.remove_button,
+                ],
+                columns=3,
+            )
+        )
+
+        splitter = QSplitter(Qt.Horizontal, self)
+        splitter.setChildrenCollapsible(False)
+        root.addWidget(splitter, 1)
+
+        table_box = QGroupBox("Documents", self)
+        table_layout = QVBoxLayout(table_box)
+        table_layout.setContentsMargins(14, 18, 14, 14)
+        table_layout.setSpacing(10)
+        self.documents_table = QTableWidget(0, 9, table_box)
+        self.documents_table.setHorizontalHeaderLabels(
+            [
+                "ID",
+                "Title",
+                "Type",
+                "Version",
+                "Storage",
+                "Active",
+                "Signed",
+                "Filename",
+                "Checksum",
+            ]
+        )
+        self.documents_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.documents_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.documents_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.documents_table.verticalHeader().setVisible(False)
+        header = self.documents_table.horizontalHeader()
+        header.setMinimumSectionSize(36)
+        for column, width in (
+            (0, 68),
+            (2, 112),
+            (3, 88),
+            (4, 94),
+            (5, 68),
+            (6, 68),
+        ):
+            header.setSectionResizeMode(column, QHeaderView.Interactive)
+            header.resizeSection(column, width)
+        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        header.setSectionResizeMode(7, QHeaderView.Stretch)
+        header.setSectionResizeMode(8, QHeaderView.Stretch)
+        self.documents_table.itemSelectionChanged.connect(self._on_selection_changed)
+        table_layout.addWidget(self.documents_table, 1)
+        splitter.addWidget(table_box)
+
+        detail_box = QGroupBox("Selected Document", self)
+        detail_layout = QVBoxLayout(detail_box)
+        detail_layout.setContentsMargins(14, 18, 14, 14)
+        detail_layout.setSpacing(10)
+        detail_layout.addWidget(
+            QLabel(
+                "Edit the selected document's structured metadata here. Storage and file integrity fields are preserved unless you change them explicitly."
+            )
+        )
+
+        form = QFormLayout()
+        _configure_standard_form_layout(form)
+        self.document_id_label = QLabel("")
+        self.filename_label = QLabel("")
+        self.filename_label.setTextInteractionFlags(
+            Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard
+        )
+        self.checksum_label = QLabel("")
+        self.checksum_label.setTextInteractionFlags(
+            Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard
+        )
+        self.source_path_label = QLabel("")
+        self.source_path_label.setWordWrap(True)
+        self.source_path_label.setTextInteractionFlags(
+            Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard
+        )
+
+        self.title_edit = QLineEdit()
+        self.document_type_combo = QComboBox()
+        self.document_type_combo.addItems(
+            [value.replace("_", " ").title() for value in DOCUMENT_TYPE_CHOICES]
+        )
+        self.version_edit = QLineEdit()
+        self.created_edit = QLineEdit()
+        self.received_edit = QLineEdit()
+        self.signed_status_edit = QLineEdit()
+        self.signed_all_checkbox = QCheckBox("Signed by all parties")
+        self.active_checkbox = QCheckBox("Active")
+        self.supersedes_edit = QLineEdit()
+        self.superseded_by_edit = QLineEdit()
+        self.storage_mode_combo = QComboBox()
+        self.storage_mode_combo.addItem("Managed file", STORAGE_MODE_MANAGED_FILE)
+        self.storage_mode_combo.addItem("Database (BLOB)", STORAGE_MODE_DATABASE)
+        self.notes_edit = QPlainTextEdit()
+        self.notes_edit.setMinimumHeight(110)
+
+        form.addRow("Document ID", self.document_id_label)
+        form.addRow("Title", self.title_edit)
+        form.addRow("Document Type", self.document_type_combo)
+        form.addRow("Version Label", self.version_edit)
+        form.addRow("Created Date", self.created_edit)
+        form.addRow("Received Date", self.received_edit)
+        form.addRow("Signed Status", self.signed_status_edit)
+        form.addRow("Signed By All", self.signed_all_checkbox)
+        form.addRow("Active", self.active_checkbox)
+        form.addRow("Supersedes Document ID", self.supersedes_edit)
+        form.addRow("Superseded By Document ID", self.superseded_by_edit)
+        form.addRow("Storage Mode", self.storage_mode_combo)
+        form.addRow("Filename", self.filename_label)
+        form.addRow("Stored Path / Blob", self.source_path_label)
+        form.addRow("Checksum", self.checksum_label)
+        form.addRow("Notes", self.notes_edit)
+        detail_layout.addLayout(form)
+
+        detail_actions = QHBoxLayout()
+        detail_actions.setContentsMargins(0, 0, 0, 0)
+        detail_actions.setSpacing(8)
+        detail_actions.addStretch(1)
+        self.switch_mode_button = QPushButton("Switch Storage Mode")
+        self.switch_mode_button.clicked.connect(self._toggle_selected_storage_mode)
+        detail_actions.addWidget(self.switch_mode_button)
+        detail_layout.addLayout(detail_actions)
+        splitter.addWidget(detail_box)
+        splitter.setStretchFactor(0, 4)
+        splitter.setStretchFactor(1, 5)
+
+        for widget in (
+            self.title_edit,
+            self.document_type_combo,
+            self.version_edit,
+            self.created_edit,
+            self.received_edit,
+            self.signed_status_edit,
+            self.signed_all_checkbox,
+            self.active_checkbox,
+            self.supersedes_edit,
+            self.superseded_by_edit,
+            self.storage_mode_combo,
+            self.notes_edit,
+        ):
+            self._connect_document_widget(widget)
+
+        self._refresh_action_state()
+
+    def closeEvent(self, event) -> None:  # pragma: no cover - Qt lifecycle hook
+        self.cleanup()
+        super().closeEvent(event)
+
+    def cleanup(self) -> None:
+        preview_dir = getattr(self, "_preview_dir", None)
+        if preview_dir is None:
+            return
+        try:
+            preview_dir.cleanup()
+        except Exception:
+            pass
+        self._preview_dir = None
+
+    def _connect_document_widget(self, widget) -> None:
+        if isinstance(widget, QLineEdit):
+            widget.textChanged.connect(self._sync_current_document_from_form)
+        elif isinstance(widget, QPlainTextEdit):
+            widget.textChanged.connect(self._sync_current_document_from_form)
+        elif isinstance(widget, QComboBox):
+            widget.currentTextChanged.connect(self._sync_current_document_from_form)
+        elif isinstance(widget, QCheckBox):
+            widget.stateChanged.connect(self._sync_current_document_from_form)
+
+    def _payload_from_record(self, record: ContractDocumentRecord) -> ContractDocumentPayload:
+        return ContractDocumentPayload(
+            document_id=record.id,
+            title=record.title,
+            document_type=record.document_type,
+            version_label=record.version_label,
+            created_date=record.created_date,
+            received_date=record.received_date,
+            signed_status=record.signed_status,
+            signed_by_all_parties=record.signed_by_all_parties,
+            active_flag=record.active_flag,
+            supersedes_document_id=record.supersedes_document_id,
+            superseded_by_document_id=record.superseded_by_document_id,
+            stored_path=record.file_path,
+            storage_mode=record.storage_mode,
+            filename=record.filename,
+            checksum_sha256=record.checksum_sha256,
+            notes=record.notes,
+        )
+
+    def load_documents(self, documents: list[ContractDocumentRecord]) -> None:
+        self._suspend_updates = True
+        try:
+            self._documents = [self._payload_from_record(document) for document in documents]
+            self.documents_table.blockSignals(True)
+            try:
+                self.documents_table.setRowCount(0)
+                for row, document in enumerate(self._documents):
+                    self._insert_document_row(row, document)
+            finally:
+                self.documents_table.blockSignals(False)
+            if self._documents:
+                self.documents_table.selectRow(0)
+                self._load_document_into_form(0)
+            else:
+                self._current_row = -1
+                self._clear_form()
+        finally:
+            self._suspend_updates = False
+        self._refresh_action_state()
+
+    def documents(self) -> list[ContractDocumentPayload]:
+        self._sync_current_document_from_form()
+        return [
+            ContractDocumentPayload(
+                document_id=item.document_id,
+                title=item.title,
+                document_type=item.document_type,
+                version_label=item.version_label,
+                created_date=item.created_date,
+                received_date=item.received_date,
+                signed_status=item.signed_status,
+                signed_by_all_parties=item.signed_by_all_parties,
+                active_flag=item.active_flag,
+                supersedes_document_id=item.supersedes_document_id,
+                superseded_by_document_id=item.superseded_by_document_id,
+                source_path=item.source_path,
+                stored_path=item.stored_path,
+                storage_mode=item.storage_mode,
+                filename=item.filename,
+                checksum_sha256=item.checksum_sha256,
+                notes=item.notes,
+            )
+            for item in self._documents
+        ]
+
+    def _current_document(self) -> tuple[int, ContractDocumentPayload] | None:
+        row = self.documents_table.currentRow()
+        if row < 0 or row >= len(self._documents):
+            return None
+        return row, self._documents[row]
+
+    def _refresh_action_state(self) -> None:
+        has_selection = self._current_document() is not None
+        for button in (
+            self.open_button,
+            self.export_button,
+            self.database_button,
+            self.managed_button,
+            self.remove_button,
+            self.switch_mode_button,
+        ):
+            button.setEnabled(has_selection)
+        if has_selection:
+            _, document = self._current_document()
+            assert document is not None
+            current_mode = normalize_storage_mode(document.storage_mode, default=None)
+            self.database_button.setEnabled(current_mode != STORAGE_MODE_DATABASE)
+            self.managed_button.setEnabled(current_mode != STORAGE_MODE_MANAGED_FILE)
+            self.switch_mode_button.setText(
+                "Switch to Managed File"
+                if current_mode == STORAGE_MODE_DATABASE
+                else "Switch to Database"
+            )
+        else:
+            self.switch_mode_button.setText("Switch Storage Mode")
+
+    def _clear_form(self) -> None:
+        self.document_id_label.setText("")
+        self.title_edit.clear()
+        self.document_type_combo.setCurrentIndex(0)
+        self.version_edit.clear()
+        self.created_edit.clear()
+        self.received_edit.clear()
+        self.signed_status_edit.clear()
+        self.signed_all_checkbox.setChecked(False)
+        self.active_checkbox.setChecked(False)
+        self.supersedes_edit.clear()
+        self.superseded_by_edit.clear()
+        self.storage_mode_combo.setCurrentIndex(0)
+        self.filename_label.setText("")
+        self.source_path_label.setText("")
+        self.checksum_label.setText("")
+        self.notes_edit.clear()
+
+    def _insert_document_row(self, row: int, document: ContractDocumentPayload) -> None:
+        if row >= self.documents_table.rowCount():
+            self.documents_table.insertRow(row)
+        values = [
+            str(document.document_id or ""),
+            document.title,
+            (document.document_type or "other").replace("_", " ").title(),
+            document.version_label or "",
+            (normalize_storage_mode(document.storage_mode, default=None) or STORAGE_MODE_MANAGED_FILE)
+            .replace("_", " ")
+            .title(),
+            "Yes" if document.active_flag else "No",
+            "Yes" if document.signed_by_all_parties else "No",
+            document.filename or "",
+            document.checksum_sha256 or "",
+        ]
+        for column, value in enumerate(values):
+            item = QTableWidgetItem(value)
+            if column == 0:
+                item.setTextAlignment(Qt.AlignCenter)
+            self.documents_table.setItem(row, column, item)
+
+    def _update_document_row(self, row: int) -> None:
+        if row < 0 or row >= len(self._documents):
+            return
+        document = self._documents[row]
+        values = [
+            str(document.document_id or ""),
+            document.title,
+            (document.document_type or "other").replace("_", " ").title(),
+            document.version_label or "",
+            (normalize_storage_mode(document.storage_mode, default=None) or STORAGE_MODE_MANAGED_FILE)
+            .replace("_", " ")
+            .title(),
+            "Yes" if document.active_flag else "No",
+            "Yes" if document.signed_by_all_parties else "No",
+            document.filename or "",
+            document.checksum_sha256 or "",
+        ]
+        for column, value in enumerate(values):
+            item = self.documents_table.item(row, column)
+            if item is None:
+                item = QTableWidgetItem()
+                self.documents_table.setItem(row, column, item)
+            item.setText(value)
+
+    def _load_document_into_form(self, row: int) -> None:
+        if row < 0 or row >= len(self._documents):
+            self._current_row = -1
+            self._clear_form()
+            self._refresh_action_state()
+            return
+        document = self._documents[row]
+        self._current_row = row
+        self._suspend_updates = True
+        try:
+            self.document_id_label.setText(str(document.document_id or ""))
+            self.title_edit.setText(document.title or "")
+            self.document_type_combo.setCurrentText(
+                (document.document_type or "other").replace("_", " ").title()
+            )
+            self.version_edit.setText(document.version_label or "")
+            self.created_edit.setText(document.created_date or "")
+            self.received_edit.setText(document.received_date or "")
+            self.signed_status_edit.setText(document.signed_status or "")
+            self.signed_all_checkbox.setChecked(bool(document.signed_by_all_parties))
+            self.active_checkbox.setChecked(bool(document.active_flag))
+            self.supersedes_edit.setText(
+                "" if document.supersedes_document_id is None else str(document.supersedes_document_id)
+            )
+            self.superseded_by_edit.setText(
+                ""
+                if document.superseded_by_document_id is None
+                else str(document.superseded_by_document_id)
+            )
+            self.storage_mode_combo.setCurrentIndex(
+                self.storage_mode_combo.findData(
+                    normalize_storage_mode(document.storage_mode, default=STORAGE_MODE_MANAGED_FILE)
+                )
+            )
+            self.filename_label.setText(document.filename or "")
+            storage_mode = normalize_storage_mode(
+                document.storage_mode, default=STORAGE_MODE_MANAGED_FILE
+            )
+            self.source_path_label.setText(
+                document.stored_path
+                or document.source_path
+                or ("Stored in database" if storage_mode == STORAGE_MODE_DATABASE else "")
+            )
+            self.checksum_label.setText(document.checksum_sha256 or "")
+            self.notes_edit.setPlainText(document.notes or "")
+        finally:
+            self._suspend_updates = False
+        self._refresh_action_state()
+
+    def _on_selection_changed(self) -> None:
+        if self._suspend_updates:
+            return
+        self._sync_current_document_from_form()
+        self._load_document_into_form(self.documents_table.currentRow())
+
+    def _sync_current_document_from_form(self) -> None:
+        if self._suspend_updates:
+            return
+        current = self._current_document()
+        if current is None:
+            return
+        row, document = current
+        document.title = self.title_edit.text().strip()
+        document.document_type = (
+            self.document_type_combo.currentText().strip().lower().replace(" ", "_") or "other"
+        )
+        document.version_label = self.version_edit.text().strip() or None
+        document.created_date = self.created_edit.text().strip() or None
+        document.received_date = self.received_edit.text().strip() or None
+        document.signed_status = self.signed_status_edit.text().strip() or None
+        document.signed_by_all_parties = self.signed_all_checkbox.isChecked()
+        document.active_flag = self.active_checkbox.isChecked()
+        document.supersedes_document_id = _parse_optional_int(self.supersedes_edit.text())
+        document.superseded_by_document_id = _parse_optional_int(self.superseded_by_edit.text())
+        document.storage_mode = normalize_storage_mode(
+            self.storage_mode_combo.currentData(), default=STORAGE_MODE_MANAGED_FILE
+        )
+        document.notes = self.notes_edit.toPlainText().strip() or None
+        self._documents[row] = document
+        self._update_document_row(row)
+
+    def _append_document_file(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "Select Contract Document", "")
+        if not path:
+            return
+        resolved = Path(path)
+        title = resolved.name
+        payload = ContractDocumentPayload(
+            title=title,
+            document_type="signed_agreement",
+            source_path=str(resolved),
+            storage_mode=STORAGE_MODE_MANAGED_FILE,
+            filename=resolved.name,
+        )
+        self._documents.append(payload)
+        row = len(self._documents) - 1
+        self._insert_document_row(row, payload)
+        self.documents_table.selectRow(row)
+        self._load_document_into_form(row)
+
+    def _remove_selected_document(self) -> None:
+        current = self._current_document()
+        if current is None:
+            return
+        row, _ = current
+        self.documents_table.removeRow(row)
+        del self._documents[row]
+        if self._documents:
+            next_row = min(row, len(self._documents) - 1)
+            self.documents_table.selectRow(next_row)
+            self._load_document_into_form(next_row)
+        else:
+            self._current_row = -1
+            self._clear_form()
+        self._refresh_action_state()
+
+    def _document_bytes(self, document: ContractDocumentPayload) -> tuple[bytes, str]:
+        if document.document_id is not None:
+            data, mime_type = self.contract_service.fetch_document_bytes(int(document.document_id))
+            filename = document.filename or ""
+            if not filename:
+                filename = Path(document.stored_path or document.source_path or "contract-document").name
+            return data, filename
+        source_path = str(document.source_path or "").strip()
+        if source_path:
+            path = Path(source_path)
+            if not path.exists():
+                raise FileNotFoundError(source_path)
+            return path.read_bytes(), path.name
+        stored_path = str(document.stored_path or "").strip()
+        if stored_path:
+            resolved = self.contract_service.resolve_document_path(stored_path)
+            if resolved is None or not resolved.exists():
+                raise FileNotFoundError(stored_path)
+            return resolved.read_bytes(), resolved.name
+        raise FileNotFoundError("No document source is available.")
+
+    def _materialize_document(self, document: ContractDocumentPayload) -> Path:
+        data, filename = self._document_bytes(document)
+        suffix = Path(filename).suffix or ".bin"
+        preview_dir = Path(self._preview_dir.name)
+        preview_dir.mkdir(parents=True, exist_ok=True)
+        handle = tempfile.NamedTemporaryFile(
+            delete=False,
+            dir=preview_dir,
+            prefix="document_",
+            suffix=suffix,
+        )
+        with handle:
+            handle.write(data)
+        return Path(handle.name)
+
+    def open_selected_document(self) -> Path | None:
+        current = self._current_document()
+        if current is None:
+            QMessageBox.information(self, "Open Document", "Select a document first.")
+            return None
+        _, document = current
+        try:
+            preview_path = self._materialize_document(document)
+        except Exception as exc:
+            QMessageBox.critical(self, "Open Document", str(exc))
+            return None
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(preview_path)))
+        return preview_path
+
+    def _export_selected_document(self, path: str | Path | None = None) -> Path | None:
+        current = self._current_document()
+        if current is None:
+            QMessageBox.information(self, "Export Document", "Select a document first.")
+            return None
+        _, document = current
+        if path is None:
+            suggested = document.filename or Path(document.stored_path or document.source_path or "contract-document").name
+            chosen, _ = QFileDialog.getSaveFileName(self, "Export Contract Document", suggested)
+            if not chosen:
+                return None
+            output = Path(chosen)
+        else:
+            output = Path(path)
+        try:
+            data, _ = self._document_bytes(document)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_bytes(data)
+        except Exception as exc:
+            QMessageBox.critical(self, "Export Document", str(exc))
+            return None
+        return output
+
+    def _set_selected_storage_mode(self, target_mode: str) -> None:
+        current = self._current_document()
+        if current is None:
+            return
+        row, document = current
+        document.storage_mode = normalize_storage_mode(target_mode, default=STORAGE_MODE_MANAGED_FILE)
+        self._documents[row] = document
+        self._load_document_into_form(row)
+
+    def _toggle_selected_storage_mode(self) -> None:
+        current = self._current_document()
+        if current is None:
+            return
+        _, document = current
+        current_mode = normalize_storage_mode(document.storage_mode, default=STORAGE_MODE_MANAGED_FILE)
+        target_mode = (
+            STORAGE_MODE_DATABASE
+            if current_mode == STORAGE_MODE_MANAGED_FILE
+            else STORAGE_MODE_MANAGED_FILE
+        )
+        self._set_selected_storage_mode(target_mode)
 
 
 class ContractEditorDialog(QDialog):
@@ -216,28 +820,11 @@ class ContractEditorDialog(QDialog):
         tabs.addTab(obligations_scroll, "Obligations")
 
         documents_scroll, _, documents_layout = _create_scrollable_dialog_content(self)
-        documents_box, documents_box_layout = _create_standard_section(
-            self,
-            "Document Versions",
-            "Use one line per document in the form `title|type|version|source_path|signed_all|active|storage_mode`.",
+        self.documents_editor = ContractDocumentEditor(
+            contract_service=self.contract_service,
+            parent=self,
         )
-        docs_label_row = QHBoxLayout()
-        docs_label_row.setContentsMargins(0, 0, 0, 0)
-        docs_label_row.setSpacing(8)
-        docs_label_row.addStretch(1)
-        add_file_button = QPushButton("Append File…")
-        add_file_button.clicked.connect(self._append_document_file)
-        docs_label_row.addWidget(add_file_button)
-        documents_box_layout.addLayout(docs_label_row)
-
-        self.documents_edit = QPlainTextEdit()
-        self.documents_edit.setPlaceholderText(
-            "One line per document: title|type|version|source_path|signed_all|active|storage_mode"
-        )
-        self.documents_edit.setMinimumHeight(260)
-        documents_box_layout.addWidget(self.documents_edit)
-        documents_layout.addWidget(documents_box)
-        documents_layout.addStretch(1)
+        documents_layout.addWidget(self.documents_editor)
         tabs.addTab(documents_scroll, "Documents")
 
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel, self)
@@ -291,43 +878,9 @@ class ContractEditorDialog(QDialog):
                     for item in detail.obligations
                 )
             )
-            self.documents_edit.setPlainText(
-                "\n".join(
-                    "|".join(
-                        [
-                            item.title,
-                            item.document_type,
-                            item.version_label or "",
-                            (
-                                str(resolved)
-                                if (
-                                    item.file_path
-                                    and (
-                                        resolved := self.contract_service.resolve_document_path(
-                                            item.file_path
-                                        )
-                                    )
-                                    is not None
-                                )
-                                else ""
-                            ),
-                            "1" if item.signed_by_all_parties else "0",
-                            "1" if item.active_flag else "0",
-                            item.storage_mode or "",
-                        ]
-                    )
-                    for item in detail.documents
-                )
-            )
-
-    def _append_document_file(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Select Contract Document", "")
-        if not path:
-            return
-        title = path.rsplit("/", 1)[-1]
-        line = f"{title}|signed_agreement||{path}|1|1|managed_file"
-        current = self.documents_edit.toPlainText().strip()
-        self.documents_edit.setPlainText(f"{current}\n{line}" if current else line)
+            self.documents_editor.load_documents(detail.documents)
+        else:
+            self.documents_editor.load_documents([])
 
     def payload(self) -> ContractPayload:
         parties: list[ContractPartyPayload] = []
@@ -359,27 +912,6 @@ class ContractEditorDialog(QDialog):
                     completed=_parse_bool_token(parts[5]) if len(parts) > 5 else False,
                 )
             )
-        documents: list[ContractDocumentPayload] = []
-        for line in self.documents_edit.toPlainText().splitlines():
-            parts = [part.strip() for part in line.split("|")]
-            if len(parts) < 1 or not parts[0]:
-                continue
-            source_path = parts[3] if len(parts) > 3 and parts[3] else None
-            storage_mode = (
-                normalize_storage_mode(parts[6], default=None) if len(parts) > 6 else None
-            )
-            documents.append(
-                ContractDocumentPayload(
-                    title=parts[0],
-                    document_type=parts[1] if len(parts) > 1 and parts[1] else "other",
-                    version_label=parts[2] if len(parts) > 2 and parts[2] else None,
-                    source_path=source_path,
-                    stored_path=None if source_path else None,
-                    signed_by_all_parties=_parse_bool_token(parts[4]) if len(parts) > 4 else False,
-                    active_flag=_parse_bool_token(parts[5]) if len(parts) > 5 else False,
-                    storage_mode=storage_mode,
-                )
-            )
         return ContractPayload(
             title=self.title_edit.text().strip(),
             contract_type=self.type_edit.text().strip() or None,
@@ -398,11 +930,18 @@ class ContractEditorDialog(QDialog):
             notes=self.notes_edit.toPlainText().strip() or None,
             parties=parties,
             obligations=obligations,
-            documents=documents,
+            documents=self.documents_editor.documents(),
             work_ids=_parse_int_list(self.work_ids_edit.text()),
             track_ids=_parse_int_list(self.track_ids_edit.text()),
             release_ids=_parse_int_list(self.release_ids_edit.text()),
         )
+
+    def closeEvent(self, event) -> None:  # pragma: no cover - Qt lifecycle hook
+        documents_editor = getattr(self, "documents_editor", None)
+        cleanup = getattr(documents_editor, "cleanup", None)
+        if callable(cleanup):
+            cleanup()
+        super().closeEvent(event)
 
 
 class ContractBrowserPanel(QWidget):
@@ -434,11 +973,13 @@ class ContractBrowserPanel(QWidget):
         )
         controls = QHBoxLayout()
         controls.setContentsMargins(0, 0, 0, 0)
-        controls.setSpacing(8)
+        controls.setSpacing(10)
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("Search contracts by title, type, party, or summary...")
         self.search_edit.textChanged.connect(self.refresh)
         controls.addWidget(self.search_edit, 1)
+        controls_layout.addLayout(controls)
+        action_buttons: list[QPushButton] = []
         for label, handler in (
             ("Add", self.create_contract),
             ("Edit", self.edit_selected),
@@ -448,8 +989,8 @@ class ContractBrowserPanel(QWidget):
         ):
             button = QPushButton(label)
             button.clicked.connect(handler)
-            controls.addWidget(button)
-        controls_layout.addLayout(controls)
+            action_buttons.append(button)
+        controls_layout.addWidget(_create_action_button_grid(self, action_buttons, columns=3))
         root.addWidget(controls_box)
 
         table_box, table_layout = _create_standard_section(

@@ -20,6 +20,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from isrc_manager.ui_common import (
+    _add_standard_dialog_header,
+    _apply_compact_dialog_control_heights,
+    _apply_standard_dialog_chrome,
+)
+
 from .models import ExchangeImportOptions, ExchangeInspection
 
 
@@ -43,16 +49,19 @@ class ExchangeImportDialog(QDialog):
 
         self.setWindowTitle(f"Import {inspection.format_name.upper()}")
         self.resize(1100, 760)
+        _apply_standard_dialog_chrome(self, "exchangeImportDialog")
 
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(12)
-
-        intro = QLabel(
-            "Review the detected columns, adjust the mapping where needed, and choose how the import should match existing rows."
+        _add_standard_dialog_header(
+            root,
+            self,
+            title=self.windowTitle(),
+            subtitle=(
+                "Review the detected columns, adjust the mapping where needed, and choose how the import should match existing rows."
+            ),
         )
-        intro.setWordWrap(True)
-        root.addWidget(intro)
 
         self.content_tabs = QTabWidget(self)
         self.content_tabs.setObjectName("exchangeImportTabs")
@@ -60,12 +69,14 @@ class ExchangeImportDialog(QDialog):
         root.addWidget(self.content_tabs, 1)
 
         setup_page = QWidget(self.content_tabs)
+        setup_page.setProperty("role", "workspaceCanvas")
         setup_layout = QVBoxLayout(setup_page)
         setup_layout.setContentsMargins(0, 0, 0, 0)
         setup_layout.setSpacing(12)
         self.content_tabs.addTab(setup_page, "Setup & Mapping")
 
         preview_page = QWidget(self.content_tabs)
+        preview_page.setProperty("role", "workspaceCanvas")
         preview_layout = QVBoxLayout(preview_page)
         preview_layout.setContentsMargins(0, 0, 0, 0)
         preview_layout.setSpacing(12)
@@ -165,6 +176,7 @@ class ExchangeImportDialog(QDialog):
         self._apply_initial_mode()
         self.mode_combo.currentIndexChanged.connect(self._update_mode_affordances)
         self._update_mode_affordances()
+        _apply_compact_dialog_control_heights(self)
 
     def _settings_key(self) -> str:
         return f"exchange/mapping_presets/{self.inspection.format_name}"

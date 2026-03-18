@@ -24,6 +24,7 @@ class CatalogWorkspaceDock(QDockWidget):
         self.panel_factory = panel_factory
         self._panel: QWidget | None = None
         self.setObjectName(dock_object_name)
+        self.setProperty("role", "panel")
         self.setAllowedAreas(Qt.AllDockWidgetAreas)
         self.setFeatures(
             QDockWidget.DockWidgetClosable
@@ -35,6 +36,8 @@ class CatalogWorkspaceDock(QDockWidget):
     def panel(self) -> QWidget:
         if self._panel is None:
             self._panel = self.panel_factory(self)
+            if self._panel.property("role") is None:
+                self._panel.setProperty("role", "workspaceCanvas")
             close_requested = getattr(self._panel, "close_requested", None)
             if close_requested is not None and hasattr(close_requested, "connect"):
                 close_requested.connect(self.hide)

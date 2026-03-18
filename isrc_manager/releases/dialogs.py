@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,
+    QCompleter,
     QDialog,
     QFileDialog,
     QFormLayout,
@@ -32,9 +33,18 @@ from isrc_manager.file_storage import (
     STORAGE_MODE_MANAGED_FILE,
     normalize_storage_mode,
 )
+from isrc_manager.selection_scope import (
+    SelectionScopeBanner,
+    SelectionScopeState,
+    TrackChoice,
+    TrackSelectionChooserDialog,
+    build_selection_preview,
+)
 from isrc_manager.services.repertoire_status import REPERTOIRE_STATUS_CHOICES
 from isrc_manager.ui_common import (
+    FocusWheelComboBox,
     _add_standard_dialog_header,
+    _create_action_button_grid,
     _apply_compact_dialog_control_heights,
     _apply_standard_dialog_chrome,
     _apply_standard_widget_chrome,
@@ -84,17 +94,32 @@ class ReleaseEditorDialog(QDialog):
         splitter = QSplitter(Qt.Horizontal, self)
         root.addWidget(splitter, 1)
 
-        metadata_panel = QWidget(splitter)
-        metadata_layout = QVBoxLayout(metadata_panel)
-        metadata_layout.setContentsMargins(0, 0, 0, 0)
+        metadata_scroll, _, metadata_layout = _create_scrollable_dialog_content(splitter)
         metadata_layout.setSpacing(12)
 
-        metadata_box = QGroupBox("Release Metadata", metadata_panel)
+        def stored_value_combo(query: str) -> FocusWheelComboBox:
+            combo = FocusWheelComboBox(self)
+            combo.setEditable(True)
+            combo.addItem("")
+            values: list[str] = []
+            seen: set[str] = set()
+            conn = getattr(self.release_service, "conn", None)
+            if conn is not None:
+                for row in conn.execute(query).fetchall():
+                    value = str(row[0] or "").strip()
+                    if not value or value in seen:
+                        continue
+                    seen.add(value)
+                    values.append(value)
+            combo.addItems(values)
+            completer = QCompleter(values, combo)
+            completer.setCaseSensitivity(Qt.CaseInsensitive)
+            combo.setCompleter(completer)
+            return combo
+
+        metadata_box = QGroupBox("Release Metadata", metadata_scroll)
         form = QFormLayout(metadata_box)
-        form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
-        form.setLabelAlignment(Qt.AlignLeft | Qt.AlignTop)
-        form.setHorizontalSpacing(12)
-        form.setVerticalSpacing(10)
+        _configure_standard_form_layout(form)
 
         self.title_edit = QLineEdit()
         form.addRow("Release Title", self.title_edit)
@@ -128,10 +153,34 @@ class ReleaseEditorDialog(QDialog):
         self.sublabel_edit = QLineEdit()
         form.addRow("Sublabel", self.sublabel_edit)
 
-        self.catalog_number_edit = QLineEdit()
+        self.catalog_number_edit = stored_value_combo(
+            """
+            SELECT value
+            FROM (
+                SELECT catalog_number AS value
+                FROM Tracks
+                WHERE catalog_number IS NOT NULL AND catalog_number != ''
+                UNION
+                SELECT catalog_number AS value
+                FROM Releases
+                WHERE catalog_number IS NOT NULL AND catalog_number != ''
+            )
+            ORDER BY value
+            """
+        )
         form.addRow("Catalog#", self.catalog_number_edit)
 
-        self.upc_edit = QLineEdit()
+        self.upc_edit = stored_value_combo(
+            """
+            SELECT value
+            FROM (
+                SELECT upc AS value FROM Tracks WHERE upc IS NOT NULL AND upc != ''
+                UNION
+                SELECT upc AS value FROM Releases WHERE upc IS NOT NULL AND upc != ''
+            )
+            ORDER BY value
+            """
+        )
         form.addRow("UPC / EAN", self.upc_edit)
 
         self.territory_edit = QLineEdit()
@@ -189,7 +238,7 @@ class ReleaseEditorDialog(QDialog):
 
         metadata_layout.addWidget(metadata_box)
         metadata_layout.addStretch(1)
-        splitter.addWidget(metadata_panel)
+        splitter.addWidget(metadata_scroll)
 
         tracks_panel = QWidget(splitter)
         tracks_layout = QVBoxLayout(tracks_panel)
@@ -201,31 +250,33 @@ class ReleaseEditorDialog(QDialog):
         tracks_box_layout.setContentsMargins(12, 12, 12, 12)
         tracks_box_layout.setSpacing(10)
 
-        action_row = QHBoxLayout()
-        action_row.setContentsMargins(0, 0, 0, 0)
-        action_row.setSpacing(8)
-        action_row.addStretch(1)
-
         add_selected_button = QPushButton("Add Selected Tracks")
         add_selected_button.clicked.connect(self._add_selected_tracks)
-        action_row.addWidget(add_selected_button)
 
         remove_rows_button = QPushButton("Remove Highlighted")
         remove_rows_button.clicked.connect(self._remove_selected_rows)
-        action_row.addWidget(remove_rows_button)
 
         move_up_button = QPushButton("Move Up")
         move_up_button.clicked.connect(lambda: self._move_selected_row(-1))
-        action_row.addWidget(move_up_button)
 
         move_down_button = QPushButton("Move Down")
         move_down_button.clicked.connect(lambda: self._move_selected_row(1))
-        action_row.addWidget(move_down_button)
 
         renumber_button = QPushButton("Renumber")
         renumber_button.clicked.connect(self._renumber_rows)
-        action_row.addWidget(renumber_button)
-        tracks_box_layout.addLayout(action_row)
+        tracks_box_layout.addWidget(
+            _create_action_button_grid(
+                tracks_box,
+                [
+                    add_selected_button,
+                    remove_rows_button,
+                    move_up_button,
+                    move_down_button,
+                    renumber_button,
+                ],
+                columns=2,
+            )
+        )
 
         self.tracks_table = QTableWidget(0, 5, tracks_box)
         self.tracks_table.setHorizontalHeaderLabels(
@@ -284,8 +335,8 @@ class ReleaseEditorDialog(QDialog):
         self.original_release_date_edit.setText(release.original_release_date or "")
         self.label_edit.setText(release.label or "")
         self.sublabel_edit.setText(release.sublabel or "")
-        self.catalog_number_edit.setText(release.catalog_number or "")
-        self.upc_edit.setText(release.upc or "")
+        self.catalog_number_edit.setCurrentText(release.catalog_number or "")
+        self.upc_edit.setCurrentText(release.upc or "")
         self.territory_edit.setText(release.territory or "")
         self.status_combo.setCurrentText(
             (release.repertoire_status or "").replace("_", " ").title()
@@ -446,8 +497,8 @@ class ReleaseEditorDialog(QDialog):
             original_release_date=self.original_release_date_edit.text().strip() or None,
             label=self.label_edit.text().strip() or None,
             sublabel=self.sublabel_edit.text().strip() or None,
-            catalog_number=self.catalog_number_edit.text().strip() or None,
-            upc=self.upc_edit.text().strip() or None,
+            catalog_number=self.catalog_number_edit.currentText().strip() or None,
+            upc=self.upc_edit.currentText().strip() or None,
             territory=self.territory_edit.text().strip() or None,
             explicit_flag=self.explicit_checkbox.isChecked(),
             repertoire_status=self.status_combo.currentText().strip().lower().replace(" ", "_")
@@ -488,8 +539,8 @@ class ReleaseBrowserPanel(QWidget):
     open_track_requested = Signal(int)
     edit_release_requested = Signal(int)
     duplicate_release_requested = Signal(int)
-    add_selected_tracks_requested = Signal(int)
-    create_release_requested = Signal()
+    add_selected_tracks_requested = Signal(int, list)
+    create_release_requested = Signal(list)
     close_requested = Signal()
 
     def __init__(
@@ -497,13 +548,18 @@ class ReleaseBrowserPanel(QWidget):
         *,
         release_service_provider,
         track_title_resolver,
+        selected_track_ids_provider=None,
+        track_choice_provider=None,
         parent=None,
     ):
         super().__init__(parent)
         self.release_service_provider = release_service_provider
         self.track_title_resolver = track_title_resolver
+        self.selected_track_ids_provider = selected_track_ids_provider or (lambda: [])
+        self.track_choice_provider = track_choice_provider or (lambda: [])
         self._release_ids_by_row: list[int] = []
         self._current_summary: ReleaseSummary | None = None
+        self._selection_override_track_ids: list[int] = []
 
         self.setObjectName("releaseBrowserPanel")
         _apply_standard_widget_chrome(self, "releaseBrowserPanel")
@@ -528,16 +584,21 @@ class ReleaseBrowserPanel(QWidget):
         )
         controls = QHBoxLayout()
         controls.setContentsMargins(0, 0, 0, 0)
-        controls.setSpacing(8)
+        controls.setSpacing(10)
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("Search releases...")
         self.search_edit.textChanged.connect(self.refresh)
         controls.addWidget(self.search_edit, 1)
 
         new_button = QPushButton("Create Release")
-        new_button.clicked.connect(self.create_release_requested.emit)
+        new_button.clicked.connect(self._emit_create_release_current)
         controls.addWidget(new_button)
         controls_layout.addLayout(controls)
+        self.selection_banner = SelectionScopeBanner(parent=self)
+        self.selection_banner.use_current_button.clicked.connect(self._use_current_selection)
+        self.selection_banner.choose_button.clicked.connect(self._choose_tracks)
+        self.selection_banner.clear_override_button.clicked.connect(self._clear_selection_override)
+        controls_layout.addWidget(self.selection_banner)
         root.addWidget(controls_box)
 
         splitter = QSplitter(Qt.Horizontal, self)
@@ -587,7 +648,7 @@ class ReleaseBrowserPanel(QWidget):
 
         overview_tab = QWidget(detail_tabs)
         overview_tab_layout = QVBoxLayout(overview_tab)
-        overview_tab_layout.setContentsMargins(0, 0, 0, 0)
+        overview_tab_layout.setContentsMargins(0, 8, 0, 0)
         overview_tab_layout.setSpacing(0)
         overview_scroll, _, overview_layout = _create_scrollable_dialog_content(self)
 
@@ -653,7 +714,7 @@ class ReleaseBrowserPanel(QWidget):
 
         tracks_tab = QWidget(detail_tabs)
         tracks_tab_layout = QVBoxLayout(tracks_tab)
-        tracks_tab_layout.setContentsMargins(0, 0, 0, 0)
+        tracks_tab_layout.setContentsMargins(0, 8, 0, 0)
         tracks_tab_layout.setSpacing(0)
         tracks_box, tracks_box_layout = _create_standard_section(
             self,
@@ -681,8 +742,10 @@ class ReleaseBrowserPanel(QWidget):
         )
         action_grid = QGridLayout()
         action_grid.setContentsMargins(0, 0, 0, 0)
-        action_grid.setHorizontalSpacing(8)
-        action_grid.setVerticalSpacing(8)
+        action_grid.setHorizontalSpacing(12)
+        action_grid.setVerticalSpacing(10)
+        action_grid.setColumnStretch(0, 1)
+        action_grid.setColumnStretch(1, 1)
         edit_button = QPushButton("Edit Release")
         edit_button.clicked.connect(self._emit_edit_current)
         action_grid.addWidget(edit_button, 0, 0)
@@ -714,12 +777,14 @@ class ReleaseBrowserPanel(QWidget):
 
         _apply_compact_dialog_control_heights(self)
         self.refresh()
+        self.refresh_selection_scope()
 
     def _release_service(self) -> ReleaseService | None:
         service = self.release_service_provider()
         return service
 
     def refresh(self) -> None:
+        selected_release_id = self._selected_release_id()
         service = self._release_service()
         if service is None:
             self._release_ids_by_row = []
@@ -728,6 +793,7 @@ class ReleaseBrowserPanel(QWidget):
             self.release_count_label.setText("Open a profile first to browse releases.")
             for label in self._summary_fields.values():
                 label.setText("")
+            self.refresh_selection_scope()
             return
 
         releases = service.list_releases(search_text=self.search_edit.text().strip())
@@ -748,18 +814,104 @@ class ReleaseBrowserPanel(QWidget):
             ]
             for column, value in enumerate(values):
                 self.release_table.setItem(row, column, QTableWidgetItem(value))
+        restored = self._restore_release_selection(selected_release_id)
         if releases:
-            self.release_table.selectRow(0)
+            if not restored:
+                self.release_table.selectRow(0)
         else:
             for label in self._summary_fields.values():
                 label.setText("")
             self.track_table.setRowCount(0)
+        self.refresh_selection_scope()
 
     def _selected_release_id(self) -> int | None:
         row = self.release_table.currentRow()
         if row < 0 or row >= len(self._release_ids_by_row):
             return None
         return int(self._release_ids_by_row[row])
+
+    def _restore_release_selection(self, release_id: int | None) -> bool:
+        if not release_id:
+            return False
+        for row, current_release_id in enumerate(self._release_ids_by_row):
+            if int(current_release_id) != int(release_id):
+                continue
+            self.release_table.selectRow(row)
+            return True
+        return False
+
+    def selected_track_ids(self) -> list[int]:
+        if self._selection_override_track_ids:
+            return [int(track_id) for track_id in self._selection_override_track_ids]
+        try:
+            return [int(track_id) for track_id in (self.selected_track_ids_provider() or [])]
+        except Exception:
+            return []
+
+    def selection_scope_state(self) -> SelectionScopeState:
+        track_ids = tuple(self.selected_track_ids())
+        override_active = bool(self._selection_override_track_ids)
+        source_label = "Pinned chooser override" if override_active else "Catalog selection"
+        return SelectionScopeState(
+            source_label=source_label,
+            track_ids=track_ids,
+            preview_text=build_selection_preview(track_ids, self.track_title_resolver),
+            override_active=override_active,
+        )
+
+    def refresh_selection_scope(self) -> None:
+        self.selection_banner.set_state(self.selection_scope_state())
+
+    def _use_current_selection(self) -> None:
+        self._selection_override_track_ids = []
+        self.refresh_selection_scope()
+
+    def _clear_selection_override(self) -> None:
+        self._selection_override_track_ids = []
+        self.refresh_selection_scope()
+
+    def _available_track_choices(self) -> list[TrackChoice]:
+        try:
+            choices = list(self.track_choice_provider() or [])
+        except Exception:
+            choices = []
+        normalized: list[TrackChoice] = []
+        seen: set[int] = set()
+        for choice in choices:
+            if isinstance(choice, TrackChoice):
+                track_id = int(choice.track_id)
+                title = choice.title
+                subtitle = choice.subtitle
+            else:
+                try:
+                    track_id = int(choice["track_id"])
+                except Exception:
+                    continue
+                title = str(choice.get("title") or "").strip()
+                subtitle = str(choice.get("subtitle") or "").strip()
+            if track_id <= 0 or track_id in seen:
+                continue
+            seen.add(track_id)
+            normalized.append(
+                TrackChoice(
+                    track_id=track_id,
+                    title=title or self.track_title_resolver(track_id),
+                    subtitle=subtitle,
+                )
+            )
+        return normalized
+
+    def _choose_tracks(self) -> None:
+        dialog = TrackSelectionChooserDialog(
+            track_choices=self._available_track_choices(),
+            initial_track_ids=self.selected_track_ids(),
+            title="Choose Release Scope Tracks",
+            parent=self,
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return
+        self._selection_override_track_ids = dialog.selected_track_ids()
+        self.refresh_selection_scope()
 
     def _load_selected_release(self) -> None:
         service = self._release_service()
@@ -821,7 +973,10 @@ class ReleaseBrowserPanel(QWidget):
     def _emit_add_selected_current(self) -> None:
         release_id = self._selected_release_id()
         if release_id is not None:
-            self.add_selected_tracks_requested.emit(release_id)
+            self.add_selected_tracks_requested.emit(release_id, self.selected_track_ids())
+
+    def _emit_create_release_current(self) -> None:
+        self.create_release_requested.emit(self.selected_track_ids())
 
     def _emit_filter_current(self) -> None:
         if self._current_summary is None:
@@ -849,14 +1004,16 @@ class ReleaseBrowserDialog(QDialog):
     open_track_requested = Signal(int)
     edit_release_requested = Signal(int)
     duplicate_release_requested = Signal(int)
-    add_selected_tracks_requested = Signal(int)
-    create_release_requested = Signal()
+    add_selected_tracks_requested = Signal(int, list)
+    create_release_requested = Signal(list)
 
     def __init__(
         self,
         *,
         release_service: ReleaseService,
         track_title_resolver,
+        selected_track_ids_provider=None,
+        track_choice_provider=None,
         parent=None,
     ):
         super().__init__(parent)
@@ -871,6 +1028,8 @@ class ReleaseBrowserDialog(QDialog):
         self.panel = ReleaseBrowserPanel(
             release_service_provider=lambda: release_service,
             track_title_resolver=track_title_resolver,
+            selected_track_ids_provider=selected_track_ids_provider,
+            track_choice_provider=track_choice_provider,
             parent=self,
         )
         self.panel.filter_requested.connect(self.filter_requested.emit)

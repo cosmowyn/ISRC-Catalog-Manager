@@ -29,12 +29,20 @@ from PySide6.QtWidgets import (
 
 from isrc_manager.ui_common import (
     _add_standard_dialog_header,
+    _create_action_button_grid,
     _apply_compact_dialog_control_heights,
     _apply_standard_dialog_chrome,
     _apply_standard_widget_chrome,
     _configure_standard_form_layout,
     _create_scrollable_dialog_content,
     _create_standard_section,
+)
+from isrc_manager.selection_scope import (
+    SelectionScopeBanner,
+    SelectionScopeState,
+    TrackChoice,
+    TrackSelectionChooserDialog,
+    build_selection_preview,
 )
 
 from .models import (
@@ -393,6 +401,11 @@ class WorkBrowserPanel(QWidget):
     """Browse, create, duplicate, and link first-class work records inside a workspace panel."""
 
     filter_requested = Signal(list)
+    create_requested = Signal(object)
+    update_requested = Signal(int, object)
+    duplicate_requested = Signal(int)
+    link_tracks_requested = Signal(int, list)
+    delete_requested = Signal(int)
 
     def __init__(
         self,
@@ -400,6 +413,7 @@ class WorkBrowserPanel(QWidget):
         work_service_provider,
         track_title_resolver,
         selected_track_ids_provider,
+        track_choice_provider=None,
         linked_track_id: int | None = None,
         parent=None,
     ):
@@ -407,7 +421,9 @@ class WorkBrowserPanel(QWidget):
         self.work_service_provider = work_service_provider
         self.track_title_resolver = track_title_resolver
         self.selected_track_ids_provider = selected_track_ids_provider
+        self.track_choice_provider = track_choice_provider or (lambda: [])
         self.linked_track_id = linked_track_id
+        self._selection_override_track_ids: list[int] = []
         self.setObjectName("workBrowserPanel")
         _apply_standard_widget_chrome(self, "workBrowserPanel")
 
@@ -431,7 +447,7 @@ class WorkBrowserPanel(QWidget):
         )
         controls = QHBoxLayout()
         controls.setContentsMargins(0, 0, 0, 0)
-        controls.setSpacing(8)
+        controls.setSpacing(10)
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText(
             "Search works by title, alternate title, ISWC, or registration #..."
@@ -451,16 +467,29 @@ class WorkBrowserPanel(QWidget):
         delete_button.clicked.connect(self.delete_selected)
         open_filter_button = QPushButton("Filter Main Table")
         open_filter_button.clicked.connect(self.filter_by_work_tracks)
-        for button in (
-            add_button,
-            edit_button,
-            duplicate_button,
-            link_button,
-            delete_button,
-            open_filter_button,
-        ):
-            controls.addWidget(button)
         controls_layout.addLayout(controls)
+        controls_layout.addWidget(
+            _create_action_button_grid(
+                self,
+                [
+                    add_button,
+                    edit_button,
+                    duplicate_button,
+                    link_button,
+                    delete_button,
+                    open_filter_button,
+                ],
+                columns=3,
+            )
+        )
+        self.selection_banner = SelectionScopeBanner(
+            chooser_label="Choose Tracks",
+            parent=self,
+        )
+        self.selection_banner.use_current_button.clicked.connect(self._use_current_selection)
+        self.selection_banner.choose_button.clicked.connect(self._choose_tracks)
+        self.selection_banner.clear_override_button.clicked.connect(self._clear_selection_override)
+        controls_layout.addWidget(self.selection_banner)
         root.addWidget(controls_box)
 
         table_box, table_layout = _create_standard_section(
@@ -489,6 +518,7 @@ class WorkBrowserPanel(QWidget):
         _apply_compact_dialog_control_heights(self)
 
         self.refresh()
+        self.refresh_selection_scope()
 
     def _work_service(self) -> WorkService | None:
         service = self.work_service_provider()
@@ -526,6 +556,7 @@ class WorkBrowserPanel(QWidget):
         service = self._work_service()
         if service is None:
             self.table.setRowCount(0)
+            self.refresh_selection_scope()
             return
 
         rows = service.list_works(
@@ -551,6 +582,80 @@ class WorkBrowserPanel(QWidget):
                 self.table.setItem(row, column, item)
         self.table.resizeColumnsToContents()
         self._restore_selection(selected_work_id)
+        self.refresh_selection_scope()
+
+    def selected_track_ids(self) -> list[int]:
+        if self._selection_override_track_ids:
+            return [int(track_id) for track_id in self._selection_override_track_ids]
+        try:
+            return [int(track_id) for track_id in (self.selected_track_ids_provider() or [])]
+        except Exception:
+            return []
+
+    def selection_scope_state(self) -> SelectionScopeState:
+        track_ids = tuple(self.selected_track_ids())
+        override_active = bool(self._selection_override_track_ids)
+        source_label = "Pinned chooser override" if override_active else "Catalog selection"
+        return SelectionScopeState(
+            source_label=source_label,
+            track_ids=track_ids,
+            preview_text=build_selection_preview(track_ids, self.track_title_resolver),
+            override_active=override_active,
+        )
+
+    def refresh_selection_scope(self) -> None:
+        self.selection_banner.set_state(self.selection_scope_state())
+
+    def _use_current_selection(self) -> None:
+        self._selection_override_track_ids = []
+        self.refresh_selection_scope()
+
+    def _clear_selection_override(self) -> None:
+        self._selection_override_track_ids = []
+        self.refresh_selection_scope()
+
+    def _available_track_choices(self) -> list[TrackChoice]:
+        try:
+            choices = list(self.track_choice_provider() or [])
+        except Exception:
+            choices = []
+        normalized: list[TrackChoice] = []
+        seen: set[int] = set()
+        for choice in choices:
+            if isinstance(choice, TrackChoice):
+                track_id = int(choice.track_id)
+                title = choice.title
+                subtitle = choice.subtitle
+            else:
+                try:
+                    track_id = int(choice["track_id"])
+                except Exception:
+                    continue
+                title = str(choice.get("title") or "").strip()
+                subtitle = str(choice.get("subtitle") or "").strip()
+            if track_id <= 0 or track_id in seen:
+                continue
+            seen.add(track_id)
+            normalized.append(
+                TrackChoice(
+                    track_id=track_id,
+                    title=title or self.track_title_resolver(track_id),
+                    subtitle=subtitle,
+                )
+            )
+        return normalized
+
+    def _choose_tracks(self) -> None:
+        dialog = TrackSelectionChooserDialog(
+            track_choices=self._available_track_choices(),
+            initial_track_ids=self.selected_track_ids(),
+            title="Choose Work Scope Tracks",
+            parent=self,
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return
+        self._selection_override_track_ids = dialog.selected_track_ids()
+        self.refresh_selection_scope()
 
     def _edit_dialog_for(self, work_id: int | None = None) -> WorkEditorDialog:
         service = self._work_service()
@@ -570,10 +675,12 @@ class WorkBrowserPanel(QWidget):
                 for item in detail.contributors
             ]
             track_ids = list(detail.track_ids)
+        elif work_id is None:
+            track_ids = list(self.selected_track_ids())
         return WorkEditorDialog(
             work_service=service,
             track_title_resolver=self.track_title_resolver,
-            selected_track_ids_provider=self.selected_track_ids_provider,
+            selected_track_ids_provider=self.selected_track_ids,
             work=detail.work if detail is not None else None,
             contributors=contributors,
             track_ids=track_ids,
@@ -588,12 +695,7 @@ class WorkBrowserPanel(QWidget):
         dialog = self._edit_dialog_for()
         if dialog.exec() != QDialog.Accepted:
             return
-        try:
-            service.create_work(dialog.payload())
-        except Exception as exc:
-            QMessageBox.critical(self, "Work Manager", str(exc))
-            return
-        self.refresh()
+        self.create_requested.emit(dialog.payload())
 
     def edit_selected(self) -> None:
         service = self._work_service()
@@ -607,12 +709,7 @@ class WorkBrowserPanel(QWidget):
         dialog = self._edit_dialog_for(work_id)
         if dialog.exec() != QDialog.Accepted:
             return
-        try:
-            service.update_work(work_id, dialog.payload())
-        except Exception as exc:
-            QMessageBox.critical(self, "Work Manager", str(exc))
-            return
-        self.refresh()
+        self.update_requested.emit(work_id, dialog.payload())
 
     def duplicate_selected(self) -> None:
         service = self._work_service()
@@ -623,12 +720,7 @@ class WorkBrowserPanel(QWidget):
         if not work_id:
             QMessageBox.information(self, "Work Manager", "Select a work first.")
             return
-        try:
-            service.duplicate_work(work_id)
-        except Exception as exc:
-            QMessageBox.critical(self, "Work Manager", str(exc))
-            return
-        self.refresh()
+        self.duplicate_requested.emit(work_id)
 
     def link_selected_tracks(self) -> None:
         service = self._work_service()
@@ -639,14 +731,13 @@ class WorkBrowserPanel(QWidget):
         if not work_id:
             QMessageBox.information(self, "Work Manager", "Select a work first.")
             return
-        track_ids = list(self.selected_track_ids_provider() or [])
+        track_ids = list(self.selected_track_ids())
         if not track_ids:
             QMessageBox.information(
                 self, "Work Manager", "Select one or more tracks in the main table first."
             )
             return
-        service.link_tracks_to_work(work_id, track_ids)
-        self.refresh()
+        self.link_tracks_requested.emit(work_id, track_ids)
 
     def delete_selected(self) -> None:
         service = self._work_service()
@@ -662,8 +753,7 @@ class WorkBrowserPanel(QWidget):
             != QMessageBox.Yes
         ):
             return
-        service.delete_work(work_id)
-        self.refresh()
+        self.delete_requested.emit(work_id)
 
     def filter_by_work_tracks(self) -> None:
         service = self._work_service()
@@ -684,6 +774,11 @@ class WorkBrowserDialog(QDialog):
     """Compatibility dialog wrapper around the reusable work manager panel."""
 
     filter_requested = Signal(list)
+    create_requested = Signal(object)
+    update_requested = Signal(int, object)
+    duplicate_requested = Signal(int)
+    link_tracks_requested = Signal(int, list)
+    delete_requested = Signal(int)
 
     def __init__(
         self,
@@ -691,6 +786,7 @@ class WorkBrowserDialog(QDialog):
         work_service: WorkService,
         track_title_resolver,
         selected_track_ids_provider,
+        track_choice_provider=None,
         linked_track_id: int | None = None,
         parent=None,
     ):
@@ -707,10 +803,16 @@ class WorkBrowserDialog(QDialog):
             work_service_provider=lambda: work_service,
             track_title_resolver=track_title_resolver,
             selected_track_ids_provider=selected_track_ids_provider,
+            track_choice_provider=track_choice_provider,
             linked_track_id=linked_track_id,
             parent=self,
         )
         self.panel.filter_requested.connect(self.filter_requested.emit)
+        self.panel.create_requested.connect(self.create_requested.emit)
+        self.panel.update_requested.connect(self.update_requested.emit)
+        self.panel.duplicate_requested.connect(self.duplicate_requested.emit)
+        self.panel.link_tracks_requested.connect(self.link_tracks_requested.emit)
+        self.panel.delete_requested.connect(self.delete_requested.emit)
         root.addWidget(self.panel)
 
     def __getattr__(self, name: str):

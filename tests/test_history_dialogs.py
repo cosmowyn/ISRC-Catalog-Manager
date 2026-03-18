@@ -114,6 +114,7 @@ class HistoryDialogTests(unittest.TestCase):
                 fake_app = _FakeHistoryApp(history)
                 dialog = HistoryDialog(fake_app)
                 try:
+                    self.assertEqual(dialog.property("role"), "panel")
                     self.assertEqual(dialog.session_table.rowCount(), 0)
                     self.assertEqual(dialog.history_table.rowCount(), 1)
                     self.assertEqual(dialog.history_table.item(0, 2).text(), "Update Settings")

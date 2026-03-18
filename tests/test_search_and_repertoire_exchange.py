@@ -246,6 +246,31 @@ class SearchAndRepertoireExchangeTests(unittest.TestCase):
         entity_types = {item.entity_type for item in search_results}
         self.assertTrue({"work", "track"} <= entity_types)
 
+        for suffix in range(3):
+            self.track_service.create_track(
+                TrackCreatePayload(
+                    isrc=f"NL-ABC-26-1{suffix:04d}",
+                    track_title=f"Preview Track {suffix + 1}",
+                    artist_name="Nova",
+                    additional_artists=[],
+                    album_title="Night Runs",
+                    release_date="2026-03-16",
+                    track_length_sec=180 + suffix,
+                    iswc=None,
+                    upc=None,
+                    genre="Synth",
+                )
+            )
+        overview_results = self.search_service.browse_default_view(limit=200, preview_limit=2)
+        self.assertGreater(len(overview_results), 0)
+        overview_entity_types = {item.entity_type for item in overview_results}
+        self.assertTrue({"work", "track", "release"} <= overview_entity_types)
+        track_preview = self.search_service.browse_default_view(
+            entity_types=["track"], limit=200, preview_limit=2
+        )
+        self.assertTrue(all(item.entity_type == "track" for item in track_preview))
+        self.assertLessEqual(len(track_preview), 2)
+
         saved_id = self.search_service.save_search("Midnight Works", "Midnight", ["work", "track"])
         updated_id = self.search_service.save_search("Midnight Works", "Nova", ["party"])
         self.assertEqual(saved_id, updated_id)

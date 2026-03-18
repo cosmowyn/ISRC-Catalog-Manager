@@ -408,6 +408,82 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.assertEqual(len(visible_rows), 1)
         self.assertFalse(dock.isHidden())
 
+    def test_release_browser_filter_replaces_active_search_filter(self):
+        release_track_ids = [
+            self._create_track(index=141, title="Release Filter One", album_title="Filter Release"),
+            self._create_track(index=142, title="Release Filter Two", album_title="Filter Release"),
+        ]
+        other_track_id = self._create_track(index=143, title="Unrelated Search Match")
+        self.window.release_service.create_release(
+            app_module.ReleasePayload(
+                title="Filter Release",
+                primary_artist="Cosmowyn",
+                release_type="album",
+                release_date="2026-03-17",
+                placements=[
+                    app_module.ReleaseTrackPlacement(
+                        track_id=track_id,
+                        disc_number=1,
+                        track_number=index + 1,
+                        sequence_number=index + 1,
+                    )
+                    for index, track_id in enumerate(release_track_ids)
+                ],
+            )
+        )
+        self.window.refresh_table()
+        self.window.search_field.setText("Unrelated Search Match")
+        self.window.apply_search_filter()
+        self.app.processEvents()
+        visible_before = [
+            int(self.window.table.item(row, 0).text())
+            for row in range(self.window.table.rowCount())
+            if not self.window.table.isRowHidden(row)
+        ]
+        self.assertEqual(visible_before, [other_track_id])
+
+        self.window.open_release_browser()
+        self.app.processEvents()
+        panel = self.window.release_browser_dock.widget()
+        panel.release_table.selectRow(0)
+        panel._emit_filter_current()
+        self.app.processEvents()
+
+        visible_after = {
+            int(self.window.table.item(row, 0).text())
+            for row in range(self.window.table.rowCount())
+            if not self.window.table.isRowHidden(row)
+        }
+        self.assertEqual(visible_after, set(release_track_ids))
+        self.assertEqual(self.window.search_field.text(), "")
+        self.assertEqual(set(self.window._selected_track_ids()), set(release_track_ids))
+
+    def test_release_browser_selection_scope_tracks_catalog_selection_and_override(self):
+        track_ids = [
+            self._create_track(index=151, title="Selection Orbit One"),
+            self._create_track(index=152, title="Selection Orbit Two"),
+            self._create_track(index=153, title="Selection Orbit Three"),
+        ]
+        self.window.refresh_table()
+        self._select_track_ids(track_ids[:2])
+
+        self.window.open_release_browser()
+        self.app.processEvents()
+
+        panel = self.window.release_browser_dock.widget()
+        state = panel.selection_scope_state()
+        self.assertEqual(state.track_ids, tuple(track_ids[:2]))
+        self.assertEqual(state.source_label, "Catalog selection")
+        self.assertIn("Selection Orbit One", state.preview_text)
+        self.assertFalse(state.override_active)
+
+        panel._selection_override_track_ids = [track_ids[2]]
+        panel.refresh_selection_scope()
+        override_state = panel.selection_scope_state()
+        self.assertEqual(override_state.track_ids, (track_ids[2],))
+        self.assertTrue(override_state.override_active)
+        self.assertEqual(panel.selection_banner.scope_label.text(), "Pinned chooser override")
+
     def test_work_manager_dock_uses_live_track_selection(self):
         track_ids = [
             self._create_track(index=111, title="Work Dock One"),
@@ -430,16 +506,19 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.assertEqual(dock.objectName(), "workManagerDock")
         self.assertEqual(panel.objectName(), "workBrowserPanel")
         self.assertIn(dock, self.window.tabifiedDockWidgets(self.window.catalog_table_dock))
+        self.assertEqual(panel.selection_scope_state().track_ids, tuple(track_ids[:2]))
 
         panel.table.selectRow(0)
         panel.link_selected_tracks()
         detail = self.window.work_service.fetch_work_detail(work_id)
         self.assertEqual(set(detail.track_ids), set(track_ids[:2]))
 
-        self._select_track_ids([track_ids[2]])
+        panel._selection_override_track_ids = [track_ids[2]]
+        panel.refresh_selection_scope()
         panel.link_selected_tracks()
         detail = self.window.work_service.fetch_work_detail(work_id)
         self.assertEqual(set(detail.track_ids), set(track_ids))
+        self.assertTrue(panel.selection_scope_state().override_active)
         self.assertFalse(dock.isHidden())
 
     def test_global_search_opens_as_dock_and_keeps_entity_navigation_live(self):
@@ -455,6 +534,9 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.assertEqual(dock.objectName(), "globalSearchDock")
         self.assertEqual(panel.objectName(), "globalSearchPanel")
         self.assertIn(dock, self.window.tabifiedDockWidgets(self.window.catalog_table_dock))
+        self.assertGreaterEqual(panel.results_table.rowCount(), 1)
+        self.assertEqual(panel.results_table.currentRow(), -1)
+        self.assertIn("catalog overview", panel.results_status_label.text().lower())
 
         panel.entity_combo.setCurrentText("Tracks")
         panel.search_edit.setText("Searchable Dock Track")
@@ -480,8 +562,28 @@ class AppShellIntegrationTests(unittest.TestCase):
         )
 
         self.assertEqual(panel.tabs.currentWidget(), panel.licensees_tab)
-        self.assertEqual(panel.tabs.tabText(panel.tabs.currentIndex()), "Licensees")
+        self.assertEqual(panel.tabs.tabText(panel.tabs.currentIndex()), "Legacy Licensees")
         self.assertTrue(panel.isVisible())
+
+    def test_catalog_menu_hides_top_level_release_creation_and_groups_legacy_tools(self):
+        catalog_action = next(
+            action for action in self.window.menuBar().actions() if action.text() == "Catalog"
+        )
+        catalog_menu = catalog_action.menu()
+        menu_texts = [action.text() for action in catalog_menu.actions() if action.text()]
+        self.assertNotIn("Create Release from Selection…", menu_texts)
+        self.assertNotIn("Add Selected Tracks to Release…", menu_texts)
+        legacy_action = next(
+            action
+            for action in catalog_menu.actions()
+            if action.menu() is not None and action.text() == "Legacy License Archive"
+        )
+        legacy_menu = legacy_action.menu()
+        legacy_texts = [action.text() for action in legacy_menu.actions() if action.text()]
+        self.assertIn("License Browser…", legacy_texts)
+        self.assertIn("Migrate Legacy Licenses to Contracts…", legacy_texts)
+        self.assertNotIn("create_release", self.window._action_ribbon_specs_by_id)
+        self.assertNotIn("add_selected_to_release", self.window._action_ribbon_specs_by_id)
 
     def test_license_browser_opens_as_tabified_dock_and_applies_track_filter(self):
         track_id = self._create_track(index=131, title="Licensed Track")
@@ -646,6 +748,8 @@ class AppShellIntegrationTests(unittest.TestCase):
             self.assertTrue(
                 any(area.property("role") == "workspaceCanvas" for area in scroll_areas)
             )
+            self.assertIsInstance(dialog.upc, app_module.QComboBox)
+            self.assertTrue(dialog.upc.isEditable())
         finally:
             dialog.close()
 
@@ -680,8 +784,30 @@ class AppShellIntegrationTests(unittest.TestCase):
             )
             current_page = dialog.primary_tabs.currentWidget()
             self.assertEqual(current_page.property("role"), "workspaceCanvas")
+            self.assertIsInstance(dialog.catalog_number, app_module.QComboBox)
+            self.assertTrue(dialog.catalog_number.isEditable())
         finally:
             dialog.close()
+
+    def test_add_data_comboboxes_include_release_level_catalog_values(self):
+        with self.window.conn:
+            self.window.conn.execute(
+                """
+                INSERT INTO Releases(title, release_type, upc, catalog_number)
+                VALUES (?, ?, ?, ?)
+                """,
+                ("Overview Release", "album", "8720892724990", "CAT-REL-900"),
+            )
+
+        self.window.populate_all_comboboxes()
+
+        upc_values = [self.window.upc_field.itemText(index) for index in range(self.window.upc_field.count())]
+        catalog_values = [
+            self.window.catalog_number_field.itemText(index)
+            for index in range(self.window.catalog_number_field.count())
+        ]
+        self.assertIn("8720892724990", upc_values)
+        self.assertIn("CAT-REL-900", catalog_values)
 
     def test_gs1_dialog_uses_top_level_workflow_tabs(self):
         track_id = self.window.track_service.create_track(

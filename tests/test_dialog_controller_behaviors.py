@@ -39,6 +39,7 @@ class _SearchService:
         self.saved_args = None
         self.deleted_ids = []
         self.raise_on_save = None
+        self.last_browse = None
 
     def list_saved_searches(self):
         return list(self.saved)
@@ -47,6 +48,10 @@ class _SearchService:
         self.last_search = (query_text, entity_types, limit)
         if not query_text.strip():
             return []
+        return list(self.results)
+
+    def browse_default_view(self, entity_types=None, limit=200, preview_limit=8):
+        self.last_browse = (entity_types, limit, preview_limit)
         return list(self.results)
 
     def save_search(self, name, query_text, entity_types):
@@ -177,6 +182,11 @@ class DialogControllerBehaviorTests(unittest.TestCase):
             lambda entity_type, entity_id: opened.append((entity_type, entity_id))
         )
         try:
+            self.assertEqual(search_service.last_browse, (None, 200, 8))
+            self.assertEqual(dialog.results_table.rowCount(), 1)
+            self.assertEqual(dialog.results_table.currentRow(), -1)
+            self.assertIn("catalog overview", dialog.results_status_label.text().lower())
+
             with mock.patch.object(QMessageBox, "information", return_value=None) as info:
                 dialog.open_selected_result()
             info.assert_called_once()
@@ -286,36 +296,54 @@ class DialogControllerBehaviorTests(unittest.TestCase):
 
     def test_work_browser_handles_empty_selection_filtering_and_delete_confirmation(self):
         service = _WorkService()
+        selected_track_ids: list[int] = []
         dialog = WorkBrowserDialog(
             work_service=service,
             track_title_resolver=lambda track_id: f"Track {track_id}",
-            selected_track_ids_provider=lambda: [],
+            selected_track_ids_provider=lambda: list(selected_track_ids),
         )
         emitted_filters = []
+        emitted_links = []
+        emitted_deletes = []
         dialog.filter_requested.connect(lambda track_ids: emitted_filters.append(track_ids))
+        dialog.link_tracks_requested.connect(
+            lambda work_id, track_ids: emitted_links.append((work_id, track_ids))
+        )
+        dialog.delete_requested.connect(lambda work_id: emitted_deletes.append(work_id))
         try:
             with mock.patch.object(QMessageBox, "information", return_value=None) as info:
                 dialog.link_selected_tracks()
             info.assert_called_once()
 
+            selected_track_ids[:] = [11, 12]
+            dialog.refresh_selection_scope()
+            self.assertEqual(dialog.selection_scope_state().track_ids, (11, 12))
+            self.assertEqual(dialog.selection_scope_state().source_label, "Catalog selection")
+
             dialog.table.selectRow(0)
             self.app.processEvents()
 
-            with mock.patch.object(QMessageBox, "information", return_value=None) as info:
-                dialog.link_selected_tracks()
-            info.assert_called_once()
-            self.assertEqual(service.link_calls, [])
+            dialog.link_selected_tracks()
+            self.assertEqual(emitted_links, [(1, [11, 12])])
+
+            dialog.panel._selection_override_track_ids = [12]
+            dialog.refresh_selection_scope()
+            self.assertTrue(dialog.selection_scope_state().override_active)
+            self.assertEqual(dialog.selection_scope_state().track_ids, (12,))
+
+            dialog.link_selected_tracks()
+            self.assertEqual(emitted_links[-1], (1, [12]))
 
             dialog.filter_by_work_tracks()
             self.assertEqual(emitted_filters, [[11, 12]])
 
             with mock.patch.object(QMessageBox, "question", return_value=QMessageBox.No):
                 dialog.delete_selected()
-            self.assertEqual(service.delete_calls, [])
+            self.assertEqual(emitted_deletes, [])
 
             with mock.patch.object(QMessageBox, "question", return_value=QMessageBox.Yes):
                 dialog.delete_selected()
-            self.assertEqual(service.delete_calls, [1])
+            self.assertEqual(emitted_deletes, [1])
         finally:
             dialog.close()
 

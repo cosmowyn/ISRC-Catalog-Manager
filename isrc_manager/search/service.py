@@ -13,8 +13,38 @@ from .models import GlobalSearchResult, RelationshipSection, SavedSearchRecord
 class GlobalSearchService:
     """Runs lightweight cross-entity search over the local workspace."""
 
+    _ENTITY_ORDER = {
+        "work": 0,
+        "track": 1,
+        "release": 2,
+        "contract": 3,
+        "right": 4,
+        "party": 5,
+        "document": 6,
+        "asset": 7,
+    }
+
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
+
+    @staticmethod
+    def _normalized_entity_types(entity_types: list[str] | None) -> set[str]:
+        return {
+            str(item).strip().lower()
+            for item in (entity_types or [])
+            if str(item).strip()
+        }
+
+    @classmethod
+    def _sort_results(cls, results: list[GlobalSearchResult]) -> list[GlobalSearchResult]:
+        return sorted(
+            results,
+            key=lambda item: (
+                cls._ENTITY_ORDER.get(item.entity_type, 999),
+                item.title.casefold(),
+                int(item.entity_id),
+            ),
+        )
 
     def search(
         self,
@@ -26,7 +56,7 @@ class GlobalSearchService:
         clean_query = clean_text(query_text)
         if not clean_query:
             return []
-        allowed = {item.strip().lower() for item in (entity_types or []) if str(item).strip()}
+        allowed = self._normalized_entity_types(entity_types)
         like = f"%{clean_query}%"
         results: list[GlobalSearchResult] = []
 
@@ -207,8 +237,194 @@ class GlobalSearchService:
                         str(row[1] or ""),
                     )
                 )
-        results.sort(key=lambda item: (item.entity_type, item.title.casefold(), item.entity_id))
-        return results[:limit]
+        return self._sort_results(results)[:limit]
+
+    def browse_default_view(
+        self,
+        entity_types: list[str] | None = None,
+        *,
+        limit: int = 100,
+        preview_limit: int = 8,
+    ) -> list[GlobalSearchResult]:
+        allowed = self._normalized_entity_types(entity_types)
+        total_limit = max(0, int(limit))
+        preview_limit = max(0, int(preview_limit))
+        results: list[GlobalSearchResult] = []
+
+        def include(entity_type: str) -> bool:
+            return not allowed or entity_type in allowed
+
+        def extend(rows, factory) -> None:
+            for row in rows:
+                results.append(factory(row))
+
+        if include("work"):
+            extend(
+                self.conn.execute(
+                    """
+                    SELECT id, title, COALESCE(iswc, ''), COALESCE(work_status, '')
+                    FROM Works
+                    ORDER BY title, id
+                    LIMIT ?
+                    """,
+                    (preview_limit,),
+                ).fetchall(),
+                lambda row: GlobalSearchResult(
+                    "work",
+                    int(row[0]),
+                    str(row[1] or ""),
+                    str(row[2] or ""),
+                    clean_text(row[3]),
+                    str(row[1] or ""),
+                ),
+            )
+        if include("track"):
+            extend(
+                self.conn.execute(
+                    """
+                    SELECT
+                        t.id,
+                        t.track_title,
+                        COALESCE(a.name, ''),
+                        COALESCE(t.isrc, ''),
+                        COALESCE(t.repertoire_status, '')
+                    FROM Tracks t
+                    LEFT JOIN Artists a ON a.id = t.main_artist_id
+                    ORDER BY t.track_title, t.id
+                    LIMIT ?
+                    """,
+                    (preview_limit,),
+                ).fetchall(),
+                lambda row: GlobalSearchResult(
+                    "track",
+                    int(row[0]),
+                    str(row[1] or ""),
+                    " / ".join(part for part in (row[2], row[3]) if part),
+                    clean_text(row[4]),
+                    str(row[1] or ""),
+                ),
+            )
+        if include("release"):
+            extend(
+                self.conn.execute(
+                    """
+                    SELECT id, title, COALESCE(primary_artist, ''), COALESCE(upc, ''), COALESCE(repertoire_status, '')
+                    FROM Releases
+                    ORDER BY title, id
+                    LIMIT ?
+                    """,
+                    (preview_limit,),
+                ).fetchall(),
+                lambda row: GlobalSearchResult(
+                    "release",
+                    int(row[0]),
+                    str(row[1] or ""),
+                    " / ".join(part for part in (row[2], row[3]) if part),
+                    clean_text(row[4]),
+                    str(row[1] or ""),
+                ),
+            )
+        if include("contract"):
+            extend(
+                self.conn.execute(
+                    """
+                    SELECT id, title, COALESCE(contract_type, ''), status
+                    FROM Contracts
+                    ORDER BY title, id
+                    LIMIT ?
+                    """,
+                    (preview_limit,),
+                ).fetchall(),
+                lambda row: GlobalSearchResult(
+                    "contract",
+                    int(row[0]),
+                    str(row[1] or ""),
+                    str(row[2] or ""),
+                    clean_text(row[3]),
+                    str(row[1] or ""),
+                ),
+            )
+        if include("right"):
+            extend(
+                self.conn.execute(
+                    """
+                    SELECT id, COALESCE(title, right_type), COALESCE(territory, ''), right_type
+                    FROM RightsRecords
+                    ORDER BY COALESCE(title, right_type), id
+                    LIMIT ?
+                    """,
+                    (preview_limit,),
+                ).fetchall(),
+                lambda row: GlobalSearchResult(
+                    "right",
+                    int(row[0]),
+                    str(row[1] or ""),
+                    str(row[2] or ""),
+                    str(row[3] or ""),
+                    str(row[1] or ""),
+                ),
+            )
+        if include("party"):
+            extend(
+                self.conn.execute(
+                    """
+                    SELECT id, legal_name, COALESCE(display_name, ''), COALESCE(email, ''), party_type
+                    FROM Parties
+                    ORDER BY legal_name, id
+                    LIMIT ?
+                    """,
+                    (preview_limit,),
+                ).fetchall(),
+                lambda row: GlobalSearchResult(
+                    "party",
+                    int(row[0]),
+                    str(row[1] or ""),
+                    " / ".join(part for part in (row[2], row[3]) if part),
+                    clean_text(row[4]),
+                    str(row[1] or ""),
+                ),
+            )
+        if include("document"):
+            extend(
+                self.conn.execute(
+                    """
+                    SELECT id, title, COALESCE(filename, ''), document_type
+                    FROM ContractDocuments
+                    ORDER BY title, id
+                    LIMIT ?
+                    """,
+                    (preview_limit,),
+                ).fetchall(),
+                lambda row: GlobalSearchResult(
+                    "document",
+                    int(row[0]),
+                    str(row[1] or ""),
+                    str(row[2] or ""),
+                    str(row[3] or ""),
+                    str(row[1] or ""),
+                ),
+            )
+        if include("asset"):
+            extend(
+                self.conn.execute(
+                    """
+                    SELECT id, filename, asset_type, COALESCE(version_status, '')
+                    FROM AssetVersions
+                    ORDER BY filename, id
+                    LIMIT ?
+                    """,
+                    (preview_limit,),
+                ).fetchall(),
+                lambda row: GlobalSearchResult(
+                    "asset",
+                    int(row[0]),
+                    str(row[1] or ""),
+                    str(row[2] or ""),
+                    clean_text(row[3]),
+                    str(row[1] or ""),
+                ),
+            )
+        return self._sort_results(results)[:total_limit]
 
     def save_search(self, name: str, query_text: str, entity_types: list[str] | None = None) -> int:
         clean_name = clean_text(name)

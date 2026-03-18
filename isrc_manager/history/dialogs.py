@@ -18,6 +18,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from isrc_manager.ui_common import _apply_standard_dialog_chrome
+
 
 class HistoryDialog(QDialog):
     """Simple history and snapshot browser."""
@@ -25,35 +27,10 @@ class HistoryDialog(QDialog):
     def __init__(self, app, parent=None):
         super().__init__(parent or app)
         self.app = app
-        self.setObjectName("historyDialog")
         self.setWindowTitle("Undo History")
         self.resize(1040, 720)
         self.setMinimumSize(940, 640)
-        self.setStyleSheet(
-            """
-            QDialog#historyDialog QLabel[role="dialogTitle"] {
-                font-size: 26px;
-                font-weight: 700;
-            }
-            QDialog#historyDialog QLabel[role="dialogSubtitle"] {
-                color: #64748b;
-                font-size: 15px;
-            }
-            QDialog#historyDialog QLabel[role="supportingText"] {
-                color: #52606d;
-            }
-            QDialog#historyDialog QGroupBox {
-                font-size: 15px;
-                font-weight: 600;
-                margin-top: 10px;
-            }
-            QDialog#historyDialog QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 6px;
-            }
-            """
-        )
+        _apply_standard_dialog_chrome(self, "historyDialog")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 18, 18, 18)

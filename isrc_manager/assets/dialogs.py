@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,
+    QCompleter,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -34,6 +36,7 @@ from isrc_manager.ui_common import (
     _apply_standard_dialog_chrome,
     _apply_standard_widget_chrome,
     _configure_standard_form_layout,
+    _create_action_button_grid,
     _create_scrollable_dialog_content,
     _create_standard_section,
 )
@@ -76,6 +79,7 @@ class AssetEditorDialog(QDialog):
 
         def create_tab(title: str) -> QVBoxLayout:
             page = QWidget(self.tabs)
+            page.setProperty("role", "workspaceCanvas")
             page_layout = QVBoxLayout(page)
             page_layout.setContentsMargins(0, 0, 0, 0)
             page_layout.setSpacing(0)
@@ -84,6 +88,14 @@ class AssetEditorDialog(QDialog):
             self.tabs.addTab(page, title)
             return content_layout
 
+        self.track_id_edit = QComboBox()
+        self.track_id_edit.setEditable(True)
+        self.track_id_edit.addItem("", None)
+        self.release_id_edit = QComboBox()
+        self.release_id_edit.setEditable(True)
+        self.release_id_edit.addItem("", None)
+        self._populate_reference_combos()
+
         target_box, target_layout = _create_standard_section(
             self,
             "Target Record",
@@ -91,11 +103,7 @@ class AssetEditorDialog(QDialog):
         )
         target_form = QFormLayout()
         _configure_standard_form_layout(target_form)
-
-        self.track_id_edit = QLineEdit()
         target_form.addRow("Track ID", self.track_id_edit)
-
-        self.release_id_edit = QLineEdit()
         target_form.addRow("Release ID", self.release_id_edit)
 
         self.asset_type_combo = QComboBox()
@@ -176,8 +184,8 @@ class AssetEditorDialog(QDialog):
         _apply_compact_dialog_control_heights(self)
 
         if asset is not None:
-            self.track_id_edit.setText(str(asset.track_id or ""))
-            self.release_id_edit.setText(str(asset.release_id or ""))
+            self._set_combo_id(self.track_id_edit, asset.track_id)
+            self._set_combo_id(self.release_id_edit, asset.release_id)
             self.asset_type_combo.setCurrentText(asset.asset_type.replace("_", " ").title())
             resolved = self.asset_service.resolve_asset_path(asset.stored_path)
             self.file_edit.setText(str(resolved) if resolved is not None else "")
@@ -195,6 +203,69 @@ class AssetEditorDialog(QDialog):
         else:
             self.storage_mode_combo.setCurrentIndex(1)
 
+    def _populate_reference_combos(self) -> None:
+        conn = getattr(self.asset_service, "conn", None)
+        if conn is None:
+            return
+        for track_id, track_title, artist_name in conn.execute(
+            """
+            SELECT
+                t.id,
+                t.track_title,
+                COALESCE(a.name, '')
+            FROM Tracks t
+            LEFT JOIN Artists a ON a.id = t.main_artist_id
+            ORDER BY t.track_title, t.id
+            """
+        ).fetchall():
+            label = " / ".join(
+                part for part in (str(track_title or ""), str(artist_name or "")) if part
+            )
+            if not label:
+                label = f"Track {track_id}"
+            self.track_id_edit.addItem(f"{track_id} - {label}", int(track_id))
+        for release_id, title, primary_artist in conn.execute(
+            """
+            SELECT id, title, COALESCE(primary_artist, '')
+            FROM Releases
+            ORDER BY title, id
+            """
+        ).fetchall():
+            label = " / ".join(
+                part for part in (str(title or ""), str(primary_artist or "")) if part
+            )
+            if not label:
+                label = f"Release {release_id}"
+            self.release_id_edit.addItem(f"{release_id} - {label}", int(release_id))
+        for combo in (self.track_id_edit, self.release_id_edit):
+            labels = [combo.itemText(index) for index in range(combo.count()) if combo.itemText(index)]
+            completer = QCompleter(labels, combo)
+            completer.setCaseSensitivity(Qt.CaseInsensitive)
+            combo.setCompleter(completer)
+
+    @staticmethod
+    def _set_combo_id(combo: QComboBox, value: int | None) -> None:
+        for index in range(combo.count()):
+            if combo.itemData(index) == value:
+                combo.setCurrentIndex(index)
+                return
+
+    @staticmethod
+    def _combo_optional_int(combo: QComboBox) -> int | None:
+        data = combo.currentData()
+        if data not in (None, ""):
+            try:
+                return int(data)
+            except (TypeError, ValueError):
+                return None
+        text = combo.currentText().strip()
+        if not text:
+            return None
+        try:
+            return int(text.split(" - ", 1)[0].strip())
+        except (TypeError, ValueError):
+            return None
+
     def _pick_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Select Asset File", "")
         if path:
@@ -210,10 +281,8 @@ class AssetEditorDialog(QDialog):
             primary_flag=self.primary_checkbox.isChecked(),
             version_status=self.status_edit.text().strip() or None,
             notes=self.notes_edit.toPlainText().strip() or None,
-            track_id=int(self.track_id_edit.text()) if self.track_id_edit.text().strip() else None,
-            release_id=(
-                int(self.release_id_edit.text()) if self.release_id_edit.text().strip() else None
-            ),
+            track_id=self._combo_optional_int(self.track_id_edit),
+            release_id=self._combo_optional_int(self.release_id_edit),
         )
 
 
@@ -246,11 +315,13 @@ class AssetBrowserPanel(QWidget):
         )
         controls = QHBoxLayout()
         controls.setContentsMargins(0, 0, 0, 0)
-        controls.setSpacing(8)
+        controls.setSpacing(10)
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("Search by filename, type, or version status...")
         self.search_edit.textChanged.connect(self.refresh)
         controls.addWidget(self.search_edit, 1)
+        controls_layout.addLayout(controls)
+        action_buttons: list[QPushButton] = []
         for label, handler in (
             ("Add", self.create_asset),
             ("Edit", self.edit_selected),
@@ -260,8 +331,8 @@ class AssetBrowserPanel(QWidget):
         ):
             button = QPushButton(label)
             button.clicked.connect(handler)
-            controls.addWidget(button)
-        controls_layout.addLayout(controls)
+            action_buttons.append(button)
+        controls_layout.addWidget(_create_action_button_grid(self, action_buttons, columns=3))
         root.addWidget(controls_box)
 
         table_box, table_layout = _create_standard_section(

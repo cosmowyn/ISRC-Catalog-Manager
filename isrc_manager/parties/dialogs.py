@@ -28,6 +28,8 @@ from isrc_manager.ui_common import (
     _apply_standard_dialog_chrome,
     _apply_standard_widget_chrome,
     _configure_standard_form_layout,
+    _create_action_button_grid,
+    _create_scrollable_dialog_content,
     _create_standard_section,
 )
 
@@ -46,7 +48,7 @@ class PartyEditorDialog(QDialog):
         self.party = party
         self.setWindowTitle("Edit Party" if party is not None else "Create Party")
         self.resize(760, 620)
-        self.setMinimumSize(680, 560)
+        self.setMinimumSize(620, 500)
         _apply_standard_dialog_chrome(self, "partyEditorDialog")
 
         root = QVBoxLayout(self)
@@ -71,14 +73,16 @@ class PartyEditorDialog(QDialog):
             page = QWidget(self.tabs)
             page_layout = QVBoxLayout(page)
             page_layout.setContentsMargins(0, 0, 0, 0)
-            page_layout.setSpacing(10)
+            page_layout.setSpacing(0)
+            scroll_area, _, content_layout = _create_scrollable_dialog_content(page)
+            page_layout.addWidget(scroll_area, 1)
 
             box, box_layout = _create_standard_section(page, section_title, description)
             form = QFormLayout()
             _configure_standard_form_layout(form)
             box_layout.addLayout(form)
-            page_layout.addWidget(box)
-            page_layout.addStretch(1)
+            content_layout.addWidget(box)
+            content_layout.addStretch(1)
             self.tabs.addTab(page, tab_title)
             return form
 
@@ -95,14 +99,16 @@ class PartyEditorDialog(QDialog):
         notes_page = QWidget(self.tabs)
         notes_layout = QVBoxLayout(notes_page)
         notes_layout.setContentsMargins(0, 0, 0, 0)
-        notes_layout.setSpacing(10)
+        notes_layout.setSpacing(0)
+        notes_scroll, _, notes_content = _create_scrollable_dialog_content(notes_page)
+        notes_layout.addWidget(notes_scroll, 1)
         notes_box, notes_box_layout = _create_standard_section(
             notes_page,
             "Notes",
             "Capture internal context about this party, its role, or any relationship details that should remain in the workspace.",
         )
-        notes_layout.addWidget(notes_box)
-        notes_layout.addStretch(1)
+        notes_content.addWidget(notes_box)
+        notes_content.addStretch(1)
         self.tabs.addTab(notes_page, "Notes")
 
         self.legal_name_edit = QLineEdit()
@@ -207,6 +213,8 @@ class PartyManagerPanel(QWidget):
         root.addWidget(intro)
 
         top_row = QHBoxLayout()
+        top_row.setContentsMargins(0, 0, 0, 0)
+        top_row.setSpacing(10)
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("Search parties by name, email, or IPI/CAE...")
         self.search_edit.textChanged.connect(self.refresh)
@@ -222,9 +230,14 @@ class PartyManagerPanel(QWidget):
         delete_button.clicked.connect(self.delete_selected)
         refresh_button = QPushButton("Refresh")
         refresh_button.clicked.connect(self.refresh)
-        for button in (add_button, edit_button, merge_button, delete_button, refresh_button):
-            top_row.addWidget(button)
         root.addLayout(top_row)
+        root.addWidget(
+            _create_action_button_grid(
+                self,
+                [add_button, edit_button, merge_button, delete_button, refresh_button],
+                columns=3,
+            )
+        )
 
         self.table = QTableWidget(0, 6, self)
         self.table.setHorizontalHeaderLabels(

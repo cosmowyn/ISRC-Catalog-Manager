@@ -114,6 +114,35 @@ class ReleaseService:
         return family_title or normalized
 
     @classmethod
+    def infer_release_type(
+        cls,
+        *,
+        title: str | None,
+        track_count: int,
+        release_type: str | None = None,
+    ) -> str:
+        clean_release_type = cls._clean_release_type(release_type)
+        if release_type and clean_release_type != "other":
+            return clean_release_type
+        normalized_title = cls._normalize_release_identity_text(title)
+        if track_count <= 1:
+            return "single"
+        if cls._REMIX_MARKER_RE.search(str(title or "")):
+            return "remix_package"
+        if normalized_title in {"single", ""}:
+            return "single"
+        return "album"
+
+    @classmethod
+    def normalized_release_family_title(
+        cls, title: str | None, *, release_type: str | None = None
+    ) -> str:
+        clean_release_type = cls._clean_release_type(release_type)
+        if clean_release_type == "remix_package" or cls._REMIX_MARKER_RE.search(str(title or "")):
+            return cls._normalize_release_upc_family_title(title)
+        return cls._normalize_release_identity_text(title)
+
+    @classmethod
     def releases_share_upc_family(
         cls, releases: Iterable[tuple[str | None, str | None] | str | None]
     ) -> bool:
@@ -130,7 +159,7 @@ class ReleaseService:
             if not normalized_title:
                 continue
             normalized_titles.append(normalized_title)
-            family_title = cls._normalize_release_upc_family_title(title)
+            family_title = cls.normalized_release_family_title(title, release_type=release_type)
             family_titles.append(family_title)
             variant_hint = variant_hint or family_title != normalized_title
             variant_hint = variant_hint or bool(cls._REMIX_MARKER_RE.search(str(title or "")))

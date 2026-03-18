@@ -578,6 +578,8 @@ class ApplicationLogDialog(QDialog):
         super().__init__(parent or app)
         self.app = app
         self.setObjectName("applicationLogDialog")
+        self.setProperty("role", "panel")
+        self.setAttribute(Qt.WA_StyledBackground, True)
         self.setWindowTitle("Application Log")
         self.resize(860, 700)
         self.setMinimumSize(720, 560)
@@ -590,7 +592,6 @@ class ApplicationLogDialog(QDialog):
                     font-weight: 700;
                 }
                 QDialog#applicationLogDialog QLabel#logSubtitle {
-                    color: #64748b;
                     font-size: 15px;
                 }
                 QDialog#applicationLogDialog QGroupBox {
@@ -603,7 +604,6 @@ class ApplicationLogDialog(QDialog):
                     padding: 0 6px;
                 }
                 QDialog#applicationLogDialog QLabel[role="meta"] {
-                    color: #475569;
                 }
                 """,
             )
@@ -620,10 +620,12 @@ class ApplicationLogDialog(QDialog):
 
         title = QLabel("Application Log")
         title.setObjectName("logTitle")
+        title.setProperty("role", "dialogTitle")
         subtitle = QLabel(
             "Review the live application logs, open archived log files, and jump straight to the log folder."
         )
         subtitle.setObjectName("logSubtitle")
+        subtitle.setProperty("role", "dialogSubtitle")
         subtitle.setWordWrap(True)
         root.addWidget(title)
         root.addWidget(subtitle)
@@ -744,6 +746,8 @@ class DiagnosticsDialog(QDialog):
         self.app = app
         self._checks = []
         self.setObjectName("diagnosticsDialog")
+        self.setProperty("role", "panel")
+        self.setAttribute(Qt.WA_StyledBackground, True)
         self.setWindowTitle("Diagnostics")
         self.resize(1080, 780)
         self.setMinimumSize(980, 680)
@@ -756,7 +760,6 @@ class DiagnosticsDialog(QDialog):
                     font-weight: 700;
                 }
                 QDialog#diagnosticsDialog QLabel#diagnosticsSubtitle {
-                    color: #64748b;
                     font-size: 15px;
                 }
                 QDialog#diagnosticsDialog QGroupBox {
@@ -783,10 +786,12 @@ class DiagnosticsDialog(QDialog):
 
         title = QLabel("Diagnostics")
         title.setObjectName("diagnosticsTitle")
+        title.setProperty("role", "dialogTitle")
         subtitle = QLabel(
             "Inspect the current profile, schema, and managed files to quickly spot anything that needs attention."
         )
         subtitle.setObjectName("diagnosticsSubtitle")
+        subtitle.setProperty("role", "dialogSubtitle")
         subtitle.setWordWrap(True)
         root.addWidget(title)
         root.addWidget(subtitle)
@@ -982,6 +987,8 @@ class AboutDialog(QDialog):
         super().__init__(parent or app)
         self.app = app
         self.setObjectName("aboutDialog")
+        self.setProperty("role", "panel")
+        self.setAttribute(Qt.WA_StyledBackground, True)
         self.setWindowTitle("About ISRC Catalog Manager")
         self.resize(680, 420)
         self.setMinimumSize(620, 380)
@@ -1032,6 +1039,7 @@ class AboutDialog(QDialog):
         intro_layout.setSpacing(8)
         title = QLabel("ISRC Catalog Manager")
         title.setObjectName("aboutTitle")
+        title.setProperty("role", "dialogTitle")
         intro_layout.addWidget(title)
 
         version_label = QLabel(f"Version {app._app_version_text()}")
@@ -1042,6 +1050,7 @@ class AboutDialog(QDialog):
             "Local-first desktop catalog management for tracks, licensing, custom metadata, snapshots, and export workflows."
         )
         body.setObjectName("aboutBody")
+        body.setProperty("role", "dialogSubtitle")
         body.setWordWrap(True)
         intro_layout.addWidget(body)
 
@@ -1049,6 +1058,7 @@ class AboutDialog(QDialog):
             "Everything stays on your machine: profile databases, managed media, logs, backups, and history."
         )
         body2.setObjectName("aboutBody")
+        body2.setProperty("role", "dialogSubtitle")
         body2.setWordWrap(True)
         intro_layout.addWidget(body2)
         intro_layout.addStretch(1)
