@@ -29,34 +29,39 @@ def run_snapshot_history_action(
         kind=before_kind or f"pre_{safe_kind}",
         label=before_label or f"Before {action_label}",
     )
+    after_snapshot = None
     try:
         result = mutation()
+        after_snapshot = history_manager.capture_snapshot(
+            kind=after_kind or f"post_{safe_kind}",
+            label=after_label or f"After {action_label}",
+        )
+        history_manager.record_snapshot_action(
+            label=action_label,
+            action_type=action_type,
+            entity_type=entity_type,
+            entity_id=str(entity_id) if entity_id is not None else None,
+            payload=payload or {},
+            snapshot_before_id=before_snapshot.snapshot_id,
+            snapshot_after_id=after_snapshot.snapshot_id,
+        )
+        return result
     except Exception:
         try:
             history_manager.restore_snapshot(before_snapshot.snapshot_id)
         except Exception as restore_error:
             if logger is not None:
                 logger.exception("Snapshot rollback failed for %s: %s", action_type, restore_error)
+        if after_snapshot is not None:
+            try:
+                history_manager.delete_snapshot(after_snapshot.snapshot_id)
+            except Exception:
+                pass
         try:
             history_manager.delete_snapshot(before_snapshot.snapshot_id)
         except Exception:
             pass
         raise
-
-    after_snapshot = history_manager.capture_snapshot(
-        kind=after_kind or f"post_{safe_kind}",
-        label=after_label or f"After {action_label}",
-    )
-    history_manager.record_snapshot_action(
-        label=action_label,
-        action_type=action_type,
-        entity_type=entity_type,
-        entity_id=str(entity_id) if entity_id is not None else None,
-        payload=payload or {},
-        snapshot_before_id=before_snapshot.snapshot_id,
-        snapshot_after_id=after_snapshot.snapshot_id,
-    )
-    return result
 
 
 def run_file_history_action(
@@ -81,6 +86,24 @@ def run_file_history_action(
     )
     try:
         result = mutation()
+        after_state = history_manager.capture_file_state(
+            target_path,
+            companion_suffixes=companion_suffixes,
+        )
+        if before_state != after_state:
+            final_label = action_label(result) if callable(action_label) else action_label
+            final_payload = payload(result) if callable(payload) else (payload or {})
+            history_manager.record_file_write_action(
+                label=final_label,
+                action_type=action_type,
+                target_path=target_path,
+                before_state=before_state,
+                after_state=after_state,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                payload=final_payload,
+            )
+        return result
     except Exception:
         try:
             history_manager.restore_file_state(target_path, before_state)
@@ -88,22 +111,3 @@ def run_file_history_action(
             if logger is not None:
                 logger.exception("File rollback failed for %s: %s", action_type, restore_error)
         raise
-
-    after_state = history_manager.capture_file_state(
-        target_path,
-        companion_suffixes=companion_suffixes,
-    )
-    if before_state != after_state:
-        final_label = action_label(result) if callable(action_label) else action_label
-        final_payload = payload(result) if callable(payload) else (payload or {})
-        history_manager.record_file_write_action(
-            label=final_label,
-            action_type=action_type,
-            target_path=target_path,
-            before_state=before_state,
-            after_state=after_state,
-            entity_type=entity_type,
-            entity_id=entity_id,
-            payload=final_payload,
-        )
-    return result

@@ -76,7 +76,7 @@ class HistoryDialog(QDialog):
         layout.addLayout(header_row)
 
         subtitle_label = QLabel(
-            "Review recent undo and redo activity, inspect saved history entries, and manage database snapshots from one place.",
+            "Review recent user actions, undo or redo meaningful changes, and manage database snapshots from one place.",
             self,
         )
         subtitle_label.setProperty("role", "dialogSubtitle")
@@ -89,7 +89,7 @@ class HistoryDialog(QDialog):
         browser_layout.setContentsMargins(14, 18, 14, 14)
         browser_layout.setSpacing(10)
         browser_help = QLabel(
-            "Use the Session and History tabs to review changes. The Snapshots tab lists full restore points stored on disk.",
+            "The Session and History tabs show meaningful user actions. Internal sync and bookkeeping steps are hidden automatically.",
             browser_box,
         )
         browser_help.setProperty("role", "supportingText")
@@ -98,10 +98,10 @@ class HistoryDialog(QDialog):
         browser_layout.addWidget(self.tabs, 1)
         layout.addWidget(browser_box, 1)
 
-        self.session_table = self._build_table(["Current", "Time", "Label", "Action", "Strategy"])
+        self.session_table = self._build_table(["Current", "Time", "Action"])
         self.tabs.addTab(self.session_table, "Session")
 
-        self.history_table = self._build_table(["Current", "Time", "Label", "Action", "Strategy"])
+        self.history_table = self._build_table(["Current", "Time", "Action"])
         self.tabs.addTab(self.history_table, "History")
 
         self.snapshot_table = self._build_table(["Time", "Kind", "Label", "Path"])
@@ -197,8 +197,6 @@ class HistoryDialog(QDialog):
                 "●" if entry.is_current else "",
                 entry.created_at,
                 entry.label,
-                entry.action_type,
-                entry.strategy,
             ]
             for col_idx, value in enumerate(values):
                 table.setItem(row_idx, col_idx, QTableWidgetItem(value))

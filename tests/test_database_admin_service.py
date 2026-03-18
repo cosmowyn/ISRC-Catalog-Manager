@@ -2,6 +2,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from isrc_manager.services import DatabaseMaintenanceService, ProfileStoreService
 
@@ -91,6 +92,35 @@ class DatabaseMaintenanceServiceTests(unittest.TestCase):
         self.assertIsNotNone(restore.safety_copy_path)
         self.assertTrue(restore.safety_copy_path.exists())
         self.assertEqual(read_sample_db(restore.safety_copy_path), "changed")
+
+    def test_restore_database_keeps_current_file_when_backup_is_invalid(self):
+        invalid_backup = self.backups_dir / "invalid.db"
+        invalid_backup.parent.mkdir(parents=True, exist_ok=True)
+        invalid_backup.write_text("not a sqlite database", encoding="utf-8")
+
+        with self.assertRaises(RuntimeError):
+            self.service.restore_database(invalid_backup, self.current_db)
+
+        self.assertEqual(read_sample_db(self.current_db), "original")
+
+    def test_restore_database_rolls_back_after_post_replace_integrity_failure(self):
+        conn = sqlite3.connect(str(self.current_db))
+        try:
+            result = self.service.create_backup(conn, self.current_db)
+        finally:
+            conn.close()
+
+        write_sample_db(self.current_db, "changed")
+
+        with patch.object(
+            self.service,
+            "verify_integrity",
+            side_effect=["ok", "ok", "database error: simulated failure"],
+        ):
+            with self.assertRaises(RuntimeError):
+                self.service.restore_database(result.backup_path, self.current_db)
+
+        self.assertEqual(read_sample_db(self.current_db), "changed")
 
 
 if __name__ == "__main__":

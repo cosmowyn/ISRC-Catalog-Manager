@@ -222,7 +222,12 @@ class BackgroundAppServiceFactory:
             audio_tag_service=audio_tag_service,
             tagged_audio_export_service=TaggedAudioExportService(audio_tag_service),
             history_manager=HistoryManager(
-                conn, settings, self.db_path, self.history_dir, self.data_root
+                conn,
+                settings,
+                self.db_path,
+                self.history_dir,
+                self.data_root,
+                self.backups_dir,
             ),
             database_maintenance=DatabaseMaintenanceService(self.backups_dir),
             settings_reads=settings_reads,
