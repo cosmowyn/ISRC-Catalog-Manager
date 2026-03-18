@@ -908,8 +908,7 @@ class ExchangeService:
             artwork_source_path=self._resolve_media_path(
                 source_dir, row.get("release_artwork_path")
             ),
-            artwork_storage_mode=str(row.get("release_artwork_storage_mode") or "").strip()
-            or None,
+            artwork_storage_mode=str(row.get("release_artwork_storage_mode") or "").strip() or None,
             placements=[placement],
         )
         if existing_id is None:

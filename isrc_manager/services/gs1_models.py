@@ -182,10 +182,7 @@ class GS1TemplateAsset:
     @property
     def label(self) -> str:
         return (
-            self.managed_file_path
-            or self.source_path
-            or self.filename
-            or "Official GS1 workbook"
+            self.managed_file_path or self.source_path or self.filename or "Official GS1 workbook"
         ).strip()
 
     @property

@@ -112,9 +112,7 @@ class XMLExportService:
             where_clause = ""
             params = []
         album_columns = self._table_columns("Albums")
-        album_art_blob_sql = (
-            "al.album_art_blob" if "album_art_blob" in album_columns else "NULL"
-        )
+        album_art_blob_sql = "al.album_art_blob" if "album_art_blob" in album_columns else "NULL"
 
         rows = self.conn.execute(
             f"""

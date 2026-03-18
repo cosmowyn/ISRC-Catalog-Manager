@@ -9,9 +9,9 @@ from pathlib import Path
 
 from isrc_manager.blob_icons import blob_icon_spec_from_storage, blob_icon_spec_to_storage
 from isrc_manager.file_storage import (
-    ManagedFileStorage,
     STORAGE_MODE_DATABASE,
     STORAGE_MODE_MANAGED_FILE,
+    ManagedFileStorage,
     bytes_from_blob,
     coalesce_filename,
     infer_storage_mode,
@@ -346,10 +346,21 @@ class CustomFieldValueService:
     ):
         self.conn = conn
         self.definitions = definitions
-        self.file_store = ManagedFileStorage(data_root=data_root, relative_root="custom_field_media")
+        self.file_store = ManagedFileStorage(
+            data_root=data_root, relative_root="custom_field_media"
+        )
         self._ensure_storage_columns()
 
     def _ensure_storage_columns(self) -> None:
+        table_names = {
+            str(row[0])
+            for row in self.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+            if row and row[0]
+        }
+        if "CustomFieldValues" not in table_names:
+            return
         columns = {
             str(row[1])
             for row in self.conn.execute("PRAGMA table_info(CustomFieldValues)").fetchall()
@@ -447,7 +458,9 @@ class CustomFieldValueService:
             clean_mode = normalize_storage_mode(storage_mode, default=STORAGE_MODE_DATABASE)
             source = Path(blob_path)
             mime = mimetypes.guess_type(source.name)[0]
-            filename = coalesce_filename(source.name, default_stem=self.definitions.get_field_name(field_def_id))
+            filename = coalesce_filename(
+                source.name, default_stem=self.definitions.get_field_name(field_def_id)
+            )
             if clean_mode == STORAGE_MODE_DATABASE:
                 blob_data = _read_blob_from_path(blob_path)
                 rel_path = None
@@ -503,7 +516,9 @@ class CustomFieldValueService:
                 if current:
                     stale_path = str(current[2] or "").strip()
                     if stale_path and stale_path != str(rel_path or "").strip():
-                        self._delete_managed_file_if_unreferenced(stale_path, cursor=self.conn.cursor())
+                        self._delete_managed_file_if_unreferenced(
+                            stale_path, cursor=self.conn.cursor()
+                        )
             return
 
         with self.conn:
@@ -600,7 +615,9 @@ class CustomFieldValueService:
         if effective_mode == STORAGE_MODE_MANAGED_FILE:
             resolved = self._resolve_managed_path(managed_file_path)
             if resolved is None or not resolved.exists():
-                raise FileNotFoundError(managed_file_path or filename or "managed custom field file")
+                raise FileNotFoundError(
+                    managed_file_path or filename or "managed custom field file"
+                )
             return resolved.read_bytes(), mime_type
         if blob_value is None:
             raise FileNotFoundError("No file stored for this field.")

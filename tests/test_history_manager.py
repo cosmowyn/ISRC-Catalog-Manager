@@ -6,7 +6,6 @@ from unittest.mock import patch
 from PySide6.QtCore import QPoint, QSettings
 
 from isrc_manager.history import HistoryManager, HistoryRecoveryError
-from isrc_manager.tasks.history_helpers import run_file_history_action, run_snapshot_history_action
 from isrc_manager.services import (
     ContractService,
     DatabaseSchemaService,
@@ -20,6 +19,7 @@ from isrc_manager.services import (
     TrackService,
     TrackUpdatePayload,
 )
+from isrc_manager.tasks.history_helpers import run_file_history_action, run_snapshot_history_action
 from isrc_manager.theme_builder import theme_setting_defaults
 
 
@@ -799,7 +799,9 @@ class HistoryManagerTests(unittest.TestCase):
         self.assertIsNotNone(repaired_backup)
         self.assertEqual(repaired_backup.backup_path, str(missing_backup))
         self.assertTrue(missing_backup.exists())
-        self.assertEqual(self.history.fetch_entry(backup_entry.entry_id).entry_id, backup_entry.entry_id)
+        self.assertEqual(
+            self.history.fetch_entry(backup_entry.entry_id).entry_id, backup_entry.entry_id
+        )
         registered_orphan_backups = [
             backup
             for backup in self.history.list_backups(limit=20)
@@ -888,17 +890,23 @@ class HistoryManagerTests(unittest.TestCase):
                 )
 
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Tracks").fetchone()[0], 0)
-        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM HistorySnapshots").fetchone()[0], 0)
+        self.assertEqual(
+            self.conn.execute("SELECT COUNT(*) FROM HistorySnapshots").fetchone()[0], 0
+        )
 
     def test_restore_snapshot_missing_file_does_not_create_extra_restore_point(self):
         snapshot = self.history.create_manual_snapshot("Missing Restore Target")
         Path(snapshot.db_snapshot_path).unlink()
 
-        before_snapshot_ids = [record.snapshot_id for record in self.history.list_snapshots(limit=20)]
+        before_snapshot_ids = [
+            record.snapshot_id for record in self.history.list_snapshots(limit=20)
+        ]
         with self.assertRaises(HistoryRecoveryError):
             self.history.restore_snapshot_as_action(snapshot.snapshot_id)
 
-        after_snapshot_ids = [record.snapshot_id for record in self.history.list_snapshots(limit=20)]
+        after_snapshot_ids = [
+            record.snapshot_id for record in self.history.list_snapshots(limit=20)
+        ]
         self.assertEqual(after_snapshot_ids, before_snapshot_ids)
 
     def test_snapshot_helper_rolls_back_when_history_recording_fails(self):

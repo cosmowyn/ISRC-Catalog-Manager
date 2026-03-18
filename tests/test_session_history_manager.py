@@ -94,13 +94,19 @@ class SessionHistoryManagerTests(unittest.TestCase):
 
     def test_branching_after_undo_supersedes_session_redo(self):
         app = _FakeApp(self.primary)
-        first = self.history.record_profile_switch(from_path=str(self.primary), to_path=str(self.secondary))
-        second = self.history.record_profile_switch(from_path=str(self.secondary), to_path=str(self.primary))
+        first = self.history.record_profile_switch(
+            from_path=str(self.primary), to_path=str(self.secondary)
+        )
+        second = self.history.record_profile_switch(
+            from_path=str(self.secondary), to_path=str(self.primary)
+        )
 
         self.history.undo(app)
         self.assertEqual(self.history.get_default_redo_entry().entry_id, second.entry_id)
 
-        third = self.history.record_profile_switch(from_path=str(self.secondary), to_path=str(self.created))
+        third = self.history.record_profile_switch(
+            from_path=str(self.secondary), to_path=str(self.created)
+        )
 
         self.assertEqual(third.parent_id, first.entry_id)
         self.assertIsNone(self.history.get_default_redo_entry())

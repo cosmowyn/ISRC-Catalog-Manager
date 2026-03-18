@@ -174,7 +174,9 @@ class QualityDashboardService:
                         fix_key="regenerate_derived",
                     )
                 )
-            has_audio = bool(str(audio_file_path or "").strip()) or bool(int(audio_blob_present or 0))
+            has_audio = bool(str(audio_file_path or "").strip()) or bool(
+                int(audio_blob_present or 0)
+            )
             if not has_audio:
                 issues.append(
                     QualityIssue(
@@ -436,7 +438,15 @@ class QualityDashboardService:
             ORDER BY id
             """
         ).fetchall()
-        for track_id, audio_path, audio_mode, audio_blob_present, album_art_path, album_art_mode, album_art_blob_present in track_rows:
+        for (
+            track_id,
+            audio_path,
+            audio_mode,
+            audio_blob_present,
+            album_art_path,
+            album_art_mode,
+            album_art_blob_present,
+        ) in track_rows:
             for media_key, stored_path, storage_mode, blob_present in (
                 ("audio", audio_path, audio_mode, audio_blob_present),
                 ("album_art", album_art_path, album_art_mode, album_art_blob_present),

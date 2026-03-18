@@ -850,7 +850,9 @@ class DatabaseSchemaService:
             )
             """
         )
-        cols = [row[1] for row in self.cursor.execute("PRAGMA table_info(HistoryEntries)").fetchall()]
+        cols = [
+            row[1] for row in self.cursor.execute("PRAGMA table_info(HistoryEntries)").fetchall()
+        ]
         if "visible_in_history" not in cols:
             self.cursor.execute(
                 "ALTER TABLE HistoryEntries ADD COLUMN visible_in_history INTEGER NOT NULL DEFAULT 1"
@@ -1105,19 +1107,17 @@ class DatabaseSchemaService:
         if filename_column:
             select_parts.append(filename_column)
         if blob_column:
-            select_parts.append(f"CASE WHEN {blob_column} IS NOT NULL THEN 1 ELSE 0 END AS has_blob")
-        rows = self.cursor.execute(
-            f"SELECT {', '.join(select_parts)} FROM {table_name}"
-        ).fetchall()
+            select_parts.append(
+                f"CASE WHEN {blob_column} IS NOT NULL THEN 1 ELSE 0 END AS has_blob"
+            )
+        rows = self.cursor.execute(f"SELECT {', '.join(select_parts)} FROM {table_name}").fetchall()
         for row in rows:
             values = list(row)
             row_ids = values[: len(id_columns)]
             offset = len(id_columns)
             stored_path = str(values[offset] or "").strip()
             storage_mode = str(values[offset + 1] or "").strip()
-            filename = (
-                str(values[offset + 2] or "").strip() if filename_column is not None else ""
-            )
+            filename = str(values[offset + 2] or "").strip() if filename_column is not None else ""
             blob_present = bool(values[-1]) if blob_column is not None else False
             updates: dict[str, object] = {}
             if not storage_mode:
@@ -1419,7 +1419,9 @@ class DatabaseSchemaService:
         workbook_blob_info = table_info.get("workbook_blob")
         workbook_blob_notnull = bool(workbook_blob_info and int(workbook_blob_info[3] or 0))
         if workbook_blob_notnull:
-            self.cursor.execute("ALTER TABLE GS1TemplateStorage RENAME TO GS1TemplateStorage_legacy")
+            self.cursor.execute(
+                "ALTER TABLE GS1TemplateStorage RENAME TO GS1TemplateStorage_legacy"
+            )
             self.cursor.execute(
                 """
                 CREATE TABLE GS1TemplateStorage (

@@ -7501,6 +7501,13 @@ class App(QMainWindow):
             if pos:
                 label.move(pos)
 
+    def _on_header_layout_changed(self, *_args):
+        # Compatibility shim for older callers that still expect a single
+        # layout-change hook after the split between reorder and resize events.
+        if getattr(self, "_suspend_layout_history", False):
+            return
+        self._save_header_state()
+
     def _on_header_sections_reordered(self, *_args):
         if getattr(self, "_suspend_layout_history", False):
             return

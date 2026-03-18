@@ -141,9 +141,7 @@ class GS1SettingsServiceTests(unittest.TestCase):
         template_path = Path(self.tmpdir.name) / "managed-gs1-template.xlsx"
         build_template(template_path)
 
-        stored = self.service.import_template_from_path(
-            template_path, storage_mode="managed_file"
-        )
+        stored = self.service.import_template_from_path(template_path, storage_mode="managed_file")
 
         self.assertEqual(stored.storage_mode, "managed_file")
         self.assertFalse(stored.stored_in_database)

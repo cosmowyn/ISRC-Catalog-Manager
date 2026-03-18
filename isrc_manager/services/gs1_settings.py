@@ -9,10 +9,9 @@ from pathlib import Path
 from PySide6.QtCore import QSettings
 
 from isrc_manager.file_storage import (
-    ManagedFileStorage,
     STORAGE_MODE_DATABASE,
     STORAGE_MODE_MANAGED_FILE,
-    bytes_from_blob,
+    ManagedFileStorage,
     coalesce_filename,
     guess_mime_type,
     infer_storage_mode,
@@ -191,7 +190,7 @@ class GS1SettingsService:
             source_path=str(path),
             managed_file_path="",
             storage_mode=STORAGE_MODE_MANAGED_FILE if path.exists() else STORAGE_MODE_DATABASE,
-            mime_type=str(mimetypes.guess_type(path.name)[0] or "").strip(),
+            mime_type=guess_mime_type(path.name),
             size_bytes=size_bytes,
             stored_in_database=False,
         )
@@ -222,11 +221,11 @@ class GS1SettingsService:
         if mode == STORAGE_MODE_DATABASE:
             if blob is None:
                 return None
-            return bytes_from_blob(blob)
+            return bytes(blob)
         path = self.template_store.resolve(managed_file_path or source_path)
         if path is None or not path.exists():
             return None
-        return path.read_bytes()
+        return Path(path).read_bytes()
 
     def import_template_from_path(
         self,
@@ -247,7 +246,6 @@ class GS1SettingsService:
         workbook_bytes = _read_blob_from_path(str(source))
         mime_type = guess_mime_type(source.name)
         clean_mode = normalize_storage_mode(storage_mode, default=STORAGE_MODE_DATABASE)
-        stored_path = None
         managed_file_path = None
         if clean_mode == STORAGE_MODE_MANAGED_FILE:
             if self.template_store.data_root is None:

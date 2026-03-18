@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import mimetypes
-import re
 import sqlite3
 from dataclasses import asdict
 from pathlib import Path
@@ -16,16 +14,15 @@ except Exception:  # pragma: no cover - optional at runtime in constrained envir
 
 from isrc_manager.domain.repertoire import clean_text
 from isrc_manager.file_storage import (
-    ManagedFileStorage,
     STORAGE_MODE_DATABASE,
     STORAGE_MODE_MANAGED_FILE,
+    ManagedFileStorage,
     bytes_from_blob,
     coalesce_filename,
     guess_mime_type,
     infer_storage_mode,
     normalize_storage_mode,
 )
-from isrc_manager.media.blob_files import _read_blob_from_path
 
 from .models import (
     ASSET_TYPE_CHOICES,
@@ -46,6 +43,15 @@ class AssetService:
         self._ensure_storage_columns()
 
     def _ensure_storage_columns(self) -> None:
+        table_names = {
+            str(row[0])
+            for row in self.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+            if row and row[0]
+        }
+        if "AssetVersions" not in table_names:
+            return
         columns = {
             str(row[1])
             for row in self.conn.execute("PRAGMA table_info(AssetVersions)").fetchall()
@@ -55,7 +61,9 @@ class AssetService:
         with self.conn:
             for column_name, column_sql in additions:
                 if column_name not in columns:
-                    self.conn.execute(f"ALTER TABLE AssetVersions ADD COLUMN {column_name} {column_sql}")
+                    self.conn.execute(
+                        f"ALTER TABLE AssetVersions ADD COLUMN {column_name} {column_sql}"
+                    )
 
     @staticmethod
     def _clean_type(value: str | None) -> str:
@@ -185,7 +193,9 @@ class AssetService:
             return "audio"
         return "files"
 
-    def _managed_asset_bytes(self, path: str | Path) -> tuple[str, bytes, str | None, dict[str, int | None]]:
+    def _managed_asset_bytes(
+        self, path: str | Path
+    ) -> tuple[str, bytes, str | None, dict[str, int | None]]:
         source = Path(path)
         if not source.exists():
             raise FileNotFoundError(source)
@@ -235,7 +245,9 @@ class AssetService:
         data: bytes | None = None,
         filename: str | None = None,
         storage_mode: str | None = None,
-    ) -> tuple[str | None, str, bytes | None, str | None, str | None, int | None, int | None, int | None]:
+    ) -> tuple[
+        str | None, str, bytes | None, str | None, str | None, int | None, int | None, int | None
+    ]:
         if source_path is None and data is None:
             raise ValueError("An asset source file or bytes are required.")
         clean_mode = normalize_storage_mode(storage_mode, default=STORAGE_MODE_MANAGED_FILE)

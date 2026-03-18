@@ -94,9 +94,7 @@ class HistoryManager:
     # ------------------------------------------------------------------
     def list_entries(self, limit: int = 250, *, include_hidden: bool = False) -> list[HistoryEntry]:
         current_id = (
-            self.get_current_entry_id()
-            if include_hidden
-            else self.get_current_visible_entry_id()
+            self.get_current_entry_id() if include_hidden else self.get_current_visible_entry_id()
         )
         where_sql = "" if include_hidden else "WHERE visible_in_history=1"
         rows = self.conn.execute(
@@ -910,9 +908,7 @@ class HistoryManager:
             )
 
         registered_backup_paths = {
-            str(Path(record.backup_path))
-            for record in self._all_backups()
-            if record.backup_path
+            str(Path(record.backup_path)) for record in self._all_backups() if record.backup_path
         }
         for backup in self._all_backups():
             backup_path = Path(backup.backup_path)
@@ -1104,11 +1100,7 @@ class HistoryManager:
                 changes.append(registered)
 
         orphan_backup_paths = self._orphan_backup_files(
-            {
-                str(Path(record.backup_path))
-                for record in self._all_backups()
-                if record.backup_path
-            }
+            {str(Path(record.backup_path)) for record in self._all_backups() if record.backup_path}
         )
         orphan_backup_by_id: dict[int, Path] = {}
         for path in orphan_backup_paths:
@@ -1165,9 +1157,7 @@ class HistoryManager:
             )
 
         registered_backup_paths = {
-            str(Path(record.backup_path))
-            for record in self._all_backups()
-            if record.backup_path
+            str(Path(record.backup_path)) for record in self._all_backups() if record.backup_path
         }
         for path in self._orphan_backup_files(registered_backup_paths):
             metadata = self._load_backup_metadata(path)
@@ -1691,11 +1681,7 @@ class HistoryManager:
                     )
                 if update_current_entry:
                     self._set_current_entry_id_in_cursor(
-                        (
-                            next_current_entry_id
-                            if isinstance(next_current_entry_id, int)
-                            else None
-                        ),
+                        (next_current_entry_id if isinstance(next_current_entry_id, int) else None),
                         cursor=self.conn.cursor(),
                     )
                 if status_updates:
@@ -1894,7 +1880,9 @@ class HistoryManager:
             if self.get_current_entry_id() is not None:
                 self._set_current_entry_id(None)
                 if changes is not None:
-                    changes.append("Cleared stale HistoryHead pointer because no history entries remain.")
+                    changes.append(
+                        "Cleared stale HistoryHead pointer because no history entries remain."
+                    )
             return
 
         snapshot_ids = {snapshot.snapshot_id for snapshot in self._all_snapshots()}
@@ -2285,7 +2273,9 @@ class HistoryManager:
         snapshot_path = Path(str(archived_snapshot.get("db_snapshot_path") or ""))
         if not snapshot_path.exists():
             missing_paths.append(snapshot_path)
-        for state in (archived_snapshot.get("manifest") or {}).get("managed_directories", {}).values():
+        for state in (
+            (archived_snapshot.get("manifest") or {}).get("managed_directories", {}).values()
+        ):
             if not state.get("exists"):
                 continue
             asset_path = Path(str(state.get("snapshot_path") or ""))
@@ -2305,7 +2295,11 @@ class HistoryManager:
         if not backup_path.exists():
             return None
         existing = next(
-            (record for record in self._all_backups() if str(Path(record.backup_path)) == str(backup_path)),
+            (
+                record
+                for record in self._all_backups()
+                if str(Path(record.backup_path)) == str(backup_path)
+            ),
             None,
         )
         if existing is not None:
@@ -2392,22 +2386,14 @@ class HistoryManager:
         if not snapshot_dir.exists():
             return []
         return sorted(
-            [
-                path
-                for path in snapshot_dir.glob("*.db")
-                if str(path) not in registered_paths
-            ]
+            [path for path in snapshot_dir.glob("*.db") if str(path) not in registered_paths]
         )
 
     def _orphan_backup_files(self, registered_paths: set[str]) -> list[Path]:
         if self.backups_root is None or not self.backups_root.exists():
             return []
         return sorted(
-            [
-                path
-                for path in self.backups_root.rglob("*.db")
-                if str(path) not in registered_paths
-            ]
+            [path for path in self.backups_root.rglob("*.db") if str(path) not in registered_paths]
         )
 
     def _snapshot_sidecar_path(self, snapshot_path: Path) -> Path:
@@ -2436,7 +2422,9 @@ class HistoryManager:
             "manifest": snapshot.manifest,
         }
         try:
-            self._write_json_sidecar(self._snapshot_sidecar_path(Path(snapshot.db_snapshot_path)), payload)
+            self._write_json_sidecar(
+                self._snapshot_sidecar_path(Path(snapshot.db_snapshot_path)), payload
+            )
         except Exception:
             pass
 
@@ -2615,7 +2603,9 @@ class HistoryManager:
     def _infer_backup_kind(backup_path: Path) -> str:
         return "pre_restore" if "pre_restore" in backup_path.name else "manual"
 
-    def _restore_external_state(self, *, rollback_manifest: dict, settings_state: dict) -> str | None:
+    def _restore_external_state(
+        self, *, rollback_manifest: dict, settings_state: dict
+    ) -> str | None:
         restore_errors: list[str] = []
         try:
             self._restore_managed_state(rollback_manifest)

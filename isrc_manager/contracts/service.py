@@ -5,16 +5,15 @@ from __future__ import annotations
 import hashlib
 import mimetypes
 import sqlite3
-import time
 from dataclasses import asdict
 from datetime import date, timedelta
 from pathlib import Path
 
 from isrc_manager.domain.repertoire import clean_text, parse_iso_date
 from isrc_manager.file_storage import (
-    ManagedFileStorage,
     STORAGE_MODE_DATABASE,
     STORAGE_MODE_MANAGED_FILE,
+    ManagedFileStorage,
     bytes_from_blob,
     coalesce_filename,
     infer_storage_mode,
@@ -84,6 +83,15 @@ class ContractService:
         return clean
 
     def _ensure_storage_columns(self) -> None:
+        table_names = {
+            str(row[0])
+            for row in self.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+            if row and row[0]
+        }
+        if "ContractDocuments" not in table_names:
+            return
         columns = {
             str(row[1])
             for row in self.conn.execute("PRAGMA table_info(ContractDocuments)").fetchall()
@@ -843,9 +851,11 @@ class ContractService:
             checksum = clean_text(item.checksum_sha256)
             file_blob = None
             if clean_text(item.source_path):
-                stored_path, file_blob, filename, checksum, _ = self._build_document_storage_payload(
-                    source_path=item.source_path,
-                    storage_mode=desired_mode,
+                stored_path, file_blob, filename, checksum, _ = (
+                    self._build_document_storage_payload(
+                        source_path=item.source_path,
+                        storage_mode=desired_mode,
+                    )
                 )
             elif current is not None:
                 stored_path = stored_path or current["file_path"]
@@ -860,7 +870,10 @@ class ContractService:
                         existing_file_blob=current["file_blob"],
                     )
                     stored_path, file_blob, filename, checksum, _ = payload
-                elif desired_mode == STORAGE_MODE_MANAGED_FILE and current_mode == STORAGE_MODE_DATABASE:
+                elif (
+                    desired_mode == STORAGE_MODE_MANAGED_FILE
+                    and current_mode == STORAGE_MODE_DATABASE
+                ):
                     blob_data = bytes_from_blob(current["file_blob"])
                     if not blob_data:
                         raise FileNotFoundError("No document blob is stored for this record.")

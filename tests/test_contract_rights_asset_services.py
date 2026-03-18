@@ -309,9 +309,7 @@ class ContractRightsAssetServiceTests(unittest.TestCase):
         self.assertEqual(converted_managed.storage_mode, "managed_file")
         self.assertIsNotNone(converted_managed.file_path)
         converted_path = self.contract_service.resolve_document_path(converted_managed.file_path)
-        self.assertTrue(
-            converted_path.exists()
-        )
+        self.assertTrue(converted_path.exists())
 
         self.contract_service.delete_contract(contract_id)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Contracts").fetchone()[0], 0)

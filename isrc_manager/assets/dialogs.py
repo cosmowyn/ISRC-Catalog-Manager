@@ -185,9 +185,7 @@ class AssetEditorDialog(QDialog):
             self.format_edit.setText(asset.format or "")
             self.storage_mode_combo.setCurrentIndex(
                 0
-                if normalize_storage_mode(
-                    asset.storage_mode, default=STORAGE_MODE_MANAGED_FILE
-                )
+                if normalize_storage_mode(asset.storage_mode, default=STORAGE_MODE_MANAGED_FILE)
                 == STORAGE_MODE_DATABASE
                 else 1
             )

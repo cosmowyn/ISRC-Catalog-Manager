@@ -319,10 +319,12 @@ class AppShellIntegrationTests(unittest.TestCase):
                 "exec",
                 return_value=app_module.QMessageBox.Yes,
             ),
+            mock.patch.object(app_module.QMessageBox, "critical") as critical_mock,
         ):
             self.window.delete_entry()
 
         self.app.processEvents()
+        critical_mock.assert_not_called()
         self.assertIsNone(self.window.track_service.fetch_track_snapshot(track_id))
         self.assertEqual(
             self.window.undo_action.text(),
@@ -331,13 +333,19 @@ class AppShellIntegrationTests(unittest.TestCase):
 
         visible_history = self.window.history_manager.list_entries(limit=20)
         all_history = self.window.history_manager.list_entries(limit=20, include_hidden=True)
-        self.assertEqual([entry.label for entry in visible_history], ["Delete Track: Delete History Song"])
-        self.assertEqual([entry.label for entry in all_history], ["Delete Track: Delete History Song"])
+        self.assertEqual(
+            [entry.label for entry in visible_history], ["Delete Track: Delete History Song"]
+        )
+        self.assertEqual(
+            [entry.label for entry in all_history], ["Delete Track: Delete History Song"]
+        )
 
         dialog = app_module.HistoryDialog(self.window, parent=self.window)
         try:
             self.assertEqual(dialog.history_table.rowCount(), 1)
-            self.assertEqual(dialog.history_table.item(0, 2).text(), "Delete Track: Delete History Song")
+            self.assertEqual(
+                dialog.history_table.item(0, 2).text(), "Delete Track: Delete History Song"
+            )
         finally:
             dialog.close()
             self.app.processEvents()

@@ -98,10 +98,10 @@ class HistoryDialog(QDialog):
         browser_layout.addWidget(self.tabs, 1)
         layout.addWidget(browser_box, 1)
 
-        self.session_table = self._build_table(["Current", "Time", "Action"])
+        self.session_table = self._build_table(["Current", "Time", "Action", "Type"])
         self.tabs.addTab(self.session_table, "Session")
 
-        self.history_table = self._build_table(["Current", "Time", "Action"])
+        self.history_table = self._build_table(["Current", "Time", "Action", "Type"])
         self.tabs.addTab(self.history_table, "History")
 
         self.snapshot_table = self._build_table(["Time", "Kind", "Label", "Path"])
@@ -197,6 +197,7 @@ class HistoryDialog(QDialog):
                 "●" if entry.is_current else "",
                 entry.created_at,
                 entry.label,
+                getattr(entry, "action_type", ""),
             ]
             for col_idx, value in enumerate(values):
                 table.setItem(row_idx, col_idx, QTableWidgetItem(value))

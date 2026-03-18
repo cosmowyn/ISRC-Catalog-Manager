@@ -249,7 +249,9 @@ class SessionHistoryManager:
             if parent_id is None:
                 is_redo_child = row_parent_id is None
             else:
-                is_redo_child = int(row_parent_id) == int(parent_id) if row_parent_id is not None else False
+                is_redo_child = (
+                    int(row_parent_id) == int(parent_id) if row_parent_id is not None else False
+                )
             if is_redo_child and str(row.get("status", self.STATUS_APPLIED)) == self.STATUS_UNDONE:
                 row["status"] = self.STATUS_SUPERSEDED
         self._state["next_entry_id"] = entry_id + 1
@@ -322,7 +324,10 @@ class SessionHistoryManager:
         current_id = self.get_current_entry_id()
         if current_id is not None and self.fetch_entry(current_id) is None:
             self._state["current_entry_id"] = self._select_fallback_current_entry_id()
-        if all(str(row.get("status", self.STATUS_APPLIED)) == self.STATUS_APPLIED for row in self._state["entries"]):
+        if all(
+            str(row.get("status", self.STATUS_APPLIED)) == self.STATUS_APPLIED
+            for row in self._state["entries"]
+        ):
             self._bootstrap_statuses()
         self._save_state()
 
@@ -340,9 +345,7 @@ class SessionHistoryManager:
             current_id = parent_map[current_id]
         for row in self._state["entries"]:
             row["status"] = (
-                self.STATUS_APPLIED
-                if int(row["entry_id"]) in applied_ids
-                else self.STATUS_UNDONE
+                self.STATUS_APPLIED if int(row["entry_id"]) in applied_ids else self.STATUS_UNDONE
             )
 
     def _select_fallback_current_entry_id(self) -> int | None:

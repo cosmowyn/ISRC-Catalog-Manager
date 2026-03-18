@@ -149,7 +149,9 @@ class RepertoireExchangeService:
                         document.get("filename"),
                         default_stem=f"contract-document-{document_id or contract_id or 'file'}",
                     )
-                    package_key = f"embedded/contracts/{contract_id or 'contract'}/{document_id}/{filename}"
+                    package_key = (
+                        f"embedded/contracts/{contract_id or 'contract'}/{document_id}/{filename}"
+                    )
                     arcname = f"files/contracts/{document_id}_{filename}"
                     if arcname not in packaged_files.values():
                         archive.writestr(arcname, data)

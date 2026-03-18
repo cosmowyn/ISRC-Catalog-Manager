@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 import mimetypes
 import sqlite3
-import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
@@ -13,16 +12,19 @@ from typing import Iterable
 from isrc_manager.domain.codes import is_blank, to_compact_isrc
 from isrc_manager.domain.standard_fields import standard_media_specs_by_key
 from isrc_manager.file_storage import (
-    ManagedFileStorage,
     STORAGE_MODE_DATABASE,
     STORAGE_MODE_MANAGED_FILE,
+    ManagedFileStorage,
     bytes_from_blob,
     coalesce_filename,
     infer_storage_mode,
     normalize_storage_mode,
 )
-from isrc_manager.media.blob_files import _is_valid_audio_path, _is_valid_image_path
-from isrc_manager.media.blob_files import _read_blob_from_path
+from isrc_manager.media.blob_files import (
+    _is_valid_audio_path,
+    _is_valid_image_path,
+    _read_blob_from_path,
+)
 
 
 def _build_media_fields() -> dict[str, dict[str, object]]:
@@ -156,16 +158,31 @@ class TrackService:
         self._ensure_storage_columns()
 
     def _ensure_storage_columns(self) -> None:
-        track_columns = {
-            str(row[1])
-            for row in self.conn.execute("PRAGMA table_info(Tracks)").fetchall()
-            if row and row[1]
+        table_names = {
+            str(row[0])
+            for row in self.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+            if row and row[0]
         }
-        album_columns = {
-            str(row[1])
-            for row in self.conn.execute("PRAGMA table_info(Albums)").fetchall()
-            if row and row[1]
-        }
+        track_columns = (
+            {
+                str(row[1])
+                for row in self.conn.execute("PRAGMA table_info(Tracks)").fetchall()
+                if row and row[1]
+            }
+            if "Tracks" in table_names
+            else set()
+        )
+        album_columns = (
+            {
+                str(row[1])
+                for row in self.conn.execute("PRAGMA table_info(Albums)").fetchall()
+                if row and row[1]
+            }
+            if "Albums" in table_names
+            else set()
+        )
         track_additions = (
             ("audio_file_storage_mode", "TEXT"),
             ("audio_file_blob", "BLOB"),
@@ -180,12 +197,18 @@ class TrackService:
             ("album_art_filename", "TEXT"),
         )
         with self.conn:
-            for column_name, column_sql in track_additions:
-                if column_name not in track_columns:
-                    self.conn.execute(f"ALTER TABLE Tracks ADD COLUMN {column_name} {column_sql}")
-            for column_name, column_sql in album_additions:
-                if column_name not in album_columns:
-                    self.conn.execute(f"ALTER TABLE Albums ADD COLUMN {column_name} {column_sql}")
+            if "Tracks" in table_names:
+                for column_name, column_sql in track_additions:
+                    if column_name not in track_columns:
+                        self.conn.execute(
+                            f"ALTER TABLE Tracks ADD COLUMN {column_name} {column_sql}"
+                        )
+            if "Albums" in table_names:
+                for column_name, column_sql in album_additions:
+                    if column_name not in album_columns:
+                        self.conn.execute(
+                            f"ALTER TABLE Albums ADD COLUMN {column_name} {column_sql}"
+                        )
 
     @staticmethod
     def parse_additional_artists(text: str) -> list[str]:
@@ -851,10 +874,12 @@ class TrackService:
                     owner_id=int(album_id),
                 )
 
-        rel_path, filename, blob_data, mime_type, size_bytes = self._build_media_storage_payload_from_source(
-            media_key,
-            source_path,
-            storage_mode=storage_mode,
+        rel_path, filename, blob_data, mime_type, size_bytes = (
+            self._build_media_storage_payload_from_source(
+                media_key,
+                source_path,
+                storage_mode=storage_mode,
+            )
         )
         stale_meta = self._get_track_row_media_meta(track_id, media_key, cursor=cur)
         self._update_track_media_reference(
@@ -1202,7 +1227,7 @@ class TrackService:
                     release_date, track_length_sec, iswc, upc, genre,
                     composer, publisher, comments, lyrics
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     int(snapshot.track_id),
@@ -1427,13 +1452,21 @@ class TrackService:
                 payload.track_title.strip(),
                 payload.catalog_number,
                 (None if shared_album_art else (str(current_track_art.get("path") or "") or None)),
-                (None if shared_album_art else (str(current_track_art.get("storage_mode") or "") or None)),
+                (
+                    None
+                    if shared_album_art
+                    else (str(current_track_art.get("storage_mode") or "") or None)
+                ),
                 (
                     None
                     if shared_album_art or current_track_art_blob is None
                     else sqlite3.Binary(current_track_art_blob)
                 ),
-                (None if shared_album_art else (str(current_track_art.get("filename") or "") or None)),
+                (
+                    None
+                    if shared_album_art
+                    else (str(current_track_art.get("filename") or "") or None)
+                ),
                 (
                     None
                     if shared_album_art
@@ -1494,7 +1527,8 @@ class TrackService:
                 self._delete_unreferenced_media_files([stale_track_art_path], cursor=cursor)
         else:
             if bool(current_effective_art.get("has_media")) and (
-                str(current_effective_art.get("path") or "") != str(current_track_art.get("path") or "")
+                str(current_effective_art.get("path") or "")
+                != str(current_track_art.get("path") or "")
                 or str(current_effective_art.get("storage_mode") or "")
                 != str(current_track_art.get("storage_mode") or "")
             ):

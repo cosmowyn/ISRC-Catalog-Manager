@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from isrc_manager.file_storage import normalize_storage_mode
 from isrc_manager.ui_common import (
     _add_standard_dialog_header,
     _apply_compact_dialog_control_heights,
@@ -33,7 +34,6 @@ from isrc_manager.ui_common import (
     _create_scrollable_dialog_content,
     _create_standard_section,
 )
-from isrc_manager.file_storage import normalize_storage_mode
 
 from .models import (
     CONTRACT_STATUS_CHOICES,

@@ -10,16 +10,15 @@ from typing import Iterable
 
 from isrc_manager.domain.codes import barcode_validation_status
 from isrc_manager.file_storage import (
-    ManagedFileStorage,
     STORAGE_MODE_DATABASE,
     STORAGE_MODE_MANAGED_FILE,
+    ManagedFileStorage,
     bytes_from_blob,
     coalesce_filename,
     infer_storage_mode,
     normalize_storage_mode,
 )
-from isrc_manager.media.blob_files import _is_valid_image_path
-from isrc_manager.media.blob_files import _read_blob_from_path
+from isrc_manager.media.blob_files import _is_valid_image_path, _read_blob_from_path
 
 from .models import (
     ReleasePayload,
@@ -59,6 +58,15 @@ class ReleaseService:
         self._ensure_storage_columns()
 
     def _ensure_storage_columns(self) -> None:
+        table_names = {
+            str(row[0])
+            for row in self.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+            if row and row[0]
+        }
+        if "Releases" not in table_names:
+            return
         columns = {
             str(row[1])
             for row in self.conn.execute("PRAGMA table_info(Releases)").fetchall()
@@ -440,7 +448,9 @@ class ReleaseService:
             if not current:
                 raise ValueError(f"Release {release_id} not found")
             current_artwork_path = str(current[0] or "") or None
-            current_artwork_mode = infer_storage_mode(explicit_mode=current[1], stored_path=current[0])
+            current_artwork_mode = infer_storage_mode(
+                explicit_mode=current[1], stored_path=current[0]
+            )
             current_artwork_filename = str(current[2] or "") or None
             current_artwork_mime = str(current[3] or "") or None
             current_artwork_size = int(current[4] or 0)
@@ -613,7 +623,9 @@ class ReleaseService:
         else:
             artwork_path = self.media_store.write_bytes(
                 data,
-                filename=coalesce_filename(release.artwork_filename, default_stem="release-artwork"),
+                filename=coalesce_filename(
+                    release.artwork_filename, default_stem="release-artwork"
+                ),
                 subdir="images",
             )
             artwork_blob = None

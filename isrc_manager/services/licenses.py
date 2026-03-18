@@ -9,9 +9,9 @@ from pathlib import Path
 from typing import Iterable
 
 from isrc_manager.file_storage import (
-    ManagedFileStorage,
     STORAGE_MODE_DATABASE,
     STORAGE_MODE_MANAGED_FILE,
+    ManagedFileStorage,
     bytes_from_blob,
     coalesce_filename,
     infer_storage_mode,
@@ -56,6 +56,15 @@ class LicenseService:
         self._ensure_storage_columns()
 
     def _ensure_storage_columns(self) -> None:
+        table_names = {
+            str(row[0])
+            for row in self.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+            if row and row[0]
+        }
+        if "Licenses" not in table_names:
+            return
         columns = {
             str(row[1])
             for row in self.conn.execute("PRAGMA table_info(Licenses)").fetchall()
@@ -261,7 +270,11 @@ class LicenseService:
             mime_type = current.mime_type
             size_bytes = current.size_bytes
             clean_mode = normalize_storage_mode(storage_mode, default=current.storage_mode)
-            blob_data = self._fetch_license_blob(record_id) if current.storage_mode == STORAGE_MODE_DATABASE else None
+            blob_data = (
+                self._fetch_license_blob(record_id)
+                if current.storage_mode == STORAGE_MODE_DATABASE
+                else None
+            )
             if replacement_pdf_path:
                 file_path, filename, blob_data, mime_type, size_bytes = self._store_license_source(
                     Path(replacement_pdf_path),
