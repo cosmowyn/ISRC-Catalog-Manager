@@ -32,7 +32,6 @@ from PySide6.QtWidgets import (
 from isrc_manager.blob_icons import BlobIconDialog, describe_blob_icon_spec
 from isrc_manager.constants import DEFAULT_WINDOW_TITLE, FIELD_TYPE_CHOICES
 from isrc_manager.help_content import HELP_CHAPTERS, HELP_CHAPTERS_BY_ID
-from isrc_manager.paths import DATA_DIR
 from isrc_manager.ui_common import (
     FocusWheelComboBox,
     _add_standard_dialog_header,
@@ -884,7 +883,7 @@ class DiagnosticsDialog(QDialog):
             lambda: self.app._open_local_path(self.app.logs_dir, "Open Log Folder")
         )
         self.open_data_button.clicked.connect(
-            lambda: self.app._open_local_path(DATA_DIR(), "Open Data Folder")
+            lambda: self.app._open_local_path(self.app.data_root, "Open Data Folder")
         )
         self.close_button.clicked.connect(self.accept)
         self.checks_list.currentRowChanged.connect(self._show_selected_check)
@@ -938,6 +937,10 @@ class DiagnosticsDialog(QDialog):
         repairable = bool(check and check.get("repair_key"))
         self.preview_repair_button.setEnabled(repairable)
         self.repair_button.setEnabled(repairable)
+        label = "Repair Issue"
+        if check is not None:
+            label = check.get("repair_label") or "Repair Issue"
+        self.repair_button.setText(label)
 
     def _selected_check(self) -> dict | None:
         row = self.checks_list.currentRow()
@@ -1080,7 +1083,7 @@ class AboutDialog(QDialog):
             "Database path": (
                 str(app.current_db_path) if getattr(app, "current_db_path", "") else "(none)"
             ),
-            "Data folder": str(DATA_DIR()),
+            "Data folder": str(app.data_root),
             "Log folder": str(app.logs_dir),
             "Schema version": str(app._get_db_version()),
         }

@@ -62,7 +62,7 @@ class GS1SettingsService:
 
     def _resolve_data_root(self, data_root: str | Path | None) -> Path | None:
         if data_root is not None:
-            return Path(data_root)
+            return Path(data_root).resolve()
         try:
             settings_file = str(self.settings.fileName() or "").strip()
         except Exception:

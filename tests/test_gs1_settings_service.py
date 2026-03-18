@@ -154,6 +154,19 @@ class GS1SettingsServiceTests(unittest.TestCase):
         self.assertEqual(converted.storage_mode, "database")
         self.assertEqual(self.service.load_stored_template_bytes(), template_path.read_bytes())
 
+    def test_explicit_data_root_overrides_settings_file_parent_for_managed_templates(self):
+        explicit_root = Path(self.tmpdir.name) / "explicit-data-root"
+        service = GS1SettingsService(self.conn, self.settings, data_root=explicit_root)
+        template_path = Path(self.tmpdir.name) / "explicit-managed-template.xlsx"
+        build_template(template_path)
+
+        stored = service.import_template_from_path(template_path, storage_mode="managed_file")
+
+        self.assertTrue(stored.managed_file_path.startswith("gs1_templates/"))
+        managed_path = explicit_root / stored.managed_file_path
+        self.assertTrue(managed_path.exists())
+        self.assertEqual(service.data_root, explicit_root.resolve())
+
 
 if __name__ == "__main__":
     unittest.main()

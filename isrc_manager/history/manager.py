@@ -183,6 +183,18 @@ class HistoryManager:
             return None
         return self._backup_from_row(row)
 
+    def delete_backup(self, backup_id: int) -> None:
+        backup = self.fetch_backup(backup_id)
+        if backup is None:
+            raise ValueError(f"Backup {backup_id} not found")
+
+        with self.conn:
+            self.conn.execute("DELETE FROM HistoryBackups WHERE id=?", (int(backup_id),))
+
+        backup_path = Path(backup.backup_path)
+        self._remove_path(backup_path)
+        self._remove_path(self._backup_sidecar_path(backup_path))
+
     def can_undo(self) -> bool:
         self._ensure_history_invariants()
         return bool(self._visible_undo_plan())

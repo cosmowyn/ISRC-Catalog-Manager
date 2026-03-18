@@ -3,9 +3,16 @@
 import uuid
 from pathlib import Path
 
-from PySide6.QtCore import QLockFile, QSettings, QStandardPaths
+from PySide6.QtCore import QLockFile, QSettings
 
 from .constants import APP_NAME, SETTINGS_BASENAME
+from .paths import (
+    STORAGE_ACTIVE_DATA_ROOT_KEY,
+    configure_qt_application_identity,
+    lock_path,
+    preferred_data_root,
+    settings_path,
+)
 
 
 def init_settings() -> QSettings:
@@ -15,19 +22,21 @@ def init_settings() -> QSettings:
       - macOS:   ~/Library/Application Support/GenericVendor/ISRCManager/
       - Linux:   ~/.local/share/GenericVendor/ISRCManager/
     """
-    base_dir = Path(QStandardPaths.writableLocation(QStandardPaths.AppDataLocation))
+    configure_qt_application_identity()
+    ini_path = settings_path()
+    base_dir = ini_path.parent
     base_dir.mkdir(parents=True, exist_ok=True)
-
-    ini_path = base_dir / SETTINGS_BASENAME
     settings = QSettings(str(ini_path), QSettings.IniFormat)
     settings.setFallbacksEnabled(False)
 
     first_run = settings.value("app/initialized", False, type=bool) is False
     if first_run:
+        preferred_root = preferred_data_root()
         settings.setValue("app/initialized", True)
         settings.setValue("app/schema_version", 1)
         settings.setValue("ui/theme", "system")
-        settings.setValue("paths/database_dir", str((base_dir.parent / "Database").resolve()))
+        settings.setValue("paths/database_dir", str((preferred_root / "Database").resolve()))
+        settings.setValue(STORAGE_ACTIVE_DATA_ROOT_KEY, str(preferred_root))
         settings.setValue("app/uid", str(uuid.uuid4()))
         settings.sync()
 
@@ -36,9 +45,10 @@ def init_settings() -> QSettings:
 
 def enforce_single_instance(timeout_ms: int = 60000):
     """Return a QLockFile if we obtained the lock; otherwise None."""
-    lock_dir = Path(QStandardPaths.writableLocation(QStandardPaths.AppDataLocation))
-    lock_dir.mkdir(parents=True, exist_ok=True)
-    lock = QLockFile(str(lock_dir / f"{APP_NAME}.lock"))
+    configure_qt_application_identity()
+    current_lock_path = lock_path()
+    current_lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock = QLockFile(str(current_lock_path))
     lock.setStaleLockTime(timeout_ms)
     if not lock.tryLock(0):
         return None

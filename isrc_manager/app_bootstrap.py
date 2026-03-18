@@ -8,6 +8,7 @@ from collections.abc import Callable, Sequence
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from .constants import APP_NAME
+from .paths import configure_qt_application_identity
 
 
 def get_or_create_application(
@@ -18,8 +19,11 @@ def get_or_create_application(
     """Return the current QApplication instance or create one."""
     app = application_factory.instance()
     if app is not None:
+        configure_qt_application_identity(app)
         return app
-    return application_factory(list(sys.argv if argv is None else argv))
+    app = application_factory(list(sys.argv if argv is None else argv))
+    configure_qt_application_identity(app)
+    return app
 
 
 def run_desktop_application(

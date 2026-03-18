@@ -118,7 +118,11 @@ from PySide6.QtWidgets import (
 
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput, QAudioDecoder, QAudioFormat
 
-from isrc_manager.history import HistoryManager, SessionHistoryManager
+from isrc_manager.history import (
+    HistoryManager,
+    HistoryStorageCleanupService,
+    SessionHistoryManager,
+)
 from isrc_manager.history.dialogs import HistoryDialog
 from isrc_manager.constants import (
     APP_NAME,
@@ -179,7 +183,12 @@ from isrc_manager.catalog_workspace import (
     refresh_catalog_workspace_docks,
 )
 from isrc_manager.main_window_shell import build_main_window_shell
-from isrc_manager.paths import DATA_DIR
+from isrc_manager.paths import (
+    STORAGE_STATE_DEFERRED,
+    configure_qt_application_identity,
+    resolve_app_storage_layout,
+    settings_path,
+)
 from isrc_manager.qss_autocomplete import QssCodeEditor
 from isrc_manager.qss_reference import (
     QssReferenceEntry,
@@ -287,6 +296,7 @@ from isrc_manager.settings import enforce_single_instance, init_settings
 from isrc_manager.tasks import BackgroundTaskManager, TaskFailure
 from isrc_manager.tasks.app_services import BackgroundAppServiceFactory
 from isrc_manager.tasks.history_helpers import run_file_history_action, run_snapshot_history_action
+from isrc_manager.storage_migration import StorageMigrationService
 from isrc_manager.tags import (
     AudioTagService,
     TaggedAudioExportService,
@@ -456,11 +466,8 @@ class DraggableLabel(QLabel):
             app = self.window()
             s = getattr(app, "settings", None)
             if s is None:
-                ini_path = (
-                    Path(QStandardPaths.writableLocation(QStandardPaths.AppDataLocation))
-                    / "settings.ini"
-                )
-                s = QSettings(str(ini_path), QSettings.IniFormat)
+                configure_qt_application_identity()
+                s = QSettings(str(settings_path()), QSettings.IniFormat)
                 s.setFallbacksEnabled(False)
             s.setValue(self.settings_key, self.pos())
             s.sync()
@@ -5145,27 +5152,17 @@ class App(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setObjectName("mainWindow")
+        configure_qt_application_identity(self)
 
-        # --- File system: per-user writable dirs (cross-platform) ---
-        self.database_dir = DATA_DIR() / "Database"
-        self.database_dir.mkdir(parents=True, exist_ok=True)
+        self.settings = QSettings(str(settings_path()), QSettings.IniFormat)
+        self.settings.setFallbacksEnabled(False)
+        self.storage_layout = resolve_app_storage_layout(settings=self.settings)
+        self.storage_migration_service = StorageMigrationService(
+            self.storage_layout, settings=self.settings
+        )
+        self._maybe_run_storage_layout_migration()
+        self._apply_storage_layout()
 
-        self.exports_dir = DATA_DIR() / "exports"
-        self.exports_dir.mkdir(parents=True, exist_ok=True)
-
-        self.logs_dir = DATA_DIR() / "logs"
-        self.logs_dir.mkdir(parents=True, exist_ok=True)
-        today_stamp = datetime.now().strftime("%Y-%m-%d")
-        self.log_path = self.logs_dir / f"isrc_manager_{today_stamp}.log"
-        self.trace_log_path = self.logs_dir / f"isrc_manager_trace_{today_stamp}.jsonl"
-
-        self.backups_dir = DATA_DIR() / "backups"
-        self.backups_dir.mkdir(parents=True, exist_ok=True)
-        self.history_dir = DATA_DIR() / "history"
-        self.history_dir.mkdir(parents=True, exist_ok=True)
-        self.help_dir = DATA_DIR() / "help"
-        self.help_dir.mkdir(parents=True, exist_ok=True)
-        self.help_file_path = self.help_dir / "isrc_catalog_manager_help.html"
         self.sqlite_connection_factory = SQLiteConnectionFactory()
         self.database_session = DatabaseSessionService(self.sqlite_connection_factory)
         self.profile_store = ProfileStoreService(self.database_dir)
@@ -5175,7 +5172,7 @@ class App(QMainWindow):
         self.background_tasks.task_state_changed.connect(self._on_background_task_state_changed)
         self.background_service_factory = BackgroundAppServiceFactory(
             connection_factory=self.sqlite_connection_factory,
-            data_root=DATA_DIR(),
+            data_root=self.data_root,
             history_dir=self.history_dir,
             backups_dir=self.backups_dir,
         )
@@ -5191,17 +5188,10 @@ class App(QMainWindow):
         self._log_event(
             "app.start",
             "Application start",
-            data_dir=DATA_DIR(),
+            data_dir=self.data_root,
             log_path=self.log_path,
             trace_log_path=self.trace_log_path,
         )
-
-        # --- Settings / identity ---
-        ini_path = (
-            Path(QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)) / "settings.ini"
-        )
-        self.settings = QSettings(str(ini_path), QSettings.IniFormat)
-        self.settings.setFallbacksEnabled(False)
         self.background_service_factory.configure(settings_path=self.settings.fileName())
 
         self.identity = self._load_identity()
@@ -5287,6 +5277,164 @@ class App(QMainWindow):
         self._ensure_widget_object_names(self)
         self._apply_theme()
         self._refresh_catalog_ui_in_background(unique_key="catalog.ui.startup")
+
+    def _apply_storage_layout(self) -> None:
+        self.storage_layout = resolve_app_storage_layout(settings=self.settings)
+        self.storage_migration_service = StorageMigrationService(
+            self.storage_layout, settings=self.settings
+        )
+        self.data_root = self.storage_layout.data_root
+        self.database_dir = self.storage_layout.database_dir
+        self.exports_dir = self.storage_layout.exports_dir
+        self.logs_dir = self.storage_layout.logs_dir
+        self.backups_dir = self.storage_layout.backups_dir
+        self.history_dir = self.storage_layout.history_dir
+        self.help_dir = self.storage_layout.help_dir
+
+        for directory in (
+            self.data_root,
+            self.database_dir,
+            self.exports_dir,
+            self.logs_dir,
+            self.backups_dir,
+            self.history_dir,
+            self.help_dir,
+        ):
+            directory.mkdir(parents=True, exist_ok=True)
+
+        today_stamp = datetime.now().strftime("%Y-%m-%d")
+        self.log_path = self.logs_dir / f"isrc_manager_{today_stamp}.log"
+        self.trace_log_path = self.logs_dir / f"isrc_manager_trace_{today_stamp}.jsonl"
+        self.help_file_path = self.help_dir / "isrc_catalog_manager_help.html"
+        factory = getattr(self, "background_service_factory", None)
+        if factory is not None:
+            factory.configure(
+                data_root=self.data_root,
+                history_dir=self.history_dir,
+                backups_dir=self.backups_dir,
+                settings_path=self.settings.fileName(),
+            )
+
+    def _maybe_run_storage_layout_migration(self) -> None:
+        inspection = self.storage_migration_service.inspect()
+        if self.storage_layout.portable or inspection.legacy_root is None or not inspection.legacy_items:
+            return
+        if (
+            inspection.target_ready
+            and self.storage_layout.active_data_root == self.storage_layout.preferred_data_root
+        ):
+            self.storage_migration_service.mark_complete()
+            return
+        if inspection.deferred and self.storage_layout.active_data_root == inspection.legacy_root:
+            return
+        if not inspection.migration_needed and inspection.target_ready:
+            return
+
+        lines = [
+            "A legacy app-data folder was found.",
+            "",
+            f"Current folder: {inspection.legacy_root}",
+            f"New folder: {self.storage_layout.preferred_data_root}",
+            "",
+            "The migration will copy app-owned profiles, history, backups, logs, exports, help files, and managed media into the new app folder.",
+            "Legacy data will stay in place until you choose to remove it later.",
+            "",
+            "Migrate to the new app folder now?",
+        ]
+        message_box = QMessageBox(self)
+        message_box.setWindowTitle("App Data Migration")
+        message_box.setIcon(QMessageBox.Warning)
+        message_box.setText("\n".join(lines))
+        migrate_button = message_box.addButton("Migrate Now", QMessageBox.AcceptRole)
+        keep_button = message_box.addButton("Keep Current Folder For Now", QMessageBox.RejectRole)
+        message_box.setDefaultButton(migrate_button)
+        message_box.exec()
+
+        if message_box.clickedButton() is keep_button:
+            self.storage_migration_service.defer(inspection.legacy_root)
+            self.storage_layout = resolve_app_storage_layout(settings=self.settings)
+            self.storage_migration_service = StorageMigrationService(
+                self.storage_layout, settings=self.settings
+            )
+            return
+
+        try:
+            result = self._run_storage_layout_migration()
+        except Exception as exc:
+            self.storage_migration_service.defer(inspection.legacy_root)
+            self.storage_layout = resolve_app_storage_layout(settings=self.settings)
+            self.storage_migration_service = StorageMigrationService(
+                self.storage_layout, settings=self.settings
+            )
+            QMessageBox.warning(
+                self,
+                "App Data Migration",
+                "The app-data migration could not be completed.\n\n"
+                f"{exc}\n\nThe app will continue to use the current folder for now.",
+            )
+            return
+
+        QMessageBox.information(
+            self,
+            "App Data Migration",
+            "App-owned data was copied into the new storage layout successfully.\n\n"
+            f"Migrated items: {', '.join(result.copied_items)}",
+        )
+
+    def _run_storage_layout_migration(self):
+        if hasattr(self, "background_tasks") and self.background_tasks.has_running_tasks():
+            raise RuntimeError(
+                "Finish any running background tasks before migrating app-owned storage."
+            )
+
+        inspection = self.storage_migration_service.inspect()
+        source_root = inspection.legacy_root.resolve() if inspection.legacy_root is not None else None
+        previous_current_path = str(getattr(self, "current_db_path", "") or "").strip()
+        previous_was_open = getattr(self, "conn", None) is not None
+
+        if previous_was_open:
+            self._prepare_for_background_db_task()
+            self._close_database_connection()
+
+        try:
+            result = self.storage_migration_service.migrate()
+        except Exception:
+            if previous_was_open and previous_current_path and Path(previous_current_path).exists():
+                self.open_database(previous_current_path)
+                self._reload_profiles_list(select_path=previous_current_path)
+            raise
+
+        source_root = result.source_root.resolve()
+        target_root = result.target_root.resolve()
+
+        self._apply_storage_layout()
+
+        if previous_was_open and previous_current_path:
+            reopened_path = previous_current_path
+            try:
+                relative = Path(previous_current_path).resolve().relative_to(source_root)
+            except Exception:
+                relative = None
+            if relative is not None:
+                migrated_path = (target_root / relative).resolve()
+                if not migrated_path.exists():
+                    raise RuntimeError(
+                        "The active profile did not appear in the migrated app-data folder."
+                    )
+                reopened_path = str(migrated_path)
+            self.open_database(reopened_path)
+            self._reload_profiles_list(select_path=reopened_path)
+        else:
+            self._configure_background_runtime()
+
+        self._log_event(
+            "storage.migration",
+            "Migrated app-owned data into the preferred storage layout",
+            source_root=source_root,
+            target_root=target_root,
+            migrated_items=list(result.copied_items),
+        )
+        return result
 
     def closeEvent(self, e):
         if hasattr(self, "background_tasks") and self.background_tasks.has_running_tasks():
@@ -5575,6 +5723,17 @@ class App(QMainWindow):
         return int(row[0] or 0) if row else 0
 
     def _preview_diagnostics_repair(self, repair_key: str, check: dict | None = None) -> str:
+        if repair_key == "storage_layout_migrate":
+            inspection = self.storage_migration_service.inspect()
+            if inspection.legacy_root is None or not inspection.legacy_items:
+                return "No legacy app-owned storage was detected, so no migration is needed."
+            return (
+                "This will copy app-owned storage into the preferred app folder, rewrite known internal "
+                "history and snapshot paths, verify copied databases, and keep the legacy folder intact.\n\n"
+                f"Legacy folder: {inspection.legacy_root}\n"
+                f"Preferred folder: {self.storage_layout.preferred_data_root}\n"
+                f"Items to migrate: {', '.join(inspection.legacy_items)}"
+            )
         if repair_key == "schema_migrate":
             return "This will re-run the schema bootstrap and migrations for the current profile."
         if repair_key == "custom_value_cleanup":
@@ -5601,6 +5760,15 @@ class App(QMainWindow):
         raise ValueError(f"Unknown diagnostics repair: {repair_key}")
 
     def _run_diagnostics_repair(self, repair_key: str, check: dict | None = None) -> str:
+        if repair_key == "storage_layout_migrate":
+            result = self._run_storage_layout_migration()
+            return (
+                "App-owned data was migrated into the preferred storage layout.\n\n"
+                f"Source: {result.source_root}\n"
+                f"Target: {result.target_root}\n"
+                f"Copied items: {', '.join(result.copied_items)}"
+            )
+
         if repair_key == "schema_migrate":
             self.init_db()
             self.migrate_schema()
@@ -5689,7 +5857,7 @@ class App(QMainWindow):
             "Database path": (
                 str(self.current_db_path) if getattr(self, "current_db_path", "") else "(none)"
             ),
-            "Data folder": str(DATA_DIR()),
+            "Data folder": str(self.data_root),
             "Log folder": str(self.logs_dir),
             "Restore points": self._history_snapshot_summary(),
             "Platform": f"{platform.system()} {platform.release()}",
@@ -5707,6 +5875,7 @@ class App(QMainWindow):
             repair_key: str | None = None,
             repair_label: str | None = None,
             orphan_count: int | None = None,
+            **extra,
         ) -> None:
             checks.append(
                 {
@@ -5717,10 +5886,62 @@ class App(QMainWindow):
                     "repair_key": repair_key,
                     "repair_label": repair_label,
                     "orphan_count": orphan_count,
+                    **extra,
                 }
             )
 
         db_version = self._get_db_version()
+        try:
+            storage_inspection = self.storage_migration_service.inspect()
+            if self.storage_layout.portable:
+                add_check(
+                    "Storage layout",
+                    "ok",
+                    "Portable mode is active.",
+                    "Portable mode keeps app-owned data beside the executable, so no app-data migration is required.",
+                )
+            elif storage_inspection.legacy_root is None or not storage_inspection.legacy_items:
+                add_check(
+                    "Storage layout",
+                    "ok",
+                    "App-owned data already uses the preferred app folder layout.",
+                    f"Active data root: {self.storage_layout.active_data_root}\nPreferred data root: {self.storage_layout.preferred_data_root}",
+                )
+            else:
+                current_root = self.storage_layout.active_data_root
+                target_ready_text = (
+                    ", ".join(storage_inspection.target_items)
+                    if storage_inspection.target_items
+                    else "(empty)"
+                )
+                add_check(
+                    "Storage layout",
+                    "warning",
+                    "Legacy app-owned storage was detected.",
+                    "\n".join(
+                        [
+                            f"Legacy root: {storage_inspection.legacy_root}",
+                            f"Active root: {current_root}",
+                            f"Preferred root: {self.storage_layout.preferred_data_root}",
+                            f"Legacy items: {', '.join(storage_inspection.legacy_items)}",
+                            f"Preferred-root contents: {target_ready_text}",
+                            "",
+                            "Use the migration action to collect managed app data into the preferred app folder without deleting the legacy copy.",
+                        ]
+                    ),
+                    repair_key="storage_layout_migrate",
+                    repair_label="Migrate App Data",
+                )
+        except Exception as exc:
+            add_check(
+                "Storage layout",
+                "error",
+                "Storage layout could not be inspected.",
+                f"An exception occurred while checking the app-data layout:\n{exc}",
+                repair_key="storage_layout_migrate",
+                repair_label="Migrate App Data",
+            )
+
         if db_version == SCHEMA_TARGET:
             add_check(
                 "Schema version",
@@ -6114,7 +6335,7 @@ class App(QMainWindow):
                 logger=self.logger,
                 audit_callback=self._audit,
                 audit_commit=self._audit_commit,
-                data_root=DATA_DIR(),
+                data_root=self.data_root,
             )
             if self.conn is not None
             else None
@@ -6125,13 +6346,18 @@ class App(QMainWindow):
                 self.settings,
                 self.current_db_path,
                 self.history_dir,
-                DATA_DIR(),
+                self.data_root,
                 self.backups_dir,
             )
             if self.conn is not None and getattr(self, "current_db_path", None)
             else None
         )
-        self.track_service = TrackService(self.conn, DATA_DIR()) if self.conn is not None else None
+        self.history_cleanup_service = (
+            HistoryStorageCleanupService(self.history_manager)
+            if self.history_manager is not None
+            else None
+        )
+        self.track_service = TrackService(self.conn, self.data_root) if self.conn is not None else None
         self.settings_reads = SettingsReadService(self.conn) if self.conn is not None else None
         self.settings_mutations = (
             SettingsMutationService(self.conn, self.settings) if self.conn is not None else None
@@ -6140,19 +6366,21 @@ class App(QMainWindow):
             BlobIconSettingsService(self.conn) if self.conn is not None else None
         )
         self.gs1_settings_service = (
-            GS1SettingsService(self.conn, self.settings) if self.conn is not None else None
+            GS1SettingsService(self.conn, self.settings, data_root=self.data_root)
+            if self.conn is not None
+            else None
         )
         self.catalog_service = CatalogAdminService(self.conn) if self.conn is not None else None
         self.catalog_reads = CatalogReadService(self.conn) if self.conn is not None else None
         self.license_service = (
-            LicenseService(self.conn, DATA_DIR()) if self.conn is not None else None
+            LicenseService(self.conn, self.data_root) if self.conn is not None else None
         )
         self.profile_kv = ProfileKVService(self.conn) if self.conn is not None else None
         self.custom_field_definitions = (
             CustomFieldDefinitionService(self.conn) if self.conn is not None else None
         )
         self.custom_field_values = (
-            CustomFieldValueService(self.conn, self.custom_field_definitions, DATA_DIR())
+            CustomFieldValueService(self.conn, self.custom_field_definitions, self.data_root)
             if self.conn is not None
             else None
         )
@@ -6163,7 +6391,7 @@ class App(QMainWindow):
             else None
         )
         self.release_service = (
-            ReleaseService(self.conn, DATA_DIR()) if self.conn is not None else None
+            ReleaseService(self.conn, self.data_root) if self.conn is not None else None
         )
         self.party_service = PartyService(self.conn) if self.conn is not None else None
         self.work_service = (
@@ -6172,7 +6400,7 @@ class App(QMainWindow):
             else None
         )
         self.contract_service = (
-            ContractService(self.conn, DATA_DIR(), party_service=self.party_service)
+            ContractService(self.conn, self.data_root, party_service=self.party_service)
             if self.conn is not None
             else None
         )
@@ -6192,7 +6420,7 @@ class App(QMainWindow):
             else None
         )
         self.rights_service = RightsService(self.conn) if self.conn is not None else None
-        self.asset_service = AssetService(self.conn, DATA_DIR()) if self.conn is not None else None
+        self.asset_service = AssetService(self.conn, self.data_root) if self.conn is not None else None
         self.repertoire_workflow_service = (
             RepertoireWorkflowService(self.conn) if self.conn is not None else None
         )
@@ -6214,7 +6442,7 @@ class App(QMainWindow):
                 self.track_service,
                 self.release_service,
                 self.custom_field_definitions,
-                DATA_DIR(),
+                self.data_root,
             )
             if (
                 self.conn is not None
@@ -6232,7 +6460,7 @@ class App(QMainWindow):
                 contract_service=self.contract_service,
                 rights_service=self.rights_service,
                 asset_service=self.asset_service,
-                data_root=DATA_DIR(),
+                data_root=self.data_root,
             )
             if (
                 self.conn is not None
@@ -6249,7 +6477,7 @@ class App(QMainWindow):
                 self.conn,
                 track_service=self.track_service,
                 release_service=self.release_service,
-                data_root=DATA_DIR(),
+                data_root=self.data_root,
             )
             if self.conn is not None
             and self.track_service is not None
@@ -7310,6 +7538,7 @@ class App(QMainWindow):
         self.schema_service = None
         self.history_manager = None
         self.profile_kv = None
+        self.history_cleanup_service = None
         self.settings_reads = None
         self.settings_mutations = None
         self.blob_icon_settings_service = None
@@ -8844,7 +9073,7 @@ class App(QMainWindow):
                 schema_service = DatabaseSchemaService(
                     session.conn,
                     logger=self.logger,
-                    data_root=DATA_DIR(),
+                    data_root=self.data_root,
                 )
                 schema_service.init_db()
                 schema_service.migrate_schema()
@@ -9078,6 +9307,14 @@ class App(QMainWindow):
         if self.history_manager is None:
             return
         self.history_manager.delete_snapshot_as_action(snapshot_id)
+        self._refresh_history_actions()
+        if self.history_dialog is not None and self.history_dialog.isVisible():
+            self.history_dialog.refresh_data()
+
+    def delete_backup_from_history(self, backup_id: int):
+        if self.history_manager is None:
+            return
+        self.history_manager.delete_backup(backup_id)
         self._refresh_history_actions()
         if self.history_dialog is not None and self.history_dialog.isVisible():
             self.history_dialog.refresh_data()

@@ -28,7 +28,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from isrc_manager.paths import DATA_DIR
 from isrc_manager.ui_common import (
     FocusWheelCalendarWidget,
     FocusWheelComboBox,
@@ -553,7 +552,7 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
 
     app.open_data_folder_action = app._create_action(
         "Open Data Folder…",
-        slot=lambda: app._open_local_path(DATA_DIR(), "Open Data Folder"),
+        slot=lambda: app._open_local_path(app.data_root, "Open Data Folder"),
         shortcuts=("Ctrl+Alt+Shift+L", "Meta+Alt+Shift+L"),
     )
     help_menu.addAction(app.open_data_folder_action)

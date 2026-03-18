@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -34,6 +35,52 @@ def _no_catalog_background_refresh(self, *args, **kwargs):
     if callable(on_finished):
         on_finished()
     return None
+
+
+class _DeferredMigrationMessageBox:
+    Warning = object()
+    AcceptRole = object()
+    RejectRole = object()
+    last_text = ""
+
+    def __init__(self, *_args, **_kwargs):
+        self._migrate_button = None
+        self._keep_button = None
+        self._clicked_button = None
+
+    def setWindowTitle(self, _title):
+        return None
+
+    def setIcon(self, _icon):
+        return None
+
+    def setText(self, text):
+        type(self).last_text = str(text)
+
+    def addButton(self, label, _role):
+        button = object()
+        if "Keep Current Folder For Now" in label:
+            self._keep_button = button
+        else:
+            self._migrate_button = button
+        return button
+
+    def setDefaultButton(self, _button):
+        return None
+
+    def exec(self):
+        self._clicked_button = self._keep_button
+
+    def clickedButton(self):
+        return self._clicked_button
+
+    @staticmethod
+    def warning(*_args, **_kwargs):
+        return None
+
+    @staticmethod
+    def information(*_args, **_kwargs):
+        return None
 
 
 class AppShellIntegrationTests(unittest.TestCase):
@@ -221,6 +268,78 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.assertTrue(self.window.close())
         self.app.processEvents()
         self.assertFalse(self.window.isVisible())
+
+    def test_startup_can_defer_legacy_storage_migration_and_keep_current_folder(self):
+        self._close_window()
+        preferred_root = self.qt_settings_root / "AppLocalDataLocation"
+        if preferred_root.exists():
+            for child in preferred_root.iterdir():
+                if child.is_dir():
+                    shutil.rmtree(child)
+                else:
+                    child.unlink()
+        legacy_root = self.local_appdata / APP_NAME
+        (legacy_root / "history").mkdir(parents=True, exist_ok=True)
+        (legacy_root / "Database").mkdir(parents=True, exist_ok=True)
+
+        with mock.patch.object(app_module, "QMessageBox", _DeferredMigrationMessageBox):
+            self.window = app_module.App()
+            self.window.show()
+            self._drain_events()
+
+        self.assertEqual(self.window.data_root, legacy_root.resolve())
+        self.assertEqual(
+            self.window.settings.value("storage/migration_state", "", str),
+            "deferred",
+        )
+        self.assertIn("legacy app-data folder", _DeferredMigrationMessageBox.last_text.lower())
+
+    def test_storage_migration_reopens_active_managed_profile_in_new_root(self):
+        self._close_window()
+        preferred_root = self.qt_settings_root / "AppLocalDataLocation"
+        if preferred_root.exists():
+            shutil.rmtree(preferred_root)
+
+        legacy_root = self.local_appdata / APP_NAME
+        legacy_db = legacy_root / "Database" / "legacy_active.db"
+        self._create_profile_database(legacy_db)
+
+        settings_path = self.qt_settings_root / "AppDataLocation" / "settings.ini"
+        settings = app_module.QSettings(str(settings_path), app_module.QSettings.IniFormat)
+        settings.setFallbacksEnabled(False)
+        settings.setValue("storage/migration_state", "deferred")
+        settings.setValue("storage/legacy_data_root", str(legacy_root.resolve()))
+        settings.setValue("storage/active_data_root", str(legacy_root.resolve()))
+        settings.setValue("db/last_path", str(legacy_db.resolve()))
+        settings.setValue("paths/database_dir", str((legacy_root / "Database").resolve()))
+        settings.sync()
+
+        self.window = app_module.App()
+        self.window.show()
+        self._drain_events()
+
+        self.assertEqual(self.window.data_root, legacy_root.resolve())
+        self.assertEqual(Path(self.window.current_db_path).resolve(), legacy_db.resolve())
+
+        track_id = self._create_track(index=404, title="Migrated Managed Profile")
+
+        result = self.window._run_storage_layout_migration()
+        self._drain_events()
+
+        migrated_db = preferred_root / "Database" / legacy_db.name
+        self.assertEqual(result.target_root, preferred_root.resolve())
+        self.assertEqual(Path(self.window.current_db_path).resolve(), migrated_db.resolve())
+        self.assertTrue(migrated_db.exists())
+        self.assertEqual(
+            self.window.settings.value("db/last_path", "", str),
+            str(migrated_db.resolve()),
+        )
+        self.assertEqual(
+            self.window.settings.value("storage/active_data_root", "", str),
+            str(preferred_root.resolve()),
+        )
+        self.assertTrue((legacy_root / "Database" / legacy_db.name).exists())
+        self.assertIsNotNone(self.window.track_service.fetch_track_snapshot(track_id))
 
     def test_bundled_themes_are_available_and_not_persisted_as_user_library_entries(self):
         library = self.window._load_theme_library()

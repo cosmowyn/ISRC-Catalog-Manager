@@ -572,8 +572,11 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Show Undo History…</strong>: inspect session and profile history entries.</li>
           <li><strong>Create Snapshot…</strong>: save a manual restore point.</li>
           <li><strong>Restore Snapshot</strong>: roll the profile back to a previous state.</li>
+          <li><strong>Backups</strong>: review registered backup files that were created manually or as restore safety copies.</li>
+          <li><strong>Cleanup…</strong>: preview safe-to-delete snapshots, backup artifacts, archived snapshot bundles, file-state bundles, and stale session snapshots.</li>
+          <li><strong>Trim History</strong>: keep the most recent reversible actions on the active branch while removing older history rows and newly unreferenced storage artifacts.</li>
         </ul>
-        <p>Snapshots capture the profile database and related managed state where supported, giving heavier workflows a safer recovery path than a simple session-only undo stack.</p>
+        <p>Snapshots capture the profile database and related managed state where supported, giving heavier workflows a safer recovery path than a simple session-only undo stack. Cleanup previews exactly which artifacts are eligible, protects anything still required by undo, redo, snapshot restore, backup restore, or session restore, and leaves protected items untouched. If Diagnostics reports missing or inconsistent history artifacts, repair those issues first before trimming storage.</p>
         """,
     ),
     HelpChapter(
@@ -585,11 +588,11 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         <p>The Diagnostics window gives you a high-level health view of both the application environment and the active profile so you can verify that the workspace is still operating cleanly.</p>
         <ul>
           <li><strong>Environment</strong>: app version, schema version, profile path, data folder, log folder, snapshot count, platform, and Python version.</li>
-          <li><strong>Checks</strong>: schema validation, SQLite integrity, foreign-key integrity, custom-value integrity, managed files for path-backed records, and snapshot storage.</li>
+          <li><strong>Checks</strong>: storage layout, schema validation, SQLite integrity, foreign-key integrity, custom-value integrity, managed files for path-backed records, and history storage.</li>
           <li><strong>Details</strong>: expanded explanation for the currently selected check.</li>
-          <li><strong>Repair</strong>: preview or run supported repair actions when a check reports a repairable issue.</li>
+          <li><strong>Repair</strong>: preview or run supported repair actions when a check reports a repairable issue, including storage-layout migration and history artifact reconciliation.</li>
         </ul>
-        <p>Use Diagnostics after restores, before major exports, when troubleshooting a profile, or any time you want to verify that the catalog and its managed files are still aligned.</p>
+        <p>Use Diagnostics after restores, before major exports, when troubleshooting a profile, or any time you want to verify that the catalog and its managed files are still aligned. If a legacy app-data layout is detected, Diagnostics can guide a staged migration into the preferred app-named folder structure without deleting the legacy copy. Migration will not start while background tasks are still running, closes the active managed profile before copying, stages the new layout first, rewrites known internal paths, verifies the migrated databases, and only then switches the app over to the preferred root.</p>
         """,
     ),
     HelpChapter(

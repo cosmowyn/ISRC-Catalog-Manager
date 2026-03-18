@@ -168,6 +168,14 @@ There is also a dedicated repertoire exchange workflow for works, parties, contr
 
 ISRC Catalog Manager includes persistent history, undo/redo, manual snapshots, and restore paths for high-risk workflows. Legacy license migration, imports, restores, and other heavier operations are designed to be recoverable rather than one-way.
 
+The History window now also includes a dedicated Backups tab plus a Cleanup flow for older restore points and history artifacts. Cleanup previews eligible items before deletion, protects anything still required by undo/redo or snapshot restore, and can trim older history only after preserving the active branch and current redo chain.
+
+### Storage layout and safe app-data migration
+
+Non-portable installs now keep app-owned data in an app-specific local data folder with clear subdirectories for databases, history, backups, logs, exports, help content, and managed media.
+
+If the app detects a legacy data layout, startup and Diagnostics can guide a safe migration into the preferred app folder. The migration closes the active managed profile first, stages copied data in a temporary sibling folder, copies SQLite databases through SQLite's backup API instead of raw file copying, rewrites known internal paths, verifies integrity, promotes the fully verified result, and leaves the legacy folder intact until you decide what to do with it later.
+
 ### Theme builder and advanced QSS
 
 The app ships with a full visual theme builder covering typography, surfaces, buttons, inputs, navigation, data views, and geometry controls, plus starter themes bundled with the application:
@@ -280,7 +288,7 @@ The repository includes user-facing and developer-facing guides in `docs/`:
 - [Undo, History, and Snapshots](docs/undo_redo_strategy.md)
 - [Modularization Strategy](docs/modularization_strategy.md)
 
-The application itself also includes a searchable in-app help browser that mirrors the major workflows.
+The application itself also includes a searchable in-app help browser that mirrors the major workflows, including history cleanup, diagnostics, and app-data migration behavior.
 
 ## Demo Workspace
 

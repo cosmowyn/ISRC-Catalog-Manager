@@ -55,6 +55,9 @@ class _FakeHistoryApp(QWidget):
     def delete_snapshot_from_history(self, _snapshot_id: int):
         return None
 
+    def delete_backup_from_history(self, _backup_id: int):
+        return None
+
 
 class HistoryDialogTests(unittest.TestCase):
     @classmethod
@@ -63,7 +66,7 @@ class HistoryDialogTests(unittest.TestCase):
             raise unittest.SkipTest(f"PySide6 QtWidgets unavailable: {QT_IMPORT_ERROR}")
         cls.app = QApplication.instance() or QApplication([])
 
-    def test_history_dialog_shows_only_visible_history_entries(self):
+    def test_history_dialog_shows_visible_history_entries_and_backups_tab(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             db_path = root / "library.db"
@@ -110,6 +113,15 @@ class HistoryDialogTests(unittest.TestCase):
                     entity_id=hidden_key,
                     visible_in_history=False,
                 )
+                backup_path = root / "backup.db"
+                conn.commit()
+                sqlite3.connect(str(backup_path)).close()
+                history.register_backup(
+                    backup_path,
+                    kind="manual",
+                    label="Dialog Backup",
+                    source_db_path=db_path,
+                )
 
                 fake_app = _FakeHistoryApp(history)
                 dialog = HistoryDialog(fake_app)
@@ -119,6 +131,10 @@ class HistoryDialogTests(unittest.TestCase):
                     self.assertEqual(dialog.history_table.rowCount(), 1)
                     self.assertEqual(dialog.history_table.item(0, 2).text(), "Update Settings")
                     self.assertEqual(dialog.history_table.item(0, 3).text(), "settings.bundle")
+                    self.assertEqual(dialog.tabs.tabText(3), "Backups")
+                    self.assertEqual(dialog.backup_table.rowCount(), 1)
+                    self.assertEqual(dialog.backup_table.item(0, 2).text(), "Dialog Backup")
+                    self.assertEqual(dialog.cleanup_btn.text(), "Cleanup…")
                 finally:
                     dialog.close()
                     fake_app.close()

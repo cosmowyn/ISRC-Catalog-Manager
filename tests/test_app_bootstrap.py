@@ -127,14 +127,19 @@ class SettingsIntegrationTests(unittest.TestCase):
 
     def test_init_settings_creates_and_preserves_profile_defaults(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            appdata_root = Path(tmpdir) / "appdata"
+            settings_root = Path(tmpdir) / "qt-settings"
+            preferred_root = Path(tmpdir) / "qt-local"
             with mock.patch.object(
-                app_settings.QStandardPaths,
-                "writableLocation",
-                return_value=str(appdata_root),
+                app_settings,
+                "settings_path",
+                return_value=settings_root / SETTINGS_BASENAME,
+            ), mock.patch.object(
+                app_settings,
+                "preferred_data_root",
+                return_value=preferred_root,
             ):
                 settings = app_settings.init_settings()
-                self.assertTrue((appdata_root / SETTINGS_BASENAME).exists())
+                self.assertTrue((settings_root / SETTINGS_BASENAME).exists())
                 self.assertTrue(settings.value("app/initialized", False, type=bool))
                 self.assertEqual(settings.value("ui/theme"), "system")
                 settings.setValue("ui/theme", "dark")
@@ -146,11 +151,11 @@ class SettingsIntegrationTests(unittest.TestCase):
 
     def test_enforce_single_instance_returns_none_while_lock_is_held(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            appdata_root = Path(tmpdir) / "appdata"
+            lock_root = Path(tmpdir) / "qt-settings"
             with mock.patch.object(
-                app_settings.QStandardPaths,
-                "writableLocation",
-                return_value=str(appdata_root),
+                app_settings,
+                "lock_path",
+                return_value=lock_root / "ISRCManager.lock",
             ):
                 lock = app_settings.enforce_single_instance(timeout_ms=10)
                 self.assertIsNotNone(lock)

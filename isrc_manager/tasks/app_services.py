@@ -128,11 +128,20 @@ class BackgroundAppServiceFactory:
         *,
         db_path: str | Path | None = None,
         settings_path: str | Path | None = None,
+        data_root: str | Path | None = None,
+        history_dir: str | Path | None = None,
+        backups_dir: str | Path | None = None,
     ) -> None:
         if db_path is not None:
             self.db_path = str(db_path)
         if settings_path is not None:
             self.settings_path = str(settings_path)
+        if data_root is not None:
+            self.data_root = Path(data_root)
+        if history_dir is not None:
+            self.history_dir = Path(history_dir)
+        if backups_dir is not None:
+            self.backups_dir = Path(backups_dir)
 
     def open_bundle(self) -> BackgroundAppServiceBundle:
         if not self.db_path:
@@ -156,7 +165,7 @@ class BackgroundAppServiceFactory:
         catalog_reads = CatalogReadService(conn)
         settings_reads = SettingsReadService(conn)
         settings_mutations = SettingsMutationService(conn, settings)
-        gs1_settings_service = GS1SettingsService(conn, settings)
+        gs1_settings_service = GS1SettingsService(conn, settings, data_root=self.data_root)
         audio_tag_service = AudioTagService()
         party_service = PartyService(conn)
         work_service = WorkService(conn, party_service=party_service)
