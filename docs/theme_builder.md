@@ -17,7 +17,7 @@ The builder now exposes the full visible surface of the application, including:
 - inputs, placeholders, and focus styling
 - tables, lists, headers, selections, and row hovers
 - progress bars, scrollbars, and status chrome
-- menus, toolbars, dock titles, headers, tab bars, tabs, and tab panes
+- menus, toolbars, dock titles, headers, tab bars, tabs, tab panes, and the action ribbon surface
 - geometry settings such as font sizes, padding, radii, border width, help-button size, and scrollbar thickness
 
 This is intended to give the user real visual control without turning every theme change into a stylesheet engineering task.
@@ -128,6 +128,16 @@ Style the surrounding application chrome, including:
 - tab bar background
 - tab pane background and border
 
+### Action Ribbon
+
+This dedicated section themes the action ribbon toolbar independently from the tab chrome beneath it:
+
+- ribbon background
+- ribbon text
+- ribbon border and separators
+
+In this pass, ribbon buttons still inherit the shared button styling from the Buttons section. Use Advanced QSS only if you need button-level ribbon overrides.
+
 ### Advanced QSS
 
 Advanced QSS remains available for precise selector work, but it now sits on top of a much deeper visual builder instead of compensating for missing basics.
@@ -140,6 +150,7 @@ The builder includes a focused live preview system. Instead of showing every wid
 - button previews show interaction states
 - input previews show fields and indicators
 - navigation previews show tabs, menus, headers, and chrome
+- action ribbon previews show the ribbon directly above workspace tabs so separation is easy to judge
 - data view previews show lists, tables, scrollbars, and progress surfaces
 
 This keeps the preview clear and makes it easier to judge the effect of each change.
@@ -170,6 +181,12 @@ When a visual control still is not enough, the advanced editor provides:
 - safe object-name insertion
 - rule-template insertion
 - a live selector reference harvested from currently open windows and dialogs
+
+Useful ribbon selectors now exposed in that catalog include:
+
+- `QToolBar#actionRibbonToolbar`
+- `QToolBar[role="actionRibbonToolbar"]`
+- `QToolButton[role="actionRibbonButton"]`
 
 This lets advanced users finish the last few percent of theme customization without guesswork.
 

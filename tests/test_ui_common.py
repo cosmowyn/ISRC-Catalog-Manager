@@ -2,12 +2,21 @@ import unittest
 
 try:
     from PySide6.QtCore import Qt
-    from PySide6.QtWidgets import QApplication, QDialog, QFormLayout, QLineEdit, QPushButton, QWidget
+    from PySide6.QtWidgets import (
+        QApplication,
+        QDialog,
+        QFormLayout,
+        QFrame,
+        QLineEdit,
+        QPushButton,
+        QWidget,
+    )
 except ImportError as exc:  # pragma: no cover - environment-specific fallback
     QApplication = None
     Qt = None
     QDialog = None
     QFormLayout = None
+    QFrame = None
     QLineEdit = None
     QPushButton = None
     QWidget = None
@@ -107,6 +116,30 @@ class UICommonTests(unittest.TestCase):
             scroll_area, content, layout = _create_scrollable_dialog_content(owner)
             self.assertIs(scroll_area.widget(), content)
             self.assertIs(content.parentWidget(), scroll_area.viewport())
+            self.assertEqual(layout.spacing(), 14)
+            self.assertEqual(scroll_area.property("role"), "workspaceCanvas")
+            self.assertEqual(content.property("role"), "workspaceCanvas")
+            self.assertEqual(scroll_area.frameShape(), QFrame.NoFrame)
+            self.assertTrue(scroll_area.widgetResizable())
+        finally:
+            owner.close()
+
+    def test_scrollable_dialog_content_can_preserve_outer_page_identity(self):
+        owner = QWidget()
+        page = QWidget(owner)
+        try:
+            scroll_area, content, layout = _create_scrollable_dialog_content(
+                owner,
+                page=page,
+                role="workspaceCanvas",
+            )
+            self.assertIs(page.layout().itemAt(0).widget(), scroll_area)
+            self.assertIs(scroll_area.parentWidget(), page)
+            self.assertIs(scroll_area.widget(), content)
+            self.assertEqual(page.property("role"), "workspaceCanvas")
+            self.assertEqual(scroll_area.property("role"), "workspaceCanvas")
+            self.assertEqual(scroll_area.viewport().property("role"), "workspaceCanvas")
+            self.assertEqual(content.property("role"), "workspaceCanvas")
             self.assertEqual(layout.spacing(), 14)
         finally:
             owner.close()

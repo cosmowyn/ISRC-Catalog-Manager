@@ -116,6 +116,30 @@ STATIC_QSS_REFERENCE_ENTRIES: tuple[QssReferenceEntry, ...] = (
         object_name="releaseBrowserDock",
         role_name="workspaceCanvas",
     ),
+    QssReferenceEntry(
+        "Example",
+        "QToolBar#actionRibbonToolbar",
+        "The dedicated action ribbon toolbar surface.",
+        selector_kind="typed_object",
+        widget_class="QToolBar",
+        object_name="actionRibbonToolbar",
+    ),
+    QssReferenceEntry(
+        "Example",
+        'QToolBar[role="actionRibbonToolbar"]',
+        "Any toolbar explicitly tagged as the action ribbon surface.",
+        selector_kind="typed_role",
+        widget_class="QToolBar",
+        role_name="actionRibbonToolbar",
+    ),
+    QssReferenceEntry(
+        "Example",
+        'QToolButton[role="actionRibbonButton"]',
+        "Buttons hosted inside the action ribbon toolbar.",
+        selector_kind="typed_role",
+        widget_class="QToolButton",
+        role_name="actionRibbonButton",
+    ),
 )
 
 

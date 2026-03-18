@@ -140,20 +140,20 @@ def refresh_catalog_workspace_docks(app: Any) -> None:
 
 def _default_tab_anchor(app: Any, new_dock: QDockWidget) -> QDockWidget | None:
     catalog_table_dock = getattr(app, "catalog_table_dock", None)
-    if isinstance(catalog_table_dock, QDockWidget) and catalog_table_dock is not new_dock:
+    if _is_tab_anchor_candidate(app, catalog_table_dock, new_dock):
         return catalog_table_dock
 
     registry = getattr(app, "_catalog_workspace_docks", {})
     visible_peers = [
         dock
         for dock in registry.values()
-        if isinstance(dock, QDockWidget) and dock is not new_dock and dock.isVisible()
+        if _is_tab_anchor_candidate(app, dock, new_dock)
     ]
     if visible_peers:
         return visible_peers[-1]
 
     add_data_dock = getattr(app, "add_data_dock", None)
-    if isinstance(add_data_dock, QDockWidget):
+    if _is_tab_anchor_candidate(app, add_data_dock, new_dock):
         return add_data_dock
     return None
 
@@ -165,3 +165,15 @@ def _tabify_catalog_workspace_dock(
     if anchor is None or anchor is dock:
         return
     app.tabifyDockWidget(anchor, dock)
+
+
+def _is_tab_anchor_candidate(app: Any, dock: Any, new_dock: QDockWidget) -> bool:
+    return (
+        isinstance(dock, QDockWidget)
+        and dock is not new_dock
+        and dock.widget() is not None
+        and dock.isVisible()
+        and not dock.isHidden()
+        and not dock.isFloating()
+        and app.dockWidgetArea(dock) != Qt.NoDockWidgetArea
+    )

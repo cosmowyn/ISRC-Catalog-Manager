@@ -308,6 +308,7 @@ from isrc_manager.ui_common import (
     _apply_standard_widget_chrome,
     _compose_widget_stylesheet,
     _create_action_button_grid,
+    _create_scrollable_dialog_content,
     _create_round_help_button,
     _create_standard_section,
 )
@@ -1079,8 +1080,8 @@ class ApplicationSettingsDialog(QDialog):
         theme_layout.addWidget(theme_library_box)
 
         theme_intro = QLabel(
-            "The visual theme builder now covers the full application surface: typography, workspace canvases, panels, group titles, compact frames, buttons, inputs, data views, tab panes, toolbar and status chrome, help buttons, and state styling. "
-            "A dedicated Blob Icons tab keeps media badges separate from visual theme presets. Use the grouped tabs for most styling work and keep Advanced QSS for the final edge cases."
+            "The visual theme builder now covers the full application surface: typography, workspace canvases, panels, group titles, compact frames, buttons, inputs, data views, tab panes, toolbar and status chrome, the action ribbon surface, help buttons, and state styling. "
+            "A dedicated Blob Icons tab keeps media badges separate from visual theme presets, and the Action Ribbon tab isolates ribbon chrome without introducing a separate ribbon-button token set in this pass."
         )
         theme_intro.setWordWrap(True)
         theme_intro.setProperty("role", "secondary")
@@ -1435,7 +1436,7 @@ class ApplicationSettingsDialog(QDialog):
         advanced_layout.addWidget(advanced_note)
 
         qss_help = QLabel(
-            "Example selectors: `QPushButton`, `QLineEdit`, `QDockWidget::title`, or `#profilesToolbar QPushButton`. "
+            "Example selectors: `QPushButton`, `QLineEdit`, `QDockWidget::title`, `#profilesToolbar QPushButton`, or `QToolBar#actionRibbonToolbar`. "
             "Press Ctrl+Space in the editor for context-aware autocomplete with selectors, pseudo-states, subcontrols, "
             "property lines, value suggestions, and full rule templates."
         )
@@ -1544,6 +1545,7 @@ class ApplicationSettingsDialog(QDialog):
             "inputs": "Inputs",
             "data_views": "Data Views",
             "navigation": "Navigation",
+            "action_ribbon": "Action Ribbon",
             "blob_icons": "Blob Icons",
             "advanced": "Advanced QSS",
         }
@@ -1554,6 +1556,7 @@ class ApplicationSettingsDialog(QDialog):
             "inputs": self._build_theme_preview_inputs_page,
             "data_views": self._build_theme_preview_data_views_page,
             "navigation": self._build_theme_preview_navigation_page,
+            "action_ribbon": self._build_theme_preview_action_ribbon_page,
             "blob_icons": self._build_theme_preview_blob_icons_page,
             "advanced": self._build_theme_preview_advanced_page,
         }
@@ -1912,6 +1915,71 @@ class ApplicationSettingsDialog(QDialog):
         layout.addStretch(1)
         return page
 
+    def _build_theme_preview_action_ribbon_page(self) -> QWidget:
+        page, preview_root, layout = self._create_theme_preview_page("themePreviewActionRibbonRoot")
+
+        ribbon_box = QGroupBox("Ribbon Over Workspace Tabs", preview_root)
+        ribbon_layout = QVBoxLayout(ribbon_box)
+        ribbon_layout.setContentsMargins(14, 18, 14, 14)
+        ribbon_layout.setSpacing(8)
+        intro = QLabel(
+            "This preview keeps the action ribbon directly above tab chrome so you can judge separation and color contrast. Ribbon buttons still use the shared Buttons styling in this pass.",
+            ribbon_box,
+        )
+        intro.setWordWrap(True)
+        intro.setProperty("role", "secondary")
+        ribbon_layout.addWidget(intro)
+
+        preview_toolbar = QToolBar("Preview Action Ribbon", ribbon_box)
+        preview_toolbar.setObjectName("actionRibbonToolbar")
+        preview_toolbar.setProperty("role", "actionRibbonToolbar")
+        preview_toolbar.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        for label, checked in (("Catalog", True), ("Search", False), ("Releases", False)):
+            button = QToolButton(preview_toolbar)
+            button.setText(label)
+            button.setCheckable(True)
+            button.setChecked(checked)
+            button.setProperty("role", "actionRibbonButton")
+            preview_toolbar.addWidget(button)
+        preview_toolbar.addSeparator()
+        pinned_button = QToolButton(preview_toolbar)
+        pinned_button.setText("Pinned")
+        pinned_button.setCheckable(True)
+        pinned_button.setProperty("role", "actionRibbonButton")
+        preview_toolbar.addWidget(pinned_button)
+        ribbon_layout.addWidget(preview_toolbar)
+
+        workspace_tabs = QTabWidget(ribbon_box)
+        workspace_tabs.setDocumentMode(True)
+        first_page = QWidget(workspace_tabs)
+        first_page.setProperty("role", "workspaceCanvas")
+        first_layout = QVBoxLayout(first_page)
+        first_layout.setContentsMargins(14, 14, 14, 14)
+        first_layout.setSpacing(8)
+        first_layout.addWidget(QLabel("Workspace tab content preview", first_page))
+        first_note = QLabel(
+            "Use the separate Action Ribbon tab to differentiate ribbon chrome from the dock and tab chrome below it.",
+            first_page,
+        )
+        first_note.setWordWrap(True)
+        first_note.setProperty("role", "secondary")
+        first_layout.addWidget(first_note)
+        first_layout.addStretch(1)
+        second_page = QWidget(workspace_tabs)
+        second_page.setProperty("role", "workspaceCanvas")
+        second_layout = QVBoxLayout(second_page)
+        second_layout.setContentsMargins(14, 14, 14, 14)
+        second_layout.setSpacing(8)
+        second_layout.addWidget(QLabel("Inactive workspace tab", second_page))
+        second_layout.addStretch(1)
+        workspace_tabs.addTab(first_page, "Catalog Managers")
+        workspace_tabs.addTab(second_page, "Release Browser")
+        ribbon_layout.addWidget(workspace_tabs)
+
+        layout.addWidget(ribbon_box)
+        layout.addStretch(1)
+        return page
+
     def _build_theme_preview_blob_icons_page(self) -> QWidget:
         page, preview_root, layout = self._create_theme_preview_page("themePreviewBlobIconsRoot")
 
@@ -2014,7 +2082,7 @@ class ApplicationSettingsDialog(QDialog):
         playground_layout.addWidget(advanced_help)
         advanced_layout.addWidget(playground_row)
         selector_hint = QLabel(
-            "Example object names: `#themePreviewButton`, `#themePreviewField`, `#themePreviewHelpButton`, and `#themePreviewPlayground QPushButton`.",
+            "Example object names: `#themePreviewButton`, `#themePreviewField`, `#themePreviewHelpButton`, `#themePreviewPlayground QPushButton`, and `QToolButton[role=\"actionRibbonButton\"]`.",
             advanced_box,
         )
         selector_hint.setProperty("role", "hint")
@@ -4359,7 +4427,9 @@ class _CatalogArtistsPane(_CatalogManagerPaneBase):
     def __init__(self, app, parent=None):
         super().__init__(app, parent)
 
-        root = QVBoxLayout(self)
+        self.scroll_area, self.scroll_content, root = _create_scrollable_dialog_content(
+            self, page=self
+        )
         root.setContentsMargins(18, 18, 18, 18)
         root.setSpacing(14)
 
@@ -4538,7 +4608,9 @@ class _CatalogAlbumsPane(_CatalogManagerPaneBase):
     def __init__(self, app, parent=None):
         super().__init__(app, parent)
 
-        root = QVBoxLayout(self)
+        self.scroll_area, self.scroll_content, root = _create_scrollable_dialog_content(
+            self, page=self
+        )
         root.setContentsMargins(18, 18, 18, 18)
         root.setSpacing(14)
 
@@ -4710,7 +4782,9 @@ class _CatalogLicenseesPane(_CatalogManagerPaneBase):
     def __init__(self, app, parent=None):
         super().__init__(app, parent)
 
-        root = QVBoxLayout(self)
+        self.scroll_area, self.scroll_content, root = _create_scrollable_dialog_content(
+            self, page=self
+        )
         root.setContentsMargins(18, 18, 18, 18)
         root.setSpacing(14)
 
@@ -5066,6 +5140,7 @@ class CatalogManagersDialog(QDialog):
 
 class App(QMainWindow):
     BASE_HEADERS = list(DEFAULT_BASE_HEADERS)
+    TOP_CHROME_DOCK_GAP = 5
 
     def __init__(self):
         super().__init__()
@@ -6345,6 +6420,40 @@ class App(QMainWindow):
         app.setPalette(palette)
         self.setPalette(palette)
         app.setStyleSheet(self._build_theme_stylesheet(raw_values))
+        self._queue_top_chrome_boundary_refresh()
+
+    def _apply_top_chrome_boundary(self) -> None:
+        toolbar = getattr(self, "toolbar", None)
+        if not isinstance(toolbar, QToolBar):
+            return
+        bottom_gap = int(self.TOP_CHROME_DOCK_GAP)
+        margins = toolbar.contentsMargins()
+        if margins.left() != 0 or margins.top() != 0 or margins.right() != 0 or margins.bottom() != bottom_gap:
+            toolbar.setContentsMargins(0, 0, 0, bottom_gap)
+        toolbar.updateGeometry()
+        toolbar.update()
+
+    def _queue_top_chrome_boundary_refresh(self) -> None:
+        timer = getattr(self, "_top_chrome_boundary_timer", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self._apply_top_chrome_boundary)
+            self._top_chrome_boundary_timer = timer
+        timer.start(0)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._queue_top_chrome_boundary_refresh()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._queue_top_chrome_boundary_refresh()
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() in (QEvent.WindowStateChange, QEvent.ActivationChange):
+            self._queue_top_chrome_boundary_refresh()
 
     @staticmethod
     def _root_object_name(widget: QWidget) -> str:
@@ -8159,14 +8268,14 @@ class App(QMainWindow):
             {
                 "id": "show_add_data",
                 "label": "Show Add Data Panel",
-                "category": "View",
+                "category": "Catalog",
                 "description": "Toggle the Add Data dock panel.",
                 "action": self.add_data_action,
             },
             {
                 "id": "show_catalog_table",
                 "label": "Show Catalog Table",
-                "category": "View",
+                "category": "Catalog",
                 "description": "Toggle the Catalog Table dock panel.",
                 "action": self.catalog_table_action,
             },
@@ -12299,6 +12408,7 @@ class App(QMainWindow):
                 getattr(self, "_action_ribbon_action_ids", []),
                 enabled,
             )
+            self._queue_top_chrome_boundary_refresh()
             self.settings.setValue("display/action_ribbon_visible", enabled)
             self.settings.sync()
 

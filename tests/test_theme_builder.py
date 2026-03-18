@@ -58,6 +58,9 @@ class ThemeBuilderTests(unittest.TestCase):
             "scrollbar_handle_bg",
             "menu_selected_bg",
             "toolbar_bg",
+            "action_ribbon_bg",
+            "action_ribbon_fg",
+            "action_ribbon_border",
             "statusbar_bg",
             "header_border",
             "tab_selected_border",
@@ -92,6 +95,16 @@ class ThemeBuilderTests(unittest.TestCase):
             self.assertTrue(library[name]["window_bg"])
             self.assertTrue(library[name]["window_fg"])
             self.assertTrue(library[name]["accent"])
+            self.assertTrue(library[name]["action_ribbon_bg"])
+            self.assertTrue(library[name]["action_ribbon_fg"])
+            self.assertTrue(library[name]["action_ribbon_border"])
+
+    def test_high_visibility_theme_keeps_explicit_readable_ribbon_colors(self):
+        library = starter_theme_library()
+        effective = effective_theme_settings(library["High Visibility"])
+        self.assertEqual(effective["action_ribbon_bg"], "#FFD60A")
+        self.assertEqual(effective["action_ribbon_fg"], "#000000")
+        self.assertEqual(effective["action_ribbon_border"], "#FFFFFF")
 
     def test_effective_theme_settings_derive_blank_state_values(self):
         effective = effective_theme_settings(
@@ -116,6 +129,9 @@ class ThemeBuilderTests(unittest.TestCase):
         self.assertEqual(effective["group_title_fg"], "#F7FAFC")
         self.assertEqual(effective["compact_group_bg"], effective["panel_bg"])
         self.assertEqual(effective["toolbar_bg"], effective["panel_bg"])
+        self.assertEqual(effective["action_ribbon_bg"], effective["toolbar_bg"])
+        self.assertEqual(effective["action_ribbon_fg"], effective["toolbar_fg"])
+        self.assertEqual(effective["action_ribbon_border"], effective["toolbar_border"])
         self.assertEqual(effective["statusbar_fg"], "#F7FAFC")
         self.assertEqual(effective["tab_bar_bg"], "#20242A")
         self.assertEqual(effective["tab_pane_bg"], effective["panel_bg"])
@@ -155,6 +171,9 @@ class ThemeBuilderTests(unittest.TestCase):
         self.assertIn("QHeaderView {", stylesheet)
         self.assertIn("QTableCornerButton::section", stylesheet)
         self.assertIn("QToolBar", stylesheet)
+        self.assertIn("QToolBar#actionRibbonToolbar", stylesheet)
+        self.assertIn('QToolBar[role="actionRibbonToolbar"]', stylesheet)
+        self.assertIn('QToolBar[role="actionRibbonToolbar"]::separator', stylesheet)
         self.assertIn("QStatusBar", stylesheet)
         self.assertIn('QFrame[role="compactControlGroup"]', stylesheet)
         self.assertIn('QWidget[role="compactControlGroup"]', stylesheet)
@@ -204,6 +223,7 @@ class ThemeBuilderTests(unittest.TestCase):
             self.assertIn("Inputs", labels)
             self.assertIn("Data Views", labels)
             self.assertIn("Navigation", labels)
+            self.assertIn("Action Ribbon", labels)
             self.assertIn("Blob Icons", labels)
             self.assertIn("Advanced QSS", labels)
             for key in (
@@ -213,6 +233,9 @@ class ThemeBuilderTests(unittest.TestCase):
                 "progress_fg",
                 "header_border",
                 "toolbar_bg",
+                "action_ribbon_bg",
+                "action_ribbon_fg",
+                "action_ribbon_border",
                 "statusbar_bg",
                 "tab_bar_bg",
                 "tab_pane_bg",
@@ -222,6 +245,7 @@ class ThemeBuilderTests(unittest.TestCase):
             dialog._theme_color_edits["button_hover_bg"].setText("#224488")
             dialog._theme_color_edits["menu_selected_bg"].setText("#BB5500")
             dialog._theme_color_edits["toolbar_bg"].setText("#1F2937")
+            dialog._theme_color_edits["action_ribbon_bg"].setText("#0F4C81")
             dialog._theme_color_edits["tab_pane_bg"].setText("#0F172A")
             dialog._theme_metric_spins["menu_radius"].setValue(14)
             dialog._theme_metric_spins["dialog_title_font_size"].setValue(22)
@@ -231,6 +255,7 @@ class ThemeBuilderTests(unittest.TestCase):
             self.assertEqual(values["theme_settings"]["button_hover_bg"], "#224488")
             self.assertEqual(values["theme_settings"]["menu_selected_bg"], "#BB5500")
             self.assertEqual(values["theme_settings"]["toolbar_bg"], "#1F2937")
+            self.assertEqual(values["theme_settings"]["action_ribbon_bg"], "#0F4C81")
             self.assertEqual(values["theme_settings"]["tab_pane_bg"], "#0F172A")
             self.assertEqual(values["theme_settings"]["menu_radius"], 14)
             self.assertEqual(values["theme_settings"]["dialog_title_font_size"], 22)
@@ -411,6 +436,18 @@ class ThemeBuilderTests(unittest.TestCase):
             self.assertEqual(
                 dialog.theme_preview_tabs.tabText(dialog.theme_preview_tabs.currentIndex()),
                 "Inputs",
+            )
+
+            action_ribbon_index = next(
+                index
+                for index in range(dialog.theme_builder_tabs.count())
+                if dialog.theme_builder_tabs.tabText(index) == "Action Ribbon"
+            )
+            dialog.theme_builder_tabs.setCurrentIndex(action_ribbon_index)
+            self.app.processEvents()
+            self.assertEqual(
+                dialog.theme_preview_tabs.tabText(dialog.theme_preview_tabs.currentIndex()),
+                "Action Ribbon",
             )
 
             blob_icons_index = next(

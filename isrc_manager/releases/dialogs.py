@@ -708,6 +708,8 @@ class ReleaseBrowserPanel(QWidget):
         detail_content_layout.addWidget(self.detail_tabs, 1)
 
         overview_tab = QWidget(self.detail_tabs)
+        overview_tab.setProperty("role", "workspaceCanvas")
+        self.overview_tab = overview_tab
         overview_tab_layout = QVBoxLayout(overview_tab)
         overview_tab_layout.setContentsMargins(0, 8, 0, 0)
         overview_tab_layout.setSpacing(0)
@@ -774,6 +776,8 @@ class ReleaseBrowserPanel(QWidget):
         self.detail_tabs.addTab(overview_tab, "Overview")
 
         tracks_tab = QWidget(self.detail_tabs)
+        tracks_tab.setProperty("role", "workspaceCanvas")
+        self.tracks_tab = tracks_tab
         tracks_tab_layout = QVBoxLayout(tracks_tab)
         tracks_tab_layout.setContentsMargins(0, 8, 0, 0)
         tracks_tab_layout.setSpacing(0)

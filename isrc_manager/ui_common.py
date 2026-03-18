@@ -214,19 +214,23 @@ def _configure_standard_form_layout(form: QFormLayout) -> None:
 
 def _create_scrollable_dialog_content(
     owner: QWidget,
+    *,
+    role: str = "workspaceCanvas",
+    page: QWidget | None = None,
 ) -> tuple[QScrollArea, QWidget, QVBoxLayout]:
-    scroll_area = QScrollArea(owner)
+    scroll_parent = page or owner
+    scroll_area = QScrollArea(scroll_parent)
     scroll_area.setWidgetResizable(True)
     scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
     scroll_area.setFrameShape(QFrame.NoFrame)
-    scroll_area.setProperty("role", "workspaceCanvas")
+    scroll_area.setProperty("role", role)
     scroll_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     viewport = scroll_area.viewport()
     if viewport is not None:
-        viewport.setProperty("role", "workspaceCanvas")
+        viewport.setProperty("role", role)
 
     content = QWidget(scroll_area)
-    content.setProperty("role", "workspaceCanvas")
+    content.setProperty("role", role)
     content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
     layout = QVBoxLayout(content)
@@ -234,6 +238,16 @@ def _create_scrollable_dialog_content(
     layout.setSpacing(14)
 
     scroll_area.setWidget(content)
+
+    if page is not None:
+        page.setProperty("role", role)
+        page_layout = page.layout()
+        if page_layout is None:
+            page_layout = QVBoxLayout(page)
+            page_layout.setContentsMargins(0, 0, 0, 0)
+            page_layout.setSpacing(0)
+        page_layout.addWidget(scroll_area)
+
     return scroll_area, content, layout
 
 

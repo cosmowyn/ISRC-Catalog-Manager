@@ -130,6 +130,8 @@ class GlobalSearchPanel(QWidget):
         splitter.addWidget(self.saved_searches_scroll_area)
 
         right_container = QWidget(self)
+        right_container.setProperty("role", "workspaceCanvas")
+        self.right_container = right_container
         right_layout = QVBoxLayout(right_container)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(0)
@@ -137,6 +139,8 @@ class GlobalSearchPanel(QWidget):
         right_layout.addWidget(detail_tabs, 1)
 
         results_tab = QWidget(detail_tabs)
+        results_tab.setProperty("role", "workspaceCanvas")
+        self.results_tab = results_tab
         results_tab_layout = QVBoxLayout(results_tab)
         results_tab_layout.setContentsMargins(0, 0, 0, 0)
         results_tab_layout.setSpacing(0)
@@ -166,6 +170,8 @@ class GlobalSearchPanel(QWidget):
         detail_tabs.addTab(results_tab, "Results")
 
         relationships_tab = QWidget(detail_tabs)
+        relationships_tab.setProperty("role", "workspaceCanvas")
+        self.relationships_tab = relationships_tab
         relationships_tab_layout = QVBoxLayout(relationships_tab)
         relationships_tab_layout.setContentsMargins(0, 0, 0, 0)
         relationships_tab_layout.setSpacing(0)

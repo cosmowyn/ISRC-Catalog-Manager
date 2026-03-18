@@ -19,7 +19,7 @@ from isrc_manager.starter_themes import starter_theme_names
 from tests.qt_test_helpers import require_qapplication
 
 try:
-    from PySide6.QtWidgets import QScrollArea
+    from PySide6.QtWidgets import QScrollArea, QTabBar
 
     import ISRC_manager as app_module
 except Exception as exc:  # pragma: no cover - environment-specific fallback
@@ -152,6 +152,24 @@ class AppShellIntegrationTests(unittest.TestCase):
             if button.text() == text:
                 return button
         raise AssertionError(f"Button not found: {text}")
+
+    def _workspace_dock_tab_bar(self) -> QTabBar:
+        expected_titles = {
+            dock.windowTitle()
+            for dock in (
+                getattr(self.window, "catalog_table_dock", None),
+                getattr(self.window, "release_browser_dock", None),
+                getattr(self.window, "work_manager_dock", None),
+                getattr(self.window, "global_search_dock", None),
+                getattr(self.window, "catalog_managers_dock", None),
+            )
+            if dock is not None
+        }
+        for tab_bar in self.window.findChildren(QTabBar):
+            texts = {tab_bar.tabText(index) for index in range(tab_bar.count())}
+            if texts & expected_titles:
+                return tab_bar
+        raise AssertionError("Workspace dock tab bar not found")
 
     def test_startup_builds_main_window_with_core_actions(self):
         self.assertIsNotNone(self.window.conn)
@@ -630,6 +648,58 @@ class AppShellIntegrationTests(unittest.TestCase):
         )
         self.assertTrue(self.window.global_search_dock.widget().isVisible())
 
+    def test_top_chrome_boundary_persists_across_ribbon_visibility_and_window_state_changes(self):
+        track_id = self._create_track(index=168, title="Boundary Validation Track")
+        self.window.release_service.create_release(
+            app_module.ReleasePayload(
+                title="Boundary Validation Release",
+                primary_artist="Cosmowyn",
+                release_type="single",
+                release_date="2026-03-17",
+                placements=[
+                    app_module.ReleaseTrackPlacement(
+                        track_id=track_id,
+                        disc_number=1,
+                        track_number=1,
+                        sequence_number=1,
+                    )
+                ],
+            )
+        )
+        self.window.refresh_table()
+        self.window.open_release_browser()
+        self.app.processEvents()
+
+        tab_bar = self._workspace_dock_tab_bar()
+        self.assertEqual(self.window.toolbar.contentsMargins().bottom(), 5)
+        self.assertGreaterEqual(tab_bar.geometry().top(), self.window.toolbar.geometry().bottom())
+        self.assertEqual(self.window.action_ribbon_toolbar.property("role"), "actionRibbonToolbar")
+
+        self.window.showFullScreen()
+        self.app.processEvents()
+        self.window.showNormal()
+        self.app.processEvents()
+        self.assertEqual(self.window.toolbar.contentsMargins().bottom(), 5)
+        self.assertGreaterEqual(tab_bar.geometry().top(), self.window.toolbar.geometry().bottom())
+
+        self.window.action_ribbon_visibility_action.trigger()
+        self.app.processEvents()
+        self.assertFalse(self.window.action_ribbon_toolbar.isVisible())
+        self.assertEqual(self.window.toolbar.contentsMargins().bottom(), 5)
+
+        self.window.action_ribbon_visibility_action.trigger()
+        self.app.processEvents()
+        self.assertTrue(self.window.action_ribbon_toolbar.isVisible())
+        self.assertEqual(self.window.toolbar.contentsMargins().bottom(), 5)
+
+        self.window.open_global_search()
+        self.app.processEvents()
+        self.window.global_search_dock.raise_()
+        self.app.processEvents()
+        self.window.release_browser_dock.raise_()
+        self.app.processEvents()
+        self.assertEqual(self.window.toolbar.contentsMargins().bottom(), 5)
+
     def test_workspace_panels_keep_actions_and_saved_search_controls_inside_scroll_safe_surfaces(self):
         track_id = self._create_track(index=167, title="Reachable Action Track")
         self.window.release_service.create_release(
@@ -654,6 +724,8 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.window.open_release_browser()
         self.app.processEvents()
         release_panel = self.window.release_browser_dock.widget()
+        self.assertEqual(release_panel.overview_tab.property("role"), "workspaceCanvas")
+        self.assertEqual(release_panel.tracks_tab.property("role"), "workspaceCanvas")
         self.assertTrue(
             self._is_within_scroll_content(
                 release_panel.detail_scroll_area, release_panel.actions_cluster
@@ -663,6 +735,9 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.window.open_global_search()
         self.app.processEvents()
         search_panel = self.window.global_search_dock.widget()
+        self.assertEqual(search_panel.right_container.property("role"), "workspaceCanvas")
+        self.assertEqual(search_panel.results_tab.property("role"), "workspaceCanvas")
+        self.assertEqual(search_panel.relationships_tab.property("role"), "workspaceCanvas")
         self.assertTrue(
             self._is_within_scroll_content(
                 search_panel.saved_searches_scroll_area, search_panel.delete_saved_button
@@ -695,6 +770,34 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.assertEqual(panel.tabs.tabText(panel.tabs.currentIndex()), "Legacy Licensees")
         self.assertTrue(panel.isVisible())
 
+    def test_catalog_managers_tabs_keep_bottom_actions_inside_themed_scroll_surfaces(self):
+        self.window.resize(980, 620)
+        self.window.open_catalog_managers_dialog(initial_tab="artists")
+        self.app.processEvents()
+
+        panel = self.window.catalog_managers_dock.widget()
+        for pane, controls in (
+            (panel.artists_tab, (panel.artists_tab.refresh_btn, panel.artists_tab.delete_btn)),
+            (panel.albums_tab, (panel.albums_tab.refresh_btn, panel.albums_tab.delete_btn)),
+            (
+                panel.licensees_tab,
+                (
+                    panel.licensees_tab.add_btn,
+                    panel.licensees_tab.rename_btn,
+                    panel.licensees_tab.delete_btn,
+                ),
+            ),
+        ):
+            panel.tabs.setCurrentWidget(pane)
+            self.app.processEvents()
+            self.assertIs(panel.tabs.currentWidget(), pane)
+            self.assertEqual(pane.property("role"), "workspaceCanvas")
+            self.assertEqual(pane.scroll_area.property("role"), "workspaceCanvas")
+            self.assertEqual(pane.scroll_area.viewport().property("role"), "workspaceCanvas")
+            self.assertEqual(pane.scroll_content.property("role"), "workspaceCanvas")
+            for control in controls:
+                self.assertTrue(self._is_within_scroll_content(pane.scroll_area, control))
+
     def test_catalog_menu_hides_top_level_release_creation_and_groups_legacy_tools(self):
         catalog_action = next(
             action for action in self.window.menuBar().actions() if action.text() == "Catalog"
@@ -714,6 +817,71 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.assertIn("Migrate Legacy Licenses to Contracts…", legacy_texts)
         self.assertNotIn("create_release", self.window._action_ribbon_specs_by_id)
         self.assertNotIn("add_selected_to_release", self.window._action_ribbon_specs_by_id)
+
+    def test_catalog_menu_hosts_panel_toggle_actions_and_preserves_existing_behavior(self):
+        catalog_action = next(
+            action for action in self.window.menuBar().actions() if action.text() == "Catalog"
+        )
+        view_action = next(
+            action for action in self.window.menuBar().actions() if action.text() == "View"
+        )
+        catalog_menu = catalog_action.menu()
+        view_menu = view_action.menu()
+        catalog_texts = [action.text() for action in catalog_menu.actions() if action.text()]
+        view_texts = [action.text() for action in view_menu.actions() if action.text()]
+
+        self.assertIn("Show Add Data Panel", catalog_texts)
+        self.assertIn("Show Catalog Table", catalog_texts)
+        self.assertNotIn("Show Add Data Panel", view_texts)
+        self.assertNotIn("Show Catalog Table", view_texts)
+        self.assertEqual(
+            self.window._action_ribbon_specs_by_id["show_add_data"]["category"], "Catalog"
+        )
+        self.assertEqual(
+            self.window._action_ribbon_specs_by_id["show_catalog_table"]["category"], "Catalog"
+        )
+
+        self.assertFalse(self.window.add_data_dock.isVisible())
+        self.window.add_data_action.trigger()
+        self.app.processEvents()
+        self.assertTrue(self.window.add_data_dock.isVisible())
+        self.assertTrue(self.window.settings.value("display/add_data_panel", False, bool))
+
+        self.assertTrue(self.window.catalog_table_dock.isVisible())
+        self.window.catalog_table_action.trigger()
+        self.app.processEvents()
+        self.assertFalse(self.window.catalog_table_dock.isVisible())
+        self.assertFalse(self.window.settings.value("display/catalog_table_panel", True, bool))
+        self.window.catalog_table_action.trigger()
+        self.app.processEvents()
+        self.assertTrue(self.window.catalog_table_dock.isVisible())
+        self.assertTrue(self.window.settings.value("display/catalog_table_panel", False, bool))
+
+    def test_hidden_catalog_table_does_not_block_workspace_dock_access_or_peer_tabifying(self):
+        self.assertTrue(self.window.catalog_table_dock.isVisible())
+        self.window.catalog_table_action.trigger()
+        self.app.processEvents()
+        self.assertFalse(self.window.catalog_table_dock.isVisible())
+
+        self.window.open_release_browser()
+        self.app.processEvents()
+        self.assertTrue(self.window.release_browser_dock.isVisible())
+        self.assertFalse(self.window.release_browser_dock.isHidden())
+
+        self.window.open_work_manager()
+        self.app.processEvents()
+        self.window.open_global_search()
+        self.app.processEvents()
+        self.window.open_catalog_managers_dialog()
+        self.app.processEvents()
+
+        peer_tabs = set(self.window.tabifiedDockWidgets(self.window.release_browser_dock))
+        self.assertIn(self.window.work_manager_dock, peer_tabs)
+        self.assertIn(self.window.global_search_dock, peer_tabs)
+        self.assertIn(self.window.catalog_managers_dock, peer_tabs)
+        self.assertTrue(self.window.work_manager_dock.isVisible())
+        self.assertTrue(self.window.global_search_dock.isVisible())
+        self.assertTrue(self.window.catalog_managers_dock.isVisible())
 
     def test_license_browser_opens_as_tabified_dock_and_applies_track_filter(self):
         track_id = self._create_track(index=131, title="Licensed Track")

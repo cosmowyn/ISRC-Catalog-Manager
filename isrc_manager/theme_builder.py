@@ -64,6 +64,11 @@ THEME_PAGE_SPECS: tuple[tuple[str, str, str], ...] = (
         "Control menu bars, menus, tabs, dock titles, headers, and related navigation chrome.",
     ),
     (
+        "action_ribbon",
+        "Action Ribbon",
+        "Theme the action ribbon chrome separately from tabs and the rest of the toolbar stack. Ribbon buttons still use the shared button styling in this pass.",
+    ),
+    (
         "advanced",
         "Advanced QSS",
         "Use the live selector catalog and code editor only for the remaining edge cases.",
@@ -672,6 +677,30 @@ THEME_COLOR_FIELD_SPECS: tuple[ThemeColorFieldSpec, ...] = (
         "Border color used around toolbar chrome and separators.",
     ),
     ThemeColorFieldSpec(
+        "action_ribbon_bg",
+        "action_ribbon",
+        "Ribbon Chrome",
+        "Ribbon Background",
+        "Background used specifically for the action ribbon toolbar.",
+        placeholder="Toolbar background",
+    ),
+    ThemeColorFieldSpec(
+        "action_ribbon_fg",
+        "action_ribbon",
+        "Ribbon Chrome",
+        "Ribbon Text",
+        "Foreground used on the action ribbon toolbar label and text.",
+        placeholder="Toolbar text",
+    ),
+    ThemeColorFieldSpec(
+        "action_ribbon_border",
+        "action_ribbon",
+        "Ribbon Chrome",
+        "Ribbon Border",
+        "Border and separator color used around the action ribbon toolbar.",
+        placeholder="Toolbar border",
+    ),
+    ThemeColorFieldSpec(
         "statusbar_bg",
         "navigation",
         "Toolbars & Status",
@@ -1206,6 +1235,9 @@ def theme_setting_defaults() -> dict[str, object]:
         "toolbar_bg": "",
         "toolbar_fg": "",
         "toolbar_border": "",
+        "action_ribbon_bg": "",
+        "action_ribbon_fg": "",
+        "action_ribbon_border": "",
         "statusbar_bg": "",
         "statusbar_fg": "",
         "statusbar_border": "",
@@ -1554,6 +1586,15 @@ def effective_theme_settings(raw_values: dict[str, object] | None = None) -> dic
     toolbar_bg = _resolve_theme_color(normalized, defaults, "toolbar_bg", panel_bg)
     toolbar_fg = _resolve_theme_color(normalized, defaults, "toolbar_fg", window_fg)
     toolbar_border = _resolve_theme_color(normalized, defaults, "toolbar_border", border_color)
+    action_ribbon_bg = _resolve_theme_color(
+        normalized, defaults, "action_ribbon_bg", toolbar_bg
+    )
+    action_ribbon_fg = _resolve_theme_color(
+        normalized, defaults, "action_ribbon_fg", toolbar_fg
+    )
+    action_ribbon_border = _resolve_theme_color(
+        normalized, defaults, "action_ribbon_border", toolbar_border
+    )
     statusbar_bg = _resolve_theme_color(normalized, defaults, "statusbar_bg", panel_bg)
     statusbar_fg = _resolve_theme_color(normalized, defaults, "statusbar_fg", window_fg)
     statusbar_border = _resolve_theme_color(normalized, defaults, "statusbar_border", border_color)
@@ -1668,6 +1709,9 @@ def effective_theme_settings(raw_values: dict[str, object] | None = None) -> dic
             "toolbar_bg": toolbar_bg,
             "toolbar_fg": toolbar_fg,
             "toolbar_border": toolbar_border,
+            "action_ribbon_bg": action_ribbon_bg,
+            "action_ribbon_fg": action_ribbon_fg,
+            "action_ribbon_border": action_ribbon_border,
             "statusbar_bg": statusbar_bg,
             "statusbar_fg": statusbar_fg,
             "statusbar_border": statusbar_border,
@@ -1707,6 +1751,7 @@ def effective_theme_settings(raw_values: dict[str, object] | None = None) -> dic
             ("menu_selected_bg", "menu_selected_fg"),
             ("header_bg", "header_fg"),
             ("toolbar_bg", "toolbar_fg"),
+            ("action_ribbon_bg", "action_ribbon_fg"),
             ("statusbar_bg", "statusbar_fg"),
             ("tab_bg", "tab_fg"),
             ("tab_hover_bg", "tab_hover_fg"),
@@ -1906,13 +1951,30 @@ def build_theme_stylesheet(raw_values: dict[str, object] | None = None) -> str:
         color: {theme["toolbar_fg"]};
         border-bottom: {int(theme["border_width"])}px solid {theme["toolbar_border"]};
     }}
+    QToolBar#profilesToolbar {{
+        border-bottom: 5px solid {theme["toolbar_border"]};
+    }}
+    QToolBar#actionRibbonToolbar,
+    QToolBar[role="actionRibbonToolbar"] {{
+        background-color: {theme["action_ribbon_bg"]};
+        color: {theme["action_ribbon_fg"]};
+        border-bottom: {int(theme["border_width"])}px solid {theme["action_ribbon_border"]};
+    }}
     QToolBar QLabel {{
         color: {theme["toolbar_fg"]};
+    }}
+    QToolBar#actionRibbonToolbar QLabel,
+    QToolBar[role="actionRibbonToolbar"] QLabel {{
+        color: {theme["action_ribbon_fg"]};
     }}
     QToolBar::separator {{
         background: {theme["toolbar_border"]};
         width: {max(1, int(theme["border_width"]))}px;
         margin: 4px 6px;
+    }}
+    QToolBar#actionRibbonToolbar::separator,
+    QToolBar[role="actionRibbonToolbar"]::separator {{
+        background: {theme["action_ribbon_border"]};
     }}
     QStatusBar {{
         background-color: {theme["statusbar_bg"]};

@@ -45,6 +45,9 @@ def build_main_window_shell(app: Any, *, last_db: str, movable: bool) -> None:
     _build_action_ribbon_toolbar(app)
     _build_profiles_toolbar(app, last_db=last_db)
     _build_catalog_docks(app, movable=movable)
+    refresh_boundary = getattr(app, "_queue_top_chrome_boundary_refresh", None)
+    if callable(refresh_boundary):
+        refresh_boundary()
 
 
 def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
@@ -311,6 +314,23 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         shortcuts=("Ctrl+Alt+F", "Meta+Alt+F"),
     )
     catalog_menu.addAction(app.global_search_action)
+    app.add_data_action = app._create_action(
+        "Show Add Data Panel",
+        checkable=True,
+        checked=False,
+        toggled_slot=app._on_toggle_add_data,
+        shortcuts=("Ctrl+Shift+D", "Meta+Shift+D"),
+    )
+    catalog_menu.addAction(app.add_data_action)
+
+    app.catalog_table_action = app._create_action(
+        "Show Catalog Table",
+        checkable=True,
+        checked=True,
+        toggled_slot=app._on_toggle_catalog_table,
+        shortcuts=("Ctrl+Shift+T", "Meta+Shift+T"),
+    )
+    catalog_menu.addAction(app.catalog_table_action)
     catalog_menu.addSeparator()
     legacy_menu = catalog_menu.addMenu("Legacy License Archive")
     app.license_browser_action = app._create_action(
@@ -434,24 +454,6 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     app.columns_menu.addSeparator()
     app.column_visibility_actions = []
 
-    app.add_data_action = app._create_action(
-        "Show Add Data Panel",
-        checkable=True,
-        checked=False,
-        toggled_slot=app._on_toggle_add_data,
-        shortcuts=("Ctrl+Shift+D", "Meta+Shift+D"),
-    )
-    view_menu.addAction(app.add_data_action)
-
-    app.catalog_table_action = app._create_action(
-        "Show Catalog Table",
-        checkable=True,
-        checked=True,
-        toggled_slot=app._on_toggle_catalog_table,
-        shortcuts=("Ctrl+Shift+T", "Meta+Shift+T"),
-    )
-    view_menu.addAction(app.catalog_table_action)
-
     app.action_ribbon_visibility_action = app._create_action(
         "Show Action Ribbon",
         checkable=True,
@@ -560,6 +562,7 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
 def _build_action_ribbon_toolbar(app: Any) -> None:
     app.action_ribbon_toolbar = QToolBar("Action Ribbon", app)
     app.action_ribbon_toolbar.setObjectName("actionRibbonToolbar")
+    app.action_ribbon_toolbar.setProperty("role", "actionRibbonToolbar")
     app.action_ribbon_toolbar.setAllowedAreas(Qt.TopToolBarArea)
     app.action_ribbon_toolbar.setMovable(False)
     app.action_ribbon_toolbar.setFloatable(False)
@@ -575,6 +578,7 @@ def _build_action_ribbon_toolbar(app: Any) -> None:
 def _build_profiles_toolbar(app: Any, *, last_db: str) -> None:
     app.toolbar = QToolBar("Profiles", app)
     app.toolbar.setObjectName("profilesToolbar")
+    app.toolbar.setContentsMargins(0, 0, 0, 5)
     app.addToolBar(Qt.TopToolBarArea, app.toolbar)
     app.toolbar.setMovable(True)
     app.toolbar.addWidget(QLabel("Profile: "))
