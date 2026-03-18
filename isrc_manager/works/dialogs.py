@@ -27,23 +27,22 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from isrc_manager.ui_common import (
-    _add_standard_dialog_header,
-    _create_action_button_grid,
-    _create_action_button_cluster,
-    _apply_compact_dialog_control_heights,
-    _apply_standard_dialog_chrome,
-    _apply_standard_widget_chrome,
-    _configure_standard_form_layout,
-    _create_scrollable_dialog_content,
-    _create_standard_section,
-)
 from isrc_manager.selection_scope import (
     SelectionScopeBanner,
     SelectionScopeState,
     TrackChoice,
     TrackSelectionChooserDialog,
     build_selection_preview,
+)
+from isrc_manager.ui_common import (
+    _add_standard_dialog_header,
+    _apply_compact_dialog_control_heights,
+    _apply_standard_dialog_chrome,
+    _apply_standard_widget_chrome,
+    _configure_standard_form_layout,
+    _create_action_button_cluster,
+    _create_scrollable_dialog_content,
+    _create_standard_section,
 )
 
 from .models import (

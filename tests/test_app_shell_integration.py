@@ -700,7 +700,9 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.app.processEvents()
         self.assertEqual(self.window.toolbar.contentsMargins().bottom(), 5)
 
-    def test_workspace_panels_keep_actions_and_saved_search_controls_inside_scroll_safe_surfaces(self):
+    def test_workspace_panels_keep_actions_and_saved_search_controls_inside_scroll_safe_surfaces(
+        self,
+    ):
         track_id = self._create_track(index=167, title="Reachable Action Track")
         self.window.release_service.create_release(
             app_module.ReleasePayload(
@@ -1099,7 +1101,9 @@ class AppShellIntegrationTests(unittest.TestCase):
 
         self.window.populate_all_comboboxes()
 
-        upc_values = [self.window.upc_field.itemText(index) for index in range(self.window.upc_field.count())]
+        upc_values = [
+            self.window.upc_field.itemText(index) for index in range(self.window.upc_field.count())
+        ]
         catalog_values = [
             self.window.catalog_number_field.itemText(index)
             for index in range(self.window.catalog_number_field.count())

@@ -32,6 +32,7 @@ from isrc_manager.ui_common import (
     _create_standard_section,
 )
 
+from .models import GlobalSearchResult
 from .service import GlobalSearchService, RelationshipExplorerService
 
 
@@ -246,9 +247,7 @@ class GlobalSearchPanel(QWidget):
         }
         return mapping.get(entity_type, entity_type + "s")
 
-    def _default_status_text(
-        self, *, query: str, results: list["GlobalSearchResult"]
-    ) -> str:
+    def _default_status_text(self, *, query: str, results: list[GlobalSearchResult]) -> str:
         if query:
             return (
                 f"Showing {len(results)} search result{'s' if len(results) != 1 else ''} "
@@ -289,12 +288,14 @@ class GlobalSearchPanel(QWidget):
             if entity_type in counts
         ]
         if len(preview_parts) > 4:
-            preview_text = ", ".join(preview_parts[:4]) + f", and {len(preview_parts) - 4} more types"
+            preview_text = (
+                ", ".join(preview_parts[:4]) + f", and {len(preview_parts) - 4} more types"
+            )
         else:
             preview_text = ", ".join(preview_parts)
         return f"Showing catalog overview: {preview_text}. Type to narrow results."
 
-    def _browse_results(self, service: GlobalSearchService) -> list["GlobalSearchResult"]:
+    def _browse_results(self, service: GlobalSearchService) -> list[GlobalSearchResult]:
         entity_filter = self._entity_filter()
         if entity_filter is None:
             return service.browse_default_view(limit=200, preview_limit=8)
@@ -364,9 +365,7 @@ class GlobalSearchPanel(QWidget):
             for column, value in enumerate(values):
                 self.results_table.setItem(row, column, QTableWidgetItem(value))
         self._clear_result_selection()
-        self.results_status_label.setText(
-            self._default_status_text(query=query, results=results)
-        )
+        self.results_status_label.setText(self._default_status_text(query=query, results=results))
         self.refresh_relationships()
 
     def _selected_result(self) -> tuple[str, int] | None:

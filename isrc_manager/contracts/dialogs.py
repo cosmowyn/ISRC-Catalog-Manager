@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
-    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
@@ -47,7 +46,6 @@ from isrc_manager.ui_common import (
     _apply_standard_widget_chrome,
     _configure_standard_form_layout,
     _create_action_button_grid,
-    _create_action_button_cluster,
     _create_scrollable_dialog_content,
     _create_standard_section,
 )
@@ -227,7 +225,10 @@ class _OptionalReferenceSelector(QWidget):
                 display_text = _reference_choice_display_text(choice)
                 self.combo.addItem(display_text, choice.reference_id)
                 display_values.append(display_text)
-            if selected_choice is not None and selected_choice.reference_id not in self._choices_by_id:
+            if (
+                selected_choice is not None
+                and selected_choice.reference_id not in self._choices_by_id
+            ):
                 display_text = _reference_choice_display_text(selected_choice)
                 self.combo.addItem(display_text, selected_choice.reference_id)
                 display_values.append(display_text)
@@ -777,7 +778,10 @@ class ContractDocumentEditor(QWidget):
             document.title,
             (document.document_type or "other").replace("_", " ").title(),
             document.version_label or "",
-            (normalize_storage_mode(document.storage_mode, default=None) or STORAGE_MODE_MANAGED_FILE)
+            (
+                normalize_storage_mode(document.storage_mode, default=None)
+                or STORAGE_MODE_MANAGED_FILE
+            )
             .replace("_", " ")
             .title(),
             "Yes" if document.active_flag else "No",
@@ -800,7 +804,10 @@ class ContractDocumentEditor(QWidget):
             document.title,
             (document.document_type or "other").replace("_", " ").title(),
             document.version_label or "",
-            (normalize_storage_mode(document.storage_mode, default=None) or STORAGE_MODE_MANAGED_FILE)
+            (
+                normalize_storage_mode(document.storage_mode, default=None)
+                or STORAGE_MODE_MANAGED_FILE
+            )
             .replace("_", " ")
             .title(),
             "Yes" if document.active_flag else "No",
@@ -926,7 +933,9 @@ class ContractDocumentEditor(QWidget):
             self._clear_form()
         self._refresh_action_state()
 
-    def _document_reference_choices(self, *, exclude_row: int | None = None) -> list[_ReferenceChoice]:
+    def _document_reference_choices(
+        self, *, exclude_row: int | None = None
+    ) -> list[_ReferenceChoice]:
         choices: list[_ReferenceChoice] = []
         for row, document in enumerate(self._documents):
             if exclude_row is not None and row == exclude_row:
@@ -938,7 +947,10 @@ class ContractDocumentEditor(QWidget):
                 label_parts.append(f"Version: {document.version_label}")
             if document.filename:
                 label_parts.append(document.filename)
-            label = " / ".join(part for part in label_parts if part) or f"Document #{document.document_id}"
+            label = (
+                " / ".join(part for part in label_parts if part)
+                or f"Document #{document.document_id}"
+            )
             choices.append(_ReferenceChoice(int(document.document_id), label))
         return choices
 
@@ -963,7 +975,9 @@ class ContractDocumentEditor(QWidget):
             data, mime_type = self.contract_service.fetch_document_bytes(int(document.document_id))
             filename = document.filename or ""
             if not filename:
-                filename = Path(document.stored_path or document.source_path or "contract-document").name
+                filename = Path(
+                    document.stored_path or document.source_path or "contract-document"
+                ).name
             return data, filename
         source_path = str(document.source_path or "").strip()
         if source_path:
@@ -1015,7 +1029,10 @@ class ContractDocumentEditor(QWidget):
             return None
         _, document = current
         if path is None:
-            suggested = document.filename or Path(document.stored_path or document.source_path or "contract-document").name
+            suggested = (
+                document.filename
+                or Path(document.stored_path or document.source_path or "contract-document").name
+            )
             chosen, _ = QFileDialog.getSaveFileName(self, "Export Contract Document", suggested)
             if not chosen:
                 return None
@@ -1036,7 +1053,9 @@ class ContractDocumentEditor(QWidget):
         if current is None:
             return
         row, document = current
-        document.storage_mode = normalize_storage_mode(target_mode, default=STORAGE_MODE_MANAGED_FILE)
+        document.storage_mode = normalize_storage_mode(
+            target_mode, default=STORAGE_MODE_MANAGED_FILE
+        )
         self._documents[row] = document
         self._load_document_into_form(row)
 
@@ -1045,7 +1064,9 @@ class ContractDocumentEditor(QWidget):
         if current is None:
             return
         _, document = current
-        current_mode = normalize_storage_mode(document.storage_mode, default=STORAGE_MODE_MANAGED_FILE)
+        current_mode = normalize_storage_mode(
+            document.storage_mode, default=STORAGE_MODE_MANAGED_FILE
+        )
         target_mode = (
             STORAGE_MODE_DATABASE
             if current_mode == STORAGE_MODE_MANAGED_FILE

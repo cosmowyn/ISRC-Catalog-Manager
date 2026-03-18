@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QDockWidget, QWidget
 
 
@@ -145,9 +145,7 @@ def _default_tab_anchor(app: Any, new_dock: QDockWidget) -> QDockWidget | None:
 
     registry = getattr(app, "_catalog_workspace_docks", {})
     visible_peers = [
-        dock
-        for dock in registry.values()
-        if _is_tab_anchor_candidate(app, dock, new_dock)
+        dock for dock in registry.values() if _is_tab_anchor_candidate(app, dock, new_dock)
     ]
     if visible_peers:
         return visible_peers[-1]

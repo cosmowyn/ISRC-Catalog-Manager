@@ -238,7 +238,9 @@ class AssetEditorDialog(QDialog):
                 label = f"Release {release_id}"
             self.release_id_edit.addItem(f"{release_id} - {label}", int(release_id))
         for combo in (self.track_id_edit, self.release_id_edit):
-            labels = [combo.itemText(index) for index in range(combo.count()) if combo.itemText(index)]
+            labels = [
+                combo.itemText(index) for index in range(combo.count()) if combo.itemText(index)
+            ]
             completer = QCompleter(labels, combo)
             completer.setCaseSensitivity(Qt.CaseInsensitive)
             combo.setCompleter(completer)

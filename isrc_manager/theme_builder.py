@@ -1586,12 +1586,8 @@ def effective_theme_settings(raw_values: dict[str, object] | None = None) -> dic
     toolbar_bg = _resolve_theme_color(normalized, defaults, "toolbar_bg", panel_bg)
     toolbar_fg = _resolve_theme_color(normalized, defaults, "toolbar_fg", window_fg)
     toolbar_border = _resolve_theme_color(normalized, defaults, "toolbar_border", border_color)
-    action_ribbon_bg = _resolve_theme_color(
-        normalized, defaults, "action_ribbon_bg", toolbar_bg
-    )
-    action_ribbon_fg = _resolve_theme_color(
-        normalized, defaults, "action_ribbon_fg", toolbar_fg
-    )
+    action_ribbon_bg = _resolve_theme_color(normalized, defaults, "action_ribbon_bg", toolbar_bg)
+    action_ribbon_fg = _resolve_theme_color(normalized, defaults, "action_ribbon_fg", toolbar_fg)
     action_ribbon_border = _resolve_theme_color(
         normalized, defaults, "action_ribbon_border", toolbar_border
     )

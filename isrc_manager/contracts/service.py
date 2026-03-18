@@ -950,7 +950,11 @@ class ContractService:
                     ),
                 )
                 seen_ids.add(document_id)
-                if old_path and old_path != stored_path and self._is_managed_document_path(old_path):
+                if (
+                    old_path
+                    and old_path != stored_path
+                    and self._is_managed_document_path(old_path)
+                ):
                     self._delete_document_if_unreferenced(old_path, cursor=cursor)
                 continue
             cursor.execute(

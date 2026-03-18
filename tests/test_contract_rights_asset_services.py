@@ -534,7 +534,10 @@ class ContractRightsAssetServiceTests(unittest.TestCase):
                 assert document is not None
                 preview_path = editor._materialize_document(document)
                 self.assertTrue(preview_path.exists())
-                self.assertEqual(preview_path.read_bytes(), self.contract_service.fetch_document_bytes(document.document_id)[0])
+                self.assertEqual(
+                    preview_path.read_bytes(),
+                    self.contract_service.fetch_document_bytes(document.document_id)[0],
+                )
 
                 export_path = self.data_root / f"exported-{row}.bin"
                 written = editor._export_selected_document(export_path)
@@ -678,7 +681,9 @@ class ContractRightsAssetServiceTests(unittest.TestCase):
             self.assertEqual(dialog.work_ids_edit.table.item(0, 1).text(), "Unknown #991")
             self.assertEqual(dialog.track_ids_edit.table.item(0, 1).text(), "Unknown #992")
             self.assertEqual(dialog.release_ids_edit.table.item(0, 1).text(), "Unknown #993")
-            self.assertIn("Unknown #999", dialog.documents_editor.supersedes_edit.combo.currentText())
+            self.assertIn(
+                "Unknown #999", dialog.documents_editor.supersedes_edit.combo.currentText()
+            )
 
             payload = dialog.payload()
             self.assertEqual(payload.work_ids, [991])

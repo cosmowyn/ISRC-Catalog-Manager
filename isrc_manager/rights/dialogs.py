@@ -282,7 +282,9 @@ class RightEditorDialog(QDialog):
             self.track_combo,
             self.release_combo,
         ):
-            labels = [combo.itemText(index) for index in range(combo.count()) if combo.itemText(index)]
+            labels = [
+                combo.itemText(index) for index in range(combo.count()) if combo.itemText(index)
+            ]
             completer = QCompleter(labels, combo)
             completer.setCaseSensitivity(Qt.CaseInsensitive)
             combo.setCompleter(completer)

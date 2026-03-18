@@ -29,11 +29,7 @@ class GlobalSearchService:
 
     @staticmethod
     def _normalized_entity_types(entity_types: list[str] | None) -> set[str]:
-        return {
-            str(item).strip().lower()
-            for item in (entity_types or [])
-            if str(item).strip()
-        }
+        return {str(item).strip().lower() for item in (entity_types or []) if str(item).strip()}
 
     @classmethod
     def _sort_results(cls, results: list[GlobalSearchResult]) -> list[GlobalSearchResult]:

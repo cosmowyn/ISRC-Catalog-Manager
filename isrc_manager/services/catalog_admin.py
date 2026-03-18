@@ -81,7 +81,8 @@ class CatalogAdminService:
         ]
         if blocked:
             raise ValueError(
-                "Artist still linked to tracks: " + ", ".join(sorted(set(blocked), key=str.casefold))
+                "Artist still linked to tracks: "
+                + ", ".join(sorted(set(blocked), key=str.casefold))
             )
         ids = [(artist_id,) for artist_id in normalized_ids]
         with self.conn:
