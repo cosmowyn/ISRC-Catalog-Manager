@@ -40,6 +40,9 @@ class DatabaseSchemaServiceTests(unittest.TestCase):
         gs1_columns = {
             row[1] for row in self.conn.execute("PRAGMA table_info(GS1Metadata)").fetchall()
         }
+        history_entry_columns = {
+            row[1] for row in self.conn.execute("PRAGMA table_info(HistoryEntries)").fetchall()
+        }
         track_indexes = {
             row[1] for row in self.conn.execute("PRAGMA index_list(Tracks)").fetchall()
         }
@@ -55,6 +58,7 @@ class DatabaseSchemaServiceTests(unittest.TestCase):
 
         self.assertEqual(self.service.get_db_version(), SCHEMA_TARGET)
         self.assertIn("HistoryEntries", tables)
+        self.assertIn("HistoryBackups", tables)
         self.assertIn("HistorySnapshots", tables)
         self.assertIn("HistoryHead", tables)
         self.assertIn("Licensees", tables)
@@ -75,6 +79,7 @@ class DatabaseSchemaServiceTests(unittest.TestCase):
         self.assertIn("SavedSearches", tables)
         self.assertIn("vw_Licenses", tables)
         self.assertIn("contract_number", gs1_columns)
+        self.assertIn("visible_in_history", history_entry_columns)
         self.assertIn("blob_icon_payload", custom_field_columns)
         self.assertTrue({"blob_value", "mime_type", "size_bytes"} <= value_columns)
         self.assertTrue(
@@ -177,6 +182,46 @@ class DatabaseSchemaServiceTests(unittest.TestCase):
                 row[1] for row in conn.execute("PRAGMA table_info(CustomFieldDefs)").fetchall()
             }
             self.assertIn("blob_icon_payload", columns)
+            self.assertEqual(service.get_db_version(), SCHEMA_TARGET)
+        finally:
+            conn.close()
+
+    def test_migrate_23_to_24_adds_history_visibility_column(self):
+        conn = sqlite3.connect(":memory:")
+        try:
+            service = DatabaseSchemaService(conn)
+            service.init_db()
+            conn.execute("PRAGMA user_version = 23")
+            conn.execute("DROP TABLE IF EXISTS HistoryEntries")
+            conn.execute(
+                """
+                CREATE TABLE HistoryEntries (
+                    id INTEGER PRIMARY KEY,
+                    parent_id INTEGER,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    label TEXT NOT NULL,
+                    action_type TEXT NOT NULL,
+                    entity_type TEXT,
+                    entity_id TEXT,
+                    reversible INTEGER NOT NULL DEFAULT 1,
+                    strategy TEXT NOT NULL,
+                    payload_json TEXT,
+                    inverse_json TEXT,
+                    redo_json TEXT,
+                    snapshot_before_id INTEGER,
+                    snapshot_after_id INTEGER,
+                    status TEXT NOT NULL DEFAULT 'applied'
+                )
+                """
+            )
+            conn.commit()
+
+            service.migrate_schema()
+
+            columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(HistoryEntries)").fetchall()
+            }
+            self.assertIn("visible_in_history", columns)
             self.assertEqual(service.get_db_version(), SCHEMA_TARGET)
         finally:
             conn.close()

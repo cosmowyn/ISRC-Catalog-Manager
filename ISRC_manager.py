@@ -20,6 +20,7 @@ import tempfile
 import platform
 import logging
 import mimetypes
+from contextlib import contextmanager
 from importlib import metadata
 from pathlib import Path
 from datetime import datetime
@@ -5324,6 +5325,17 @@ class App(QMainWindow):
                 f"This will delete {int(count)} orphaned custom value row(s) that no longer point to a valid "
                 "track or custom field definition."
             )
+        if repair_key == "history_reconcile":
+            issue_count = 0
+            if check is not None:
+                issue_count = int(check.get("issue_count") or 0)
+            return (
+                f"This will reconcile {issue_count} history and recovery issue(s), repair stale current pointers, "
+                "restore missing snapshots and backups from archived history artifacts when possible, re-register "
+                "orphaned snapshot or backup files that still have metadata, and rebuild missing backup artifacts "
+                "from live files when the current data is intact. Irrecoverable references will be left in place "
+                "and reported as unresolved so the history trail is not silently erased."
+            )
         raise ValueError(f"Unknown diagnostics repair: {repair_key}")
 
     def _run_diagnostics_repair(self, repair_key: str, check: dict | None = None) -> str:
@@ -5377,6 +5389,29 @@ class App(QMainWindow):
                 remaining=after_count,
             )
             return f"Removed {removed} orphaned custom value row(s)."
+
+        if repair_key == "history_reconcile":
+            if self.history_manager is None:
+                raise RuntimeError("Open a profile first.")
+            result = self.history_manager.repair_recovery_state()
+            self._refresh_history_actions()
+            self._audit("REPAIR", "History", ref_id=self.current_db_path, details="history_reconcile")
+            self._audit_commit()
+            self._log_event(
+                "diagnostics.repair.history_reconcile",
+                "History diagnostics repair applied",
+                repair_key=repair_key,
+                changes=len(result.changes),
+                unresolved=len(result.unresolved),
+            )
+            summary_parts = []
+            if result.changes:
+                summary_parts.append("\n".join(result.changes))
+            else:
+                summary_parts.append("No registry changes were needed.")
+            if result.unresolved:
+                summary_parts.append("Unresolved:\n" + "\n".join(result.unresolved))
+            return "\n\n".join(summary_parts)
 
         raise ValueError(f"Unknown diagnostics repair: {repair_key}")
 
@@ -5464,6 +5499,7 @@ class App(QMainWindow):
                 "Licensees",
                 "HistoryEntries",
                 "HistoryHead",
+                "HistoryBackups",
                 "HistorySnapshots",
                 "app_kv",
             }
@@ -5688,40 +5724,117 @@ class App(QMainWindow):
             )
 
         try:
-            if self.conn is None:
-                raise RuntimeError("No active database connection")
-            snapshot_rows = self.conn.execute(
-                "SELECT id, label, db_snapshot_path FROM HistorySnapshots ORDER BY id"
-            ).fetchall()
-            missing_snapshots = []
-            for snapshot_id, label, db_snapshot_path in snapshot_rows:
-                if not db_snapshot_path:
-                    continue
-                snapshot_path = Path(db_snapshot_path)
-                if not snapshot_path.exists():
-                    missing_snapshots.append(
-                        f"Snapshot #{snapshot_id} '{label or 'Unnamed snapshot'}' is missing its database snapshot file:\n{snapshot_path}"
-                    )
-            if not missing_snapshots:
+            if self.history_manager is None:
+                raise RuntimeError("No active history manager")
+            recovery_issues = self.history_manager.inspect_recovery_state()
+
+            snapshot_issues = [
+                issue
+                for issue in recovery_issues
+                if issue.issue_type in {
+                    "missing_snapshot_artifact",
+                    "missing_snapshot_archive",
+                    "orphan_snapshot_file",
+                    "dangling_snapshot_reference",
+                }
+            ]
+            snapshot_details = "\n\n".join(
+                "\n".join(
+                    [issue.message]
+                    + ([str(issue.path)] if issue.path else [])
+                    + ([f"Details: {issue.details}"] if issue.details else [])
+                )
+                for issue in snapshot_issues[:20]
+            )
+            snapshot_total = len(self.history_manager.list_snapshots(limit=10_000))
+            if not snapshot_issues:
                 add_check(
                     "History snapshots",
                     "ok",
-                    f"{len(snapshot_rows)} snapshot record(s) available.",
-                    "All registered history snapshots that reference a database snapshot file are available on disk.",
+                    f"{snapshot_total} snapshot record(s) available.",
+                    "Snapshot records and their registered artifacts are internally consistent.",
                 )
             else:
                 add_check(
                     "History snapshots",
                     "warning",
-                    f"{len(missing_snapshots)} snapshot file(s) missing.",
-                    "\n\n".join(missing_snapshots[:20]),
+                    f"{len(snapshot_issues)} snapshot issue(s) detected.",
+                    snapshot_details,
+                    repair_key="history_reconcile",
+                    repair_label="Repair History Artifacts",
+                    orphan_count=len(snapshot_issues),
                 )
+
+            backup_issues = [
+                issue
+                for issue in recovery_issues
+                if issue.issue_type
+                in {
+                    "missing_backup_file",
+                    "missing_backup_history_artifact",
+                    "orphan_backup_file",
+                }
+            ]
+            backup_details = "\n\n".join(
+                "\n".join(
+                    [issue.message] + ([str(issue.path)] if issue.path else [])
+                )
+                for issue in backup_issues[:20]
+            )
+            backup_total = len(self.history_manager.list_backups(limit=10_000))
+            if not backup_issues:
+                add_check(
+                    "Backup artifacts",
+                    "ok",
+                    f"{backup_total} backup record(s) tracked.",
+                    "Registered backup files and on-disk backup artifacts are internally consistent.",
+                )
+            else:
+                add_check(
+                    "Backup artifacts",
+                    "warning",
+                    f"{len(backup_issues)} backup issue(s) detected.",
+                    backup_details,
+                    repair_key="history_reconcile",
+                    repair_label="Repair History Artifacts",
+                    orphan_count=len(backup_issues),
+                )
+
+            invariant_issues = [
+                issue for issue in recovery_issues if issue.issue_type == "stale_current_head"
+            ]
+            invariant_details = "\n\n".join(issue.message for issue in invariant_issues[:20])
+            if not invariant_issues:
+                add_check(
+                    "History invariants",
+                    "ok",
+                    "History head and entry references are coherent.",
+                    "The current history pointer resolves to a valid entry, and no repair is needed.",
+                )
+            else:
+                add_check(
+                    "History invariants",
+                    "warning",
+                    f"{len(invariant_issues)} history invariant issue(s) detected.",
+                    invariant_details,
+                    repair_key="history_reconcile",
+                    repair_label="Repair History Artifacts",
+                    orphan_count=len(invariant_issues),
+                )
+
+            total_history_issues = len(snapshot_issues) + len(backup_issues) + len(invariant_issues)
+            if total_history_issues:
+                for check in checks[-3:]:
+                    check["issue_count"] = total_history_issues
         except Exception as exc:
             add_check(
                 "History snapshots",
                 "error",
                 "Snapshot storage could not be inspected.",
-                f"An exception occurred while checking HistorySnapshots:\n{exc}",
+                f"An exception occurred while checking history artifacts:\n{exc}",
+                repair_key="history_reconcile",
+                repair_label="Repair History Artifacts",
+                orphan_count=0,
             )
 
         return {"environment": environment, "checks": checks}
@@ -5746,7 +5859,12 @@ class App(QMainWindow):
         )
         self.history_manager = (
             HistoryManager(
-                self.conn, self.settings, self.current_db_path, self.history_dir, DATA_DIR()
+                self.conn,
+                self.settings,
+                self.current_db_path,
+                self.history_dir,
+                DATA_DIR(),
+                self.backups_dir,
             )
             if self.conn is not None and getattr(self, "current_db_path", None)
             else None
@@ -7059,6 +7177,8 @@ class App(QMainWindow):
             self.logger.exception(f"Schema migration failed: {e}")
             QMessageBox.critical(self, "Migration Error", f"Database migration failed:\n{e}")
             # keep going; DB might still be usable
+        if self.history_manager is not None:
+            self.history_manager._ensure_history_invariants()
 
         self.blob_icon_settings = self._load_blob_icon_settings()
         self.active_custom_fields = self.load_active_custom_fields()
@@ -7130,30 +7250,50 @@ class App(QMainWindow):
         if self.history_dialog is not None and self.history_dialog.isVisible():
             self.history_dialog.refresh_data()
 
+    @contextmanager
+    def _suspend_table_layout_history(self):
+        header = self.table.horizontalHeader() if hasattr(self, "table") else None
+        previous_suspend_state = self._suspend_layout_history
+        self._suspend_layout_history = True
+        if header is not None:
+            self._unbind_header_state_signals()
+        try:
+            yield
+        finally:
+            def _resume_layout_history():
+                self._suspend_layout_history = previous_suspend_state
+                try:
+                    self._bind_header_state_signals()
+                except Exception as exc:
+                    self.logger.warning("Failed to rebind header history signals: %s", exc)
+
+            QTimer.singleShot(0, _resume_layout_history)
+
     def _refresh_after_history_change(self):
-        self.identity = self._load_identity()
-        self.theme_settings = self._load_theme_settings()
-        self.blob_icon_settings = self._load_blob_icon_settings()
-        self._apply_identity()
-        self._apply_theme()
-        self.active_custom_fields = self.load_active_custom_fields()
-        self._rebuild_table_headers()
-        try:
-            self._load_header_state()
-        except Exception:
-            pass
-        self._apply_saved_hint_positions()
-        try:
-            self._apply_saved_view_preferences()
-        except Exception:
-            pass
-        self.populate_all_comboboxes()
-        self._update_add_data_generated_fields()
-        self.refresh_table_preserve_view()
-        self._refresh_catalog_workspace_docks()
-        self._refresh_auto_snapshot_schedule()
-        self._last_auto_snapshot_marker = self._current_auto_snapshot_marker()
-        self._refresh_history_actions()
+        with self._suspend_table_layout_history():
+            self.identity = self._load_identity()
+            self.theme_settings = self._load_theme_settings()
+            self.blob_icon_settings = self._load_blob_icon_settings()
+            self._apply_identity()
+            self._apply_theme()
+            self.active_custom_fields = self.load_active_custom_fields()
+            self._rebuild_table_headers()
+            try:
+                self._load_header_state()
+            except Exception:
+                pass
+            self._apply_saved_hint_positions()
+            try:
+                self._apply_saved_view_preferences()
+            except Exception:
+                pass
+            self.populate_all_comboboxes()
+            self._update_add_data_generated_fields()
+            self.refresh_table_preserve_view()
+            self._refresh_catalog_workspace_docks()
+            self._refresh_auto_snapshot_schedule()
+            self._last_auto_snapshot_marker = self._current_auto_snapshot_marker()
+            self._refresh_history_actions()
 
     def _apply_saved_hint_positions(self):
         for attr_name, settings_key in (
@@ -7167,18 +7307,45 @@ class App(QMainWindow):
             if pos:
                 label.move(pos)
 
-    def _on_header_layout_changed(self, *_args):
+    def _on_header_sections_reordered(self, *_args):
         if getattr(self, "_suspend_layout_history", False):
             return
-        self._save_header_state()
+        prefix = self._table_settings_prefix()
+        self._save_header_state(
+            action_label="Reorder Columns",
+            history_entity_id=f"{prefix}/column_order",
+        )
+
+    def _on_header_sections_resized(self, *_args):
+        if getattr(self, "_suspend_layout_history", False):
+            return
+        prefix = self._table_settings_prefix()
+        self._save_header_state(
+            action_label="Adjust Column Widths",
+            history_entity_id=f"{prefix}/column_widths",
+        )
+
+    def _unbind_header_state_signals(self):
+        if not getattr(self, "_header_layout_signals_bound", False) or not hasattr(self, "table"):
+            return
+        header = self.table.horizontalHeader()
+        try:
+            header.sectionMoved.disconnect(self._on_header_sections_reordered)
+        except (RuntimeError, TypeError):
+            pass
+        try:
+            header.sectionResized.disconnect(self._on_header_sections_resized)
+        except (RuntimeError, TypeError):
+            pass
+        self._header_layout_signals_bound = False
 
     def _bind_header_state_signals(self):
+        if not hasattr(self, "table"):
+            return
         header = self.table.horizontalHeader()
-        if self._header_layout_signals_bound:
-            header.sectionMoved.disconnect(self._on_header_layout_changed)
-            header.sectionResized.disconnect(self._on_header_layout_changed)
-        header.sectionMoved.connect(self._on_header_layout_changed)
-        header.sectionResized.connect(self._on_header_layout_changed)
+        self._unbind_header_state_signals()
+        header.sectionMoved.connect(self._on_header_sections_reordered)
+        header.sectionResized.connect(self._on_header_sections_resized)
         self._header_layout_signals_bound = True
 
     @staticmethod
@@ -8042,31 +8209,31 @@ class App(QMainWindow):
         )
         try:
             result = mutation()
+            after_state = self.history_manager.capture_file_state(
+                target_path,
+                companion_suffixes=companion_suffixes,
+            )
+            if before_state != after_state:
+                final_label = action_label(result) if callable(action_label) else action_label
+                final_payload = payload(result) if callable(payload) else (payload or {})
+                self.history_manager.record_file_write_action(
+                    label=final_label,
+                    action_type=action_type,
+                    target_path=target_path,
+                    before_state=before_state,
+                    after_state=after_state,
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    payload=final_payload,
+                )
+                self._refresh_history_actions()
+            return result
         except Exception:
             try:
                 self.history_manager.restore_file_state(target_path, before_state)
             except Exception as restore_error:
                 self.logger.exception(f"File rollback failed for {action_type}: {restore_error}")
             raise
-        after_state = self.history_manager.capture_file_state(
-            target_path,
-            companion_suffixes=companion_suffixes,
-        )
-        if before_state != after_state:
-            final_label = action_label(result) if callable(action_label) else action_label
-            final_payload = payload(result) if callable(payload) else (payload or {})
-            self.history_manager.record_file_write_action(
-                label=final_label,
-                action_type=action_type,
-                target_path=target_path,
-                before_state=before_state,
-                after_state=after_state,
-                entity_type=entity_type,
-                entity_id=entity_id,
-                payload=final_payload,
-            )
-            self._refresh_history_actions()
-        return result
 
     def _table_setting_keys(self, *, include_columns_movable: bool = False) -> list[str]:
         prefix = self._table_settings_prefix()
@@ -8089,18 +8256,19 @@ class App(QMainWindow):
 
         self.open_database(path)
 
-        try:
-            self.active_custom_fields = self.load_active_custom_fields()
-            self._rebuild_table_headers()
-            self._load_header_state()
-        except Exception:
-            pass
+        with self._suspend_table_layout_history():
+            try:
+                self.active_custom_fields = self.load_active_custom_fields()
+                self._rebuild_table_headers()
+                self._load_header_state()
+            except Exception:
+                pass
 
-        self._reload_profiles_list(select_path=path)
-        self.refresh_table_preserve_view()
-        self.populate_all_comboboxes()
-        self._update_add_data_generated_fields()
-        self._refresh_history_actions()
+            self._reload_profiles_list(select_path=path)
+            self.refresh_table_preserve_view()
+            self.populate_all_comboboxes()
+            self._update_add_data_generated_fields()
+            self._refresh_history_actions()
 
     def _prepare_profile_database_background(
         self,
@@ -8172,20 +8340,21 @@ class App(QMainWindow):
             if not prepared_path:
                 return
             self.open_database(prepared_path)
-            try:
-                self.active_custom_fields = self.load_active_custom_fields()
-                self._rebuild_table_headers()
-                self._load_header_state()
-            except Exception:
-                pass
-            self._reload_profiles_list(select_path=prepared_path)
-            self._refresh_catalog_ui_in_background(
-                select_path=prepared_path,
-                unique_key=f"catalog.ui.profile.{prepared_path}",
-                on_finished=lambda: (
-                    on_activated(prepared_path) if on_activated is not None else None
-                ),
-            )
+            with self._suspend_table_layout_history():
+                try:
+                    self.active_custom_fields = self.load_active_custom_fields()
+                    self._rebuild_table_headers()
+                    self._load_header_state()
+                except Exception:
+                    pass
+                self._reload_profiles_list(select_path=prepared_path)
+                self._refresh_catalog_ui_in_background(
+                    select_path=prepared_path,
+                    unique_key=f"catalog.ui.profile.{prepared_path}",
+                    on_finished=lambda: (
+                        on_activated(prepared_path) if on_activated is not None else None
+                    ),
+                )
 
         return self._prepare_profile_database_background(
             path,
@@ -8209,7 +8378,7 @@ class App(QMainWindow):
 
         if direction == "undo":
             if self.history_manager is not None and self.history_manager.can_undo():
-                candidates.append(("profile", self.history_manager.get_current_entry()))
+                candidates.append(("profile", self.history_manager.get_current_visible_entry()))
             if self.session_history_manager.can_undo():
                 candidates.append(("session", self.session_history_manager.get_current_entry()))
         else:
@@ -8256,46 +8425,21 @@ class App(QMainWindow):
         after_kind: str | None = None,
         after_label: str | None = None,
     ):
-        if self.history_manager is None:
-            return mutation()
-
-        safe_kind = action_type.replace(".", "_")
-        before_snapshot = self.history_manager.capture_snapshot(
-            kind=before_kind or f"pre_{safe_kind}",
-            label=before_label or f"Before {action_label}",
+        result = run_snapshot_history_action(
+            history_manager=self.history_manager,
+            action_label=action_label,
+            action_type=action_type,
+            mutation=mutation,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            payload=payload,
+            before_kind=before_kind,
+            before_label=before_label,
+            after_kind=after_kind,
+            after_label=after_label,
+            logger=self.logger,
         )
-        try:
-            result = mutation()
-        except Exception:
-            try:
-                self.history_manager.restore_snapshot(before_snapshot.snapshot_id)
-            except Exception as restore_error:
-                self.logger.exception(
-                    f"Snapshot rollback failed for {action_type}: {restore_error}"
-                )
-            try:
-                self.history_manager.delete_snapshot(before_snapshot.snapshot_id)
-            except Exception:
-                pass
-            raise
-
-        try:
-            after_snapshot = self.history_manager.capture_snapshot(
-                kind=after_kind or f"post_{safe_kind}",
-                label=after_label or f"After {action_label}",
-            )
-            self.history_manager.record_snapshot_action(
-                label=action_label,
-                action_type=action_type,
-                entity_type=entity_type,
-                entity_id=str(entity_id) if entity_id is not None else None,
-                payload=payload or {},
-                snapshot_before_id=before_snapshot.snapshot_id,
-                snapshot_after_id=after_snapshot.snapshot_id,
-            )
-            self._refresh_history_actions()
-        except Exception as e:
-            self.logger.exception(f"History recording failed for {action_type}: {e}")
+        self._refresh_history_actions()
         return result
 
     def open_history_dialog(self):
@@ -8886,26 +9030,27 @@ class App(QMainWindow):
                 self.conn.commit()
             except Exception:
                 pass
-            self._apply_catalog_ui_dataset(dataset)
-            try:
-                self._load_header_state()
-            except Exception as e:
-                self.logger.warning("Failed to load header state: %s", e)
-            self._restore_view_state(state)
-            if focus_id is not None:
-                self._select_row_by_id(focus_id)
-            if select_path:
-                self._reload_profiles_list(select_path=select_path)
-            if sort_enabled:
-                self.table.setSortingEnabled(True)
+            with self._suspend_table_layout_history():
+                self._apply_catalog_ui_dataset(dataset)
                 try:
-                    self.table.sortItems(self._last_sort_col, self._last_sort_order)
-                except Exception:
-                    pass
-            self._update_add_data_generated_fields()
-            self._refresh_history_actions()
-            if on_finished is not None:
-                on_finished()
+                    self._load_header_state()
+                except Exception as e:
+                    self.logger.warning("Failed to load header state: %s", e)
+                self._restore_view_state(state)
+                if focus_id is not None:
+                    self._select_row_by_id(focus_id)
+                if select_path:
+                    self._reload_profiles_list(select_path=select_path)
+                if sort_enabled:
+                    self.table.setSortingEnabled(True)
+                    try:
+                        self.table.sortItems(self._last_sort_col, self._last_sort_order)
+                    except Exception:
+                        pass
+                self._update_add_data_generated_fields()
+                self._refresh_history_actions()
+                if on_finished is not None:
+                    on_finished()
 
         def _finished():
             if not sort_enabled:
@@ -9036,47 +9181,48 @@ class App(QMainWindow):
                 break
 
     def refresh_table_preserve_view(self, focus_id: int | None = None):
-        _prev_sort_enabled = self.table.isSortingEnabled()
-        if _prev_sort_enabled:
-            self.table.setSortingEnabled(False)
+        with self._suspend_table_layout_history():
+            _prev_sort_enabled = self.table.isSortingEnabled()
+            if _prev_sort_enabled:
+                self.table.setSortingEnabled(False)
 
-        # Capture current viewport
-        state = self._capture_view_state()
+            # Capture current viewport
+            state = self._capture_view_state()
 
-        # Refresh schema + headers
-        self.active_custom_fields = self.load_active_custom_fields()
-        self._rebuild_table_headers()
+            # Refresh schema + headers
+            self.active_custom_fields = self.load_active_custom_fields()
+            self._rebuild_table_headers()
 
-        # Always rebind first (safe if duplicated)
-        try:
-            self._bind_header_state_signals()
-        except Exception as e:
-            self.logger.warning("Failed to rebind sectionMoved: %s", e)
-
-        # Then load header state (visual order + widths)
-        try:
-            self._load_header_state()
-        except Exception as e:
-            self.logger.warning("Failed to load header state: %s", e)
-
-        # Refresh data and restore view state
-        self.refresh_table()
-        self._restore_view_state(state)
-        self._update_count_label()
-
-        if focus_id is not None:
-            self._select_row_by_id(focus_id)
-
-        # Re-apply blob markers
-        self._apply_blob_badges()
-
-        # Restore sorting after refresh
-        if _prev_sort_enabled:
-            self.table.setSortingEnabled(True)
+            # Always rebind first (safe if duplicated)
             try:
-                self.table.sortItems(self._last_sort_col, self._last_sort_order)
-            except Exception:
-                pass
+                self._bind_header_state_signals()
+            except Exception as e:
+                self.logger.warning("Failed to rebind sectionMoved: %s", e)
+
+            # Then load header state (visual order + widths)
+            try:
+                self._load_header_state()
+            except Exception as e:
+                self.logger.warning("Failed to load header state: %s", e)
+
+            # Refresh data and restore view state
+            self.refresh_table()
+            self._restore_view_state(state)
+            self._update_count_label()
+
+            if focus_id is not None:
+                self._select_row_by_id(focus_id)
+
+            # Re-apply blob markers
+            self._apply_blob_badges()
+
+            # Restore sorting after refresh
+            if _prev_sort_enabled:
+                self.table.setSortingEnabled(True)
+                try:
+                    self.table.sortItems(self._last_sort_col, self._last_sort_order)
+                except Exception:
+                    pass
 
     # =============================================================================
     # Relational helpers
@@ -11000,7 +11146,18 @@ class App(QMainWindow):
                         self, "Delete", "Could not load the selected track for deletion."
                     )
                     return
-                self.track_service.delete_track(row_id)
+                self._run_snapshot_history_action(
+                    action_label=f"Delete Track: {before_snapshot.track_title}",
+                    action_type="track.delete",
+                    entity_type="Track",
+                    entity_id=row_id,
+                    payload={
+                        "track_id": row_id,
+                        "track_title": before_snapshot.track_title,
+                        "isrc": before_snapshot.isrc,
+                    },
+                    mutation=lambda: self.track_service.delete_track(row_id),
+                )
                 self.refresh_table_preserve_view()
                 self.populate_all_comboboxes()
                 self._log_event(
@@ -11013,7 +11170,6 @@ class App(QMainWindow):
                 )
                 self._audit("DELETE", "Track", ref_id=row_id, details="delete_entry")
                 self._audit_commit()
-                self.history_manager.record_track_delete(before_snapshot=before_snapshot)
                 self._refresh_history_actions()
             except Exception as e:
                 self.conn.rollback()
@@ -11881,29 +12037,30 @@ class App(QMainWindow):
             )
 
     def _on_custom_fields_changed(self):
-        self.active_custom_fields = self.load_active_custom_fields()
-        self._rebuild_table_headers()
+        with self._suspend_table_layout_history():
+            self.active_custom_fields = self.load_active_custom_fields()
+            self._rebuild_table_headers()
 
-        # Always rebind first (safe if duplicated)
-        try:
-            self._bind_header_state_signals()
-        except Exception as e:
-            self.logger.warning("Failed to rebind sectionMoved after custom fields change: %s", e)
+            # Always rebind first (safe if duplicated)
+            try:
+                self._bind_header_state_signals()
+            except Exception as e:
+                self.logger.warning("Failed to rebind sectionMoved after custom fields change: %s", e)
 
-        # Then load header state (visual order + widths)
-        try:
-            self._load_header_state()
-        except Exception as e:
-            self.logger.warning("Failed to load header state after custom fields change: %s", e)
+            # Then load header state (visual order + widths)
+            try:
+                self._load_header_state()
+            except Exception as e:
+                self.logger.warning("Failed to load header state after custom fields change: %s", e)
 
-        try:
-            self._save_header_state(record_history=False)
-        except Exception as e:
-            self.logger.warning("Failed to save header state after custom fields change: %s", e)
+            try:
+                self._save_header_state(record_history=False)
+            except Exception as e:
+                self.logger.warning("Failed to save header state after custom fields change: %s", e)
 
-        self.refresh_table()
-        self._update_count_label()
-        self._apply_blob_badges()
+            self.refresh_table()
+            self._update_count_label()
+            self._apply_blob_badges()
 
     # ============================================================
     # Double-click editing: base vs custom fields
@@ -12784,7 +12941,13 @@ class App(QMainWindow):
             self.columns_menu.addAction(action)
             self.column_visibility_actions.append(action)
 
-    def _save_header_state(self, *, record_history: bool = True):
+    def _save_header_state(
+        self,
+        *,
+        record_history: bool = True,
+        action_label: str = "Update Table Layout",
+        history_entity_id: str | None = None,
+    ):
         try:
 
             def mutation():
@@ -12816,10 +12979,10 @@ class App(QMainWindow):
 
             if record_history:
                 self._run_setting_bundle_history_action(
-                    action_label="Update Table Layout",
+                    action_label=action_label,
                     setting_keys=self._table_setting_keys(include_columns_movable=False),
                     mutation=mutation,
-                    entity_id=self._table_settings_prefix(),
+                    entity_id=history_entity_id or self._table_settings_prefix(),
                 )
             else:
                 mutation()
@@ -12921,6 +13084,13 @@ class App(QMainWindow):
                     entity_type="DB",
                     entity_id=str(result.backup_path),
                     payload={"path": str(result.backup_path), "method": result.method},
+                )
+                bundle.history_manager.register_backup(
+                    result.backup_path,
+                    kind="manual",
+                    label=f"Backup: {result.backup_path.name}",
+                    source_db_path=src,
+                    metadata={"method": result.method},
                 )
             return {"backup_path": str(result.backup_path), "method": result.method}
 
@@ -13045,79 +13215,106 @@ class App(QMainWindow):
             }
 
         def _success(result):
-            self.open_database(str(result["restored_path"]))
-            self.refresh_table_preserve_view()
-            QMessageBox.information(
-                self, "Restore", "Database restored successfully (schema + data)."
-            )
-            self._log_event(
-                "db.restore",
-                "Database restored from backup",
-                level=logging.WARNING,
-                source_backup=path,
-                restored_path=result["restored_path"],
-                safety_copy_path=result["safety_copy_path"],
-            )
             try:
-                details = f"restored to {result['restored_path']}"
-                if result["safety_copy_path"] is not None:
-                    details += f"; safety_copy={result['safety_copy_path']}"
-                self._audit("RESTORE", "DB", ref_id=path, details=details)
-                self._audit_commit()
-            except Exception:
-                pass
+                self.open_database(str(result["restored_path"]))
+                self.refresh_table_preserve_view()
 
-            payload = {
-                "source_backup": str(path),
-                "restored_path": str(result["restored_path"]),
-                "safety_copy_path": result["safety_copy_path"],
-            }
-            if result["safety_copy_path"] is not None and self.history_manager is not None:
-                payload["file_effects"] = [
-                    {
-                        "target_path": str(result["safety_copy_path"]),
-                        "before_state": {
+                payload = {
+                    "source_backup": str(path),
+                    "restored_path": str(result["restored_path"]),
+                    "safety_copy_path": result["safety_copy_path"],
+                }
+                if result["safety_copy_path"] is not None and self.history_manager is not None:
+                    self.history_manager.register_backup(
+                        result["safety_copy_path"],
+                        kind="pre_restore_safety_copy",
+                        label=f"Pre-Restore Safety Copy: {Path(result['safety_copy_path']).name}",
+                        source_db_path=current_db_path,
+                        metadata={"source_backup": str(path)},
+                    )
+                    payload["file_effects"] = [
+                        {
                             "target_path": str(result["safety_copy_path"]),
-                            "companion_suffixes": list(
-                                self.history_manager.FILE_COMPANION_SUFFIXES
+                            "before_state": {
+                                "target_path": str(result["safety_copy_path"]),
+                                "companion_suffixes": list(
+                                    self.history_manager.FILE_COMPANION_SUFFIXES
+                                ),
+                                "exists": False,
+                                "files": [],
+                            },
+                            "after_state": self.history_manager.capture_file_state(
+                                result["safety_copy_path"],
+                                companion_suffixes=self.history_manager.FILE_COMPANION_SUFFIXES,
                             ),
-                            "exists": False,
-                            "files": [],
-                        },
-                        "after_state": self.history_manager.capture_file_state(
-                            result["safety_copy_path"],
-                            companion_suffixes=self.history_manager.FILE_COMPANION_SUFFIXES,
-                        ),
-                    }
-                ]
-            if pre_restore_snapshot is not None and self.history_manager is not None:
-                registered_before = self.history_manager.register_snapshot(
-                    pre_restore_snapshot,
-                    kind="pre_db_restore_registered",
-                    label=pre_restore_snapshot.label,
+                        }
+                    ]
+                if pre_restore_snapshot is not None and self.history_manager is not None:
+                    registered_before = self.history_manager.register_snapshot(
+                        pre_restore_snapshot,
+                        kind="pre_db_restore_registered",
+                        label=pre_restore_snapshot.label,
+                    )
+                    after_snapshot = self.history_manager.capture_snapshot(
+                        kind="post_db_restore",
+                        label=f"After Database Restore: {Path(path).name}",
+                    )
+                    self.history_manager.record_snapshot_action(
+                        label="Restore Database from Backup",
+                        action_type="db.restore",
+                        entity_type="DB",
+                        entity_id=str(path),
+                        payload=payload,
+                        snapshot_before_id=registered_before.snapshot_id,
+                        snapshot_after_id=after_snapshot.snapshot_id,
+                    )
+                elif self.history_manager is not None:
+                    self.history_manager.record_event(
+                        label="Restore Database from Backup",
+                        action_type="db.restore",
+                        entity_type="DB",
+                        entity_id=str(path),
+                        payload=payload,
+                    )
+                self._refresh_history_actions()
+                QMessageBox.information(
+                    self, "Restore", "Database restored successfully (schema + data)."
                 )
-                after_snapshot = self.history_manager.capture_snapshot(
-                    kind="post_db_restore",
-                    label=f"After Database Restore: {Path(path).name}",
+                self._log_event(
+                    "db.restore",
+                    "Database restored from backup",
+                    level=logging.WARNING,
+                    source_backup=path,
+                    restored_path=result["restored_path"],
+                    safety_copy_path=result["safety_copy_path"],
                 )
-                self.history_manager.record_snapshot_action(
-                    label="Restore Database from Backup",
-                    action_type="db.restore",
-                    entity_type="DB",
-                    entity_id=str(path),
-                    payload=payload,
-                    snapshot_before_id=registered_before.snapshot_id,
-                    snapshot_after_id=after_snapshot.snapshot_id,
+                try:
+                    details = f"restored to {result['restored_path']}"
+                    if result["safety_copy_path"] is not None:
+                        details += f"; safety_copy={result['safety_copy_path']}"
+                    self._audit("RESTORE", "DB", ref_id=path, details=details)
+                    self._audit_commit()
+                except Exception:
+                    pass
+            except Exception as exc:
+                self.logger.exception("Restore finalization failed: %s", exc)
+                if result["safety_copy_path"] is not None:
+                    try:
+                        self._close_database_connection()
+                        self.database_maintenance.restore_database(
+                            result["safety_copy_path"], current_db_path
+                        )
+                        self.open_database(current_db_path)
+                    except Exception as rollback_error:
+                        self.logger.exception(
+                            "Failed to roll back database restore finalization: %s",
+                            rollback_error,
+                        )
+                self._show_background_task_error(
+                    "Restore Error",
+                    TaskFailure(message=str(exc), traceback_text=""),
+                    user_message="Failed to finalize the restored database:",
                 )
-            elif self.history_manager is not None:
-                self.history_manager.record_event(
-                    label="Restore Database from Backup",
-                    action_type="db.restore",
-                    entity_type="DB",
-                    entity_id=str(path),
-                    payload=payload,
-                )
-            self._refresh_history_actions()
 
         def _error(failure):
             try:

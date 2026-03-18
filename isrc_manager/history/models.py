@@ -22,6 +22,7 @@ class HistoryEntry:
     snapshot_before_id: int | None
     snapshot_after_id: int | None
     status: str
+    visible_in_history: bool = True
     is_current: bool = False
 
 
@@ -34,3 +35,32 @@ class SnapshotRecord:
     db_snapshot_path: str
     settings_state: dict
     manifest: dict
+
+
+@dataclass(slots=True)
+class BackupRecord:
+    backup_id: int
+    created_at: str
+    kind: str
+    label: str
+    backup_path: str
+    source_db_path: str | None
+    metadata: dict
+
+
+@dataclass(slots=True)
+class HistoryIssue:
+    issue_type: str
+    severity: str
+    message: str
+    path: str | None = None
+    snapshot_id: int | None = None
+    backup_id: int | None = None
+    entry_id: int | None = None
+    details: dict | None = None
+
+
+@dataclass(slots=True)
+class HistoryRepairResult:
+    changes: list[str]
+    unresolved: list[str]

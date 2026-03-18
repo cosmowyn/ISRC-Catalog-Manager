@@ -294,6 +294,70 @@ class AppShellIntegrationTests(unittest.TestCase):
         selected_ids = self.window._selected_track_ids()
         self.assertEqual(len(selected_ids), len(visible_rows))
 
+    def test_delete_entry_history_stays_a_single_visible_user_action(self):
+        track_id = self._create_track(index=121, title="Delete History Song")
+        self.window.refresh_table()
+        row = self.window._row_for_id(track_id)
+        self.assertGreaterEqual(row, 0)
+        self.window.table.setCurrentCell(row, 0)
+        self.app.processEvents()
+
+        original_rebuild = self.window._rebuild_table_headers
+
+        def _rebuild_with_internal_layout_ping():
+            original_rebuild()
+            self.window._on_header_layout_changed()
+
+        with (
+            mock.patch.object(
+                self.window,
+                "_rebuild_table_headers",
+                side_effect=_rebuild_with_internal_layout_ping,
+            ),
+            mock.patch.object(
+                app_module.QMessageBox,
+                "exec",
+                return_value=app_module.QMessageBox.Yes,
+            ),
+        ):
+            self.window.delete_entry()
+
+        self.app.processEvents()
+        self.assertIsNone(self.window.track_service.fetch_track_snapshot(track_id))
+        self.assertEqual(
+            self.window.undo_action.text(),
+            "Undo Delete Track: Delete History Song",
+        )
+
+        visible_history = self.window.history_manager.list_entries(limit=20)
+        all_history = self.window.history_manager.list_entries(limit=20, include_hidden=True)
+        self.assertEqual([entry.label for entry in visible_history], ["Delete Track: Delete History Song"])
+        self.assertEqual([entry.label for entry in all_history], ["Delete Track: Delete History Song"])
+
+        dialog = app_module.HistoryDialog(self.window, parent=self.window)
+        try:
+            self.assertEqual(dialog.history_table.rowCount(), 1)
+            self.assertEqual(dialog.history_table.item(0, 2).text(), "Delete Track: Delete History Song")
+        finally:
+            dialog.close()
+            self.app.processEvents()
+
+        self.window.history_undo()
+        self.app.processEvents()
+        self.assertIsNotNone(self.window.track_service.fetch_track_snapshot(track_id))
+        self.assertEqual(
+            self.window.redo_action.text(),
+            "Redo Delete Track: Delete History Song",
+        )
+
+        self.window.history_redo()
+        self.app.processEvents()
+        self.assertIsNone(self.window.track_service.fetch_track_snapshot(track_id))
+        self.assertEqual(
+            self.window.history_manager.list_entries(limit=20)[0].label,
+            "Delete Track: Delete History Song",
+        )
+
     def test_catalog_release_browser_opens_as_tabified_dock(self):
         track_id = self._create_track(index=101, title="Release Dock Track")
         self.window.release_service.create_release(

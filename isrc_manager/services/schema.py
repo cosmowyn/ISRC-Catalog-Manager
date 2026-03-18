@@ -249,7 +249,8 @@ class DatabaseSchemaService:
                 redo_json TEXT,
                 snapshot_before_id INTEGER,
                 snapshot_after_id INTEGER,
-                status TEXT NOT NULL DEFAULT 'applied'
+                status TEXT NOT NULL DEFAULT 'applied',
+                visible_in_history INTEGER NOT NULL DEFAULT 1
             )
             """
         )
@@ -271,6 +272,19 @@ class DatabaseSchemaService:
                 db_snapshot_path TEXT NOT NULL,
                 settings_json TEXT,
                 manifest_json TEXT
+            )
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS HistoryBackups (
+                id INTEGER PRIMARY KEY,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                kind TEXT NOT NULL,
+                label TEXT NOT NULL,
+                backup_path TEXT NOT NULL,
+                source_db_path TEXT,
+                metadata_json TEXT
             )
             """
         )
@@ -419,6 +433,12 @@ class DatabaseSchemaService:
             elif version == 21:
                 self._apply_migration(21, self._mig_21_to_22)
                 version = 22
+            elif version == 22:
+                self._apply_migration(22, self._mig_22_to_23)
+                version = 23
+            elif version == 23:
+                self._apply_migration(23, self._mig_23_to_24)
+                version = 24
             else:
                 self.logger.warning("Unknown migration path from version %s", version)
                 break
@@ -789,7 +809,8 @@ class DatabaseSchemaService:
                 redo_json TEXT,
                 snapshot_before_id INTEGER,
                 snapshot_after_id INTEGER,
-                status TEXT NOT NULL DEFAULT 'applied'
+                status TEXT NOT NULL DEFAULT 'applied',
+                visible_in_history INTEGER NOT NULL DEFAULT 1
             )
             """
         )
@@ -854,6 +875,50 @@ class DatabaseSchemaService:
 
     def _mig_21_to_22(self) -> None:
         self._ensure_blob_icon_schema()
+
+    def _mig_22_to_23(self) -> None:
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS HistoryBackups (
+                id INTEGER PRIMARY KEY,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                kind TEXT NOT NULL,
+                label TEXT NOT NULL,
+                backup_path TEXT NOT NULL,
+                source_db_path TEXT,
+                metadata_json TEXT
+            )
+            """
+        )
+
+    def _mig_23_to_24(self) -> None:
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS HistoryEntries (
+                id INTEGER PRIMARY KEY,
+                parent_id INTEGER,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                label TEXT NOT NULL,
+                action_type TEXT NOT NULL,
+                entity_type TEXT,
+                entity_id TEXT,
+                reversible INTEGER NOT NULL DEFAULT 1,
+                strategy TEXT NOT NULL,
+                payload_json TEXT,
+                inverse_json TEXT,
+                redo_json TEXT,
+                snapshot_before_id INTEGER,
+                snapshot_after_id INTEGER,
+                status TEXT NOT NULL DEFAULT 'applied',
+                visible_in_history INTEGER NOT NULL DEFAULT 1
+            )
+            """
+        )
+        cols = [row[1] for row in self.cursor.execute("PRAGMA table_info(HistoryEntries)").fetchall()]
+        if "visible_in_history" not in cols:
+            self.cursor.execute(
+                "ALTER TABLE HistoryEntries ADD COLUMN visible_in_history INTEGER NOT NULL DEFAULT 1"
+            )
 
     def _ensure_current_track_columns(self) -> None:
         cols = self._table_columns("Tracks")

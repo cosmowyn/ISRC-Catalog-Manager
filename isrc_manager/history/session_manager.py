@@ -13,6 +13,10 @@ from .models import HistoryEntry
 class SessionHistoryManager:
     """Stores undo/redo history for actions that span multiple profile databases."""
 
+    STATUS_APPLIED = "applied"
+    STATUS_UNDONE = "undone"
+    STATUS_SUPERSEDED = "superseded"
+
     def __init__(self, history_root: str | Path):
         self.history_root = Path(history_root)
         self.history_root.mkdir(parents=True, exist_ok=True)
@@ -21,6 +25,7 @@ class SessionHistoryManager:
         self.snapshot_dir.mkdir(parents=True, exist_ok=True)
 
         self._state = self._load_state()
+        self._ensure_invariants()
 
     # ------------------------------------------------------------------
     # Public queries
@@ -50,6 +55,8 @@ class SessionHistoryManager:
         candidates = []
         for row in self._state["entries"]:
             if not row.get("reversible", True):
+                continue
+            if str(row.get("status", self.STATUS_APPLIED)) != self.STATUS_UNDONE:
                 continue
             parent_id = row.get("parent_id")
             if current_id is None:
@@ -190,21 +197,33 @@ class SessionHistoryManager:
     # Undo / redo
     # ------------------------------------------------------------------
     def undo(self, app) -> HistoryEntry | None:
+        self._ensure_invariants()
         entry = self.get_current_entry()
         if entry is None or not entry.reversible:
             return None
         self._apply_payload(app, entry.action_type, entry.inverse_payload or {}, direction="undo")
+        for row in self._state["entries"]:
+            if int(row["entry_id"]) == entry.entry_id:
+                row["status"] = self.STATUS_UNDONE
+                break
         self._state["current_entry_id"] = entry.parent_id
         self._save_state()
         return entry
 
     def redo(self, app, entry_id: int | None = None) -> HistoryEntry | None:
+        self._ensure_invariants()
         entry = (
             self.fetch_entry(entry_id) if entry_id is not None else self.get_default_redo_entry()
         )
         if entry is None or not entry.reversible:
             return None
+        if not self._is_entry_redoable(entry):
+            raise ValueError(f"Session history entry {entry.entry_id} is not redoable right now.")
         self._apply_payload(app, entry.action_type, entry.redo_payload or {}, direction="redo")
+        for row in self._state["entries"]:
+            if int(row["entry_id"]) == entry.entry_id:
+                row["status"] = self.STATUS_APPLIED
+                break
         self._state["current_entry_id"] = entry.entry_id
         self._save_state()
         return entry
@@ -224,10 +243,19 @@ class SessionHistoryManager:
         redo_payload: dict,
     ) -> int:
         entry_id = int(self._state["next_entry_id"])
+        parent_id = self.get_current_entry_id()
+        for row in self._state["entries"]:
+            row_parent_id = row.get("parent_id")
+            if parent_id is None:
+                is_redo_child = row_parent_id is None
+            else:
+                is_redo_child = int(row_parent_id) == int(parent_id) if row_parent_id is not None else False
+            if is_redo_child and str(row.get("status", self.STATUS_APPLIED)) == self.STATUS_UNDONE:
+                row["status"] = self.STATUS_SUPERSEDED
         self._state["next_entry_id"] = entry_id + 1
         row = {
             "entry_id": entry_id,
-            "parent_id": self.get_current_entry_id(),
+            "parent_id": parent_id,
             "created_at": datetime.now().isoformat(timespec="seconds"),
             "label": label,
             "action_type": action_type,
@@ -238,7 +266,8 @@ class SessionHistoryManager:
             "payload": payload,
             "inverse_payload": inverse_payload,
             "redo_payload": redo_payload,
-            "status": "applied",
+            "status": self.STATUS_APPLIED,
+            "visible_in_history": True,
         }
         self._state["entries"].append(row)
         self._state["current_entry_id"] = entry_id
@@ -289,6 +318,56 @@ class SessionHistoryManager:
         raw.setdefault("entries", [])
         return raw
 
+    def _ensure_invariants(self) -> None:
+        current_id = self.get_current_entry_id()
+        if current_id is not None and self.fetch_entry(current_id) is None:
+            self._state["current_entry_id"] = self._select_fallback_current_entry_id()
+        if all(str(row.get("status", self.STATUS_APPLIED)) == self.STATUS_APPLIED for row in self._state["entries"]):
+            self._bootstrap_statuses()
+        self._save_state()
+
+    def _bootstrap_statuses(self) -> None:
+        current_id = self.get_current_entry_id()
+        applied_ids: set[int] = set()
+        parent_map = {
+            int(row["entry_id"]): (
+                int(row["parent_id"]) if row.get("parent_id") is not None else None
+            )
+            for row in self._state["entries"]
+        }
+        while current_id is not None and current_id in parent_map:
+            applied_ids.add(int(current_id))
+            current_id = parent_map[current_id]
+        for row in self._state["entries"]:
+            row["status"] = (
+                self.STATUS_APPLIED
+                if int(row["entry_id"]) in applied_ids
+                else self.STATUS_UNDONE
+            )
+
+    def _select_fallback_current_entry_id(self) -> int | None:
+        applied_ids = {
+            int(row["entry_id"])
+            for row in self._state["entries"]
+            if str(row.get("status", self.STATUS_APPLIED)) == self.STATUS_APPLIED
+        }
+        applied_child_ids = {
+            int(row["parent_id"])
+            for row in self._state["entries"]
+            if row.get("parent_id") is not None
+            and str(row.get("status", self.STATUS_APPLIED)) == self.STATUS_APPLIED
+        }
+        leaf_ids = sorted(applied_ids - applied_child_ids, reverse=True)
+        return leaf_ids[0] if leaf_ids else None
+
+    def _is_entry_redoable(self, entry: HistoryEntry) -> bool:
+        if entry.status != self.STATUS_UNDONE:
+            return False
+        current_id = self.get_current_entry_id()
+        if current_id is None:
+            return entry.parent_id is None
+        return entry.parent_id == current_id
+
     def _save_state(self) -> None:
         tmp_path = self.state_path.with_suffix(".tmp")
         tmp_path.write_text(json.dumps(self._state, indent=2), encoding="utf-8")
@@ -311,6 +390,7 @@ class SessionHistoryManager:
             snapshot_before_id=None,
             snapshot_after_id=None,
             status=row.get("status", "applied"),
+            visible_in_history=bool(row.get("visible_in_history", True)),
             is_current=int(row["entry_id"]) == current_id,
         )
 

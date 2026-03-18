@@ -1,10 +1,12 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from PySide6.QtCore import QPoint, QSettings
 
-from isrc_manager.history import HistoryManager
+from isrc_manager.history import HistoryManager, HistoryRecoveryError
+from isrc_manager.tasks.history_helpers import run_file_history_action, run_snapshot_history_action
 from isrc_manager.services import (
     ContractService,
     DatabaseSchemaService,
@@ -29,7 +31,9 @@ class HistoryManagerTests(unittest.TestCase):
         self.settings_path = self.root / "settings.ini"
         self.history_root = self.root / "history"
         self.data_root = self.root / "data"
+        self.backups_root = self.root / "backups"
         self.data_root.mkdir(parents=True, exist_ok=True)
+        self.backups_root.mkdir(parents=True, exist_ok=True)
         self.settings = QSettings(str(self.settings_path), QSettings.IniFormat)
         self.settings.setFallbacksEnabled(False)
 
@@ -60,6 +64,7 @@ class HistoryManagerTests(unittest.TestCase):
             self.db_path,
             self.history_root,
             self.data_root,
+            self.backups_root,
         )
 
     def tearDown(self):
@@ -87,6 +92,11 @@ class HistoryManagerTests(unittest.TestCase):
         pdf_path = self.root / name
         pdf_path.write_bytes(b"%PDF-1.4\n% history test\n")
         return pdf_path
+
+    def _write_backup_file(self, name: str = "library_backup.db") -> Path:
+        backup_path = self.backups_root / name
+        backup_path.write_bytes(b"SQLite backup bytes")
+        return backup_path
 
     def test_setting_change_undo_and_redo_are_persistent(self):
         self.settings_mutations.set_isrc_prefix("NLABC")
@@ -405,6 +415,66 @@ class HistoryManagerTests(unittest.TestCase):
         self.history.redo()
         self.assertEqual(self.settings.value(key, type=QPoint), QPoint(60, 90))
 
+    def test_hidden_internal_entries_are_skipped_by_visible_history_and_boundary_undo(self):
+        visible_key = "display/action_ribbon_visible"
+        hidden_key = "display/catalog_table_panel"
+        self.settings.setValue(visible_key, False)
+        self.settings.setValue(hidden_key, False)
+        self.settings.sync()
+
+        before_visible = self.history.capture_setting_states([visible_key])
+        self.settings.setValue(visible_key, True)
+        self.settings.sync()
+        after_visible = self.history.capture_setting_states([visible_key])
+        visible_entry = self.history.record_setting_bundle_change(
+            label="Update Settings",
+            before_entries=before_visible,
+            after_entries=after_visible,
+            entity_id=visible_key,
+            visible_in_history=True,
+        )
+
+        before_hidden = self.history.capture_setting_states([hidden_key])
+        self.settings.setValue(hidden_key, True)
+        self.settings.sync()
+        after_hidden = self.history.capture_setting_states([hidden_key])
+        hidden_entry = self.history.record_setting_bundle_change(
+            label="Internal UI Sync",
+            before_entries=before_hidden,
+            after_entries=after_hidden,
+            entity_id=hidden_key,
+            visible_in_history=False,
+        )
+
+        visible_entries = self.history.list_entries(limit=20)
+        self.assertEqual([entry.label for entry in visible_entries], ["Update Settings"])
+        self.assertTrue(visible_entries[0].is_current)
+        self.assertEqual(self.history.describe_undo(), "Update Settings")
+        self.assertEqual(self.history.get_current_entry_id(), hidden_entry.entry_id)
+        self.assertEqual(self.history.get_current_visible_entry_id(), visible_entry.entry_id)
+
+        all_entries = self.history.list_entries(limit=20, include_hidden=True)
+        self.assertEqual(
+            [entry.label for entry in all_entries],
+            ["Internal UI Sync", "Update Settings"],
+        )
+        self.assertFalse(all_entries[0].visible_in_history)
+        self.assertTrue(all_entries[1].visible_in_history)
+
+        undone = self.history.undo()
+        self.assertIsNotNone(undone)
+        self.assertEqual(undone.entry_id, visible_entry.entry_id)
+        self.assertFalse(self.settings.value(visible_key, False, bool))
+        self.assertFalse(self.settings.value(hidden_key, False, bool))
+        self.assertEqual(self.history.describe_redo(), "Update Settings")
+
+        redone = self.history.redo()
+        self.assertIsNotNone(redone)
+        self.assertEqual(redone.entry_id, visible_entry.entry_id)
+        self.assertTrue(self.settings.value(visible_key, False, bool))
+        self.assertTrue(self.settings.value(hidden_key, False, bool))
+        self.assertEqual(self.history.get_current_entry_id(), hidden_entry.entry_id)
+
     def test_snapshot_actions_restore_external_file_side_effects(self):
         before = self.history.capture_snapshot(
             kind="pre_file_side_effect", label="Before file side effect"
@@ -512,6 +582,394 @@ class HistoryManagerTests(unittest.TestCase):
         self.assertIsNotNone(restored_migrated_path)
         assert restored_migrated_path is not None
         self.assertTrue(restored_migrated_path.exists())
+
+    def test_snapshot_restore_preserves_audit_log_and_supports_undo_redo(self):
+        snapshot = self.history.create_manual_snapshot("Before Audit Restore")
+        self.conn.execute(
+            "INSERT INTO AuditLog (action, entity, ref_id, details) VALUES (?, ?, ?, ?)",
+            ("TEST", "Audit", "1", "seed row"),
+        )
+        self.conn.commit()
+
+        track_id = self._create_track(title="Audited Song")
+        self.assertIsNotNone(self.track_service.fetch_track_snapshot(track_id))
+
+        entry = self.history.restore_snapshot_as_action(snapshot.snapshot_id)
+
+        self.assertEqual(entry.action_type, "snapshot.restore")
+        self.assertIsNone(self.track_service.fetch_track_snapshot(track_id))
+        audit_count_after_restore = self.conn.execute("SELECT COUNT(*) FROM AuditLog").fetchone()[0]
+        self.assertEqual(audit_count_after_restore, 1)
+
+        self.history.undo()
+        self.assertIsNotNone(self.track_service.fetch_track_snapshot(track_id))
+        self.assertEqual(self.history.get_current_entry_id(), entry.parent_id)
+
+        self.history.redo()
+        self.assertIsNone(self.track_service.fetch_track_snapshot(track_id))
+        self.assertEqual(self.history.get_current_entry_id(), entry.entry_id)
+
+    def test_snapshot_history_undo_redo_does_not_duplicate_entries(self):
+        created_track_id = run_snapshot_history_action(
+            history_manager=self.history,
+            action_label="Create Track: Snapshot Path",
+            action_type="track.create",
+            entity_type="Track",
+            entity_id="snapshot-path",
+            payload={"track_title": "Snapshot Path"},
+            mutation=lambda: self.track_service.create_track(
+                TrackCreatePayload(
+                    isrc="NL-ABC-26-00044",
+                    track_title="Snapshot Path",
+                    artist_name="Snapshot Artist",
+                    additional_artists=[],
+                    album_title=None,
+                    release_date="2026-03-18",
+                    track_length_sec=120,
+                    iswc=None,
+                    upc=None,
+                    genre=None,
+                )
+            ),
+        )
+        self.conn.execute(
+            "INSERT INTO AuditLog (action, entity, ref_id, details) VALUES (?, ?, ?, ?)",
+            ("TEST", "Track", str(created_track_id), "seed row"),
+        )
+        self.conn.commit()
+
+        self.assertEqual(len(self.history.list_entries(limit=20)), 1)
+
+        self.history.undo()
+        self.assertIsNone(self.track_service.fetch_track_snapshot(created_track_id))
+        self.assertEqual(len(self.history.list_entries(limit=20)), 1)
+
+        self.history.redo()
+        self.assertIsNotNone(self.track_service.fetch_track_snapshot(created_track_id))
+        self.assertEqual(len(self.history.list_entries(limit=20)), 1)
+
+    def test_branching_after_undo_supersedes_old_redo(self):
+        self.settings_mutations.set_isrc_prefix("NLAAA")
+        first = self.history.record_setting_change(
+            key="isrc_prefix",
+            label="Set ISRC Prefix: NLAAA",
+            before_value="",
+            after_value="NLAAA",
+        )
+        self.settings_mutations.set_isrc_prefix("NLBBB")
+        second = self.history.record_setting_change(
+            key="isrc_prefix",
+            label="Set ISRC Prefix: NLBBB",
+            before_value="NLAAA",
+            after_value="NLBBB",
+        )
+
+        self.history.undo()
+        self.assertEqual(self.history.get_default_redo_entry().entry_id, second.entry_id)
+
+        self.settings_mutations.set_isrc_prefix("NLCCC")
+        third = self.history.record_setting_change(
+            key="isrc_prefix",
+            label="Set ISRC Prefix: NLCCC",
+            before_value="NLAAA",
+            after_value="NLCCC",
+        )
+
+        self.assertEqual(third.parent_id, first.entry_id)
+        self.assertIsNone(self.history.get_default_redo_entry())
+        self.assertEqual(self.history.fetch_entry(second.entry_id).status, "superseded")
+
+    def test_missing_snapshot_file_raises_clear_error_without_creating_pre_restore_snapshot(self):
+        snapshot = self.history.create_manual_snapshot("Missing Snapshot")
+        snapshot_path = Path(snapshot.db_snapshot_path)
+        snapshot_path.unlink()
+
+        snapshot_count_before = len(self.history.list_snapshots(limit=100))
+
+        with self.assertRaises(HistoryRecoveryError):
+            self.history.restore_snapshot_as_action(snapshot.snapshot_id)
+
+        self.assertEqual(len(self.history.list_snapshots(limit=100)), snapshot_count_before)
+
+    def test_snapshot_restore_rolls_back_database_when_external_restore_fails(self):
+        track_id = self._create_track(title="Rollback Song")
+        snapshot = self.history.create_manual_snapshot("Rollback Point")
+
+        self.track_service.update_track(
+            TrackUpdatePayload(
+                track_id=track_id,
+                isrc="NL-ABC-26-00077",
+                track_title="Changed After Snapshot",
+                artist_name="Main Artist",
+                additional_artists=["Guest Artist"],
+                album_title="Debut Album",
+                release_date="2026-03-13",
+                track_length_sec=245,
+                iswc=None,
+                upc=None,
+                genre="Pop",
+            )
+        )
+
+        with patch.object(
+            self.history,
+            "_apply_settings_state",
+            side_effect=RuntimeError("settings restore failed"),
+        ):
+            with self.assertRaises(RuntimeError):
+                self.history.restore_snapshot(snapshot.snapshot_id)
+
+        current = self.track_service.fetch_track_snapshot(track_id)
+        self.assertIsNotNone(current)
+        self.assertEqual(current.track_title, "Changed After Snapshot")
+
+    def test_repair_recovery_state_relinks_missing_snapshot_and_registers_orphan_backup(self):
+        snapshot = self.history.create_manual_snapshot("Repairable Snapshot")
+        snapshot_path = Path(snapshot.db_snapshot_path)
+        repaired_snapshot_path = snapshot_path.with_name(f"relinked_{snapshot_path.name}")
+        snapshot_path.replace(repaired_snapshot_path)
+        snapshot_sidecar = self.history._snapshot_sidecar_path(snapshot_path)
+        repaired_sidecar = self.history._snapshot_sidecar_path(repaired_snapshot_path)
+        if snapshot_sidecar.exists():
+            snapshot_sidecar.replace(repaired_sidecar)
+
+        missing_backup = self._write_backup_file("missing_backup.db")
+        before_state = {
+            "target_path": str(missing_backup),
+            "companion_suffixes": [],
+            "exists": False,
+            "files": [],
+        }
+        after_state = self.history.capture_file_state(missing_backup)
+        backup_entry = self.history.record_file_write_action(
+            label="Create Database Backup",
+            action_type="file.db_backup",
+            target_path=missing_backup,
+            before_state=before_state,
+            after_state=after_state,
+            entity_type="DB",
+            entity_id=str(missing_backup),
+            payload={"path": str(missing_backup), "method": "file_copy"},
+        )
+        backup_record = self.history.register_backup(
+            missing_backup,
+            kind="manual",
+            label="Missing Backup",
+            source_db_path=self.db_path,
+            metadata={"method": "file_copy"},
+        )
+        missing_backup.unlink()
+
+        orphan_backup = self._write_backup_file("orphan_backup.db")
+
+        with self.conn:
+            self.conn.execute("UPDATE HistoryHead SET current_entry_id=?", (9999,))
+
+        issues_before = self.history.inspect_recovery_state()
+        self.assertTrue(any(issue.issue_type == "stale_current_head" for issue in issues_before))
+        self.assertTrue(
+            any(
+                issue.issue_type == "missing_snapshot_artifact"
+                and issue.snapshot_id == snapshot.snapshot_id
+                for issue in issues_before
+            )
+        )
+        self.assertTrue(
+            any(
+                issue.issue_type == "missing_backup_file"
+                and issue.backup_id == backup_record.backup_id
+                for issue in issues_before
+            )
+        )
+        self.assertTrue(
+            any(
+                issue.issue_type == "orphan_backup_file" and issue.path == str(orphan_backup)
+                for issue in issues_before
+            )
+        )
+
+        repair_result = self.history.repair_recovery_state()
+        self.assertTrue(repair_result.changes)
+        self.assertFalse(repair_result.unresolved)
+
+        repaired_snapshot = self.history.fetch_snapshot(snapshot.snapshot_id)
+        self.assertIsNotNone(repaired_snapshot)
+        self.assertTrue(Path(repaired_snapshot.db_snapshot_path).exists())
+        repaired_backup = self.history.fetch_backup(backup_record.backup_id)
+        self.assertIsNotNone(repaired_backup)
+        self.assertEqual(repaired_backup.backup_path, str(missing_backup))
+        self.assertTrue(missing_backup.exists())
+        self.assertEqual(self.history.fetch_entry(backup_entry.entry_id).entry_id, backup_entry.entry_id)
+        registered_orphan_backups = [
+            backup
+            for backup in self.history.list_backups(limit=20)
+            if backup.backup_path == str(orphan_backup)
+        ]
+        self.assertEqual(len(registered_orphan_backups), 1)
+        repaired_head_id = self.history.get_current_entry_id()
+        self.assertIsNotNone(repaired_head_id)
+        self.assertIsNotNone(self.history.fetch_entry(repaired_head_id))
+
+        second_pass = self.history.repair_recovery_state()
+        self.assertFalse(second_pass.unresolved)
+
+    def test_repair_recovery_state_rebuilds_missing_backup_history_artifacts(self):
+        backup_path = self._write_backup_file("artifact_repair_backup.db")
+        before_state = {
+            "target_path": str(backup_path),
+            "companion_suffixes": [],
+            "exists": False,
+            "files": [],
+        }
+        after_state = self.history.capture_file_state(backup_path)
+        entry = self.history.record_file_write_action(
+            label="Create Database Backup",
+            action_type="file.db_backup",
+            target_path=backup_path,
+            before_state=before_state,
+            after_state=after_state,
+            entity_type="DB",
+            entity_id=str(backup_path),
+            payload={"path": str(backup_path), "method": "file_copy"},
+        )
+
+        for file_info in after_state["files"]:
+            Path(file_info["artifact_path"]).unlink()
+
+        issues_before = self.history.inspect_recovery_state()
+        self.assertTrue(
+            any(
+                issue.issue_type == "missing_backup_history_artifact"
+                and issue.entry_id == entry.entry_id
+                for issue in issues_before
+            )
+        )
+
+        repair_result = self.history.repair_recovery_state()
+        self.assertTrue(repair_result.changes)
+        self.assertFalse(repair_result.unresolved)
+
+        refreshed_entry = self.history.fetch_entry(entry.entry_id)
+        self.assertIsNotNone(refreshed_entry)
+        refreshed_state = (refreshed_entry.redo_payload or {}).get("state", {})
+        self.assertTrue(refreshed_state.get("files"))
+        self.assertTrue(
+            all(Path(file_info["artifact_path"]).exists() for file_info in refreshed_state["files"])
+        )
+
+    def test_run_snapshot_history_action_rolls_back_when_history_recording_fails(self):
+        with patch.object(
+            self.history,
+            "record_snapshot_action",
+            side_effect=RuntimeError("history recording failed"),
+        ):
+            with self.assertRaises(RuntimeError):
+                run_snapshot_history_action(
+                    history_manager=self.history,
+                    action_label="Create Track: Rollback",
+                    action_type="track.create",
+                    entity_type="Track",
+                    entity_id="rollback",
+                    payload={"track_title": "Rollback"},
+                    mutation=lambda: self.track_service.create_track(
+                        TrackCreatePayload(
+                            isrc="NL-ABC-26-00088",
+                            track_title="Rollback",
+                            artist_name="Rollback Artist",
+                            additional_artists=[],
+                            album_title=None,
+                            release_date="2026-03-18",
+                            track_length_sec=90,
+                            iswc=None,
+                            upc=None,
+                            genre=None,
+                        )
+                    ),
+                )
+
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Tracks").fetchone()[0], 0)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM HistorySnapshots").fetchone()[0], 0)
+
+    def test_restore_snapshot_missing_file_does_not_create_extra_restore_point(self):
+        snapshot = self.history.create_manual_snapshot("Missing Restore Target")
+        Path(snapshot.db_snapshot_path).unlink()
+
+        before_snapshot_ids = [record.snapshot_id for record in self.history.list_snapshots(limit=20)]
+        with self.assertRaises(HistoryRecoveryError):
+            self.history.restore_snapshot_as_action(snapshot.snapshot_id)
+
+        after_snapshot_ids = [record.snapshot_id for record in self.history.list_snapshots(limit=20)]
+        self.assertEqual(after_snapshot_ids, before_snapshot_ids)
+
+    def test_snapshot_helper_rolls_back_when_history_recording_fails(self):
+        snapshot_count_before = len(self.history.list_snapshots(limit=50))
+
+        with patch.object(
+            self.history,
+            "record_snapshot_action",
+            side_effect=RuntimeError("history capture failed"),
+        ):
+            with self.assertRaises(RuntimeError):
+                run_snapshot_history_action(
+                    history_manager=self.history,
+                    action_label="Create Track via Helper",
+                    action_type="track.helper_create",
+                    mutation=lambda: self._create_track(title="Helper Rollback"),
+                )
+
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Tracks").fetchone()[0], 0)
+        self.assertEqual(len(self.history.list_snapshots(limit=50)), snapshot_count_before)
+
+    def test_file_helper_rolls_back_when_history_recording_fails(self):
+        export_path = self.root / "exports" / "helper.txt"
+
+        def mutation():
+            export_path.parent.mkdir(parents=True, exist_ok=True)
+            export_path.write_text("helper", encoding="utf-8")
+            return str(export_path)
+
+        with patch.object(
+            self.history,
+            "record_file_write_action",
+            side_effect=RuntimeError("file history capture failed"),
+        ):
+            with self.assertRaises(RuntimeError):
+                run_file_history_action(
+                    history_manager=self.history,
+                    action_label="Write Helper Export",
+                    action_type="file.helper_export",
+                    target_path=export_path,
+                    mutation=mutation,
+                )
+
+        self.assertFalse(export_path.exists())
+
+    def test_repair_recovery_state_quarantines_referenced_missing_snapshot(self):
+        before = self.history.capture_snapshot(kind="pre_quarantine", label="Before quarantine")
+        created_track_id = self._create_track(title="Quarantine Target")
+        after = self.history.capture_snapshot(kind="post_quarantine", label="After quarantine")
+        entry = self.history.record_snapshot_action(
+            label="Create Track Snapshot Action",
+            action_type="track.snapshot_create",
+            entity_type="Track",
+            entity_id=str(created_track_id),
+            payload={"track_id": created_track_id},
+            snapshot_before_id=before.snapshot_id,
+            snapshot_after_id=after.snapshot_id,
+        )
+
+        Path(before.db_snapshot_path).unlink()
+
+        repair_result = self.history.repair_recovery_state()
+        self.assertTrue(repair_result.changes)
+
+        repaired_entry = self.history.fetch_entry(entry.entry_id)
+        self.assertIsNotNone(repaired_entry)
+        self.assertFalse(repaired_entry.reversible)
+        self.assertEqual(repaired_entry.status, self.history.STATUS_ARTIFACT_MISSING)
+        self.assertIsNone(repaired_entry.snapshot_before_id)
+        self.assertIsNotNone(self.history.fetch_snapshot(after.snapshot_id))
+        self.assertIsNone(self.history.fetch_snapshot(before.snapshot_id))
 
 
 if __name__ == "__main__":
