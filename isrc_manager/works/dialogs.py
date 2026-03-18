@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 from isrc_manager.ui_common import (
     _add_standard_dialog_header,
     _create_action_button_grid,
+    _create_action_button_cluster,
     _apply_compact_dialog_control_heights,
     _apply_standard_dialog_chrome,
     _apply_standard_widget_chrome,
@@ -468,20 +469,21 @@ class WorkBrowserPanel(QWidget):
         open_filter_button = QPushButton("Filter Main Table")
         open_filter_button.clicked.connect(self.filter_by_work_tracks)
         controls_layout.addLayout(controls)
-        controls_layout.addWidget(
-            _create_action_button_grid(
-                self,
-                [
-                    add_button,
-                    edit_button,
-                    duplicate_button,
-                    link_button,
-                    delete_button,
-                    open_filter_button,
-                ],
-                columns=3,
-            )
+        self.manage_actions_cluster = _create_action_button_cluster(
+            self,
+            [
+                add_button,
+                edit_button,
+                duplicate_button,
+                link_button,
+                delete_button,
+                open_filter_button,
+            ],
+            columns=2,
+            min_button_width=180,
         )
+        self.manage_actions_cluster.setObjectName("workManagerActionsCluster")
+        controls_layout.addWidget(self.manage_actions_cluster)
         self.selection_banner = SelectionScopeBanner(
             chooser_label="Choose Tracks",
             parent=self,

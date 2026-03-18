@@ -3,7 +3,13 @@ import unittest
 from tests.qt_test_helpers import require_qapplication
 
 try:
-    from PySide6.QtWidgets import QComboBox, QDialogButtonBox, QScrollArea, QTabWidget
+    from PySide6.QtWidgets import (
+        QComboBox,
+        QDialogButtonBox,
+        QLineEdit,
+        QScrollArea,
+        QTabWidget,
+    )
 
     from isrc_manager.assets.dialogs import AssetEditorDialog
     from isrc_manager.contracts.dialogs import ContractEditorDialog
@@ -12,7 +18,7 @@ try:
     from isrc_manager.rights.dialogs import RightEditorDialog
     from isrc_manager.search.dialogs import GlobalSearchDialog
     from isrc_manager.selection_scope import SelectionScopeBanner
-    from isrc_manager.works.dialogs import WorkEditorDialog
+    from isrc_manager.works.dialogs import WorkBrowserDialog, WorkEditorDialog
 except Exception as exc:  # pragma: no cover - environment-specific fallback
     REPERTOIRE_IMPORT_ERROR = exc
 else:
@@ -31,6 +37,11 @@ class _EmptyPartyService:
 
 class _EmptyContractService:
     def list_contracts(self):
+        return []
+
+
+class _EmptyWorkService:
+    def list_works(self, **_kwargs):
         return []
 
 
@@ -81,6 +92,13 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
             buttons = dialog.findChild(QDialogButtonBox)
             self.assertIsNotNone(buttons)
             self.assertLess(dialog.documents_editor.minimumSizeHint().width(), 960)
+            self.assertTrue(hasattr(dialog.work_ids_edit, "value_ids"))
+            self.assertTrue(hasattr(dialog.track_ids_edit, "value_ids"))
+            self.assertTrue(hasattr(dialog.release_ids_edit, "value_ids"))
+            self.assertFalse(isinstance(dialog.work_ids_edit, QLineEdit))
+            self.assertFalse(isinstance(dialog.documents_editor.supersedes_edit, QLineEdit))
+            self.assertFalse(isinstance(dialog.documents_editor.superseded_by_edit, QLineEdit))
+            self.assertIsInstance(dialog.documents_editor.detail_scroll_area, QScrollArea)
         finally:
             dialog.close()
 
@@ -141,17 +159,26 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
         finally:
             dialog.close()
 
-    def test_release_editor_uses_stored_value_combos_for_catalog_number_and_upc(self):
+    def test_release_editor_uses_editable_combos_for_safe_metadata_fields(self):
         dialog = ReleaseEditorDialog(
             release_service=object(),
             track_title_resolver=lambda track_id: f"Track {track_id}",
             selected_track_ids_provider=lambda: [],
         )
         try:
+            self.assertIsInstance(dialog.primary_artist_edit, QComboBox)
+            self.assertTrue(dialog.primary_artist_edit.isEditable())
+            self.assertIsInstance(dialog.album_artist_edit, QComboBox)
+            self.assertTrue(dialog.album_artist_edit.isEditable())
+            self.assertIsInstance(dialog.label_edit, QComboBox)
+            self.assertTrue(dialog.label_edit.isEditable())
+            self.assertIsInstance(dialog.sublabel_edit, QComboBox)
+            self.assertTrue(dialog.sublabel_edit.isEditable())
             self.assertIsInstance(dialog.catalog_number_edit, QComboBox)
             self.assertTrue(dialog.catalog_number_edit.isEditable())
             self.assertIsInstance(dialog.upc_edit, QComboBox)
             self.assertTrue(dialog.upc_edit.isEditable())
+            self.assertIsInstance(dialog.territory_edit, QLineEdit)
         finally:
             dialog.close()
 
@@ -170,6 +197,20 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
         try:
             self.assertEqual(dialog.release_count_label.text(), "0 releases shown.")
             self.assertEqual(dialog.track_table.columnCount(), 4)
+            self.assertIsInstance(dialog.detail_scroll_area, QScrollArea)
+            self.assertIsNotNone(dialog.actions_cluster)
+        finally:
+            dialog.close()
+
+    def test_work_browser_uses_action_cluster_for_top_controls(self):
+        dialog = WorkBrowserDialog(
+            work_service=_EmptyWorkService(),
+            track_title_resolver=lambda track_id: f"Track {track_id}",
+            selected_track_ids_provider=lambda: [],
+        )
+        try:
+            self.assertIsNotNone(dialog.manage_actions_cluster)
+            self.assertGreaterEqual(dialog.manage_actions_cluster.minimumSizeHint().width(), 0)
         finally:
             dialog.close()
 
@@ -183,6 +224,8 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
             self.assertIsNotNone(tabs)
             self.assertEqual(tabs.count(), 2)
             self.assertIn("No catalog records", dialog.results_status_label.text())
+            self.assertIsInstance(dialog.saved_searches_scroll_area, QScrollArea)
+            self.assertIsNotNone(dialog.delete_saved_button)
         finally:
             dialog.close()
 

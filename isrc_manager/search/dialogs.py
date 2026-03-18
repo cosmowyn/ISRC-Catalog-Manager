@@ -28,6 +28,7 @@ from isrc_manager.ui_common import (
     _apply_compact_dialog_control_heights,
     _apply_standard_dialog_chrome,
     _apply_standard_widget_chrome,
+    _create_scrollable_dialog_content,
     _create_standard_section,
 )
 
@@ -109,10 +110,10 @@ class GlobalSearchPanel(QWidget):
         splitter.setChildrenCollapsible(False)
         root.addWidget(splitter, 1)
 
-        left_container = QWidget(self)
-        left_layout = QVBoxLayout(left_container)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(0)
+        self.saved_searches_scroll_area, _, left_content_layout = _create_scrollable_dialog_content(
+            splitter
+        )
+        self.saved_searches_scroll_area.setObjectName("globalSearchSavedSearchesScrollArea")
         saved_box, saved_layout = _create_standard_section(
             self,
             "Saved Searches",
@@ -121,11 +122,12 @@ class GlobalSearchPanel(QWidget):
         self.saved_searches_list = QListWidget(saved_box)
         self.saved_searches_list.itemDoubleClicked.connect(self.apply_saved_search)
         saved_layout.addWidget(self.saved_searches_list, 1)
-        delete_saved_button = QPushButton("Delete Saved Search")
-        delete_saved_button.clicked.connect(self.delete_saved_search)
-        saved_layout.addWidget(delete_saved_button)
-        left_layout.addWidget(saved_box, 1)
-        splitter.addWidget(left_container)
+        self.delete_saved_button = QPushButton("Delete Saved Search")
+        self.delete_saved_button.clicked.connect(self.delete_saved_search)
+        saved_layout.addWidget(self.delete_saved_button)
+        left_content_layout.addWidget(saved_box)
+        left_content_layout.addStretch(1)
+        splitter.addWidget(self.saved_searches_scroll_area)
 
         right_container = QWidget(self)
         right_layout = QVBoxLayout(right_container)

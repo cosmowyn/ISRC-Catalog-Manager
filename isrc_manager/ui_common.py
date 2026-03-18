@@ -273,6 +273,56 @@ def _create_action_button_grid(
     return container
 
 
+def _create_action_button_cluster(
+    owner: QWidget,
+    buttons: list[QPushButton],
+    *,
+    columns: int = 2,
+    min_button_width: int = 160,
+    outer_margins: tuple[int, int, int, int] = (2, 2, 2, 2),
+    span_last_row: bool = False,
+) -> QWidget:
+    container = QFrame(owner)
+    container.setProperty("role", "compactControlGroup")
+    container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+    layout = QGridLayout(container)
+    left, top, right, bottom = outer_margins
+    layout.setContentsMargins(left, top, right, bottom)
+    layout.setHorizontalSpacing(12)
+    layout.setVerticalSpacing(10)
+    total_columns = max(1, int(columns or 1))
+    for column in range(total_columns):
+        layout.setColumnStretch(column, 1)
+    last_index = len(buttons) - 1
+    button_heights: list[int] = []
+    for index, button in enumerate(buttons):
+        button.setMinimumWidth(max(button.minimumWidth(), int(min_button_width or 0)))
+        target_height = max(button.minimumHeight(), button.fontMetrics().lineSpacing() + 14)
+        button.setMinimumHeight(target_height)
+        button_heights.append(target_height)
+        button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        row = index // total_columns
+        column = index % total_columns
+        if (
+            span_last_row
+            and total_columns > 1
+            and index == last_index
+            and len(buttons) % total_columns == 1
+        ):
+            layout.addWidget(button, row, 0, 1, total_columns)
+            continue
+        layout.addWidget(button, row, column)
+    total_rows = ((len(buttons) - 1) // total_columns) + 1 if buttons else 0
+    if total_rows and button_heights:
+        container.setMinimumHeight(
+            top
+            + bottom
+            + (max(button_heights) * total_rows)
+            + (layout.verticalSpacing() * max(0, total_rows - 1))
+        )
+    return container
+
+
 class _WheelIntentMixin:
     """Ignore wheel changes unless the widget is actively focused by the user."""
 

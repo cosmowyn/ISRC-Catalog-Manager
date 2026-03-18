@@ -141,6 +141,18 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.assertIn(dock, self.window.tabifiedDockWidgets(self.window.catalog_table_dock))
         return panel
 
+    @staticmethod
+    def _is_within_scroll_content(scroll_area, widget) -> bool:
+        content = scroll_area.widget()
+        return content is widget or (content is not None and content.isAncestorOf(widget))
+
+    @staticmethod
+    def _button_by_text(container, text: str):
+        for button in container.findChildren(app_module.QPushButton):
+            if button.text() == text:
+                return button
+        raise AssertionError(f"Button not found: {text}")
+
     def test_startup_builds_main_window_with_core_actions(self):
         self.assertIsNotNone(self.window.conn)
         self.assertTrue(Path(self.window.current_db_path).exists())
@@ -550,6 +562,124 @@ class AppShellIntegrationTests(unittest.TestCase):
 
         open_selected_editor.assert_called_once_with(track_id)
         self.assertTrue(dock.isVisible())
+
+    def test_workspace_docks_use_north_tabs_and_remain_tabified_across_fullscreen_cycle(self):
+        track_id = self._create_track(index=166, title="Dock Tab Visibility Track")
+        self.window.release_service.create_release(
+            app_module.ReleasePayload(
+                title="Dock Tab Visibility Release",
+                primary_artist="Cosmowyn",
+                release_type="single",
+                release_date="2026-03-17",
+                placements=[
+                    app_module.ReleaseTrackPlacement(
+                        track_id=track_id,
+                        disc_number=1,
+                        track_number=1,
+                        sequence_number=1,
+                    )
+                ],
+            )
+        )
+        self.window.refresh_table()
+
+        self.window.open_release_browser()
+        self.app.processEvents()
+        self.assertEqual(
+            self.window.tabPosition(app_module.Qt.RightDockWidgetArea),
+            app_module.QTabWidget.North,
+        )
+        self.assertTrue(self.window.release_browser_dock.widget().isVisible())
+
+        self.window.open_work_manager()
+        self.app.processEvents()
+        self.assertTrue(self.window.work_manager_dock.widget().isVisible())
+        self.assertIn(
+            self.window.work_manager_dock,
+            self.window.tabifiedDockWidgets(self.window.catalog_table_dock),
+        )
+
+        self.window.open_global_search()
+        self.app.processEvents()
+        self.assertTrue(self.window.global_search_dock.widget().isVisible())
+        self.assertIn(
+            self.window.global_search_dock,
+            self.window.tabifiedDockWidgets(self.window.catalog_table_dock),
+        )
+
+        self.window.showFullScreen()
+        self.app.processEvents()
+        self.window.showNormal()
+        self.app.processEvents()
+
+        self.assertEqual(
+            self.window.tabPosition(app_module.Qt.RightDockWidgetArea),
+            app_module.QTabWidget.North,
+        )
+        self.assertIn(
+            self.window.release_browser_dock,
+            self.window.tabifiedDockWidgets(self.window.catalog_table_dock),
+        )
+        self.assertIn(
+            self.window.work_manager_dock,
+            self.window.tabifiedDockWidgets(self.window.catalog_table_dock),
+        )
+        self.assertIn(
+            self.window.global_search_dock,
+            self.window.tabifiedDockWidgets(self.window.catalog_table_dock),
+        )
+        self.assertTrue(self.window.global_search_dock.widget().isVisible())
+
+    def test_workspace_panels_keep_actions_and_saved_search_controls_inside_scroll_safe_surfaces(self):
+        track_id = self._create_track(index=167, title="Reachable Action Track")
+        self.window.release_service.create_release(
+            app_module.ReleasePayload(
+                title="Reachable Action Release",
+                primary_artist="Cosmowyn",
+                release_type="single",
+                release_date="2026-03-17",
+                placements=[
+                    app_module.ReleaseTrackPlacement(
+                        track_id=track_id,
+                        disc_number=1,
+                        track_number=1,
+                        sequence_number=1,
+                    )
+                ],
+            )
+        )
+        self.window.refresh_table()
+
+        self.window.resize(980, 620)
+        self.window.open_release_browser()
+        self.app.processEvents()
+        release_panel = self.window.release_browser_dock.widget()
+        self.assertTrue(
+            self._is_within_scroll_content(
+                release_panel.detail_scroll_area, release_panel.actions_cluster
+            )
+        )
+
+        self.window.open_global_search()
+        self.app.processEvents()
+        search_panel = self.window.global_search_dock.widget()
+        self.assertTrue(
+            self._is_within_scroll_content(
+                search_panel.saved_searches_scroll_area, search_panel.delete_saved_button
+            )
+        )
+
+        self.window.open_work_manager()
+        self.app.processEvents()
+        work_panel = self.window.work_manager_dock.widget()
+        add_button = self._button_by_text(work_panel.manage_actions_cluster, "Add")
+        edit_button = self._button_by_text(work_panel.manage_actions_cluster, "Edit")
+        duplicate_button = self._button_by_text(work_panel.manage_actions_cluster, "Duplicate")
+
+        self.assertGreater(edit_button.geometry().left() - add_button.geometry().right(), 0)
+        self.assertGreater(duplicate_button.geometry().top() - add_button.geometry().bottom(), 0)
+        for button in (add_button, edit_button, duplicate_button):
+            self.assertGreaterEqual(button.width(), button.minimumSizeHint().width())
 
     def test_catalog_managers_open_as_tabified_dock_and_focus_requested_tab(self):
         self.window.open_catalog_managers_dialog(initial_tab="licensees")

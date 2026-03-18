@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,
+    QCompleter,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -38,12 +40,14 @@ from isrc_manager.file_storage import (
     normalize_storage_mode,
 )
 from isrc_manager.ui_common import (
+    FocusWheelComboBox,
     _add_standard_dialog_header,
     _apply_compact_dialog_control_heights,
     _apply_standard_dialog_chrome,
     _apply_standard_widget_chrome,
     _configure_standard_form_layout,
     _create_action_button_grid,
+    _create_action_button_cluster,
     _create_scrollable_dialog_content,
     _create_standard_section,
 )
@@ -79,6 +83,311 @@ def _parse_optional_int(text: str) -> int | None:
     if not clean:
         return None
     return int(clean)
+
+
+@dataclass(slots=True)
+class _ReferenceChoice:
+    reference_id: int
+    label: str
+    unresolved: bool = False
+
+
+def _normalize_reference_text(value: str | None) -> str:
+    return " ".join(str(value or "").split()).casefold()
+
+
+def _unknown_reference_choice(reference_id: int) -> _ReferenceChoice:
+    return _ReferenceChoice(int(reference_id), f"Unknown #{int(reference_id)}", unresolved=True)
+
+
+def _reference_choice_display_text(choice: _ReferenceChoice) -> str:
+    if choice.unresolved:
+        return choice.label
+    label = str(choice.label or "").strip() or f"Record #{choice.reference_id}"
+    return f"{choice.reference_id} - {label}"
+
+
+def _extract_reference_id(text: str | None) -> int | None:
+    clean = str(text or "").strip()
+    if not clean:
+        return None
+    if clean.isdigit():
+        return int(clean)
+    if clean.startswith("#") and clean[1:].isdigit():
+        return int(clean[1:])
+    prefix, separator, _ = clean.partition(" - ")
+    if separator and prefix.strip().isdigit():
+        return int(prefix.strip())
+    lowered = clean.lower()
+    if lowered.startswith("unknown #"):
+        candidate = clean.split("#", 1)[1].split(" ", 1)[0].strip()
+        if candidate.isdigit():
+            return int(candidate)
+    return None
+
+
+def _build_reference_completer(combo: QComboBox, values: list[str]) -> None:
+    completer = QCompleter(values, combo)
+    completer.setCaseSensitivity(Qt.CaseInsensitive)
+    combo.setCompleter(completer)
+
+
+def _iter_reference_choice_matches(
+    choices: list[_ReferenceChoice], normalized_text: str
+) -> _ReferenceChoice | None:
+    for choice in choices:
+        display_text = _reference_choice_display_text(choice)
+        if normalized_text in {
+            _normalize_reference_text(choice.label),
+            _normalize_reference_text(display_text),
+        }:
+            return choice
+    return None
+
+
+class _OptionalReferenceSelector(QWidget):
+    valueChanged = Signal()
+
+    def __init__(self, *, placeholder: str, clear_button_text: str = "Clear", parent=None):
+        super().__init__(parent)
+        self._choices: list[_ReferenceChoice] = []
+        self._choices_by_id: dict[int, _ReferenceChoice] = {}
+        self._suspend_signals = False
+
+        root = QHBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(8)
+
+        self.combo = FocusWheelComboBox(self)
+        self.combo.setEditable(True)
+        self.combo.setInsertPolicy(QComboBox.NoInsert)
+        self.combo.addItem("", None)
+        self.combo.setCurrentIndex(0)
+        self.combo.setMinimumWidth(220)
+        self.combo.setPlaceholderText(placeholder)
+        self.combo.currentIndexChanged.connect(self._emit_value_changed)
+        self.combo.currentTextChanged.connect(self._emit_value_changed)
+        root.addWidget(self.combo, 1)
+
+        self.clear_button = QPushButton(clear_button_text, self)
+        self.clear_button.clicked.connect(self.clear)
+        root.addWidget(self.clear_button)
+
+    def set_choices(self, choices: list[_ReferenceChoice]) -> None:
+        current_value = self.value_id()
+        self._choices = list(choices)
+        self._choices_by_id = {choice.reference_id: choice for choice in self._choices}
+        self._rebuild_combo(current_value)
+
+    def set_value_id(self, reference_id: int | None) -> None:
+        self._rebuild_combo(int(reference_id) if reference_id is not None else None)
+
+    def value_id(self) -> int | None:
+        current_index = self.combo.currentIndex()
+        data = self.combo.currentData()
+        if current_index > 0 and data not in (None, ""):
+            if _normalize_reference_text(self.combo.currentText()) == _normalize_reference_text(
+                self.combo.itemText(current_index)
+            ):
+                return int(data)
+        resolved = self._resolve_choice(self.combo.currentText())
+        return resolved.reference_id if resolved is not None else None
+
+    def clear(self) -> None:
+        self._suspend_signals = True
+        try:
+            self.combo.setCurrentIndex(0)
+            self.combo.setEditText("")
+        finally:
+            self._suspend_signals = False
+        self.valueChanged.emit()
+
+    def _resolve_choice(self, text: str | None) -> _ReferenceChoice | None:
+        clean = str(text or "").strip()
+        if not clean:
+            return None
+        extracted_id = _extract_reference_id(clean)
+        if extracted_id is not None:
+            return self._choices_by_id.get(extracted_id) or _unknown_reference_choice(extracted_id)
+        normalized_text = _normalize_reference_text(clean)
+        return _iter_reference_choice_matches(self._choices, normalized_text)
+
+    def _rebuild_combo(self, selected_id: int | None) -> None:
+        selected_choice = None
+        if selected_id is not None:
+            selected_choice = self._choices_by_id.get(selected_id) or _unknown_reference_choice(
+                selected_id
+            )
+        self._suspend_signals = True
+        try:
+            self.combo.clear()
+            self.combo.addItem("", None)
+            display_values: list[str] = []
+            for choice in self._choices:
+                display_text = _reference_choice_display_text(choice)
+                self.combo.addItem(display_text, choice.reference_id)
+                display_values.append(display_text)
+            if selected_choice is not None and selected_choice.reference_id not in self._choices_by_id:
+                display_text = _reference_choice_display_text(selected_choice)
+                self.combo.addItem(display_text, selected_choice.reference_id)
+                display_values.append(display_text)
+            _build_reference_completer(self.combo, display_values)
+            if selected_choice is None:
+                self.combo.setCurrentIndex(0)
+                self.combo.setEditText("")
+                return
+            for index in range(self.combo.count()):
+                if self.combo.itemData(index) == selected_choice.reference_id:
+                    self.combo.setCurrentIndex(index)
+                    return
+            self.combo.setCurrentIndex(0)
+            self.combo.setEditText(_reference_choice_display_text(selected_choice))
+        finally:
+            self._suspend_signals = False
+
+    def _emit_value_changed(self, *_args) -> None:
+        if self._suspend_signals:
+            return
+        self.valueChanged.emit()
+
+
+class _ReferenceListEditor(QWidget):
+    valueChanged = Signal()
+
+    def __init__(self, *, placeholder: str, parent=None):
+        super().__init__(parent)
+        self._choices: list[_ReferenceChoice] = []
+        self._choices_by_id: dict[int, _ReferenceChoice] = {}
+        self._entries: list[_ReferenceChoice] = []
+        self._suspend_signals = False
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(8)
+
+        controls = QHBoxLayout()
+        controls.setContentsMargins(0, 0, 0, 0)
+        controls.setSpacing(8)
+        self.combo = FocusWheelComboBox(self)
+        self.combo.setEditable(True)
+        self.combo.setInsertPolicy(QComboBox.NoInsert)
+        self.combo.addItem("", None)
+        self.combo.setMinimumWidth(240)
+        self.combo.setPlaceholderText(placeholder)
+        self.combo.activated.connect(lambda *_args: self.add_current_reference())
+        controls.addWidget(self.combo, 1)
+
+        self.add_button = QPushButton("Add", self)
+        self.add_button.clicked.connect(self.add_current_reference)
+        controls.addWidget(self.add_button)
+
+        self.remove_button = QPushButton("Remove Highlighted", self)
+        self.remove_button.clicked.connect(self.remove_selected_references)
+        controls.addWidget(self.remove_button)
+        root.addLayout(controls)
+
+        self.table = QTableWidget(0, 2, self)
+        self.table.setHorizontalHeaderLabels(["ID", "Reference"])
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.verticalHeader().setVisible(False)
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        self.table.setMinimumHeight(118)
+        root.addWidget(self.table, 1)
+
+    def set_choices(self, choices: list[_ReferenceChoice]) -> None:
+        self._choices = list(choices)
+        self._choices_by_id = {choice.reference_id: choice for choice in self._choices}
+        self._entries = [
+            self._choices_by_id.get(entry.reference_id) or entry for entry in self._entries
+        ]
+        self._refresh_combo()
+        self._refresh_table()
+
+    def set_value_ids(self, reference_ids: list[int]) -> None:
+        seen: set[int] = set()
+        entries: list[_ReferenceChoice] = []
+        for raw_id in reference_ids:
+            try:
+                reference_id = int(raw_id)
+            except Exception:
+                continue
+            if reference_id <= 0 or reference_id in seen:
+                continue
+            seen.add(reference_id)
+            entries.append(
+                self._choices_by_id.get(reference_id) or _unknown_reference_choice(reference_id)
+            )
+        self._suspend_signals = True
+        try:
+            self._entries = entries
+            self._refresh_table()
+        finally:
+            self._suspend_signals = False
+
+    def value_ids(self) -> list[int]:
+        return [int(entry.reference_id) for entry in self._entries]
+
+    def add_current_reference(self) -> None:
+        choice = self._resolve_choice(self.combo.currentText())
+        if choice is None:
+            return
+        if any(entry.reference_id == choice.reference_id for entry in self._entries):
+            return
+        self._entries.append(choice)
+        self._refresh_table()
+        self.combo.setCurrentIndex(0)
+        self.combo.setEditText("")
+        self.valueChanged.emit()
+
+    def remove_selected_references(self) -> None:
+        rows = sorted({index.row() for index in self.table.selectedIndexes()}, reverse=True)
+        if not rows:
+            return
+        for row in rows:
+            if 0 <= row < len(self._entries):
+                del self._entries[row]
+        self._refresh_table()
+        self.valueChanged.emit()
+
+    def _resolve_choice(self, text: str | None) -> _ReferenceChoice | None:
+        clean = str(text or "").strip()
+        if not clean:
+            return None
+        current_index = self.combo.currentIndex()
+        if current_index > 0 and _normalize_reference_text(clean) == _normalize_reference_text(
+            self.combo.itemText(current_index)
+        ):
+            data = self.combo.currentData()
+            if data not in (None, ""):
+                return self._choices_by_id.get(int(data))
+        extracted_id = _extract_reference_id(clean)
+        if extracted_id is not None:
+            return self._choices_by_id.get(extracted_id) or _unknown_reference_choice(extracted_id)
+        normalized_text = _normalize_reference_text(clean)
+        return _iter_reference_choice_matches(self._choices, normalized_text)
+
+    def _refresh_combo(self) -> None:
+        self.combo.clear()
+        self.combo.addItem("", None)
+        display_values: list[str] = []
+        for choice in self._choices:
+            display_text = _reference_choice_display_text(choice)
+            self.combo.addItem(display_text, choice.reference_id)
+            display_values.append(display_text)
+        _build_reference_completer(self.combo, display_values)
+
+    def _refresh_table(self) -> None:
+        self.table.setRowCount(len(self._entries))
+        for row, choice in enumerate(self._entries):
+            id_item = QTableWidgetItem(str(choice.reference_id))
+            id_item.setTextAlignment(Qt.AlignCenter)
+            label_item = QTableWidgetItem(choice.label or f"Record #{choice.reference_id}")
+            self.table.setItem(row, 0, id_item)
+            self.table.setItem(row, 1, label_item)
 
 
 class ContractDocumentEditor(QWidget):
@@ -172,18 +481,30 @@ class ContractDocumentEditor(QWidget):
         table_layout.addWidget(self.documents_table, 1)
         splitter.addWidget(table_box)
 
-        detail_box = QGroupBox("Selected Document", self)
-        detail_layout = QVBoxLayout(detail_box)
-        detail_layout.setContentsMargins(14, 18, 14, 14)
-        detail_layout.setSpacing(10)
-        detail_layout.addWidget(
-            QLabel(
-                "Edit the selected document's structured metadata here. Storage and file integrity fields are preserved unless you change them explicitly."
-            )
+        detail_panel = QWidget(splitter)
+        detail_panel.setMinimumWidth(360)
+        detail_panel_layout = QVBoxLayout(detail_panel)
+        detail_panel_layout.setContentsMargins(0, 0, 0, 0)
+        detail_panel_layout.setSpacing(0)
+        self.detail_scroll_area, _, detail_content_layout = _create_scrollable_dialog_content(
+            detail_panel
         )
+        self.detail_scroll_area.setObjectName("contractDocumentDetailScrollArea")
+        detail_panel_layout.addWidget(self.detail_scroll_area, 1)
 
-        form = QFormLayout()
-        _configure_standard_form_layout(form)
+        detail_intro = QLabel(
+            "Edit the selected document metadata here. Storage and file integrity fields stay intact unless you change them explicitly."
+        )
+        detail_intro.setWordWrap(True)
+        detail_content_layout.addWidget(detail_intro)
+
+        identity_box, identity_layout = _create_standard_section(
+            self,
+            "Document Identity",
+            "Core metadata for the selected contract file and its version history.",
+        )
+        identity_form = QFormLayout()
+        _configure_standard_form_layout(identity_form)
         self.document_id_label = QLabel("")
         self.filename_label = QLabel("")
         self.filename_label.setTextInteractionFlags(
@@ -208,33 +529,59 @@ class ContractDocumentEditor(QWidget):
         self.created_edit = QLineEdit()
         self.received_edit = QLineEdit()
         self.signed_status_edit = QLineEdit()
+
+        for widget in (self.created_edit, self.received_edit):
+            widget.setPlaceholderText("YYYY-MM-DD")
+
+        identity_form.addRow("Document ID", self.document_id_label)
+        identity_form.addRow("Title", self.title_edit)
+        identity_form.addRow("Document Type", self.document_type_combo)
+        identity_form.addRow("Version Label", self.version_edit)
+        identity_form.addRow("Created Date", self.created_edit)
+        identity_form.addRow("Received Date", self.received_edit)
+        identity_form.addRow("Signed Status", self.signed_status_edit)
+        identity_layout.addLayout(identity_form)
+        detail_content_layout.addWidget(identity_box)
+
+        lifecycle_box, lifecycle_layout = _create_standard_section(
+            self,
+            "Status and Relationships",
+            "Track signature state, active status, and which earlier version this document replaces.",
+        )
+        lifecycle_form = QFormLayout()
+        _configure_standard_form_layout(lifecycle_form)
         self.signed_all_checkbox = QCheckBox("Signed by all parties")
         self.active_checkbox = QCheckBox("Active")
-        self.supersedes_edit = QLineEdit()
-        self.superseded_by_edit = QLineEdit()
+        self.supersedes_edit = _OptionalReferenceSelector(
+            placeholder="Select a saved document or type an ID",
+            parent=self,
+        )
+        self.superseded_by_edit = _OptionalReferenceSelector(
+            placeholder="Select a saved document or type an ID",
+            parent=self,
+        )
+        lifecycle_form.addRow("Signed By All", self.signed_all_checkbox)
+        lifecycle_form.addRow("Active", self.active_checkbox)
+        lifecycle_form.addRow("Supersedes Document", self.supersedes_edit)
+        lifecycle_form.addRow("Superseded By Document", self.superseded_by_edit)
+        lifecycle_layout.addLayout(lifecycle_form)
+        detail_content_layout.addWidget(lifecycle_box)
+
+        storage_box, storage_layout = _create_standard_section(
+            self,
+            "Storage and Integrity",
+            "Switch storage modes without losing the known filename, path, or checksum data.",
+        )
+        storage_form = QFormLayout()
+        _configure_standard_form_layout(storage_form)
         self.storage_mode_combo = QComboBox()
         self.storage_mode_combo.addItem("Managed file", STORAGE_MODE_MANAGED_FILE)
         self.storage_mode_combo.addItem("Database (BLOB)", STORAGE_MODE_DATABASE)
-        self.notes_edit = QPlainTextEdit()
-        self.notes_edit.setMinimumHeight(110)
-
-        form.addRow("Document ID", self.document_id_label)
-        form.addRow("Title", self.title_edit)
-        form.addRow("Document Type", self.document_type_combo)
-        form.addRow("Version Label", self.version_edit)
-        form.addRow("Created Date", self.created_edit)
-        form.addRow("Received Date", self.received_edit)
-        form.addRow("Signed Status", self.signed_status_edit)
-        form.addRow("Signed By All", self.signed_all_checkbox)
-        form.addRow("Active", self.active_checkbox)
-        form.addRow("Supersedes Document ID", self.supersedes_edit)
-        form.addRow("Superseded By Document ID", self.superseded_by_edit)
-        form.addRow("Storage Mode", self.storage_mode_combo)
-        form.addRow("Filename", self.filename_label)
-        form.addRow("Stored Path / Blob", self.source_path_label)
-        form.addRow("Checksum", self.checksum_label)
-        form.addRow("Notes", self.notes_edit)
-        detail_layout.addLayout(form)
+        storage_form.addRow("Storage Mode", self.storage_mode_combo)
+        storage_form.addRow("Filename", self.filename_label)
+        storage_form.addRow("Stored Path / Blob", self.source_path_label)
+        storage_form.addRow("Checksum", self.checksum_label)
+        storage_layout.addLayout(storage_form)
 
         detail_actions = QHBoxLayout()
         detail_actions.setContentsMargins(0, 0, 0, 0)
@@ -243,10 +590,24 @@ class ContractDocumentEditor(QWidget):
         self.switch_mode_button = QPushButton("Switch Storage Mode")
         self.switch_mode_button.clicked.connect(self._toggle_selected_storage_mode)
         detail_actions.addWidget(self.switch_mode_button)
-        detail_layout.addLayout(detail_actions)
-        splitter.addWidget(detail_box)
+        storage_layout.addLayout(detail_actions)
+        detail_content_layout.addWidget(storage_box)
+
+        notes_box, notes_layout = _create_standard_section(
+            self,
+            "Notes",
+            "Capture the signing context, delivery notes, or other detail that belongs with this specific document version.",
+        )
+        self.notes_edit = QPlainTextEdit()
+        self.notes_edit.setMinimumHeight(88)
+        notes_layout.addWidget(self.notes_edit)
+        detail_content_layout.addWidget(notes_box)
+        detail_content_layout.addStretch(1)
+
+        splitter.addWidget(detail_panel)
         splitter.setStretchFactor(0, 4)
         splitter.setStretchFactor(1, 5)
+        splitter.setSizes([440, 560])
 
         for widget in (
             self.title_edit,
@@ -289,6 +650,8 @@ class ContractDocumentEditor(QWidget):
             widget.currentTextChanged.connect(self._sync_current_document_from_form)
         elif isinstance(widget, QCheckBox):
             widget.stateChanged.connect(self._sync_current_document_from_form)
+        elif hasattr(widget, "valueChanged"):
+            widget.valueChanged.connect(self._sync_current_document_from_form)
 
     def _payload_from_record(self, record: ContractDocumentRecord) -> ContractDocumentPayload:
         return ContractDocumentPayload(
@@ -357,7 +720,7 @@ class ContractDocumentEditor(QWidget):
         ]
 
     def _current_document(self) -> tuple[int, ContractDocumentPayload] | None:
-        row = self.documents_table.currentRow()
+        row = self._current_row
         if row < 0 or row >= len(self._documents):
             return None
         return row, self._documents[row]
@@ -404,6 +767,7 @@ class ContractDocumentEditor(QWidget):
         self.source_path_label.setText("")
         self.checksum_label.setText("")
         self.notes_edit.clear()
+        self._refresh_document_reference_selectors()
 
     def _insert_document_row(self, row: int, document: ContractDocumentPayload) -> None:
         if row >= self.documents_table.rowCount():
@@ -472,14 +836,9 @@ class ContractDocumentEditor(QWidget):
             self.signed_status_edit.setText(document.signed_status or "")
             self.signed_all_checkbox.setChecked(bool(document.signed_by_all_parties))
             self.active_checkbox.setChecked(bool(document.active_flag))
-            self.supersedes_edit.setText(
-                "" if document.supersedes_document_id is None else str(document.supersedes_document_id)
-            )
-            self.superseded_by_edit.setText(
-                ""
-                if document.superseded_by_document_id is None
-                else str(document.superseded_by_document_id)
-            )
+            self._refresh_document_reference_selectors()
+            self.supersedes_edit.set_value_id(document.supersedes_document_id)
+            self.superseded_by_edit.set_value_id(document.superseded_by_document_id)
             self.storage_mode_combo.setCurrentIndex(
                 self.storage_mode_combo.findData(
                     normalize_storage_mode(document.storage_mode, default=STORAGE_MODE_MANAGED_FILE)
@@ -523,8 +882,8 @@ class ContractDocumentEditor(QWidget):
         document.signed_status = self.signed_status_edit.text().strip() or None
         document.signed_by_all_parties = self.signed_all_checkbox.isChecked()
         document.active_flag = self.active_checkbox.isChecked()
-        document.supersedes_document_id = _parse_optional_int(self.supersedes_edit.text())
-        document.superseded_by_document_id = _parse_optional_int(self.superseded_by_edit.text())
+        document.supersedes_document_id = self.supersedes_edit.value_id()
+        document.superseded_by_document_id = self.superseded_by_edit.value_id()
         document.storage_mode = normalize_storage_mode(
             self.storage_mode_combo.currentData(), default=STORAGE_MODE_MANAGED_FILE
         )
@@ -566,6 +925,38 @@ class ContractDocumentEditor(QWidget):
             self._current_row = -1
             self._clear_form()
         self._refresh_action_state()
+
+    def _document_reference_choices(self, *, exclude_row: int | None = None) -> list[_ReferenceChoice]:
+        choices: list[_ReferenceChoice] = []
+        for row, document in enumerate(self._documents):
+            if exclude_row is not None and row == exclude_row:
+                continue
+            if document.document_id is None:
+                continue
+            label_parts = [str(document.title or "").strip()]
+            if document.version_label:
+                label_parts.append(f"Version: {document.version_label}")
+            if document.filename:
+                label_parts.append(document.filename)
+            label = " / ".join(part for part in label_parts if part) or f"Document #{document.document_id}"
+            choices.append(_ReferenceChoice(int(document.document_id), label))
+        return choices
+
+    def _refresh_document_reference_selectors(self) -> None:
+        current_row = self._current_row if self._current_row >= 0 else None
+        choices = self._document_reference_choices(exclude_row=current_row)
+        selected_supersedes = None
+        selected_superseded_by = None
+        if current_row is not None and current_row < len(self._documents):
+            current = self._documents[current_row]
+            selected_supersedes = current.supersedes_document_id
+            selected_superseded_by = current.superseded_by_document_id
+        self.supersedes_edit.set_choices(choices)
+        self.superseded_by_edit.set_choices(choices)
+        if current_row is None:
+            return
+        self.supersedes_edit.set_value_id(selected_supersedes)
+        self.superseded_by_edit.set_value_id(selected_superseded_by)
 
     def _document_bytes(self, document: ContractDocumentPayload) -> tuple[bytes, str]:
         if document.document_id is not None:
@@ -712,11 +1103,11 @@ class ContractEditorDialog(QDialog):
         core_form.addRow("Status", self.status_combo)
 
         self.summary_edit = QPlainTextEdit()
-        self.summary_edit.setMinimumHeight(110)
+        self.summary_edit.setMinimumHeight(88)
         core_form.addRow("Summary", self.summary_edit)
 
         self.notes_edit = QPlainTextEdit()
-        self.notes_edit.setMinimumHeight(120)
+        self.notes_edit.setMinimumHeight(96)
         core_form.addRow("Notes", self.notes_edit)
         core_layout.addLayout(core_form)
         overview_layout.addWidget(core_box)
@@ -726,16 +1117,6 @@ class ContractEditorDialog(QDialog):
             "Lifecycle Dates",
             "Keep the contract timeline in one place so notice windows, renewals, and reversion points stay visible.",
         )
-        lifecycle_grid = QGridLayout()
-        lifecycle_grid.setContentsMargins(0, 0, 0, 0)
-        lifecycle_grid.setHorizontalSpacing(12)
-        lifecycle_grid.setVerticalSpacing(10)
-
-        def _add_lifecycle_field(row: int, column: int, label_text: str, widget: QLineEdit) -> None:
-            widget.setPlaceholderText("YYYY-MM-DD")
-            lifecycle_grid.addWidget(QLabel(label_text), row, column * 2)
-            lifecycle_grid.addWidget(widget, row, column * 2 + 1)
-
         self.draft_edit = QLineEdit()
         self.signature_edit = QLineEdit()
         self.effective_edit = QLineEdit()
@@ -747,20 +1128,56 @@ class ContractEditorDialog(QDialog):
         self.termination_edit = QLineEdit()
         self.option_periods_edit = QLineEdit()
 
-        _add_lifecycle_field(0, 0, "Draft Date", self.draft_edit)
-        _add_lifecycle_field(0, 1, "Signature Date", self.signature_edit)
-        _add_lifecycle_field(1, 0, "Effective Date", self.effective_edit)
-        _add_lifecycle_field(1, 1, "Start Date", self.start_edit)
-        _add_lifecycle_field(2, 0, "End Date", self.end_edit)
-        _add_lifecycle_field(2, 1, "Renewal Date", self.renewal_edit)
-        _add_lifecycle_field(3, 0, "Notice Deadline", self.notice_edit)
-        _add_lifecycle_field(3, 1, "Reversion Date", self.reversion_edit)
-        _add_lifecycle_field(4, 0, "Termination Date", self.termination_edit)
-        lifecycle_grid.addWidget(QLabel("Option Periods"), 4, 2)
-        lifecycle_grid.addWidget(self.option_periods_edit, 4, 3)
-        lifecycle_grid.setColumnStretch(1, 1)
-        lifecycle_grid.setColumnStretch(3, 1)
-        lifecycle_layout.addLayout(lifecycle_grid)
+        for widget in (
+            self.draft_edit,
+            self.signature_edit,
+            self.effective_edit,
+            self.start_edit,
+            self.end_edit,
+            self.renewal_edit,
+            self.notice_edit,
+            self.reversion_edit,
+            self.termination_edit,
+        ):
+            widget.setPlaceholderText("YYYY-MM-DD")
+
+        def _add_lifecycle_group(title: str, rows: list[tuple[str, QWidget]]) -> None:
+            group = QGroupBox(title, self)
+            group_layout = QVBoxLayout(group)
+            group_layout.setContentsMargins(12, 14, 12, 12)
+            group_layout.setSpacing(8)
+            form = QFormLayout()
+            _configure_standard_form_layout(form)
+            for label_text, widget in rows:
+                form.addRow(label_text, widget)
+            group_layout.addLayout(form)
+            lifecycle_layout.addWidget(group)
+
+        _add_lifecycle_group(
+            "Execution",
+            [
+                ("Draft Date", self.draft_edit),
+                ("Signature Date", self.signature_edit),
+                ("Effective Date", self.effective_edit),
+            ],
+        )
+        _add_lifecycle_group(
+            "Term and Renewal",
+            [
+                ("Start Date", self.start_edit),
+                ("End Date", self.end_edit),
+                ("Renewal Date", self.renewal_edit),
+                ("Option Periods", self.option_periods_edit),
+            ],
+        )
+        _add_lifecycle_group(
+            "Notice and Exit",
+            [
+                ("Notice Deadline", self.notice_edit),
+                ("Reversion Date", self.reversion_edit),
+                ("Termination Date", self.termination_edit),
+            ],
+        )
         overview_layout.addWidget(lifecycle_box)
         overview_layout.addStretch(1)
         tabs.addTab(overview_scroll, "Overview")
@@ -774,16 +1191,25 @@ class ContractEditorDialog(QDialog):
         repertoire_form = QFormLayout()
         _configure_standard_form_layout(repertoire_form)
 
-        self.work_ids_edit = QLineEdit()
-        self.work_ids_edit.setPlaceholderText("Comma-separated work IDs")
+        self.work_ids_edit = _ReferenceListEditor(
+            placeholder="Select a linked work or type an ID",
+            parent=self,
+        )
+        self.work_ids_edit.setObjectName("contractWorkReferenceEditor")
         repertoire_form.addRow("Linked Work IDs", self.work_ids_edit)
 
-        self.track_ids_edit = QLineEdit()
-        self.track_ids_edit.setPlaceholderText("Comma-separated track IDs")
+        self.track_ids_edit = _ReferenceListEditor(
+            placeholder="Select a linked track or type an ID",
+            parent=self,
+        )
+        self.track_ids_edit.setObjectName("contractTrackReferenceEditor")
         repertoire_form.addRow("Linked Track IDs", self.track_ids_edit)
 
-        self.release_ids_edit = QLineEdit()
-        self.release_ids_edit.setPlaceholderText("Comma-separated release IDs")
+        self.release_ids_edit = _ReferenceListEditor(
+            placeholder="Select a linked release or type an ID",
+            parent=self,
+        )
+        self.release_ids_edit.setObjectName("contractReleaseReferenceEditor")
         repertoire_form.addRow("Linked Release IDs", self.release_ids_edit)
         repertoire_layout.addLayout(repertoire_form)
         links_layout.addWidget(repertoire_box)
@@ -797,7 +1223,7 @@ class ContractEditorDialog(QDialog):
         self.parties_edit.setPlaceholderText(
             "One line per party: party_id|role_label|primary\nOr: party_name|role_label|primary"
         )
-        self.parties_edit.setMinimumHeight(180)
+        self.parties_edit.setMinimumHeight(140)
         parties_layout.addWidget(self.parties_edit)
         links_layout.addWidget(parties_box)
         links_layout.addStretch(1)
@@ -813,7 +1239,7 @@ class ContractEditorDialog(QDialog):
         self.obligations_edit.setPlaceholderText(
             "One line per obligation: type|title|due_date|follow_up_date|reminder_date|completed"
         )
-        self.obligations_edit.setMinimumHeight(260)
+        self.obligations_edit.setMinimumHeight(180)
         obligations_box_layout.addWidget(self.obligations_edit)
         obligations_layout.addWidget(obligations_box)
         obligations_layout.addStretch(1)
@@ -836,6 +1262,7 @@ class ContractEditorDialog(QDialog):
             save_button.setDefault(True)
         root.addWidget(buttons)
         _apply_compact_dialog_control_heights(self)
+        self._populate_reference_editors()
 
         if detail is not None:
             contract = detail.contract
@@ -854,9 +1281,9 @@ class ContractEditorDialog(QDialog):
             self.termination_edit.setText(contract.termination_date or "")
             self.summary_edit.setPlainText(contract.summary or "")
             self.notes_edit.setPlainText(contract.notes or "")
-            self.work_ids_edit.setText(", ".join(str(item) for item in detail.work_ids))
-            self.track_ids_edit.setText(", ".join(str(item) for item in detail.track_ids))
-            self.release_ids_edit.setText(", ".join(str(item) for item in detail.release_ids))
+            self.work_ids_edit.set_value_ids(detail.work_ids)
+            self.track_ids_edit.set_value_ids(detail.track_ids)
+            self.release_ids_edit.set_value_ids(detail.release_ids)
             self.parties_edit.setPlainText(
                 "\n".join(
                     f"{item.party_id}|{item.role_label}|{'1' if item.is_primary else '0'}"
@@ -881,6 +1308,64 @@ class ContractEditorDialog(QDialog):
             self.documents_editor.load_documents(detail.documents)
         else:
             self.documents_editor.load_documents([])
+
+    def _reference_choices_from_query(self, query: str, formatter) -> list[_ReferenceChoice]:
+        conn = getattr(self.contract_service, "conn", None)
+        if conn is None:
+            return []
+        choices: list[_ReferenceChoice] = []
+        for row in conn.execute(query).fetchall():
+            try:
+                reference_id = int(row[0])
+            except Exception:
+                continue
+            choices.append(_ReferenceChoice(reference_id, formatter(row)))
+        return choices
+
+    def _populate_reference_editors(self) -> None:
+        self.work_ids_edit.set_choices(
+            self._reference_choices_from_query(
+                """
+                SELECT id, title, COALESCE(iswc, '')
+                FROM Works
+                ORDER BY title, id
+                """,
+                lambda row: " / ".join(
+                    part for part in (str(row[1] or "").strip(), str(row[2] or "").strip()) if part
+                )
+                or f"Work #{int(row[0])}",
+            )
+        )
+        self.track_ids_edit.set_choices(
+            self._reference_choices_from_query(
+                """
+                SELECT
+                    t.id,
+                    t.track_title,
+                    COALESCE(a.name, '')
+                FROM Tracks t
+                LEFT JOIN Artists a ON a.id = t.main_artist_id
+                ORDER BY t.track_title, t.id
+                """,
+                lambda row: " / ".join(
+                    part for part in (str(row[1] or "").strip(), str(row[2] or "").strip()) if part
+                )
+                or f"Track #{int(row[0])}",
+            )
+        )
+        self.release_ids_edit.set_choices(
+            self._reference_choices_from_query(
+                """
+                SELECT id, title, COALESCE(primary_artist, '')
+                FROM Releases
+                ORDER BY title, id
+                """,
+                lambda row: " / ".join(
+                    part for part in (str(row[1] or "").strip(), str(row[2] or "").strip()) if part
+                )
+                or f"Release #{int(row[0])}",
+            )
+        )
 
     def payload(self) -> ContractPayload:
         parties: list[ContractPartyPayload] = []
@@ -931,9 +1416,9 @@ class ContractEditorDialog(QDialog):
             parties=parties,
             obligations=obligations,
             documents=self.documents_editor.documents(),
-            work_ids=_parse_int_list(self.work_ids_edit.text()),
-            track_ids=_parse_int_list(self.track_ids_edit.text()),
-            release_ids=_parse_int_list(self.release_ids_edit.text()),
+            work_ids=self.work_ids_edit.value_ids(),
+            track_ids=self.track_ids_edit.value_ids(),
+            release_ids=self.release_ids_edit.value_ids(),
         )
 
     def closeEvent(self, event) -> None:  # pragma: no cover - Qt lifecycle hook

@@ -21,6 +21,7 @@ from isrc_manager.ui_common import (
     _apply_compact_dialog_control_heights,
     _apply_standard_dialog_chrome,
     _compose_widget_stylesheet,
+    _create_action_button_cluster,
     _configure_standard_form_layout,
     _create_round_help_button,
     _create_scrollable_dialog_content,
@@ -121,6 +122,20 @@ class UICommonTests(unittest.TestCase):
             )
             self.assertGreaterEqual(button.minimumHeight(), button.fontMetrics().lineSpacing() + 14)
             self.assertGreaterEqual(button.minimumWidth(), 0)
+        finally:
+            owner.close()
+
+    def test_action_button_cluster_sets_spacing_role_and_min_widths(self):
+        owner = QWidget()
+        try:
+            buttons = [QPushButton("One", owner), QPushButton("Two", owner), QPushButton("Three", owner)]
+            cluster = _create_action_button_cluster(owner, buttons, columns=2, min_button_width=180)
+            layout = cluster.layout()
+            self.assertEqual(cluster.property("role"), "compactControlGroup")
+            self.assertEqual(layout.horizontalSpacing(), 12)
+            self.assertEqual(layout.verticalSpacing(), 10)
+            for button in buttons:
+                self.assertGreaterEqual(button.minimumWidth(), 180)
         finally:
             owner.close()
 

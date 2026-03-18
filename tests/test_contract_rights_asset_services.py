@@ -5,22 +5,27 @@ from pathlib import Path
 
 from isrc_manager.assets import AssetService, AssetVersionPayload
 from isrc_manager.contracts import (
+    ContractDetail,
     ContractDocumentPayload,
+    ContractDocumentRecord,
     ContractObligationPayload,
     ContractPartyPayload,
     ContractPayload,
+    ContractRecord,
     ContractService,
 )
 from isrc_manager.parties import PartyPayload, PartyService
 from isrc_manager.releases import ReleasePayload, ReleaseService, ReleaseTrackPlacement
 from isrc_manager.rights import RightPayload, RightsService
 from isrc_manager.services import DatabaseSchemaService, TrackCreatePayload, TrackService
+from isrc_manager.works import WorkPayload, WorkService
 from tests.qt_test_helpers import require_qapplication
 
 try:
-    from isrc_manager.contracts.dialogs import ContractDocumentEditor
+    from isrc_manager.contracts.dialogs import ContractDocumentEditor, ContractEditorDialog
 except Exception:  # pragma: no cover - environment-specific fallback
     ContractDocumentEditor = None
+    ContractEditorDialog = None
 
 
 class ContractRightsAssetServiceTests(unittest.TestCase):
@@ -35,6 +40,7 @@ class ContractRightsAssetServiceTests(unittest.TestCase):
         self.track_service = TrackService(self.conn, self.data_root)
         self.release_service = ReleaseService(self.conn, self.data_root)
         self.party_service = PartyService(self.conn)
+        self.work_service = WorkService(self.conn, party_service=self.party_service)
         self.contract_service = ContractService(
             self.conn, self.data_root, party_service=self.party_service
         )
@@ -537,6 +543,150 @@ class ContractRightsAssetServiceTests(unittest.TestCase):
                 self.assertEqual(export_path.read_bytes(), preview_path.read_bytes())
         finally:
             editor.close()
+
+    def test_contract_editor_selector_widgets_round_trip_known_reference_ids(self):
+        if ContractEditorDialog is None:
+            self.skipTest("Contract editor dialog unavailable")
+        require_qapplication()
+
+        work_id = self.work_service.create_work(WorkPayload(title="Selector Linked Work"))
+        track_id, release_id = self._create_track_and_release()
+        dialog = ContractEditorDialog(contract_service=self.contract_service)
+        try:
+            dialog.title_edit.setText("Selector Round Trip Contract")
+            dialog.work_ids_edit.set_value_ids([work_id])
+            dialog.track_ids_edit.set_value_ids([track_id])
+            dialog.release_ids_edit.set_value_ids([release_id])
+            dialog.documents_editor.load_documents(
+                [
+                    ContractDocumentRecord(
+                        id=41,
+                        contract_id=1,
+                        title="Original Version",
+                        document_type="signed_agreement",
+                        version_label="v1",
+                        created_date=None,
+                        received_date=None,
+                        signed_status="signed",
+                        signed_by_all_parties=True,
+                        active_flag=True,
+                        supersedes_document_id=None,
+                        superseded_by_document_id=42,
+                        file_path=None,
+                        filename="original.pdf",
+                        checksum_sha256=None,
+                        notes=None,
+                        uploaded_at=None,
+                        storage_mode="managed_file",
+                    ),
+                    ContractDocumentRecord(
+                        id=42,
+                        contract_id=1,
+                        title="Amendment",
+                        document_type="amendment",
+                        version_label="v2",
+                        created_date=None,
+                        received_date=None,
+                        signed_status="signed",
+                        signed_by_all_parties=True,
+                        active_flag=False,
+                        supersedes_document_id=41,
+                        superseded_by_document_id=None,
+                        file_path=None,
+                        filename="amendment.pdf",
+                        checksum_sha256=None,
+                        notes=None,
+                        uploaded_at=None,
+                        storage_mode="managed_file",
+                    ),
+                ]
+            )
+            dialog.documents_editor.documents_table.selectRow(1)
+            dialog.documents_editor._load_document_into_form(1)
+
+            payload = dialog.payload()
+            self.assertEqual(payload.work_ids, [work_id])
+            self.assertEqual(payload.track_ids, [track_id])
+            self.assertEqual(payload.release_ids, [release_id])
+            self.assertEqual(payload.documents[1].supersedes_document_id, 41)
+            self.assertEqual(payload.documents[0].superseded_by_document_id, 42)
+        finally:
+            dialog.close()
+
+    def test_contract_editor_preserves_unresolved_reference_ids_in_dialog_payload(self):
+        if ContractEditorDialog is None:
+            self.skipTest("Contract editor dialog unavailable")
+        require_qapplication()
+
+        detail = ContractDetail(
+            contract=ContractRecord(
+                id=7,
+                title="Legacy Reference Contract",
+                contract_type="license",
+                draft_date=None,
+                signature_date=None,
+                effective_date=None,
+                start_date=None,
+                end_date=None,
+                renewal_date=None,
+                notice_deadline=None,
+                option_periods=None,
+                reversion_date=None,
+                termination_date=None,
+                status="draft",
+                supersedes_contract_id=None,
+                superseded_by_contract_id=None,
+                summary=None,
+                notes=None,
+                profile_name=None,
+                created_at=None,
+                updated_at=None,
+                obligation_count=0,
+                document_count=1,
+            ),
+            parties=[],
+            obligations=[],
+            documents=[
+                ContractDocumentRecord(
+                    id=71,
+                    contract_id=7,
+                    title="Legacy Amendment",
+                    document_type="amendment",
+                    version_label="legacy",
+                    created_date=None,
+                    received_date=None,
+                    signed_status=None,
+                    signed_by_all_parties=False,
+                    active_flag=False,
+                    supersedes_document_id=999,
+                    superseded_by_document_id=None,
+                    file_path=None,
+                    filename="legacy.pdf",
+                    checksum_sha256=None,
+                    notes=None,
+                    uploaded_at=None,
+                    storage_mode="managed_file",
+                )
+            ],
+            work_ids=[991],
+            track_ids=[992],
+            release_ids=[993],
+        )
+
+        dialog = ContractEditorDialog(contract_service=self.contract_service, detail=detail)
+        try:
+            self.assertEqual(dialog.work_ids_edit.table.item(0, 1).text(), "Unknown #991")
+            self.assertEqual(dialog.track_ids_edit.table.item(0, 1).text(), "Unknown #992")
+            self.assertEqual(dialog.release_ids_edit.table.item(0, 1).text(), "Unknown #993")
+            self.assertIn("Unknown #999", dialog.documents_editor.supersedes_edit.combo.currentText())
+
+            payload = dialog.payload()
+            self.assertEqual(payload.work_ids, [991])
+            self.assertEqual(payload.track_ids, [992])
+            self.assertEqual(payload.release_ids, [993])
+            self.assertEqual(payload.documents[0].supersedes_document_id, 999)
+        finally:
+            dialog.close()
 
     def test_contract_validation_rejects_invalid_date_ranges(self):
         with self.assertRaises(ValueError):

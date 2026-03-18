@@ -45,6 +45,7 @@ from isrc_manager.ui_common import (
     FocusWheelComboBox,
     _add_standard_dialog_header,
     _create_action_button_grid,
+    _create_action_button_cluster,
     _apply_compact_dialog_control_heights,
     _apply_standard_dialog_chrome,
     _apply_standard_widget_chrome,
@@ -127,10 +128,46 @@ class ReleaseEditorDialog(QDialog):
         self.subtitle_edit = QLineEdit()
         form.addRow("Version / Subtitle", self.subtitle_edit)
 
-        self.primary_artist_edit = QLineEdit()
+        self.primary_artist_edit = stored_value_combo(
+            """
+            SELECT value
+            FROM (
+                SELECT name AS value
+                FROM Artists
+                WHERE name IS NOT NULL AND name != ''
+                UNION
+                SELECT primary_artist AS value
+                FROM Releases
+                WHERE primary_artist IS NOT NULL AND primary_artist != ''
+                UNION
+                SELECT album_artist AS value
+                FROM Releases
+                WHERE album_artist IS NOT NULL AND album_artist != ''
+            )
+            ORDER BY value
+            """
+        )
         form.addRow("Primary Artist", self.primary_artist_edit)
 
-        self.album_artist_edit = QLineEdit()
+        self.album_artist_edit = stored_value_combo(
+            """
+            SELECT value
+            FROM (
+                SELECT name AS value
+                FROM Artists
+                WHERE name IS NOT NULL AND name != ''
+                UNION
+                SELECT primary_artist AS value
+                FROM Releases
+                WHERE primary_artist IS NOT NULL AND primary_artist != ''
+                UNION
+                SELECT album_artist AS value
+                FROM Releases
+                WHERE album_artist IS NOT NULL AND album_artist != ''
+            )
+            ORDER BY value
+            """
+        )
         form.addRow("Album Artist", self.album_artist_edit)
 
         self.release_type_combo = QComboBox()
@@ -147,10 +184,32 @@ class ReleaseEditorDialog(QDialog):
         self.original_release_date_edit.setPlaceholderText("YYYY-MM-DD")
         form.addRow("Original Release Date", self.original_release_date_edit)
 
-        self.label_edit = QLineEdit()
+        self.label_edit = stored_value_combo(
+            """
+            SELECT value
+            FROM (
+                SELECT publisher AS value
+                FROM Tracks
+                WHERE publisher IS NOT NULL AND publisher != ''
+                UNION
+                SELECT label AS value
+                FROM Releases
+                WHERE label IS NOT NULL AND label != ''
+            )
+            ORDER BY value
+            """
+        )
         form.addRow("Label", self.label_edit)
 
-        self.sublabel_edit = QLineEdit()
+        self.sublabel_edit = stored_value_combo(
+            """
+            SELECT sublabel
+            FROM Releases
+            WHERE sublabel IS NOT NULL AND sublabel != ''
+            GROUP BY sublabel
+            ORDER BY sublabel
+            """
+        )
         form.addRow("Sublabel", self.sublabel_edit)
 
         self.catalog_number_edit = stored_value_combo(
@@ -326,15 +385,15 @@ class ReleaseEditorDialog(QDialog):
 
         self.title_edit.setText(release.title or "")
         self.subtitle_edit.setText(release.version_subtitle or "")
-        self.primary_artist_edit.setText(release.primary_artist or "")
-        self.album_artist_edit.setText(release.album_artist or "")
+        self.primary_artist_edit.setCurrentText(release.primary_artist or "")
+        self.album_artist_edit.setCurrentText(release.album_artist or "")
         self.release_type_combo.setCurrentText(
             (release.release_type or "album").replace("_", " ").title()
         )
         self.release_date_edit.setText(release.release_date or "")
         self.original_release_date_edit.setText(release.original_release_date or "")
-        self.label_edit.setText(release.label or "")
-        self.sublabel_edit.setText(release.sublabel or "")
+        self.label_edit.setCurrentText(release.label or "")
+        self.sublabel_edit.setCurrentText(release.sublabel or "")
         self.catalog_number_edit.setCurrentText(release.catalog_number or "")
         self.upc_edit.setCurrentText(release.upc or "")
         self.territory_edit.setText(release.territory or "")
@@ -490,13 +549,13 @@ class ReleaseEditorDialog(QDialog):
         return ReleasePayload(
             title=self.title_edit.text().strip(),
             version_subtitle=self.subtitle_edit.text().strip() or None,
-            primary_artist=self.primary_artist_edit.text().strip() or None,
-            album_artist=self.album_artist_edit.text().strip() or None,
+            primary_artist=self.primary_artist_edit.currentText().strip() or None,
+            album_artist=self.album_artist_edit.currentText().strip() or None,
             release_type=release_type,
             release_date=self.release_date_edit.text().strip() or None,
             original_release_date=self.original_release_date_edit.text().strip() or None,
-            label=self.label_edit.text().strip() or None,
-            sublabel=self.sublabel_edit.text().strip() or None,
+            label=self.label_edit.currentText().strip() or None,
+            sublabel=self.sublabel_edit.currentText().strip() or None,
             catalog_number=self.catalog_number_edit.currentText().strip() or None,
             upc=self.upc_edit.currentText().strip() or None,
             territory=self.territory_edit.text().strip() or None,
@@ -638,15 +697,17 @@ class ReleaseBrowserPanel(QWidget):
         list_layout.addWidget(list_box, 1)
         splitter.addWidget(list_panel)
 
-        detail_panel = QWidget(splitter)
-        detail_layout = QVBoxLayout(detail_panel)
-        detail_layout.setContentsMargins(0, 0, 0, 0)
-        detail_layout.setSpacing(10)
+        self.detail_scroll_area, _, detail_content_layout = _create_scrollable_dialog_content(
+            splitter
+        )
+        self.detail_scroll_area.setObjectName("releaseBrowserDetailScrollArea")
+        detail_content_layout.setSpacing(10)
 
-        detail_tabs = QTabWidget(detail_panel)
-        detail_layout.addWidget(detail_tabs, 1)
+        self.detail_tabs = QTabWidget(self.detail_scroll_area)
+        self.detail_tabs.setMinimumHeight(420)
+        detail_content_layout.addWidget(self.detail_tabs, 1)
 
-        overview_tab = QWidget(detail_tabs)
+        overview_tab = QWidget(self.detail_tabs)
         overview_tab_layout = QVBoxLayout(overview_tab)
         overview_tab_layout.setContentsMargins(0, 8, 0, 0)
         overview_tab_layout.setSpacing(0)
@@ -710,9 +771,9 @@ class ReleaseBrowserPanel(QWidget):
         overview_layout.addWidget(workflow_box)
         overview_layout.addStretch(1)
         overview_tab_layout.addWidget(overview_scroll, 1)
-        detail_tabs.addTab(overview_tab, "Overview")
+        self.detail_tabs.addTab(overview_tab, "Overview")
 
-        tracks_tab = QWidget(detail_tabs)
+        tracks_tab = QWidget(self.detail_tabs)
         tracks_tab_layout = QVBoxLayout(tracks_tab)
         tracks_tab_layout.setContentsMargins(0, 8, 0, 0)
         tracks_tab_layout.setSpacing(0)
@@ -733,38 +794,42 @@ class ReleaseBrowserPanel(QWidget):
         self.track_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
         tracks_box_layout.addWidget(self.track_table, 1)
         tracks_tab_layout.addWidget(tracks_box, 1)
-        detail_tabs.addTab(tracks_tab, "Tracks")
+        self.detail_tabs.addTab(tracks_tab, "Tracks")
 
         actions_box, actions_layout = _create_standard_section(
             self,
             "Release Actions",
             "Edit or duplicate the release, attach the current selection, filter the main table, or open the highlighted track.",
         )
-        action_grid = QGridLayout()
-        action_grid.setContentsMargins(0, 0, 0, 0)
-        action_grid.setHorizontalSpacing(12)
-        action_grid.setVerticalSpacing(10)
-        action_grid.setColumnStretch(0, 1)
-        action_grid.setColumnStretch(1, 1)
         edit_button = QPushButton("Edit Release")
         edit_button.clicked.connect(self._emit_edit_current)
-        action_grid.addWidget(edit_button, 0, 0)
         duplicate_button = QPushButton("Duplicate Release")
         duplicate_button.clicked.connect(self._emit_duplicate_current)
-        action_grid.addWidget(duplicate_button, 0, 1)
         add_selection_button = QPushButton("Add Selected Tracks")
         add_selection_button.clicked.connect(self._emit_add_selected_current)
-        action_grid.addWidget(add_selection_button, 1, 0)
         filter_button = QPushButton("Filter Catalog To Release")
         filter_button.clicked.connect(self._emit_filter_current)
-        action_grid.addWidget(filter_button, 1, 1)
         open_track_button = QPushButton("Open Selected Track")
         open_track_button.clicked.connect(self._emit_open_track_current)
-        action_grid.addWidget(open_track_button, 2, 0, 1, 2)
-        actions_layout.addLayout(action_grid)
-        detail_layout.addWidget(actions_box)
+        self.actions_cluster = _create_action_button_cluster(
+            actions_box,
+            [
+                edit_button,
+                duplicate_button,
+                add_selection_button,
+                filter_button,
+                open_track_button,
+            ],
+            columns=2,
+            min_button_width=180,
+            span_last_row=True,
+        )
+        self.actions_cluster.setObjectName("releaseBrowserActionsCluster")
+        actions_layout.addWidget(self.actions_cluster)
+        detail_content_layout.addWidget(actions_box)
+        detail_content_layout.addStretch(1)
 
-        splitter.addWidget(detail_panel)
+        splitter.addWidget(self.detail_scroll_area)
         splitter.setStretchFactor(0, 5)
         splitter.setStretchFactor(1, 4)
 

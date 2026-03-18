@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import QDockWidget, QWidget
 
 
@@ -53,9 +53,27 @@ class CatalogWorkspaceDock(QDockWidget):
 
     def show_panel(self) -> QWidget:
         panel = self.panel()
-        self.setVisible(True)
-        _tabify_catalog_workspace_dock(self.app, self)
-        self.raise_()
+        previous_suspend_state = getattr(self.app, "_suspend_dock_state_sync", False)
+        setattr(self.app, "_suspend_dock_state_sync", True)
+        try:
+            self.setVisible(True)
+            _tabify_catalog_workspace_dock(self.app, self)
+        finally:
+            setattr(self.app, "_suspend_dock_state_sync", previous_suspend_state)
+
+        def _finalize_show_panel() -> None:
+            suspended_state = getattr(self.app, "_suspend_dock_state_sync", False)
+            setattr(self.app, "_suspend_dock_state_sync", True)
+            try:
+                _tabify_catalog_workspace_dock(self.app, self)
+                self.raise_()
+            finally:
+                setattr(self.app, "_suspend_dock_state_sync", suspended_state)
+            save_state = getattr(self.app, "_save_main_dock_state", None)
+            if callable(save_state):
+                save_state()
+
+        QTimer.singleShot(0, _finalize_show_panel)
         refresh = getattr(panel, "refresh", None)
         if callable(refresh):
             refresh()

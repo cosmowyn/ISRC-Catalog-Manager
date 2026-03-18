@@ -616,6 +616,13 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
         | QMainWindow.AllowTabbedDocks
         | QMainWindow.AnimatedDocks
     )
+    for area in (
+        Qt.LeftDockWidgetArea,
+        Qt.RightDockWidgetArea,
+        Qt.TopDockWidgetArea,
+        Qt.BottomDockWidgetArea,
+    ):
+        app.setTabPosition(area, QTabWidget.North)
     app._dock_placeholder = QWidget()
     app._dock_placeholder.setObjectName("dockPlaceholder")
     app._dock_placeholder.setProperty("role", "workspaceCanvas")
