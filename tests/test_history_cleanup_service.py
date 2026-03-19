@@ -11,7 +11,11 @@ from isrc_manager.history import (
     HistoryStorageCleanupService,
     SessionHistoryManager,
 )
-from isrc_manager.services import DatabaseSchemaService, DatabaseSessionService, SettingsMutationService
+from isrc_manager.services import (
+    DatabaseSchemaService,
+    DatabaseSessionService,
+    SettingsMutationService,
+)
 
 
 class HistoryCleanupServiceTests(unittest.TestCase):
@@ -83,7 +87,9 @@ class HistoryCleanupServiceTests(unittest.TestCase):
         )
         protected_file_state_dir = Path(after_state["files"][0]["artifact_path"]).parent
 
-        stale_file_state_dir = self.history_root / "file_states" / self.db_path.stem / "stale_bundle"
+        stale_file_state_dir = (
+            self.history_root / "file_states" / self.db_path.stem / "stale_bundle"
+        )
         stale_file_state_dir.mkdir(parents=True, exist_ok=True)
         (stale_file_state_dir / "artifact.bin").write_bytes(b"stale")
 

@@ -102,6 +102,7 @@ class MigrationIntegrationTests(unittest.TestCase):
         window = app_module.App()
         try:
             window.open_database(str(legacy_path))
+            active_data_root = Path(window.data_root)
 
             self.assertEqual(window.schema_service.get_db_version(), SCHEMA_TARGET)
             snapshot = window.track_service.fetch_track_snapshot(1)
@@ -111,14 +112,14 @@ class MigrationIntegrationTests(unittest.TestCase):
             self.assertEqual(snapshot.buma_work_number, "BUMA-LEGACY-99")
             self.assertTrue(str(snapshot.audio_file_path).startswith("track_media/audio/"))
             self.assertTrue(str(snapshot.album_art_path).startswith("track_media/images/"))
-            self.assertTrue((Path(self.data_root) / str(snapshot.audio_file_path)).exists())
-            self.assertTrue((Path(self.data_root) / str(snapshot.album_art_path)).exists())
+            self.assertTrue((active_data_root / str(snapshot.audio_file_path)).exists())
+            self.assertTrue((active_data_root / str(snapshot.album_art_path)).exists())
             self.assertEqual(
-                (Path(self.data_root) / str(snapshot.audio_file_path)).read_bytes(),
+                (active_data_root / str(snapshot.audio_file_path)).read_bytes(),
                 b"WAVE",
             )
             self.assertEqual(
-                (Path(self.data_root) / str(snapshot.album_art_path)).read_bytes(),
+                (active_data_root / str(snapshot.album_art_path)).read_bytes(),
                 b"PNG!",
             )
             self.assertEqual(

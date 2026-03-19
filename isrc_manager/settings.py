@@ -1,11 +1,9 @@
 """Application settings and single-instance helpers."""
 
 import uuid
-from pathlib import Path
 
 from PySide6.QtCore import QLockFile, QSettings
 
-from .constants import APP_NAME, SETTINGS_BASENAME
 from .paths import (
     STORAGE_ACTIVE_DATA_ROOT_KEY,
     configure_qt_application_identity,

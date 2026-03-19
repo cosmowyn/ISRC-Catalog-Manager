@@ -257,4 +257,6 @@ def DATA_DIR(
     the native Qt local app-data location but can honor a stored active root when
     migration has been deferred or completed.
     """
-    return resolve_app_storage_layout(settings=settings, app_name=app_name, portable=portable).data_root
+    return resolve_app_storage_layout(
+        settings=settings, app_name=app_name, portable=portable
+    ).data_root

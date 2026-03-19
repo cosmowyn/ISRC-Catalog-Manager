@@ -380,7 +380,9 @@ class StorageMigrationService:
 
         return tuple(rewritten)
 
-    def _rewrite_profile_database(self, db_path: Path, source_root: Path, target_root: Path) -> None:
+    def _rewrite_profile_database(
+        self, db_path: Path, source_root: Path, target_root: Path
+    ) -> None:
         conn = sqlite3.connect(str(db_path))
         try:
             with conn:
@@ -392,7 +394,9 @@ class StorageMigrationService:
                         settings_state, source_root, target_root
                     )
                     updated_manifest = self._rewrite_json_value(manifest, source_root, target_root)
-                    updated_path = self._rewrite_path_string(snapshot_path, source_root, target_root)
+                    updated_path = self._rewrite_path_string(
+                        snapshot_path, source_root, target_root
+                    )
                     conn.execute(
                         """
                         UPDATE HistorySnapshots
@@ -431,9 +435,15 @@ class StorageMigrationService:
 
                 entry_rows = conn.execute(ENTRY_TABLE_SQL).fetchall()
                 for entry_id, payload_json, inverse_json, redo_json in entry_rows:
-                    payload = self._rewrite_json_value(self._loads(payload_json), source_root, target_root)
-                    inverse = self._rewrite_json_value(self._loads(inverse_json), source_root, target_root)
-                    redo = self._rewrite_json_value(self._loads(redo_json), source_root, target_root)
+                    payload = self._rewrite_json_value(
+                        self._loads(payload_json), source_root, target_root
+                    )
+                    inverse = self._rewrite_json_value(
+                        self._loads(inverse_json), source_root, target_root
+                    )
+                    redo = self._rewrite_json_value(
+                        self._loads(redo_json), source_root, target_root
+                    )
                     conn.execute(
                         """
                         UPDATE HistoryEntries
@@ -460,9 +470,7 @@ class StorageMigrationService:
                 self.settings.setValue("db/last_path", updated)
         database_dir = str(self.settings.value("paths/database_dir", "", str) or "").strip()
         if database_dir:
-            updated_database_dir = self._rewrite_path_string(
-                database_dir, source_root, target_root
-            )
+            updated_database_dir = self._rewrite_path_string(database_dir, source_root, target_root)
             if updated_database_dir != database_dir:
                 self.settings.setValue("paths/database_dir", updated_database_dir)
         self.settings.setValue(STORAGE_ACTIVE_DATA_ROOT_KEY, str(target_root.resolve()))

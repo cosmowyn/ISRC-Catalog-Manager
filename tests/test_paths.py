@@ -45,14 +45,17 @@ class PathLayoutTests(unittest.TestCase):
                     return str(qt_local_root)
                 return str(root / location_name)
 
-            with mock.patch.object(
-                path_helpers.QStandardPaths,
-                "writableLocation",
-                side_effect=_fake_writable_location,
-            ), mock.patch.object(
-                path_helpers,
-                "legacy_data_root",
-                return_value=legacy_root,
+            with (
+                mock.patch.object(
+                    path_helpers.QStandardPaths,
+                    "writableLocation",
+                    side_effect=_fake_writable_location,
+                ),
+                mock.patch.object(
+                    path_helpers,
+                    "legacy_data_root",
+                    return_value=legacy_root,
+                ),
             ):
                 layout = path_helpers.resolve_app_storage_layout(settings=settings)
 
@@ -83,11 +86,15 @@ class PathLayoutTests(unittest.TestCase):
 
         for platform_name, env_patch, expected_settings, expected_local in cases:
             with self.subTest(platform=platform_name):
-                with mock.patch.object(path_helpers, "QStandardPaths", None), mock.patch.object(
-                    path_helpers.sys,
-                    "platform",
-                    platform_name,
-                ), mock.patch.dict(os.environ, env_patch, clear=False):
+                with (
+                    mock.patch.object(path_helpers, "QStandardPaths", None),
+                    mock.patch.object(
+                        path_helpers.sys,
+                        "platform",
+                        platform_name,
+                    ),
+                    mock.patch.dict(os.environ, env_patch, clear=False),
+                ):
                     self.assertEqual(path_helpers.settings_root(), expected_settings.resolve())
                     self.assertEqual(path_helpers.preferred_data_root(), expected_local.resolve())
 
@@ -96,11 +103,15 @@ class PathLayoutTests(unittest.TestCase):
                 "LOCALAPPDATA": str(Path(tmpdir) / "LocalAppData"),
                 "APPDATA": str(Path(tmpdir) / "RoamingAppData"),
             }
-            with mock.patch.object(path_helpers, "QStandardPaths", None), mock.patch.object(
-                path_helpers.sys,
-                "platform",
-                "win32",
-            ), mock.patch.dict(os.environ, env_patch, clear=False):
+            with (
+                mock.patch.object(path_helpers, "QStandardPaths", None),
+                mock.patch.object(
+                    path_helpers.sys,
+                    "platform",
+                    "win32",
+                ),
+                mock.patch.dict(os.environ, env_patch, clear=False),
+            ):
                 self.assertEqual(
                     path_helpers.settings_root(),
                     (Path(env_patch["APPDATA"]) / APP_ORG / APP_NAME).resolve(),

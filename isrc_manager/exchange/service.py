@@ -12,7 +12,8 @@ import sqlite3
 import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime, time as dt_time, timedelta
+from datetime import datetime, timedelta
+from datetime import time as dt_time
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -68,6 +69,7 @@ class ExchangeService:
         }
     )
     _TITLE_NAME_TOKEN_RE = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?")
+    _TITLE_NAME_COMPACT_ACRONYM_RE = re.compile(r"(?<![A-Z])[A-Z]{1,2}(?:[&/][A-Z]{1,2})+(?![A-Z])")
 
     BASE_EXPORT_COLUMNS = (
         "track_id",
@@ -657,9 +659,7 @@ class ExchangeService:
         with Path(path).open("r", encoding="utf-8-sig", newline="") as handle:
             sample = handle.read(CSV_SNIFF_SAMPLE_SIZE)
             handle.seek(0)
-            dialect, resolved_delimiter = self._csv_dialect_for_sample(
-                sample, delimiter=delimiter
-            )
+            dialect, resolved_delimiter = self._csv_dialect_for_sample(sample, delimiter=delimiter)
             if dialect is None:
                 yield csv.DictReader(handle, delimiter=resolved_delimiter), resolved_delimiter
                 return
@@ -991,7 +991,25 @@ class ExchangeService:
             lambda match: cls._capitalize_title_name_token(match.group(0)),
             lowered,
         )
-        return cls._lowercase_middle_small_words(titled)
+        normalized = cls._lowercase_middle_small_words(titled)
+        return cls._restore_compact_acronym_spans(clean, normalized)
+
+    @classmethod
+    def _restore_compact_acronym_spans(cls, original: str, normalized: str) -> str:
+        if not original or not normalized or len(original) != len(normalized):
+            return normalized
+        parts: list[str] = []
+        last_end = 0
+        has_match = False
+        for match in cls._TITLE_NAME_COMPACT_ACRONYM_RE.finditer(original):
+            has_match = True
+            parts.append(normalized[last_end : match.start()])
+            parts.append(match.group(0))
+            last_end = match.end()
+        if not has_match:
+            return normalized
+        parts.append(normalized[last_end:])
+        return "".join(parts)
 
     @staticmethod
     def _capitalize_title_name_token(token: str) -> str:
@@ -1226,9 +1244,7 @@ class ExchangeService:
                 if is_blank(str(track_length_value or "")):
                     track_length_hms = row.get("track_length_hms")
                     if isinstance(track_length_hms, (dt_time, timedelta)):
-                        track_length_value = self._normalize_track_length_target(
-                            track_length_hms
-                        )
+                        track_length_value = self._normalize_track_length_target(track_length_hms)
                     else:
                         track_length_value = parse_hms_text(str(track_length_hms or ""))
                 track_length_sec = int(track_length_value or 0)

@@ -1,4 +1,3 @@
-import json
 import shutil
 import sqlite3
 import tempfile
@@ -136,14 +135,18 @@ class StorageMigrationServiceTests(unittest.TestCase):
             str(self.target_root.resolve()),
         )
 
-        migrated_conn = DatabaseSessionService().open(self.target_root / "Database" / "library.db").conn
+        migrated_conn = (
+            DatabaseSessionService().open(self.target_root / "Database" / "library.db").conn
+        )
         try:
             snapshot_row = migrated_conn.execute(
                 "SELECT db_snapshot_path, settings_json, manifest_json FROM HistorySnapshots LIMIT 1"
             ).fetchone()
             self.assertIsNotNone(snapshot_row)
             assert snapshot_row is not None
-            self.assertTrue(str(Path(snapshot_row[0]).resolve()).startswith(str(self.target_root.resolve())))
+            self.assertTrue(
+                str(Path(snapshot_row[0]).resolve()).startswith(str(self.target_root.resolve()))
+            )
             self.assertIn(str(self.target_root.resolve()), str(snapshot_row[1]))
             self.assertIn(str(self.target_root.resolve()), str(snapshot_row[2]))
             self.assertNotIn(str(self.source_root.resolve()), str(snapshot_row[1]))
@@ -154,18 +157,18 @@ class StorageMigrationServiceTests(unittest.TestCase):
             ).fetchone()
             self.assertIsNotNone(backup_row)
             assert backup_row is not None
-            self.assertTrue(str(Path(backup_row[0]).resolve()).startswith(str(self.target_root.resolve())))
-            self.assertTrue(str(Path(backup_row[1]).resolve()).startswith(str(self.target_root.resolve())))
+            self.assertTrue(
+                str(Path(backup_row[0]).resolve()).startswith(str(self.target_root.resolve()))
+            )
+            self.assertTrue(
+                str(Path(backup_row[1]).resolve()).startswith(str(self.target_root.resolve()))
+            )
             self.assertIn(str(self.target_root.resolve()), str(backup_row[2]))
 
             entry_rows = migrated_conn.execute(
                 "SELECT payload_json, inverse_json, redo_json FROM HistoryEntries ORDER BY id"
             ).fetchall()
-            serialized_entries = "\n".join(
-                str(value or "")
-                for row in entry_rows
-                for value in row
-            )
+            serialized_entries = "\n".join(str(value or "") for row in entry_rows for value in row)
             self.assertIn(str(self.target_root.resolve()), serialized_entries)
             self.assertNotIn(str(self.source_root.resolve()), serialized_entries)
         finally:

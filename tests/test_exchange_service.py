@@ -89,9 +89,7 @@ class ExchangeServiceTests(unittest.TestCase):
             )
         )
 
-    def _fetch_release_row_for_track(
-        self, track_id: int
-    ) -> tuple[str, str, str, str, str] | None:
+    def _fetch_release_row_for_track(self, track_id: int) -> tuple[str, str, str, str, str] | None:
         return self.conn.execute(
             """
             SELECT
@@ -662,8 +660,7 @@ class ExchangeServiceTests(unittest.TestCase):
     def test_inspect_csv_preserves_quoted_commas(self):
         csv_path = self.data_root / "quoted-commas.csv"
         csv_path.write_text(
-            'track_title,artist_name,comments\n'
-            '"Orbit, Pt. 1",Cosmowyn,"Dreamy, wide mix"\n',
+            "track_title,artist_name,comments\n" '"Orbit, Pt. 1",Cosmowyn,"Dreamy, wide mix"\n',
             encoding="utf-8",
         )
 
@@ -755,8 +752,7 @@ class ExchangeServiceTests(unittest.TestCase):
     def test_custom_csv_delimiter_refresh_and_import_preserve_quoted_values(self):
         csv_path = self.data_root / "caret-import.csv"
         csv_path.write_text(
-            'track_title^artist_name^comments\n'
-            '"Orbit^Pt. 1"^Cosmowyn^"Dreamy^wide mix"\n',
+            "track_title^artist_name^comments\n" '"Orbit^Pt. 1"^Cosmowyn^"Dreamy^wide mix"\n',
             encoding="utf-8",
         )
 
@@ -890,7 +886,7 @@ class ExchangeServiceTests(unittest.TestCase):
         csv_path = self.data_root / "title-name-normalization.csv"
         csv_path.write_text(
             "Song Name,Lead Artist,Guest Artists,Album Name,Release Name,Release Primary,Release Album Artist,Track Length,ISRC Code,ISWC Code,UPC Code,Cat No,Release Cat No,Release UPC,Mood Source\n"
-            "\"DJ/MC BATTLE\",JOHN DOE,\"JANE DOE, DJ/MC CREW\",THE FOREST OF INFINITE IMAGINATION,THE FOREST OF INFINITE IMAGINATION,JOHN DOE,DJ/MC CREW,180,NL-ABC-25-00001,T-123.456.789-0,036000291452,CAT-001,REL-001,036000291452,LOUD\n",
+            '"DJ/MC BATTLE",JOHN DOE,"JANE DOE, DJ/MC CREW",THE FOREST OF INFINITE IMAGINATION,THE FOREST OF INFINITE IMAGINATION,JOHN DOE,DJ/MC CREW,180,NL-ABC-25-00001,T-123.456.789-0,036000291452,CAT-001,REL-001,036000291452,LOUD\n',
             encoding="utf-8",
         )
 
@@ -922,9 +918,9 @@ class ExchangeServiceTests(unittest.TestCase):
         snapshot = self.track_service.fetch_track_snapshot(track_id)
         assert snapshot is not None
 
-        self.assertEqual(snapshot.track_title, "Dj/Mc Battle")
+        self.assertEqual(snapshot.track_title, "DJ/MC Battle")
         self.assertEqual(snapshot.artist_name, "John Doe")
-        self.assertEqual(sorted(snapshot.additional_artists), ["Dj/Mc Crew", "Jane Doe"])
+        self.assertEqual(sorted(snapshot.additional_artists), ["DJ/MC Crew", "Jane Doe"])
         self.assertEqual(snapshot.album_title, "The Forest of Infinite Imagination")
         self.assertEqual(snapshot.isrc, "NL-ABC-25-00001")
         self.assertEqual(snapshot.iswc, "T-123.456.789-0")
@@ -935,7 +931,7 @@ class ExchangeServiceTests(unittest.TestCase):
             (
                 "The Forest of Infinite Imagination",
                 "John Doe",
-                "Dj/Mc Crew",
+                "DJ/MC Crew",
                 "REL-001",
                 "036000291452",
             ),
@@ -995,9 +991,9 @@ class ExchangeServiceTests(unittest.TestCase):
         snapshot = self.track_service.fetch_track_snapshot(track_id)
         assert snapshot is not None
 
-        self.assertEqual(snapshot.track_title, "Dj/Mc Battle")
+        self.assertEqual(snapshot.track_title, "DJ/MC Battle")
         self.assertEqual(snapshot.artist_name, "John Doe")
-        self.assertEqual(sorted(snapshot.additional_artists), ["Dj/Mc Crew", "Jane Doe"])
+        self.assertEqual(sorted(snapshot.additional_artists), ["DJ/MC Crew", "Jane Doe"])
         self.assertEqual(snapshot.album_title, "The Forest of Infinite Imagination")
         self.assertEqual(snapshot.isrc, "NL-ABC-25-00002")
         self.assertEqual(snapshot.iswc, "T-123.456.789-0")
@@ -1008,7 +1004,7 @@ class ExchangeServiceTests(unittest.TestCase):
             (
                 "The Forest of Infinite Imagination",
                 "John Doe",
-                "Dj/Mc Crew",
+                "DJ/MC Crew",
                 "REL-002",
                 "036000291452",
             ),
@@ -1074,9 +1070,7 @@ class ExchangeServiceTests(unittest.TestCase):
         }
         json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
-        report = self.service.import_json(
-            json_path, options=ExchangeImportOptions(mode="create")
-        )
+        report = self.service.import_json(json_path, options=ExchangeImportOptions(mode="create"))
 
         self.assertEqual(report.passed, 2)
         self.assertEqual(report.failed, 0)
@@ -1086,9 +1080,9 @@ class ExchangeServiceTests(unittest.TestCase):
         assert first_snapshot is not None
         assert second_snapshot is not None
 
-        self.assertEqual(first_snapshot.track_title, "Dj/Mc Battle")
+        self.assertEqual(first_snapshot.track_title, "DJ/MC Battle")
         self.assertEqual(first_snapshot.artist_name, "John Doe")
-        self.assertEqual(sorted(first_snapshot.additional_artists), ["Dj/Mc Crew", "Jane Doe"])
+        self.assertEqual(sorted(first_snapshot.additional_artists), ["DJ/MC Crew", "Jane Doe"])
         self.assertEqual(first_snapshot.album_title, "The Forest of Infinite Imagination")
         self.assertEqual(first_snapshot.isrc, "NL-ABC-25-00003")
         self.assertEqual(first_snapshot.iswc, "T-123.456.789-0")
@@ -1099,7 +1093,7 @@ class ExchangeServiceTests(unittest.TestCase):
             (
                 "The Forest of Infinite Imagination",
                 "John Doe",
-                "Dj/Mc Crew",
+                "DJ/MC Crew",
                 "REL-003",
                 "036000291452",
             ),
@@ -1122,6 +1116,40 @@ class ExchangeServiceTests(unittest.TestCase):
                 "REL-004",
                 "042100005264",
             ),
+        )
+
+    def test_normalize_text_target_restores_only_exact_compound_spans(self):
+        self.assertEqual(
+            self.service._normalize_text_target("track_title", "AC/DC LIVE SESSION"),
+            "AC/DC Live Session",
+        )
+        self.assertEqual(
+            self.service._normalize_text_target("artist_name", "R&B UNIT"),
+            "R&B Unit",
+        )
+        self.assertEqual(
+            self.service._normalize_text_target("album_title", "THE R&B SESSIONS"),
+            "The R&B Sessions",
+        )
+        self.assertEqual(
+            self.service._normalize_text_target("release_album_artist", "AC/DC"),
+            "AC/DC",
+        )
+        self.assertEqual(
+            self.service._normalize_additional_artists_target("DJ/MC CREW, JANE DOE"),
+            "DJ/MC Crew, Jane Doe",
+        )
+        self.assertEqual(
+            self.service._normalize_text_target("track_title", "AC/DC Live"),
+            "AC/DC Live",
+        )
+        self.assertEqual(
+            self.service._normalize_text_target("comments", "AC/DC LIVE"),
+            "AC/DC LIVE",
+        )
+        self.assertEqual(
+            self.service._normalize_text_target("custom::Mood", "R&B NIGHTS"),
+            "R&B NIGHTS",
         )
 
     def test_merge_mode_matches_case_only_title_and_artist_differences(self):

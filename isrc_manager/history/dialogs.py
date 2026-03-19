@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QGroupBox,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QMessageBox,
     QPushButton,
@@ -15,7 +16,6 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QTabWidget,
     QToolButton,
-    QInputDialog,
     QVBoxLayout,
 )
 
@@ -170,9 +170,7 @@ class HistoryDialog(QDialog):
         self.snapshot_table.resizeColumnsToContents()
 
         backups = (
-            self.app.history_manager.list_backups()
-            if self.app.history_manager is not None
-            else []
+            self.app.history_manager.list_backups() if self.app.history_manager is not None else []
         )
         self.backup_table.setRowCount(len(backups))
         for row_idx, backup in enumerate(backups):

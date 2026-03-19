@@ -4,15 +4,18 @@ Date: 2026-03-19
 
 ## Summary
 
-This pass adds a narrow import-time capitalization normalization layer for human-readable title/name fields in the exchange import stack.
+This follow-up keeps the narrow import-time capitalization normalization layer for human-readable title/name fields in the exchange import stack and adds a conservative acronym/branding-aware refinement.
 
 It builds on `docs/implementation_handoffs/csv-import-delimiter-selection.md` and keeps the current delimiter, duration, merge-matching, and custom-column mapping behavior unchanged.
 
-The enhancement:
+This follow-up enhancement:
 
 - normalizes clearly all-caps title/name values into a display-friendly form
+- restores only exact matched compact acronym compounds from the original import source
 - applies only to an explicit allowlist of human-readable exchange import targets
 - preserves existing behavior for codes, identifiers, custom fields, and other non-name fields
+- moves the XML import action under `File > Import Exchange`
+- records the current CI failures and the minimal fixes used to clear them
 
 ## Confirmed Baseline From Prior Handoff
 
@@ -93,28 +96,52 @@ The rule is intentionally narrow and deterministic:
   - `O'CONNOR -> O'Connor`
 - connector words are lowercased when not first/last:
   - `a`, `an`, `and`, `as`, `at`, `but`, `by`, `for`, `in`, `nor`, `of`, `on`, `or`, `the`, `to`, `via`, `vs`
+- after the simple display-case pass, exact matched compact acronym compounds from the original all-caps source are restored by source span only
+- restoration is limited to compact `/` and `&` compounds with 1-2 letter alphabetic segments:
+  - `AC/DC`
+  - `DJ/MC`
+  - `R&B`
+- only the exact matched substring is restored:
+  - `AC/DC LIVE SESSION -> AC/DC Live Session`
+  - `DJ/MC BATTLE -> DJ/MC Battle`
+- neighboring words are not preserved or broadened:
+  - `AC/DC LIVE SESSION` does not become `AC/DC LIVE Session`
+- standalone short tokens such as `DJ` are still handled by the normal simple title-casing rule
+- longer symbolic words such as `ON/OFF` remain outside this narrow preservation rule
 
 Examples:
 
 - `DREAMING AWAKE -> Dreaming Awake`
 - `THE FOREST OF INFINITE IMAGINATION -> The Forest of Infinite Imagination`
 - `JOHN DOE -> John Doe`
+- `AC/DC LIVE -> AC/DC Live`
+- `DJ/MC CREW -> DJ/MC Crew`
+- `R&B NIGHTS -> R&B Nights`
+- `AC/DC Live -> AC/DC Live`
 
 ## Acronym-Heavy / Symbol-Heavy Behavior
 
-This pass does not add acronym preservation.
+This follow-up adds conservative acronym preservation for exact matched compact compounds only.
 
-Current behavior is intentionally the simple rule output, and that output is locked in tests and documented here:
+Important boundaries:
 
-- `DJ/MC BATTLE -> Dj/Mc Battle`
-- `DJ/MC CREW -> Dj/Mc Crew`
+- the allowlist of normalized fields is unchanged
+- already-correct mixed-case values still bypass normalization
+- only the matched compact compound span is restored from the original source
+- codes, identifiers, custom fields, comments, lyrics, notes, and all other excluded targets remain untouched
 
-Related simple-rule behavior also currently comes out as:
+Examples of improved outcomes:
 
+- `DJ/MC BATTLE -> DJ/MC Battle`
+- `DJ/MC CREW -> DJ/MC Crew`
+- `AC/DC LIVE -> AC/DC Live`
 - `R&B NIGHTS -> R&B Nights`
-- `AC/DC LIVE -> Ac/Dc Live`
 
-If a later pass needs better acronym handling, it should be treated as a separate follow-up and not bundled into this narrow normalization pass.
+Examples that remain intentionally unchanged or out of scope:
+
+- `AC/DC Live -> AC/DC Live`
+- `comments: AC/DC LIVE -> AC/DC LIVE`
+- `custom::Mood: R&B NIGHTS -> R&B NIGHTS`
 
 ## Format Coverage
 
@@ -127,15 +154,31 @@ Covered:
 
 Not covered in this pass:
 
-- XML import
+- XML import normalization
 - repertoire exchange import
 - any new `.xls` support
+
+## XML Menu Placement
+
+The XML import workflow itself remains unchanged.
+
+UI change in this follow-up:
+
+- the existing `Import XML…` `QAction` now lives under `File > Import Exchange`
+- the action object, label, shortcut, and workflow wiring are preserved
+- `App.import_from_xml()` and `XMLImportService` behavior were not changed
+
+Shortcut preserved:
+
+- `Ctrl+Shift+I`
+- `Meta+Shift+I`
 
 ## Tests Added Or Updated
 
 Updated:
 
 - `tests/test_exchange_service.py`
+- `tests/test_app_shell_integration.py`
 
 New coverage added for:
 
@@ -145,7 +188,9 @@ New coverage added for:
 - all-caps track, album/release, artist, and additional-artist fields
 - already-proper or intentionally mixed-case values remaining unchanged
 - code/identifier fields remaining unchanged
-- acronym-heavy / symbol-heavy fallback behavior being explicit and deterministic
+- exact-span acronym compound restoration for `AC/DC`, `DJ/MC`, and `R&B`
+- a guard case proving neighboring words are not preserved
+- `File > Import Exchange` containing the XML action while preserving the existing XML workflow wiring
 
 Existing regression coverage left in place:
 
@@ -158,13 +203,48 @@ Existing regression coverage left in place:
 
 Focused verification command used for this pass:
 
-- `python3 -m unittest tests.test_exchange_service tests.test_exchange_dialogs tests.test_search_and_repertoire_exchange tests.test_xml_import_service`
+- `python3 -m unittest tests.test_exchange_service tests.test_exchange_dialogs tests.test_xml_import_service tests.test_app_shell_integration -v`
+
+## CI Findings And Fixes
+
+Current online CI findings investigated on March 19, 2026:
+
+- `CI #94` on commit `d01c613` was already failing `Ruff lint` and `Black format check`
+- the current workflow file remained correct; the failures came from code style drift, not workflow configuration
+- an older failed run on commit `8164d76` also showed `Tests` and `Coverage` failures, but those were not treated as the current head root cause without fresh reproduction
+
+Locally reproduced causes:
+
+- `python3 -m black --check build.py isrc_manager tests` wanted to reformat:
+  - `isrc_manager/paths.py`
+  - `tests/test_app_bootstrap.py`
+  - `tests/test_history_cleanup_service.py`
+  - `tests/test_paths.py`
+  - `isrc_manager/history/cleanup.py`
+  - `tests/test_storage_migration_service.py`
+  - `isrc_manager/storage_migration.py`
+  - `isrc_manager/history/dialogs.py`
+  - `tests/test_exchange_service.py`
+  - `isrc_manager/exchange/service.py`
+  - `tests/test_app_shell_integration.py`
+- `python3 -m ruff check build.py isrc_manager tests` reported:
+  - import ordering issues in `isrc_manager/exchange/service.py`
+  - import ordering issues in `isrc_manager/history/dialogs.py`
+  - unused imports in `isrc_manager/settings.py`
+  - import ordering issues in `tests/test_history_cleanup_service.py`
+  - an unused import in `tests/test_storage_migration_service.py`
+
+Fix approach kept intentionally minimal:
+
+- no CI gates were weakened
+- no workflow jobs were removed
+- only the flagged format/lint drift was corrected
+- verification still reran Ruff, Black, mypy, targeted tests, the full unittest suite, and coverage
 
 ## Remaining Limitations
 
 Still intentionally out of scope:
 
-- acronym-preservation logic
 - fuzzy or stylistic recasing of already mixed-case values
 - locale-aware title-casing
 - normalization of arbitrary free text

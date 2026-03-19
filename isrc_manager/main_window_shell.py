@@ -136,9 +136,9 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         slot=app.import_from_xml,
         shortcuts=("Ctrl+Shift+I", "Meta+Shift+I"),
     )
-    file_menu.addAction(app.import_xml_action)
 
     import_exchange_menu = file_menu.addMenu("Import Exchange")
+    import_exchange_menu.addAction(app.import_xml_action)
     app.import_csv_action = app._create_action(
         "Import CSV…",
         slot=lambda: app.import_exchange_file("csv"),

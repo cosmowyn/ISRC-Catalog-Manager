@@ -224,6 +224,12 @@ class AppShellIntegrationTests(unittest.TestCase):
                 return button
         raise AssertionError(f"Button not found: {text}")
 
+    def _menu_by_text(self, text: str):
+        for menu in self.window.menuBar().findChildren(app_module.QMenu):
+            if menu.title() == text:
+                return menu
+        raise AssertionError(f"Menu not found: {text}")
+
     def _workspace_dock_tab_bar(self) -> QTabBar:
         expected_titles = {
             dock.windowTitle()
@@ -268,6 +274,50 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.assertTrue(self.window.close())
         self.app.processEvents()
         self.assertFalse(self.window.isVisible())
+
+    def test_file_menu_groups_xml_import_under_import_exchange_and_preserves_wiring(self):
+        file_menu = self._menu_by_text("File")
+        file_texts = [action.text() for action in file_menu.actions() if action.text()]
+        self.assertNotIn("Import XML…", file_texts)
+
+        import_exchange_action = next(
+            action
+            for action in file_menu.actions()
+            if action.menu() is not None and action.text() == "Import Exchange"
+        )
+        import_exchange_menu = import_exchange_action.menu()
+        assert import_exchange_menu is not None
+        submenu_actions = [
+            action for action in import_exchange_menu.actions() if not action.isSeparator()
+        ]
+        self.assertEqual(
+            submenu_actions[:5],
+            [
+                self.window.import_xml_action,
+                self.window.import_csv_action,
+                self.window.import_xlsx_action,
+                self.window.import_json_action,
+                self.window.import_package_action,
+            ],
+        )
+        self.assertTrue(
+            any(not shortcut.isEmpty() for shortcut in self.window.import_xml_action.shortcuts())
+        )
+
+        with mock.patch.object(
+            app_module.QFileDialog,
+            "getOpenFileName",
+            return_value=("", ""),
+        ) as get_open_file_name:
+            self.window.import_xml_action.trigger()
+            self.app.processEvents()
+
+        get_open_file_name.assert_called_once_with(
+            self.window,
+            "Import from XML",
+            "",
+            "XML Files (*.xml)",
+        )
 
     def test_startup_can_defer_legacy_storage_migration_and_keep_current_folder(self):
         self._close_window()
@@ -1050,7 +1100,9 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.window.open_release_browser()
         self._drain_events()
 
-        self.window.addDockWidget(app_module.Qt.LeftDockWidgetArea, self.window.release_browser_dock)
+        self.window.addDockWidget(
+            app_module.Qt.LeftDockWidgetArea, self.window.release_browser_dock
+        )
         self.window.tabifyDockWidget(self.window.add_data_dock, self.window.release_browser_dock)
         self.window.release_browser_dock.raise_()
         self._drain_events()
@@ -1105,7 +1157,9 @@ class AppShellIntegrationTests(unittest.TestCase):
             set(self.window.tabifiedDockWidgets(self.window.catalog_table_dock)),
         )
 
-    def test_close_reopen_round_trip_preserves_core_panel_visibility_without_shutdown_corruption(self):
+    def test_close_reopen_round_trip_preserves_core_panel_visibility_without_shutdown_corruption(
+        self,
+    ):
         self.window.add_data_action.trigger()
         self._drain_events()
         self.assertTrue(self.window.add_data_dock.isVisible())

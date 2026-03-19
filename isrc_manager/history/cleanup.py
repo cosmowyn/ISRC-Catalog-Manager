@@ -133,7 +133,8 @@ class HistoryStorageCleanupService:
                     label=path.name,
                     created_at=self._path_created_at(path),
                     path=str(path),
-                    bytes_on_disk=self._path_size(path) + self._path_size(path.with_suffix(".assets")),
+                    bytes_on_disk=self._path_size(path)
+                    + self._path_size(path.with_suffix(".assets")),
                     reason="Snapshot file is present on disk but not registered in HistorySnapshots.",
                     eligible=True,
                 )
@@ -273,8 +274,10 @@ class HistoryStorageCleanupService:
             for item in post_trim_preview.eligible_items
             if item.item_type in {"snapshot_record", "snapshot_archive", "file_state_bundle"}
         ]
-        cleanup_result = self.cleanup_selected(removable_artifact_keys) if removable_artifact_keys else (
-            HistoryCleanupResult((), (), ())
+        cleanup_result = (
+            self.cleanup_selected(removable_artifact_keys)
+            if removable_artifact_keys
+            else (HistoryCleanupResult((), (), ()))
         )
         return HistoryCleanupResult(
             removed_item_keys=cleanup_result.removed_item_keys,
@@ -287,8 +290,7 @@ class HistoryStorageCleanupService:
         if preview.repair_required:
             message = "\n".join(preview.repair_messages[:10])
             raise HistoryCleanupBlockedError(
-                "Cleanup is blocked until history diagnostics are repaired.\n\n"
-                f"{message}"
+                "Cleanup is blocked until history diagnostics are repaired.\n\n" f"{message}"
             )
 
     def _remove_item(self, item: HistoryCleanupItem) -> list[str]:
@@ -405,7 +407,11 @@ class HistoryStorageCleanupService:
         }
 
     def _snapshot_archive_root(self) -> Path:
-        return self.history_manager.history_root / "snapshot_archives" / self.history_manager.db_path.stem
+        return (
+            self.history_manager.history_root
+            / "snapshot_archives"
+            / self.history_manager.db_path.stem
+        )
 
     def _file_states_root(self) -> Path:
         return self.history_manager.history_root / "file_states" / self.history_manager.db_path.stem

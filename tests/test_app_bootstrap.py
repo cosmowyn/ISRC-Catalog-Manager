@@ -129,14 +129,17 @@ class SettingsIntegrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             settings_root = Path(tmpdir) / "qt-settings"
             preferred_root = Path(tmpdir) / "qt-local"
-            with mock.patch.object(
-                app_settings,
-                "settings_path",
-                return_value=settings_root / SETTINGS_BASENAME,
-            ), mock.patch.object(
-                app_settings,
-                "preferred_data_root",
-                return_value=preferred_root,
+            with (
+                mock.patch.object(
+                    app_settings,
+                    "settings_path",
+                    return_value=settings_root / SETTINGS_BASENAME,
+                ),
+                mock.patch.object(
+                    app_settings,
+                    "preferred_data_root",
+                    return_value=preferred_root,
+                ),
             ):
                 settings = app_settings.init_settings()
                 self.assertTrue((settings_root / SETTINGS_BASENAME).exists())
