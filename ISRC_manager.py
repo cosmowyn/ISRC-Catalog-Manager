@@ -235,7 +235,7 @@ from isrc_manager.contracts import ContractService
 from isrc_manager.contracts.dialogs import ContractBrowserDialog, ContractBrowserPanel
 from isrc_manager.exchange.dialogs import ExchangeImportDialog
 from isrc_manager.exchange.repertoire_service import RepertoireExchangeService
-from isrc_manager.exchange.models import ExchangeImportReport
+from isrc_manager.exchange.models import ExchangeImportReport, ExchangeInspection
 from isrc_manager.exchange.service import ExchangeService
 from isrc_manager.parties import PartyService
 from isrc_manager.parties.dialogs import PartyManagerDialog, PartyManagerPanel
@@ -11977,17 +11977,19 @@ class App(QMainWindow):
             raise ValueError(f"Unsupported exchange format: {normalized_format}")
 
         def _inspection_success(inspection):
-            supported_headers = list(self.exchange_service.BASE_EXPORT_COLUMNS)
-            for field in self.custom_field_definitions.list_active_fields():
-                if field.get("field_type") in {"blob_audio", "blob_image"}:
-                    continue
-                supported_headers.append(f"custom::{field['name']}")
+            supported_headers = self.exchange_service.supported_import_targets()
+
+            def _csv_reinspect(delimiter: str | None) -> ExchangeInspection:
+                return self.exchange_service.inspect_csv(path, delimiter=delimiter)
 
             dlg = ExchangeImportDialog(
                 inspection=inspection,
                 supported_headers=supported_headers,
                 settings=self.settings,
                 initial_mode=("create" if normalized_format == "package" else "dry_run"),
+                csv_reinspect_callback=(
+                    _csv_reinspect if normalized_format == "csv" else None
+                ),
                 parent=self,
             )
             if dlg.exec() != QDialog.Accepted:
@@ -11995,6 +11997,7 @@ class App(QMainWindow):
 
             mapping = dlg.mapping()
             options = dlg.import_options()
+            selected_csv_delimiter = dlg.resolved_csv_delimiter()
 
             def _import_worker(bundle, ctx):
                 ctx.set_status(f"Importing {normalized_format.upper()} exchange data...")
@@ -12002,7 +12005,10 @@ class App(QMainWindow):
                 def _mutation():
                     if normalized_format == "csv":
                         return bundle.exchange_service.import_csv(
-                            path, mapping=mapping, options=options
+                            path,
+                            mapping=mapping,
+                            options=options,
+                            delimiter=selected_csv_delimiter,
                         )
                     if normalized_format == "xlsx":
                         return bundle.exchange_service.import_xlsx(

@@ -2,8 +2,11 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from datetime import time, timedelta
 from pathlib import Path
 from zipfile import ZipFile
+
+from openpyxl import Workbook
 
 from isrc_manager.exchange import ExchangeImportOptions, ExchangeService
 from isrc_manager.releases import ReleasePayload, ReleaseService, ReleaseTrackPlacement
@@ -659,6 +662,389 @@ class ExchangeServiceTests(unittest.TestCase):
         self.assertEqual(
             inspection.preview_rows,
             [{"track_title": "Orbit", "artist_name": "Cosmowyn", "isrc": "NL-ABC-26-00033"}],
+        )
+        self.assertEqual(inspection.resolved_delimiter, ";")
+
+    def test_inspect_csv_detects_tab_delimiter(self):
+        csv_path = self.data_root / "tab-headers.csv"
+        csv_path.write_text(
+            "track_title\tartist_name\tcomments\nOrbit\tCosmowyn\tTabbed import\n",
+            encoding="utf-8",
+        )
+
+        inspection = self.service.inspect_csv(csv_path)
+
+        self.assertEqual(inspection.headers, ["track_title", "artist_name", "comments"])
+        self.assertEqual(
+            inspection.preview_rows,
+            [
+                {
+                    "track_title": "Orbit",
+                    "artist_name": "Cosmowyn",
+                    "comments": "Tabbed import",
+                }
+            ],
+        )
+        self.assertEqual(inspection.resolved_delimiter, "\t")
+
+    def test_import_csv_detects_pipe_delimiter(self):
+        csv_path = self.data_root / "pipe-import.csv"
+        csv_path.write_text(
+            "track_title|artist_name|isrc|comments\n"
+            "Orbit|Cosmowyn|NL-ABC-26-00034|Pipe import\n",
+            encoding="utf-8",
+        )
+
+        report = self.service.import_csv(
+            csv_path,
+            mapping={
+                "track_title": "track_title",
+                "artist_name": "artist_name",
+                "isrc": "isrc",
+                "comments": "comments",
+            },
+            options=ExchangeImportOptions(mode="create"),
+        )
+
+        self.assertEqual(report.passed, 1)
+        self.assertEqual(
+            self.conn.execute(
+                """
+                SELECT t.track_title, COALESCE(a.name, ''), t.comments
+                FROM Tracks t
+                LEFT JOIN Artists a ON a.id = t.main_artist_id
+                WHERE t.id=?
+                """,
+                (report.created_tracks[0],),
+            ).fetchone(),
+            ("Orbit", "Cosmowyn", "Pipe import"),
+        )
+
+    def test_custom_csv_delimiter_refresh_and_import_preserve_quoted_values(self):
+        csv_path = self.data_root / "caret-import.csv"
+        csv_path.write_text(
+            'track_title^artist_name^comments\n'
+            '"Orbit^Pt. 1"^Cosmowyn^"Dreamy^wide mix"\n',
+            encoding="utf-8",
+        )
+
+        inspection = self.service.inspect_csv(csv_path, delimiter="^")
+        report = self.service.import_csv(
+            csv_path,
+            mapping={
+                "track_title": "track_title",
+                "artist_name": "artist_name",
+                "comments": "comments",
+            },
+            options=ExchangeImportOptions(mode="create"),
+            delimiter=inspection.resolved_delimiter,
+        )
+
+        self.assertEqual(inspection.resolved_delimiter, "^")
+        self.assertEqual(
+            inspection.preview_rows,
+            [
+                {
+                    "track_title": "Orbit^Pt. 1",
+                    "artist_name": "Cosmowyn",
+                    "comments": "Dreamy^wide mix",
+                }
+            ],
+        )
+        self.assertEqual(report.passed, 1)
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT track_title, comments FROM Tracks WHERE id=?",
+                (report.created_tracks[0],),
+            ).fetchone(),
+            ("Orbit^Pt. 1", "Dreamy^wide mix"),
+        )
+
+    def test_import_csv_rejects_invalid_explicit_delimiter(self):
+        csv_path = self.data_root / "invalid-delimiter.csv"
+        csv_path.write_text("track_title,artist_name\nOrbit,Cosmowyn\n", encoding="utf-8")
+
+        with self.assertRaisesRegex(ValueError, "single non-newline"):
+            self.service.inspect_csv(csv_path, delimiter="||")
+        with self.assertRaisesRegex(ValueError, "single non-newline"):
+            self.service.import_csv(
+                csv_path,
+                mapping={"track_title": "track_title", "artist_name": "artist_name"},
+                options=ExchangeImportOptions(mode="create"),
+                delimiter="||",
+            )
+
+    def test_import_csv_normalizes_hms_track_length_target(self):
+        csv_path = self.data_root / "duration-import.csv"
+        csv_path.write_text(
+            "track_title,artist_name,track_length_sec\n"
+            "Orbit,Cosmowyn,12:34:56\n"
+            "Pulse,Cosmowyn,180\n",
+            encoding="utf-8",
+        )
+
+        report = self.service.import_csv(
+            csv_path,
+            mapping={
+                "track_title": "track_title",
+                "artist_name": "artist_name",
+                "track_length_sec": "track_length_sec",
+            },
+            options=ExchangeImportOptions(mode="create"),
+        )
+
+        self.assertEqual(report.passed, 2)
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT track_title, track_length_sec FROM Tracks ORDER BY id"
+            ).fetchall(),
+            [("Orbit", 45296), ("Pulse", 180)],
+        )
+
+    def test_import_csv_invalid_track_length_text_still_fails_row(self):
+        csv_path = self.data_root / "invalid-duration-import.csv"
+        csv_path.write_text(
+            "track_title,artist_name,track_length_sec\nOrbit,Cosmowyn,not-a-duration\n",
+            encoding="utf-8",
+        )
+
+        report = self.service.import_csv(
+            csv_path,
+            mapping={
+                "track_title": "track_title",
+                "artist_name": "artist_name",
+                "track_length_sec": "track_length_sec",
+            },
+            options=ExchangeImportOptions(mode="create"),
+        )
+
+        self.assertEqual(report.failed, 1)
+        self.assertEqual(
+            self.conn.execute("SELECT COUNT(*) FROM Tracks").fetchone()[0],
+            0,
+        )
+
+    def test_import_xlsx_normalizes_track_length_target_values(self):
+        xlsx_path = self.data_root / "duration-import.xlsx"
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(["track_title", "artist_name", "track_length_sec"])
+        sheet.append(["Orbit", "Cosmowyn", "12:34:56"])
+        sheet.append(["Pulse", "Cosmowyn", time(1, 2, 3)])
+        sheet.append(["Drift", "Cosmowyn", timedelta(hours=2, minutes=3, seconds=4)])
+        sheet.append(["Signal", "Cosmowyn", 180])
+        workbook.save(xlsx_path)
+
+        report = self.service.import_xlsx(
+            xlsx_path,
+            mapping={
+                "track_title": "track_title",
+                "artist_name": "artist_name",
+                "track_length_sec": "track_length_sec",
+            },
+            options=ExchangeImportOptions(mode="create"),
+        )
+
+        self.assertEqual(report.passed, 4)
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT track_title, track_length_sec FROM Tracks ORDER BY id"
+            ).fetchall(),
+            [("Orbit", 45296), ("Pulse", 3723), ("Drift", 7384), ("Signal", 180)],
+        )
+
+    def test_merge_mode_matches_case_only_title_and_artist_differences(self):
+        track_id = self.track_service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00035",
+                track_title="Orbit",
+                artist_name="Cosmowyn",
+                additional_artists=[],
+                album_title=None,
+                release_date=None,
+                track_length_sec=180,
+                iswc=None,
+                upc=None,
+                genre=None,
+                comments=None,
+            )
+        )
+        csv_path = self.data_root / "merge-case-import.csv"
+        csv_path.write_text(
+            "track_title,artist_name,comments\nORBIT,COSMOWYN,Imported note\n",
+            encoding="utf-8",
+        )
+
+        report = self.service.import_csv(
+            csv_path,
+            mapping={
+                "track_title": "track_title",
+                "artist_name": "artist_name",
+                "comments": "comments",
+            },
+            options=ExchangeImportOptions(
+                mode="merge",
+                match_by_internal_id=False,
+                match_by_isrc=False,
+                match_by_upc_title=False,
+                heuristic_match=False,
+            ),
+        )
+
+        self.assertEqual(report.updated_tracks, [track_id])
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Tracks").fetchone()[0], 1)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Artists").fetchone()[0], 1)
+        self.assertEqual(
+            self.conn.execute(
+                """
+                SELECT t.track_title, a.name, t.comments
+                FROM Tracks t
+                JOIN Artists a ON a.id = t.main_artist_id
+                WHERE t.id=?
+                """,
+                (track_id,),
+            ).fetchone(),
+            ("Orbit", "Cosmowyn", "Imported note"),
+        )
+
+    def test_merge_mode_matches_case_only_upc_title_lookup(self):
+        track_id = self.track_service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00036",
+                track_title="Orbit",
+                artist_name="Cosmowyn",
+                additional_artists=[],
+                album_title=None,
+                release_date=None,
+                track_length_sec=180,
+                iswc=None,
+                upc="036000291452",
+                genre=None,
+                comments=None,
+            )
+        )
+        csv_path = self.data_root / "merge-upc-title-import.csv"
+        csv_path.write_text(
+            "track_title,artist_name,upc,comments\nORBIT,Ignored Artist,036000291452,UPC title match\n",
+            encoding="utf-8",
+        )
+
+        report = self.service.import_csv(
+            csv_path,
+            mapping={
+                "track_title": "track_title",
+                "artist_name": "artist_name",
+                "upc": "upc",
+                "comments": "comments",
+            },
+            options=ExchangeImportOptions(
+                mode="merge",
+                match_by_internal_id=False,
+                match_by_isrc=False,
+                match_by_upc_title=True,
+                heuristic_match=False,
+            ),
+        )
+
+        self.assertEqual(report.updated_tracks, [track_id])
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Tracks").fetchone()[0], 1)
+        self.assertEqual(
+            self.conn.execute(
+                """
+                SELECT t.track_title, a.name, t.comments
+                FROM Tracks t
+                JOIN Artists a ON a.id = t.main_artist_id
+                WHERE t.id=?
+                """,
+                (track_id,),
+            ).fetchone(),
+            ("Orbit", "Cosmowyn", "UPC title match"),
+        )
+
+    def test_merge_mode_does_not_auto_merge_ambiguous_case_normalized_match(self):
+        for suffix in ("37", "38"):
+            self.track_service.create_track(
+                TrackCreatePayload(
+                    isrc=f"NL-ABC-26-000{suffix}",
+                    track_title="Orbit",
+                    artist_name="Cosmowyn",
+                    additional_artists=[],
+                    album_title=None,
+                    release_date=None,
+                    track_length_sec=180,
+                    iswc=None,
+                    upc=None,
+                    genre=None,
+                )
+            )
+        csv_path = self.data_root / "merge-ambiguous-import.csv"
+        csv_path.write_text(
+            "track_title,artist_name,comments\nORBIT,COSMOWYN,Ambiguous match\n",
+            encoding="utf-8",
+        )
+
+        report = self.service.import_csv(
+            csv_path,
+            mapping={
+                "track_title": "track_title",
+                "artist_name": "artist_name",
+                "comments": "comments",
+            },
+            options=ExchangeImportOptions(
+                mode="merge",
+                match_by_internal_id=False,
+                match_by_isrc=False,
+                match_by_upc_title=False,
+                heuristic_match=False,
+            ),
+        )
+
+        self.assertEqual(report.updated_tracks, [])
+        self.assertEqual(len(report.created_tracks), 1)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Tracks").fetchone()[0], 3)
+
+    def test_supported_import_targets_include_active_non_blob_custom_fields(self):
+        self.custom_defs.ensure_fields(
+            [
+                {"name": "Mood", "field_type": "text"},
+                {"name": "Artwork", "field_type": "blob_image"},
+            ]
+        )
+
+        targets = self.service.supported_import_targets()
+
+        self.assertIn("custom::Mood", targets)
+        self.assertNotIn("custom::Artwork", targets)
+        self.assertEqual(len(targets), len(set(targets)))
+
+    def test_import_csv_maps_arbitrary_source_column_to_active_custom_field(self):
+        self.custom_defs.ensure_fields([{"name": "Mood", "field_type": "text"}])
+        csv_path = self.data_root / "custom-mapping-import.csv"
+        csv_path.write_text(
+            "Title,Artist,Energy\nOrbit,Cosmowyn,Dreamy\n",
+            encoding="utf-8",
+        )
+
+        report = self.service.import_csv(
+            csv_path,
+            mapping={
+                "Title": "track_title",
+                "Artist": "artist_name",
+                "Energy": "custom::Mood",
+            },
+            options=ExchangeImportOptions(mode="create"),
+        )
+
+        self.assertEqual(report.passed, 1)
+        self.assertEqual(
+            self.conn.execute(
+                """
+                SELECT cfd.name, cfv.value
+                FROM CustomFieldValues cfv
+                JOIN CustomFieldDefs cfd ON cfd.id = cfv.field_def_id
+                """
+            ).fetchall(),
+            [("Mood", "Dreamy")],
         )
 
 

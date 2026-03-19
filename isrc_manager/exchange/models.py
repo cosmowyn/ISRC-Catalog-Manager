@@ -13,6 +13,7 @@ class ExchangeInspection:
     preview_rows: list[dict[str, object]]
     suggested_mapping: dict[str, str]
     warnings: list[str] = field(default_factory=list)
+    resolved_delimiter: str | None = None
 
 
 @dataclass(slots=True)

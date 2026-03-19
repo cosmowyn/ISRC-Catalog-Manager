@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -39,6 +40,7 @@ class ExchangeImportDialog(QDialog):
         supported_headers: list[str],
         settings,
         initial_mode: str = "dry_run",
+        csv_reinspect_callback: Callable[[str | None], ExchangeInspection] | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -46,6 +48,8 @@ class ExchangeImportDialog(QDialog):
         self.supported_headers = supported_headers
         self.settings = settings
         self.initial_mode = str(initial_mode or "dry_run")
+        self.csv_reinspect_callback = csv_reinspect_callback
+        self._csv_delimiter_error: str | None = None
 
         self.setWindowTitle(f"Import {inspection.format_name.upper()}")
         self.resize(1100, 760)
@@ -85,13 +89,43 @@ class ExchangeImportDialog(QDialog):
         meta_row = QHBoxLayout()
         meta_row.setContentsMargins(0, 0, 0, 0)
         meta_row.setSpacing(8)
-        meta_row.addWidget(QLabel(f"Source: {inspection.file_path}"))
+        self.source_label = QLabel(f"Source: {inspection.file_path}")
+        meta_row.addWidget(self.source_label)
         meta_row.addStretch(1)
-        if inspection.warnings:
-            warning_label = QLabel("Warnings: " + " | ".join(inspection.warnings))
-            warning_label.setWordWrap(True)
-            meta_row.addWidget(warning_label)
+        self.warning_label = QLabel()
+        self.warning_label.setWordWrap(True)
+        meta_row.addWidget(self.warning_label)
         setup_layout.addLayout(meta_row)
+        self._update_warning_label()
+
+        self.delimiter_combo: QComboBox | None = None
+        self.custom_delimiter_edit: QLineEdit | None = None
+        self.delimiter_error_label: QLabel | None = None
+        if self.inspection.format_name == "csv":
+            delimiter_row = QHBoxLayout()
+            delimiter_row.setContentsMargins(0, 0, 0, 0)
+            delimiter_row.setSpacing(8)
+            delimiter_row.addWidget(QLabel("Delimiter"))
+            self.delimiter_combo = QComboBox(self)
+            self.delimiter_combo.setObjectName("csvDelimiterCombo")
+            self.delimiter_combo.addItem("Auto detect", "auto")
+            self.delimiter_combo.addItem("Comma (,)", ",")
+            self.delimiter_combo.addItem("Semicolon (;)", ";")
+            self.delimiter_combo.addItem("Tab", "\t")
+            self.delimiter_combo.addItem("Pipe (|)", "|")
+            self.delimiter_combo.addItem("Custom delimiter", "custom")
+            delimiter_row.addWidget(self.delimiter_combo)
+            self.custom_delimiter_edit = QLineEdit(self)
+            self.custom_delimiter_edit.setObjectName("csvCustomDelimiterEdit")
+            self.custom_delimiter_edit.setPlaceholderText("One character")
+            delimiter_row.addWidget(self.custom_delimiter_edit)
+            delimiter_row.addStretch(1)
+            setup_layout.addLayout(delimiter_row)
+
+            self.delimiter_error_label = QLabel(self)
+            self.delimiter_error_label.setObjectName("csvDelimiterErrorLabel")
+            self.delimiter_error_label.setWordWrap(True)
+            setup_layout.addWidget(self.delimiter_error_label)
 
         preset_row = QHBoxLayout()
         preset_row.setContentsMargins(0, 0, 0, 0)
@@ -175,6 +209,11 @@ class ExchangeImportDialog(QDialog):
         self._populate_preview_table()
         self._apply_initial_mode()
         self.mode_combo.currentIndexChanged.connect(self._update_mode_affordances)
+        if self.delimiter_combo is not None and self.custom_delimiter_edit is not None:
+            self.delimiter_combo.currentIndexChanged.connect(self._on_csv_delimiter_changed)
+            self.custom_delimiter_edit.textChanged.connect(self._on_csv_delimiter_changed)
+            self._update_csv_delimiter_widgets()
+            self._set_csv_delimiter_error(None)
         self._update_mode_affordances()
         _apply_compact_dialog_control_heights(self)
 
@@ -199,7 +238,16 @@ class ExchangeImportDialog(QDialog):
         for name in sorted(self._read_presets()):
             self.preset_combo.addItem(name)
 
-    def _populate_mapping_table(self) -> None:
+    def _update_warning_label(self) -> None:
+        warnings = self.inspection.warnings
+        if warnings:
+            self.warning_label.setText("Warnings: " + " | ".join(warnings))
+            self.warning_label.show()
+            return
+        self.warning_label.clear()
+        self.warning_label.hide()
+
+    def _populate_mapping_table(self, preferred_mapping: dict[str, str] | None = None) -> None:
         headers = self.inspection.headers
         self.mapping_table.setRowCount(len(headers))
         choices = [""] + self.supported_headers
@@ -207,13 +255,22 @@ class ExchangeImportDialog(QDialog):
             self.mapping_table.setItem(row, 0, QTableWidgetItem(header))
             combo = QComboBox(self.mapping_table)
             combo.addItems(choices)
-            suggested = self.inspection.suggested_mapping.get(header, "")
+            suggested = (
+                preferred_mapping.get(header, "")
+                if preferred_mapping is not None
+                else self.inspection.suggested_mapping.get(header, "")
+            )
+            if not suggested:
+                suggested = self.inspection.suggested_mapping.get(header, "")
             index = combo.findText(suggested)
             combo.setCurrentIndex(index if index >= 0 else 0)
             self.mapping_table.setCellWidget(row, 1, combo)
 
     def _populate_preview_table(self) -> None:
         rows = self.inspection.preview_rows
+        self.preview_table.clearContents()
+        self.preview_table.setColumnCount(len(self.inspection.headers))
+        self.preview_table.setHorizontalHeaderLabels(self.inspection.headers)
         self.preview_table.setRowCount(len(rows))
         for row_index, row in enumerate(rows):
             for column, header in enumerate(self.inspection.headers):
@@ -241,6 +298,7 @@ class ExchangeImportDialog(QDialog):
             self.mode_hint_label.setText(
                 "This mode writes rows into the current profile using the matching rules selected below."
             )
+        self._apply_dialog_validation()
 
     def _save_preset(self) -> None:
         name = self.preset_name_edit.text().strip()
@@ -292,3 +350,91 @@ class ExchangeImportDialog(QDialog):
             heuristic_match=self.heuristic_checkbox.isChecked(),
             create_missing_custom_fields=self.create_custom_checkbox.isChecked(),
         )
+
+    def resolved_csv_delimiter(self) -> str | None:
+        if self.delimiter_combo is None:
+            return None
+        current = str(self.delimiter_combo.currentData() or "auto")
+        if current == "auto":
+            return self.inspection.resolved_delimiter
+        if current == "custom":
+            delimiter, _error = self._validate_custom_delimiter()
+            return delimiter
+        return current
+
+    def _apply_inspection(
+        self,
+        inspection: ExchangeInspection,
+        *,
+        preferred_mapping: dict[str, str] | None = None,
+    ) -> None:
+        self.inspection = inspection
+        self.source_label.setText(f"Source: {inspection.file_path}")
+        self._update_warning_label()
+        self._populate_mapping_table(preferred_mapping=preferred_mapping)
+        self._populate_preview_table()
+
+    def _apply_dialog_validation(self) -> None:
+        self.import_button.setEnabled(not bool(self._csv_delimiter_error))
+
+    def _set_csv_delimiter_error(self, message: str | None) -> None:
+        self._csv_delimiter_error = str(message).strip() if message is not None else None
+        if self._csv_delimiter_error == "":
+            self._csv_delimiter_error = None
+        if self.delimiter_error_label is None:
+            return
+        if self._csv_delimiter_error:
+            self.delimiter_error_label.setText(self._csv_delimiter_error)
+            self.delimiter_error_label.show()
+        else:
+            self.delimiter_error_label.clear()
+            self.delimiter_error_label.hide()
+        self._apply_dialog_validation()
+
+    def _update_csv_delimiter_widgets(self) -> None:
+        if self.delimiter_combo is None or self.custom_delimiter_edit is None:
+            return
+        is_custom = str(self.delimiter_combo.currentData() or "auto") == "custom"
+        self.custom_delimiter_edit.setVisible(is_custom)
+
+    def _validate_custom_delimiter(self) -> tuple[str | None, str | None]:
+        if self.delimiter_combo is None or self.custom_delimiter_edit is None:
+            return None, None
+        if str(self.delimiter_combo.currentData() or "auto") != "custom":
+            return None, None
+        delimiter = self.custom_delimiter_edit.text()
+        if not delimiter:
+            return None, "Enter a custom delimiter."
+        if len(delimiter) != 1 or delimiter in {"\r", "\n"}:
+            return None, "Custom delimiter must be exactly one non-newline character."
+        if delimiter == "\t":
+            return None, "Use the Tab option for tab-delimited files."
+        return delimiter, None
+
+    def _requested_csv_delimiter(self) -> tuple[str | None, str | None]:
+        if self.delimiter_combo is None:
+            return None, None
+        current = str(self.delimiter_combo.currentData() or "auto")
+        if current == "auto":
+            return None, None
+        if current == "custom":
+            return self._validate_custom_delimiter()
+        return current, None
+
+    def _on_csv_delimiter_changed(self) -> None:
+        self._update_csv_delimiter_widgets()
+        requested_delimiter, error = self._requested_csv_delimiter()
+        if error:
+            self._set_csv_delimiter_error(error)
+            return
+        if self.csv_reinspect_callback is None:
+            self._set_csv_delimiter_error(None)
+            return
+        preferred_mapping = self.mapping()
+        try:
+            inspection = self.csv_reinspect_callback(requested_delimiter)
+        except Exception as exc:
+            self._set_csv_delimiter_error(str(exc))
+            return
+        self._set_csv_delimiter_error(None)
+        self._apply_inspection(inspection, preferred_mapping=preferred_mapping)

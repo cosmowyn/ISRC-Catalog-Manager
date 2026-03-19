@@ -5,19 +5,20 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import math
 import shutil
 import sqlite3
 import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, time as dt_time, timedelta
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from openpyxl import Workbook, load_workbook
 
 from isrc_manager.domain.codes import is_blank, to_compact_isrc, to_iso_isrc
-from isrc_manager.domain.timecode import parse_hms_text, seconds_to_hms
+from isrc_manager.domain.timecode import hms_to_seconds, parse_hms_text, seconds_to_hms
 from isrc_manager.file_storage import coalesce_filename, infer_storage_mode
 from isrc_manager.releases import ReleasePayload, ReleaseService, ReleaseTrackPlacement
 from isrc_manager.services.custom_fields import CustomFieldDefinitionService
@@ -27,6 +28,7 @@ from .models import ExchangeImportOptions, ExchangeImportReport, ExchangeInspect
 
 JSON_SCHEMA_VERSION = 1
 CSV_SNIFF_SAMPLE_SIZE = 4096
+AUTO_CSV_DELIMITERS = ",;\t|"
 
 
 class ExchangeService:
@@ -616,25 +618,45 @@ class ExchangeService:
     @contextmanager
     def _open_csv_dict_reader(
         self, path: str | Path, *, delimiter: str | None = None
-    ) -> Iterator[csv.DictReader]:
+    ) -> Iterator[tuple[csv.DictReader, str]]:
         with Path(path).open("r", encoding="utf-8-sig", newline="") as handle:
             sample = handle.read(CSV_SNIFF_SAMPLE_SIZE)
             handle.seek(0)
-            if delimiter is not None:
-                yield csv.DictReader(handle, delimiter=delimiter)
+            dialect, resolved_delimiter = self._csv_dialect_for_sample(
+                sample, delimiter=delimiter
+            )
+            if dialect is None:
+                yield csv.DictReader(handle, delimiter=resolved_delimiter), resolved_delimiter
                 return
-            try:
-                dialect = (
-                    csv.Sniffer().sniff(sample, delimiters=",;")
-                    if sample.strip()
-                    else csv.excel
-                )
-            except csv.Error:
-                dialect = csv.excel
-            yield csv.DictReader(handle, dialect=dialect)
+            yield csv.DictReader(handle, dialect=dialect), resolved_delimiter
+
+    @staticmethod
+    def _validate_csv_delimiter(delimiter: str | None) -> str | None:
+        if delimiter is None:
+            return None
+        clean = str(delimiter)
+        if len(clean) != 1 or clean in {"\r", "\n"}:
+            raise ValueError("CSV delimiter must be a single non-newline character.")
+        return clean
+
+    def _csv_dialect_for_sample(
+        self, sample: str, *, delimiter: str | None = None
+    ) -> tuple[type[csv.Dialect] | csv.Dialect | None, str]:
+        explicit_delimiter = self._validate_csv_delimiter(delimiter)
+        if explicit_delimiter is not None:
+            return None, explicit_delimiter
+        try:
+            dialect = (
+                csv.Sniffer().sniff(sample, delimiters=AUTO_CSV_DELIMITERS)
+                if sample.strip()
+                else csv.excel
+            )
+        except csv.Error:
+            dialect = csv.excel
+        return dialect, str(getattr(dialect, "delimiter", ",") or ",")
 
     def inspect_csv(self, path: str | Path, *, delimiter: str | None = None) -> ExchangeInspection:
-        with self._open_csv_dict_reader(path, delimiter=delimiter) as reader:
+        with self._open_csv_dict_reader(path, delimiter=delimiter) as (reader, resolved_delimiter):
             headers = list(reader.fieldnames or [])
             preview_rows = []
             for _, row in zip(range(5), reader):
@@ -645,6 +667,7 @@ class ExchangeService:
             headers=headers,
             preview_rows=preview_rows,
             suggested_mapping=self._suggest_mapping(headers),
+            resolved_delimiter=resolved_delimiter,
         )
 
     def inspect_xlsx(self, path: str | Path) -> ExchangeInspection:
@@ -707,15 +730,34 @@ class ExchangeService:
                 mapping[header] = header
         return mapping
 
+    def supported_import_targets(self) -> list[str]:
+        targets: list[str] = []
+        seen: set[str] = set()
+        for name in self.BASE_EXPORT_COLUMNS:
+            if name in seen:
+                continue
+            seen.add(name)
+            targets.append(name)
+        for field in self.custom_fields.list_active_fields():
+            if field.get("field_type") in {"blob_audio", "blob_image"}:
+                continue
+            target_name = f"custom::{field['name']}"
+            if target_name in seen:
+                continue
+            seen.add(target_name)
+            targets.append(target_name)
+        return targets
+
     def import_csv(
         self,
         path: str | Path,
         *,
         mapping: dict[str, str] | None = None,
         options: ExchangeImportOptions | None = None,
+        delimiter: str | None = None,
     ) -> ExchangeImportReport:
         path_obj = Path(path)
-        with self._open_csv_dict_reader(path_obj) as reader:
+        with self._open_csv_dict_reader(path_obj, delimiter=delimiter) as (reader, _resolved):
             rows = [dict(row) for row in reader]
         return self._import_rows(
             rows, mapping=mapping, options=options, format_name="csv", source_dir=path_obj.parent
@@ -822,8 +864,7 @@ class ExchangeService:
                 """
                 SELECT t.id
                 FROM Tracks t
-                JOIN Artists a ON a.id = t.main_artist_id
-                WHERE t.track_title=? AND COALESCE(t.upc, '')=?
+                WHERE lower(t.track_title)=lower(?) AND COALESCE(t.upc, '')=?
                 ORDER BY t.id
                 LIMIT 1
                 """,
@@ -831,21 +872,59 @@ class ExchangeService:
             ).fetchone()
             if found:
                 return int(found[0])
-        if options.heuristic_match and title and artist:
-            found = self.conn.execute(
-                """
-                SELECT t.id
-                FROM Tracks t
-                JOIN Artists a ON a.id = t.main_artist_id
-                WHERE lower(t.track_title)=lower(?) AND lower(a.name)=lower(?)
-                ORDER BY t.id
-                LIMIT 1
-                """,
-                (title, artist),
-            ).fetchone()
-            if found:
-                return int(found[0])
+        normalized_matches = (
+            self._find_case_normalized_title_artist_matches(title, artist)
+            if title and artist
+            else []
+        )
+        if options.heuristic_match and normalized_matches:
+            return normalized_matches[0]
+        if options.mode == "merge" and len(normalized_matches) == 1:
+            return normalized_matches[0]
         return None
+
+    def _find_case_normalized_title_artist_matches(self, title: str, artist: str) -> list[int]:
+        clean_title = str(title or "").strip()
+        clean_artist = str(artist or "").strip()
+        if not clean_title or not clean_artist:
+            return []
+        rows = self.conn.execute(
+            """
+            SELECT t.id
+            FROM Tracks t
+            JOIN Artists a ON a.id = t.main_artist_id
+            WHERE lower(t.track_title)=lower(?) AND lower(a.name)=lower(?)
+            ORDER BY t.id
+            """,
+            (clean_title, clean_artist),
+        ).fetchall()
+        return [int(row[0]) for row in rows]
+
+    @staticmethod
+    def _normalize_track_length_target(raw_value: object) -> object:
+        if isinstance(raw_value, timedelta):
+            return max(0, int(raw_value.total_seconds()))
+        if isinstance(raw_value, dt_time):
+            return hms_to_seconds(raw_value.hour, raw_value.minute, raw_value.second)
+        if isinstance(raw_value, float) and math.isfinite(raw_value):
+            return int(raw_value)
+        if isinstance(raw_value, str):
+            text = raw_value.strip()
+            if not text:
+                return raw_value
+            parts = text.split(":")
+            if len(parts) != 3:
+                return raw_value
+            if not all(part.isdigit() for part in parts):
+                return raw_value
+            if len(parts[1]) != 2 or len(parts[2]) != 2:
+                return raw_value
+            minutes = int(parts[1])
+            seconds = int(parts[2])
+            if minutes > 59 or seconds > 59:
+                return raw_value
+            return parse_hms_text(text)
+        return raw_value
 
     def _resolve_media_path(self, source_dir: Path, raw_value: object) -> str | None:
         text = str(raw_value or "").strip()
@@ -1010,9 +1089,17 @@ class ExchangeService:
 
             try:
                 release_date = str(row.get("release_date") or "").strip() or None
-                track_length_value = row.get("track_length_sec")
+                track_length_value = self._normalize_track_length_target(
+                    row.get("track_length_sec")
+                )
                 if is_blank(str(track_length_value or "")):
-                    track_length_value = parse_hms_text(str(row.get("track_length_hms") or ""))
+                    track_length_hms = row.get("track_length_hms")
+                    if isinstance(track_length_hms, (dt_time, timedelta)):
+                        track_length_value = self._normalize_track_length_target(
+                            track_length_hms
+                        )
+                    else:
+                        track_length_value = parse_hms_text(str(track_length_hms or ""))
                 track_length_sec = int(track_length_value or 0)
                 payload_kwargs = dict(
                     isrc=to_iso_isrc(str(row.get("isrc") or "")) or "",
