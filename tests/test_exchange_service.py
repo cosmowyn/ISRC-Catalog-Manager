@@ -89,6 +89,38 @@ class ExchangeServiceTests(unittest.TestCase):
             )
         )
 
+    def _fetch_release_row_for_track(
+        self, track_id: int
+    ) -> tuple[str, str, str, str, str] | None:
+        return self.conn.execute(
+            """
+            SELECT
+                r.title,
+                COALESCE(r.primary_artist, ''),
+                COALESCE(r.album_artist, ''),
+                COALESCE(r.catalog_number, ''),
+                COALESCE(r.upc, '')
+            FROM Releases r
+            JOIN ReleaseTracks rt ON rt.release_id = r.id
+            WHERE rt.track_id=?
+            ORDER BY r.id
+            LIMIT 1
+            """,
+            (track_id,),
+        ).fetchone()
+
+    def _fetch_custom_value(self, track_id: int, field_name: str) -> str | None:
+        row = self.conn.execute(
+            """
+            SELECT cfv.value
+            FROM CustomFieldValues cfv
+            JOIN CustomFieldDefs cfd ON cfd.id = cfv.field_def_id
+            WHERE cfv.track_id=? AND cfd.name=?
+            """,
+            (track_id, field_name),
+        ).fetchone()
+        return None if row is None else str(row[0] or "")
+
     def test_json_round_trip_preserves_release_and_custom_fields(self):
         track_id = self._create_track(isrc="NL-ABC-26-00001", title="Orbit")
         self._create_release(track_id)
@@ -851,6 +883,245 @@ class ExchangeServiceTests(unittest.TestCase):
                 "SELECT track_title, track_length_sec FROM Tracks ORDER BY id"
             ).fetchall(),
             [("Orbit", 45296), ("Pulse", 3723), ("Drift", 7384), ("Signal", 180)],
+        )
+
+    def test_import_csv_normalizes_allowed_title_fields_after_mapping_and_preserves_codes(self):
+        self.custom_defs.ensure_fields([{"name": "Mood", "field_type": "text"}])
+        csv_path = self.data_root / "title-name-normalization.csv"
+        csv_path.write_text(
+            "Song Name,Lead Artist,Guest Artists,Album Name,Release Name,Release Primary,Release Album Artist,Track Length,ISRC Code,ISWC Code,UPC Code,Cat No,Release Cat No,Release UPC,Mood Source\n"
+            "\"DJ/MC BATTLE\",JOHN DOE,\"JANE DOE, DJ/MC CREW\",THE FOREST OF INFINITE IMAGINATION,THE FOREST OF INFINITE IMAGINATION,JOHN DOE,DJ/MC CREW,180,NL-ABC-25-00001,T-123.456.789-0,036000291452,CAT-001,REL-001,036000291452,LOUD\n",
+            encoding="utf-8",
+        )
+
+        report = self.service.import_csv(
+            csv_path,
+            mapping={
+                "Song Name": "track_title",
+                "Lead Artist": "artist_name",
+                "Guest Artists": "additional_artists",
+                "Album Name": "album_title",
+                "Release Name": "release_title",
+                "Release Primary": "release_primary_artist",
+                "Release Album Artist": "release_album_artist",
+                "Track Length": "track_length_sec",
+                "ISRC Code": "isrc",
+                "ISWC Code": "iswc",
+                "UPC Code": "upc",
+                "Cat No": "catalog_number",
+                "Release Cat No": "release_catalog_number",
+                "Release UPC": "release_upc",
+                "Mood Source": "custom::Mood",
+            },
+            options=ExchangeImportOptions(mode="create"),
+        )
+
+        self.assertEqual(report.passed, 1)
+        self.assertEqual(report.failed, 0)
+        track_id = report.created_tracks[0]
+        snapshot = self.track_service.fetch_track_snapshot(track_id)
+        assert snapshot is not None
+
+        self.assertEqual(snapshot.track_title, "Dj/Mc Battle")
+        self.assertEqual(snapshot.artist_name, "John Doe")
+        self.assertEqual(sorted(snapshot.additional_artists), ["Dj/Mc Crew", "Jane Doe"])
+        self.assertEqual(snapshot.album_title, "The Forest of Infinite Imagination")
+        self.assertEqual(snapshot.isrc, "NL-ABC-25-00001")
+        self.assertEqual(snapshot.iswc, "T-123.456.789-0")
+        self.assertEqual(snapshot.upc, "036000291452")
+        self.assertEqual(snapshot.catalog_number, "CAT-001")
+        self.assertEqual(
+            self._fetch_release_row_for_track(track_id),
+            (
+                "The Forest of Infinite Imagination",
+                "John Doe",
+                "Dj/Mc Crew",
+                "REL-001",
+                "036000291452",
+            ),
+        )
+        self.assertEqual(self._fetch_custom_value(track_id, "Mood"), "LOUD")
+
+    def test_import_xlsx_normalizes_allowed_title_fields_and_preserves_codes(self):
+        xlsx_path = self.data_root / "title-name-normalization.xlsx"
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(
+            [
+                "track_title",
+                "artist_name",
+                "additional_artists",
+                "album_title",
+                "release_title",
+                "release_primary_artist",
+                "release_album_artist",
+                "track_length_sec",
+                "isrc",
+                "iswc",
+                "upc",
+                "catalog_number",
+                "release_catalog_number",
+                "release_upc",
+            ]
+        )
+        sheet.append(
+            [
+                "DJ/MC BATTLE",
+                "JOHN DOE",
+                "JANE DOE, DJ/MC CREW",
+                "THE FOREST OF INFINITE IMAGINATION",
+                "THE FOREST OF INFINITE IMAGINATION",
+                "JOHN DOE",
+                "DJ/MC CREW",
+                180,
+                "NL-ABC-25-00002",
+                "T-123.456.789-0",
+                "036000291452",
+                "CAT-002",
+                "REL-002",
+                "036000291452",
+            ]
+        )
+        workbook.save(xlsx_path)
+
+        report = self.service.import_xlsx(
+            xlsx_path,
+            options=ExchangeImportOptions(mode="create"),
+        )
+
+        self.assertEqual(report.passed, 1)
+        self.assertEqual(report.failed, 0)
+        track_id = report.created_tracks[0]
+        snapshot = self.track_service.fetch_track_snapshot(track_id)
+        assert snapshot is not None
+
+        self.assertEqual(snapshot.track_title, "Dj/Mc Battle")
+        self.assertEqual(snapshot.artist_name, "John Doe")
+        self.assertEqual(sorted(snapshot.additional_artists), ["Dj/Mc Crew", "Jane Doe"])
+        self.assertEqual(snapshot.album_title, "The Forest of Infinite Imagination")
+        self.assertEqual(snapshot.isrc, "NL-ABC-25-00002")
+        self.assertEqual(snapshot.iswc, "T-123.456.789-0")
+        self.assertEqual(snapshot.upc, "036000291452")
+        self.assertEqual(snapshot.catalog_number, "CAT-002")
+        self.assertEqual(
+            self._fetch_release_row_for_track(track_id),
+            (
+                "The Forest of Infinite Imagination",
+                "John Doe",
+                "Dj/Mc Crew",
+                "REL-002",
+                "036000291452",
+            ),
+        )
+
+    def test_import_json_normalizes_allowed_title_fields_and_preserves_existing_case_and_codes(
+        self,
+    ):
+        json_path = self.data_root / "title-name-normalization.json"
+        payload = {
+            "schema_version": 1,
+            "columns": [
+                "track_title",
+                "artist_name",
+                "additional_artists",
+                "album_title",
+                "release_title",
+                "release_primary_artist",
+                "release_album_artist",
+                "track_length_sec",
+                "isrc",
+                "iswc",
+                "upc",
+                "catalog_number",
+                "release_catalog_number",
+                "release_upc",
+            ],
+            "rows": [
+                {
+                    "track_title": "DJ/MC BATTLE",
+                    "artist_name": "JOHN DOE",
+                    "additional_artists": "JANE DOE, DJ/MC CREW",
+                    "album_title": "THE FOREST OF INFINITE IMAGINATION",
+                    "release_title": "THE FOREST OF INFINITE IMAGINATION",
+                    "release_primary_artist": "JOHN DOE",
+                    "release_album_artist": "DJ/MC CREW",
+                    "track_length_sec": 180,
+                    "isrc": "NL-ABC-25-00003",
+                    "iswc": "T-123.456.789-0",
+                    "upc": "036000291452",
+                    "catalog_number": "CAT-003",
+                    "release_catalog_number": "REL-003",
+                    "release_upc": "036000291452",
+                },
+                {
+                    "track_title": "Already Fine",
+                    "artist_name": "deadmau5",
+                    "additional_artists": "Jane Doe",
+                    "album_title": "Night Drive",
+                    "release_title": "Night Drive",
+                    "release_primary_artist": "deadmau5",
+                    "release_album_artist": "deadmau5",
+                    "track_length_sec": 181,
+                    "isrc": "NL-ABC-25-00004",
+                    "iswc": "T-223.456.789-0",
+                    "upc": "042100005264",
+                    "catalog_number": "CAT-004",
+                    "release_catalog_number": "REL-004",
+                    "release_upc": "042100005264",
+                },
+            ],
+            "custom_field_defs": [],
+        }
+        json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+        report = self.service.import_json(
+            json_path, options=ExchangeImportOptions(mode="create")
+        )
+
+        self.assertEqual(report.passed, 2)
+        self.assertEqual(report.failed, 0)
+
+        first_snapshot = self.track_service.fetch_track_snapshot(report.created_tracks[0])
+        second_snapshot = self.track_service.fetch_track_snapshot(report.created_tracks[1])
+        assert first_snapshot is not None
+        assert second_snapshot is not None
+
+        self.assertEqual(first_snapshot.track_title, "Dj/Mc Battle")
+        self.assertEqual(first_snapshot.artist_name, "John Doe")
+        self.assertEqual(sorted(first_snapshot.additional_artists), ["Dj/Mc Crew", "Jane Doe"])
+        self.assertEqual(first_snapshot.album_title, "The Forest of Infinite Imagination")
+        self.assertEqual(first_snapshot.isrc, "NL-ABC-25-00003")
+        self.assertEqual(first_snapshot.iswc, "T-123.456.789-0")
+        self.assertEqual(first_snapshot.upc, "036000291452")
+        self.assertEqual(first_snapshot.catalog_number, "CAT-003")
+        self.assertEqual(
+            self._fetch_release_row_for_track(first_snapshot.track_id),
+            (
+                "The Forest of Infinite Imagination",
+                "John Doe",
+                "Dj/Mc Crew",
+                "REL-003",
+                "036000291452",
+            ),
+        )
+
+        self.assertEqual(second_snapshot.track_title, "Already Fine")
+        self.assertEqual(second_snapshot.artist_name, "deadmau5")
+        self.assertEqual(second_snapshot.additional_artists, ["Jane Doe"])
+        self.assertEqual(second_snapshot.album_title, "Night Drive")
+        self.assertEqual(second_snapshot.isrc, "NL-ABC-25-00004")
+        self.assertEqual(second_snapshot.iswc, "T-223.456.789-0")
+        self.assertEqual(second_snapshot.upc, "042100005264")
+        self.assertEqual(second_snapshot.catalog_number, "CAT-004")
+        self.assertEqual(
+            self._fetch_release_row_for_track(second_snapshot.track_id),
+            (
+                "Night Drive",
+                "deadmau5",
+                "deadmau5",
+                "REL-004",
+                "042100005264",
+            ),
         )
 
     def test_merge_mode_matches_case_only_title_and_artist_differences(self):

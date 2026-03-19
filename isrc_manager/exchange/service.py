@@ -6,6 +6,7 @@ import csv
 import hashlib
 import json
 import math
+import re
 import shutil
 import sqlite3
 import tempfile
@@ -33,6 +34,40 @@ AUTO_CSV_DELIMITERS = ",;\t|"
 
 class ExchangeService:
     """Owns tabular and JSON import/export workflows."""
+
+    _TITLE_NAME_IMPORT_TARGETS = frozenset(
+        {
+            "track_title",
+            "album_title",
+            "artist_name",
+            "additional_artists",
+            "release_title",
+            "release_primary_artist",
+            "release_album_artist",
+        }
+    )
+    _TITLE_NAME_SMALL_WORDS = frozenset(
+        {
+            "a",
+            "an",
+            "and",
+            "as",
+            "at",
+            "but",
+            "by",
+            "for",
+            "in",
+            "nor",
+            "of",
+            "on",
+            "or",
+            "the",
+            "to",
+            "via",
+            "vs",
+        }
+    )
+    _TITLE_NAME_TOKEN_RE = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?")
 
     BASE_EXPORT_COLUMNS = (
         "track_id",
@@ -900,6 +935,100 @@ class ExchangeService:
         ).fetchall()
         return [int(row[0]) for row in rows]
 
+    @classmethod
+    def _normalize_row_text_targets(cls, row: dict[str, object]) -> dict[str, object]:
+        normalized: dict[str, object] = {}
+        for key, value in row.items():
+            normalized[key] = cls._normalize_text_target(str(key), value)
+        return normalized
+
+    @classmethod
+    def _normalize_text_target(cls, target_name: str, raw_value: object) -> object:
+        if target_name not in cls._TITLE_NAME_IMPORT_TARGETS or not isinstance(raw_value, str):
+            return raw_value
+        clean = raw_value.strip()
+        if not clean:
+            return clean
+        if target_name == "additional_artists":
+            return cls._normalize_additional_artists_target(clean)
+        if not cls._should_normalize_title_name_text(clean):
+            return clean
+        return cls._to_display_title_name_case(clean)
+
+    @staticmethod
+    def _should_normalize_title_name_text(text: str) -> bool:
+        has_alpha = False
+        has_upper = False
+        has_lower = False
+        for char in str(text or ""):
+            if not char.isalpha():
+                continue
+            has_alpha = True
+            has_upper = has_upper or char.isupper()
+            has_lower = has_lower or char.islower()
+        return has_alpha and has_upper and not has_lower
+
+    @classmethod
+    def _normalize_additional_artists_target(cls, text: str) -> str:
+        parts = [part.strip() for part in str(text or "").split(",")]
+        normalized_parts: list[str] = []
+        for part in parts:
+            if not part:
+                continue
+            if cls._should_normalize_title_name_text(part):
+                normalized_parts.append(cls._to_display_title_name_case(part))
+            else:
+                normalized_parts.append(part)
+        return ", ".join(normalized_parts)
+
+    @classmethod
+    def _to_display_title_name_case(cls, text: str) -> str:
+        clean = str(text or "").strip()
+        if not clean:
+            return clean
+        lowered = clean.lower()
+        titled = cls._TITLE_NAME_TOKEN_RE.sub(
+            lambda match: cls._capitalize_title_name_token(match.group(0)),
+            lowered,
+        )
+        return cls._lowercase_middle_small_words(titled)
+
+    @staticmethod
+    def _capitalize_title_name_token(token: str) -> str:
+        parts = str(token or "").split("'")
+        if not parts:
+            return ""
+        normalized_parts: list[str] = []
+        previous_length = 0
+        for index, part in enumerate(parts):
+            if not part:
+                normalized_parts.append(part)
+            elif index == 0 or previous_length == 1:
+                normalized_parts.append(part[0].upper() + part[1:])
+            else:
+                normalized_parts.append(part)
+            previous_length = len(part)
+        return "'".join(normalized_parts)
+
+    @classmethod
+    def _lowercase_middle_small_words(cls, text: str) -> str:
+        matches = list(cls._TITLE_NAME_TOKEN_RE.finditer(text))
+        if len(matches) < 3:
+            return text
+        parts: list[str] = []
+        last_end = 0
+        last_index = len(matches) - 1
+        for index, match in enumerate(matches):
+            parts.append(text[last_end : match.start()])
+            token = match.group(0)
+            if 0 < index < last_index and token.lower() in cls._TITLE_NAME_SMALL_WORDS:
+                parts.append(token.lower())
+            else:
+                parts.append(token)
+            last_end = match.end()
+        parts.append(text[last_end:])
+        return "".join(parts)
+
     @staticmethod
     def _normalize_track_length_target(raw_value: object) -> object:
         if isinstance(raw_value, timedelta):
@@ -1032,7 +1161,9 @@ class ExchangeService:
         source_dir: Path,
     ) -> ExchangeImportReport:
         opts = options or ExchangeImportOptions()
-        normalized_rows = [self._apply_mapping(row, mapping) for row in rows]
+        normalized_rows = [
+            self._normalize_row_text_targets(self._apply_mapping(row, mapping)) for row in rows
+        ]
         unknown_fields = sorted(
             {
                 key
