@@ -150,6 +150,74 @@ class ExchangeServiceTests(unittest.TestCase):
         self.assertEqual(report.skipped, 1)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Tracks").fetchone()[0], 0)
 
+    def test_import_csv_creates_track_from_multiple_columns(self):
+        csv_path = self.data_root / "create-import.csv"
+        csv_path.write_text(
+            "track_title,artist_name,isrc,comments\n"
+            "Orbit,Cosmowyn,NL-ABC-26-00031,Demo import\n",
+            encoding="utf-8",
+        )
+
+        report = self.service.import_csv(
+            csv_path,
+            mapping={
+                "track_title": "track_title",
+                "artist_name": "artist_name",
+                "isrc": "isrc",
+                "comments": "comments",
+            },
+            options=ExchangeImportOptions(mode="create"),
+        )
+
+        self.assertEqual(report.passed, 1)
+        self.assertEqual(report.failed, 0)
+        self.assertEqual(len(report.created_tracks), 1)
+        self.assertEqual(
+            self.conn.execute(
+                """
+                SELECT t.track_title, COALESCE(a.name, ''), t.isrc, t.comments
+                FROM Tracks t
+                LEFT JOIN Artists a ON a.id = t.main_artist_id
+                """
+            ).fetchone(),
+            ("Orbit", "Cosmowyn", "NL-ABC-26-00031", "Demo import"),
+        )
+
+    def test_import_csv_detects_semicolon_delimiter(self):
+        csv_path = self.data_root / "semicolon-import.csv"
+        csv_path.write_text(
+            "track_title;artist_name;isrc;comments\n"
+            "Orbit;Cosmowyn;NL-ABC-26-00032;Semicolon import\n",
+            encoding="utf-8",
+        )
+
+        report = self.service.import_csv(
+            csv_path,
+            mapping={
+                "track_title": "track_title",
+                "artist_name": "artist_name",
+                "isrc": "isrc",
+                "comments": "comments",
+            },
+            options=ExchangeImportOptions(mode="create"),
+        )
+
+        self.assertEqual(report.passed, 1)
+        self.assertEqual(report.failed, 0)
+        self.assertEqual(len(report.created_tracks), 1)
+        self.assertEqual(
+            self.conn.execute(
+                """
+                SELECT t.track_title, COALESCE(a.name, ''), t.isrc, t.comments
+                FROM Tracks t
+                LEFT JOIN Artists a ON a.id = t.main_artist_id
+                WHERE t.id=?
+                """,
+                (report.created_tracks[0],),
+            ).fetchone(),
+            ("Orbit", "Cosmowyn", "NL-ABC-26-00032", "Semicolon import"),
+        )
+
     def test_package_export_writes_manifest_and_media(self):
         track_id = self._create_track(isrc="NL-ABC-26-00002", title="Nebula", audio=True)
         self._create_release(track_id)
@@ -547,9 +615,51 @@ class ExchangeServiceTests(unittest.TestCase):
 
         inspection = self.service.inspect_csv(csv_path)
 
+        self.assertEqual(inspection.headers, ["track_title", "artist_name", "custom::Mood"])
+        self.assertEqual(
+            inspection.preview_rows,
+            [{"track_title": "Orbit", "artist_name": "Cosmowyn", "custom::Mood": "Dreamy"}],
+        )
         self.assertEqual(inspection.suggested_mapping["track_title"], "track_title")
         self.assertEqual(inspection.suggested_mapping["artist_name"], "artist_name")
         self.assertEqual(inspection.suggested_mapping["custom::Mood"], "custom::Mood")
+
+    def test_inspect_csv_preserves_quoted_commas(self):
+        csv_path = self.data_root / "quoted-commas.csv"
+        csv_path.write_text(
+            'track_title,artist_name,comments\n'
+            '"Orbit, Pt. 1",Cosmowyn,"Dreamy, wide mix"\n',
+            encoding="utf-8",
+        )
+
+        inspection = self.service.inspect_csv(csv_path)
+
+        self.assertEqual(inspection.headers, ["track_title", "artist_name", "comments"])
+        self.assertEqual(
+            inspection.preview_rows,
+            [
+                {
+                    "track_title": "Orbit, Pt. 1",
+                    "artist_name": "Cosmowyn",
+                    "comments": "Dreamy, wide mix",
+                }
+            ],
+        )
+
+    def test_inspect_csv_detects_semicolon_delimiter(self):
+        csv_path = self.data_root / "semicolon-headers.csv"
+        csv_path.write_text(
+            "track_title;artist_name;isrc\nOrbit;Cosmowyn;NL-ABC-26-00033\n",
+            encoding="utf-8",
+        )
+
+        inspection = self.service.inspect_csv(csv_path)
+
+        self.assertEqual(inspection.headers, ["track_title", "artist_name", "isrc"])
+        self.assertEqual(
+            inspection.preview_rows,
+            [{"track_title": "Orbit", "artist_name": "Cosmowyn", "isrc": "NL-ABC-26-00033"}],
+        )
 
 
 if __name__ == "__main__":

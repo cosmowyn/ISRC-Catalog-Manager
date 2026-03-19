@@ -8,6 +8,8 @@ import json
 import shutil
 import sqlite3
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -24,6 +26,7 @@ from isrc_manager.services.tracks import TrackCreatePayload, TrackService, Track
 from .models import ExchangeImportOptions, ExchangeImportReport, ExchangeInspection
 
 JSON_SCHEMA_VERSION = 1
+CSV_SNIFF_SAMPLE_SIZE = 4096
 
 
 class ExchangeService:
@@ -610,9 +613,28 @@ class ExchangeService:
             prepared_rows.append(row)
         return prepared_rows
 
-    def inspect_csv(self, path: str | Path, *, delimiter: str = ",") -> ExchangeInspection:
+    @contextmanager
+    def _open_csv_dict_reader(
+        self, path: str | Path, *, delimiter: str | None = None
+    ) -> Iterator[csv.DictReader]:
         with Path(path).open("r", encoding="utf-8-sig", newline="") as handle:
-            reader = csv.DictReader(handle, delimiter=delimiter)
+            sample = handle.read(CSV_SNIFF_SAMPLE_SIZE)
+            handle.seek(0)
+            if delimiter is not None:
+                yield csv.DictReader(handle, delimiter=delimiter)
+                return
+            try:
+                dialect = (
+                    csv.Sniffer().sniff(sample, delimiters=",;")
+                    if sample.strip()
+                    else csv.excel
+                )
+            except csv.Error:
+                dialect = csv.excel
+            yield csv.DictReader(handle, dialect=dialect)
+
+    def inspect_csv(self, path: str | Path, *, delimiter: str | None = None) -> ExchangeInspection:
+        with self._open_csv_dict_reader(path, delimiter=delimiter) as reader:
             headers = list(reader.fieldnames or [])
             preview_rows = []
             for _, row in zip(range(5), reader):
@@ -692,11 +714,11 @@ class ExchangeService:
         mapping: dict[str, str] | None = None,
         options: ExchangeImportOptions | None = None,
     ) -> ExchangeImportReport:
-        with Path(path).open("r", encoding="utf-8-sig", newline="") as handle:
-            reader = csv.DictReader(handle)
+        path_obj = Path(path)
+        with self._open_csv_dict_reader(path_obj) as reader:
             rows = [dict(row) for row in reader]
         return self._import_rows(
-            rows, mapping=mapping, options=options, format_name="csv", source_dir=Path(path).parent
+            rows, mapping=mapping, options=options, format_name="csv", source_dir=path_obj.parent
         )
 
     def import_xlsx(
