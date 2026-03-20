@@ -1,118 +1,233 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
 import build
-from build import ensure_requirements
 
 
-class EnsureRequirementsTests(unittest.TestCase):
-    def test_creates_default_requirements_with_runtime_and_build_deps(self):
+class BuildMetadataTests(unittest.TestCase):
+    def test_project_version_reads_from_pyproject(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            project_dir = Path(tmpdir)
-            req = ensure_requirements(project_dir)
+            pyproject = Path(tmpdir) / "pyproject.toml"
+            pyproject.write_text(
+                '[project]\nname = "isrc-catalog-manager"\nversion = "9.8.7"\n',
+                encoding="utf-8",
+            )
 
-            contents = req.read_text(encoding="utf-8")
+            version = build._project_version(pyproject)
 
-        self.assertIn("PySide6==6.9.1", contents)
-        self.assertIn("pyinstaller==6.15.0", contents)
-        self.assertIn("audioread==3.0.1", contents)
-        self.assertIn("pillow==12.0.0", contents)
-        self.assertIn("openpyxl==3.1.5", contents)
-        self.assertIn("mutagen==1.47.0", contents)
+        self.assertEqual(version, "9.8.7")
 
-    def test_locate_built_artifact_returns_expected_candidate_when_missing(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            project_root = Path(tmpdir)
-            with (
-                mock.patch.object(build, "PROJECT_ROOT", project_root),
-                mock.patch.object(build.platform, "system", return_value="Linux"),
-            ):
-                candidate = build.locate_built_artifact(onefile=True, console=False)
 
-        self.assertEqual(candidate, project_root / "dist" / build.APP_NAME)
-
-    def test_install_artifact_creates_launcher_for_unix_onefile_binary(self):
+class IconResolutionTests(unittest.TestCase):
+    def test_windows_prefers_native_ico(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            artifact = root / build.APP_NAME
-            artifact.write_text("binary", encoding="utf-8")
-            install_root = root / "install"
-
-            with mock.patch.object(build.platform, "system", return_value="Linux"):
-                build.install_artifact(artifact, install_root)
-
-            installed = install_root / build.APP_NAME
-            launcher = install_root / f"run_{build.APP_NAME.lower()}"
-            self.assertTrue(installed.exists())
-            self.assertTrue(launcher.exists())
-            self.assertIn(build.APP_NAME, launcher.read_text(encoding="utf-8"))
-
-    def test_main_env_only_skips_build_steps(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            project_root = Path(tmpdir)
-            venv_path = project_root / ".venv"
-            (venv_path / "bin").mkdir(parents=True, exist_ok=True)
-            requirements_path = project_root / "requirements.txt"
-            requirements_path.write_text("PySide6==6.9.1\n", encoding="utf-8")
+            icons_dir = root / "build_assets" / "icons"
+            icons_dir.mkdir(parents=True, exist_ok=True)
+            ico = icons_dir / "app_logo.ico"
+            ico.write_bytes(b"ico")
+            (icons_dir / "app_logo.png").write_bytes(b"png")
 
             with (
-                mock.patch.object(build, "PROJECT_ROOT", project_root),
-                mock.patch.object(build, "create_venv") as create_venv,
-                mock.patch.object(build, "reexec_in_dotvenv_if_found") as reexec,
-                mock.patch.object(build, "ask_build_mode", return_value="env_only"),
-                mock.patch.object(build, "ensure_requirements", return_value=requirements_path),
-                mock.patch.object(build, "venv_python", return_value=venv_path / "bin" / "python"),
-                mock.patch.object(build, "pip_install") as pip_install,
-                mock.patch.object(build, "ensure_pyinstaller") as ensure_pyinstaller,
-                mock.patch.object(build, "build_binary") as build_binary,
-                mock.patch.object(build, "destroy_tk_root") as destroy_tk_root,
+                mock.patch.object(build, "_is_windows", return_value=True),
+                mock.patch.object(build, "_is_macos", return_value=False),
             ):
-                build.main()
+                resolved = build._resolve_icon(root)
 
-        create_venv.assert_not_called()
-        reexec.assert_called_once()
-        pip_install.assert_called_once()
-        ensure_pyinstaller.assert_not_called()
-        build_binary.assert_not_called()
-        destroy_tk_root.assert_called_once()
+        self.assertEqual(resolved, str(ico))
 
-    def test_main_build_mode_runs_build_and_install_flow(self):
+    def test_windows_converts_png_when_ico_missing(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            project_root = Path(tmpdir)
-            venv_path = project_root / ".venv"
-            (venv_path / "bin").mkdir(parents=True, exist_ok=True)
-            requirements_path = project_root / "requirements.txt"
-            requirements_path.write_text("PySide6==6.9.1\n", encoding="utf-8")
-            artifact = project_root / "dist" / build.APP_NAME
-            artifact.parent.mkdir(parents=True, exist_ok=True)
-            artifact.write_text("binary", encoding="utf-8")
-            install_root = project_root / "installed"
+            root = Path(tmpdir)
+            icons_dir = root / "build_assets" / "icons"
+            icons_dir.mkdir(parents=True, exist_ok=True)
+            png = icons_dir / "app_logo.png"
+            png.write_bytes(b"png")
+            converted = root / "build" / "generated_assets" / "icons" / "app_logo.ico"
 
             with (
-                mock.patch.object(build, "PROJECT_ROOT", project_root),
-                mock.patch.object(build, "create_venv"),
-                mock.patch.object(build, "reexec_in_dotvenv_if_found"),
-                mock.patch.object(build, "ask_build_mode", return_value="build"),
-                mock.patch.object(build, "ensure_requirements", return_value=requirements_path),
-                mock.patch.object(build, "venv_python", return_value=venv_path / "bin" / "python"),
-                mock.patch.object(build, "pip_install"),
-                mock.patch.object(build, "ensure_pyinstaller") as ensure_pyinstaller,
-                mock.patch.object(build, "_pick_build_options_by_os", return_value=(True, False)),
-                mock.patch.object(build, "build_binary") as build_binary,
-                mock.patch.object(build, "locate_built_artifact", return_value=artifact),
-                mock.patch.object(build, "pick_install_dir", return_value=install_root),
-                mock.patch.object(build, "install_artifact") as install_artifact,
-                mock.patch.object(build, "destroy_tk_root") as destroy_tk_root,
-                mock.patch.object(build.platform, "system", return_value="Linux"),
+                mock.patch.object(build, "_is_windows", return_value=True),
+                mock.patch.object(build, "_is_macos", return_value=False),
+                mock.patch.object(build, "_convert_image_to_ico_qt", return_value=converted) as convert,
             ):
-                build.main()
+                resolved = build._resolve_icon(root)
 
-        ensure_pyinstaller.assert_called_once()
-        build_binary.assert_called_once_with(onefile=True, console=False)
-        install_artifact.assert_called_once_with(artifact, install_root)
-        destroy_tk_root.assert_called_once()
+        convert.assert_called_once_with(png, root)
+        self.assertEqual(resolved, str(converted))
+
+    def test_macos_converts_png_when_icns_missing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            icons_dir = root / "build_assets" / "icons"
+            icons_dir.mkdir(parents=True, exist_ok=True)
+            png = icons_dir / "app_logo.png"
+            png.write_bytes(b"png")
+            converted = root / "build" / "generated_assets" / "icons" / "app_logo.icns"
+
+            with (
+                mock.patch.object(build, "_is_windows", return_value=False),
+                mock.patch.object(build, "_is_macos", return_value=True),
+                mock.patch.object(
+                    build, "_convert_image_to_icns_mac", return_value=converted
+                ) as convert,
+            ):
+                resolved = build._resolve_icon(root)
+
+        convert.assert_called_once_with(png, root)
+        self.assertEqual(resolved, str(converted))
+
+    def test_linux_uses_png(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            icons_dir = root / "build_assets" / "icons"
+            icons_dir.mkdir(parents=True, exist_ok=True)
+            png = icons_dir / "app_logo.png"
+            png.write_bytes(b"png")
+
+            with (
+                mock.patch.object(build, "_is_windows", return_value=False),
+                mock.patch.object(build, "_is_macos", return_value=False),
+            ):
+                resolved = build._resolve_icon(root)
+
+        self.assertEqual(resolved, str(png))
+
+
+class SplashResolutionTests(unittest.TestCase):
+    def test_resolve_splash_prefers_png(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "build_assets").mkdir(parents=True, exist_ok=True)
+            jpg = root / "build_assets" / "splash.jpg"
+            png = root / "build_assets" / "splash.png"
+            jpg.write_bytes(b"jpg")
+            png.write_bytes(b"png")
+
+            with mock.patch.object(build, "_is_macos", return_value=False):
+                resolved = build._resolve_splash(root)
+
+        self.assertEqual(resolved, str(png))
+
+    def test_resolve_splash_skips_macos(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "build_assets").mkdir(parents=True, exist_ok=True)
+            png = root / "build_assets" / "splash.png"
+            png.write_bytes(b"png")
+
+            with mock.patch.object(build, "_is_macos", return_value=True):
+                resolved = build._resolve_splash(root)
+
+        self.assertIsNone(resolved)
+
+
+class CommandConstructionTests(unittest.TestCase):
+    def test_windows_pyinstaller_command_uses_onefile_and_splash(self):
+        build_python = Path("/python")
+        entry_script = Path("/project/ISRC_manager.py")
+
+        with (
+            mock.patch.object(build, "_is_windows", return_value=True),
+            mock.patch.object(build, "_is_macos", return_value=False),
+        ):
+            cmd = build._pyinstaller_cmd(
+                build_python=build_python,
+                entry_script=entry_script,
+                app_name=build.APP_NAME,
+                splash="/project/build_assets/splash.png",
+                icon="/project/build_assets/icons/app_logo.ico",
+            )
+
+        self.assertIn("--onefile", cmd)
+        self.assertNotIn("--onedir", cmd)
+        self.assertIn("--splash", cmd)
+        self.assertIn("/project/build_assets/splash.png", cmd)
+        self.assertIn("--icon", cmd)
+        self.assertIn("/project/build_assets/icons/app_logo.ico", cmd)
+
+    def test_linux_pyinstaller_command_uses_onedir_and_splash(self):
+        build_python = Path("/python")
+        entry_script = Path("/project/ISRC_manager.py")
+
+        with (
+            mock.patch.object(build, "_is_windows", return_value=False),
+            mock.patch.object(build, "_is_macos", return_value=False),
+        ):
+            cmd = build._pyinstaller_cmd(
+                build_python=build_python,
+                entry_script=entry_script,
+                app_name=build.APP_NAME,
+                splash="/project/build_assets/splash.png",
+                icon="/project/build_assets/icons/app_logo.png",
+            )
+
+        self.assertIn("--onedir", cmd)
+        self.assertNotIn("--onefile", cmd)
+        self.assertIn("--splash", cmd)
+
+    def test_macos_pyinstaller_command_skips_splash(self):
+        build_python = Path("/python")
+        entry_script = Path("/project/ISRC_manager.py")
+
+        with (
+            mock.patch.object(build, "_is_windows", return_value=False),
+            mock.patch.object(build, "_is_macos", return_value=True),
+        ):
+            cmd = build._pyinstaller_cmd(
+                build_python=build_python,
+                entry_script=entry_script,
+                app_name=build.APP_NAME,
+                splash="/project/build_assets/splash.png",
+                icon="/project/build_assets/icons/app_logo.icns",
+            )
+
+        self.assertIn("--onedir", cmd)
+        self.assertNotIn("--splash", cmd)
+
+
+class ArtifactStagingTests(unittest.TestCase):
+    def test_find_built_artifact_prefers_macos_app_bundle(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            app_bundle = root / "dist" / f"{build.APP_NAME}.app"
+            app_bundle.mkdir(parents=True, exist_ok=True)
+
+            with (
+                mock.patch.object(build, "_is_windows", return_value=False),
+                mock.patch.object(build, "_is_macos", return_value=True),
+            ):
+                artifact = build._find_built_artifact(root)
+
+        self.assertEqual(artifact, app_bundle)
+
+    def test_stage_release_artifact_copies_file_and_writes_manifest(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            dist_dir = root / "dist"
+            dist_dir.mkdir(parents=True, exist_ok=True)
+            artifact = dist_dir / f"{build.APP_NAME}.exe"
+            artifact.write_bytes(b"binary")
+
+            with (
+                mock.patch.object(build, "_is_windows", return_value=True),
+                mock.patch.object(build, "_is_macos", return_value=False),
+            ):
+                staged = build._stage_release_artifact(
+                    artifact,
+                    dist_dir,
+                    app_version="2.0.0",
+                )
+
+            manifest = json.loads((dist_dir / "release_manifest.json").read_text(encoding="utf-8"))
+            self.assertTrue(staged.exists())
+            self.assertEqual(staged.name, f"{build.APP_NAME}-2.0.0-windows.exe")
+            self.assertEqual(manifest["app_version"], "2.0.0")
+            self.assertEqual(manifest["platform"], "windows")
+            self.assertEqual(manifest["source_artifact"], str(artifact))
+            self.assertEqual(manifest["release_artifact"], str(staged))
 
 
 if __name__ == "__main__":

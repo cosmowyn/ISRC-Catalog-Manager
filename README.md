@@ -335,7 +335,7 @@ The repository includes a demo database and sample media in the `demo/` folder s
 
 ## Installation
 
-### Option 1: Use the guided builder
+### Option 1: Build a release package
 
 Run:
 
@@ -343,12 +343,27 @@ Run:
 python build.py
 ```
 
-The build tool can:
+The build script now follows a deterministic release workflow:
 
-- create or refresh the project virtual environment
-- install the required runtime dependencies
-- build a packaged application with PyInstaller
-- install the packaged application to a chosen location
+- use the current project metadata and `ISRC_manager.py` as the fixed entrypoint
+- resolve packaged branding from `build_assets/icons/app_logo.*`
+- resolve splash branding from `build_assets/splash.*`
+- build with PyInstaller using the platform policy in the script
+- stage the release artifact under `dist/release/`
+- write a `dist/release_manifest.json` alongside the staged output
+
+To customize the packaged branding, replace the files in `build_assets/icons/` and `build_assets/` with the same filenames and extensions you want the build to use.
+
+Typical asset layout:
+
+```text
+build_assets/
+  icons/
+    app_logo.png
+    app_logo.ico
+    app_logo.icns
+  splash.png
+```
 
 The build flow is designed not to package or overwrite your existing profile databases.
 
