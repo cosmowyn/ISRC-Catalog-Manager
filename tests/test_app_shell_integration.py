@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest import mock
 
 from isrc_manager.constants import APP_NAME
+from isrc_manager.paths import AppStorageLayout
 from isrc_manager.services import (
     AssetVersionPayload,
     ContractPayload,
@@ -83,6 +84,26 @@ class _DeferredMigrationMessageBox:
         return None
 
 
+class _AcceptMigrationMessageBox(_DeferredMigrationMessageBox):
+    warning_calls: list[str] = []
+    information_calls: list[str] = []
+
+    def exec(self):
+        self._clicked_button = self._migrate_button
+
+    @staticmethod
+    def warning(*args, **_kwargs):
+        text = str(args[2]) if len(args) > 2 else ""
+        _AcceptMigrationMessageBox.warning_calls.append(text)
+        return None
+
+    @staticmethod
+    def information(*args, **_kwargs):
+        text = str(args[2]) if len(args) > 2 else ""
+        _AcceptMigrationMessageBox.information_calls.append(text)
+        return None
+
+
 class AppShellIntegrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -155,6 +176,23 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.window.show()
         self._drain_events()
         return self.window
+
+    def _settings_path(self) -> Path:
+        return self.qt_settings_root / "AppDataLocation" / "settings.ini"
+
+    def _settings(self):
+        settings = app_module.QSettings(str(self._settings_path()), app_module.QSettings.IniFormat)
+        settings.setFallbacksEnabled(False)
+        return settings
+
+    def _seed_startup_settings_for_legacy_db(self, legacy_db: Path) -> None:
+        settings = self._settings()
+        settings.setValue("storage/legacy_data_root", str(legacy_db.parent.parent.resolve()))
+        settings.setValue("storage/active_data_root", str(legacy_db.parent.parent.resolve()))
+        settings.setValue("db/last_path", str(legacy_db.resolve()))
+        settings.setValue("paths/database_dir", str(legacy_db.parent.resolve()))
+        settings.sync()
+        settings.deleteLater() if hasattr(settings, "deleteLater") else None
 
     def _create_profile_database(self, path: Path) -> None:
         session = DatabaseSessionService().open(path)
@@ -339,10 +377,98 @@ class AppShellIntegrationTests(unittest.TestCase):
 
         self.assertEqual(self.window.data_root, legacy_root.resolve())
         self.assertEqual(
+            self.window.settings.value("storage/active_data_root", "", str),
+            str(legacy_root.resolve()),
+        )
+        self.assertTrue(
+            str(Path(self.window.current_db_path).resolve()).startswith(str(legacy_root.resolve()))
+        )
+        self.assertEqual(
             self.window.settings.value("storage/migration_state", "", str),
             "deferred",
         )
         self.assertIn("legacy app-data folder", _DeferredMigrationMessageBox.last_text.lower())
+
+    def test_startup_migrate_now_bootstraps_logging_and_uses_preferred_root(self):
+        self._close_window()
+        _AcceptMigrationMessageBox.warning_calls = []
+        _AcceptMigrationMessageBox.information_calls = []
+        preferred_root = self.qt_settings_root / "AppLocalDataLocation"
+        if preferred_root.exists():
+            shutil.rmtree(preferred_root)
+
+        legacy_root = self.local_appdata / APP_NAME
+        legacy_db = legacy_root / "Database" / "legacy_startup.db"
+        self._create_profile_database(legacy_db)
+        self._seed_startup_settings_for_legacy_db(legacy_db)
+
+        with mock.patch.object(app_module, "QMessageBox", _AcceptMigrationMessageBox):
+            self.window = app_module.App()
+            self.window.show()
+            self._drain_events()
+
+        self.assertEqual(self.window.data_root, preferred_root.resolve())
+        self.assertEqual(
+            self.window.settings.value("storage/migration_state", "", str),
+            "complete",
+        )
+        self.assertEqual(
+            self.window.settings.value("storage/active_data_root", "", str),
+            str(preferred_root.resolve()),
+        )
+        self.assertEqual(
+            self.window.settings.value("db/last_path", "", str),
+            str((preferred_root / "Database" / legacy_db.name).resolve()),
+        )
+        self.assertEqual(Path(self.window.current_db_path).resolve(), (preferred_root / "Database" / legacy_db.name).resolve())
+        log_files = sorted(preferred_root.joinpath("logs").glob("isrc_manager_*.log"))
+        trace_files = sorted(preferred_root.joinpath("logs").glob("isrc_manager_trace_*.jsonl"))
+        self.assertTrue(log_files)
+        self.assertTrue(trace_files)
+        self.assertEqual(_AcceptMigrationMessageBox.warning_calls, [])
+
+    def test_startup_adopts_valid_preferred_root_when_settings_still_pin_legacy(self):
+        self._close_window()
+        preferred_root = self.qt_settings_root / "AppLocalDataLocation"
+        if preferred_root.exists():
+            shutil.rmtree(preferred_root)
+
+        legacy_root = self.local_appdata / APP_NAME
+        legacy_db = legacy_root / "Database" / "legacy_adopt.db"
+        self._create_profile_database(legacy_db)
+        self._seed_startup_settings_for_legacy_db(legacy_db)
+
+        settings = self._settings()
+        layout = app_module.resolve_app_storage_layout(settings=settings)
+        app_module.StorageMigrationService(layout, settings=settings).migrate()
+        settings.setValue("storage/migration_state", "failed")
+        settings.setValue("storage/legacy_data_root", str(legacy_root.resolve()))
+        settings.setValue("storage/active_data_root", str(legacy_root.resolve()))
+        settings.setValue("db/last_path", str(legacy_db.resolve()))
+        settings.setValue("paths/database_dir", str((legacy_root / "Database").resolve()))
+        settings.sync()
+
+        with mock.patch.object(app_module, "QMessageBox") as message_box:
+            self.window = app_module.App()
+            self.window.show()
+            self._drain_events()
+
+        migrated_db = preferred_root / "Database" / legacy_db.name
+        self.assertEqual(self.window.data_root, preferred_root.resolve())
+        self.assertEqual(Path(self.window.current_db_path).resolve(), migrated_db.resolve())
+        self.assertEqual(
+            self.window.settings.value("storage/active_data_root", "", str),
+            str(preferred_root.resolve()),
+        )
+        self.assertEqual(
+            self.window.settings.value("storage/migration_state", "", str),
+            "complete",
+        )
+        self.assertEqual(
+            self.window.settings.value("db/last_path", "", str),
+            str(migrated_db.resolve()),
+        )
+        self.assertFalse(message_box.called)
 
     def test_storage_migration_reopens_active_managed_profile_in_new_root(self):
         self._close_window()
@@ -388,8 +514,86 @@ class AppShellIntegrationTests(unittest.TestCase):
             self.window.settings.value("storage/active_data_root", "", str),
             str(preferred_root.resolve()),
         )
+        self.assertEqual(
+            self.window.settings.value("storage/migration_state", "", str),
+            "complete",
+        )
         self.assertTrue((legacy_root / "Database" / legacy_db.name).exists())
         self.assertIsNotNone(self.window.track_service.fetch_track_snapshot(track_id))
+
+    def test_manual_legacy_cleanup_after_adoption_does_not_recreate_legacy_root(self):
+        self._close_window()
+        preferred_root = self.qt_settings_root / "AppLocalDataLocation"
+        if preferred_root.exists():
+            shutil.rmtree(preferred_root)
+
+        legacy_root = self.local_appdata / APP_NAME
+        legacy_db = legacy_root / "Database" / "legacy_cleanup.db"
+        self._create_profile_database(legacy_db)
+        self._seed_startup_settings_for_legacy_db(legacy_db)
+
+        settings = self._settings()
+        layout = app_module.resolve_app_storage_layout(settings=settings)
+        app_module.StorageMigrationService(layout, settings=settings).migrate()
+        settings.setValue("storage/migration_state", "failed")
+        settings.setValue("storage/legacy_data_root", str(legacy_root.resolve()))
+        settings.setValue("storage/active_data_root", str(legacy_root.resolve()))
+        settings.setValue("db/last_path", str(legacy_db.resolve()))
+        settings.setValue("paths/database_dir", str((legacy_root / "Database").resolve()))
+        settings.sync()
+
+        shutil.rmtree(legacy_root)
+        self.assertFalse(legacy_root.exists())
+
+        self.window = app_module.App()
+        self.window.show()
+        self._drain_events()
+
+        self.assertEqual(self.window.data_root, preferred_root.resolve())
+        self.assertFalse(legacy_root.exists())
+        self.assertFalse((legacy_root / "Database" / "default.db").exists())
+        self.assertFalse((legacy_root / "history").exists())
+        self.assertFalse((legacy_root / "help").exists())
+        self.assertFalse((legacy_root / "logs").exists())
+
+    def test_portable_mode_skips_storage_migration_and_legacy_adoption(self):
+        self._close_window()
+        portable_root = self.root / "portable-root"
+        legacy_root = self.local_appdata / APP_NAME
+        legacy_db = legacy_root / "Database" / "portable_legacy.db"
+        self._create_profile_database(legacy_db)
+
+        def _portable_layout(*, settings=None, app_name=APP_NAME, portable=None, active_data_root=None):
+            chosen_root = Path(active_data_root).resolve() if active_data_root is not None else portable_root.resolve()
+            return AppStorageLayout(
+                app_name=app_name,
+                portable=True,
+                settings_root=portable_root.resolve(),
+                settings_path=(portable_root / "settings.ini").resolve(),
+                lock_path=(portable_root / f"{app_name}.lock").resolve(),
+                preferred_data_root=portable_root.resolve(),
+                active_data_root=chosen_root,
+                legacy_data_roots=(),
+                database_dir=chosen_root / "Database",
+                exports_dir=chosen_root / "exports",
+                logs_dir=chosen_root / "logs",
+                backups_dir=chosen_root / "backups",
+                history_dir=chosen_root / "history",
+                help_dir=chosen_root / "help",
+            )
+
+        with (
+            mock.patch.object(app_module, "settings_path", return_value=portable_root / "settings.ini"),
+            mock.patch.object(app_module, "resolve_app_storage_layout", side_effect=_portable_layout),
+            mock.patch.object(app_module, "QMessageBox") as message_box,
+        ):
+            self.window = app_module.App()
+            self.window.show()
+            self._drain_events()
+
+        self.assertEqual(self.window.data_root, portable_root.resolve())
+        self.assertNotEqual(self.window.data_root, legacy_root.resolve())
+        self.assertFalse(message_box.called)
 
     def test_bundled_themes_are_available_and_not_persisted_as_user_library_entries(self):
         library = self.window._load_theme_library()

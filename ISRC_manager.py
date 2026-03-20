@@ -297,7 +297,14 @@ from isrc_manager.settings import enforce_single_instance, init_settings
 from isrc_manager.tasks import BackgroundTaskManager, TaskFailure
 from isrc_manager.tasks.app_services import BackgroundAppServiceFactory
 from isrc_manager.tasks.history_helpers import run_file_history_action, run_snapshot_history_action
-from isrc_manager.storage_migration import StorageMigrationService
+from isrc_manager.storage_migration import (
+    PREFERRED_STATE_CONFLICT,
+    PREFERRED_STATE_EMPTY,
+    PREFERRED_STATE_RESUMABLE_STAGE,
+    PREFERRED_STATE_SAFE_NOISE,
+    PREFERRED_STATE_VALID_COMPLETE,
+    StorageMigrationService,
+)
 from isrc_manager.tags import (
     AudioTagService,
     TaggedAudioExportService,
@@ -5159,12 +5166,18 @@ class App(QMainWindow):
 
         self.settings = QSettings(str(settings_path()), QSettings.IniFormat)
         self.settings.setFallbacksEnabled(False)
+        self.logger = logging.getLogger("ISRCManager")
+        self.trace_logger = logging.getLogger("ISRCManager.trace")
+        self._logging_configured = False
+        self._bootstrap_log_buffer: list[tuple[str, int, str, dict | None]] = []
         self.storage_layout = resolve_app_storage_layout(settings=self.settings)
         self.storage_migration_service = StorageMigrationService(
-            self.storage_layout, settings=self.settings
+            self.storage_layout,
+            settings=self.settings,
+            reporter=self._log_event,
         )
-        self._maybe_run_storage_layout_migration()
-        self._apply_storage_layout()
+        startup_root = self._reconcile_startup_storage_root()
+        self._apply_storage_layout(active_data_root=startup_root)
 
         self.sqlite_connection_factory = SQLiteConnectionFactory()
         self.database_session = DatabaseSessionService(self.sqlite_connection_factory)
@@ -5185,8 +5198,6 @@ class App(QMainWindow):
         DB_PATH = self.database_dir / "default.db"
 
         # --- Logging setup (daily human log + structured trace log) ---
-        self.logger = logging.getLogger("ISRCManager")
-        self.trace_logger = logging.getLogger("ISRCManager.trace")
         self._configure_logging()
         self._log_event(
             "app.start",
@@ -5281,10 +5292,15 @@ class App(QMainWindow):
         self._apply_theme()
         self._refresh_catalog_ui_in_background(unique_key="catalog.ui.startup")
 
-    def _apply_storage_layout(self) -> None:
-        self.storage_layout = resolve_app_storage_layout(settings=self.settings)
+    def _apply_storage_layout(self, *, active_data_root: str | Path | None = None) -> None:
+        self.storage_layout = resolve_app_storage_layout(
+            settings=self.settings,
+            active_data_root=active_data_root,
+        )
         self.storage_migration_service = StorageMigrationService(
-            self.storage_layout, settings=self.settings
+            self.storage_layout,
+            settings=self.settings,
+            reporter=self._log_event,
         )
         self.data_root = self.storage_layout.data_root
         self.database_dir = self.storage_layout.database_dir
@@ -5318,24 +5334,67 @@ class App(QMainWindow):
                 settings_path=self.settings.fileName(),
             )
 
-    def _maybe_run_storage_layout_migration(self) -> None:
+    def _reconcile_startup_storage_root(self) -> Path:
         inspection = self.storage_migration_service.inspect()
-        if (
-            self.storage_layout.portable
-            or inspection.legacy_root is None
-            or not inspection.legacy_items
-        ):
-            return
-        if (
-            inspection.target_ready
-            and self.storage_layout.active_data_root == self.storage_layout.preferred_data_root
-        ):
-            self.storage_migration_service.mark_complete()
-            return
+        preferred_root = self.storage_layout.preferred_data_root.resolve()
+        if self.storage_layout.portable:
+            self._log_event(
+                "storage.migration.startup",
+                "Portable mode is active; storage migration is skipped",
+                data_root=preferred_root,
+            )
+            return preferred_root
+
+        if inspection.preferred_state == PREFERRED_STATE_VALID_COMPLETE:
+            result = self.storage_migration_service.migrate()
+            self._log_event(
+                "storage.migration.startup",
+                "Adopted verified preferred app-data root during startup",
+                action=result.action,
+                source_root=result.source_root,
+                target_root=result.target_root,
+            )
+            return result.target_root.resolve()
+
+        if inspection.preferred_state == PREFERRED_STATE_RESUMABLE_STAGE:
+            result = self.storage_migration_service.migrate()
+            self._log_event(
+                "storage.migration.startup",
+                "Resumed staged app-data migration during startup",
+                action=result.action,
+                source_root=result.source_root,
+                target_root=result.target_root,
+            )
+            return result.target_root.resolve()
+
+        if inspection.preferred_state == PREFERRED_STATE_CONFLICT:
+            self._log_event(
+                "storage.migration.startup_conflict",
+                "Preferred app-data root contains conflicting content; keeping the current managed root",
+                level=logging.WARNING,
+                preferred_root=preferred_root,
+                conflict_items=list(inspection.conflict_items),
+            )
+            if inspection.legacy_root is not None and inspection.legacy_items:
+                return inspection.legacy_root.resolve()
+            return preferred_root
+
+        if inspection.legacy_root is None or not inspection.legacy_items:
+            self._log_event(
+                "storage.migration.startup",
+                "No legacy app-data migration is needed on startup",
+                active_root=preferred_root,
+                preferred_state=inspection.preferred_state,
+            )
+            return preferred_root
+
         if inspection.deferred and self.storage_layout.active_data_root == inspection.legacy_root:
-            return
-        if not inspection.migration_needed and inspection.target_ready:
-            return
+            self._log_event(
+                "storage.migration.startup_deferred",
+                "Startup is honoring the deferred legacy app-data root",
+                legacy_root=inspection.legacy_root,
+            )
+            return inspection.legacy_root.resolve()
 
         lines = [
             "A legacy app-data folder was found.",
@@ -5359,19 +5418,25 @@ class App(QMainWindow):
 
         if message_box.clickedButton() is keep_button:
             self.storage_migration_service.defer(inspection.legacy_root)
-            self.storage_layout = resolve_app_storage_layout(settings=self.settings)
-            self.storage_migration_service = StorageMigrationService(
-                self.storage_layout, settings=self.settings
+            self._log_event(
+                "storage.migration.deferred",
+                "Startup app-data migration was deferred by the user",
+                legacy_root=inspection.legacy_root,
+                preferred_root=preferred_root,
             )
-            return
+            return inspection.legacy_root.resolve()
 
         try:
-            result = self._run_storage_layout_migration()
+            result = self.storage_migration_service.migrate()
         except Exception as exc:
             self.storage_migration_service.defer(inspection.legacy_root)
-            self.storage_layout = resolve_app_storage_layout(settings=self.settings)
-            self.storage_migration_service = StorageMigrationService(
-                self.storage_layout, settings=self.settings
+            self._log_event(
+                "storage.migration.startup_failed",
+                "Startup app-data migration could not be completed; continuing with the legacy root",
+                level=logging.WARNING,
+                legacy_root=inspection.legacy_root,
+                preferred_root=preferred_root,
+                error=str(exc),
             )
             QMessageBox.warning(
                 self,
@@ -5379,14 +5444,25 @@ class App(QMainWindow):
                 "The app-data migration could not be completed.\n\n"
                 f"{exc}\n\nThe app will continue to use the current folder for now.",
             )
-            return
+            return inspection.legacy_root.resolve()
 
         QMessageBox.information(
             self,
             "App Data Migration",
-            "App-owned data was copied into the new storage layout successfully.\n\n"
-            f"Migrated items: {', '.join(result.copied_items)}",
+            f"App-owned data was {result.action} successfully.\n\n"
+            f"Items: {', '.join(result.copied_items)}",
         )
+        self._log_event(
+            "storage.migration.startup",
+            "Startup selected the preferred app-data root after migration",
+            action=result.action,
+            source_root=result.source_root,
+            target_root=result.target_root,
+        )
+        return result.target_root.resolve()
+
+    def _maybe_run_storage_layout_migration(self) -> Path:
+        return self._reconcile_startup_storage_root()
 
     def _run_storage_layout_migration(self):
         if hasattr(self, "background_tasks") and self.background_tasks.has_running_tasks():
@@ -5416,7 +5492,8 @@ class App(QMainWindow):
         source_root = result.source_root.resolve()
         target_root = result.target_root.resolve()
 
-        self._apply_storage_layout()
+        self._apply_storage_layout(active_data_root=target_root)
+        self._configure_logging()
 
         if previous_was_open and previous_current_path:
             reopened_path = previous_current_path
@@ -5438,9 +5515,10 @@ class App(QMainWindow):
 
         self._log_event(
             "storage.migration",
-            "Migrated app-owned data into the preferred storage layout",
+            "Completed app-owned storage recovery",
             source_root=source_root,
             target_root=target_root,
+            action=result.action,
             migrated_items=list(result.copied_items),
         )
         return result
@@ -5471,6 +5549,7 @@ class App(QMainWindow):
             "%Y-%m-%d %H:%M:%S",
         )
         trace_formatter = _JsonLogFormatter()
+        self._logging_configured = False
 
         for logger in (self.logger, self.trace_logger):
             logger.setLevel(logging.INFO)
@@ -5503,6 +5582,19 @@ class App(QMainWindow):
         stream_handler.setLevel(logging.WARNING)
         stream_handler.setFormatter(app_formatter)
         self.logger.addHandler(stream_handler)
+        self._logging_configured = True
+        self._flush_bootstrap_log_buffer()
+
+    def _flush_bootstrap_log_buffer(self) -> None:
+        if not self._logging_configured:
+            return
+        buffered_records = list(self._bootstrap_log_buffer)
+        self._bootstrap_log_buffer.clear()
+        for record_type, level, message, extra in buffered_records:
+            if record_type == "trace":
+                self.trace_logger.log(level, message, extra=extra or {})
+            else:
+                self.logger.log(level, message)
 
     @staticmethod
     def _normalize_log_value(value):
@@ -5535,6 +5627,9 @@ class App(QMainWindow):
             return
         extra = {"event": event}
         extra.update(self._trace_context(**fields))
+        if not getattr(self, "_logging_configured", False):
+            self._bootstrap_log_buffer.append(("trace", level, message or event, extra))
+            return
         self.trace_logger.log(level, message or event, extra=extra)
 
     def _log_event(self, event: str, message: str, *, level: int = logging.INFO, **fields) -> None:
@@ -5547,6 +5642,10 @@ class App(QMainWindow):
                 normalized = ", ".join(str(item) for item in normalized)
             summary_parts.append(f"{key}={normalized}")
         line = message if not summary_parts else f"{message} | " + " | ".join(summary_parts)
+        if not getattr(self, "_logging_configured", False):
+            self._bootstrap_log_buffer.append(("app", level, line, None))
+            self._log_trace(event, message=message, level=level, **fields)
+            return
         self.logger.log(level, line)
         self._log_trace(event, message=message, level=level, **fields)
 
@@ -5734,8 +5833,31 @@ class App(QMainWindow):
     def _preview_diagnostics_repair(self, repair_key: str, check: dict | None = None) -> str:
         if repair_key == "storage_layout_migrate":
             inspection = self.storage_migration_service.inspect()
-            if inspection.legacy_root is None or not inspection.legacy_items:
+            if (
+                inspection.legacy_root is None
+                and inspection.preferred_state not in (
+                    PREFERRED_STATE_VALID_COMPLETE,
+                    PREFERRED_STATE_RESUMABLE_STAGE,
+                )
+            ):
                 return "No legacy app-owned storage was detected, so no migration is needed."
+            if inspection.preferred_state == PREFERRED_STATE_VALID_COMPLETE:
+                return (
+                    "This will adopt the verified app-owned data already present in the preferred app folder "
+                    "and refresh startup settings to use it automatically."
+                )
+            if inspection.preferred_state == PREFERRED_STATE_RESUMABLE_STAGE:
+                return (
+                    "This will resume the preserved staged app-data migration, verify the staged databases, "
+                    "and promote the staged root into the preferred app folder."
+                )
+            if inspection.preferred_state == PREFERRED_STATE_CONFLICT:
+                conflict_text = "\n".join(f"- {item}" for item in inspection.conflict_items[:10]) or "- (unknown)"
+                return (
+                    "The preferred app folder contains conflicting managed content that cannot be overwritten "
+                    "automatically.\n\n"
+                    f"Conflicting items:\n{conflict_text}"
+                )
             return (
                 "This will copy app-owned storage into the preferred app folder, rewrite known internal "
                 "history and snapshot paths, verify copied databases, and keep the legacy folder intact.\n\n"
@@ -5772,10 +5894,10 @@ class App(QMainWindow):
         if repair_key == "storage_layout_migrate":
             result = self._run_storage_layout_migration()
             return (
-                "App-owned data was migrated into the preferred storage layout.\n\n"
+                f"App-owned data was {result.action} into the preferred storage layout.\n\n"
                 f"Source: {result.source_root}\n"
                 f"Target: {result.target_root}\n"
-                f"Copied items: {', '.join(result.copied_items)}"
+                f"Items: {', '.join(result.copied_items)}"
             )
 
         if repair_key == "schema_migrate":
@@ -5920,22 +6042,38 @@ class App(QMainWindow):
                 )
             else:
                 current_root = self.storage_layout.active_data_root
-                target_ready_text = (
-                    ", ".join(storage_inspection.target_items)
-                    if storage_inspection.target_items
+                preferred_state_text = (
+                    ", ".join(storage_inspection.preferred_items)
+                    if storage_inspection.preferred_items
                     else "(empty)"
                 )
+                summary = "Legacy app-owned storage was detected."
+                status = "warning"
+                if storage_inspection.preferred_state == PREFERRED_STATE_VALID_COMPLETE:
+                    summary = "Verified app-owned data already exists in the preferred app folder."
+                elif storage_inspection.preferred_state == PREFERRED_STATE_RESUMABLE_STAGE:
+                    summary = "A staged app-data migration can be resumed."
+                elif storage_inspection.preferred_state == PREFERRED_STATE_CONFLICT:
+                    summary = "The preferred app folder contains conflicting managed content."
+                    status = "error"
                 add_check(
                     "Storage layout",
-                    "warning",
-                    "Legacy app-owned storage was detected.",
+                    status,
+                    summary,
                     "\n".join(
                         [
                             f"Legacy root: {storage_inspection.legacy_root}",
                             f"Active root: {current_root}",
                             f"Preferred root: {self.storage_layout.preferred_data_root}",
                             f"Legacy items: {', '.join(storage_inspection.legacy_items)}",
-                            f"Preferred-root contents: {target_ready_text}",
+                            f"Preferred state: {storage_inspection.preferred_state}",
+                            f"Preferred-root contents: {preferred_state_text}",
+                            (
+                                "Conflict items: "
+                                + ", ".join(storage_inspection.conflict_items[:10])
+                                if storage_inspection.conflict_items
+                                else ""
+                            ),
                             "",
                             "Use the migration action to collect managed app data into the preferred app folder without deleting the legacy copy.",
                         ]

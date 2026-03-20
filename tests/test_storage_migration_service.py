@@ -3,6 +3,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from PySide6.QtCore import QSettings
 
@@ -33,6 +34,9 @@ class StorageMigrationServiceTests(unittest.TestCase):
         self.settings.setValue("paths/database_dir", str(self.source_root / "Database"))
         self.settings.sync()
         self._build_legacy_storage()
+
+    def _build_service(self) -> StorageMigrationService:
+        return StorageMigrationService(self._build_layout(), settings=self.settings)
 
     def tearDown(self):
         self.settings.clear()
@@ -98,7 +102,10 @@ class StorageMigrationServiceTests(unittest.TestCase):
                 kind="manual",
                 label="Legacy Backup",
                 source_db_path=self.db_path,
-                metadata={"source_backup": str(backup_path)},
+                metadata={
+                    "source_backup": str(backup_path),
+                    "external_reference": str((self.root / "external-license.pdf").resolve()),
+                },
             )
         finally:
             DatabaseSessionService.close(session.conn)
@@ -110,15 +117,17 @@ class StorageMigrationServiceTests(unittest.TestCase):
         )
 
     def test_migrate_copies_storage_and_rewrites_internal_paths(self):
-        service = StorageMigrationService(self._build_layout(), settings=self.settings)
+        service = self._build_service()
 
         inspection = service.inspect()
         self.assertTrue(inspection.migration_needed)
+        self.assertEqual(inspection.preferred_state, "empty")
         self.assertEqual(inspection.legacy_root, self.source_root.resolve())
         self.assertIn("Database", inspection.legacy_items)
         self.assertIn("history", inspection.legacy_items)
 
         result = service.migrate()
+        self.assertEqual(result.action, "migrated")
 
         self.assertTrue((self.target_root / "Database" / "library.db").exists())
         self.assertTrue((self.source_root / "Database" / "library.db").exists())
@@ -164,6 +173,7 @@ class StorageMigrationServiceTests(unittest.TestCase):
                 str(Path(backup_row[1]).resolve()).startswith(str(self.target_root.resolve()))
             )
             self.assertIn(str(self.target_root.resolve()), str(backup_row[2]))
+            self.assertIn(str((self.root / "external-license.pdf").resolve()), str(backup_row[2]))
 
             entry_rows = migrated_conn.execute(
                 "SELECT payload_json, inverse_json, redo_json FROM HistoryEntries ORDER BY id"
@@ -223,7 +233,7 @@ class StorageMigrationServiceTests(unittest.TestCase):
             live_conn.commit()
             self.assertTrue(Path(f"{self.db_path}-wal").exists())
 
-            service = StorageMigrationService(self._build_layout(), settings=self.settings)
+            service = self._build_service()
             service.migrate()
         finally:
             live_conn.close()
@@ -239,6 +249,114 @@ class StorageMigrationServiceTests(unittest.TestCase):
         self.assertIsNotNone(row)
         assert row is not None
         self.assertEqual(row[0], "copied from wal-backed source")
+
+    def test_migrate_adopts_verified_complete_preferred_root_with_stale_legacy_settings(self):
+        initial_service = self._build_service()
+        initial_result = initial_service.migrate()
+        self.assertEqual(initial_result.action, "migrated")
+
+        self.settings.setValue("storage/migration_state", "failed")
+        self.settings.setValue("storage/legacy_data_root", str(self.source_root.resolve()))
+        self.settings.setValue("storage/active_data_root", str(self.source_root.resolve()))
+        self.settings.setValue("db/last_path", str(self.db_path.resolve()))
+        self.settings.setValue("paths/database_dir", str((self.source_root / "Database").resolve()))
+        self.settings.sync()
+
+        service = self._build_service()
+        inspection = service.inspect()
+        self.assertEqual(inspection.preferred_state, "valid_complete")
+
+        result = service.migrate()
+
+        self.assertEqual(result.action, "adopted")
+        self.assertEqual(
+            self.settings.value("storage/active_data_root", "", str),
+            str(self.target_root.resolve()),
+        )
+        self.assertEqual(
+            self.settings.value("db/last_path", "", str),
+            str((self.target_root / "Database" / "library.db").resolve()),
+        )
+        self.assertEqual(
+            self.settings.value("paths/database_dir", "", str),
+            str((self.target_root / "Database").resolve()),
+        )
+
+    def test_resume_from_failed_stage_promotes_preserved_stage_root(self):
+        service = self._build_service()
+
+        with mock.patch.object(
+            StorageMigrationService,
+            "_promote_stage_root",
+            side_effect=RuntimeError("promotion blocked for test"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "promotion blocked for test"):
+                service.migrate()
+
+        journal = service.load_journal()
+        stage_root = Path(str(journal.get("stage_root")))
+        self.assertEqual(journal.get("status"), "failed")
+        self.assertTrue(stage_root.exists())
+        self.assertFalse(self.target_root.exists())
+
+        resumed_service = self._build_service()
+        with mock.patch.object(
+            StorageMigrationService,
+            "_copy_item",
+            side_effect=AssertionError("resume should not recopy legacy files"),
+        ):
+            result = resumed_service.migrate()
+
+        self.assertEqual(result.action, "resumed")
+        self.assertTrue((self.target_root / "Database" / "library.db").exists())
+        self.assertFalse(stage_root.exists())
+        self.assertEqual(
+            self.settings.value("storage/active_data_root", "", str),
+            str(self.target_root.resolve()),
+        )
+        self.assertEqual(
+            resumed_service.load_journal().get("status"),
+            "complete",
+        )
+
+    def test_migrate_can_replace_safe_bootstrap_noise_in_preferred_root(self):
+        (self.target_root / "logs").mkdir(parents=True, exist_ok=True)
+        (self.target_root / "logs" / "bootstrap.log").write_text("bootstrap", encoding="utf-8")
+        (self.target_root / "help").mkdir(parents=True, exist_ok=True)
+        (self.target_root / "help" / "isrc_catalog_manager_help.html").write_text(
+            "<html>help</html>",
+            encoding="utf-8",
+        )
+
+        service = self._build_service()
+        inspection = service.inspect()
+        self.assertEqual(inspection.preferred_state, "safe_noise")
+
+        result = service.migrate()
+
+        self.assertEqual(result.action, "migrated")
+        self.assertTrue((self.target_root / "Database" / "library.db").exists())
+        self.assertFalse((self.target_root / "logs" / "bootstrap.log").exists())
+        self.assertFalse(
+            (self.target_root / "help" / "isrc_catalog_manager_help.html").exists()
+        )
+
+    def test_migrate_blocks_conflicting_nonempty_preferred_root(self):
+        (self.target_root / "Database").mkdir(parents=True, exist_ok=True)
+        (self.target_root / "Database" / "foreign.db").write_text("not managed", encoding="utf-8")
+
+        service = self._build_service()
+        inspection = service.inspect()
+        self.assertEqual(inspection.preferred_state, "conflict")
+
+        with self.assertRaisesRegex(RuntimeError, "conflicting content"):
+            service.migrate()
+
+        self.assertTrue((self.source_root / "Database" / "library.db").exists())
+        self.assertEqual(
+            self.settings.value("storage/active_data_root", "", str),
+            "",
+        )
 
 
 if __name__ == "__main__":
