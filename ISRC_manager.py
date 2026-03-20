@@ -33,6 +33,7 @@ from PySide6.QtCore import (
     Qt,
     QDate,
     QPoint,
+    QRect,
     QSettings,
     QStandardPaths,
     QByteArray,
@@ -390,7 +391,9 @@ def _prompt_storage_mode_choice(
     db_button = dialog.addButton("Store in Database", QMessageBox.AcceptRole)
     file_button = dialog.addButton("Store as Managed File", QMessageBox.AcceptRole)
     dialog.addButton(QMessageBox.Cancel)
-    dialog.setDefaultButton(file_button if default_normalized == STORAGE_MODE_MANAGED_FILE else db_button)
+    dialog.setDefaultButton(
+        file_button if default_normalized == STORAGE_MODE_MANAGED_FILE else db_button
+    )
     dialog.exec()
     clicked = dialog.clickedButton()
     if clicked is db_button:
@@ -2089,7 +2092,7 @@ class ApplicationSettingsDialog(QDialog):
         playground_layout.addWidget(advanced_help)
         advanced_layout.addWidget(playground_row)
         selector_hint = QLabel(
-            "Example object names: `#themePreviewButton`, `#themePreviewField`, `#themePreviewHelpButton`, `#themePreviewPlayground QPushButton`, and `QToolButton[role=\"actionRibbonButton\"]`.",
+            'Example object names: `#themePreviewButton`, `#themePreviewField`, `#themePreviewHelpButton`, `#themePreviewPlayground QPushButton`, and `QToolButton[role="actionRibbonButton"]`.',
             advanced_box,
         )
         selector_hint.setProperty("role", "hint")
@@ -5317,7 +5320,11 @@ class App(QMainWindow):
 
     def _maybe_run_storage_layout_migration(self) -> None:
         inspection = self.storage_migration_service.inspect()
-        if self.storage_layout.portable or inspection.legacy_root is None or not inspection.legacy_items:
+        if (
+            self.storage_layout.portable
+            or inspection.legacy_root is None
+            or not inspection.legacy_items
+        ):
             return
         if (
             inspection.target_ready
@@ -5388,7 +5395,9 @@ class App(QMainWindow):
             )
 
         inspection = self.storage_migration_service.inspect()
-        source_root = inspection.legacy_root.resolve() if inspection.legacy_root is not None else None
+        source_root = (
+            inspection.legacy_root.resolve() if inspection.legacy_root is not None else None
+        )
         previous_current_path = str(getattr(self, "current_db_path", "") or "").strip()
         previous_was_open = getattr(self, "conn", None) is not None
 
@@ -5825,7 +5834,9 @@ class App(QMainWindow):
                 raise RuntimeError("Open a profile first.")
             result = self.history_manager.repair_recovery_state()
             self._refresh_history_actions()
-            self._audit("REPAIR", "History", ref_id=self.current_db_path, details="history_reconcile")
+            self._audit(
+                "REPAIR", "History", ref_id=self.current_db_path, details="history_reconcile"
+            )
             self._audit_commit()
             self._log_event(
                 "diagnostics.repair.history_reconcile",
@@ -6214,7 +6225,8 @@ class App(QMainWindow):
             snapshot_issues = [
                 issue
                 for issue in recovery_issues
-                if issue.issue_type in {
+                if issue.issue_type
+                in {
                     "missing_snapshot_artifact",
                     "missing_snapshot_archive",
                     "orphan_snapshot_file",
@@ -6259,9 +6271,7 @@ class App(QMainWindow):
                 }
             ]
             backup_details = "\n\n".join(
-                "\n".join(
-                    [issue.message] + ([str(issue.path)] if issue.path else [])
-                )
+                "\n".join([issue.message] + ([str(issue.path)] if issue.path else []))
                 for issue in backup_issues[:20]
             )
             backup_total = len(self.history_manager.list_backups(limit=10_000))
@@ -6357,7 +6367,9 @@ class App(QMainWindow):
             if self.history_manager is not None
             else None
         )
-        self.track_service = TrackService(self.conn, self.data_root) if self.conn is not None else None
+        self.track_service = (
+            TrackService(self.conn, self.data_root) if self.conn is not None else None
+        )
         self.settings_reads = SettingsReadService(self.conn) if self.conn is not None else None
         self.settings_mutations = (
             SettingsMutationService(self.conn, self.settings) if self.conn is not None else None
@@ -6420,7 +6432,9 @@ class App(QMainWindow):
             else None
         )
         self.rights_service = RightsService(self.conn) if self.conn is not None else None
-        self.asset_service = AssetService(self.conn, self.data_root) if self.conn is not None else None
+        self.asset_service = (
+            AssetService(self.conn, self.data_root) if self.conn is not None else None
+        )
         self.repertoire_workflow_service = (
             RepertoireWorkflowService(self.conn) if self.conn is not None else None
         )
@@ -6671,7 +6685,12 @@ class App(QMainWindow):
             return
         bottom_gap = int(self.TOP_CHROME_DOCK_GAP)
         margins = toolbar.contentsMargins()
-        if margins.left() != 0 or margins.top() != 0 or margins.right() != 0 or margins.bottom() != bottom_gap:
+        if (
+            margins.left() != 0
+            or margins.top() != 0
+            or margins.right() != 0
+            or margins.bottom() != bottom_gap
+        ):
             toolbar.setContentsMargins(0, 0, 0, bottom_gap)
         toolbar.updateGeometry()
         toolbar.update()
@@ -6693,10 +6712,7 @@ class App(QMainWindow):
     def showEvent(self, event):
         super().showEvent(event)
         self._queue_top_chrome_boundary_refresh()
-        if (
-            self._workspace_layout_restore_pending
-            and not self._workspace_layout_restore_scheduled
-        ):
+        if self._workspace_layout_restore_pending and not self._workspace_layout_restore_scheduled:
             self._workspace_layout_restore_pending = False
             self._workspace_layout_restore_scheduled = True
             QTimer.singleShot(0, self._restore_workspace_layout_on_first_show)
@@ -7834,6 +7850,7 @@ class App(QMainWindow):
         try:
             yield
         finally:
+
             def _resume_layout_history():
                 self._suspend_layout_history = previous_suspend_state
                 try:
@@ -8003,6 +8020,10 @@ class App(QMainWindow):
     def _window_state_setting_key() -> str:
         return "display/main_window_window_state"
 
+    @staticmethod
+    def _window_normal_geometry_setting_key() -> str:
+        return "display/main_window_normal_geometry"
+
     def _schedule_main_dock_state_save(self) -> None:
         if (
             getattr(self, "_suspend_dock_state_sync", False)
@@ -8071,6 +8092,12 @@ class App(QMainWindow):
                 self._window_state_setting_key(),
                 self._current_main_window_state_marker(),
             )
+            normal_geometry = self.normalGeometry()
+            if isinstance(normal_geometry, QRect) and normal_geometry.isValid():
+                self.settings.setValue(
+                    self._window_normal_geometry_setting_key(),
+                    normal_geometry,
+                )
             if sync:
                 self.settings.sync()
         except Exception as e:
@@ -8081,6 +8108,14 @@ class App(QMainWindow):
             geometry = self.settings.value(self._window_geometry_setting_key(), None, QByteArray)
         except Exception:
             geometry = None
+        try:
+            normal_geometry = self.settings.value(
+                self._window_normal_geometry_setting_key(),
+                None,
+                QRect,
+            )
+        except Exception:
+            normal_geometry = None
         try:
             window_state_marker = self.settings.value(self._window_state_setting_key(), "", str)
         except Exception:
@@ -8106,6 +8141,8 @@ class App(QMainWindow):
             return True
         if marker == "normal":
             self.showNormal()
+            if isinstance(normal_geometry, QRect) and normal_geometry.isValid():
+                self.setGeometry(normal_geometry)
             return True
         return restored
 
@@ -10543,7 +10580,9 @@ class App(QMainWindow):
         self.search_field.blockSignals(False)
         self.search_column_combo.blockSignals(True)
         all_columns_index = self.search_column_combo.findData(-1)
-        self.search_column_combo.setCurrentIndex(all_columns_index if all_columns_index != -1 else 0)
+        self.search_column_combo.setCurrentIndex(
+            all_columns_index if all_columns_index != -1 else 0
+        )
         self.search_column_combo.blockSignals(False)
         self._explicit_row_filter_track_ids = set(normalized_ids) if normalized_ids else None
         self.apply_search_filter()
@@ -11365,7 +11404,9 @@ class App(QMainWindow):
                 entity_type="Work",
                 entity_id=work_id,
                 payload={"work_id": int(work_id), "track_ids": normalized_ids},
-                mutation=lambda: self.work_service.link_tracks_to_work(int(work_id), normalized_ids),
+                mutation=lambda: self.work_service.link_tracks_to_work(
+                    int(work_id), normalized_ids
+                ),
             )
             self._log_event(
                 "work.link_tracks",
@@ -11987,9 +12028,7 @@ class App(QMainWindow):
                 supported_headers=supported_headers,
                 settings=self.settings,
                 initial_mode=("create" if normalized_format == "package" else "dry_run"),
-                csv_reinspect_callback=(
-                    _csv_reinspect if normalized_format == "csv" else None
-                ),
+                csv_reinspect_callback=(_csv_reinspect if normalized_format == "csv" else None),
                 parent=self,
             )
             if dlg.exec() != QDialog.Accepted:
@@ -13212,7 +13251,9 @@ class App(QMainWindow):
             try:
                 self._bind_header_state_signals()
             except Exception as e:
-                self.logger.warning("Failed to rebind sectionMoved after custom fields change: %s", e)
+                self.logger.warning(
+                    "Failed to rebind sectionMoved after custom fields change: %s", e
+                )
 
             # Then load header state (visual order + widths)
             try:
@@ -13517,7 +13558,10 @@ class App(QMainWindow):
                 menu.addAction(act_delete_standard)
 
                 current_mode = normalize_storage_mode(
-                    str(self.track_media_meta(track_id, standard_media_key).get("storage_mode") or ""),
+                    str(
+                        self.track_media_meta(track_id, standard_media_key).get("storage_mode")
+                        or ""
+                    ),
                     default=None,
                 )
                 if current_mode != STORAGE_MODE_DATABASE:
@@ -16060,8 +16104,7 @@ class AlbumEntryDialog(QDialog):
         album_art_source_path = self.album_art.text().strip() or None
         use_release_year = bool(self.use_release_year.isChecked())
         any_audio_source_path = any(
-            (section.audio_file.text() or "").strip()
-            for section in self._track_sections
+            (section.audio_file.text() or "").strip() for section in self._track_sections
         )
         media_modes = self.app._choose_track_media_storage_modes(
             audio_source_path="present" if any_audio_source_path else None,
@@ -16170,7 +16213,9 @@ class AlbumEntryDialog(QDialog):
                     buma_work_number=(section.buma_work_number.text().strip() or None),
                     audio_file_source_path=(section.audio_file.text().strip() or None),
                     audio_file_storage_mode=(
-                        default_audio_storage_mode if (section.audio_file.text() or "").strip() else None
+                        default_audio_storage_mode
+                        if (section.audio_file.text() or "").strip()
+                        else None
                     ),
                     album_art_source_path=album_art_source_path if index == 1 else None,
                     album_art_storage_mode=album_art_storage_mode if index == 1 else None,
@@ -17515,7 +17560,9 @@ class EditDialog(QDialog):
             return
 
         media_modes = parent._choose_track_media_storage_modes(
-            audio_source_path=(new_audio_path or None) if apply_audio and not self._clear_audio_file else None,
+            audio_source_path=(
+                (new_audio_path or None) if apply_audio and not self._clear_audio_file else None
+            ),
             album_art_source_path=(
                 (new_album_art_path or None)
                 if apply_album_art and not self._clear_album_art

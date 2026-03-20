@@ -1,6 +1,7 @@
 import sqlite3
 import tempfile
 import unittest
+from datetime import date, timedelta
 from pathlib import Path
 
 from isrc_manager.assets import AssetService, AssetVersionPayload
@@ -195,14 +196,17 @@ class ContractRightsAssetServiceTests(unittest.TestCase):
         replacement_path = self.data_root / "final.txt"
         original_path.write_text("draft agreement", encoding="utf-8")
         replacement_path.write_text("final agreement", encoding="utf-8")
+        signature_date = date.today() - timedelta(days=10)
+        notice_deadline = date.today() + timedelta(days=8)
+        obligation_due_date = date.today() + timedelta(days=9)
 
         contract_id = self.contract_service.create_contract(
             ContractPayload(
                 title="South Agency Agreement",
                 contract_type="services",
                 status="active",
-                signature_date="2026-03-10",
-                notice_deadline="2026-03-18",
+                signature_date=signature_date.isoformat(),
+                notice_deadline=notice_deadline.isoformat(),
                 parties=[
                     ContractPartyPayload(name="South Agency", role_label="manager", is_primary=True)
                 ],
@@ -210,7 +214,7 @@ class ContractRightsAssetServiceTests(unittest.TestCase):
                     ContractObligationPayload(
                         obligation_type="follow_up",
                         title="Check approval notes",
-                        due_date="2026-03-19",
+                        due_date=obligation_due_date.isoformat(),
                     )
                 ],
                 documents=[
@@ -239,8 +243,8 @@ class ContractRightsAssetServiceTests(unittest.TestCase):
                 title="South Agency Agreement",
                 contract_type="services",
                 status="active",
-                signature_date="2026-03-10",
-                notice_deadline="2026-03-18",
+                signature_date=signature_date.isoformat(),
+                notice_deadline=notice_deadline.isoformat(),
                 summary="Updated summary",
                 parties=[
                     ContractPartyPayload(
@@ -253,7 +257,7 @@ class ContractRightsAssetServiceTests(unittest.TestCase):
                     ContractObligationPayload(
                         obligation_type="follow_up",
                         title="Check approval notes",
-                        due_date="2026-03-19",
+                        due_date=obligation_due_date.isoformat(),
                     )
                 ],
                 documents=[
