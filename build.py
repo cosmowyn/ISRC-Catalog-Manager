@@ -266,14 +266,26 @@ def _resolve_icon(project_root: Path) -> str | None:
 
 
 def _resolve_splash(project_root: Path) -> str | None:
+    runtime_splash = _resolve_runtime_splash_asset(project_root)
     if _is_macos():
         return None
+    return runtime_splash
 
+
+def _resolve_runtime_splash_asset(project_root: Path) -> str | None:
     for ext in SPLASH_EXTENSIONS:
         candidate = project_root / "build_assets" / f"{SPLASH_BASENAME}{ext}"
         if candidate.exists():
             return str(candidate)
     return None
+
+
+def _add_data_separator() -> str:
+    return ";" if _is_windows() else ":"
+
+
+def _pyinstaller_add_data(source: str | Path, destination: str) -> str:
+    return f"{source}{_add_data_separator()}{destination}"
 
 
 def _pyinstaller_cmd(
@@ -282,6 +294,7 @@ def _pyinstaller_cmd(
     app_name: str,
     splash: str | None,
     icon: str | None,
+    runtime_splash_asset: str | None,
 ) -> list[str]:
     cmd = [
         str(build_python),
@@ -304,6 +317,14 @@ def _pyinstaller_cmd(
 
     if splash and not _is_macos():
         cmd.extend(["--splash", splash])
+
+    if runtime_splash_asset:
+        cmd.extend(
+            [
+                "--add-data",
+                _pyinstaller_add_data(runtime_splash_asset, "build_assets"),
+            ]
+        )
 
     if icon:
         cmd.extend(["--icon", icon])
@@ -395,6 +416,7 @@ def main() -> int:
 
     try:
         splash = _resolve_splash(project_root)
+        runtime_splash_asset = _resolve_runtime_splash_asset(project_root)
         icon = _resolve_icon(project_root)
     except Exception as exc:
         print(f"ERROR: Could not resolve build assets.\n{exc}")
@@ -404,6 +426,11 @@ def main() -> int:
         print(f"Using splash asset: {splash}")
     else:
         print("No splash asset configured for this platform.")
+
+    if runtime_splash_asset:
+        print(f"Bundling runtime splash asset: {runtime_splash_asset}")
+    else:
+        print("No runtime splash asset configured.")
 
     if icon:
         print(f"Using icon asset: {icon}")
@@ -421,6 +448,7 @@ def main() -> int:
         app_name=APP_NAME,
         splash=splash,
         icon=icon,
+        runtime_splash_asset=runtime_splash_asset,
     )
 
     print("\nRunning:")

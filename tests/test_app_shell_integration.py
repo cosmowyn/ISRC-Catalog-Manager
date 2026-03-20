@@ -104,6 +104,18 @@ class _AcceptMigrationMessageBox(_DeferredMigrationMessageBox):
         return None
 
 
+class _FakeStartupSplashController:
+    def __init__(self):
+        self.messages: list[str] = []
+        self.finish_calls: list[object] = []
+
+    def set_status(self, message: str):
+        self.messages.append(str(message))
+
+    def finish(self, window):
+        self.finish_calls.append(window)
+
+
 class AppShellIntegrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -143,6 +155,9 @@ class AppShellIntegrationTests(unittest.TestCase):
                 self.window.deleteLater()
                 self.app.processEvents()
         finally:
+            app = getattr(self, "app", None)
+            if app is not None and hasattr(app, "_startup_splash_controller"):
+                delattr(app, "_startup_splash_controller")
             for patcher in reversed(getattr(self, "_patchers", [])):
                 patcher.stop()
             self.tmpdir.cleanup()
@@ -312,6 +327,43 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.assertTrue(self.window.close())
         self.app.processEvents()
         self.assertFalse(self.window.isVisible())
+
+    def test_startup_status_messages_cover_real_bootstrap_phases_and_ready_boundary(self):
+        self._close_window()
+        splash = _FakeStartupSplashController()
+        self.app._startup_splash_controller = splash
+
+        self.window = app_module.App()
+        self.window.startupReady.connect(lambda: splash.finish(self.window))
+
+        self.assertEqual(
+            splash.messages,
+            [
+                "Resolving storage layout…",
+                "Initializing settings…",
+                "Opening profile database…",
+                "Loading services…",
+                "Finalizing interface…",
+            ],
+        )
+        self.assertEqual(splash.finish_calls, [])
+
+        self.window.show()
+        self.assertEqual(splash.finish_calls, [])
+        self._drain_events()
+
+        self.assertEqual(
+            splash.messages,
+            [
+                "Resolving storage layout…",
+                "Initializing settings…",
+                "Opening profile database…",
+                "Loading services…",
+                "Finalizing interface…",
+                "Restoring workspace…",
+            ],
+        )
+        self.assertEqual(splash.finish_calls, [self.window])
 
     def test_file_menu_groups_xml_import_under_import_exchange_and_preserves_wiring(self):
         file_menu = self._menu_by_text("File")

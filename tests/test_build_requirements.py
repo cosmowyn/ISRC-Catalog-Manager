@@ -123,6 +123,18 @@ class SplashResolutionTests(unittest.TestCase):
 
         self.assertIsNone(resolved)
 
+    def test_resolve_runtime_splash_asset_works_on_macos(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "build_assets").mkdir(parents=True, exist_ok=True)
+            png = root / "build_assets" / "splash.png"
+            png.write_bytes(b"png")
+
+            with mock.patch.object(build, "_is_macos", return_value=True):
+                resolved = build._resolve_runtime_splash_asset(root)
+
+        self.assertEqual(resolved, str(png))
+
 
 class CommandConstructionTests(unittest.TestCase):
     def test_windows_pyinstaller_command_uses_onefile_and_splash(self):
@@ -139,12 +151,15 @@ class CommandConstructionTests(unittest.TestCase):
                 app_name=build.APP_NAME,
                 splash="/project/build_assets/splash.png",
                 icon="/project/build_assets/icons/app_logo.ico",
+                runtime_splash_asset="/project/build_assets/splash.png",
             )
 
         self.assertIn("--onefile", cmd)
         self.assertNotIn("--onedir", cmd)
         self.assertIn("--splash", cmd)
         self.assertIn("/project/build_assets/splash.png", cmd)
+        self.assertIn("--add-data", cmd)
+        self.assertIn("/project/build_assets/splash.png;build_assets", cmd)
         self.assertIn("--icon", cmd)
         self.assertIn("/project/build_assets/icons/app_logo.ico", cmd)
 
@@ -162,11 +177,14 @@ class CommandConstructionTests(unittest.TestCase):
                 app_name=build.APP_NAME,
                 splash="/project/build_assets/splash.png",
                 icon="/project/build_assets/icons/app_logo.png",
+                runtime_splash_asset="/project/build_assets/splash.png",
             )
 
         self.assertIn("--onedir", cmd)
         self.assertNotIn("--onefile", cmd)
         self.assertIn("--splash", cmd)
+        self.assertIn("--add-data", cmd)
+        self.assertIn("/project/build_assets/splash.png:build_assets", cmd)
 
     def test_macos_pyinstaller_command_skips_splash(self):
         build_python = Path("/python")
@@ -182,10 +200,13 @@ class CommandConstructionTests(unittest.TestCase):
                 app_name=build.APP_NAME,
                 splash="/project/build_assets/splash.png",
                 icon="/project/build_assets/icons/app_logo.icns",
+                runtime_splash_asset="/project/build_assets/splash.png",
             )
 
         self.assertIn("--onedir", cmd)
         self.assertNotIn("--splash", cmd)
+        self.assertIn("--add-data", cmd)
+        self.assertIn("/project/build_assets/splash.png:build_assets", cmd)
 
 
 class ArtifactStagingTests(unittest.TestCase):

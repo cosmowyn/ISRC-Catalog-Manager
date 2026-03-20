@@ -255,6 +255,7 @@ from isrc_manager.rights.dialogs import RightsBrowserDialog, RightsBrowserPanel
 from isrc_manager.search import GlobalSearchService, RelationshipExplorerService
 from isrc_manager.search.dialogs import GlobalSearchPanel
 from isrc_manager.selection_scope import TrackChoice
+from isrc_manager.startup_splash import STARTUP_SPLASH_CONTROLLER_ATTR
 from isrc_manager.services.db_access import DatabaseWriteCoordinator, SQLiteConnectionFactory
 from isrc_manager.services.bulk_edit import MIXED_VALUE, shared_bulk_value, should_apply_bulk_change
 from isrc_manager.services.sqlite_utils import safe_wal_checkpoint
@@ -5156,6 +5157,7 @@ class CatalogManagersDialog(QDialog):
 
 
 class App(QMainWindow):
+    startupReady = Signal()
     BASE_HEADERS = list(DEFAULT_BASE_HEADERS)
     TOP_CHROME_DOCK_GAP = 5
 
@@ -5176,6 +5178,7 @@ class App(QMainWindow):
             settings=self.settings,
             reporter=self._log_event,
         )
+        self._report_startup_status("Resolving storage layout…")
         startup_root = self._reconcile_startup_storage_root()
         self._apply_storage_layout(active_data_root=startup_root)
 
@@ -5208,6 +5211,7 @@ class App(QMainWindow):
         )
         self.background_service_factory.configure(settings_path=self.settings.fileName())
 
+        self._report_startup_status("Initializing settings…")
         self.identity = self._load_identity()
         self.theme_settings = self._load_theme_settings()
         self.blob_icon_settings = default_blob_icon_settings()
@@ -5265,6 +5269,7 @@ class App(QMainWindow):
         self.release_browser_dialog = None
         self._explicit_row_filter_track_ids = None
         self._background_write_lock = None
+        self._report_startup_status("Opening profile database…")
         self.open_database(last_db)
 
         try:
@@ -5274,6 +5279,7 @@ class App(QMainWindow):
         except Exception:
             movable = False
 
+        self._report_startup_status("Finalizing interface…")
         build_main_window_shell(self, last_db=last_db, movable=bool(movable))
         self.tabifiedDockWidgetActivated.connect(
             lambda *_args: self._schedule_main_dock_state_save()
@@ -5291,6 +5297,18 @@ class App(QMainWindow):
         self._ensure_widget_object_names(self)
         self._apply_theme()
         self._refresh_catalog_ui_in_background(unique_key="catalog.ui.startup")
+
+    def _report_startup_status(self, message: str) -> None:
+        app = QApplication.instance()
+        if app is None:
+            return
+        controller = getattr(app, STARTUP_SPLASH_CONTROLLER_ATTR, None)
+        set_status = getattr(controller, "set_status", None)
+        if callable(set_status):
+            try:
+                set_status(str(message))
+            except Exception:
+                pass
 
     def _apply_storage_layout(self, *, active_data_root: str | Path | None = None) -> None:
         self.storage_layout = resolve_app_storage_layout(
@@ -7879,6 +7897,7 @@ class App(QMainWindow):
         self.cursor = session.cursor
         self.current_db_path = path
         self._configure_background_runtime()
+        self._report_startup_status("Loading services…")
         self._init_services()
 
         self._migrate_artist_code_from_qsettings_if_needed()
@@ -8564,6 +8583,7 @@ class App(QMainWindow):
     def _restore_workspace_layout_on_first_show(self) -> None:
         if getattr(self, "_workspace_layout_restore_complete", False):
             return
+        self._report_startup_status("Restoring workspace…")
         self._workspace_layout_restore_scheduled = False
         previous_suspend_state = self._suspend_dock_state_sync
         previous_restore_state = self._is_restoring_workspace_layout
@@ -8586,6 +8606,7 @@ class App(QMainWindow):
         self._store_workspace_panel_visibility_preferences(sync=False)
         self._schedule_main_window_geometry_save()
         self._schedule_main_dock_state_save()
+        self.startupReady.emit()
 
     def _materialize_visible_workspace_dock_panels(self) -> None:
         registry = getattr(self, "_catalog_workspace_docks", {})
