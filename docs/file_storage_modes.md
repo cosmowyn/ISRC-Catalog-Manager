@@ -6,6 +6,21 @@ ISRC Catalog Manager now supports two storage modes for file-backed records acro
 
 The goal is simple: keep the user-facing workflow consistent while letting teams choose whether files should live inside the profile database or in app-managed local storage.
 
+## What This Enables
+
+The storage model matters because the app treats attachments as part of catalog operations, not as an afterthought.
+
+It gives you a consistent way to handle:
+
+- track media and artwork
+- release artwork
+- license PDFs and contract documents
+- asset registry files
+- GS1 workbook templates
+- packaged exchange workflows that need to round-trip real files safely
+
+For the import side of that story, see [Import and Merge Workflows](import-and-merge-workflows.md). For recovery and maintenance behavior, see [Diagnostics and Recovery](diagnostics-and-recovery.md).
+
 ## What Uses This
 
 The dual-storage model applies to file-backed records such as:

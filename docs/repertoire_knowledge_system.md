@@ -8,6 +8,16 @@ This guide explains the product model behind that expansion.
 
 It also reflects the current workspace design: the major catalog-management surfaces for releases, works, licenses, parties, contracts, rights, assets, and relationship search can remain open as tabbed dock panels beside the track table instead of interrupting catalog work as blocking popups.
 
+## What This Enables
+
+The repertoire layer matters because it turns the app from a flat recording list into a working system for:
+
+- keeping recordings, releases, works, parties, contracts, rights, documents, and assets connected
+- reviewing those linked records inside the docked workspace instead of across separate tools and folders
+- moving from track cleanup into rights, contract, or deliverable review without losing context
+
+If you want the workspace side of that model, read [Catalog Workspace Workflows](catalog-workspace-workflows.md). If you want the recovery and maintenance side, read [Diagnostics and Recovery](diagnostics-and-recovery.md).
+
 ## Why This Layer Exists
 
 A serious music catalog is made up of more than recordings.

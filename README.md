@@ -2,38 +2,37 @@
 
 Current product version: `2.0.0`
 
-ISRC Catalog Manager is a local-first desktop application for artists, labels, managers, and catalog owners who need one place to maintain the full reality of a music catalog.
+ISRC Catalog Manager is a local-first desktop catalog and repertoire operations workspace for artists, labels, managers, and catalog owners who need more than a basic track list.
 
-It combines track metadata, releases, musical works, contracts, rights, parties, documents, assets, GS1 product data, import/export tooling, quality control, and durable history into one professional workspace. Everything stays on your machine, in your files, and under your control.
+It combines recording metadata, releases, musical works, contracts, rights, parties, documents, assets, GS1 product data, import/export tooling, diagnostics, and durable history into one serious working system. Everything stays on your machine, in your files, and under your control.
 
 ![Workspace overview](docs/screenshots/workspace-overview.png)
 
 ## What This App Is For
 
-Most catalog tools stop at track lists or release scheduling. ISRC Catalog Manager goes much further.
+Most catalog tools stop at track metadata or release scheduling. ISRC Catalog Manager is built for the day-to-day operational layer that sits around a real catalog.
 
-It helps you manage:
+It helps you maintain:
 
-- recordings and track metadata
-- release and product records
-- musical works and composition metadata
-- contract lifecycle and obligations
-- rights ownership and licensing positions
-- reusable party and contact records
-- contract documents and amendments
+- recordings and release metadata
+- releases as first-class product records
+- works and composition metadata
+- parties, licensees, and reusable contact entities
+- contracts, obligations, and managed documents
+- rights positions and source-agreement links
 - deliverables, masters, artwork, and derived assets
-- GS1 workbook preparation
-- custom fields, exchange formats, and validation
+- custom metadata, GS1 workbook data, and exchange-ready fields
+- diagnostics, recovery points, and managed local storage
 
-The result is a catalog system that answers practical questions quickly:
+The result is a product that can answer practical questions quickly:
 
-- Which recordings belong to this release?
+- Which recordings belong to this release, and in what order?
 - Which work is linked to this track?
-- Who controls the master in this territory?
-- Which contract granted this right?
-- Which amendment is currently governing?
+- Which contract and document govern this right?
+- Which party granted or retained this territory?
 - Which asset is the approved master?
-- Which records are blocked, incomplete, or unsafe to export?
+- Which records are incomplete, broken, duplicated, or unsafe to export?
+- Which external metadata file can be merged into the current catalog without starting over?
 
 ## What Makes It Different
 
@@ -52,14 +51,15 @@ This applies across standard track media, release artwork, custom binary fields,
 
 ### Built for real catalog operations
 
-This is not just a metadata sheet with a pretty skin. It is designed for the day-to-day realities of independent catalog management:
+This is not just a metadata sheet with a prettier front end. It is designed for recurring catalog work:
 
-- maintaining clean identifiers
+- importing and reconciling external metadata into an existing catalog
+- matching incoming rows against existing tracks and releases
+- normalizing identifiers, dates, and durations
 - attaching files in either database or managed-file mode
-- keeping releases and works distinct
-- storing agreement history and obligation dates
-- verifying readiness before export or delivery
-- preserving recoverable history and restore points
+- keeping releases, works, contracts, rights, and assets connected
+- verifying readiness before export, delivery, or review
+- preserving recoverable history, snapshots, backups, and repair paths
 
 ### A richer model than a basic release manager
 
@@ -152,29 +152,45 @@ This is designed to surface action items, not abstract diagnostics.
 
 The app includes a dedicated GS1 workflow for maintaining product metadata and exporting to official workbook templates. It verifies workbook structure, stores profile-specific defaults, and now lets the configured workbook template live either inside the profile database or as a managed local file so the export setup remains stable even if the original source file is moved.
 
-### Exchange and portability
+### Import and reconcile external metadata
 
-You can move catalog data in and out using:
+The import layer is designed as a rule-driven workbench rather than a generic file picker.
 
-- XML
-- CSV
-- XLSX
-- JSON
-- ZIP packages with manifests and materialized attachment copies
+For structured exchange import, the app can:
 
-There is also a dedicated repertoire exchange workflow for works, parties, contracts, rights, assets, and their relationships, separate from the standard track/release exchange layer. Package export/import now preserves both database-backed and managed-file-backed attachments by materializing portable copies and restoring the recorded storage mode on import.
+- inspect incoming `CSV`, `XLSX`, `JSON`, and `ZIP package` sources before import
+- preview incoming rows and choose the CSV delimiter when needed
+- map source columns to supported catalog fields or active `custom::<name>` text fields
+- save and reload mapping presets for repeat imports
+- choose between `dry_run`, `create`, `update`, `merge`, and `insert_new`
+- match against existing data by internal ID, ISRC, UPC plus title, and optional title/artist heuristics
+- normalize names, titles, and durations where the importer supports it
+- upsert linked release data as part of the same flow
+- round-trip packaged media while preserving database-backed versus managed-file-backed storage
 
-### Undo, snapshots, and restore confidence
+That makes the app useful for bringing in structured exports from labels, catalog administrators, collection-society workflows, and PRO-style metadata sources such as BUMA, STEMRA, SENA, and similar organizations, as long as those exports can be delivered in one of the supported formats. The support is format-based and mapping-based, not a direct third-party integration.
 
-ISRC Catalog Manager includes persistent history, undo/redo, manual snapshots, and restore paths for high-risk workflows. Legacy license migration, imports, restores, and other heavier operations are designed to be recoverable rather than one-way.
+The app also includes:
 
-The History window now also includes a dedicated Backups tab plus a Cleanup flow for older restore points and history artifacts. Cleanup previews eligible items before deletion, protects anything still required by undo/redo or snapshot restore, and can trim older history only after preserving the active branch and current redo chain.
+- a separate XML import path for supported XML catalog files
+- audio tag import/export for reading embedded tags and writing metadata to exported copies
+- a separate repertoire exchange workflow for works, parties, contracts, rights, assets, and their relationships
 
-### Storage layout and safe app-data migration
+### Trust, recovery, and maintenance
 
-Non-portable installs now keep app-owned data in an app-specific local data folder with clear subdirectories for databases, history, backups, logs, exports, help content, and managed media.
+ISRC Catalog Manager treats recovery and maintenance as product features, not hidden engineering details.
 
-If the app detects a legacy data layout, startup and Diagnostics can guide a safe migration into the preferred app folder. The migration closes the active managed profile first, stages copied data in a temporary sibling folder, copies SQLite databases through SQLite's backup API instead of raw file copying, rewrites known internal paths, verifies integrity, promotes the fully verified result, and leaves the legacy folder intact until you decide what to do with it later.
+The app includes:
+
+- persistent undo/redo history for supported reversible actions
+- manual snapshots and restore paths for heavier operations
+- a dedicated Backups tab plus cleanup and trim flows for older artifacts
+- a quality dashboard for operational catalog issues
+- diagnostics for schema, storage, integrity, managed files, and history health
+- repair actions for supported issues such as history reconciliation and storage-layout migration
+- a staged app-data migration path for older storage layouts
+
+Imports, restore flows, legacy license migration, and other higher-risk operations are designed to be recoverable rather than one-way.
 
 ### Theme builder and advanced QSS
 
@@ -199,6 +215,19 @@ It also includes a dedicated BLOB icon builder for stored media indicators:
 These media badge settings are intentionally kept separate from theme presets, so you can refine how stored files are represented in the catalog without changing the broader application theme.
 
 Advanced users can go further with a selector reference and syntax-aware QSS editor that supports safe autocomplete, rule templates, pseudo-states, subcontrols, and object-name targeting.
+
+## Power Features Easy To Miss
+
+Some of the strongest workflow features are easy to underestimate from a quick skim:
+
+- the docked workspace keeps Release Browser, Work Manager, Party Manager, Contract Manager, Rights Matrix, Asset Registry, License Browser, Global Search, and Catalog Managers open beside the table as tabbed panels
+- layout and dock state are remembered, so the app reopens as a real workstation instead of a fixed single screen
+- the action ribbon can be customized around your high-frequency commands
+- global search and relationship browsing give the richer catalog model a usable navigation layer
+- package exchange can carry managed files and restore their recorded storage mode on import
+- audio tag workflows can preview conflicts before writing metadata back to exported copies
+- legacy license migration can move older PDF-based license records into the richer contract/document model with snapshot protection
+- theme tooling goes beyond colors into starter themes, BLOB badge icons, selector discovery, and QSS autocomplete
 
 ## Who It Is For
 
@@ -226,23 +255,23 @@ That focus is deliberate. The goal is depth and reliability in catalog maintenan
 
 ## Workflow Overview
 
-### 1. Build the catalog
+### 1. Build or import the catalog
 
-Use the Add Data panel for single tracks or Add Album for grouped releases. Attach audio and artwork, choose whether new file-backed records should live in the database or in managed local storage, generate or enter identifiers, and save records directly into the active profile.
+Use the Add Data panel for single tracks, Add Album for grouped releases, or the exchange import workflows when catalog data already exists elsewhere. Incoming tabular data can be previewed, mapped, matched, merged, or inserted as new records depending on the source and the job.
 
 ### 2. Organize the repertoire graph
 
-Create releases, works, parties, contracts, rights, and asset versions as first-class records. Link them across the catalog so tracks, compositions, agreements, and deliverables stay connected.
+Create releases, works, parties, contracts, rights, and asset versions as first-class records. Link them across the catalog so tracks, compositions, agreements, deliverables, and supporting documents stay connected.
 
-Use the docked Catalog workspace panels to keep those managers open as tabbed companions to the track table rather than as one-at-a-time modal dialogs.
+Use the docked workspace panels to keep those managers open as tabbed companions to the track table rather than as one-at-a-time modal dialogs.
 
-### 3. Validate before delivery or export
+### 3. Review, clean up, and verify
 
-Run the quality dashboard, inspect missing data, and jump directly into the affected record or manager to correct issues.
+Run the quality dashboard, inspect findings, open the affected records, and use diagnostics when the issue may involve managed files, storage layout, or history artifacts rather than catalog content alone.
 
-### 4. Export or archive safely
+### 4. Export, package, or archive safely
 
-Use XML, CSV, XLSX, JSON, GS1 workbook export, or ZIP package export depending on the workflow. Snapshots and restore paths help protect the catalog before major operations.
+Use XML, CSV, XLSX, JSON, GS1 workbook export, repertoire exchange, or ZIP package export depending on the workflow. Snapshots, backups, cleanup, and restore paths help protect the catalog before major operations.
 
 ## Screenshots
 
@@ -279,16 +308,26 @@ The result is a catalog environment that feels closer to a professional desktop 
 
 ## Documentation
 
-The repository includes user-facing and developer-facing guides in `docs/`:
+Start with the docs hub in [`docs/README.md`](docs/README.md) for the user-guide reading path.
 
+### User Guides
+
+- [Documentation Hub](docs/README.md)
+- [Import and Merge Workflows](docs/import-and-merge-workflows.md)
+- [Catalog Workspace Workflows](docs/catalog-workspace-workflows.md)
+- [Diagnostics and Recovery](docs/diagnostics-and-recovery.md)
 - [Attachment Storage Modes](docs/file_storage_modes.md)
 - [Repertoire Knowledge System](docs/repertoire_knowledge_system.md)
 - [GS1 Workflow Guide](docs/gs1_workflow.md)
 - [Theme Builder Guide](docs/theme_builder.md)
 - [Undo, History, and Snapshots](docs/undo_redo_strategy.md)
-- [Modularization Strategy](docs/modularization_strategy.md)
 
-The application itself also includes a searchable in-app help browser that mirrors the major workflows, including history cleanup, diagnostics, and app-data migration behavior.
+### Developer / Internal Docs
+
+- [Modularization Strategy](docs/modularization_strategy.md)
+- [Implementation Handoffs](docs/implementation_handoffs/)
+
+The application itself also includes a searchable in-app help browser that mirrors the major workflows, including import setup, history cleanup, diagnostics, and app-data migration behavior.
 
 ## Demo Workspace
 

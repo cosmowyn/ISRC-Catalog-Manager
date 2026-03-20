@@ -6,6 +6,18 @@ The GS1 workflow in ISRC Catalog Manager is designed for teams who need to prepa
 
 It helps you move from catalog metadata to official workbook export with fewer manual steps, fewer broken templates, and less dependency on external spreadsheets.
 
+## What This Enables
+
+The GS1 layer is useful when you want to keep product metadata inside the same catalog system that already holds the recordings, releases, and artwork behind it.
+
+In practice, it helps you:
+
+- prepare workbook-ready product data without rebuilding it from scratch in spreadsheets
+- keep the official template stored with the catalog in either database or managed-file mode
+- validate workbook structure before export so template drift is caught early
+
+For the underlying storage choices, see [Attachment Storage Modes](file_storage_modes.md). For broader catalog context, see [Repertoire Knowledge System](repertoire_knowledge_system.md).
+
 ## What The GS1 Workflow Is Meant To Solve
 
 GS1 data often lives in a fragile in-between state:

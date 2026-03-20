@@ -6,6 +6,19 @@ ISRC Catalog Manager includes a full visual theme builder so the application can
 
 The goal is simple: most appearance work should be possible from the GUI, while Advanced QSS remains available for the final edge cases.
 
+## What This Enables
+
+The theme system is deeper than a color picker. It lets power users shape the workspace they spend time in every day while keeping the catalog surface readable and branded.
+
+In practice, it helps you:
+
+- adapt the app for long review sessions or accessibility needs
+- tune the action ribbon, dock chrome, tables, tabs, and other high-traffic surfaces
+- control media badge icons separately from reusable theme presets
+- finish the rare edge cases with selector-aware QSS tooling instead of guesswork
+
+For the surrounding workspace concepts, see [Catalog Workspace Workflows](catalog-workspace-workflows.md).
+
 ## What The Theme Builder Covers
 
 The builder now exposes the full visible surface of the application, including:

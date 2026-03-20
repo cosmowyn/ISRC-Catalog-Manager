@@ -15,6 +15,20 @@ Catalog maintenance often involves high-consequence operations:
 
 This guide explains how the app approaches undo, history, and restore safety.
 
+## What This Enables
+
+The recovery system exists so heavier catalog workflows do not become one-way bets.
+
+It gives you a safer foundation for:
+
+- imports and merge passes
+- large edits and cleanup work
+- legacy license migration
+- file-backed record changes
+- restore, cleanup, and history maintenance
+
+For the operational tools around this model, including diagnostics and logs, see [Diagnostics and Recovery](diagnostics-and-recovery.md).
+
 ## Why Recovery Matters In A Catalog App
 
 Music catalog work is cumulative. A mistake is not just a typo on screen; it can become:

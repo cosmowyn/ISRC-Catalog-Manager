@@ -1,0 +1,139 @@
+# Catalog Workspace Workflows
+
+This guide explains the docked workspace as it exists in the app today: a working area built for reviewing, comparing, and updating catalog records without forcing you into popup-driven navigation.
+
+## What This Enables
+
+The main value of the docked workspace is continuity. You can keep the catalog table in view while one or more related manager panels stay open beside it. That makes it easier to inspect a selected record, switch between related surfaces, and keep moving without constantly reopening dialogs.
+
+This is especially useful when you are:
+
+- reviewing a release while cross-checking tracks, works, rights, or parties
+- assigning selected tracks to a release
+- comparing catalog data against related documents or asset versions
+- keeping global search open while you clean up or verify records
+- returning to the same workspace layout after relaunching the app
+
+## Docked Workspace Model
+
+The workspace is built around dock widgets rather than isolated modal windows.
+
+- `Add Data` and `Catalog Table` are the persistent base docks.
+- Release, work, party, contract, rights, asset, license, search, and catalog-manager surfaces are opened as docked workspace panels.
+- Related panels can remain visible while you continue using the catalog table.
+- The app prefers tabbed docking for these workspace surfaces, so multiple tools can share the same side of the window instead of spreading across the screen.
+
+In practice, that means the table stays usable while the surrounding review tools stay available. You do not have to close one surface to continue in another.
+
+## Tabbed Managers
+
+Several catalog tools are intentionally exposed as tabbed dock panels:
+
+- Release Browser
+- Work Manager
+- Party Manager
+- Contract Manager
+- Rights Matrix
+- Asset Registry
+- License Browser
+- Global Search
+- Catalog Managers
+
+The tabbed layout matters because these surfaces are not isolated utilities. They are part of the same workflow loop as the table. For example, you can inspect a release, switch to the selected tracks in the table, then move to rights or party review without losing your place.
+
+## Release Assignment From Selection
+
+The release workflow is centered on the current track selection.
+
+- The Release Browser can show the ordered track list for a release.
+- You can add the current track selection to a chosen release.
+- You can also filter the main catalog table to a specific release.
+
+That makes release work practical for both creation and review. A release is not just a stored record; it is a live container you can inspect against the tracks that belong to it.
+
+## Review Surfaces
+
+The docked managers exist to support real catalog review, not just browsing.
+
+- `Work Manager` is for connected composition data.
+- `Party Manager` is for reusable people and organizations.
+- `Contract Manager` is for structured agreement data and managed documents.
+- `Rights Matrix` is for rights positions and scope.
+- `Asset Registry` is for deliverables and asset versions.
+
+These panels help you answer questions like:
+
+- Which work is linked to this recording?
+- Which party appears in this contract or rights record?
+- Which asset version is approved or primary?
+- Which catalog items are connected to the selected record?
+
+## Saved Layout
+
+Workspace placement is remembered.
+
+- Dock placement is persisted.
+- Panel visibility is persisted.
+- The app restores its main dock state on startup when possible.
+- The saved layout also preserves the benefit of tabified workspace panels.
+
+The practical result is that a user can build a layout around the parts of the catalog they work in most often, then return to that layout on the next launch.
+
+## Action Ribbon Customization
+
+The action ribbon is a configurable quick-action strip.
+
+- It is meant for the commands you use most often.
+- It can be customized from the View settings.
+- It keeps high-frequency actions visible without forcing you into menus.
+
+This is a small feature with a large workflow impact because it reduces the number of steps needed for repeat tasks.
+
+## Global Search And Relationship Explorer
+
+Global Search is more than a simple text lookup.
+
+- It searches across the connected catalog model.
+- It can stay open as part of the docked workspace.
+- It supports relationship-oriented review rather than only record lookup.
+
+The relationship explorer is what makes search especially useful for power users:
+
+- you can inspect linked works, tracks, releases, contracts, rights, parties, documents, and assets from one place
+- you can move from search results into related records without starting over
+- you can use the search surface as a review hub while another panel remains open
+
+This is one of the strongest reasons the app works well as a catalog operations workspace rather than only a data-entry tool.
+
+## Saved Searches
+
+Saved searches are a practical way to preserve repeated review patterns.
+
+Use them when you routinely return to:
+
+- a specific subset of releases
+- records missing key metadata
+- items that still need rights, contract, or asset review
+- relationship-heavy records that you inspect frequently
+
+Saved searches matter because the app is designed around recurring operational questions, not one-off lookup.
+
+## Practical Workflow Pattern
+
+A common power-user loop looks like this:
+
+1. Open the Catalog Table and one or more docked managers.
+2. Filter or select the record you want to review.
+3. Inspect the related release, work, party, contract, rights, or asset surface.
+4. Use Global Search or the relationship explorer if you need wider context.
+5. Keep the layout open and continue to the next record.
+
+That pattern is why the docked workspace is a core product feature. It reduces context switching while keeping the catalog model visible.
+
+## What To Keep In Mind
+
+- The catalog table remains the primary browsing surface.
+- Docked panels are for review, inspection, and linked-record work.
+- The app favors tabbed workspace surfaces so related tools stay available together.
+- The workspace is meant to accelerate catalog operations, not replace the underlying data model with a single flat screen.
+

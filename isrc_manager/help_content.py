@@ -41,7 +41,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "threading",
         ),
         content_html="""
-        <p><strong>ISRC Catalog Manager</strong> is a local-first desktop workspace for building and maintaining a serious music catalog. It brings together recording metadata, release management, musical works, contracts, rights, parties, documents, deliverables, GS1 product data, history, and quality control in one application.</p>
+        <p><strong>ISRC Catalog Manager</strong> is a local-first desktop workspace for building and maintaining a serious music catalog. It brings together recording metadata, releases, musical works, contracts, rights, parties, documents, deliverables, GS1 product data, diagnostics, history, and quality control in one application.</p>
         <p>It is designed for independent artists, labels, managers, and catalog owners who need more than a basic track list and want a reliable system for both metadata and catalog operations.</p>
         <p>The app is organized around a few core ideas:</p>
         <ul>
@@ -56,8 +56,9 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Catalog Table</strong>: the central browser for searching, selecting, bulk editing, and reviewing recording data.</li>
           <li><strong>Global Search</strong>: a relationship-aware search surface across works, tracks, releases, contracts, rights, parties, documents, and assets.</li>
           <li><strong>Docked catalog workspace</strong>: release, work, license, party, contract, rights, asset, and search panels can stay open as tabbed workspace surfaces beside the catalog table.</li>
-          <li><strong>Exchange</strong>: CSV, XLSX, JSON, XML, ZIP, and GS1 workflows for sharing, exporting, and archiving the catalog safely.</li>
+          <li><strong>Import and exchange</strong>: CSV, XLSX, JSON, XML, ZIP, audio-tag, and GS1 workflows for bringing data in, reconciling it, exporting it, and archiving it safely.</li>
           <li><strong>Quality Dashboard</strong>: a practical readiness view for metadata gaps, identifier conflicts, broken media links, rights risks, and operational blockers.</li>
+          <li><strong>Diagnostics and recovery</strong>: snapshots, backups, cleanup, trim, diagnostics, repair paths, and logs keep heavier workflows recoverable.</li>
           <li><strong>Action Ribbon</strong>: a customizable quick-action strip for your most-used commands.</li>
           <li><strong>Background tasks</strong>: longer scans, imports, exports, snapshots, and file operations run outside the UI thread to keep the workspace responsive.</li>
           <li><strong>Settings and history</strong>: identity, registration settings, themes, undo/redo, snapshots, diagnostics, and logs.</li>
@@ -87,10 +88,10 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Action ribbon</strong>: a customizable strip of high-frequency actions. Use <strong>View &gt; Customize Action Ribbon…</strong> to make it match your workflow.</li>
           <li><strong>Profiles toolbar</strong>: switch databases, create a new profile, browse to an external profile, reload the profile list, or remove the selected entry.</li>
           <li><strong>Dockable panes</strong>: keep the window focused on your current task by showing only the panes you need.</li>
-          <li><strong>Tabbed catalog tools</strong>: the main Catalog managers now open as docked tabs beside the table so you can keep using the track browser while those panels remain open.</li>
+          <li><strong>Tabbed catalog tools</strong>: Release Browser, Work Manager, Catalog Managers, License Browser, Party Manager, Contract Manager, Rights Matrix, Asset Registry, and Global Search open as docked tabs beside the table so you can keep using the track browser while those panels remain open.</li>
           <li><strong>Saved layout</strong>: column layout, dock placement, and visibility preferences are remembered so the app opens the way you work.</li>
         </ul>
-        <p>Use the menus when you need the full surface of the product, or stay inside the docked views for everyday entry and review. The window title, branding, and appearance can be customized from <strong>Settings &gt; Application Settings</strong>. When you open multiple catalog tools, the app now prefers tabbed docking so the workspace stays compact and easier to navigate.</p>
+        <p>Use the menus when you need the full surface of the product, or stay inside the docked views for everyday entry and review. The window title, branding, and appearance can be customized from <strong>Settings &gt; Application Settings</strong>. When you open multiple catalog tools, the app prefers tabbed docking so the workspace stays compact and easier to navigate while the table remains usable.</p>
         """,
     ),
     HelpChapter(
@@ -296,11 +297,11 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         <ul>
           <li><strong>Supported read/write families</strong>: MP3/ID3, FLAC/Vorbis comments, OGG Vorbis/Opus comments, M4A/MP4 atoms, and WAV/AIFF where ID3-style metadata is available.</li>
           <li><strong>Mapped fields</strong>: title, artist, album, album artist, track number, disc number, genre, composer, publisher/label, release date, ISRC, UPC/EAN, comments, lyrics, and artwork.</li>
-          <li><strong>Import Tags From Audio…</strong>: open it from the Catalog menu or the table context menu to preview conflicts before catalog values are changed.</li>
+          <li><strong>Import Tags From Audio…</strong>: open it from the Catalog menu or the table context menu to preview extracted tags and conflicts before catalog values are changed.</li>
           <li><strong>Conflict policy</strong>: choose whether file tags should fill blanks only, override database values, or defer to the existing catalog data.</li>
           <li><strong>Write Tags To Exported Audio…</strong>: exports tagged audio copies to a folder without touching the managed source files in place.</li>
         </ul>
-        <p>The app preserves the original audio data when writing tags to exported copies. Unsupported or malformed tags are skipped with warnings instead of crashing the workflow.</p>
+        <p>The app preserves the original audio data when writing tags to exported copies. Unsupported or malformed tags are skipped with warnings instead of crashing the workflow, which makes the feature useful for preparing tagged deliverables without risking the original master file.</p>
         """,
     ),
     HelpChapter(
@@ -406,6 +407,8 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "column mapping",
             "dry run",
             "import report",
+            "mapping preset",
+            "package import",
         ),
         content_html="""
         <p>The exchange layer is designed for real catalog portability. Whether you are sharing data, taking a structured backup, preparing downstream workflows, or moving a project between systems, the app gives you more than a single export button.</p>
@@ -419,7 +422,39 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>JSON schema versioning</strong>: exported JSON includes an explicit schema version so future migrations stay manageable.</li>
           <li><strong>Repertoire Exchange</strong>: a separate import/export workflow now covers parties, works, contracts, rights, asset versions, and their relationship references as JSON, XLSX, CSV bundles, or ZIP packages with managed files.</li>
         </ul>
-        <p>Binary media is referenced in plain tabular exports, while ZIP packages materialize both database-backed and managed-file-backed records into portable files and preserve the recorded storage mode on import. Import preview, packaging, export, and extraction all run in the background so larger exchange jobs stay practical.</p>
+        <p>Binary media is referenced in plain tabular exports, while ZIP packages materialize both database-backed and managed-file-backed records into portable files and preserve the recorded storage mode on import. Import preview, packaging, export, and extraction all run in the background so larger exchange jobs stay practical. For the matching, merge, delimiter, and XML specifics, see <strong>Import and Merge Workflows</strong> in this manual.</p>
+        """,
+    ),
+    HelpChapter(
+        chapter_id="import-workflows",
+        title="Import and Merge Workflows",
+        summary="How exchange import, XML import, and audio-tag workflows differ, and how matching, merge, mapping, and dry runs actually work.",
+        keywords=(
+            "import workflows",
+            "merge",
+            "mapping preset",
+            "delimiter",
+            "package import",
+            "dry run",
+            "xml import",
+            "buma",
+            "stemra",
+            "sena",
+            "custom::",
+        ),
+        content_html="""
+        <p>The app has three separate ingest surfaces: exchange import for structured rows and packages, XML import for supported XML shapes, and audio-tag import/export for embedded file metadata. They overlap in the fields they can touch, but they are not the same workflow.</p>
+        <ul>
+          <li><strong>Exchange import</strong>: supports <code>CSV</code>, <code>XLSX</code>, <code>JSON</code>, and <code>ZIP package</code>. CSV import can auto-detect comma, semicolon, tab, or pipe delimiters, and CSV/XLSX can map source columns to supported standard fields or active <code>custom::name</code> text fields.</li>
+          <li><strong>Mapping presets</strong>: reusable CSV/XLSX mappings can be saved and loaded again for recurring imports.</li>
+          <li><strong>Exchange modes</strong>: <code>dry_run</code> checks setup without writing, <code>create</code> creates new tracks, <code>update</code> updates matched tracks only, <code>merge</code> updates matched tracks while preserving many existing populated values, and <code>insert_new</code> creates only unmatched rows and skips duplicates.</li>
+          <li><strong>Exchange matching</strong>: matching can use internal ID, ISRC, UPC plus title, and optional title/artist heuristics. The importer is deterministic and does not provide a row-by-row manual assignment queue.</li>
+          <li><strong>Release upsert and package restore</strong>: exchange import can update or create linked releases from supplied release fields, while ZIP package import restores packaged files and their recorded storage mode.</li>
+          <li><strong>XML import</strong>: accepts supported catalog XML shapes, performs a stronger inspection and dry-run style preflight, reports duplicate ISRCs and custom-field conflicts, can create missing custom fields when allowed, and then imports valid new rows. XML import is insert-oriented rather than merge-oriented.</li>
+          <li><strong>Audio tags</strong>: read embedded tags from supported audio files, preview conflicts before writing to the catalog, and write tags only to exported copies rather than rewriting managed source files in place.</li>
+        </ul>
+        <p>This workflow is useful for structured exports from labels, catalog administrators, collection societies, and PRO-style sources such as BUMA, STEMRA, SENA, and similar organizations, provided the data can be exported into a supported format. That support is format-based and mapping-based, not a direct third-party integration.</p>
+        <p>Keep the current limits in mind: blob custom fields are not tabular import targets, JSON and ZIP package import do not expose the same column-mapping controls as CSV/XLSX, standard exchange <code>dry_run</code> is a conservative preflight rather than a full validation engine, and matched release rows can be updated from imported release data.</p>
         """,
     ),
     HelpChapter(
@@ -445,7 +480,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Suggested fixes</strong>: regenerate derived values, normalize date formats, relink missing media by filename, or fill blank track values from linked release metadata where appropriate.</li>
           <li><strong>Export</strong>: save the current issue list to CSV or JSON for reporting or offline cleanup planning.</li>
         </ul>
-        <p>Quality scans run on demand in the background and are meant to help you move from problem detection to action quickly.</p>
+        <p>Quality scans run on demand in the background and are meant to help you move from problem detection to action quickly. Use Diagnostics when the question is about storage health, schema integrity, history artifacts, or managed files rather than catalog content itself.</p>
         """,
     ),
     HelpChapter(
@@ -488,7 +523,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         summary="Upload signed license PDFs, browse them, update them, download them, and manage licensees.",
         keywords=("licenses", "licensees", "pdf", "upload", "download", "browse licenses"),
         content_html="""
-        <p>The app can store signed license PDFs alongside the catalog. The license workflow is split into a few focused surfaces:</p>
+        <p>The app can store signed license PDFs alongside the catalog. This legacy-oriented license workflow remains available for straightforward PDF tracking while the richer contracts-and-documents model covers broader agreement management.</p>
         <ul>
           <li><strong>Add License (PDF)</strong>: attach a PDF to a track, assign a licensee, and choose whether the file should be stored in the database or as a managed local file.</li>
           <li><strong>Licenses</strong>: browse all stored license records, preview them, download them, edit them, convert their storage mode, or delete them from a docked catalog panel that can stay open beside the track table.</li>
@@ -501,10 +536,10 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
     HelpChapter(
         chapter_id="catalog-managers",
         title="Catalog Managers",
-        summary="Manage reusable artist, album, and licensee data from one consolidated manager dialog.",
+        summary="Manage reusable artist, album, and licensee data from one consolidated manager panel.",
         keywords=("catalog managers", "artists", "albums", "licensees", "purge unused", "manage"),
         content_html="""
-        <p>The consolidated <strong>Catalog Managers</strong> workspace groups catalog maintenance tasks into dedicated tabs and now opens as a docked panel instead of a blocking popup.</p>
+        <p>The consolidated <strong>Catalog Managers</strong> workspace groups artist, album, and licensee maintenance into one docked panel. It is one specific cleanup surface inside the larger docked workspace, not the name of the whole tabbed workspace model.</p>
         <ul>
           <li><strong>Artists</strong>: inspect artist usage counts and remove or purge only artists that are no longer used.</li>
           <li><strong>Albums</strong>: inspect album usage counts and remove or purge unused albums.</li>
@@ -564,7 +599,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         chapter_id="history",
         title="Undo History and Snapshots",
         summary="How to protect your work with undo, redo, snapshots, and restore paths built for real catalog operations.",
-        keywords=("history", "undo", "redo", "snapshots", "restore", "history dialog"),
+        keywords=("history", "undo", "redo", "snapshots", "restore", "history dialog", "cleanup", "backups", "trim history"),
         content_html="""
         <p>The app includes a persistent history system because catalog work should be recoverable. That matters especially for imports, large edits, settings changes, migrations, and file-backed actions.</p>
         <ul>
@@ -585,7 +620,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         summary="Use diagnostics to verify the health of the application, the active profile, and the managed files around it.",
         keywords=("diagnostics", "integrity", "schema", "repair", "managed files", "checks"),
         content_html="""
-        <p>The Diagnostics window gives you a high-level health view of both the application environment and the active profile so you can verify that the workspace is still operating cleanly.</p>
+        <p>The Diagnostics window gives you a high-level health view of both the application environment and the active profile so you can verify that the workspace is still operating cleanly. Use it when the issue may involve storage, schema, managed files, history artifacts, or migration state rather than catalog content itself.</p>
         <ul>
           <li><strong>Environment</strong>: app version, schema version, profile path, data folder, log folder, snapshot count, platform, and Python version.</li>
           <li><strong>Checks</strong>: storage layout, schema validation, SQLite integrity, foreign-key integrity, custom-value integrity, managed files for path-backed records, and history storage.</li>
