@@ -347,7 +347,7 @@ The build script now follows a deterministic release workflow:
 
 - use the current project metadata and `ISRC_manager.py` as the fixed entrypoint
 - resolve packaged branding from `build_assets/icons/app_logo.*`
-- resolve splash branding from `build_assets/splash.*`
+- bundle the runtime splash asset from `build_assets/splash.*`
 - build with PyInstaller using the platform policy in the script
 - stage the release artifact under `dist/release/`
 - write a `dist/release_manifest.json` alongside the staged output

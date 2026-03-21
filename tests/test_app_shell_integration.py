@@ -18,6 +18,7 @@ from isrc_manager.services import (
     TrackCreatePayload,
 )
 from isrc_manager.starter_themes import starter_theme_names
+from isrc_manager.startup_progress import StartupPhase, startup_phase_label
 from tests.qt_test_helpers import require_qapplication
 
 try:
@@ -40,9 +41,15 @@ def _no_catalog_background_refresh(self, *args, **kwargs):
 
 class _DeferredMigrationMessageBox:
     Warning = object()
+    Information = object()
+    Critical = object()
     AcceptRole = object()
     RejectRole = object()
     last_text = ""
+    active_splash = None
+    suspended_during_exec = False
+    messages_during_exec: list[str] = []
+    exec_count = 0
 
     def __init__(self, *_args, **_kwargs):
         self._migrate_button = None
@@ -50,6 +57,9 @@ class _DeferredMigrationMessageBox:
         self._clicked_button = None
 
     def setWindowTitle(self, _title):
+        return None
+
+    def setWindowModality(self, _modality):
         return None
 
     def setIcon(self, _icon):
@@ -70,49 +80,60 @@ class _DeferredMigrationMessageBox:
         return None
 
     def exec(self):
+        type(self).exec_count += 1
+        splash = type(self).active_splash
+        type(self).suspended_during_exec = bool(
+            getattr(splash, "suspended", False) if splash is not None else False
+        )
+        type(self).messages_during_exec = list(getattr(splash, "messages", []))
         self._clicked_button = self._keep_button
 
     def clickedButton(self):
         return self._clicked_button
 
-    @staticmethod
-    def warning(*_args, **_kwargs):
-        return None
-
-    @staticmethod
-    def information(*_args, **_kwargs):
-        return None
-
 
 class _AcceptMigrationMessageBox(_DeferredMigrationMessageBox):
-    warning_calls: list[str] = []
-    information_calls: list[str] = []
-
     def exec(self):
+        type(self).exec_count += 1
+        splash = type(self).active_splash
+        type(self).suspended_during_exec = bool(
+            getattr(splash, "suspended", False) if splash is not None else False
+        )
+        type(self).messages_during_exec = list(getattr(splash, "messages", []))
         self._clicked_button = self._migrate_button
-
-    @staticmethod
-    def warning(*args, **_kwargs):
-        text = str(args[2]) if len(args) > 2 else ""
-        _AcceptMigrationMessageBox.warning_calls.append(text)
-        return None
-
-    @staticmethod
-    def information(*args, **_kwargs):
-        text = str(args[2]) if len(args) > 2 else ""
-        _AcceptMigrationMessageBox.information_calls.append(text)
-        return None
 
 
 class _FakeStartupSplashController:
     def __init__(self):
+        self.phase_updates: list[tuple[object, str]] = []
         self.messages: list[str] = []
         self.finish_calls: list[object] = []
+        self.show_calls = 0
+        self.suspend_calls = 0
+        self.resume_calls = 0
+        self.suspended = False
+        self._finished = False
 
-    def set_status(self, message: str):
-        self.messages.append(str(message))
+    def show(self):
+        self.show_calls += 1
+
+    def set_phase(self, phase, message_override=None):
+        message = str(message_override or startup_phase_label(StartupPhase(phase)))
+        self.phase_updates.append((phase, message))
+        self.messages.append(message)
+
+    def suspend(self):
+        self.suspended = True
+        self.suspend_calls += 1
+
+    def resume(self):
+        self.suspended = False
+        self.resume_calls += 1
 
     def finish(self, window):
+        if self._finished:
+            return
+        self._finished = True
         self.finish_calls.append(window)
 
 
@@ -155,9 +176,6 @@ class AppShellIntegrationTests(unittest.TestCase):
                 self.window.deleteLater()
                 self.app.processEvents()
         finally:
-            app = getattr(self, "app", None)
-            if app is not None and hasattr(app, "_startup_splash_controller"):
-                delattr(app, "_startup_splash_controller")
             for patcher in reversed(getattr(self, "_patchers", [])):
                 patcher.stop()
             self.tmpdir.cleanup()
@@ -331,19 +349,19 @@ class AppShellIntegrationTests(unittest.TestCase):
     def test_startup_status_messages_cover_real_bootstrap_phases_and_ready_boundary(self):
         self._close_window()
         splash = _FakeStartupSplashController()
-        self.app._startup_splash_controller = splash
+        splash.show()
 
-        self.window = app_module.App()
-        self.window.startupReady.connect(lambda: splash.finish(self.window))
+        self.window = app_module.App(startup_feedback=splash)
 
         self.assertEqual(
-            splash.messages,
+            [phase for phase, _message in splash.phase_updates],
             [
-                "Resolving storage layout…",
-                "Initializing settings…",
-                "Opening profile database…",
-                "Loading services…",
-                "Finalizing interface…",
+                StartupPhase.RESOLVING_STORAGE,
+                StartupPhase.INITIALIZING_SETTINGS,
+                StartupPhase.OPENING_PROFILE_DB,
+                StartupPhase.LOADING_SERVICES,
+                StartupPhase.PREPARING_DATABASE,
+                StartupPhase.FINALIZING_INTERFACE,
             ],
         )
         self.assertEqual(splash.finish_calls, [])
@@ -353,15 +371,8 @@ class AppShellIntegrationTests(unittest.TestCase):
         self._drain_events()
 
         self.assertEqual(
-            splash.messages,
-            [
-                "Resolving storage layout…",
-                "Initializing settings…",
-                "Opening profile database…",
-                "Loading services…",
-                "Finalizing interface…",
-                "Restoring workspace…",
-            ],
+            [phase for phase, _message in splash.phase_updates[-2:]],
+            [StartupPhase.RESTORING_WORKSPACE, StartupPhase.READY],
         )
         self.assertEqual(splash.finish_calls, [self.window])
 
@@ -411,6 +422,12 @@ class AppShellIntegrationTests(unittest.TestCase):
 
     def test_startup_can_defer_legacy_storage_migration_and_keep_current_folder(self):
         self._close_window()
+        splash = _FakeStartupSplashController()
+        splash.show()
+        _DeferredMigrationMessageBox.active_splash = splash
+        _DeferredMigrationMessageBox.suspended_during_exec = False
+        _DeferredMigrationMessageBox.messages_during_exec = []
+        _DeferredMigrationMessageBox.exec_count = 0
         preferred_root = self.qt_settings_root / "AppLocalDataLocation"
         if preferred_root.exists():
             for child in preferred_root.iterdir():
@@ -423,7 +440,7 @@ class AppShellIntegrationTests(unittest.TestCase):
         (legacy_root / "Database").mkdir(parents=True, exist_ok=True)
 
         with mock.patch.object(app_module, "QMessageBox", _DeferredMigrationMessageBox):
-            self.window = app_module.App()
+            self.window = app_module.App(startup_feedback=splash)
             self.window.show()
             self._drain_events()
 
@@ -440,11 +457,23 @@ class AppShellIntegrationTests(unittest.TestCase):
             "deferred",
         )
         self.assertIn("legacy app-data folder", _DeferredMigrationMessageBox.last_text.lower())
+        self.assertEqual(_DeferredMigrationMessageBox.exec_count, 1)
+        self.assertTrue(_DeferredMigrationMessageBox.suspended_during_exec)
+        self.assertNotIn(
+            "Opening profile database…",
+            _DeferredMigrationMessageBox.messages_during_exec,
+        )
+        self.assertEqual(splash.suspend_calls, 1)
+        self.assertEqual(splash.resume_calls, 1)
 
     def test_startup_migrate_now_bootstraps_logging_and_uses_preferred_root(self):
         self._close_window()
-        _AcceptMigrationMessageBox.warning_calls = []
-        _AcceptMigrationMessageBox.information_calls = []
+        splash = _FakeStartupSplashController()
+        splash.show()
+        _AcceptMigrationMessageBox.active_splash = splash
+        _AcceptMigrationMessageBox.suspended_during_exec = False
+        _AcceptMigrationMessageBox.messages_during_exec = []
+        _AcceptMigrationMessageBox.exec_count = 0
         preferred_root = self.qt_settings_root / "AppLocalDataLocation"
         if preferred_root.exists():
             shutil.rmtree(preferred_root)
@@ -455,7 +484,7 @@ class AppShellIntegrationTests(unittest.TestCase):
         self._seed_startup_settings_for_legacy_db(legacy_db)
 
         with mock.patch.object(app_module, "QMessageBox", _AcceptMigrationMessageBox):
-            self.window = app_module.App()
+            self.window = app_module.App(startup_feedback=splash)
             self.window.show()
             self._drain_events()
 
@@ -477,7 +506,33 @@ class AppShellIntegrationTests(unittest.TestCase):
         trace_files = sorted(preferred_root.joinpath("logs").glob("isrc_manager_trace_*.jsonl"))
         self.assertTrue(log_files)
         self.assertTrue(trace_files)
-        self.assertEqual(_AcceptMigrationMessageBox.warning_calls, [])
+        self.assertEqual(_AcceptMigrationMessageBox.exec_count, 2)
+        self.assertTrue(_AcceptMigrationMessageBox.suspended_during_exec)
+        self.assertEqual(splash.suspend_calls, 2)
+        self.assertEqual(splash.resume_calls, 2)
+
+    def test_schema_migration_error_dialog_suspends_splash_during_startup(self):
+        self._close_window()
+        splash = _FakeStartupSplashController()
+        splash.show()
+        _DeferredMigrationMessageBox.active_splash = splash
+        _DeferredMigrationMessageBox.suspended_during_exec = False
+        _DeferredMigrationMessageBox.exec_count = 0
+        _DeferredMigrationMessageBox.last_text = ""
+
+        with (
+            mock.patch.object(app_module, "QMessageBox", _DeferredMigrationMessageBox),
+            mock.patch.object(app_module.App, "migrate_schema", side_effect=RuntimeError("boom")),
+        ):
+            self.window = app_module.App(startup_feedback=splash)
+            self.window.show()
+            self._drain_events()
+
+        self.assertTrue(_DeferredMigrationMessageBox.suspended_during_exec)
+        self.assertEqual(_DeferredMigrationMessageBox.exec_count, 1)
+        self.assertIn("Database migration failed", _DeferredMigrationMessageBox.last_text)
+        self.assertEqual(splash.suspend_calls, 1)
+        self.assertEqual(splash.resume_calls, 1)
 
     def test_startup_adopts_valid_preferred_root_when_settings_still_pin_legacy(self):
         self._close_window()

@@ -9,13 +9,14 @@ try:
     from isrc_manager import settings as app_settings
     from isrc_manager.app_bootstrap import get_or_create_application, run_desktop_application
     from isrc_manager.constants import SETTINGS_BASENAME
-    from isrc_manager.startup_splash import STARTUP_SPLASH_CONTROLLER_ATTR
+    from isrc_manager.startup_progress import StartupPhase, startup_phase_label
 except Exception as exc:  # pragma: no cover - environment-specific fallback
     app_settings = None
     get_or_create_application = None
     run_desktop_application = None
     SETTINGS_BASENAME = None
-    STARTUP_SPLASH_CONTROLLER_ATTR = "_startup_splash_controller"
+    StartupPhase = None
+    startup_phase_label = None
     BOOTSTRAP_IMPORT_ERROR = exc
 else:
     BOOTSTRAP_IMPORT_ERROR = None
@@ -57,11 +58,19 @@ class _FakeApplication:
 
 
 class _FakeWindow:
-    def __init__(self):
+    def __init__(self, *, startup_feedback=None):
         self.show_calls = 0
+        self._startup_feedback = startup_feedback
 
     def showMaximized(self):
         self.show_calls += 1
+
+    def complete_startup_feedback(self):
+        controller = self._startup_feedback
+        if controller is None:
+            return
+        self._startup_feedback = None
+        controller.finish(self)
 
 
 class _FakeSignal:
@@ -77,11 +86,12 @@ class _FakeSignal:
 
 
 class _FakeReadyWindow(_FakeWindow):
-    def __init__(self, app, call_order):
-        super().__init__()
+    def __init__(self, app, call_order, *, startup_feedback=None):
+        super().__init__(startup_feedback=startup_feedback)
         self.startupReady = _FakeSignal()
         self._app = app
         self._call_order = call_order
+        self.startupReady.connect(self.complete_startup_feedback)
 
     def showMaximized(self):
         self._call_order.append("show")
@@ -92,17 +102,32 @@ class _FakeReadyWindow(_FakeWindow):
 class _FakeSplashController:
     def __init__(self, call_order):
         self.call_order = call_order
+        self.phase_updates = []
         self.messages = []
         self.finish_calls = []
+        self.suspend_calls = 0
+        self.resume_calls = 0
+        self._finished = False
 
     def show(self):
         self.call_order.append("splash.show")
 
-    def set_status(self, message):
-        self.messages.append(str(message))
-        self.call_order.append(("splash.status", str(message)))
+    def set_phase(self, phase, message_override=None):
+        message = str(message_override or startup_phase_label(StartupPhase(phase)))
+        self.phase_updates.append((phase, message))
+        self.messages.append(message)
+        self.call_order.append(("splash.phase", phase, message))
+
+    def suspend(self):
+        self.suspend_calls += 1
+
+    def resume(self):
+        self.resume_calls += 1
 
     def finish(self, window):
+        if self._finished:
+            return
+        self._finished = True
         self.finish_calls.append(window)
         self.call_order.append("splash.finish")
 
@@ -138,7 +163,7 @@ class AppBootstrapTests(unittest.TestCase):
             install_qt_message_filter=lambda: call_order.append("filter"),
             enforce_single_instance=lambda timeout: call_order.append(("lock", timeout))
             or object(),
-            window_factory=lambda: call_order.append("window") or window,
+            window_factory=lambda startup_feedback=None: call_order.append("window") or window,
             application_factory=_FakeApplication,
             message_box=message_box,
             splash_factory=lambda _app: None,
@@ -179,7 +204,7 @@ class AppBootstrapTests(unittest.TestCase):
         call_order = []
         app = _FakeApplication(["catalog"])
         splash = _FakeSplashController(call_order)
-        window = _FakeReadyWindow(app, call_order)
+        window_holder = {}
 
         result = run_desktop_application(
             argv=["catalog"],
@@ -187,11 +212,16 @@ class AppBootstrapTests(unittest.TestCase):
             install_qt_message_filter=lambda: call_order.append("filter"),
             enforce_single_instance=lambda timeout: call_order.append(("lock", timeout))
             or object(),
-            window_factory=lambda: call_order.append("window") or window,
+            window_factory=lambda startup_feedback=None: call_order.append("window")
+            or window_holder.setdefault(
+                "window",
+                _FakeReadyWindow(app, call_order, startup_feedback=startup_feedback),
+            ),
             application_factory=_FakeApplication,
             message_box=mock.Mock(),
             splash_factory=lambda current_app: call_order.append("splash.factory") or splash,
         )
+        window = window_holder["window"]
 
         self.assertEqual(result, 42)
         self.assertEqual(
@@ -202,16 +232,17 @@ class AppBootstrapTests(unittest.TestCase):
                 ("lock", 60000),
                 "splash.factory",
                 "splash.show",
-                ("splash.status", "Starting application…"),
+                ("splash.phase", StartupPhase.STARTING, "Starting application…"),
                 "window",
                 "show",
                 "splash.finish",
             ],
         )
-        self.assertEqual(splash.messages, ["Starting application…"])
+        self.assertEqual(
+            splash.phase_updates,
+            [(StartupPhase.STARTING, "Starting application…")],
+        )
         self.assertEqual(splash.finish_calls, [window])
-        self.assertEqual(app.process_events_calls, 1)
-        self.assertFalse(hasattr(app, STARTUP_SPLASH_CONTROLLER_ATTR))
 
 
 class SettingsIntegrationTests(unittest.TestCase):

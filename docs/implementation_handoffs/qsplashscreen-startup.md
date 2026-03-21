@@ -1,180 +1,187 @@
 # QSplashScreen Startup Handoff
 
-Current product version: `2.0.0`
+## Purpose
 
-Date: 2026-03-20
+This document describes the current startup/splash contract for the desktop app.
 
-## Status
+The startup follow-up removed these former limitations:
 
-This pass adds a Qt-native startup splash using `QSplashScreen`.
-
-Scope boundaries for this pass:
-
-- no broader startup redesign
-- no threaded loader or animated custom splash window
-- no business-logic changes outside startup status reporting
-- no change to storage migration policy, profile selection semantics, workspace restore rules, or background bootstrap behavior
+- splash lifecycle no longer depends on a private `QApplication` attribute
+- splash progress is no longer text-only; it is now milestone-based and truthful
+- startup migration dialogs and schema-migration error dialogs no longer compete with a visible splash
+- direct `App()` construction now has an explicit startup-feedback path
+- the build path now uses one splash strategy only: the runtime `QSplashScreen`
 
 ## Source Of Truth
 
-- Runtime entrypoint and startup phases:
+- Runtime entrypoint and bootstrap:
   - [`ISRC_manager.py`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/ISRC_manager.py)
   - [`isrc_manager/app_bootstrap.py`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/isrc_manager/app_bootstrap.py)
-- Runtime asset resolution:
-  - [`isrc_manager/paths.py`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/isrc_manager/paths.py)
+- Splash controller and startup phases:
   - [`isrc_manager/startup_splash.py`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/isrc_manager/startup_splash.py)
+  - [`isrc_manager/startup_progress.py`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/isrc_manager/startup_progress.py)
+- Shell composition and workspace restore dependencies:
+  - [`isrc_manager/main_window_shell.py`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/isrc_manager/main_window_shell.py)
+  - [`docs/implementation_handoffs/workspace-layout-persistence-handoff.md`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/docs/implementation_handoffs/workspace-layout-persistence-handoff.md)
+- Storage migration dependency:
+  - [`docs/implementation_handoffs/storage-migration-reliability-fix.md`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/docs/implementation_handoffs/storage-migration-reliability-fix.md)
 - Packaging:
   - [`build.py`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/build.py)
-- Tests:
+- Regression coverage:
   - [`tests/test_app_bootstrap.py`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/tests/test_app_bootstrap.py)
   - [`tests/test_startup_splash.py`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/tests/test_startup_splash.py)
   - [`tests/test_app_shell_integration.py`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/tests/test_app_shell_integration.py)
   - [`tests/test_build_requirements.py`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/tests/test_build_requirements.py)
 
-## Startup Insertion Point
+## Startup Lifecycle Contract
 
 The real entrypoint is still `ISRC_manager.main()`, which delegates to `run_desktop_application()`.
 
-Current startup order after this pass:
+Current ordered startup flow:
 
 1. `init_settings()`
 2. `_install_qt_message_filter()`
 3. `get_or_create_application()`
 4. `enforce_single_instance()`
 5. create and show the splash in [`isrc_manager/app_bootstrap.py`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/isrc_manager/app_bootstrap.py)
-6. construct `App()`
-7. show the main window
-8. process Qt events once so first-show restore can run
-9. finish the splash when `App.startupReady` fires
-10. enter `app.exec()`
+6. set the splash to the `STARTING` phase
+7. construct `App(startup_feedback=splash)`
+8. show the main window
+9. process Qt events once so first-show restore can run before `app.exec()`
+10. finish the splash when `App.startupReady` fires
+11. keep a final cleanup fallback in bootstrap `finally`
 
-This keeps the splash as early as possible without showing it on the duplicate-instance early-exit path.
+The finish boundary is still the same: splash completion happens only after `_restore_workspace_layout_on_first_show()` completes and emits `startupReady`.
 
-The finish boundary is not `showMaximized()` alone. The splash is closed only after [`ISRC_manager.py`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/ISRC_manager.py) completes `_restore_workspace_layout_on_first_show()` and emits `startupReady`.
+## Progress Reporting
 
-## Splash Asset Resolution
+Startup progress is milestone-based and phase-driven. It is not time-based and it does not attempt fine-grained pseudo-progress.
 
-The splash asset now resolves through [`isrc_manager/startup_splash.py`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/isrc_manager/startup_splash.py):
+Current startup milestones:
 
-- candidate root is `RES_DIR()`
-- candidate folder is `build_assets/`
-- filename convention is `splash.*`
-- extension order is:
-  - `.png`
-  - `.jpg`
-  - `.jpeg`
-  - `.bmp`
-  - `.gif`
+- `STARTING` = `5`
+- `RESOLVING_STORAGE` = `15`
+- `INITIALIZING_SETTINGS` = `30`
+- `OPENING_PROFILE_DB` = `45`
+- `LOADING_SERVICES` = `55`
+- `PREPARING_DATABASE` = `70`
+- `FINALIZING_INTERFACE` = `85`
+- `RESTORING_WORKSPACE` = `95`
+- `READY` = `100`
 
-Current repo asset:
+Who emits phases:
 
-- [`build_assets/splash.png`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/build_assets/splash.png)
+- bootstrap emits `STARTING`
+- `App.__init__()` emits storage/settings/profile/interface phases
+- `open_database()` emits `LOADING_SERVICES` and `PREPARING_DATABASE`
+- `_restore_workspace_layout_on_first_show()` emits `RESTORING_WORKSPACE`
+- `complete_startup_feedback()` emits `READY` immediately before finish
 
-Behavior by environment:
+What changed:
 
-- dev/source run:
-  - `RES_DIR()` resolves to the repo root, so the splash loads from `build_assets/splash.*`
-- packaged run:
-  - `RES_DIR()` resolves to bundled read-only resources, so the same lookup works without hardcoding bundle internals
+- the splash now keeps phase text and a determinate progress bar
+- the longest database-startup blind spot is split by `PREPARING_DATABASE`
+- startup remains synchronous for migration, database, shell, and restore correctness
 
-Fallback behavior:
+What did not change:
 
-- if no candidate exists, splash creation returns `None`
-- if the image exists but `QPixmap` cannot load it, splash creation returns `None`
-- startup still continues normally in both cases
+- background catalog loading is still not part of splash readiness
+- `startupReady` still means “main window restored and ready,” not “all lazy/background work complete”
 
-## Status Messaging
+## Dialog Coordination
 
-The splash status path is intentionally narrow.
+Startup-critical dialogs now run through a startup-modal helper in `App`.
 
-Bootstrap creates a temporary controller and stores it on `QApplication` under a private attribute. `App._report_startup_status()` looks up that controller and no-ops when the splash is absent.
+Behavior:
 
-Real startup phases now reported:
+- suspend and hide the splash before showing a startup modal dialog
+- drain events so the splash is no longer visually competing
+- show a `QMessageBox` instance with `Qt.ApplicationModal`
+- use `self` as parent only when the main window is visible; otherwise use no parent
+- resume and repaint the last splash phase after the dialog closes if startup is continuing
 
-- `Starting application…`
-  - emitted in [`isrc_manager/app_bootstrap.py`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/isrc_manager/app_bootstrap.py) immediately after the splash is shown
-- `Resolving storage layout…`
-  - emitted before `_reconcile_startup_storage_root()`
-- `Initializing settings…`
-  - emitted before identity/theme/help bootstrap
-- `Opening profile database…`
-  - emitted just before `open_database(last_db)`
-- `Loading services…`
-  - emitted inside `open_database()` after opening the DB session and before `_init_services()`
-- `Finalizing interface…`
-  - emitted before shell composition, persistent dock shells, saved view preferences, and theme application
-- `Restoring workspace…`
-  - emitted at the start of `_restore_workspace_layout_on_first_show()`
+Dialog paths covered:
 
-Responsiveness behavior:
+- storage migration prompt during `_reconcile_startup_storage_root()`
+- startup storage migration failure warning
+- startup storage migration success information dialog
+- schema migration error dialog from `open_database()`
 
-- the splash controller calls `processEvents()` after `show()`
-- it also calls `processEvents()` after each `showMessage()` update
-- bootstrap calls `processEvents()` once after the main window show call so the first-show restore timer can run before `app.exec()`
+This preserves existing migration decision semantics while making the dialog the only active startup UI during the blocking step.
 
-## Packaging / Runtime Notes
+## Direct `App()` Construction
 
-This pass complements, but does not replace, the build script’s existing PyInstaller splash handling.
+Direct callers now have an explicit splash/startup-feedback path.
 
-Current packaging behavior in [`build.py`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/build.py):
+Supported patterns:
 
-- bootloader `--splash` still uses `build_assets/splash.*`
-- bootloader `--splash` is still skipped on macOS
-- the runtime splash asset is now bundled separately with `--add-data`
+- bootstrap path: `run_desktop_application()` creates the splash and passes it into `App(startup_feedback=...)`
+- direct path: tests/scripts may also construct `App(startup_feedback=controller)` explicitly
 
-Why this matters:
+Important behavior:
 
-- PyInstaller boot splash and app-side `QSplashScreen` are separate mechanisms
-- macOS was already skipping PyInstaller splash, so the in-app `QSplashScreen` is the macOS-safe startup path
-- runtime loading now depends on `RES_DIR()` rather than repo-relative paths or manual `_MEIPASS` logic
+- `App` stores the feedback object on the instance, not on `QApplication`
+- `App.startupReady` is connected to `complete_startup_feedback()`
+- `complete_startup_feedback()` finishes the feedback object once and then clears it
+- if a direct caller never shows the window, `startupReady` will not fire; that caller may call `complete_startup_feedback()` manually if it opted into splash behavior
 
-The build script now keeps both bootloader splash resolution and runtime splash bundling aligned to the same `build_assets/splash.*` naming convention.
+This is the supported replacement for the old private `_startup_splash_controller` wiring.
 
-## Tests Added Or Updated
+## Responsiveness Changes
 
-Updated:
+Safe responsiveness improvements in this pass:
 
-- [`tests/test_app_bootstrap.py`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/tests/test_app_bootstrap.py)
-  - verifies splash creation happens after the lock succeeds
-  - verifies splash show/status happen before `window_factory()`
-  - verifies splash finish is deferred until the ready-signal path
-  - verifies duplicate-instance early exit does not call splash setup
-- [`tests/test_app_shell_integration.py`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/tests/test_app_shell_integration.py)
-  - verifies real startup phase messages
-  - verifies finish happens only after `show()` plus event draining
-- [`tests/test_build_requirements.py`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/tests/test_build_requirements.py)
-  - verifies runtime splash asset bundling through `--add-data`
-  - keeps existing non-macOS bootloader `--splash` behavior
-  - keeps macOS bootloader splash skipped
+- help-file generation was removed from `App.__init__` and remains lazy at the existing help entry points
+- the initial generated-ISRC preview refresh moved to a post-ready idle tick
+- the new `PREPARING_DATABASE` milestone adds an extra event-drain boundary during startup
 
-Added:
+Intentional non-changes:
 
-- [`tests/test_startup_splash.py`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/tests/test_startup_splash.py)
-  - runtime asset preference order
-  - missing-asset fallback
-  - invalid-image fallback
-  - valid-controller creation and basic lifecycle calls
+- storage migration stays synchronous
+- `open_database()`, schema migration, and service initialization stay on the critical path
+- workspace restore and persistent dock-shell creation stay on the current side of `startupReady`
+- no startup-critical work was moved to background threads
 
-Targeted verification run:
+## Splash Asset And Packaging Contract
 
-- `python3 -m unittest tests.test_app_bootstrap tests.test_startup_splash tests.test_app_shell_integration tests.test_build_requirements`
+Runtime splash asset lookup is unchanged:
 
-## Remaining Limitations / Follow-Up
+- runtime lookup still resolves `RES_DIR()/build_assets/splash.*`
+- `build_assets/splash.*` remains the packaged runtime asset contract
+- missing asset or invalid image still returns `None` and startup continues without a splash
 
-- Startup is still mostly synchronous. The splash improves visibility and responsiveness, but it does not make heavy work asynchronous.
-- Storage migration prompts and startup migration-error dialogs can still take foreground focus during startup. That is expected and intentionally preserved.
-- There is still no percentage indicator or progress bar. This pass uses stable phase messages only.
-- Direct `App()` construction in tests or scripts does not automatically finish a splash, because the bootstrap wiring lives in `run_desktop_application()`. That is intentional so the entrypoint remains the authoritative startup path.
+Build behavior changed:
 
-## Reference Appendix
+- PyInstaller bootloader `--splash` was removed from [`build.py`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/build.py)
+- the runtime splash asset is still bundled through `--add-data`
+- packaged builds now use only the app-side `QSplashScreen`
 
-Key runtime files:
+This is the single-splash strategy on all platforms, including macOS.
 
-- [`isrc_manager/startup_splash.py`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/isrc_manager/startup_splash.py)
-- [`isrc_manager/app_bootstrap.py`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/isrc_manager/app_bootstrap.py)
-- [`ISRC_manager.py`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/ISRC_manager.py)
-- [`build.py`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/build.py)
+## Regression Coverage
 
-Key asset:
+Updated coverage now verifies:
 
-- [`build_assets/splash.png`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/build_assets/splash.png)
+- bootstrap still creates the splash after the single-instance lock and before window construction
+- the splash controller handles progress, suspend/resume, event draining, and idempotent finish
+- direct `App(startup_feedback=...)` startup reaches the expected ordered milestones and auto-finishes on `startupReady`
+- startup migration dialog flows suspend the splash while the dialog is active
+- startup schema-migration errors also suspend the splash while the dialog is active
+- build command generation no longer emits PyInstaller `--splash`
+- runtime splash asset bundling still uses `--add-data`
+
+Targeted verification command:
+
+- `python3 -m unittest tests.test_app_bootstrap tests.test_startup_splash tests.test_app_shell_integration tests.test_storage_migration_service tests.test_migration_integration tests.test_build_requirements`
+
+## Remaining Limitations
+
+- Startup-critical work is still mostly synchronous by design; the progress bar is phase-based, not elapsed-time-based.
+- Background catalog loading still begins after startup shell construction and is not part of the ready boundary.
+- The splash progress bar is only as granular as the explicit startup milestones; it does not report internal loop-by-loop migration or schema progress.
+
+## Future Follow-Up
+
+- Profile the shell-build and workspace-restore path if startup feels slow on large saved layouts.
+- Keep any future startup deferrals limited to clearly non-critical UI/data warmup.
+- If a future pass needs deeper progress granularity, add it only where a real stable milestone exists.

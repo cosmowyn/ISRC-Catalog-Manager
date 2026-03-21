@@ -5,13 +5,11 @@ Deterministic PyInstaller build helper for stable local releases.
 Behavior:
 - Builds the app from fixed repo metadata and fixed build assets.
 - Uses icons from ``build_assets/icons/app_logo.*``.
-- Uses an optional splash from ``build_assets/splash.*``.
+- Bundles an optional runtime splash from ``build_assets/splash.*``.
 - Cleans ``build/`` and ``dist/`` before each run.
 - Stages a versioned release artifact under ``dist/release/``.
 
 Notes:
-- Splash is intentionally skipped on macOS because PyInstaller splash support
-  is limited there.
 - Branding is customized by replacing the same-named files in ``build_assets/``
   before running this script.
 """
@@ -265,13 +263,6 @@ def _resolve_icon(project_root: Path) -> str | None:
     return None
 
 
-def _resolve_splash(project_root: Path) -> str | None:
-    runtime_splash = _resolve_runtime_splash_asset(project_root)
-    if _is_macos():
-        return None
-    return runtime_splash
-
-
 def _resolve_runtime_splash_asset(project_root: Path) -> str | None:
     for ext in SPLASH_EXTENSIONS:
         candidate = project_root / "build_assets" / f"{SPLASH_BASENAME}{ext}"
@@ -292,7 +283,6 @@ def _pyinstaller_cmd(
     build_python: Path,
     entry_script: Path,
     app_name: str,
-    splash: str | None,
     icon: str | None,
     runtime_splash_asset: str | None,
 ) -> list[str]:
@@ -314,9 +304,6 @@ def _pyinstaller_cmd(
         cmd.append("--onefile")
     else:
         cmd.append("--onedir")
-
-    if splash and not _is_macos():
-        cmd.extend(["--splash", splash])
 
     if runtime_splash_asset:
         cmd.extend(
@@ -411,21 +398,12 @@ def main() -> int:
         print(str(exc))
         return 1
 
-    if _is_macos():
-        print("Note: PyInstaller splash is skipped on macOS.")
-
     try:
-        splash = _resolve_splash(project_root)
         runtime_splash_asset = _resolve_runtime_splash_asset(project_root)
         icon = _resolve_icon(project_root)
     except Exception as exc:
         print(f"ERROR: Could not resolve build assets.\n{exc}")
         return 1
-
-    if splash:
-        print(f"Using splash asset: {splash}")
-    else:
-        print("No splash asset configured for this platform.")
 
     if runtime_splash_asset:
         print(f"Bundling runtime splash asset: {runtime_splash_asset}")
@@ -446,7 +424,6 @@ def main() -> int:
         build_python=build_python,
         entry_script=entry_script,
         app_name=APP_NAME,
-        splash=splash,
         icon=icon,
         runtime_splash_asset=runtime_splash_asset,
     )

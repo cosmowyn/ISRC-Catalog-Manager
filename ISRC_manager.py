@@ -255,7 +255,8 @@ from isrc_manager.rights.dialogs import RightsBrowserDialog, RightsBrowserPanel
 from isrc_manager.search import GlobalSearchService, RelationshipExplorerService
 from isrc_manager.search.dialogs import GlobalSearchPanel
 from isrc_manager.selection_scope import TrackChoice
-from isrc_manager.startup_splash import STARTUP_SPLASH_CONTROLLER_ATTR
+from isrc_manager.startup_progress import StartupPhase, startup_phase_label
+from isrc_manager.startup_splash import StartupFeedbackProtocol
 from isrc_manager.services.db_access import DatabaseWriteCoordinator, SQLiteConnectionFactory
 from isrc_manager.services.bulk_edit import MIXED_VALUE, shared_bulk_value, should_apply_bulk_change
 from isrc_manager.services.sqlite_utils import safe_wal_checkpoint
@@ -5161,10 +5162,15 @@ class App(QMainWindow):
     BASE_HEADERS = list(DEFAULT_BASE_HEADERS)
     TOP_CHROME_DOCK_GAP = 5
 
-    def __init__(self):
+    def __init__(self, *, startup_feedback: StartupFeedbackProtocol | None = None):
         super().__init__()
         self.setObjectName("mainWindow")
         configure_qt_application_identity(self)
+        self._startup_feedback = startup_feedback
+        self._startup_feedback_completed = False
+        self._post_ready_startup_tasks_scheduled = False
+        self.startupReady.connect(self.complete_startup_feedback)
+        self.startupReady.connect(self._schedule_post_ready_startup_tasks)
 
         self.settings = QSettings(str(settings_path()), QSettings.IniFormat)
         self.settings.setFallbacksEnabled(False)
@@ -5178,7 +5184,7 @@ class App(QMainWindow):
             settings=self.settings,
             reporter=self._log_event,
         )
-        self._report_startup_status("Resolving storage layout…")
+        self._report_startup_phase(StartupPhase.RESOLVING_STORAGE)
         startup_root = self._reconcile_startup_storage_root()
         self._apply_storage_layout(active_data_root=startup_root)
 
@@ -5211,7 +5217,7 @@ class App(QMainWindow):
         )
         self.background_service_factory.configure(settings_path=self.settings.fileName())
 
-        self._report_startup_status("Initializing settings…")
+        self._report_startup_phase(StartupPhase.INITIALIZING_SETTINGS)
         self.identity = self._load_identity()
         self.theme_settings = self._load_theme_settings()
         self.blob_icon_settings = default_blob_icon_settings()
@@ -5228,7 +5234,6 @@ class App(QMainWindow):
         self.session_history_manager = SessionHistoryManager(self.history_dir)
         self.history_dialog = None
         self.help_dialog = None
-        self._ensure_help_file()
         self.auto_snapshot_timer = QTimer(self)
         self.auto_snapshot_timer.setSingleShot(False)
         self.auto_snapshot_timer.timeout.connect(self._on_auto_snapshot_timer)
@@ -5269,7 +5274,7 @@ class App(QMainWindow):
         self.release_browser_dialog = None
         self._explicit_row_filter_track_ids = None
         self._background_write_lock = None
-        self._report_startup_status("Opening profile database…")
+        self._report_startup_phase(StartupPhase.OPENING_PROFILE_DB)
         self.open_database(last_db)
 
         try:
@@ -5279,7 +5284,7 @@ class App(QMainWindow):
         except Exception:
             movable = False
 
-        self._report_startup_status("Finalizing interface…")
+        self._report_startup_phase(StartupPhase.FINALIZING_INTERFACE)
         build_main_window_shell(self, last_db=last_db, movable=bool(movable))
         self.tabifiedDockWidgetActivated.connect(
             lambda *_args: self._schedule_main_dock_state_save()
@@ -5288,7 +5293,6 @@ class App(QMainWindow):
 
         self._apply_saved_view_preferences(apply_workspace_panel_visibility=False)
 
-        self._update_add_data_generated_fields()
         self.resize(1280, 800)
         self._refresh_history_actions()
         app_instance = QApplication.instance()
@@ -5298,17 +5302,112 @@ class App(QMainWindow):
         self._apply_theme()
         self._refresh_catalog_ui_in_background(unique_key="catalog.ui.startup")
 
-    def _report_startup_status(self, message: str) -> None:
-        app = QApplication.instance()
-        if app is None:
+    def _report_startup_phase(
+        self,
+        phase: StartupPhase,
+        message_override: str | None = None,
+    ) -> None:
+        controller = getattr(self, "_startup_feedback", None)
+        if controller is None or getattr(self, "_startup_feedback_completed", False):
             return
-        controller = getattr(app, STARTUP_SPLASH_CONTROLLER_ATTR, None)
+        set_phase = getattr(controller, "set_phase", None)
+        if callable(set_phase):
+            try:
+                set_phase(StartupPhase(phase), message_override)
+                return
+            except Exception:
+                pass
         set_status = getattr(controller, "set_status", None)
         if callable(set_status):
             try:
-                set_status(str(message))
+                set_status(str(message_override or startup_phase_label(StartupPhase(phase))))
             except Exception:
                 pass
+
+    @staticmethod
+    def _drain_qt_events() -> None:
+        app = QApplication.instance()
+        process_events = getattr(app, "processEvents", None) if app is not None else None
+        if callable(process_events):
+            process_events()
+
+    def _suspend_startup_feedback(self) -> None:
+        controller = getattr(self, "_startup_feedback", None)
+        suspend = getattr(controller, "suspend", None)
+        if callable(suspend):
+            try:
+                suspend()
+            except Exception:
+                pass
+        self._drain_qt_events()
+
+    def _resume_startup_feedback(self) -> None:
+        controller = getattr(self, "_startup_feedback", None)
+        resume = getattr(controller, "resume", None)
+        if callable(resume):
+            try:
+                resume()
+            except Exception:
+                pass
+        self._drain_qt_events()
+
+    def _run_startup_message_box(
+        self,
+        *,
+        title: str,
+        icon,
+        text: str,
+        configure=None,
+    ):
+        self._suspend_startup_feedback()
+        try:
+            parent = self if self.isVisible() else None
+            message_box = QMessageBox(parent)
+            if hasattr(message_box, "setWindowTitle"):
+                message_box.setWindowTitle(title)
+            if hasattr(message_box, "setIcon"):
+                message_box.setIcon(icon)
+            if hasattr(message_box, "setText"):
+                message_box.setText(text)
+            if hasattr(message_box, "setWindowModality"):
+                message_box.setWindowModality(Qt.ApplicationModal)
+            if callable(configure):
+                configure(message_box)
+            elif hasattr(message_box, "addButton"):
+                ok_button = message_box.addButton("OK", QMessageBox.AcceptRole)
+                if hasattr(message_box, "setDefaultButton"):
+                    message_box.setDefaultButton(ok_button)
+            message_box.exec()
+            return message_box
+        finally:
+            self._resume_startup_feedback()
+
+    def complete_startup_feedback(self) -> None:
+        controller = getattr(self, "_startup_feedback", None)
+        if controller is None or getattr(self, "_startup_feedback_completed", False):
+            return
+        self._startup_feedback_completed = True
+        try:
+            set_phase = getattr(controller, "set_phase", None)
+            if callable(set_phase):
+                try:
+                    set_phase(StartupPhase.READY)
+                except Exception:
+                    pass
+            finish = getattr(controller, "finish", None)
+            if callable(finish):
+                finish(self)
+        finally:
+            self._startup_feedback = None
+
+    def _schedule_post_ready_startup_tasks(self) -> None:
+        if self._post_ready_startup_tasks_scheduled:
+            return
+        self._post_ready_startup_tasks_scheduled = True
+        QTimer.singleShot(0, self._run_post_ready_startup_tasks)
+
+    def _run_post_ready_startup_tasks(self) -> None:
+        self._update_add_data_generated_fields()
 
     def _apply_storage_layout(self, *, active_data_root: str | Path | None = None) -> None:
         self.storage_layout = resolve_app_storage_layout(
@@ -5425,14 +5524,25 @@ class App(QMainWindow):
             "",
             "Migrate to the new app folder now?",
         ]
-        message_box = QMessageBox(self)
-        message_box.setWindowTitle("App Data Migration")
-        message_box.setIcon(QMessageBox.Warning)
-        message_box.setText("\n".join(lines))
-        migrate_button = message_box.addButton("Migrate Now", QMessageBox.AcceptRole)
-        keep_button = message_box.addButton("Keep Current Folder For Now", QMessageBox.RejectRole)
-        message_box.setDefaultButton(migrate_button)
-        message_box.exec()
+        migrate_button = None
+        keep_button = None
+
+        def _configure_message_box(message_box) -> None:
+            nonlocal migrate_button, keep_button
+            migrate_button = message_box.addButton("Migrate Now", QMessageBox.AcceptRole)
+            keep_button = message_box.addButton(
+                "Keep Current Folder For Now",
+                QMessageBox.RejectRole,
+            )
+            if hasattr(message_box, "setDefaultButton"):
+                message_box.setDefaultButton(migrate_button)
+
+        message_box = self._run_startup_message_box(
+            title="App Data Migration",
+            icon=QMessageBox.Warning,
+            text="\n".join(lines),
+            configure=_configure_message_box,
+        )
 
         if message_box.clickedButton() is keep_button:
             self.storage_migration_service.defer(inspection.legacy_root)
@@ -5456,19 +5566,23 @@ class App(QMainWindow):
                 preferred_root=preferred_root,
                 error=str(exc),
             )
-            QMessageBox.warning(
-                self,
-                "App Data Migration",
-                "The app-data migration could not be completed.\n\n"
-                f"{exc}\n\nThe app will continue to use the current folder for now.",
+            self._run_startup_message_box(
+                title="App Data Migration",
+                icon=QMessageBox.Warning,
+                text=(
+                    "The app-data migration could not be completed.\n\n"
+                    f"{exc}\n\nThe app will continue to use the current folder for now."
+                ),
             )
             return inspection.legacy_root.resolve()
 
-        QMessageBox.information(
-            self,
-            "App Data Migration",
-            f"App-owned data was {result.action} successfully.\n\n"
-            f"Items: {', '.join(result.copied_items)}",
+        self._run_startup_message_box(
+            title="App Data Migration",
+            icon=QMessageBox.Information,
+            text=(
+                f"App-owned data was {result.action} successfully.\n\n"
+                f"Items: {', '.join(result.copied_items)}"
+            ),
         )
         self._log_event(
             "storage.migration.startup",
@@ -7897,7 +8011,7 @@ class App(QMainWindow):
         self.cursor = session.cursor
         self.current_db_path = path
         self._configure_background_runtime()
-        self._report_startup_status("Loading services…")
+        self._report_startup_phase(StartupPhase.LOADING_SERVICES)
         self._init_services()
 
         self._migrate_artist_code_from_qsettings_if_needed()
@@ -7915,6 +8029,7 @@ class App(QMainWindow):
         self.logger.info("Settings synced to disk")
 
         # Create base tables/indices if missing
+        self._report_startup_phase(StartupPhase.PREPARING_DATABASE)
         self.init_db()
 
         # Run schema migrations and then refresh caches that depend on schema
@@ -7922,7 +8037,11 @@ class App(QMainWindow):
             self.migrate_schema()
         except Exception as e:
             self.logger.exception(f"Schema migration failed: {e}")
-            QMessageBox.critical(self, "Migration Error", f"Database migration failed:\n{e}")
+            self._run_startup_message_box(
+                title="Migration Error",
+                icon=QMessageBox.Critical,
+                text=f"Database migration failed:\n{e}",
+            )
             # keep going; DB might still be usable
         if self.history_manager is not None:
             self.history_manager._ensure_history_invariants()
@@ -8583,7 +8702,7 @@ class App(QMainWindow):
     def _restore_workspace_layout_on_first_show(self) -> None:
         if getattr(self, "_workspace_layout_restore_complete", False):
             return
-        self._report_startup_status("Restoring workspace…")
+        self._report_startup_phase(StartupPhase.RESTORING_WORKSPACE)
         self._workspace_layout_restore_scheduled = False
         previous_suspend_state = self._suspend_dock_state_sync
         previous_restore_state = self._is_restoring_workspace_layout

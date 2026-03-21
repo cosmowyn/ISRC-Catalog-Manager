@@ -97,32 +97,6 @@ class IconResolutionTests(unittest.TestCase):
 
 
 class SplashResolutionTests(unittest.TestCase):
-    def test_resolve_splash_prefers_png(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            (root / "build_assets").mkdir(parents=True, exist_ok=True)
-            jpg = root / "build_assets" / "splash.jpg"
-            png = root / "build_assets" / "splash.png"
-            jpg.write_bytes(b"jpg")
-            png.write_bytes(b"png")
-
-            with mock.patch.object(build, "_is_macos", return_value=False):
-                resolved = build._resolve_splash(root)
-
-        self.assertEqual(resolved, str(png))
-
-    def test_resolve_splash_skips_macos(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            (root / "build_assets").mkdir(parents=True, exist_ok=True)
-            png = root / "build_assets" / "splash.png"
-            png.write_bytes(b"png")
-
-            with mock.patch.object(build, "_is_macos", return_value=True):
-                resolved = build._resolve_splash(root)
-
-        self.assertIsNone(resolved)
-
     def test_resolve_runtime_splash_asset_works_on_macos(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -137,7 +111,7 @@ class SplashResolutionTests(unittest.TestCase):
 
 
 class CommandConstructionTests(unittest.TestCase):
-    def test_windows_pyinstaller_command_uses_onefile_and_splash(self):
+    def test_windows_pyinstaller_command_uses_onefile_and_runtime_splash_only(self):
         build_python = Path("/python")
         entry_script = Path("/project/ISRC_manager.py")
 
@@ -149,21 +123,19 @@ class CommandConstructionTests(unittest.TestCase):
                 build_python=build_python,
                 entry_script=entry_script,
                 app_name=build.APP_NAME,
-                splash="/project/build_assets/splash.png",
                 icon="/project/build_assets/icons/app_logo.ico",
                 runtime_splash_asset="/project/build_assets/splash.png",
             )
 
         self.assertIn("--onefile", cmd)
         self.assertNotIn("--onedir", cmd)
-        self.assertIn("--splash", cmd)
-        self.assertIn("/project/build_assets/splash.png", cmd)
+        self.assertNotIn("--splash", cmd)
         self.assertIn("--add-data", cmd)
         self.assertIn("/project/build_assets/splash.png;build_assets", cmd)
         self.assertIn("--icon", cmd)
         self.assertIn("/project/build_assets/icons/app_logo.ico", cmd)
 
-    def test_linux_pyinstaller_command_uses_onedir_and_splash(self):
+    def test_linux_pyinstaller_command_uses_onedir_and_runtime_splash_only(self):
         build_python = Path("/python")
         entry_script = Path("/project/ISRC_manager.py")
 
@@ -175,18 +147,17 @@ class CommandConstructionTests(unittest.TestCase):
                 build_python=build_python,
                 entry_script=entry_script,
                 app_name=build.APP_NAME,
-                splash="/project/build_assets/splash.png",
                 icon="/project/build_assets/icons/app_logo.png",
                 runtime_splash_asset="/project/build_assets/splash.png",
             )
 
         self.assertIn("--onedir", cmd)
         self.assertNotIn("--onefile", cmd)
-        self.assertIn("--splash", cmd)
+        self.assertNotIn("--splash", cmd)
         self.assertIn("--add-data", cmd)
         self.assertIn("/project/build_assets/splash.png:build_assets", cmd)
 
-    def test_macos_pyinstaller_command_skips_splash(self):
+    def test_macos_pyinstaller_command_keeps_runtime_splash_without_bootloader_splash(self):
         build_python = Path("/python")
         entry_script = Path("/project/ISRC_manager.py")
 
@@ -198,7 +169,6 @@ class CommandConstructionTests(unittest.TestCase):
                 build_python=build_python,
                 entry_script=entry_script,
                 app_name=build.APP_NAME,
-                splash="/project/build_assets/splash.png",
                 icon="/project/build_assets/icons/app_logo.icns",
                 runtime_splash_asset="/project/build_assets/splash.png",
             )

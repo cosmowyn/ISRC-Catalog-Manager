@@ -4,15 +4,14 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable, Sequence
+from inspect import Parameter, signature
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from .constants import APP_NAME
 from .paths import configure_qt_application_identity
-from .startup_splash import (
-    STARTUP_SPLASH_CONTROLLER_ATTR,
-    create_startup_splash_controller,
-)
+from .startup_progress import StartupPhase
+from .startup_splash import StartupFeedbackProtocol, create_startup_splash_controller
 
 
 def get_or_create_application(
@@ -30,16 +29,29 @@ def get_or_create_application(
     return app
 
 
+def _window_factory_supports_startup_feedback(window_factory: Callable[..., object]) -> bool:
+    try:
+        params = signature(window_factory).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(
+        parameter.kind == Parameter.VAR_KEYWORD or parameter.name == "startup_feedback"
+        for parameter in params
+    )
+
+
 def run_desktop_application(
     *,
     argv: Sequence[str] | None = None,
     init_settings: Callable[[], object],
     install_qt_message_filter: Callable[[], None],
     enforce_single_instance: Callable[[int], object | None],
-    window_factory: Callable[[], object],
+    window_factory: Callable[..., object],
     application_factory=QApplication,
     message_box=QMessageBox,
-    splash_factory: Callable[[QApplication], object | None] = create_startup_splash_controller,
+    splash_factory: Callable[[QApplication], StartupFeedbackProtocol | None] = (
+        create_startup_splash_controller
+    ),
     show_method_name: str = "showMaximized",
     lock_timeout_ms: int = 60000,
 ) -> int:
@@ -56,37 +68,21 @@ def run_desktop_application(
     app._single_instance_lock = lock
     splash = splash_factory(app)
     if splash is not None:
-        setattr(app, STARTUP_SPLASH_CONTROLLER_ATTR, splash)
         splash.show()
-        splash.set_status("Starting application…")
+        splash.set_phase(StartupPhase.STARTING)
 
-    window = window_factory()
-    ready_signal = getattr(window, "startupReady", None)
-    splash_finished = False
-
-    def _finish_startup_splash() -> None:
-        nonlocal splash_finished
-        if splash is None or splash_finished:
-            return
-        splash_finished = True
-        try:
-            splash.finish(window)
-        finally:
-            if getattr(app, STARTUP_SPLASH_CONTROLLER_ATTR, None) is splash:
-                delattr(app, STARTUP_SPLASH_CONTROLLER_ATTR)
-
-    if splash is not None and callable(getattr(ready_signal, "connect", None)):
-        ready_signal.connect(_finish_startup_splash)
+    if _window_factory_supports_startup_feedback(window_factory):
+        window = window_factory(startup_feedback=splash)
+    else:
+        window = window_factory()
 
     getattr(window, show_method_name)()
     process_events = getattr(app, "processEvents", None)
     if callable(process_events):
         process_events()
 
-    if splash is not None and not callable(getattr(ready_signal, "connect", None)):
-        _finish_startup_splash()
-
     try:
         return app.exec()
     finally:
-        _finish_startup_splash()
+        if splash is not None:
+            splash.finish(window)

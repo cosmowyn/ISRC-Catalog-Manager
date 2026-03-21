@@ -5,18 +5,29 @@ from pathlib import Path
 from tests.qt_test_helpers import require_qapplication
 
 try:
-    from PySide6.QtGui import QColor, QImage
+    from PySide6.QtGui import QColor, QImage, QPixmap
     from PySide6.QtWidgets import QWidget
 
     from isrc_manager import startup_splash
+    from isrc_manager.startup_progress import StartupPhase
 except Exception as exc:  # pragma: no cover - environment-specific fallback
     QColor = None
     QImage = None
+    QPixmap = None
     QWidget = None
     startup_splash = None
+    StartupPhase = None
     STARTUP_SPLASH_IMPORT_ERROR = exc
 else:
     STARTUP_SPLASH_IMPORT_ERROR = None
+
+
+class _FakeApplication:
+    def __init__(self):
+        self.process_events_calls = 0
+
+    def processEvents(self):
+        self.process_events_calls += 1
 
 
 class StartupSplashHelperTests(unittest.TestCase):
@@ -86,12 +97,60 @@ class StartupSplashHelperTests(unittest.TestCase):
             window = QWidget()
             try:
                 controller.show()
-                controller.set_status("Loading services…")
+                controller.set_phase(StartupPhase.LOADING_SERVICES)
                 controller.finish(window)
             finally:
                 window.close()
                 window.deleteLater()
                 self.app.processEvents()
+
+    def test_controller_processes_events_after_show_phase_and_finish(self):
+        fake_app = _FakeApplication()
+        pixmap = QPixmap(32, 18)
+        pixmap.fill(QColor("#204b6f"))
+        splash = startup_splash._ReadableSplashScreen(pixmap)
+        controller = startup_splash.StartupSplashController(fake_app, splash)
+        window = QWidget()
+        try:
+            controller.show()
+            controller.set_phase(StartupPhase.LOADING_SERVICES)
+            controller.finish(window)
+        finally:
+            window.close()
+            window.deleteLater()
+            splash.close()
+        self.assertEqual(fake_app.process_events_calls, 3)
+
+    def test_finish_is_idempotent_and_closes_without_window_handle(self):
+        fake_app = _FakeApplication()
+        pixmap = QPixmap(32, 18)
+        pixmap.fill(QColor("#204b6f"))
+        splash = startup_splash._ReadableSplashScreen(pixmap)
+        controller = startup_splash.StartupSplashController(fake_app, splash)
+        controller.show()
+        controller.set_phase(StartupPhase.PREPARING_DATABASE)
+        controller.finish(object())
+        controller.finish(object())
+        self.assertEqual(controller.current_phase, StartupPhase.READY)
+        self.assertEqual(controller.current_progress, int(StartupPhase.READY))
+        self.assertGreaterEqual(fake_app.process_events_calls, 3)
+
+    def test_suspend_resume_preserves_current_phase(self):
+        fake_app = _FakeApplication()
+        pixmap = QPixmap(32, 18)
+        pixmap.fill(QColor("#204b6f"))
+        splash = startup_splash._ReadableSplashScreen(pixmap)
+        controller = startup_splash.StartupSplashController(fake_app, splash)
+        controller.show()
+        controller.set_phase(StartupPhase.RESOLVING_STORAGE, "Waiting for migration decision…")
+        controller.suspend()
+        controller.resume()
+        self.assertEqual(controller.current_phase, StartupPhase.RESOLVING_STORAGE)
+        self.assertEqual(controller.current_message, "Waiting for migration decision…")
+        self.assertEqual(
+            controller.current_progress,
+            int(StartupPhase.RESOLVING_STORAGE),
+        )
 
 
 if __name__ == "__main__":
