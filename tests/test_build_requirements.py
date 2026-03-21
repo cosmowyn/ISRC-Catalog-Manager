@@ -403,11 +403,15 @@ class MainFlowTests(unittest.TestCase):
 
             with (
                 mock.patch.object(build, "PROJECT_ROOT", root),
-                mock.patch.object(build, "_resolve_entry_script", return_value=root / build.ENTRY_SCRIPT),
+                mock.patch.object(
+                    build, "_resolve_entry_script", return_value=root / build.ENTRY_SCRIPT
+                ),
                 mock.patch.object(build, "_project_version", return_value="2.0.0"),
                 mock.patch.object(build, "_resolve_build_python", return_value=Path("/python")),
                 mock.patch.object(build, "_select_pyinstaller", return_value=selection),
-                mock.patch.object(build, "_resolve_icon", side_effect=resolve_icon) as resolve_icon_mock,
+                mock.patch.object(
+                    build, "_resolve_icon", side_effect=resolve_icon
+                ) as resolve_icon_mock,
                 mock.patch.object(
                     build,
                     "_resolve_runtime_splash_asset",

@@ -292,9 +292,11 @@ def _select_pyinstaller(project_root: Path, build_python: Path) -> PyInstallerSe
                 verify_cmd=verify_cmd,
                 label=label,
                 version_text=version_text,
-                fallback_reason=str(candidate["fallback_reason"])
-                if candidate["fallback_reason"] is not None
-                else None,
+                fallback_reason=(
+                    str(candidate["fallback_reason"])
+                    if candidate["fallback_reason"] is not None
+                    else None
+                ),
             )
 
         attempts.append(
@@ -760,7 +762,9 @@ def main() -> int:
     out_path = project_root / "dist"
     built_artifact = _find_built_artifact(project_root)
     if not built_artifact.exists():
-        print("\nERROR [artifact]: PyInstaller returned success, but expected output was not found.")
+        print(
+            "\nERROR [artifact]: PyInstaller returned success, but expected output was not found."
+        )
         print(
             "Expected one of: "
             f"{', '.join(str(path) for path in _expected_artifact_candidates(project_root))}"
