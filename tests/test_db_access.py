@@ -1,6 +1,5 @@
 import tempfile
 import threading
-import time
 import unittest
 from pathlib import Path
 
@@ -9,6 +8,7 @@ from isrc_manager.services.db_access import (
     SQLiteConnectionFactory,
     is_lock_error,
 )
+from tests.qt_test_helpers import join_thread_or_fail
 
 
 class SQLiteConnectionFactoryTests(unittest.TestCase):
@@ -41,21 +41,35 @@ class DatabaseWriteCoordinatorTests(unittest.TestCase):
             coordinator_a = DatabaseWriteCoordinator.for_path(db_path)
             coordinator_b = DatabaseWriteCoordinator.for_path(db_path)
             order: list[str] = []
+            first_entered = threading.Event()
+            release_first = threading.Event()
+            second_entered = threading.Event()
 
             def worker(prefix: str, coordinator):
                 with coordinator.acquire():
                     order.append(f"{prefix}-start")
-                    time.sleep(0.05)
+                    if prefix == "first":
+                        first_entered.set()
+                        release_first.wait(timeout=1)
+                    else:
+                        second_entered.set()
                     order.append(f"{prefix}-end")
 
             first = threading.Thread(target=worker, args=("first", coordinator_a))
             second = threading.Thread(target=worker, args=("second", coordinator_b))
 
             first.start()
-            time.sleep(0.01)
+            self.assertTrue(first_entered.wait(timeout=1))
             second.start()
-            first.join()
-            second.join()
+            self.assertFalse(second_entered.wait(timeout=0.1))
+            release_first.set()
+            self.assertTrue(second_entered.wait(timeout=1))
+            join_thread_or_fail(
+                first, timeout_seconds=1.0, description="first database write worker"
+            )
+            join_thread_or_fail(
+                second, timeout_seconds=1.0, description="second database write worker"
+            )
 
             self.assertEqual(order, ["first-start", "first-end", "second-start", "second-end"])
 

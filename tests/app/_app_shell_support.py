@@ -19,7 +19,7 @@ from isrc_manager.services import (
 )
 from isrc_manager.starter_themes import starter_theme_names
 from isrc_manager.startup_progress import StartupPhase, startup_phase_label
-from tests.qt_test_helpers import require_qapplication
+from tests.qt_test_helpers import pump_events, require_qapplication, wait_for
 
 try:
     from PySide6.QtWidgets import QScrollArea, QTabBar
@@ -166,15 +166,12 @@ class AppShellTestCase(unittest.TestCase):
             patcher.start()
         self.window = app_module.App()
         self.window.show()
-        self.app.processEvents()
+        pump_events(app=self.app)
 
     def tearDown(self):
         try:
             if getattr(self, "window", None) is not None:
-                self.window.close()
-                self.window._close_database_connection()
-                self.window.deleteLater()
-                self.app.processEvents()
+                self._close_window()
         finally:
             for patcher in reversed(getattr(self, "_patchers", [])):
                 patcher.stop()
@@ -187,14 +184,29 @@ class AppShellTestCase(unittest.TestCase):
         return str(path)
 
     def _drain_events(self, cycles: int = 4) -> None:
-        for _ in range(cycles):
-            self.app.processEvents()
+        pump_events(app=self.app, cycles=cycles)
+
+    def _cancel_background_tasks(self, window) -> None:
+        task_manager = getattr(window, "background_tasks", None)
+        if task_manager is None:
+            return
+        for record in list(getattr(task_manager, "_tasks", {}).values()):
+            record.context.cancel()
+        if task_manager.has_running_tasks():
+            wait_for(
+                lambda: not task_manager.has_running_tasks(),
+                timeout_ms=1500,
+                interval_ms=10,
+                app=self.app,
+                description="app shell background tasks to finish",
+            )
 
     def _close_window(self) -> str:
         window = getattr(self, "window", None)
         if window is None:
             return ""
         settings_path = window.settings.fileName()
+        self._cancel_background_tasks(window)
         window.close()
         self._drain_events()
         window._close_database_connection()

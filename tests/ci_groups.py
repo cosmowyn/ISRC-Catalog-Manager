@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import sys
-import unittest
 from collections import Counter
+from functools import lru_cache
 from pathlib import Path
 from typing import Iterable
 
@@ -133,14 +134,36 @@ def discovered_modules() -> tuple[str, ...]:
     return tuple(_module_name(path) for path in _discovered_test_files())
 
 
+@lru_cache(maxsize=None)
+def _count_tests_in_file(path: Path) -> int:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    count = 0
+    for node in tree.body:
+        if not isinstance(node, ast.ClassDef):
+            continue
+        for statement in node.body:
+            if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if statement.name.startswith("test_"):
+                    count += 1
+            elif isinstance(statement, ast.Assign):
+                count += sum(
+                    1
+                    for target in statement.targets
+                    if isinstance(target, ast.Name) and target.id.startswith("test_")
+                )
+            elif isinstance(statement, ast.AnnAssign):
+                target = statement.target
+                if isinstance(target, ast.Name) and target.id.startswith("test_"):
+                    count += 1
+    return count
+
+
 def discovered_test_count() -> int:
-    suite = unittest.defaultTestLoader.discover(str(TEST_ROOT), pattern="test_*.py")
-    return suite.countTestCases()
+    return sum(_count_tests_in_file(path) for path in _discovered_test_files())
 
 
 def _count_tests_in_modules(modules: Iterable[str]) -> int:
-    loader = unittest.defaultTestLoader
-    return sum(loader.loadTestsFromName(module).countTestCases() for module in modules)
+    return sum(_count_tests_in_file(_module_path(module)) for module in modules)
 
 
 def group_modules(group: str) -> tuple[str, ...]:
@@ -154,7 +177,7 @@ def group_test_count(group: str) -> int:
     return _count_tests_in_modules(group_modules(group))
 
 
-def _verify_grouping() -> list[str]:
+def verify_grouping() -> list[str]:
     errors: list[str] = []
     discovered = discovered_modules()
     discovered_set = set(discovered)
@@ -208,7 +231,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     if args.verify:
-        errors = _verify_grouping()
+        errors = verify_grouping()
         if errors:
             for error in errors:
                 print(f"error: {error}", file=sys.stderr)

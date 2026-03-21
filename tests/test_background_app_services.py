@@ -5,13 +5,11 @@ import unittest
 from pathlib import Path
 
 try:
-    from PySide6.QtCore import QEventLoop, QSettings, QTimer
+    from PySide6.QtCore import QSettings
     from PySide6.QtWidgets import QApplication
 except ImportError as exc:  # pragma: no cover - environment-specific fallback
     QApplication = None
-    QEventLoop = None
     QSettings = None
-    QTimer = None
     QT_IMPORT_ERROR = exc
 else:
     QT_IMPORT_ERROR = None
@@ -20,12 +18,13 @@ from isrc_manager.services import DatabaseSchemaService
 from isrc_manager.services.db_access import DatabaseWriteCoordinator, SQLiteConnectionFactory
 from isrc_manager.tasks.app_services import BackgroundAppServiceFactory
 from isrc_manager.tasks.manager import BackgroundTaskManager
+from tests.qt_test_helpers import join_thread_or_fail, pump_events, wait_for
 
 
 class BackgroundAppServiceIntegrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        if QApplication is None or QEventLoop is None or QTimer is None or QSettings is None:
+        if QApplication is None or QSettings is None:
             raise unittest.SkipTest(f"PySide6 Qt unavailable: {QT_IMPORT_ERROR}")
         cls.app = QApplication.instance() or QApplication([])
 
@@ -64,13 +63,32 @@ class BackgroundAppServiceIntegrationTests(unittest.TestCase):
         self.manager = BackgroundTaskManager(self.app)
 
     def tearDown(self):
+        for record in list(self.manager._tasks.values()):
+            record.context.cancel()
+        if self.manager.has_running_tasks():
+            wait_for(
+                lambda: not self.manager.has_running_tasks(),
+                timeout_ms=1500,
+                interval_ms=10,
+                app=self.app,
+                description="background-app-service teardown cleanup",
+            )
         self.manager.deleteLater()
-        self.app.processEvents()
+        pump_events(app=self.app)
         self.tmpdir.cleanup()
 
+    def _wait_for_task_completion(self, finished: threading.Event, *, description: str) -> None:
+        wait_for(
+            finished.is_set,
+            timeout_ms=1500,
+            interval_ms=10,
+            app=self.app,
+            description=description,
+        )
+
     def test_background_bundle_task_persists_changes_and_reports_progress(self):
-        loop = QEventLoop()
         captured = {"progress": []}
+        finished = threading.Event()
 
         def _task(ctx):
             with self.factory.open_bundle() as bundle:
@@ -89,10 +107,12 @@ class BackgroundAppServiceIntegrationTests(unittest.TestCase):
                 (update.value, update.maximum, update.message)
             ),
             on_success=lambda result: captured.setdefault("result", result),
-            on_finished=loop.quit,
+            on_finished=finished.set,
         )
-        QTimer.singleShot(3000, loop.quit)
-        loop.exec()
+        self._wait_for_task_completion(
+            finished,
+            description="background bundle task completion",
+        )
 
         self.assertEqual(captured.get("result"), "done")
         self.assertEqual(
@@ -108,8 +128,8 @@ class BackgroundAppServiceIntegrationTests(unittest.TestCase):
         self.assertEqual(count, 1)
 
     def test_background_bundle_failure_rolls_back_uncommitted_changes(self):
-        loop = QEventLoop()
         captured = {}
+        finished = threading.Event()
 
         def _task(_ctx):
             with self.factory.open_bundle() as bundle:
@@ -123,10 +143,12 @@ class BackgroundAppServiceIntegrationTests(unittest.TestCase):
             kind="write",
             show_dialog=False,
             on_error=lambda failure: captured.setdefault("message", failure.message),
-            on_finished=loop.quit,
+            on_finished=finished.set,
         )
-        QTimer.singleShot(3000, loop.quit)
-        loop.exec()
+        self._wait_for_task_completion(
+            finished,
+            description="background rollback task completion",
+        )
 
         self.assertEqual(captured.get("message"), "explode")
         verify_conn = sqlite3.connect(str(self.db_path))
@@ -169,8 +191,8 @@ class BackgroundAppServiceIntegrationTests(unittest.TestCase):
         release_first.set()
         self.assertTrue(second_entered.wait(timeout=2))
 
-        first_thread.join(timeout=2)
-        second_thread.join(timeout=2)
+        join_thread_or_fail(first_thread, timeout_seconds=2.0, description="first write thread")
+        join_thread_or_fail(second_thread, timeout_seconds=2.0, description="second write thread")
         self.assertEqual(order, ["first", "second"])
 
 

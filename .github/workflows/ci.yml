@@ -7,6 +7,8 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHONFAULTHANDLER: "1"
+  PYTHONUNBUFFERED: "1"
   PYTHONUTF8: "1"
   QT_QPA_PLATFORM: offscreen
 
@@ -129,27 +131,37 @@ jobs:
             python-version: "3.10"
             qt-runtime: false
             coverage: false
-            timeout-minutes: 30
+            timeout-minutes: 15
+            group-timeout-seconds: 600
+            module-timeout-seconds: 120
           - group: catalog-services
             python-version: "3.13"
             qt-runtime: false
             coverage: true
-            timeout-minutes: 30
+            timeout-minutes: 15
+            group-timeout-seconds: 600
+            module-timeout-seconds: 120
           - group: exchange-import
             python-version: "3.13"
             qt-runtime: false
             coverage: true
-            timeout-minutes: 40
+            timeout-minutes: 20
+            group-timeout-seconds: 900
+            module-timeout-seconds: 180
           - group: history-storage-migration
             python-version: "3.13"
             qt-runtime: true
             coverage: true
-            timeout-minutes: 45
+            timeout-minutes: 20
+            group-timeout-seconds: 900
+            module-timeout-seconds: 180
           - group: ui-app-workflows
             python-version: "3.13"
             qt-runtime: true
             coverage: true
-            timeout-minutes: 75
+            timeout-minutes: 45
+            group-timeout-seconds: 2400
+            module-timeout-seconds: 300
 
     timeout-minutes: ${{ matrix.timeout-minutes }}
 
@@ -201,13 +213,18 @@ jobs:
 
       - name: Run grouped tests
         run: |
-          mapfile -t test_modules < <(python3 -m tests.ci_groups "${{ matrix.group }}" --modules)
           if [ "${{ matrix.coverage }}" = "true" ]; then
             python3 -m coverage erase
-            python3 -m coverage run --parallel-mode -m unittest -v "${test_modules[@]}"
-            mv .coverage ".coverage.${{ matrix.group }}.py${{ matrix.python-version }}"
+            python3 -m tests.run_group \
+              "${{ matrix.group }}" \
+              --coverage \
+              --module-timeout-seconds "${{ matrix.module-timeout-seconds }}" \
+              --group-timeout-seconds "${{ matrix.group-timeout-seconds }}"
           else
-            python3 -m unittest -v "${test_modules[@]}"
+            python3 -m tests.run_group \
+              "${{ matrix.group }}" \
+              --module-timeout-seconds "${{ matrix.module-timeout-seconds }}" \
+              --group-timeout-seconds "${{ matrix.group-timeout-seconds }}"
           fi
 
       - name: Upload coverage data
@@ -215,13 +232,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: coverage-data-${{ matrix.group }}-py${{ matrix.python-version }}
-          path: .coverage.${{ matrix.group }}.py${{ matrix.python-version }}
+          path: .coverage*
           if-no-files-found: error
 
   coverage-report:
     name: Coverage report
     runs-on: ubuntu-latest
     needs: test-shards
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v5
