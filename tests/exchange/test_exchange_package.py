@@ -1,0 +1,25 @@
+from tests.exchange._support import ExchangeServiceTestCase
+
+
+class ExchangePackageTests(ExchangeServiceTestCase):
+    test_package_export_writes_manifest_and_media = (
+        ExchangeServiceTestCase.case_package_export_writes_manifest_and_media
+    )
+    test_package_export_includes_shared_album_art_once = (
+        ExchangeServiceTestCase.case_package_export_includes_shared_album_art_once
+    )
+    test_inspect_package_reads_manifest_preview = (
+        ExchangeServiceTestCase.case_inspect_package_reads_manifest_preview
+    )
+    test_package_import_round_trip_restores_media_and_release_artwork = (
+        ExchangeServiceTestCase.case_package_import_round_trip_restores_media_and_release_artwork
+    )
+    test_package_round_trip_preserves_database_backed_media_modes = (
+        ExchangeServiceTestCase.case_package_round_trip_preserves_database_backed_media_modes
+    )
+    test_package_import_supports_legacy_relative_media_without_index = (
+        ExchangeServiceTestCase.case_package_import_supports_legacy_relative_media_without_index
+    )
+
+
+del ExchangeServiceTestCase

@@ -1,0 +1,1 @@
+"""Catalog-focused test modules."""

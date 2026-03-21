@@ -337,9 +337,7 @@ class StorageMigrationServiceTests(unittest.TestCase):
         self.assertEqual(result.action, "migrated")
         self.assertTrue((self.target_root / "Database" / "library.db").exists())
         self.assertFalse((self.target_root / "logs" / "bootstrap.log").exists())
-        self.assertFalse(
-            (self.target_root / "help" / "isrc_catalog_manager_help.html").exists()
-        )
+        self.assertFalse((self.target_root / "help" / "isrc_catalog_manager_help.html").exists())
 
     def test_migrate_blocks_conflicting_nonempty_preferred_root(self):
         (self.target_root / "Database").mkdir(parents=True, exist_ok=True)

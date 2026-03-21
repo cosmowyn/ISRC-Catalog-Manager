@@ -599,7 +599,17 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         chapter_id="history",
         title="Undo History and Snapshots",
         summary="How to protect your work with undo, redo, snapshots, and restore paths built for real catalog operations.",
-        keywords=("history", "undo", "redo", "snapshots", "restore", "history dialog", "cleanup", "backups", "trim history"),
+        keywords=(
+            "history",
+            "undo",
+            "redo",
+            "snapshots",
+            "restore",
+            "history dialog",
+            "cleanup",
+            "backups",
+            "trim history",
+        ),
         content_html="""
         <p>The app includes a persistent history system because catalog work should be recoverable. That matters especially for imports, large edits, settings changes, migrations, and file-backed actions.</p>
         <ul>

@@ -443,7 +443,9 @@ class StorageMigrationService:
         base_state = PREFERRED_STATE_EMPTY
         conflict_items: tuple[str, ...] = ()
 
-        if self._preferred_root_valid(target_root, legacy_root, legacy_items, journal, preferred_items):
+        if self._preferred_root_valid(
+            target_root, legacy_root, legacy_items, journal, preferred_items
+        ):
             base_state = PREFERRED_STATE_VALID_COMPLETE
         elif not target_root.exists() or not any(target_root.iterdir()):
             base_state = PREFERRED_STATE_EMPTY
@@ -562,19 +564,33 @@ class StorageMigrationService:
         else:
             expected_count = int(inspection.journal.get("source_inventory_count") or 0)
             if expected_count and len(stage_inventory) != expected_count:
-                raise RuntimeError("The preserved staged migration is incomplete and cannot be resumed safely.")
+                raise RuntimeError(
+                    "The preserved staged migration is incomplete and cannot be resumed safely."
+                )
             source_inventory_count = len(stage_inventory)
 
         rewrite_root = source_root or inspection.journal_source_root
         rewritten_files = list(
-            self._rewrite_target_storage(rewrite_root, stage_root) if rewrite_root is not None else ()
+            self._rewrite_target_storage(rewrite_root, stage_root)
+            if rewrite_root is not None
+            else ()
         )
         verified = list(self._verify_target_databases(stage_root))
-        if self._find_legacy_references(rewrite_root, stage_root) if rewrite_root is not None else ():
-            raise RuntimeError("The preserved staged migration still contains legacy-root references.")
+        if (
+            self._find_legacy_references(rewrite_root, stage_root)
+            if rewrite_root is not None
+            else ()
+        ):
+            raise RuntimeError(
+                "The preserved staged migration still contains legacy-root references."
+            )
         if target_root.exists() and any(target_root.iterdir()):
             if self._preferred_root_conflicts(target_root):
-                raise RuntimeError(self._format_conflict_error(target_root, self._preferred_root_conflicts(target_root)))
+                raise RuntimeError(
+                    self._format_conflict_error(
+                        target_root, self._preferred_root_conflicts(target_root)
+                    )
+                )
             self._clear_safe_target_noise(target_root)
         self._promote_stage_root(stage_root, target_root)
         if rewrite_root is not None:
@@ -623,7 +639,9 @@ class StorageMigrationService:
             source_root=source_root,
             target_root=target_root,
             copied_items=copied_items,
-            source_inventory_count=self._adoption_inventory_count(source_root, copied_items, inspection.journal),
+            source_inventory_count=self._adoption_inventory_count(
+                source_root, copied_items, inspection.journal
+            ),
             rewritten_files=[],
             verified_databases=verified,
         )
@@ -639,7 +657,9 @@ class StorageMigrationService:
         )
 
     @staticmethod
-    def _journal_copied_items(journal: dict[str, Any], fallback_items: tuple[str, ...]) -> list[str]:
+    def _journal_copied_items(
+        journal: dict[str, Any], fallback_items: tuple[str, ...]
+    ) -> list[str]:
         copied_items = journal.get("copied_items")
         if isinstance(copied_items, list):
             return [str(name) for name in copied_items if isinstance(name, str)]
@@ -735,7 +755,9 @@ class StorageMigrationService:
             inventory.append(str(path.relative_to(root)))
         return tuple(inventory)
 
-    def _find_legacy_references(self, source_root: Path | None, target_root: Path) -> tuple[str, ...]:
+    def _find_legacy_references(
+        self, source_root: Path | None, target_root: Path
+    ) -> tuple[str, ...]:
         if source_root is None:
             return ()
         source_root = source_root.resolve()

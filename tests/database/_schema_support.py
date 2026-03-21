@@ -7,7 +7,7 @@ from isrc_manager.constants import SCHEMA_TARGET
 from isrc_manager.services import DatabaseSchemaService
 
 
-class DatabaseSchemaServiceTests(unittest.TestCase):
+class DatabaseSchemaServiceTestCase(unittest.TestCase):
     def setUp(self):
         self.conn = sqlite3.connect(":memory:")
         self.service = DatabaseSchemaService(self.conn)
@@ -15,7 +15,7 @@ class DatabaseSchemaServiceTests(unittest.TestCase):
     def tearDown(self):
         self.conn.close()
 
-    def test_init_db_and_migrate_schema_reach_current_target(self):
+    def case_init_db_and_migrate_schema_reach_current_target(self):
         self.service.init_db()
         self.service.migrate_schema()
 
@@ -118,7 +118,7 @@ class DatabaseSchemaServiceTests(unittest.TestCase):
         self.assertIn("idx_gs1_metadata_contract_number", gs1_indexes)
         self.assertIn("trg_auditlog_no_update", triggers)
 
-    def test_migrate_20_to_21_adds_repertoire_tables(self):
+    def case_migrate_20_to_21_adds_repertoire_tables(self):
         conn = sqlite3.connect(":memory:")
         try:
             service = DatabaseSchemaService(conn)
@@ -155,7 +155,7 @@ class DatabaseSchemaServiceTests(unittest.TestCase):
         finally:
             conn.close()
 
-    def test_migrate_21_to_22_adds_blob_icon_payload_column(self):
+    def case_migrate_21_to_22_adds_blob_icon_payload_column(self):
         conn = sqlite3.connect(":memory:")
         try:
             service = DatabaseSchemaService(conn)
@@ -186,7 +186,7 @@ class DatabaseSchemaServiceTests(unittest.TestCase):
         finally:
             conn.close()
 
-    def test_migrate_23_to_24_adds_history_visibility_column(self):
+    def case_migrate_23_to_24_adds_history_visibility_column(self):
         conn = sqlite3.connect(":memory:")
         try:
             service = DatabaseSchemaService(conn)
@@ -226,7 +226,7 @@ class DatabaseSchemaServiceTests(unittest.TestCase):
         finally:
             conn.close()
 
-    def test_migrate_12_to_13_promotes_default_custom_fields(self):
+    def case_migrate_12_to_13_promotes_default_custom_fields(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             conn = sqlite3.connect(":memory:")
             try:
@@ -341,7 +341,7 @@ class DatabaseSchemaServiceTests(unittest.TestCase):
             finally:
                 conn.close()
 
-    def test_current_schema_allows_multiple_blank_isrc_rows(self):
+    def case_current_schema_allows_multiple_blank_isrc_rows(self):
         self.service.init_db()
         self.service.migrate_schema()
 
@@ -362,7 +362,7 @@ class DatabaseSchemaServiceTests(unittest.TestCase):
         rows = self.conn.execute("SELECT isrc, isrc_compact FROM Tracks ORDER BY id").fetchall()
         self.assertEqual(rows, [("", ""), ("", "")])
 
-    def test_migrate_13_to_14_reconciles_leftover_promoted_custom_fields(self):
+    def case_migrate_13_to_14_reconciles_leftover_promoted_custom_fields(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             conn = sqlite3.connect(":memory:")
             try:
@@ -492,7 +492,7 @@ class DatabaseSchemaServiceTests(unittest.TestCase):
             finally:
                 conn.close()
 
-    def test_migration_skips_same_name_fields_with_different_types(self):
+    def case_migration_skips_same_name_fields_with_different_types(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             conn = sqlite3.connect(":memory:")
             try:
@@ -590,7 +590,7 @@ class DatabaseSchemaServiceTests(unittest.TestCase):
             finally:
                 conn.close()
 
-    def test_init_db_tolerates_older_tracks_schema_before_migration(self):
+    def case_init_db_tolerates_older_tracks_schema_before_migration(self):
         conn = sqlite3.connect(":memory:")
         try:
             conn.executescript(
@@ -653,3 +653,7 @@ class DatabaseSchemaServiceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def load_tests(loader, tests, pattern):
+    return unittest.TestSuite()

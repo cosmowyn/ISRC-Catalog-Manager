@@ -1,0 +1,22 @@
+from tests.app._app_shell_support import AppShellTestCase
+
+
+class AppShellProfileAndSelectionTests(AppShellTestCase):
+    test_create_new_profile_and_browse_profile_switch_workspace = (
+        AppShellTestCase.case_create_new_profile_and_browse_profile_switch_workspace
+    )
+    test_cancelled_profile_creation_and_restore_leave_shell_idle = (
+        AppShellTestCase.case_cancelled_profile_creation_and_restore_leave_shell_idle
+    )
+    test_filtered_select_all_counts_only_visible_tracks = (
+        AppShellTestCase.case_filtered_select_all_counts_only_visible_tracks
+    )
+    test_delete_entry_history_stays_a_single_visible_user_action = (
+        AppShellTestCase.case_delete_entry_history_stays_a_single_visible_user_action
+    )
+    test_add_data_comboboxes_include_release_level_catalog_values = (
+        AppShellTestCase.case_add_data_comboboxes_include_release_level_catalog_values
+    )
+
+
+del AppShellTestCase

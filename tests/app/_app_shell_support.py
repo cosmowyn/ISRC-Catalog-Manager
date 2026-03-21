@@ -137,7 +137,7 @@ class _FakeStartupSplashController:
         self.finish_calls.append(window)
 
 
-class AppShellIntegrationTests(unittest.TestCase):
+class AppShellTestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if app_module is None:
@@ -319,7 +319,7 @@ class AppShellIntegrationTests(unittest.TestCase):
                 return tab_bar
         raise AssertionError("Workspace dock tab bar not found")
 
-    def test_startup_builds_main_window_with_core_actions(self):
+    def case_startup_builds_main_window_with_core_actions(self):
         self.assertIsNotNone(self.window.conn)
         self.assertTrue(Path(self.window.current_db_path).exists())
         self.assertEqual(self.window.menuBar(), self.window.menu_bar)
@@ -346,7 +346,7 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.app.processEvents()
         self.assertFalse(self.window.isVisible())
 
-    def test_startup_status_messages_cover_real_bootstrap_phases_and_ready_boundary(self):
+    def case_startup_status_messages_cover_real_bootstrap_phases_and_ready_boundary(self):
         self._close_window()
         splash = _FakeStartupSplashController()
         splash.show()
@@ -376,7 +376,7 @@ class AppShellIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(splash.finish_calls, [self.window])
 
-    def test_file_menu_groups_xml_import_under_import_exchange_and_preserves_wiring(self):
+    def case_file_menu_groups_xml_import_under_import_exchange_and_preserves_wiring(self):
         file_menu = self._menu_by_text("File")
         file_texts = [action.text() for action in file_menu.actions() if action.text()]
         self.assertNotIn("Import XML…", file_texts)
@@ -420,7 +420,7 @@ class AppShellIntegrationTests(unittest.TestCase):
             "XML Files (*.xml)",
         )
 
-    def test_startup_can_defer_legacy_storage_migration_and_keep_current_folder(self):
+    def case_startup_can_defer_legacy_storage_migration_and_keep_current_folder(self):
         self._close_window()
         splash = _FakeStartupSplashController()
         splash.show()
@@ -466,7 +466,7 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.assertEqual(splash.suspend_calls, 1)
         self.assertEqual(splash.resume_calls, 1)
 
-    def test_startup_migrate_now_bootstraps_logging_and_uses_preferred_root(self):
+    def case_startup_migrate_now_bootstraps_logging_and_uses_preferred_root(self):
         self._close_window()
         splash = _FakeStartupSplashController()
         splash.show()
@@ -501,7 +501,10 @@ class AppShellIntegrationTests(unittest.TestCase):
             self.window.settings.value("db/last_path", "", str),
             str((preferred_root / "Database" / legacy_db.name).resolve()),
         )
-        self.assertEqual(Path(self.window.current_db_path).resolve(), (preferred_root / "Database" / legacy_db.name).resolve())
+        self.assertEqual(
+            Path(self.window.current_db_path).resolve(),
+            (preferred_root / "Database" / legacy_db.name).resolve(),
+        )
         log_files = sorted(preferred_root.joinpath("logs").glob("isrc_manager_*.log"))
         trace_files = sorted(preferred_root.joinpath("logs").glob("isrc_manager_trace_*.jsonl"))
         self.assertTrue(log_files)
@@ -511,7 +514,7 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.assertEqual(splash.suspend_calls, 2)
         self.assertEqual(splash.resume_calls, 2)
 
-    def test_schema_migration_error_dialog_suspends_splash_during_startup(self):
+    def case_schema_migration_error_dialog_suspends_splash_during_startup(self):
         self._close_window()
         splash = _FakeStartupSplashController()
         splash.show()
@@ -534,7 +537,7 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.assertEqual(splash.suspend_calls, 1)
         self.assertEqual(splash.resume_calls, 1)
 
-    def test_startup_adopts_valid_preferred_root_when_settings_still_pin_legacy(self):
+    def case_startup_adopts_valid_preferred_root_when_settings_still_pin_legacy(self):
         self._close_window()
         preferred_root = self.qt_settings_root / "AppLocalDataLocation"
         if preferred_root.exists():
@@ -577,7 +580,7 @@ class AppShellIntegrationTests(unittest.TestCase):
         )
         self.assertFalse(message_box.called)
 
-    def test_storage_migration_reopens_active_managed_profile_in_new_root(self):
+    def case_storage_migration_reopens_active_managed_profile_in_new_root(self):
         self._close_window()
         preferred_root = self.qt_settings_root / "AppLocalDataLocation"
         if preferred_root.exists():
@@ -628,7 +631,7 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.assertTrue((legacy_root / "Database" / legacy_db.name).exists())
         self.assertIsNotNone(self.window.track_service.fetch_track_snapshot(track_id))
 
-    def test_manual_legacy_cleanup_after_adoption_does_not_recreate_legacy_root(self):
+    def case_manual_legacy_cleanup_after_adoption_does_not_recreate_legacy_root(self):
         self._close_window()
         preferred_root = self.qt_settings_root / "AppLocalDataLocation"
         if preferred_root.exists():
@@ -663,15 +666,21 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.assertFalse((legacy_root / "help").exists())
         self.assertFalse((legacy_root / "logs").exists())
 
-    def test_portable_mode_skips_storage_migration_and_legacy_adoption(self):
+    def case_portable_mode_skips_storage_migration_and_legacy_adoption(self):
         self._close_window()
         portable_root = self.root / "portable-root"
         legacy_root = self.local_appdata / APP_NAME
         legacy_db = legacy_root / "Database" / "portable_legacy.db"
         self._create_profile_database(legacy_db)
 
-        def _portable_layout(*, settings=None, app_name=APP_NAME, portable=None, active_data_root=None):
-            chosen_root = Path(active_data_root).resolve() if active_data_root is not None else portable_root.resolve()
+        def _portable_layout(
+            *, settings=None, app_name=APP_NAME, portable=None, active_data_root=None
+        ):
+            chosen_root = (
+                Path(active_data_root).resolve()
+                if active_data_root is not None
+                else portable_root.resolve()
+            )
             return AppStorageLayout(
                 app_name=app_name,
                 portable=True,
@@ -690,8 +699,12 @@ class AppShellIntegrationTests(unittest.TestCase):
             )
 
         with (
-            mock.patch.object(app_module, "settings_path", return_value=portable_root / "settings.ini"),
-            mock.patch.object(app_module, "resolve_app_storage_layout", side_effect=_portable_layout),
+            mock.patch.object(
+                app_module, "settings_path", return_value=portable_root / "settings.ini"
+            ),
+            mock.patch.object(
+                app_module, "resolve_app_storage_layout", side_effect=_portable_layout
+            ),
             mock.patch.object(app_module, "QMessageBox") as message_box,
         ):
             self.window = app_module.App()
@@ -702,7 +715,7 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.assertNotEqual(self.window.data_root, legacy_root.resolve())
         self.assertFalse(message_box.called)
 
-    def test_bundled_themes_are_available_and_not_persisted_as_user_library_entries(self):
+    def case_bundled_themes_are_available_and_not_persisted_as_user_library_entries(self):
         library = self.window._load_theme_library()
         for name in starter_theme_names():
             self.assertIn(name, library)
@@ -712,7 +725,7 @@ class AppShellIntegrationTests(unittest.TestCase):
         for name in starter_theme_names():
             self.assertNotIn(name, stored_payload)
 
-    def test_create_new_profile_and_browse_profile_switch_workspace(self):
+    def case_create_new_profile_and_browse_profile_switch_workspace(self):
         created_path = self.window.database_dir / "Label_Test.db"
         external_path = self.root / "external-profile.db"
         self._create_profile_database(external_path)
@@ -761,7 +774,7 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.assertEqual(self.window.current_db_path, str(external_path))
         self.assertGreaterEqual(self.window.profile_combo.findData(str(external_path)), 0)
 
-    def test_cancelled_profile_creation_and_restore_leave_shell_idle(self):
+    def case_cancelled_profile_creation_and_restore_leave_shell_idle(self):
         initial_path = self.window.current_db_path
 
         with mock.patch.object(
@@ -786,7 +799,7 @@ class AppShellIntegrationTests(unittest.TestCase):
         ]
         self.assertEqual(profiles, [Path(initial_path).name])
 
-    def test_filtered_select_all_counts_only_visible_tracks(self):
+    def case_filtered_select_all_counts_only_visible_tracks(self):
         titles = [
             "Crossroads of the Unwritten Self",
             "Crossroads of the Unwritten Self (Remix)",
@@ -828,7 +841,7 @@ class AppShellIntegrationTests(unittest.TestCase):
         selected_ids = self.window._selected_track_ids()
         self.assertEqual(len(selected_ids), len(visible_rows))
 
-    def test_delete_entry_history_stays_a_single_visible_user_action(self):
+    def case_delete_entry_history_stays_a_single_visible_user_action(self):
         track_id = self._create_track(index=121, title="Delete History Song")
         self.window.refresh_table()
         row = self.window._row_for_id(track_id)
@@ -900,7 +913,7 @@ class AppShellIntegrationTests(unittest.TestCase):
             "Delete Track: Delete History Song",
         )
 
-    def test_catalog_release_browser_opens_as_tabified_dock(self):
+    def case_catalog_release_browser_opens_as_tabified_dock(self):
         track_id = self._create_track(index=101, title="Release Dock Track")
         self.window.release_service.create_release(
             app_module.ReleasePayload(
@@ -942,7 +955,7 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.assertEqual(len(visible_rows), 1)
         self.assertFalse(dock.isHidden())
 
-    def test_release_browser_filter_replaces_active_search_filter(self):
+    def case_release_browser_filter_replaces_active_search_filter(self):
         release_track_ids = [
             self._create_track(index=141, title="Release Filter One", album_title="Filter Release"),
             self._create_track(index=142, title="Release Filter Two", album_title="Filter Release"),
@@ -992,7 +1005,7 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.assertEqual(self.window.search_field.text(), "")
         self.assertEqual(set(self.window._selected_track_ids()), set(release_track_ids))
 
-    def test_release_browser_selection_scope_tracks_catalog_selection_and_override(self):
+    def case_release_browser_selection_scope_tracks_catalog_selection_and_override(self):
         track_ids = [
             self._create_track(index=151, title="Selection Orbit One"),
             self._create_track(index=152, title="Selection Orbit Two"),
@@ -1018,7 +1031,7 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.assertTrue(override_state.override_active)
         self.assertEqual(panel.selection_banner.scope_label.text(), "Pinned chooser override")
 
-    def test_work_manager_dock_uses_live_track_selection(self):
+    def case_work_manager_dock_uses_live_track_selection(self):
         track_ids = [
             self._create_track(index=111, title="Work Dock One"),
             self._create_track(index=112, title="Work Dock Two"),
@@ -1055,7 +1068,7 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.assertTrue(panel.selection_scope_state().override_active)
         self.assertFalse(dock.isHidden())
 
-    def test_global_search_opens_as_dock_and_keeps_entity_navigation_live(self):
+    def case_global_search_opens_as_dock_and_keeps_entity_navigation_live(self):
         track_id = self._create_track(index=121, title="Searchable Dock Track")
         self.window.refresh_table()
 
@@ -1085,7 +1098,7 @@ class AppShellIntegrationTests(unittest.TestCase):
         open_selected_editor.assert_called_once_with(track_id)
         self.assertTrue(dock.isVisible())
 
-    def test_workspace_docks_use_north_tabs_and_remain_tabified_across_fullscreen_cycle(self):
+    def case_workspace_docks_use_north_tabs_and_remain_tabified_across_fullscreen_cycle(self):
         track_id = self._create_track(index=166, title="Dock Tab Visibility Track")
         self.window.release_service.create_release(
             app_module.ReleasePayload(
@@ -1152,7 +1165,7 @@ class AppShellIntegrationTests(unittest.TestCase):
         )
         self.assertTrue(self.window.global_search_dock.widget().isVisible())
 
-    def test_top_chrome_boundary_persists_across_ribbon_visibility_and_window_state_changes(self):
+    def case_top_chrome_boundary_persists_across_ribbon_visibility_and_window_state_changes(self):
         track_id = self._create_track(index=168, title="Boundary Validation Track")
         self.window.release_service.create_release(
             app_module.ReleasePayload(
@@ -1204,7 +1217,7 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.app.processEvents()
         self.assertEqual(self.window.toolbar.contentsMargins().bottom(), 5)
 
-    def test_workspace_panels_keep_actions_and_saved_search_controls_inside_scroll_safe_surfaces(
+    def case_workspace_panels_keep_actions_and_saved_search_controls_inside_scroll_safe_surfaces(
         self,
     ):
         track_id = self._create_track(index=167, title="Reachable Action Track")
@@ -1262,7 +1275,7 @@ class AppShellIntegrationTests(unittest.TestCase):
         for button in (add_button, edit_button, duplicate_button):
             self.assertGreaterEqual(button.width(), button.minimumSizeHint().width())
 
-    def test_catalog_managers_open_as_tabified_dock_and_focus_requested_tab(self):
+    def case_catalog_managers_open_as_tabified_dock_and_focus_requested_tab(self):
         self.window.open_catalog_managers_dialog(initial_tab="licensees")
         self.app.processEvents()
 
@@ -1276,7 +1289,7 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.assertEqual(panel.tabs.tabText(panel.tabs.currentIndex()), "Legacy Licensees")
         self.assertTrue(panel.isVisible())
 
-    def test_catalog_managers_tabs_keep_bottom_actions_inside_themed_scroll_surfaces(self):
+    def case_catalog_managers_tabs_keep_bottom_actions_inside_themed_scroll_surfaces(self):
         self.window.resize(980, 620)
         self.window.open_catalog_managers_dialog(initial_tab="artists")
         self.app.processEvents()
@@ -1304,7 +1317,7 @@ class AppShellIntegrationTests(unittest.TestCase):
             for control in controls:
                 self.assertTrue(self._is_within_scroll_content(pane.scroll_area, control))
 
-    def test_catalog_menu_hides_top_level_release_creation_and_groups_legacy_tools(self):
+    def case_catalog_menu_hides_top_level_release_creation_and_groups_legacy_tools(self):
         catalog_action = next(
             action for action in self.window.menuBar().actions() if action.text() == "Catalog"
         )
@@ -1324,7 +1337,7 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.assertNotIn("create_release", self.window._action_ribbon_specs_by_id)
         self.assertNotIn("add_selected_to_release", self.window._action_ribbon_specs_by_id)
 
-    def test_catalog_menu_hosts_panel_toggle_actions_and_preserves_existing_behavior(self):
+    def case_catalog_menu_hosts_panel_toggle_actions_and_preserves_existing_behavior(self):
         catalog_action = next(
             action for action in self.window.menuBar().actions() if action.text() == "Catalog"
         )
@@ -1363,7 +1376,7 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.assertTrue(self.window.catalog_table_dock.isVisible())
         self.assertTrue(self.window.settings.value("display/catalog_table_panel", False, bool))
 
-    def test_hidden_catalog_table_does_not_block_workspace_dock_access_or_peer_tabifying(self):
+    def case_hidden_catalog_table_does_not_block_workspace_dock_access_or_peer_tabifying(self):
         self.assertTrue(self.window.catalog_table_dock.isVisible())
         self.window.catalog_table_action.trigger()
         self.app.processEvents()
@@ -1389,7 +1402,7 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.assertTrue(self.window.global_search_dock.isVisible())
         self.assertTrue(self.window.catalog_managers_dock.isVisible())
 
-    def test_workspace_layout_round_trip_restores_tabified_non_floating_docks(self):
+    def case_workspace_layout_round_trip_restores_tabified_non_floating_docks(self):
         self.window.open_release_browser()
         self.window.open_work_manager()
         self.window.open_global_search()
@@ -1405,7 +1418,7 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.assertFalse(self.window.work_manager_dock.isFloating())
         self.assertFalse(self.window.global_search_dock.isFloating())
 
-    def test_layout_change_persists_latest_arrangement_not_default_arrangement(self):
+    def case_layout_change_persists_latest_arrangement_not_default_arrangement(self):
         self.assertFalse(self.window.add_data_dock.isVisible())
         self.window.add_data_action.trigger()
         self.window.open_release_browser()
@@ -1433,7 +1446,7 @@ class AppShellIntegrationTests(unittest.TestCase):
             set(self.window.tabifiedDockWidgets(self.window.catalog_table_dock)),
         )
 
-    def test_hidden_catalog_table_round_trip_preserves_peer_tab_group(self):
+    def case_hidden_catalog_table_round_trip_preserves_peer_tab_group(self):
         self.window.catalog_table_action.trigger()
         self.window.open_release_browser()
         self.window.open_work_manager()
@@ -1448,7 +1461,7 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.assertIn(self.window.global_search_dock, peer_tabs)
         self.assertFalse(self.window.release_browser_dock.isFloating())
 
-    def test_startup_restore_is_not_overwritten_by_post_init_visibility_sync(self):
+    def case_startup_restore_is_not_overwritten_by_post_init_visibility_sync(self):
         self.window.open_release_browser()
         self._drain_events()
 
@@ -1468,7 +1481,7 @@ class AppShellIntegrationTests(unittest.TestCase):
             set(self.window.tabifiedDockWidgets(self.window.catalog_table_dock)),
         )
 
-    def test_close_reopen_round_trip_preserves_core_panel_visibility_without_shutdown_corruption(
+    def case_close_reopen_round_trip_preserves_core_panel_visibility_without_shutdown_corruption(
         self,
     ):
         self.window.add_data_action.trigger()
@@ -1489,7 +1502,7 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.assertTrue(self.window.add_data_dock.isVisible())
         self.assertTrue(self.window.catalog_table_dock.isVisible())
 
-    def test_main_window_geometry_round_trip_restores_non_default_outer_state(self):
+    def case_main_window_geometry_round_trip_restores_non_default_outer_state(self):
         self.window.showNormal()
         self.window.resize(1111, 777)
         self._drain_events()
@@ -1500,7 +1513,7 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.assertEqual(self.window.width(), 1111)
         self.assertEqual(self.window.height(), 777)
 
-    def test_license_browser_opens_as_tabified_dock_and_applies_track_filter(self):
+    def case_license_browser_opens_as_tabified_dock_and_applies_track_filter(self):
         track_id = self._create_track(index=131, title="Licensed Track")
         other_track_id = self._create_track(index=132, title="Other Licensed Track")
         pdf_one = self.root / "license-one.pdf"
@@ -1532,7 +1545,7 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.assertEqual(panel._track_filter_id, track_id)
         self.assertEqual(panel.model.item(0, 1).text(), "Licensed Track")
 
-    def test_party_contract_rights_and_asset_windows_open_as_tabified_docks(self):
+    def case_party_contract_rights_and_asset_windows_open_as_tabified_docks(self):
         track_id = self._create_track(index=141, title="Docked Rights Track")
         party_id = self.window.party_service.create_party(
             PartyPayload(
@@ -1611,7 +1624,7 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.assertIn(self.window.rights_matrix_dock, tabified)
         self.assertIn(self.window.asset_registry_dock, tabified)
 
-    def test_add_data_panel_uses_tabbed_sections(self):
+    def case_add_data_panel_uses_tabbed_sections(self):
         tabs = self.window.findChild(app_module.QTabWidget, "addDataTabs")
         self.assertIsNotNone(tabs)
         self.assertEqual(
@@ -1627,7 +1640,7 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.assertEqual(self.window.table_panel_widget.property("role"), "workspaceCanvas")
         self.assertEqual(self.window.centralWidget().property("role"), "workspaceCanvas")
 
-    def test_track_editor_uses_tabbed_sections(self):
+    def case_track_editor_uses_tabbed_sections(self):
         track_id = self.window.track_service.create_track(
             TrackCreatePayload(
                 isrc="NL-TST-26-09001",
@@ -1668,7 +1681,7 @@ class AppShellIntegrationTests(unittest.TestCase):
         finally:
             dialog.close()
 
-    def test_album_entry_track_sections_use_internal_tabs(self):
+    def case_album_entry_track_sections_use_internal_tabs(self):
         dialog = app_module.AlbumEntryDialog(self.window)
         try:
             section_tabs = dialog.findChildren(app_module.QTabWidget, "albumTrackSectionTabs")
@@ -1704,7 +1717,7 @@ class AppShellIntegrationTests(unittest.TestCase):
         finally:
             dialog.close()
 
-    def test_add_data_comboboxes_include_release_level_catalog_values(self):
+    def case_add_data_comboboxes_include_release_level_catalog_values(self):
         with self.window.conn:
             self.window.conn.execute(
                 """
@@ -1726,7 +1739,7 @@ class AppShellIntegrationTests(unittest.TestCase):
         self.assertIn("8720892724990", upc_values)
         self.assertIn("CAT-REL-900", catalog_values)
 
-    def test_gs1_dialog_uses_top_level_workflow_tabs(self):
+    def case_gs1_dialog_uses_top_level_workflow_tabs(self):
         track_id = self.window.track_service.create_track(
             TrackCreatePayload(
                 isrc="NL-TST-26-09002",
@@ -1770,3 +1783,7 @@ class AppShellIntegrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def load_tests(loader, tests, pattern):
+    return unittest.TestSuite()

@@ -51,7 +51,9 @@ class IconResolutionTests(unittest.TestCase):
             with (
                 mock.patch.object(build, "_is_windows", return_value=True),
                 mock.patch.object(build, "_is_macos", return_value=False),
-                mock.patch.object(build, "_convert_image_to_ico_qt", return_value=converted) as convert,
+                mock.patch.object(
+                    build, "_convert_image_to_ico_qt", return_value=converted
+                ) as convert,
             ):
                 resolved = build._resolve_icon(root)
 

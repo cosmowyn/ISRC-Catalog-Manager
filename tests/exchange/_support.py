@@ -19,7 +19,7 @@ from isrc_manager.services import (
 )
 
 
-class ExchangeServiceTests(unittest.TestCase):
+class ExchangeServiceTestCase(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.TemporaryDirectory()
         self.data_root = Path(self.tmpdir.name)
@@ -119,7 +119,7 @@ class ExchangeServiceTests(unittest.TestCase):
         ).fetchone()
         return None if row is None else str(row[0] or "")
 
-    def test_json_round_trip_preserves_release_and_custom_fields(self):
+    def case_json_round_trip_preserves_release_and_custom_fields(self):
         track_id = self._create_track(isrc="NL-ABC-26-00001", title="Orbit")
         self._create_release(track_id)
         field = self.custom_defs.ensure_fields([{"name": "Mood", "field_type": "text"}])[0]
@@ -166,7 +166,7 @@ class ExchangeServiceTests(unittest.TestCase):
         finally:
             new_conn.close()
 
-    def test_update_mode_skips_unmatched_rows(self):
+    def case_update_mode_skips_unmatched_rows(self):
         csv_path = self.data_root / "import.csv"
         csv_path.write_text(
             "track_title,artist_name,isrc\nUnmatched,Cosmowyn,NL-ABC-26-99999\n",
@@ -183,7 +183,7 @@ class ExchangeServiceTests(unittest.TestCase):
         self.assertEqual(report.skipped, 1)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Tracks").fetchone()[0], 0)
 
-    def test_import_csv_creates_track_from_multiple_columns(self):
+    def case_import_csv_creates_track_from_multiple_columns(self):
         csv_path = self.data_root / "create-import.csv"
         csv_path.write_text(
             "track_title,artist_name,isrc,comments\n"
@@ -216,7 +216,7 @@ class ExchangeServiceTests(unittest.TestCase):
             ("Orbit", "Cosmowyn", "NL-ABC-26-00031", "Demo import"),
         )
 
-    def test_import_csv_detects_semicolon_delimiter(self):
+    def case_import_csv_detects_semicolon_delimiter(self):
         csv_path = self.data_root / "semicolon-import.csv"
         csv_path.write_text(
             "track_title;artist_name;isrc;comments\n"
@@ -251,7 +251,7 @@ class ExchangeServiceTests(unittest.TestCase):
             ("Orbit", "Cosmowyn", "NL-ABC-26-00032", "Semicolon import"),
         )
 
-    def test_package_export_writes_manifest_and_media(self):
+    def case_package_export_writes_manifest_and_media(self):
         track_id = self._create_track(isrc="NL-ABC-26-00002", title="Nebula", audio=True)
         self._create_release(track_id)
 
@@ -272,7 +272,7 @@ class ExchangeServiceTests(unittest.TestCase):
         self.assertTrue(isinstance(manifest.get("packaged_media_index"), dict))
         self.assertTrue(manifest["packaged_media_index"])
 
-    def test_package_export_includes_shared_album_art_once(self):
+    def case_package_export_includes_shared_album_art_once(self):
         artwork_path = self.data_root / "cover.png"
         artwork_path.write_bytes(
             bytes.fromhex(
@@ -345,7 +345,7 @@ class ExchangeServiceTests(unittest.TestCase):
         self.assertEqual(len([path for path in art_paths if path]), 2)
         self.assertEqual(len({path for path in art_paths if path}), 1)
 
-    def test_inspect_package_reads_manifest_preview(self):
+    def case_inspect_package_reads_manifest_preview(self):
         track_id = self._create_track(isrc="NL-ABC-26-00023", title="Comet", audio=True)
         self._create_release(track_id)
         package_path = self.data_root / "inspect-package.zip"
@@ -360,7 +360,7 @@ class ExchangeServiceTests(unittest.TestCase):
             any("Packaged media entries detected:" in warning for warning in inspection.warnings)
         )
 
-    def test_package_import_round_trip_restores_media_and_release_artwork(self):
+    def case_package_import_round_trip_restores_media_and_release_artwork(self):
         audio_path = self.data_root / "Pulse.wav"
         audio_path.write_bytes(b"RIFFdemo")
         artwork_path = self.data_root / "pulse.png"
@@ -439,7 +439,7 @@ class ExchangeServiceTests(unittest.TestCase):
         finally:
             new_conn.close()
 
-    def test_package_round_trip_preserves_database_backed_media_modes(self):
+    def case_package_round_trip_preserves_database_backed_media_modes(self):
         audio_path = self.data_root / "blob-track.wav"
         audio_path.write_bytes(b"RIFFblobtrack")
         artwork_path = self.data_root / "blob-release.png"
@@ -539,7 +539,7 @@ class ExchangeServiceTests(unittest.TestCase):
         finally:
             new_conn.close()
 
-    def test_package_import_supports_legacy_relative_media_without_index(self):
+    def case_package_import_supports_legacy_relative_media_without_index(self):
         package_path = self.data_root / "legacy-package.zip"
         rows = [
             {
@@ -640,7 +640,7 @@ class ExchangeServiceTests(unittest.TestCase):
         finally:
             new_conn.close()
 
-    def test_inspect_csv_suggests_known_headers(self):
+    def case_inspect_csv_suggests_known_headers(self):
         csv_path = self.data_root / "headers.csv"
         csv_path.write_text(
             "track_title,artist_name,custom::Mood\nOrbit,Cosmowyn,Dreamy\n", encoding="utf-8"
@@ -657,7 +657,7 @@ class ExchangeServiceTests(unittest.TestCase):
         self.assertEqual(inspection.suggested_mapping["artist_name"], "artist_name")
         self.assertEqual(inspection.suggested_mapping["custom::Mood"], "custom::Mood")
 
-    def test_inspect_csv_preserves_quoted_commas(self):
+    def case_inspect_csv_preserves_quoted_commas(self):
         csv_path = self.data_root / "quoted-commas.csv"
         csv_path.write_text(
             "track_title,artist_name,comments\n" '"Orbit, Pt. 1",Cosmowyn,"Dreamy, wide mix"\n',
@@ -678,7 +678,7 @@ class ExchangeServiceTests(unittest.TestCase):
             ],
         )
 
-    def test_inspect_csv_detects_semicolon_delimiter(self):
+    def case_inspect_csv_detects_semicolon_delimiter(self):
         csv_path = self.data_root / "semicolon-headers.csv"
         csv_path.write_text(
             "track_title;artist_name;isrc\nOrbit;Cosmowyn;NL-ABC-26-00033\n",
@@ -694,7 +694,7 @@ class ExchangeServiceTests(unittest.TestCase):
         )
         self.assertEqual(inspection.resolved_delimiter, ";")
 
-    def test_inspect_csv_detects_tab_delimiter(self):
+    def case_inspect_csv_detects_tab_delimiter(self):
         csv_path = self.data_root / "tab-headers.csv"
         csv_path.write_text(
             "track_title\tartist_name\tcomments\nOrbit\tCosmowyn\tTabbed import\n",
@@ -716,7 +716,7 @@ class ExchangeServiceTests(unittest.TestCase):
         )
         self.assertEqual(inspection.resolved_delimiter, "\t")
 
-    def test_import_csv_detects_pipe_delimiter(self):
+    def case_import_csv_detects_pipe_delimiter(self):
         csv_path = self.data_root / "pipe-import.csv"
         csv_path.write_text(
             "track_title|artist_name|isrc|comments\n"
@@ -749,7 +749,7 @@ class ExchangeServiceTests(unittest.TestCase):
             ("Orbit", "Cosmowyn", "Pipe import"),
         )
 
-    def test_custom_csv_delimiter_refresh_and_import_preserve_quoted_values(self):
+    def case_custom_csv_delimiter_refresh_and_import_preserve_quoted_values(self):
         csv_path = self.data_root / "caret-import.csv"
         csv_path.write_text(
             "track_title^artist_name^comments\n" '"Orbit^Pt. 1"^Cosmowyn^"Dreamy^wide mix"\n',
@@ -788,7 +788,7 @@ class ExchangeServiceTests(unittest.TestCase):
             ("Orbit^Pt. 1", "Dreamy^wide mix"),
         )
 
-    def test_import_csv_rejects_invalid_explicit_delimiter(self):
+    def case_import_csv_rejects_invalid_explicit_delimiter(self):
         csv_path = self.data_root / "invalid-delimiter.csv"
         csv_path.write_text("track_title,artist_name\nOrbit,Cosmowyn\n", encoding="utf-8")
 
@@ -802,7 +802,7 @@ class ExchangeServiceTests(unittest.TestCase):
                 delimiter="||",
             )
 
-    def test_import_csv_normalizes_hms_track_length_target(self):
+    def case_import_csv_normalizes_hms_track_length_target(self):
         csv_path = self.data_root / "duration-import.csv"
         csv_path.write_text(
             "track_title,artist_name,track_length_sec\n"
@@ -829,7 +829,7 @@ class ExchangeServiceTests(unittest.TestCase):
             [("Orbit", 45296), ("Pulse", 180)],
         )
 
-    def test_import_csv_invalid_track_length_text_still_fails_row(self):
+    def case_import_csv_invalid_track_length_text_still_fails_row(self):
         csv_path = self.data_root / "invalid-duration-import.csv"
         csv_path.write_text(
             "track_title,artist_name,track_length_sec\nOrbit,Cosmowyn,not-a-duration\n",
@@ -852,7 +852,7 @@ class ExchangeServiceTests(unittest.TestCase):
             0,
         )
 
-    def test_import_xlsx_normalizes_track_length_target_values(self):
+    def case_import_xlsx_normalizes_track_length_target_values(self):
         xlsx_path = self.data_root / "duration-import.xlsx"
         workbook = Workbook()
         sheet = workbook.active
@@ -881,7 +881,7 @@ class ExchangeServiceTests(unittest.TestCase):
             [("Orbit", 45296), ("Pulse", 3723), ("Drift", 7384), ("Signal", 180)],
         )
 
-    def test_import_csv_normalizes_allowed_title_fields_after_mapping_and_preserves_codes(self):
+    def case_import_csv_normalizes_allowed_title_fields_after_mapping_and_preserves_codes(self):
         self.custom_defs.ensure_fields([{"name": "Mood", "field_type": "text"}])
         csv_path = self.data_root / "title-name-normalization.csv"
         csv_path.write_text(
@@ -938,7 +938,7 @@ class ExchangeServiceTests(unittest.TestCase):
         )
         self.assertEqual(self._fetch_custom_value(track_id, "Mood"), "LOUD")
 
-    def test_import_xlsx_normalizes_allowed_title_fields_and_preserves_codes(self):
+    def case_import_xlsx_normalizes_allowed_title_fields_and_preserves_codes(self):
         xlsx_path = self.data_root / "title-name-normalization.xlsx"
         workbook = Workbook()
         sheet = workbook.active
@@ -1010,7 +1010,7 @@ class ExchangeServiceTests(unittest.TestCase):
             ),
         )
 
-    def test_import_json_normalizes_allowed_title_fields_and_preserves_existing_case_and_codes(
+    def case_import_json_normalizes_allowed_title_fields_and_preserves_existing_case_and_codes(
         self,
     ):
         json_path = self.data_root / "title-name-normalization.json"
@@ -1118,7 +1118,7 @@ class ExchangeServiceTests(unittest.TestCase):
             ),
         )
 
-    def test_normalize_text_target_restores_only_exact_compound_spans(self):
+    def case_normalize_text_target_restores_only_exact_compound_spans(self):
         self.assertEqual(
             self.service._normalize_text_target("track_title", "AC/DC LIVE SESSION"),
             "AC/DC Live Session",
@@ -1152,7 +1152,7 @@ class ExchangeServiceTests(unittest.TestCase):
             "R&B NIGHTS",
         )
 
-    def test_merge_mode_matches_case_only_title_and_artist_differences(self):
+    def case_merge_mode_matches_case_only_title_and_artist_differences(self):
         track_id = self.track_service.create_track(
             TrackCreatePayload(
                 isrc="NL-ABC-26-00035",
@@ -1206,7 +1206,7 @@ class ExchangeServiceTests(unittest.TestCase):
             ("Orbit", "Cosmowyn", "Imported note"),
         )
 
-    def test_merge_mode_matches_case_only_upc_title_lookup(self):
+    def case_merge_mode_matches_case_only_upc_title_lookup(self):
         track_id = self.track_service.create_track(
             TrackCreatePayload(
                 isrc="NL-ABC-26-00036",
@@ -1260,7 +1260,7 @@ class ExchangeServiceTests(unittest.TestCase):
             ("Orbit", "Cosmowyn", "UPC title match"),
         )
 
-    def test_merge_mode_does_not_auto_merge_ambiguous_case_normalized_match(self):
+    def case_merge_mode_does_not_auto_merge_ambiguous_case_normalized_match(self):
         for suffix in ("37", "38"):
             self.track_service.create_track(
                 TrackCreatePayload(
@@ -1302,7 +1302,7 @@ class ExchangeServiceTests(unittest.TestCase):
         self.assertEqual(len(report.created_tracks), 1)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Tracks").fetchone()[0], 3)
 
-    def test_supported_import_targets_include_active_non_blob_custom_fields(self):
+    def case_supported_import_targets_include_active_non_blob_custom_fields(self):
         self.custom_defs.ensure_fields(
             [
                 {"name": "Mood", "field_type": "text"},
@@ -1316,7 +1316,7 @@ class ExchangeServiceTests(unittest.TestCase):
         self.assertNotIn("custom::Artwork", targets)
         self.assertEqual(len(targets), len(set(targets)))
 
-    def test_import_csv_maps_arbitrary_source_column_to_active_custom_field(self):
+    def case_import_csv_maps_arbitrary_source_column_to_active_custom_field(self):
         self.custom_defs.ensure_fields([{"name": "Mood", "field_type": "text"}])
         csv_path = self.data_root / "custom-mapping-import.csv"
         csv_path.write_text(
@@ -1349,3 +1349,7 @@ class ExchangeServiceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def load_tests(loader, tests, pattern):
+    return unittest.TestSuite()

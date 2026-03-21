@@ -22,7 +22,7 @@ from isrc_manager.services import DatabaseSchemaService, TrackCreatePayload, Tra
 from isrc_manager.works import WorkContributorPayload, WorkPayload, WorkService
 
 
-class SearchAndRepertoireExchangeTests(unittest.TestCase):
+class SearchAndRepertoireExchangeTestCase(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.TemporaryDirectory()
         self.data_root = Path(self.tmpdir.name)
@@ -235,7 +235,7 @@ class SearchAndRepertoireExchangeTests(unittest.TestCase):
         )
         return conn, services, imported_track_id, imported_release_id
 
-    def test_global_search_filters_saved_searches_and_relationship_explorer(self):
+    def case_global_search_filters_saved_searches_and_relationship_explorer(self):
         ids = self._seed_repertoire()
 
         self.assertEqual(self.search_service.search("   "), [])
@@ -311,7 +311,7 @@ class SearchAndRepertoireExchangeTests(unittest.TestCase):
                 self.assertTrue(expected_sections <= section_titles)
         self.assertEqual(self.relationship_service.describe_links("unknown", 99), [])
 
-    def test_repertoire_exchange_json_round_trip(self):
+    def case_repertoire_exchange_json_round_trip(self):
         self._seed_repertoire()
         export_path = self.data_root / "repertoire.json"
         self.exchange_service.export_json(export_path)
@@ -336,7 +336,7 @@ class SearchAndRepertoireExchangeTests(unittest.TestCase):
         finally:
             new_conn.close()
 
-    def test_repertoire_exchange_package_round_trip_preserves_files_and_document_chain(self):
+    def case_repertoire_exchange_package_round_trip_preserves_files_and_document_chain(self):
         ids = self._seed_repertoire()
         original_detail = self.contract_service.fetch_contract_detail(ids["contract_id"])
         assert original_detail is not None
@@ -426,7 +426,7 @@ class SearchAndRepertoireExchangeTests(unittest.TestCase):
         finally:
             new_conn.close()
 
-    def test_repertoire_exchange_package_round_trip_preserves_database_backed_files(self):
+    def case_repertoire_exchange_package_round_trip_preserves_database_backed_files(self):
         label_party_id = self.party_service.create_party(
             PartyPayload(legal_name="Blob Label", email="blob@label.test")
         )
@@ -554,7 +554,7 @@ class SearchAndRepertoireExchangeTests(unittest.TestCase):
         finally:
             new_conn.close()
 
-    def test_repertoire_exchange_xlsx_csv_and_schema_validation(self):
+    def case_repertoire_exchange_xlsx_csv_and_schema_validation(self):
         self._seed_repertoire()
         xlsx_path = self.data_root / "repertoire.xlsx"
         csv_dir = self.data_root / "csv-export"
@@ -592,3 +592,7 @@ class SearchAndRepertoireExchangeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def load_tests(loader, tests, pattern):
+    return unittest.TestSuite()

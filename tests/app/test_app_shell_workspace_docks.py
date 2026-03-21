@@ -1,0 +1,40 @@
+from tests.app._app_shell_support import AppShellTestCase
+
+
+class AppShellWorkspaceDockTests(AppShellTestCase):
+    test_catalog_release_browser_opens_as_tabified_dock = (
+        AppShellTestCase.case_catalog_release_browser_opens_as_tabified_dock
+    )
+    test_release_browser_filter_replaces_active_search_filter = (
+        AppShellTestCase.case_release_browser_filter_replaces_active_search_filter
+    )
+    test_release_browser_selection_scope_tracks_catalog_selection_and_override = (
+        AppShellTestCase.case_release_browser_selection_scope_tracks_catalog_selection_and_override
+    )
+    test_work_manager_dock_uses_live_track_selection = (
+        AppShellTestCase.case_work_manager_dock_uses_live_track_selection
+    )
+    test_global_search_opens_as_dock_and_keeps_entity_navigation_live = (
+        AppShellTestCase.case_global_search_opens_as_dock_and_keeps_entity_navigation_live
+    )
+    test_workspace_panels_keep_actions_and_saved_search_controls_inside_scroll_safe_surfaces = (
+        AppShellTestCase.case_workspace_panels_keep_actions_and_saved_search_controls_inside_scroll_safe_surfaces
+    )
+    test_catalog_managers_open_as_tabified_dock_and_focus_requested_tab = (
+        AppShellTestCase.case_catalog_managers_open_as_tabified_dock_and_focus_requested_tab
+    )
+    test_catalog_managers_tabs_keep_bottom_actions_inside_themed_scroll_surfaces = (
+        AppShellTestCase.case_catalog_managers_tabs_keep_bottom_actions_inside_themed_scroll_surfaces
+    )
+    test_hidden_catalog_table_does_not_block_workspace_dock_access_or_peer_tabifying = (
+        AppShellTestCase.case_hidden_catalog_table_does_not_block_workspace_dock_access_or_peer_tabifying
+    )
+    test_license_browser_opens_as_tabified_dock_and_applies_track_filter = (
+        AppShellTestCase.case_license_browser_opens_as_tabified_dock_and_applies_track_filter
+    )
+    test_party_contract_rights_and_asset_windows_open_as_tabified_docks = (
+        AppShellTestCase.case_party_contract_rights_and_asset_windows_open_as_tabified_docks
+    )
+
+
+del AppShellTestCase

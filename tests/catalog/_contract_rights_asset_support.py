@@ -29,7 +29,7 @@ except Exception:  # pragma: no cover - environment-specific fallback
     ContractEditorDialog = None
 
 
-class ContractRightsAssetServiceTests(unittest.TestCase):
+class ContractRightsAssetServiceTestCase(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.TemporaryDirectory()
         self.data_root = Path(self.tmpdir.name)
@@ -107,7 +107,7 @@ class ContractRightsAssetServiceTests(unittest.TestCase):
             notes=record.notes,
         )
 
-    def test_contract_deadlines_and_document_validation(self):
+    def case_contract_deadlines_and_document_validation(self):
         party_id = self.party_service.create_party(PartyPayload(legal_name="North Label"))
         document_path = self.data_root / "agreement.txt"
         document_path.write_text("signed agreement", encoding="utf-8")
@@ -190,7 +190,7 @@ class ContractRightsAssetServiceTests(unittest.TestCase):
         deadlines = self.contract_service.upcoming_deadlines(within_days=20)
         self.assertTrue(any(item.contract_id == contract_id for item in deadlines))
 
-    def test_contract_update_search_export_and_delete_cleanup(self):
+    def case_contract_update_search_export_and_delete_cleanup(self):
         track_id, release_id = self._create_track_and_release()
         original_path = self.data_root / "draft.txt"
         replacement_path = self.data_root / "final.txt"
@@ -296,7 +296,7 @@ class ContractRightsAssetServiceTests(unittest.TestCase):
         self.assertEqual(exported_lines[0], "contract_id,title,date_field,due_date")
         self.assertTrue(any("South Agency Agreement" in line for line in exported_lines[1:]))
 
-    def test_contract_documents_support_managed_and_database_storage_modes(self):
+    def case_contract_documents_support_managed_and_database_storage_modes(self):
         managed_path = self.data_root / "managed-doc.txt"
         database_path = self.data_root / "database-doc.txt"
         managed_path.write_text("managed version", encoding="utf-8")
@@ -352,7 +352,7 @@ class ContractRightsAssetServiceTests(unittest.TestCase):
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Contracts").fetchone()[0], 0)
         self.assertFalse(converted_path.exists())
 
-    def test_contract_document_update_preserves_storage_metadata_on_noop_save(self):
+    def case_contract_document_update_preserves_storage_metadata_on_noop_save(self):
         document_path = self.data_root / "round-trip.docx"
         document_path.write_text("contract round trip", encoding="utf-8")
 
@@ -396,7 +396,7 @@ class ContractRightsAssetServiceTests(unittest.TestCase):
         self.assertEqual(refreshed.supersedes_document_id, original.supersedes_document_id)
         self.assertEqual(refreshed.superseded_by_document_id, original.superseded_by_document_id)
 
-    def test_contract_document_storage_mode_round_trip_via_update(self):
+    def case_contract_document_storage_mode_round_trip_via_update(self):
         document_path = self.data_root / "mode-switch.txt"
         document_path.write_text("managed bytes", encoding="utf-8")
 
@@ -494,7 +494,7 @@ class ContractRightsAssetServiceTests(unittest.TestCase):
         self.assertTrue(restored_path.exists())
         self.assertEqual(restored_path.read_bytes(), managed_bytes)
 
-    def test_contract_document_editor_open_and_export_helpers(self):
+    def case_contract_document_editor_open_and_export_helpers(self):
         if ContractDocumentEditor is None:
             self.skipTest("Contract document editor unavailable")
         require_qapplication()
@@ -551,7 +551,7 @@ class ContractRightsAssetServiceTests(unittest.TestCase):
         finally:
             editor.close()
 
-    def test_contract_editor_selector_widgets_round_trip_known_reference_ids(self):
+    def case_contract_editor_selector_widgets_round_trip_known_reference_ids(self):
         if ContractEditorDialog is None:
             self.skipTest("Contract editor dialog unavailable")
         require_qapplication()
@@ -620,7 +620,7 @@ class ContractRightsAssetServiceTests(unittest.TestCase):
         finally:
             dialog.close()
 
-    def test_contract_editor_preserves_unresolved_reference_ids_in_dialog_payload(self):
+    def case_contract_editor_preserves_unresolved_reference_ids_in_dialog_payload(self):
         if ContractEditorDialog is None:
             self.skipTest("Contract editor dialog unavailable")
         require_qapplication()
@@ -697,7 +697,7 @@ class ContractRightsAssetServiceTests(unittest.TestCase):
         finally:
             dialog.close()
 
-    def test_contract_validation_rejects_invalid_date_ranges(self):
+    def case_contract_validation_rejects_invalid_date_ranges(self):
         with self.assertRaises(ValueError):
             self.contract_service.create_contract(
                 ContractPayload(
@@ -707,7 +707,7 @@ class ContractRightsAssetServiceTests(unittest.TestCase):
                 )
             )
 
-    def test_rights_conflict_detection_and_missing_source_contract(self):
+    def case_rights_conflict_detection_and_missing_source_contract(self):
         granted_to = self.party_service.create_party(PartyPayload(legal_name="Sync House"))
         retained = self.party_service.create_party(PartyPayload(legal_name="Artist Control"))
         track_id, release_id = self._create_track_and_release()
@@ -750,7 +750,7 @@ class ContractRightsAssetServiceTests(unittest.TestCase):
         missing_source = self.rights_service.rights_missing_source_contract()
         self.assertTrue(any(item.id in {right_one, right_two} for item in missing_source))
 
-    def test_rights_filters_summary_update_and_delete(self):
+    def case_rights_filters_summary_update_and_delete(self):
         granted_to = self.party_service.create_party(PartyPayload(legal_name="Master Label"))
         retained = self.party_service.create_party(PartyPayload(legal_name="Writer Control"))
         track_id, release_id = self._create_track_and_release()
@@ -825,7 +825,7 @@ class ContractRightsAssetServiceTests(unittest.TestCase):
         self.rights_service.delete_right(promo_id)
         self.assertIsNone(self.rights_service.fetch_right(promo_id))
 
-    def test_asset_validation_catches_missing_approved_master(self):
+    def case_asset_validation_catches_missing_approved_master(self):
         track_id, _release_id = self._create_track_and_release()
         master_path = self.data_root / "master.wav"
         master_path.write_bytes(b"RIFFdemo")
@@ -845,7 +845,7 @@ class ContractRightsAssetServiceTests(unittest.TestCase):
         issues = self.asset_service.validate_assets()
         self.assertTrue(any(issue.issue_type == "missing_approved_master" for issue in issues))
 
-    def test_asset_can_round_trip_between_database_and_managed_file_modes(self):
+    def case_asset_can_round_trip_between_database_and_managed_file_modes(self):
         track_id, release_id = self._create_track_and_release()
         master_path = self.data_root / "db-master.wav"
         master_path.write_bytes(b"RIFFdatabase")
@@ -879,7 +879,7 @@ class ContractRightsAssetServiceTests(unittest.TestCase):
             b"RIFFdatabase",
         )
 
-    def test_asset_update_listing_validation_and_delete_cleanup(self):
+    def case_asset_update_listing_validation_and_delete_cleanup(self):
         track_id, release_id = self._create_track_and_release()
         master_path = self.data_root / "master.wav"
         alt_path = self.data_root / "radio-edit.wav"
@@ -950,3 +950,7 @@ class ContractRightsAssetServiceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def load_tests(loader, tests, pattern):
+    return unittest.TestSuite()

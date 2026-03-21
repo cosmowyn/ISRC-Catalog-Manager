@@ -23,7 +23,7 @@ from isrc_manager.tasks.history_helpers import run_file_history_action, run_snap
 from isrc_manager.theme_builder import theme_setting_defaults
 
 
-class HistoryManagerTests(unittest.TestCase):
+class HistoryManagerTestCase(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.TemporaryDirectory()
         self.root = Path(self.tmpdir.name)
@@ -98,7 +98,7 @@ class HistoryManagerTests(unittest.TestCase):
         backup_path.write_bytes(b"SQLite backup bytes")
         return backup_path
 
-    def test_setting_change_undo_and_redo_are_persistent(self):
+    def case_setting_change_undo_and_redo_are_persistent(self):
         self.settings_mutations.set_isrc_prefix("NLABC")
         self.history.record_setting_change(
             key="isrc_prefix",
@@ -116,7 +116,7 @@ class HistoryManagerTests(unittest.TestCase):
         self.history.redo()
         self.assertEqual(self.settings_reads.load_isrc_prefix(), "NLABC")
 
-    def test_auto_snapshot_setting_changes_undo_and_redo(self):
+    def case_auto_snapshot_setting_changes_undo_and_redo(self):
         self.settings_mutations.set_auto_snapshot_enabled(True)
         self.settings_mutations.set_auto_snapshot_interval_minutes(30)
 
@@ -151,7 +151,7 @@ class HistoryManagerTests(unittest.TestCase):
         self.history.redo()
         self.assertEqual(self.settings_reads.load_auto_snapshot_interval_minutes(), 45)
 
-    def test_expanded_theme_settings_undo_and_redo_restore_new_fields(self):
+    def case_expanded_theme_settings_undo_and_redo_restore_new_fields(self):
         before_theme = theme_setting_defaults()
         after_theme = dict(before_theme)
         after_theme["button_hover_bg"] = "#224488"
@@ -190,7 +190,7 @@ class HistoryManagerTests(unittest.TestCase):
         self.assertEqual(int(self.settings.value("theme/menu_radius", 0, int)), 14)
         self.assertEqual(int(self.settings.value("theme/dialog_title_font_size", 0, int)), 22)
 
-    def test_track_create_delete_and_redo_work_through_history(self):
+    def case_track_create_delete_and_redo_work_through_history(self):
         track_id = self._create_track()
         self.history.record_track_create(
             track_id=track_id,
@@ -220,7 +220,7 @@ class HistoryManagerTests(unittest.TestCase):
         self.history.redo()
         self.assertIsNone(self.track_service.fetch_track_snapshot(track_id))
 
-    def test_track_update_and_snapshot_restore_round_trip(self):
+    def case_track_update_and_snapshot_restore_round_trip(self):
         track_id = self._create_track()
         self.history.record_track_create(
             track_id=track_id,
@@ -300,7 +300,7 @@ class HistoryManagerTests(unittest.TestCase):
             self.track_service.fetch_track_snapshot(track_id).track_title, "Updated Song"
         )
 
-    def test_snapshot_actions_restore_managed_license_files(self):
+    def case_snapshot_actions_restore_managed_license_files(self):
         track_id = self._create_track()
         source_pdf = self._create_source_pdf()
 
@@ -335,7 +335,7 @@ class HistoryManagerTests(unittest.TestCase):
         self.assertIsNotNone(restored)
         self.assertTrue(self.license_service.resolve_path(restored.file_path).exists())
 
-    def test_registered_snapshot_can_be_restored(self):
+    def case_registered_snapshot_can_be_restored(self):
         snapshot = self.history.create_manual_snapshot("Initial State")
         registered = self.history.register_snapshot(
             snapshot, kind="registered", label="Registered Initial State"
@@ -348,7 +348,7 @@ class HistoryManagerTests(unittest.TestCase):
         self.history.restore_snapshot_as_action(registered.snapshot_id)
         self.assertIsNone(self.track_service.fetch_track_snapshot(track_id))
 
-    def test_manual_snapshot_create_and_delete_can_be_undone(self):
+    def case_manual_snapshot_create_and_delete_can_be_undone(self):
         created = self.history.create_manual_snapshot("Manual Snapshot")
         self.assertIsNotNone(self.history.fetch_snapshot(created.snapshot_id))
 
@@ -376,7 +376,7 @@ class HistoryManagerTests(unittest.TestCase):
             [snap for snap in self.history.list_snapshots() if snap.label == "Manual Snapshot"], []
         )
 
-    def test_setting_bundle_change_restores_qpoint_and_coalesces(self):
+    def case_setting_bundle_change_restores_qpoint_and_coalesces(self):
         key = "display/col_hint_pos"
         self.settings.setValue(key, QPoint(12, 18))
         self.settings.sync()
@@ -415,7 +415,7 @@ class HistoryManagerTests(unittest.TestCase):
         self.history.redo()
         self.assertEqual(self.settings.value(key, type=QPoint), QPoint(60, 90))
 
-    def test_hidden_internal_entries_are_skipped_by_visible_history_and_boundary_undo(self):
+    def case_hidden_internal_entries_are_skipped_by_visible_history_and_boundary_undo(self):
         visible_key = "display/action_ribbon_visible"
         hidden_key = "display/catalog_table_panel"
         self.settings.setValue(visible_key, False)
@@ -475,7 +475,7 @@ class HistoryManagerTests(unittest.TestCase):
         self.assertTrue(self.settings.value(hidden_key, False, bool))
         self.assertEqual(self.history.get_current_entry_id(), hidden_entry.entry_id)
 
-    def test_snapshot_actions_restore_external_file_side_effects(self):
+    def case_snapshot_actions_restore_external_file_side_effects(self):
         before = self.history.capture_snapshot(
             kind="pre_file_side_effect", label="Before file side effect"
         )
@@ -516,7 +516,7 @@ class HistoryManagerTests(unittest.TestCase):
         self.assertTrue(export_path.exists())
         self.assertEqual(export_path.read_text(encoding="utf-8"), "<catalog/>")
 
-    def test_snapshot_actions_restore_legacy_license_migration_state(self):
+    def case_snapshot_actions_restore_legacy_license_migration_state(self):
         track_id = self._create_track(title="Migration History Song")
         source_pdf = self._create_source_pdf("history_legacy_license.pdf")
         record_id = self.license_service.add_license(
@@ -583,7 +583,7 @@ class HistoryManagerTests(unittest.TestCase):
         assert restored_migrated_path is not None
         self.assertTrue(restored_migrated_path.exists())
 
-    def test_snapshot_restore_preserves_audit_log_and_supports_undo_redo(self):
+    def case_snapshot_restore_preserves_audit_log_and_supports_undo_redo(self):
         snapshot = self.history.create_manual_snapshot("Before Audit Restore")
         self.conn.execute(
             "INSERT INTO AuditLog (action, entity, ref_id, details) VALUES (?, ?, ?, ?)",
@@ -609,7 +609,7 @@ class HistoryManagerTests(unittest.TestCase):
         self.assertIsNone(self.track_service.fetch_track_snapshot(track_id))
         self.assertEqual(self.history.get_current_entry_id(), entry.entry_id)
 
-    def test_snapshot_history_undo_redo_does_not_duplicate_entries(self):
+    def case_snapshot_history_undo_redo_does_not_duplicate_entries(self):
         created_track_id = run_snapshot_history_action(
             history_manager=self.history,
             action_label="Create Track: Snapshot Path",
@@ -648,7 +648,7 @@ class HistoryManagerTests(unittest.TestCase):
         self.assertIsNotNone(self.track_service.fetch_track_snapshot(created_track_id))
         self.assertEqual(len(self.history.list_entries(limit=20)), 1)
 
-    def test_branching_after_undo_supersedes_old_redo(self):
+    def case_branching_after_undo_supersedes_old_redo(self):
         self.settings_mutations.set_isrc_prefix("NLAAA")
         first = self.history.record_setting_change(
             key="isrc_prefix",
@@ -679,7 +679,7 @@ class HistoryManagerTests(unittest.TestCase):
         self.assertIsNone(self.history.get_default_redo_entry())
         self.assertEqual(self.history.fetch_entry(second.entry_id).status, "superseded")
 
-    def test_missing_snapshot_file_raises_clear_error_without_creating_pre_restore_snapshot(self):
+    def case_missing_snapshot_file_raises_clear_error_without_creating_pre_restore_snapshot(self):
         snapshot = self.history.create_manual_snapshot("Missing Snapshot")
         snapshot_path = Path(snapshot.db_snapshot_path)
         snapshot_path.unlink()
@@ -691,7 +691,7 @@ class HistoryManagerTests(unittest.TestCase):
 
         self.assertEqual(len(self.history.list_snapshots(limit=100)), snapshot_count_before)
 
-    def test_snapshot_restore_rolls_back_database_when_external_restore_fails(self):
+    def case_snapshot_restore_rolls_back_database_when_external_restore_fails(self):
         track_id = self._create_track(title="Rollback Song")
         snapshot = self.history.create_manual_snapshot("Rollback Point")
 
@@ -723,7 +723,7 @@ class HistoryManagerTests(unittest.TestCase):
         self.assertIsNotNone(current)
         self.assertEqual(current.track_title, "Changed After Snapshot")
 
-    def test_repair_recovery_state_relinks_missing_snapshot_and_registers_orphan_backup(self):
+    def case_repair_recovery_state_relinks_missing_snapshot_and_registers_orphan_backup(self):
         snapshot = self.history.create_manual_snapshot("Repairable Snapshot")
         snapshot_path = Path(snapshot.db_snapshot_path)
         repaired_snapshot_path = snapshot_path.with_name(f"relinked_{snapshot_path.name}")
@@ -815,7 +815,7 @@ class HistoryManagerTests(unittest.TestCase):
         second_pass = self.history.repair_recovery_state()
         self.assertFalse(second_pass.unresolved)
 
-    def test_repair_recovery_state_rebuilds_missing_backup_history_artifacts(self):
+    def case_repair_recovery_state_rebuilds_missing_backup_history_artifacts(self):
         backup_path = self._write_backup_file("artifact_repair_backup.db")
         before_state = {
             "target_path": str(backup_path),
@@ -859,7 +859,7 @@ class HistoryManagerTests(unittest.TestCase):
             all(Path(file_info["artifact_path"]).exists() for file_info in refreshed_state["files"])
         )
 
-    def test_run_snapshot_history_action_rolls_back_when_history_recording_fails(self):
+    def case_run_snapshot_history_action_rolls_back_when_history_recording_fails(self):
         with patch.object(
             self.history,
             "record_snapshot_action",
@@ -894,7 +894,7 @@ class HistoryManagerTests(unittest.TestCase):
             self.conn.execute("SELECT COUNT(*) FROM HistorySnapshots").fetchone()[0], 0
         )
 
-    def test_restore_snapshot_missing_file_does_not_create_extra_restore_point(self):
+    def case_restore_snapshot_missing_file_does_not_create_extra_restore_point(self):
         snapshot = self.history.create_manual_snapshot("Missing Restore Target")
         Path(snapshot.db_snapshot_path).unlink()
 
@@ -909,7 +909,7 @@ class HistoryManagerTests(unittest.TestCase):
         ]
         self.assertEqual(after_snapshot_ids, before_snapshot_ids)
 
-    def test_snapshot_helper_rolls_back_when_history_recording_fails(self):
+    def case_snapshot_helper_rolls_back_when_history_recording_fails(self):
         snapshot_count_before = len(self.history.list_snapshots(limit=50))
 
         with patch.object(
@@ -928,7 +928,7 @@ class HistoryManagerTests(unittest.TestCase):
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Tracks").fetchone()[0], 0)
         self.assertEqual(len(self.history.list_snapshots(limit=50)), snapshot_count_before)
 
-    def test_file_helper_rolls_back_when_history_recording_fails(self):
+    def case_file_helper_rolls_back_when_history_recording_fails(self):
         export_path = self.root / "exports" / "helper.txt"
 
         def mutation():
@@ -952,7 +952,7 @@ class HistoryManagerTests(unittest.TestCase):
 
         self.assertFalse(export_path.exists())
 
-    def test_repair_recovery_state_quarantines_referenced_missing_snapshot(self):
+    def case_repair_recovery_state_quarantines_referenced_missing_snapshot(self):
         before = self.history.capture_snapshot(kind="pre_quarantine", label="Before quarantine")
         created_track_id = self._create_track(title="Quarantine Target")
         after = self.history.capture_snapshot(kind="post_quarantine", label="After quarantine")
@@ -982,3 +982,7 @@ class HistoryManagerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def load_tests(loader, tests, pattern):
+    return unittest.TestSuite()

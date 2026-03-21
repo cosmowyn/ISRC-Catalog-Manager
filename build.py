@@ -218,9 +218,7 @@ def _convert_image_to_ico_qt(image_path: Path, project_root: Path) -> Path:
     try:
         from PySide6.QtGui import QImage
     except Exception as exc:
-        raise RuntimeError(
-            "Could not import PySide6 to convert the Windows icon to .ico."
-        ) from exc
+        raise RuntimeError("Could not import PySide6 to convert the Windows icon to .ico.") from exc
 
     out_dir = _generated_assets_dir(project_root) / "icons"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -457,7 +455,9 @@ def main() -> int:
     built_artifact = _find_built_artifact(project_root)
     if not built_artifact.exists():
         print("\nERROR: PyInstaller returned success, but expected output was not found:")
-        print(f"Expected one of: {', '.join(str(path) for path in _expected_artifact_candidates(project_root))}")
+        print(
+            f"Expected one of: {', '.join(str(path) for path in _expected_artifact_candidates(project_root))}"
+        )
 
         if out_path.exists():
             print("\nContents of dist/:")
