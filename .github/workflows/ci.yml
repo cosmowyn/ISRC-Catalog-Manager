@@ -129,21 +129,21 @@ jobs:
         include:
           - group: catalog-services
             python-version: "3.10"
-            qt-runtime: false
+            qt-runtime: true
             coverage: false
             timeout-minutes: 15
             group-timeout-seconds: 600
             module-timeout-seconds: 120
           - group: catalog-services
             python-version: "3.13"
-            qt-runtime: false
+            qt-runtime: true
             coverage: true
             timeout-minutes: 15
             group-timeout-seconds: 600
             module-timeout-seconds: 120
           - group: exchange-import
             python-version: "3.13"
-            qt-runtime: false
+            qt-runtime: true
             coverage: true
             timeout-minutes: 20
             group-timeout-seconds: 900
@@ -233,6 +233,7 @@ jobs:
         with:
           name: coverage-data-${{ matrix.group }}-py${{ matrix.python-version }}
           path: .coverage*
+          include-hidden-files: true
           if-no-files-found: error
 
   coverage-report:
