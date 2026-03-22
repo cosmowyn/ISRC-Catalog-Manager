@@ -19,6 +19,7 @@ This is especially useful when you are:
 The workspace is built around dock widgets rather than isolated modal windows.
 
 - `Add Data` and `Catalog Table` are the persistent base docks.
+- The profiles toolbar can be shown or hidden from `View > Show Profiles Ribbon`, and that choice is remembered with the rest of the workspace state.
 - Release, work, party, contract, rights, asset, license, search, and catalog-manager surfaces are opened as docked workspace panels.
 - Related panels can remain visible while you continue using the catalog table.
 - The app prefers tabbed docking for these workspace surfaces, so multiple tools can share the same side of the window instead of spreading across the screen.
@@ -89,6 +90,18 @@ The action ribbon is a configurable quick-action strip.
 
 This is a small feature with a large workflow impact because it reduces the number of steps needed for repeat tasks.
 
+## Bulk Audio Attachment
+
+The catalog workflow now includes a dedicated batch media-intake path for existing tracks.
+
+- `Catalog > Bulk Attach Audio Files…` inspects selected local audio files before anything is written.
+- The dialog can suggest matches from filenames and embedded tags, show the detected artist/title, and let you skip or manually reassign individual files.
+- You choose whether the attached audio should be stored in the database or as managed local files.
+- One optional artist value can be applied across the matched set when you are cleaning up a consistent batch.
+- The final attach step is recorded as one history-wrapped mutation so the batch stays recoverable.
+
+This workflow is useful when the track rows already exist and the remaining job is to connect the right audio files quickly and safely.
+
 ## Global Search And Relationship Explorer
 
 Global Search is more than a simple text lookup.
@@ -136,4 +149,3 @@ That pattern is why the docked workspace is a core product feature. It reduces c
 - Docked panels are for review, inspection, and linked-record work.
 - The app favors tabbed workspace surfaces so related tools stay available together.
 - The workspace is meant to accelerate catalog operations, not replace the underlying data model with a single flat screen.
-

@@ -46,15 +46,24 @@ CSV import supports the delimiter controls exposed by the setup dialog.
 
 This matters for real-world exports because the same catalog file may arrive as comma-separated, semicolon-separated, or tab-separated data depending on the source system or region.
 
-### Mapping Presets And Column Mapping
+### Mapping Presets, Skip Targets, And Field Mapping
 
-CSV and XLSX are the strongest mapping workflows because the importer can match source columns to supported target fields.
+CSV and XLSX are still the most visible mapping workflows because they begin from arbitrary source columns, but the same exchange setup surface now also governs JSON and ZIP package imports.
 
 - Mapping presets can be saved and reused
 - Source columns can be mapped to standard fields or active `custom::<name>` text fields
 - Missing text custom fields can be created during setup when you want the import to introduce those targets instead of requiring a separate pre-creation pass
+- Any source field can be marked as `Skip this field` when you want it inspected but not applied
 - The mapping layer is not intended for blob fields
-- JSON and ZIP package imports use the same overall exchange workflow, but the source structure is already defined by the payload or package manifest, so delimiter and column mapping are not the main control points there
+- JSON and ZIP package imports now use the same mode, match-rule, target-resolution, and skip behavior as the spreadsheet imports, even though their source structure is already defined by the payload or package manifest
+
+### Saved Import Choices
+
+The exchange dialog can remember setup choices per format.
+
+- `Remember these ... import choices` stores the current mode, match options, custom-field creation preference, and CSV delimiter settings for that specific format
+- `File > Import Exchange > Reset Saved Import Choices…` clears those persisted choices when you want to start fresh
+- This is especially useful when one source family is usually merged with heuristics while another is usually create-only or validation-first
 
 This is what makes the workflow useful for structured exports from labels, catalog systems, publishers, distributors, and PRO-style export files. If a system can export to a supported format, its fields can be mapped into the catalog without a custom integration.
 
@@ -147,6 +156,16 @@ This is one of the reasons the package workflow is useful for moving a complete 
 - Import a CSV export from a catalog administrator, map the source title and contributor columns to `track_title`, `artist_name`, and `composer`, then use `merge` to bring the new data into rows that already exist in the catalog.
 - Import a label or PRO-style spreadsheet export, map its work reference column to `buma_work_number`, and map any local reporting columns to active `custom::<name>` fields.
 - Import a ZIP package that contains catalog rows plus bundled media, then use the package round trip to restore both the metadata and the packaged files in one pass.
+
+## Bulk Attach Audio Files
+
+Bulk audio attachment is a separate catalog workflow rather than a row-oriented exchange import.
+
+- Open `Catalog > Bulk Attach Audio Files…` when the track rows already exist and the remaining job is to connect audio files to them
+- The workflow inspects filenames and embedded tags, suggests likely track matches, and lets you reassign or skip files before anything is written
+- You can choose whether the attached audio should be stored in the database or as managed local files
+- One optional artist value can be applied across the matched set when you are cleaning up a consistent batch
+- The final apply step is recorded as one recoverable history mutation instead of as a series of isolated row edits
 
 ## XML Import
 
@@ -248,7 +267,7 @@ The current implementation does not do the following:
 - it does not provide a row-level manual assignment or reconciliation picker for exchange import
 - it does not provide direct third-party integrations with BUMA, STEMRA, SENA, or similar organizations
 - it does not treat blob custom fields as tabular import targets
-- it does not make CSV/XLSX mapping behave the same way as JSON or ZIP package import
+- it does not give JSON or ZIP package imports CSV delimiter controls, because those formats already arrive in a defined structured shape
 - it does not treat exchange dry-run as a full row-by-row validation engine
 - it does not make release import fill only blank fields; matching releases can be updated from supplied release-row data
 

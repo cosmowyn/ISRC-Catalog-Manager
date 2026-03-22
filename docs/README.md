@@ -7,11 +7,12 @@ Use the repository [`README.md`](../README.md) for the product overview, positio
 ## Getting Started
 
 - [Repository README](../README.md) explains what the app is, who it is for, and why the workflow model matters.
+- On first launch, the app can optionally open `Application Settings` so you can set registration values, snapshot posture, and appearance before deeper catalog work.
 - [Catalog Workspace Workflows](catalog-workspace-workflows.md) is the best first deep dive if you want to understand how the docked desktop workspace is meant to be used day to day.
 
 ## Import & Exchange
 
-- [Import and Merge Workflows](import-and-merge-workflows.md) covers exchange import, XML import, audio tag import/export, matching rules, merge behavior, package round-tripping, and workflow limits.
+- [Import and Merge Workflows](import-and-merge-workflows.md) covers exchange import, saved per-format choices, explicit skip targets, JSON/package mapping behavior, XML import, bulk audio attachment, audio tag import/export, matching rules, merge behavior, and package round-tripping.
 - [GS1 Workflow Guide](gs1_workflow.md) covers workbook preparation and verified export from catalog data.
 
 ## Catalog & Repertoire Workflows
@@ -21,9 +22,9 @@ Use the repository [`README.md`](../README.md) for the product overview, positio
 
 ## Operations & Recovery
 
-- [Diagnostics and Recovery](diagnostics-and-recovery.md) covers quality review, diagnostics, suggested fixes, snapshots, backups, cleanup, trim, migration, and logs.
+- [Diagnostics and Recovery](diagnostics-and-recovery.md) covers quality review, async diagnostics and repairs, suggested fixes, storage migration adoption/resume behavior, history budget reporting, cleanup, trim, and logs.
 - [Attachment Storage Modes](file_storage_modes.md) explains database-backed versus managed-file-backed storage and why that matters for portability and maintenance.
-- [Undo, History, and Snapshots](undo_redo_strategy.md) explains the recovery model behind edits, imports, and higher-risk workflows.
+- [Undo, History, and Snapshots](undo_redo_strategy.md) explains the recovery model behind edits, imports, retention and safety levels, history storage budgets, and higher-risk workflows.
 
 ## Customization
 
@@ -40,4 +41,4 @@ Use the repository [`README.md`](../README.md) for the product overview, positio
 - Start with the product [README](../README.md).
 - Read [Import and Merge Workflows](import-and-merge-workflows.md) if external metadata intake matters to you.
 - Read [Catalog Workspace Workflows](catalog-workspace-workflows.md) and [Repertoire Knowledge System](repertoire_knowledge_system.md) for daily catalog operations.
-- Read [Diagnostics and Recovery](diagnostics-and-recovery.md) once you are working with larger or riskier catalog changes.
+- Read [Diagnostics and Recovery](diagnostics-and-recovery.md) and [Undo, History, and Snapshots](undo_redo_strategy.md) once you are working with larger or riskier catalog changes.

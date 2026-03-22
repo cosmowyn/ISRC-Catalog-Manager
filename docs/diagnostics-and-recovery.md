@@ -39,8 +39,12 @@ Use diagnostics when you want to verify the environment around the catalog:
 - custom-value integrity
 - managed-file integrity for path-backed records
 - history storage health
+- history storage budget pressure and safe reclaimable space
+- legacy promoted-field collisions that now belong in default columns
 
 Diagnostics is the right surface when the question is, "Is the app and profile still healthy?"
+
+The diagnostics window now loads heavier reports and supported repair actions through the background task layer, so opening, refreshing, and repairing large profiles no longer has to feel like a frozen dialog.
 
 ## Suggested Fixes
 
@@ -53,6 +57,7 @@ Examples include:
 - relinking missing media by filename
 - filling blank track values from linked release metadata where appropriate
 - reconciling history artifacts
+- safely merging legacy promoted-field values into the matching default columns when blank cells can be filled conservatively
 - migrating a legacy storage layout into the preferred app-managed structure
 
 These are deliberate, scoped fixes rather than broad auto-repair. The app stays conservative about what it changes.
@@ -68,6 +73,17 @@ The history system is part of the recovery story.
 
 This is important because the app is meant for real catalog operations, not disposable scratch data.
 
+## Retention, Budget, And Automatic Cleanup
+
+Recovery is no longer just about creating artifacts. It also includes conservative storage policy controls.
+
+- `Settings > Application Settings > General` now includes snapshot retention and safety controls for the active profile.
+- The named levels `Maximum Safety`, `Balanced`, and `Lean` provide preset cleanup behavior, while `Custom` lets you keep your own combination.
+- The profile can store a soft history storage budget, an automatic-snapshot retention count, and an optional age limit for pre-restore safety copies.
+- Automatic cleanup removes only eligible auto-generated artifacts. Manual snapshots and protected restore points stay protected by default.
+
+This keeps history growth practical without turning cleanup into a blind delete tool.
+
 ## Cleanup
 
 Cleanup is not a blind delete operation.
@@ -75,6 +91,7 @@ Cleanup is not a blind delete operation.
 - The cleanup flow previews what is eligible.
 - It protects items that are still required by undo, redo, snapshot restore, backup restore, or session restore.
 - It distinguishes between eligible and protected artifacts.
+- It now shows the current budget posture and whether the active policy can still reclaim safe space.
 - It helps keep history and storage from growing without context.
 
 Use cleanup when you want to remove old restore artifacts without breaking the current recovery chain.
@@ -97,13 +114,14 @@ Recoverability is built into the app's higher-risk flows.
 - Imports run with history support.
 - Snapshots capture the profile database and related managed state where supported.
 - Cleanup avoids deleting anything still referenced by the live history chain.
+- Snapshot creation, restore, and settings changes can warn before the profile would cross its configured history budget.
 - Migration does not replace the active layout until the staged copy has been verified.
 
 The central idea is simple: the app prefers staged, verified transitions over destructive replacements.
 
 ## Storage Migration
 
-Diagnostics can guide a staged migration from a legacy app-data layout into the preferred app-managed root.
+Diagnostics can guide a staged migration from a legacy app-data layout into the preferred app-managed root, and startup now uses the same migration service before managed writes begin.
 
 - The migration is blocked while background tasks are running.
 - The active profile is closed before migration begins.
@@ -112,6 +130,8 @@ Diagnostics can guide a staged migration from a legacy app-data layout into the 
 - Embedded paths in history and backup metadata are rewritten.
 - Verification happens before the staged root is promoted.
 - The legacy root is left intact.
+- If the preferred root is already valid, the app can adopt it automatically instead of copying again.
+- If a preserved staged migration exists and still validates, the app can resume from that stage instead of starting over.
 
 That approach is conservative by design and gives diagnostics a real repair workflow instead of a simple folder move.
 
@@ -122,6 +142,7 @@ When you need to investigate something that the UI alone cannot explain, the app
 - The application log is intended for readable troubleshooting.
 - The trace log gives a structured record for deeper diagnosis.
 - Both can be opened from the app so you do not have to hunt through folders manually.
+- Startup and storage-migration decisions are buffered and written into the final log location once the launch root is settled.
 
 Use logs together with diagnostics when a problem is not obvious from the quality dashboard alone.
 
@@ -137,4 +158,3 @@ For most troubleshooting, the safest order is:
 6. Check logs if the problem still needs investigation.
 
 That sequence keeps you in a recoverable path and avoids jumping straight to destructive cleanup.
-

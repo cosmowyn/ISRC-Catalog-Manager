@@ -54,6 +54,8 @@ This applies across standard track media, release artwork, custom binary fields,
 This is not just a metadata sheet with a prettier front end. It is designed for recurring catalog work:
 
 - importing and reconciling external metadata into an existing catalog
+- remembering repeat import choices per format and explicitly skipping unwanted incoming fields
+- bulk-attaching local audio files by filename/tag matching with optional batch artist updates
 - matching incoming rows against existing tracks and releases
 - normalizing identifiers, dates, and durations
 - attaching files in either database or managed-file mode
@@ -162,6 +164,8 @@ For structured exchange import, the app can:
 - preview incoming rows and choose the CSV delimiter when needed
 - map source columns to supported catalog fields or active `custom::<name>` text fields
 - save and reload mapping presets for repeat imports
+- remember per-format import choices and reset them when the workflow needs a clean slate
+- explicitly skip incoming fields you want inspected but not applied
 - choose between `dry_run`, `create`, `update`, `merge`, and `insert_new`
 - match against existing data by internal ID, ISRC, UPC plus title, and optional title/artist heuristics
 - normalize names, titles, and durations where the importer supports it
@@ -176,6 +180,8 @@ The app also includes:
 - audio tag import/export for reading embedded tags and writing metadata to exported copies
 - a separate repertoire exchange workflow for works, parties, contracts, rights, assets, and their relationships
 
+For existing catalog rows that already need their audio attached, the separate `Catalog > Bulk Attach Audio Files…` workflow can inspect filenames and embedded tags, suggest track matches, let you reassign or skip files, choose the storage mode, and optionally apply one artist name across the matched set before committing one history-wrapped batch.
+
 ### Trust, recovery, and maintenance
 
 ISRC Catalog Manager treats recovery and maintenance as product features, not hidden engineering details.
@@ -185,9 +191,11 @@ The app includes:
 - persistent undo/redo history for supported reversible actions
 - manual snapshots and restore paths for heavier operations
 - a dedicated Backups tab plus cleanup and trim flows for older artifacts
+- profile-scoped retention and safety settings for automatic snapshots, cleanup, storage budgets, and restore safety copies
+- milestone-based startup feedback while storage reconciliation and workspace restore finish
 - a quality dashboard for operational catalog issues
-- diagnostics for schema, storage, integrity, managed files, and history health
-- repair actions for supported issues such as history reconciliation and storage-layout migration
+- diagnostics for schema, storage, integrity, managed files, history health, and history budget pressure
+- repair actions for supported issues such as history reconciliation, legacy promoted-field repair, and storage-layout migration
 - a staged app-data migration path for older storage layouts
 
 Imports, restore flows, legacy license migration, and other higher-risk operations are designed to be recoverable rather than one-way.
@@ -223,10 +231,13 @@ Some of the strongest workflow features are easy to underestimate from a quick s
 - the docked workspace keeps Release Browser, Work Manager, Party Manager, Contract Manager, Rights Matrix, Asset Registry, License Browser, Global Search, and Catalog Managers open beside the table as tabbed panels
 - layout and dock state are remembered, so the app reopens as a real workstation instead of a fixed single screen
 - the action ribbon can be customized around your high-frequency commands
+- repeat imports can remember per-format choices, and unwanted incoming fields can be skipped explicitly instead of being mapped by accident
+- `Catalog > Bulk Attach Audio Files…` can match filenames and tags to existing tracks, attach them in one reviewed batch, and optionally update matched artist names
 - global search and relationship browsing give the richer catalog model a usable navigation layer
 - package exchange can carry managed files and restore their recorded storage mode on import
 - audio tag workflows can preview conflicts before writing metadata back to exported copies
 - legacy license migration can move older PDF-based license records into the richer contract/document model with snapshot protection
+- history settings now include retention and safety presets, storage budgets, and cleanup prompts that keep manual restore points protected by default
 - theme tooling goes beyond colors into starter themes, BLOB badge icons, selector discovery, and QSS autocomplete
 
 ## Who It Is For
@@ -257,7 +268,7 @@ That focus is deliberate. The goal is depth and reliability in catalog maintenan
 
 ### 1. Build or import the catalog
 
-Use the Add Data panel for single tracks, Add Album for grouped releases, or the exchange import workflows when catalog data already exists elsewhere. Incoming tabular data can be previewed, mapped, matched, merged, or inserted as new records depending on the source and the job.
+Use the Add Data panel for single tracks, Add Album for grouped releases, exchange import when catalog data already exists elsewhere, or Bulk Attach Audio Files when track rows already exist but their media still needs to be attached. Incoming structured data can be previewed, mapped, skipped field-by-field, matched, merged, or inserted as new records depending on the source and the job.
 
 ### 2. Organize the repertoire graph
 
@@ -267,7 +278,7 @@ Use the docked workspace panels to keep those managers open as tabbed companions
 
 ### 3. Review, clean up, and verify
 
-Run the quality dashboard, inspect findings, open the affected records, and use diagnostics when the issue may involve managed files, storage layout, or history artifacts rather than catalog content alone.
+Run the quality dashboard, inspect findings, open the affected records, and use diagnostics when the issue may involve managed files, storage layout, history artifacts, legacy field collisions, or storage-budget pressure rather than catalog content alone.
 
 ### 4. Export, package, or archive safely
 
@@ -346,6 +357,7 @@ python build.py
 The build script now follows a deterministic release workflow:
 
 - use the current project metadata and `ISRC_manager.py` as the fixed entrypoint
+- on Windows, prefer a repo-local `.venv\Scripts\pyinstaller.exe` when present before falling back to other PyInstaller launch methods
 - resolve packaged branding from `build_assets/icons/app_logo.*`
 - bundle the runtime splash asset from `build_assets/splash.*`
 - build with PyInstaller using the platform policy in the script
@@ -391,10 +403,12 @@ Once launched, you can:
 - create a new profile database
 - browse to an existing profile
 - add tracks and grouped album data
+- bulk-attach audio files to existing tracks
 - maintain releases, works, parties, contracts, rights, and assets
 - import or export metadata
 - open GS1 metadata for a single track or a selected batch
-- run quality checks and repair workflows
+- run quality checks, diagnostics, and repair workflows
+- tune snapshot retention, cleanup posture, and history storage budgets
 - preview media, inspect logs, and create snapshots
 
 ## Standards and Responsibility

@@ -118,10 +118,12 @@ They can track:
 - renewal, notice, option, reversion, and termination dates
 - active, expired, draft, pending-signature, terminated, or superseded status
 - linked works, tracks, releases, and parties
-- obligations and reminders
+- structured obligations and reminders with type, due date, completion state, and notes
 - notes and summaries
 
 This makes the contract layer operational, not just archival.
+
+The current contract editor uses a structured obligations workflow rather than a free-form text block, which makes follow-up dates, completion state, and notes safer to maintain over time.
 
 ### Contract Documents
 

@@ -26,6 +26,7 @@ It gives you a safer foundation for:
 - legacy license migration
 - file-backed record changes
 - restore, cleanup, and history maintenance
+- storage-budget-aware snapshot and restore workflows
 
 For the operational tools around this model, including diagnostics and logs, see [Diagnostics and Recovery](diagnostics-and-recovery.md).
 
@@ -61,6 +62,8 @@ The application does not only protect database rows. Where supported, it also ke
 - contract documents
 - asset registry files
 - release and track media
+- custom-field media
+- stored GS1 workbook templates
 
 This matters because a music catalog is not only metadata. It is metadata plus the files that prove and deliver it.
 
@@ -75,6 +78,17 @@ From the History menu, users can:
 - restore a previous snapshot when necessary
 
 The goal is not just convenience. It is confidence.
+
+## Retention And Budget Controls
+
+Recovery now includes profile-level policy controls, not only buttons in the History menu.
+
+- `Settings > Application Settings > General` includes automatic snapshots, retention and safety levels, automatic cleanup, a history storage budget, automatic-snapshot retention counts, and optional aging for pre-restore safety copies.
+- The named levels `Maximum Safety`, `Balanced`, and `Lean` are preset helpers layered on top of the same conservative cleanup rules. `Custom` leaves the detailed controls in your hands.
+- Automatic cleanup is limited to safe auto-generated artifacts. Manual snapshots and other protected restore points remain protected by default.
+- If a snapshot, restore, or settings change would push the profile over budget, the app can warn first and open the cleanup workflow instead of failing silently.
+
+This keeps the recovery system usable over time without weakening restore safety.
 
 ## Where This Is Especially Important
 
@@ -94,6 +108,8 @@ When migrating legacy license PDFs into structured contracts and documents, the 
 ### Restore workflows
 
 Database restore is inherently a full-state operation. That is why it is handled as a protected history boundary rather than a casual row-by-row undo.
+
+Snapshot coverage is also broader than it used to be. The system now captures the profile database plus the managed roots needed for newer workflows such as custom-field media and stored GS1 templates, which makes heavier restores closer to a whole-workspace recovery boundary.
 
 ## Product Promise
 

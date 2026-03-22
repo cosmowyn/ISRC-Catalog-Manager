@@ -36,6 +36,9 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "csv",
             "json",
             "xlsx",
+            "bulk attach audio",
+            "retention",
+            "startup splash",
             "quality dashboard",
             "background tasks",
             "threading",
@@ -56,12 +59,13 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Catalog Table</strong>: the central browser for searching, selecting, bulk editing, and reviewing recording data.</li>
           <li><strong>Global Search</strong>: a relationship-aware search surface across works, tracks, releases, contracts, rights, parties, documents, and assets.</li>
           <li><strong>Docked catalog workspace</strong>: release, work, license, party, contract, rights, asset, and search panels can stay open as tabbed workspace surfaces beside the catalog table.</li>
-          <li><strong>Import and exchange</strong>: CSV, XLSX, JSON, XML, ZIP, audio-tag, and GS1 workflows for bringing data in, reconciling it, exporting it, and archiving it safely.</li>
+          <li><strong>Import and exchange</strong>: CSV, XLSX, JSON, XML, ZIP, audio-tag, bulk audio attach, and GS1 workflows for bringing data in, reconciling it, attaching media, exporting it, and archiving it safely.</li>
           <li><strong>Quality Dashboard</strong>: a practical readiness view for metadata gaps, identifier conflicts, broken media links, rights risks, and operational blockers.</li>
           <li><strong>Diagnostics and recovery</strong>: snapshots, backups, cleanup, trim, diagnostics, repair paths, and logs keep heavier workflows recoverable.</li>
           <li><strong>Action Ribbon</strong>: a customizable quick-action strip for your most-used commands.</li>
           <li><strong>Background tasks</strong>: longer scans, imports, exports, snapshots, and file operations run outside the UI thread to keep the workspace responsive.</li>
           <li><strong>Settings and history</strong>: identity, registration settings, themes, undo/redo, snapshots, diagnostics, and logs.</li>
+          <li><strong>Startup feedback</strong>: a Qt-native splash reports milestone-based startup progress while storage reconciliation and workspace restore complete.</li>
           <li><strong>Flexible file storage</strong>: file-backed records can be kept as database BLOBs or as managed local files without changing the surrounding UI workflow.</li>
           <li><strong>Media badge icons</strong>: separate visual indicators for stored audio and image BLOBs can be configured with system icons, emoji, or compressed custom images.</li>
         </ul>
@@ -87,6 +91,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         <ul>
           <li><strong>Action ribbon</strong>: a customizable strip of high-frequency actions. Use <strong>View &gt; Customize Action Ribbon…</strong> to make it match your workflow.</li>
           <li><strong>Profiles toolbar</strong>: switch databases, create a new profile, browse to an external profile, reload the profile list, or remove the selected entry.</li>
+          <li><strong>Profiles ribbon toggle</strong>: use <strong>View &gt; Show Profiles Ribbon</strong> when you want that toolbar visible or hidden, and the choice is remembered with the rest of the workspace.</li>
           <li><strong>Dockable panes</strong>: keep the window focused on your current task by showing only the panes you need.</li>
           <li><strong>Tabbed catalog tools</strong>: Release Browser, Work Manager, Catalog Managers, License Browser, Party Manager, Contract Manager, Rights Matrix, Asset Registry, and Global Search open as docked tabs beside the table so you can keep using the track browser while those panels remain open.</li>
           <li><strong>Saved layout</strong>: column layout, dock placement, and visibility preferences are remembered so the app opens the way you work.</li>
@@ -115,7 +120,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Reload List</strong>: refresh the known profile list from disk.</li>
           <li><strong>Remove…</strong>: remove the selected profile from the list and, if you choose, from disk as well.</li>
         </ul>
-        <p>Profile-specific catalog data stays with the profile. Shared app-level conveniences such as saved themes and remembered layout settings stay available across profiles. That balance keeps the product practical for both single-catalog and multi-catalog use.</p>
+        <p>Profile-specific catalog data stays with the profile. Shared app-level conveniences such as saved themes and remembered layout settings stay available across profiles. On first launch, the app can also offer to open <strong>Application Settings</strong> so you can configure registration values, snapshot posture, and appearance before deeper catalog work begins.</p>
         """,
     ),
     HelpChapter(
@@ -301,7 +306,32 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Conflict policy</strong>: choose whether file tags should fill blanks only, override database values, or defer to the existing catalog data.</li>
           <li><strong>Write Tags To Exported Audio…</strong>: exports tagged audio copies to a folder without touching the managed source files in place.</li>
         </ul>
-        <p>The app preserves the original audio data when writing tags to exported copies. Unsupported or malformed tags are skipped with warnings instead of crashing the workflow, which makes the feature useful for preparing tagged deliverables without risking the original master file.</p>
+        <p>The app preserves the original audio data when writing tags to exported copies. Unsupported or malformed tags are skipped with warnings instead of crashing the workflow, which makes the feature useful for preparing tagged deliverables without risking the original master file. When the track rows already exist and the job is to attach local files in bulk, use <strong>Catalog &gt; Bulk Attach Audio Files…</strong> instead.</p>
+        """,
+    ),
+    HelpChapter(
+        chapter_id="bulk-audio-attach",
+        title="Bulk Audio Attach",
+        summary="Attach many local audio files to existing tracks by reviewing filename and tag matches before one batch apply.",
+        keywords=(
+            "bulk attach audio",
+            "attach audio files",
+            "filename matching",
+            "apply artist",
+            "storage mode",
+            "matched tracks",
+        ),
+        content_html="""
+        <p><strong>Catalog &gt; Bulk Attach Audio Files…</strong> is the fastest way to connect a large batch of local audio files to tracks that already exist in the catalog.</p>
+        <ul>
+          <li><strong>Match suggestions</strong>: the workflow inspects filenames and embedded tags to suggest likely track matches.</li>
+          <li><strong>Review before write</strong>: the dialog shows the detected title, detected artist, current matched artist, and source file so you can confirm the batch before anything is saved.</li>
+          <li><strong>Skip or reassign</strong>: any file can be skipped or manually reassigned to another track from the same review surface.</li>
+          <li><strong>Storage mode choice</strong>: attached audio can be stored in the database or as managed local files.</li>
+          <li><strong>Optional shared artist update</strong>: when the batch is consistent, one artist value can be applied across the matched tracks during the same operation.</li>
+          <li><strong>Recoverable batch</strong>: the final apply step is recorded as one history-backed mutation rather than as a chain of separate row edits.</li>
+        </ul>
+        <p>This workflow is separate from exchange import and from audio-tag import. Use it when the catalog rows already exist and you mainly need to connect the right audio files quickly and safely.</p>
         """,
     ),
     HelpChapter(
@@ -353,7 +383,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Track-to-work links</strong>: one work can link to many recordings, and one recording can link back to more than one work where needed. Tracks and releases continue to keep their own recording/product metadata.</li>
           <li><strong>Parties</strong>: reusable people and companies can be linked as writers, publishers, contract counterparties, licensors, licensees, and rights holders.</li>
           <li><strong>Contracts</strong>: draft, signature, effective, start, end, renewal, notice, reversion, and termination dates are stored as structured fields. Contracts can link to works, tracks, releases, and parties.</li>
-          <li><strong>Obligations and reminders</strong>: delivery, approval, exclusivity, notice, follow-up, and reminder obligations can be stored per contract.</li>
+          <li><strong>Obligations and reminders</strong>: delivery, approval, exclusivity, notice, follow-up, and reminder obligations are edited as structured rows with due dates, completion state, and notes.</li>
           <li><strong>Document intelligence</strong>: a contract can keep multiple managed documents such as drafts, signed agreements, amendments, appendices, exhibits, correspondence, and scans, with version labels and active/superseded relationships.</li>
           <li><strong>Rights matrix</strong>: rights records store the right type, exclusivity, territory, media/use scope, dates, source contract, and who granted, received, or retained the right.</li>
           <li><strong>Assets and deliverables</strong>: tracks and releases can keep primary masters, alternates, derivatives, artwork variants, and approval state in one registry.</li>
@@ -415,8 +445,10 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         <ul>
           <li><strong>Export formats</strong>: CSV, XLSX, JSON, XML, and ZIP packages containing a JSON manifest plus materialized attachment copies.</li>
           <li><strong>Import formats</strong>: CSV, XLSX, JSON, ZIP packages, and XML.</li>
-          <li><strong>Import preview</strong>: CSV and XLSX imports open a mapping dialog so you can confirm how source columns map to standard or custom fields before running the import.</li>
+          <li><strong>Import setup</strong>: CSV, XLSX, JSON, and ZIP package imports all open the exchange setup surface so you can review preview rows, match rules, and field targets before running the job.</li>
           <li><strong>Saved mapping presets</strong>: frequently used column mappings can be saved per format and reused later.</li>
+          <li><strong>Saved choices</strong>: per-format import choices can be remembered and later cleared from <strong>File &gt; Import Exchange &gt; Reset Saved Import Choices…</strong>.</li>
+          <li><strong>Skip targets</strong>: any incoming field can be marked as <strong>Skip this field</strong> when you want it inspected but not applied.</li>
           <li><strong>Import modes</strong>: dry-run validation, create new rows, merge into existing matches, update existing matches only, or insert-new-when-duplicate-exists.</li>
           <li><strong>Matching options</strong>: internal ID, ISRC, UPC/EAN plus title, and optional title/artist heuristics.</li>
           <li><strong>JSON schema versioning</strong>: exported JSON includes an explicit schema version so future migrations stay manageable.</li>
@@ -445,16 +477,18 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         content_html="""
         <p>The app has three separate ingest surfaces: exchange import for structured rows and packages, XML import for supported XML shapes, and audio-tag import/export for embedded file metadata. They overlap in the fields they can touch, but they are not the same workflow.</p>
         <ul>
-          <li><strong>Exchange import</strong>: supports <code>CSV</code>, <code>XLSX</code>, <code>JSON</code>, and <code>ZIP package</code>. CSV import can auto-detect comma, semicolon, tab, or pipe delimiters, and CSV/XLSX can map source columns to supported standard fields or active <code>custom::name</code> text fields.</li>
+          <li><strong>Exchange import</strong>: supports <code>CSV</code>, <code>XLSX</code>, <code>JSON</code>, and <code>ZIP package</code>. CSV import can auto-detect comma, semicolon, tab, or pipe delimiters, and the exchange setup surface can map or skip supported fields across the structured import formats.</li>
           <li><strong>Mapping presets</strong>: reusable CSV/XLSX mappings can be saved and loaded again for recurring imports.</li>
+          <li><strong>Saved import choices</strong>: each exchange format can remember its preferred mode, match rules, custom-field creation behavior, and CSV delimiter choice until you reset those saved choices.</li>
           <li><strong>Exchange modes</strong>: <code>dry_run</code> checks setup without writing, <code>create</code> creates new tracks, <code>update</code> updates matched tracks only, <code>merge</code> updates matched tracks while preserving many existing populated values, and <code>insert_new</code> creates only unmatched rows and skips duplicates.</li>
           <li><strong>Exchange matching</strong>: matching can use internal ID, ISRC, UPC plus title, and optional title/artist heuristics. The importer is deterministic and does not provide a row-by-row manual assignment queue.</li>
           <li><strong>Release upsert and package restore</strong>: exchange import can update or create linked releases from supplied release fields, while ZIP package import restores packaged files and their recorded storage mode.</li>
           <li><strong>XML import</strong>: accepts supported catalog XML shapes, performs a stronger inspection and dry-run style preflight, reports duplicate ISRCs and custom-field conflicts, can create missing custom fields when allowed, and then imports valid new rows. XML import is insert-oriented rather than merge-oriented.</li>
+          <li><strong>Bulk audio attach</strong>: <strong>Catalog &gt; Bulk Attach Audio Files…</strong> is the better fit when track rows already exist and you need to match local files onto them in one reviewed batch.</li>
           <li><strong>Audio tags</strong>: read embedded tags from supported audio files, preview conflicts before writing to the catalog, and write tags only to exported copies rather than rewriting managed source files in place.</li>
         </ul>
         <p>This workflow is useful for structured exports from labels, catalog administrators, collection societies, and PRO-style sources such as BUMA, STEMRA, SENA, and similar organizations, provided the data can be exported into a supported format. That support is format-based and mapping-based, not a direct third-party integration.</p>
-        <p>Keep the current limits in mind: blob custom fields are not tabular import targets, JSON and ZIP package import do not expose the same column-mapping controls as CSV/XLSX, standard exchange <code>dry_run</code> is a conservative preflight rather than a full validation engine, and matched release rows can be updated from imported release data.</p>
+        <p>Keep the current limits in mind: blob custom fields are not tabular import targets, JSON and ZIP package imports do not use CSV delimiter controls because their source structure is already defined, standard exchange <code>dry_run</code> is a conservative preflight rather than a full validation engine, and matched release rows can be updated from imported release data.</p>
         """,
     ),
     HelpChapter(
@@ -551,7 +585,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
     HelpChapter(
         chapter_id="settings",
         title="Application Settings",
-        summary="The central settings workspace for branding, registration values, snapshots, GS1 defaults, and appearance.",
+        summary="The central settings workspace for branding, registration values, snapshots, retention posture, GS1 defaults, and appearance.",
         keywords=(
             "settings",
             "application settings",
@@ -559,15 +593,17 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "icon",
             "isrc prefix",
             "snapshot interval",
+            "retention",
+            "storage budget",
         ),
         content_html="""
         <p>The Application Settings dialog brings the app's most important configuration into one organized workspace so you do not have to hunt through multiple small dialogs.</p>
         <ul>
-          <li><strong>General</strong>: window title, app icon, and core registration details.</li>
+          <li><strong>General</strong>: current profile context, window title, app icon, core registration details, automatic snapshots, retention and safety level, automatic cleanup, and history storage budget controls.</li>
           <li><strong>GS1</strong>: template storage mode plus profile defaults for GS1 export workflows.</li>
           <li><strong>Theme</strong>: the full visual theme builder, starter themes, live preview, and advanced QSS.</li>
         </ul>
-        <p>Saving settings updates the current app state immediately, while supported settings changes are also recorded in history so major appearance and configuration changes remain recoverable. Media badge icon choices for stored audio and image BLOBs are managed from the Theme workspace but are kept separate from reusable theme presets.</p>
+        <p>Saving settings updates the current app state immediately, while supported settings changes are also recorded in history so major appearance and configuration changes remain recoverable. On first launch, the app can offer to open this dialog so you can configure registration and recovery posture early. Media badge icon choices for stored audio and image BLOBs are managed from the Theme workspace but are kept separate from reusable theme presets.</p>
         """,
     ),
     HelpChapter(
@@ -620,24 +656,37 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Backups</strong>: review registered backup files that were created manually or as restore safety copies.</li>
           <li><strong>Cleanup…</strong>: preview safe-to-delete snapshots, backup artifacts, archived snapshot bundles, file-state bundles, and stale session snapshots.</li>
           <li><strong>Trim History</strong>: keep the most recent reversible actions on the active branch while removing older history rows and newly unreferenced storage artifacts.</li>
+          <li><strong>Retention and safety controls</strong>: the General settings page can store Maximum Safety, Balanced, Lean, or Custom cleanup posture for the active profile.</li>
+          <li><strong>Budget-aware prompts</strong>: snapshot, restore, and related flows can warn when the profile is over its configured history storage budget and open cleanup directly.</li>
         </ul>
-        <p>Snapshots capture the profile database and related managed state where supported, giving heavier workflows a safer recovery path than a simple session-only undo stack. Cleanup previews exactly which artifacts are eligible, protects anything still required by undo, redo, snapshot restore, backup restore, or session restore, and leaves protected items untouched. If Diagnostics reports missing or inconsistent history artifacts, repair those issues first before trimming storage.</p>
+        <p>Snapshots capture the profile database and related managed state where supported, giving heavier workflows a safer recovery path than a simple session-only undo stack. Cleanup previews exactly which artifacts are eligible, protects anything still required by undo, redo, snapshot restore, backup restore, or session restore, and leaves protected items untouched. Manual snapshots and protected restore points stay protected by default, while automatic cleanup focuses on safe auto-generated artifacts only. If Diagnostics reports missing or inconsistent history artifacts, repair those issues first before trimming storage.</p>
         """,
     ),
     HelpChapter(
         chapter_id="diagnostics",
         title="Diagnostics",
         summary="Use diagnostics to verify the health of the application, the active profile, and the managed files around it.",
-        keywords=("diagnostics", "integrity", "schema", "repair", "managed files", "checks"),
+        keywords=(
+            "diagnostics",
+            "integrity",
+            "schema",
+            "repair",
+            "managed files",
+            "checks",
+            "storage budget",
+            "migration",
+            "legacy promoted field",
+        ),
         content_html="""
         <p>The Diagnostics window gives you a high-level health view of both the application environment and the active profile so you can verify that the workspace is still operating cleanly. Use it when the issue may involve storage, schema, managed files, history artifacts, or migration state rather than catalog content itself.</p>
         <ul>
           <li><strong>Environment</strong>: app version, schema version, profile path, data folder, log folder, snapshot count, platform, and Python version.</li>
-          <li><strong>Checks</strong>: storage layout, schema validation, SQLite integrity, foreign-key integrity, custom-value integrity, managed files for path-backed records, and history storage.</li>
+          <li><strong>Checks</strong>: storage layout, schema validation, SQLite integrity, foreign-key integrity, custom-value integrity, managed files for path-backed records, history storage, and history storage budget pressure.</li>
           <li><strong>Details</strong>: expanded explanation for the currently selected check.</li>
-          <li><strong>Repair</strong>: preview or run supported repair actions when a check reports a repairable issue, including storage-layout migration and history artifact reconciliation.</li>
+          <li><strong>Repair</strong>: preview or run supported repair actions when a check reports a repairable issue, including storage-layout migration, history artifact reconciliation, and the conservative legacy promoted-field merge repair.</li>
+          <li><strong>Responsive loading</strong>: heavier diagnostics reports and supported repairs run through the background task system so the window stays responsive during refresh.</li>
         </ul>
-        <p>Use Diagnostics after restores, before major exports, when troubleshooting a profile, or any time you want to verify that the catalog and its managed files are still aligned. If a legacy app-data layout is detected, Diagnostics can guide a staged migration into the preferred app-named folder structure without deleting the legacy copy. Migration will not start while background tasks are still running, closes the active managed profile before copying, stages the new layout first, rewrites known internal paths, verifies the migrated databases, and only then switches the app over to the preferred root.</p>
+        <p>Use Diagnostics after restores, before major exports, when troubleshooting a profile, or any time you want to verify that the catalog and its managed files are still aligned. If a legacy app-data layout is detected, Diagnostics can guide a staged migration into the preferred app-named folder structure without deleting the legacy copy. Migration will not start while background tasks are still running, closes the active managed profile before copying, stages the new layout first, rewrites known internal paths, verifies the migrated databases, and only then switches the app over to the preferred root. If the preferred root is already valid, the app can adopt it directly, and if a preserved staged migration is still valid, the app can resume from that stage instead of starting over.</p>
         """,
     ),
     HelpChapter(
