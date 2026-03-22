@@ -692,7 +692,12 @@ class BulkAudioAttachService:
                 best_basis = basis_label
 
         normalized_artist = _normalize_match_text(detected_artist)
-        if best_score > 0 and normalized_artist and track_artist and normalized_artist == track_artist:
+        if (
+            best_score > 0
+            and normalized_artist
+            and track_artist
+            and normalized_artist == track_artist
+        ):
             best_score += 25
             best_basis = f"{best_basis} + artist"
 

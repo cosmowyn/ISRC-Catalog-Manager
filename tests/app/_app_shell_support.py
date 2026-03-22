@@ -488,11 +488,16 @@ class AppShellTestCase(unittest.TestCase):
             box._clicked_button = box._buttons.get("Open Settings")
             return box
 
-        with mock.patch.object(
-            app_module.App,
-            "_run_startup_message_box",
-            new=_fake_startup_message_box,
-        ), mock.patch.object(app_module.App, "open_settings_dialog", autospec=True) as open_settings:
+        with (
+            mock.patch.object(
+                app_module.App,
+                "_run_startup_message_box",
+                new=_fake_startup_message_box,
+            ),
+            mock.patch.object(
+                app_module.App, "open_settings_dialog", autospec=True
+            ) as open_settings,
+        ):
             self.window = app_module.App()
             self.window.show()
             self._drain_events()
@@ -1569,9 +1574,7 @@ class AppShellTestCase(unittest.TestCase):
         self.window.profiles_toolbar_visibility_action.trigger()
         self.app.processEvents()
         self.assertFalse(self.window.toolbar.isVisible())
-        self.assertFalse(
-            self.window.settings.value("display/profiles_toolbar_visible", True, bool)
-        )
+        self.assertFalse(self.window.settings.value("display/profiles_toolbar_visible", True, bool))
 
         self._reopen_window()
         self.assertFalse(self.window.toolbar.isVisible())
@@ -1579,12 +1582,12 @@ class AppShellTestCase(unittest.TestCase):
         self.window.profiles_toolbar_visibility_action.trigger()
         self.app.processEvents()
         self.assertTrue(self.window.toolbar.isVisible())
-        self.assertTrue(
-            self.window.settings.value("display/profiles_toolbar_visible", False, bool)
-        )
+        self.assertTrue(self.window.settings.value("display/profiles_toolbar_visible", False, bool))
 
     def case_album_art_export_uses_album_title_and_bulk_export_stays_on_focused_column(self):
-        track_one = self._create_track(index=151, title="Comet Signal", album_title="Aurora Heights")
+        track_one = self._create_track(
+            index=151, title="Comet Signal", album_title="Aurora Heights"
+        )
         track_two = self._create_track(index=152, title="Harbor Glow", album_title="Neon Tides")
         cover_one = self._create_media_file("aurora.png", b"\x89PNG\r\n\x1a\naurora")
         cover_two = self._create_media_file("neon.png", b"\x89PNG\r\n\x1a\nneon")
@@ -1649,11 +1652,14 @@ class AppShellTestCase(unittest.TestCase):
 
         output_dir = self.root / "album-art-export"
         output_dir.mkdir()
-        with mock.patch.object(
-            app_module.QFileDialog,
-            "getExistingDirectory",
-            return_value=str(output_dir),
-        ), mock.patch.object(app_module.QMessageBox, "information"):
+        with (
+            mock.patch.object(
+                app_module.QFileDialog,
+                "getExistingDirectory",
+                return_value=str(output_dir),
+            ),
+            mock.patch.object(app_module.QMessageBox, "information"),
+        ):
             self.window._export_focused_media_column(
                 album_art_col,
                 track_ids=[track_one, track_two],
@@ -1714,8 +1720,12 @@ class AppShellTestCase(unittest.TestCase):
         ):
             self.window.bulk_attach_audio_files(track_ids=[track_one, track_two])
 
-        audio_one_bytes, _mime_one = self.window.track_service.fetch_media_bytes(track_one, "audio_file")
-        audio_two_bytes, _mime_two = self.window.track_service.fetch_media_bytes(track_two, "audio_file")
+        audio_one_bytes, _mime_one = self.window.track_service.fetch_media_bytes(
+            track_one, "audio_file"
+        )
+        audio_two_bytes, _mime_two = self.window.track_service.fetch_media_bytes(
+            track_two, "audio_file"
+        )
         self.assertEqual(audio_one_bytes, b"RIFForbit")
         self.assertEqual(audio_two_bytes, b"RIFFaurora")
 
@@ -2093,7 +2103,9 @@ class AppShellTestCase(unittest.TestCase):
             dialog.close()
 
     def case_track_editor_save_succeeds_without_album_propagation(self):
-        track_id = self._create_track(index=188, title="Single Edit Source", album_title="Solo Album")
+        track_id = self._create_track(
+            index=188, title="Single Edit Source", album_title="Solo Album"
+        )
 
         dialog = app_module.EditDialog(track_id, self.window)
         try:

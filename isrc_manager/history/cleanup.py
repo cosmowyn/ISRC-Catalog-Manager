@@ -353,11 +353,10 @@ class HistoryStorageCleanupService:
         budget_bytes = budget_mb * 1024 * 1024
         over_budget_bytes = max(0, total_bytes - budget_bytes) if budget_bytes > 0 else 0
         candidate_keys = {item.item_key for item in candidate_items}
-        protected_over_budget_items = tuple(
-            item
-            for item in preview.eligible_items
-            if item.item_key not in candidate_keys
-        ) + preview.protected_items
+        protected_over_budget_items = (
+            tuple(item for item in preview.eligible_items if item.item_key not in candidate_keys)
+            + preview.protected_items
+        )
         return HistoryStorageBudgetPreview(
             total_bytes=total_bytes,
             budget_bytes=budget_bytes,

@@ -14,7 +14,7 @@ class ExportFilenameHelperTests(unittest.TestCase):
 
     def test_sanitize_export_basename_replaces_invalid_characters(self):
         self.assertEqual(
-            sanitize_export_basename('Album: One/Two\\Three?*'),
+            sanitize_export_basename("Album: One/Two\\Three?*"),
             "Album_ One_Two_Three_",
         )
 

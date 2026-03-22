@@ -1358,8 +1358,7 @@ class ExchangeServiceTestCase(unittest.TestCase):
         )
         csv_path = self.data_root / "distribution-status-import.csv"
         csv_path.write_text(
-            "track_title,artist_name,custom::Distribution Status\n"
-            "Orbit,Cosmowyn,Approved\n",
+            "track_title,artist_name,custom::Distribution Status\n" "Orbit,Cosmowyn,Approved\n",
             encoding="utf-8",
         )
 

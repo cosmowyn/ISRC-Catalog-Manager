@@ -1049,9 +1049,8 @@ class DiagnosticsDialog(QDialog):
             != QMessageBox.Yes
         ):
             return
-        if (
-            check["repair_key"] != "storage_layout_migrate"
-            and hasattr(self.app, "_run_diagnostics_repair_async")
+        if check["repair_key"] != "storage_layout_migrate" and hasattr(
+            self.app, "_run_diagnostics_repair_async"
         ):
             self._set_busy(True, label)
             self.app._run_diagnostics_repair_async(

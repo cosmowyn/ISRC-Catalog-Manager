@@ -121,7 +121,9 @@ class _DiagnosticsDialogHost(QWidget):
         return f"repair-{len(self.repair_calls)}"
 
     def _show_background_task_error(self, title, failure, *, user_message):
-        self.background_errors.append((title, user_message, getattr(failure, "message", str(failure))))
+        self.background_errors.append(
+            (title, user_message, getattr(failure, "message", str(failure)))
+        )
 
     def _open_local_path(self, path, _title):
         self.opened_paths.append(Path(path))

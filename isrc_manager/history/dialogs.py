@@ -451,18 +451,14 @@ class HistoryCleanupDialog(QDialog):
                 )
                 summary_text += f" Retention level: {mode_label}."
             if budget_preview.over_budget_bytes > 0:
-                summary_text += (
-                    f" The profile is over budget by {self._human_size(budget_preview.over_budget_bytes)}."
-                )
+                summary_text += f" The profile is over budget by {self._human_size(budget_preview.over_budget_bytes)}."
                 if budget_preview.candidate_items:
                     summary_text += (
                         f" Automatic cleanup can remove {len(budget_preview.candidate_items)} "
                         "safe item(s) under the current policy."
                     )
                 elif budget_preview.protected_over_budget_items:
-                    summary_text += (
-                        " The remaining over-budget storage is protected by retained history or manual restore points."
-                    )
+                    summary_text += " The remaining over-budget storage is protected by retained history or manual restore points."
         self.summary_label.setText(summary_text)
 
         self._populate_cleanup_table(self.eligible_table, preview.eligible_items)

@@ -46,9 +46,7 @@ class HistoryRetentionSettings:
     auto_cleanup_enabled: bool = DEFAULT_HISTORY_AUTO_CLEANUP_ENABLED
     storage_budget_mb: int = DEFAULT_HISTORY_STORAGE_BUDGET_MB
     auto_snapshot_keep_latest: int = DEFAULT_HISTORY_AUTO_SNAPSHOT_KEEP_LATEST
-    prune_pre_restore_copies_after_days: int = (
-        DEFAULT_HISTORY_PRUNE_PRE_RESTORE_COPIES_AFTER_DAYS
-    )
+    prune_pre_restore_copies_after_days: int = DEFAULT_HISTORY_PRUNE_PRE_RESTORE_COPIES_AFTER_DAYS
 
 
 class SettingsReadService:

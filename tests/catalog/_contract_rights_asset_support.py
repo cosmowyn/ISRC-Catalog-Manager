@@ -23,13 +23,14 @@ from isrc_manager.works import WorkPayload, WorkService
 from tests.qt_test_helpers import require_qapplication
 
 try:
+    from PySide6.QtWidgets import QFrame
+
     from isrc_manager.contracts.dialogs import (
         ContractBrowserPanel,
         ContractDocumentEditor,
         ContractEditorDialog,
         ContractObligationEditor,
     )
-    from PySide6.QtWidgets import QFrame
 except Exception:  # pragma: no cover - environment-specific fallback
     ContractBrowserPanel = None
     ContractDocumentEditor = None
@@ -760,7 +761,9 @@ class ContractRightsAssetServiceTestCase(unittest.TestCase):
         dialog = ContractEditorDialog(contract_service=self.contract_service, detail=detail)
         try:
             self.assertIsInstance(dialog.obligations_editor, ContractObligationEditor)
-            self.assertEqual(dialog.obligations_editor.obligation_title_edit.text(), "Approve artwork")
+            self.assertEqual(
+                dialog.obligations_editor.obligation_title_edit.text(), "Approve artwork"
+            )
             self.assertEqual(dialog.obligations_editor.completed_at_edit.text(), "2026-04-02")
             self.assertEqual(
                 dialog.obligations_editor.obligation_notes_edit.toPlainText(),

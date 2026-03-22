@@ -16,7 +16,11 @@ else:
 
 from isrc_manager.history import HistoryManager
 from isrc_manager.history.dialogs import HistoryCleanupDialog, HistoryDialog
-from isrc_manager.services import DatabaseSchemaService, SettingsMutationService, SettingsReadService
+from isrc_manager.services import (
+    DatabaseSchemaService,
+    SettingsMutationService,
+    SettingsReadService,
+)
 
 
 class _EmptySessionHistory:

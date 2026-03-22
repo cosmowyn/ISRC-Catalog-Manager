@@ -256,7 +256,9 @@ class BulkAudioAttachDialog(QDialog):
             original_artist = self._items[row].get("matched_track_artist") or ""
             artist_item.setText(str(original_artist))
         else:
-            artist_item.setText(str(self._track_choice_map.get(int(track_id), {}).get("artist") or ""))
+            artist_item.setText(
+                str(self._track_choice_map.get(int(track_id), {}).get("artist") or "")
+            )
         if len(self._match_combos) == len(self._items):
             self._refresh_summary()
 
@@ -293,7 +295,9 @@ class BulkAudioAttachDialog(QDialog):
     def accept(self) -> None:
         matches = self.selected_matches()
         if not matches:
-            QMessageBox.warning(self, self.windowTitle(), "Choose at least one file-to-track match.")
+            QMessageBox.warning(
+                self, self.windowTitle(), "Choose at least one file-to-track match."
+            )
             return
         seen: set[int] = set()
         duplicates: list[str] = []
