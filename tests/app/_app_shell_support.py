@@ -4,6 +4,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from isrc_manager.constants import APP_NAME
@@ -230,6 +231,28 @@ class AppShellTestCase(unittest.TestCase):
         settings = app_module.QSettings(str(self._settings_path()), app_module.QSettings.IniFormat)
         settings.setFallbacksEnabled(False)
         return settings
+
+    def _run_bundle_task_inline(self, window, **kwargs):
+        class _InlineTaskContext:
+            def set_status(self, _message):
+                return None
+
+            def report_progress(self, *args, **kwargs):
+                del args, kwargs
+                return None
+
+            def raise_if_cancelled(self):
+                return None
+
+        with window.background_service_factory.open_bundle() as bundle:
+            result = kwargs["task_fn"](bundle, _InlineTaskContext())
+        on_success = kwargs.get("on_success")
+        if callable(on_success):
+            on_success(result)
+        on_finished = kwargs.get("on_finished")
+        if callable(on_finished):
+            on_finished()
+        return "inline-task"
 
     def _set_first_launch_prompt_pending(self, pending: bool) -> None:
         settings = self._settings()
@@ -1645,6 +1668,124 @@ class AppShellTestCase(unittest.TestCase):
             ],
         )
         self.assertFalse(any(name.endswith(".wav") for name in exported_names))
+
+    def case_bulk_audio_attach_workflow_matches_files_updates_artists_and_records_history(self):
+        track_one = self._create_track(index=401, title="Orbit Lines")
+        track_two = self._create_track(index=402, title="Aurora Bloom")
+        self.window.refresh_table_preserve_view(focus_id=track_one)
+        self.app.processEvents()
+
+        audio_one = self._create_media_file("Orbit Lines.wav", b"RIFForbit")
+        audio_two = self._create_media_file("Aurora Bloom.wav", b"RIFFaurora")
+
+        with (
+            mock.patch.object(
+                app_module.App,
+                "_submit_background_bundle_task",
+                autospec=True,
+                side_effect=self._run_bundle_task_inline,
+            ),
+            mock.patch.object(
+                app_module.QFileDialog,
+                "getOpenFileNames",
+                return_value=([str(audio_one), str(audio_two)], ""),
+            ),
+            mock.patch.object(
+                app_module.AudioTagService,
+                "read_tags",
+                return_value=SimpleNamespace(title=None, artist=None),
+            ),
+            mock.patch.object(
+                app_module.BulkAudioAttachDialog,
+                "exec",
+                return_value=app_module.QDialog.Accepted,
+            ),
+            mock.patch.object(
+                app_module.BulkAudioAttachDialog,
+                "selected_artist_name",
+                return_value="Synth Unit",
+            ),
+            mock.patch.object(
+                app_module,
+                "_prompt_storage_mode_choice",
+                return_value=app_module.STORAGE_MODE_DATABASE,
+            ),
+            mock.patch.object(app_module.QMessageBox, "information") as info_mock,
+        ):
+            self.window.bulk_attach_audio_files(track_ids=[track_one, track_two])
+
+        audio_one_bytes, _mime_one = self.window.track_service.fetch_media_bytes(track_one, "audio_file")
+        audio_two_bytes, _mime_two = self.window.track_service.fetch_media_bytes(track_two, "audio_file")
+        self.assertEqual(audio_one_bytes, b"RIFForbit")
+        self.assertEqual(audio_two_bytes, b"RIFFaurora")
+
+        snapshot_one = self.window.track_service.fetch_track_snapshot(track_one)
+        snapshot_two = self.window.track_service.fetch_track_snapshot(track_two)
+        self.assertEqual(snapshot_one.artist_name, "Synth Unit")
+        self.assertEqual(snapshot_two.artist_name, "Synth Unit")
+
+        visible_history = self.window.history_manager.list_entries(limit=5)
+        self.assertEqual(visible_history[0].label, "Bulk Attach Audio Files (2 files)")
+        info_mock.assert_called_once()
+        self.assertIn("Attached audio to 2 track(s).", info_mock.call_args.args[2])
+        self.assertIn("Updated the main artist on 2 matched track(s).", info_mock.call_args.args[2])
+
+    def case_history_budget_preflight_can_open_cleanup_dialog(self):
+        self.window.settings_mutations.set_history_retention_mode("lean")
+        self.window.settings_mutations.set_history_storage_budget_mb(1)
+
+        class _CleanupPromptBox:
+            Warning = object()
+            AcceptRole = object()
+            ActionRole = object()
+            Cancel = object()
+            last_text = ""
+
+            def __init__(self, *_args, **_kwargs):
+                self._cleanup_button = None
+                self._clicked_button = None
+
+            def setIcon(self, _icon):
+                return None
+
+            def setWindowTitle(self, _title):
+                return None
+
+            def setText(self, text):
+                type(self).last_text = str(text)
+
+            def addButton(self, label, _role=None):
+                button = object()
+                if label == "Open Cleanup":
+                    self._cleanup_button = button
+                return button
+
+            def setDefaultButton(self, _button):
+                return None
+
+            def exec(self):
+                self._clicked_button = self._cleanup_button
+
+            def clickedButton(self):
+                return self._clicked_button
+
+        with (
+            mock.patch.object(app_module, "QMessageBox", _CleanupPromptBox),
+            mock.patch.object(self.window, "open_history_cleanup_dialog") as open_cleanup,
+        ):
+            allowed = self.window._prepare_history_storage_for_projected_growth(
+                trigger_label="manual snapshot",
+                additional_bytes=256 * 1024 * 1024,
+                interactive=True,
+            )
+
+        self.assertFalse(allowed)
+        open_cleanup.assert_called_once_with()
+        self.assertIn("Projected usage", _CleanupPromptBox.last_text)
+        self.assertIn(
+            "Continue anyway, or review History Cleanup first?",
+            _CleanupPromptBox.last_text,
+        )
 
     def case_hidden_catalog_table_does_not_block_workspace_dock_access_or_peer_tabifying(self):
         self.assertTrue(self.window.catalog_table_dock.isVisible())

@@ -32,6 +32,12 @@ class AppShellStartupCoreTests(AppShellTestCase):
     test_album_art_export_uses_album_title_and_bulk_export_stays_on_focused_column = (
         AppShellTestCase.case_album_art_export_uses_album_title_and_bulk_export_stays_on_focused_column
     )
+    test_bulk_audio_attach_workflow_matches_files_updates_artists_and_records_history = (
+        AppShellTestCase.case_bulk_audio_attach_workflow_matches_files_updates_artists_and_records_history
+    )
+    test_history_budget_preflight_can_open_cleanup_dialog = (
+        AppShellTestCase.case_history_budget_preflight_can_open_cleanup_dialog
+    )
     test_track_editor_save_succeeds_without_album_propagation = (
         AppShellTestCase.case_track_editor_save_succeeds_without_album_propagation
     )

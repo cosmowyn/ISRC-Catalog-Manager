@@ -7,7 +7,7 @@ Date: 2026-03-22
 
 This document uses the live repository as the source of truth. It was created from a full repo inspection plus focused analysis of UI, services, responsiveness, storage/history, tests, and handoff conventions.
 
-Implementation has progressed through all planned waves. Wave 1 and Wave 2 are complete from the earlier pass, Wave 3 and Wave 4 are complete from the next continuation pass, and Wave 5 now includes managed-root snapshot coverage, profile-scoped retention/security presets, storage-budget preflight and cleanup enforcement, budget diagnostics reporting, and a diagnostics-driven legacy promoted-field repair path. The remaining follow-up work is primarily deeper integration coverage around the new repair/storage flows rather than missing backlog features.
+Implementation has progressed through all planned waves. Wave 1 and Wave 2 are complete from the earlier pass, Wave 3 and Wave 4 are complete from the next continuation pass, and Wave 5 now includes managed-root snapshot coverage, profile-scoped retention/security presets, storage-budget preflight and cleanup enforcement, budget diagnostics reporting, and a diagnostics-driven legacy promoted-field repair path. App-level integration coverage now also exercises the bulk-audio attach workflow and the interactive history-budget preflight prompt. The remaining follow-up work is primarily CI/runtime verification rather than missing backlog features.
 
 ## Source Of Truth
 
@@ -482,12 +482,12 @@ Exit criteria:
 ### Next Wave To Start
 
 - No new feature wave is required to satisfy the analyzed backlog.
-- The next highest-value follow-up is higher-level integration coverage for the new repair/storage flows and broader app-level coverage for the bulk-audio attach workflow.
+- The next highest-value follow-up is CI/runtime verification of the completed waves under real long-running workloads.
 
 ### Still Open After This Pass
 
-- Higher-level diagnostics/history integration coverage around budget-preflight prompts and post-repair refresh behavior
-- Additional integration coverage for the new bulk-audio attach app workflow
+- CI coverage for the new app-shell workflows and long-running background-task paths
+- Manual runtime verification of history cleanup prompts, diagnostics repairs, and large bulk-audio batches
 
 ### Important Continuation Notes
 
@@ -539,6 +539,8 @@ Exit criteria:
 - Updated `tests/history/_support.py`
 - Updated `tests/history/test_history_settings.py`
 - Updated `tests/history/test_history_snapshots.py`
+- Updated `tests/app/_app_shell_support.py`
+- Updated `tests/app/test_app_shell_startup_core.py`
 - Updated `tests/test_app_dialogs.py`
 - Updated `tests/test_history_cleanup_service.py`
 - Updated `tests/test_history_dialogs.py`
@@ -574,9 +576,11 @@ Exit criteria:
 - Result: `Ran 25 tests in 0.761s` and `OK`
 - `python3 -m unittest tests.history.test_history_snapshots tests.test_history_cleanup_service`
 - Result: `Ran 16 tests in 0.235s` and `OK`
+- `python3 -m unittest tests.app.test_app_shell_startup_core`
+- Result: `Ran 13 tests in 60.200s` and `OK`
 
 ## Future Recommendations
 
 - Split narrower follow-up handoffs only after one of the high-risk waves lands and materially changes the repo shape.
-- Refresh this unified strategy when the remaining backlog changes or when follow-up integration coverage materially changes the storage/repair flows.
+- Refresh this unified strategy when the backlog changes again or when CI/runtime validation uncovers gaps that require new implementation work.
 - Keep broad visual restyling and unrelated dock/layout cleanup out of this backlog unless they become required to safely finish one of the defined waves.
