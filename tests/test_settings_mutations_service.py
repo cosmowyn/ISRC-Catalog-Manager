@@ -63,6 +63,7 @@ class SettingsMutationServiceTests(unittest.TestCase):
         self.service.set_artist_code("42")
         self.service.set_auto_snapshot_enabled(False)
         self.service.set_auto_snapshot_interval_minutes(45)
+        self.service.set_history_retention_mode("lean")
         self.service.set_history_auto_cleanup_enabled(False)
         self.service.set_history_storage_budget_mb(4096)
         self.service.set_history_auto_snapshot_keep_latest(12)
@@ -88,6 +89,12 @@ class SettingsMutationServiceTests(unittest.TestCase):
                 "SELECT value FROM app_kv WHERE key='auto_snapshot_interval_minutes'"
             ).fetchone(),
             ("45",),
+        )
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT value FROM app_kv WHERE key='history_retention_mode'"
+            ).fetchone(),
+            ("lean",),
         )
         self.assertEqual(
             self.conn.execute(

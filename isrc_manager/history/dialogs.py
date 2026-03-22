@@ -298,6 +298,12 @@ class HistoryDialog(QDialog):
 class HistoryCleanupDialog(QDialog):
     """Preview and clean eligible history storage artifacts."""
 
+    RETENTION_MODE_LABELS = {
+        "maximum_safety": "Maximum Safety",
+        "balanced": "Balanced",
+        "lean": "Lean",
+        "custom": "Custom",
+    }
     TYPE_LABELS = {
         "snapshot_record": "Snapshot",
         "backup_record": "Backup",
@@ -413,14 +419,15 @@ class HistoryCleanupDialog(QDialog):
 
         preview = self.cleanup_service.inspect()
         budget_preview = None
+        retention_settings = None
         settings_reads = getattr(self.app, "settings_reads", None)
         if settings_reads is not None:
             try:
-                budget_preview = self.cleanup_service.preview_storage_budget(
-                    settings_reads.load_history_retention_settings()
-                )
+                retention_settings = settings_reads.load_history_retention_settings()
+                budget_preview = self.cleanup_service.preview_storage_budget(retention_settings)
             except Exception:
                 budget_preview = None
+                retention_settings = None
         if preview.repair_required:
             summary_text = (
                 "Cleanup is currently blocked because history diagnostics found issues that must be repaired first.\n\n"
@@ -437,6 +444,12 @@ class HistoryCleanupDialog(QDialog):
                 f"History storage is using {self._human_size(budget_preview.total_bytes)} "
                 f"of a {self._human_size(budget_preview.budget_bytes)} budget."
             )
+            if retention_settings is not None:
+                mode_label = self.RETENTION_MODE_LABELS.get(
+                    str(retention_settings.retention_mode or ""),
+                    str(retention_settings.retention_mode or ""),
+                )
+                summary_text += f" Retention level: {mode_label}."
             if budget_preview.over_budget_bytes > 0:
                 summary_text += (
                     f" The profile is over budget by {self._human_size(budget_preview.over_budget_bytes)}."

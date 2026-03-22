@@ -7,6 +7,7 @@ from isrc_manager.constants import (
     DEFAULT_HISTORY_AUTO_CLEANUP_ENABLED,
     DEFAULT_HISTORY_AUTO_SNAPSHOT_KEEP_LATEST,
     DEFAULT_HISTORY_PRUNE_PRE_RESTORE_COPIES_AFTER_DAYS,
+    DEFAULT_HISTORY_RETENTION_MODE,
     DEFAULT_HISTORY_STORAGE_BUDGET_MB,
 )
 from isrc_manager.services import (
@@ -108,6 +109,7 @@ class SettingsReadServiceTests(unittest.TestCase):
         self.assertEqual(
             self.service.load_history_retention_settings(),
             HistoryRetentionSettings(
+                retention_mode=DEFAULT_HISTORY_RETENTION_MODE,
                 auto_cleanup_enabled=DEFAULT_HISTORY_AUTO_CLEANUP_ENABLED,
                 storage_budget_mb=DEFAULT_HISTORY_STORAGE_BUDGET_MB,
                 auto_snapshot_keep_latest=DEFAULT_HISTORY_AUTO_SNAPSHOT_KEEP_LATEST,
@@ -122,6 +124,7 @@ class SettingsReadServiceTests(unittest.TestCase):
             self.conn.executemany(
                 "INSERT INTO app_kv(key, value) VALUES(?, ?)",
                 [
+                    ("history_retention_mode", "lean"),
                     ("history_auto_cleanup_enabled", "0"),
                     ("history_storage_budget_mb", "4096"),
                     ("history_auto_snapshot_keep_latest", "12"),
@@ -132,6 +135,7 @@ class SettingsReadServiceTests(unittest.TestCase):
         self.assertEqual(
             self.service.load_history_retention_settings(),
             HistoryRetentionSettings(
+                retention_mode="lean",
                 auto_cleanup_enabled=False,
                 storage_budget_mb=4096,
                 auto_snapshot_keep_latest=12,

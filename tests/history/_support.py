@@ -152,10 +152,19 @@ class HistoryManagerTestCase(unittest.TestCase):
         self.assertEqual(self.settings_reads.load_auto_snapshot_interval_minutes(), 45)
 
     def case_history_retention_setting_changes_undo_and_redo(self):
+        self.settings_mutations.set_history_retention_mode("balanced")
         self.settings_mutations.set_history_auto_cleanup_enabled(True)
         self.settings_mutations.set_history_storage_budget_mb(2048)
         self.settings_mutations.set_history_auto_snapshot_keep_latest(25)
         self.settings_mutations.set_history_prune_pre_restore_copies_after_days(0)
+
+        self.history.record_setting_change(
+            key="history_retention_mode",
+            label="Set History Retention Level: Lean",
+            before_value="balanced",
+            after_value="lean",
+        )
+        self.settings_mutations.set_history_retention_mode("lean")
 
         self.history.record_setting_change(
             key="history_auto_cleanup_enabled",
@@ -190,6 +199,7 @@ class HistoryManagerTestCase(unittest.TestCase):
         self.settings_mutations.set_history_prune_pre_restore_copies_after_days(14)
 
         settings = self.settings_reads.load_history_retention_settings()
+        self.assertEqual(settings.retention_mode, "lean")
         self.assertFalse(settings.auto_cleanup_enabled)
         self.assertEqual(settings.storage_budget_mb, 1024)
         self.assertEqual(settings.auto_snapshot_keep_latest, 12)
@@ -209,6 +219,12 @@ class HistoryManagerTestCase(unittest.TestCase):
 
         self.history.undo()
         self.assertTrue(self.settings_reads.load_history_auto_cleanup_enabled())
+
+        self.history.undo()
+        self.assertEqual(self.settings_reads.load_history_retention_mode(), "balanced")
+
+        self.history.redo()
+        self.assertEqual(self.settings_reads.load_history_retention_mode(), "lean")
 
         self.history.redo()
         self.assertFalse(self.settings_reads.load_history_auto_cleanup_enabled())

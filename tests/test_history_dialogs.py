@@ -15,8 +15,8 @@ else:
     QT_IMPORT_ERROR = None
 
 from isrc_manager.history import HistoryManager
-from isrc_manager.history.dialogs import HistoryDialog
-from isrc_manager.services import DatabaseSchemaService
+from isrc_manager.history.dialogs import HistoryCleanupDialog, HistoryDialog
+from isrc_manager.services import DatabaseSchemaService, SettingsMutationService, SettingsReadService
 
 
 class _EmptySessionHistory:
@@ -25,10 +25,12 @@ class _EmptySessionHistory:
 
 
 class _FakeHistoryApp(QWidget):
-    def __init__(self, history_manager: HistoryManager):
+    def __init__(self, history_manager: HistoryManager, settings_reads=None):
         super().__init__()
         self.history_manager = history_manager
         self.session_history_manager = _EmptySessionHistory()
+        self.settings_reads = settings_reads
+        self.history_dialog = None
 
     def _get_best_history_candidate(self, direction: str):
         if direction == "undo":
@@ -58,6 +60,9 @@ class _FakeHistoryApp(QWidget):
     def delete_backup_from_history(self, _backup_id: int):
         return None
 
+    def _refresh_history_actions(self):
+        return None
+
 
 class HistoryDialogTests(unittest.TestCase):
     @classmethod
@@ -77,6 +82,15 @@ class HistoryDialogTests(unittest.TestCase):
                 schema = DatabaseSchemaService(conn)
                 schema.init_db()
                 schema.migrate_schema()
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS app_kv (
+                        key TEXT PRIMARY KEY,
+                        value TEXT
+                    )
+                    """
+                )
+                conn.commit()
                 history = HistoryManager(
                     conn,
                     settings,
@@ -135,6 +149,42 @@ class HistoryDialogTests(unittest.TestCase):
                     self.assertEqual(dialog.backup_table.rowCount(), 1)
                     self.assertEqual(dialog.backup_table.item(0, 2).text(), "Dialog Backup")
                     self.assertEqual(dialog.cleanup_btn.text(), "Cleanup…")
+                finally:
+                    dialog.close()
+                    fake_app.close()
+            finally:
+                settings.clear()
+                settings.sync()
+                conn.close()
+
+    def test_history_cleanup_dialog_summary_includes_budget_usage(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            db_path = root / "library.db"
+            conn = sqlite3.connect(db_path)
+            settings = QSettings(str(root / "settings.ini"), QSettings.IniFormat)
+            settings.setFallbacksEnabled(False)
+            try:
+                schema = DatabaseSchemaService(conn)
+                schema.init_db()
+                schema.migrate_schema()
+                history = HistoryManager(
+                    conn,
+                    settings,
+                    db_path,
+                    root / "history",
+                )
+                mutations = SettingsMutationService(conn, settings)
+                mutations.set_history_retention_mode("lean")
+                mutations.set_history_storage_budget_mb(1)
+                history.capture_snapshot(kind="auto_interval", label="Dialog Auto Snapshot")
+
+                fake_app = _FakeHistoryApp(history, settings_reads=SettingsReadService(conn))
+                dialog = HistoryCleanupDialog(fake_app)
+                try:
+                    text = dialog.summary_label.text()
+                    self.assertIn("History storage is using", text)
+                    self.assertIn("budget", text)
                 finally:
                     dialog.close()
                     fake_app.close()

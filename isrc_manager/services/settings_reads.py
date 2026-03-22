@@ -11,7 +11,9 @@ from isrc_manager.constants import (
     DEFAULT_HISTORY_AUTO_CLEANUP_ENABLED,
     DEFAULT_HISTORY_AUTO_SNAPSHOT_KEEP_LATEST,
     DEFAULT_HISTORY_PRUNE_PRE_RESTORE_COPIES_AFTER_DAYS,
+    DEFAULT_HISTORY_RETENTION_MODE,
     DEFAULT_HISTORY_STORAGE_BUDGET_MB,
+    HISTORY_RETENTION_MODE_CHOICES,
     MAX_AUTO_SNAPSHOT_INTERVAL_MINUTES,
     MAX_HISTORY_AUTO_SNAPSHOT_KEEP_LATEST,
     MAX_HISTORY_PRUNE_PRE_RESTORE_COPIES_AFTER_DAYS,
@@ -40,6 +42,7 @@ class AutoSnapshotSettings:
 
 @dataclass(slots=True)
 class HistoryRetentionSettings:
+    retention_mode: str = DEFAULT_HISTORY_RETENTION_MODE
     auto_cleanup_enabled: bool = DEFAULT_HISTORY_AUTO_CLEANUP_ENABLED
     storage_budget_mb: int = DEFAULT_HISTORY_STORAGE_BUDGET_MB
     auto_snapshot_keep_latest: int = DEFAULT_HISTORY_AUTO_SNAPSHOT_KEEP_LATEST
@@ -61,7 +64,10 @@ class SettingsReadService:
         return str(row[0]).strip()
 
     def _read_profile_value(self, key: str) -> str:
-        row = self.conn.execute("SELECT value FROM app_kv WHERE key=?", (key,)).fetchone()
+        try:
+            row = self.conn.execute("SELECT value FROM app_kv WHERE key=?", (key,)).fetchone()
+        except sqlite3.OperationalError:
+            return ""
         if not row or row[0] is None:
             return ""
         return str(row[0]).strip()
@@ -121,6 +127,12 @@ class SettingsReadService:
             return bool(DEFAULT_HISTORY_AUTO_CLEANUP_ENABLED)
         return raw.strip().lower() not in {"0", "false", "off", "no"}
 
+    def load_history_retention_mode(self) -> str:
+        raw = self._read_profile_value("history_retention_mode").strip().lower()
+        if raw not in HISTORY_RETENTION_MODE_CHOICES:
+            return DEFAULT_HISTORY_RETENTION_MODE
+        return raw
+
     def load_history_storage_budget_mb(self) -> int:
         raw = self._read_profile_value("history_storage_budget_mb")
         try:
@@ -153,6 +165,7 @@ class SettingsReadService:
 
     def load_history_retention_settings(self) -> HistoryRetentionSettings:
         return HistoryRetentionSettings(
+            retention_mode=self.load_history_retention_mode(),
             auto_cleanup_enabled=self.load_history_auto_cleanup_enabled(),
             storage_budget_mb=self.load_history_storage_budget_mb(),
             auto_snapshot_keep_latest=self.load_history_auto_snapshot_keep_latest(),

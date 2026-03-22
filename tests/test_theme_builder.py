@@ -295,6 +295,53 @@ class ThemeBuilderTests(unittest.TestCase):
             dialog.close()
             host.close()
 
+    def test_application_settings_dialog_applies_history_retention_presets(self):
+        host = _ThemePreviewHost()
+        dialog = app_module.ApplicationSettingsDialog(
+            window_title="Catalog",
+            icon_path="",
+            artist_code="00",
+            auto_snapshot_enabled=True,
+            auto_snapshot_interval_minutes=30,
+            isrc_prefix="NLABC",
+            sena_number="",
+            btw_number="",
+            buma_relatie_nummer="",
+            buma_ipi="",
+            gs1_template_asset=None,
+            gs1_contracts_csv_path="",
+            gs1_contract_entries=(),
+            gs1_active_contract_number="",
+            gs1_target_market="",
+            gs1_language="",
+            gs1_brand="",
+            gs1_subbrand="",
+            gs1_packaging_type="",
+            gs1_product_classification="",
+            theme_settings={},
+            stored_themes={},
+            current_profile_path="",
+            history_retention_mode="balanced",
+            parent=host,
+        )
+        try:
+            self.assertEqual(dialog.values()["history_retention_mode"], "balanced")
+            lean_index = next(
+                index
+                for index in range(dialog.history_retention_mode_combo.count())
+                if dialog.history_retention_mode_combo.itemData(index) == "lean"
+            )
+            dialog.history_retention_mode_combo.setCurrentIndex(lean_index)
+            self.assertEqual(dialog.values()["history_retention_mode"], "lean")
+            self.assertEqual(dialog.values()["history_auto_snapshot_keep_latest"], 10)
+            self.assertEqual(dialog.values()["history_prune_pre_restore_copies_after_days"], 7)
+
+            dialog.history_auto_snapshot_keep_latest_spin.setValue(13)
+            self.assertEqual(dialog.values()["history_retention_mode"], "custom")
+        finally:
+            dialog.close()
+            host.close()
+
     def test_apply_theme_with_loading_prepares_payload_before_ui_apply(self):
         host = _ThemeApplyHost()
         previous_stylesheet = self.app.styleSheet()

@@ -9,7 +9,9 @@ from PySide6.QtCore import QSettings
 from isrc_manager.constants import (
     DEFAULT_AUTO_SNAPSHOT_INTERVAL_MINUTES,
     DEFAULT_HISTORY_AUTO_SNAPSHOT_KEEP_LATEST,
+    DEFAULT_HISTORY_RETENTION_MODE,
     DEFAULT_HISTORY_STORAGE_BUDGET_MB,
+    HISTORY_RETENTION_MODE_CHOICES,
     MAX_AUTO_SNAPSHOT_INTERVAL_MINUTES,
     MAX_HISTORY_AUTO_SNAPSHOT_KEEP_LATEST,
     MAX_HISTORY_PRUNE_PRE_RESTORE_COPIES_AFTER_DAYS,
@@ -28,8 +30,19 @@ class SettingsMutationService:
         self.conn = conn
         self.settings = settings
 
+    def _ensure_profile_store(self) -> None:
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS app_kv (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+            """
+        )
+
     def _profile_set(self, key: str, value: object) -> None:
         with self.conn:
+            self._ensure_profile_store()
             self.conn.execute(
                 "INSERT INTO app_kv(key, value) VALUES(?, ?) "
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -63,6 +76,12 @@ class SettingsMutationService:
 
     def set_history_auto_cleanup_enabled(self, enabled: bool) -> None:
         self._profile_set("history_auto_cleanup_enabled", "1" if bool(enabled) else "0")
+
+    def set_history_retention_mode(self, mode: str) -> None:
+        normalized = str(mode or "").strip().lower()
+        if normalized not in HISTORY_RETENTION_MODE_CHOICES:
+            normalized = DEFAULT_HISTORY_RETENTION_MODE
+        self._profile_set("history_retention_mode", normalized)
 
     def set_history_storage_budget_mb(self, megabytes: int) -> None:
         value = int(megabytes)

@@ -1558,6 +1558,8 @@ class HistoryManager:
             self.settings_mutations.set_auto_snapshot_enabled(bool(value))
         elif key == "auto_snapshot_interval_minutes":
             self.settings_mutations.set_auto_snapshot_interval_minutes(int(value))
+        elif key == "history_retention_mode":
+            self.settings_mutations.set_history_retention_mode(str(value))
         elif key == "history_auto_cleanup_enabled":
             self.settings_mutations.set_history_auto_cleanup_enabled(bool(value))
         elif key == "history_storage_budget_mb":

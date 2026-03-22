@@ -7,7 +7,7 @@ Date: 2026-03-22
 
 This document uses the live repository as the source of truth. It was created from a full repo inspection plus focused analysis of UI, services, responsiveness, storage/history, tests, and handoff conventions.
 
-Implementation is in progress after the planning pass. Wave 1 and Wave 2 are complete from the earlier pass, Wave 3 and Wave 4 are complete from the next continuation pass, and Wave 5 is now partially implemented with managed-root snapshot coverage, profile-scoped history retention/budget controls, automatic cleanup enforcement, and a diagnostics-driven legacy promoted-field repair path. The remaining open Wave 5 work is broader history policy expansion and deeper integration coverage around the new repair/storage flows.
+Implementation has progressed through all planned waves. Wave 1 and Wave 2 are complete from the earlier pass, Wave 3 and Wave 4 are complete from the next continuation pass, and Wave 5 now includes managed-root snapshot coverage, profile-scoped retention/security presets, storage-budget preflight and cleanup enforcement, budget diagnostics reporting, and a diagnostics-driven legacy promoted-field repair path. The remaining follow-up work is primarily deeper integration coverage around the new repair/storage flows rather than missing backlog features.
 
 ## Source Of Truth
 
@@ -463,14 +463,17 @@ Exit criteria:
 - Added `BulkAudioAttachDialog` in `isrc_manager/tags/dialogs.py` so users can review matches, manually reassign rows, and optionally apply one artist across matched tracks.
 - Added `Catalog > Bulk Attach Audio Files…` and the supporting `ISRC_manager.py` workflow to select files, preview matches, choose storage mode, attach audio in a history-wrapped batch, and optionally update matched track artists.
 
-### Wave 5 Partial
+### Wave 5 Completed
 
 - Extended `HistoryManager.MANAGED_DIRECTORIES` so snapshots now capture and restore `custom_field_media` and `gs1_templates` alongside the existing managed roots.
 - Added profile-scoped history retention settings in `app_kv` for automatic cleanup enablement, storage budget, automatic snapshot retention count, and optional pre-restore backup aging.
 - Extended `ApplicationSettingsDialog` and the surrounding settings read/write flow so those retention controls are visible, persisted, history-aware, and replayable through undo/redo.
+- Added named retention/security presets in `ApplicationSettingsDialog`, stored the selected mode in `app_kv`, and kept the UI in sync when users move between preset and custom combinations.
 - Added `HistoryStorageCleanupService.preview_storage_budget()` and `enforce_storage_budget()` so the app can classify automatic-cleanup candidates conservatively, remove only safe auto-generated artifacts, and preserve manual/protected items by default.
+- Added projected-growth previews so automatic snapshots can refuse unsafe captures before they begin and interactive snapshot/restore actions can warn before the cap would be exceeded.
 - Wired storage-budget enforcement into automatic snapshot creation, manual snapshot creation, snapshot restore completion, and interactive settings changes, with a direct prompt into `HistoryCleanupDialog` when the profile remains over budget.
 - Extended `HistoryCleanupDialog` summaries so users can see current budget usage and whether the current policy can still free safe space.
+- Added a diagnostics report section for history storage budget pressure so the diagnostics surface shows retention level, budget usage, and safe reclaimable space.
 - Added `LegacyPromotedFieldRepairService` for same-name legacy custom fields that now belong in promoted default columns, with conservative merge behavior that only fills blank default-column values and skips conflicting rows entirely.
 - Added a diagnostics check plus synchronous/async diagnostics repair entry for the legacy promoted-field repair flow, reusing the existing `refresh_schema` post-repair path.
 
@@ -478,14 +481,12 @@ Exit criteria:
 
 ### Next Wave To Start
 
-- Wave 5. Repair and storage hardening
-  - extend the conservative storage policy into fuller retention/security presets if the backlog still requires named modes
-  - add diagnostics or cleanup-surface reporting for budget pressure beyond the current prompt-and-cleanup path
-  - add higher-level integration coverage for the new repair/storage flows
+- No new feature wave is required to satisfy the analyzed backlog.
+- The next highest-value follow-up is higher-level integration coverage for the new repair/storage flows and broader app-level coverage for the bulk-audio attach workflow.
 
 ### Still Open After This Pass
 
-- Wave 5. Additional history/security policy shaping and integration coverage
+- Higher-level diagnostics/history integration coverage around budget-preflight prompts and post-repair refresh behavior
 - Additional integration coverage for the new bulk-audio attach app workflow
 
 ### Important Continuation Notes
@@ -497,7 +498,7 @@ Exit criteria:
   - same-name custom-field reuse during import
   - shared media export basename and focused-column export helpers
 - The diagnostics-backed legacy promoted-field repair now exists for same-name promoted default columns. It safely merges only into blank default-column cells and skips any field where conflicting default-column values already exist.
-- History storage budgeting and retention controls now exist in code and are enforced conservatively, but they currently focus on automatic snapshots, unreferenced artifacts, and optionally aged pre-restore backups rather than a larger preset matrix.
+- History storage budgeting and retention controls now exist in code and are enforced conservatively across automatic snapshots, manual snapshots, restore flows, and settings changes. The named retention modes are preset helpers layered on top of the same conservative cleanup engine.
 - Snapshot coverage now includes `custom_field_media` and `gs1_templates`, so future Wave 5 work can build policy enforcement on top of the broader managed-root baseline instead of adding that coverage later.
 
 ## Tests
@@ -540,6 +541,7 @@ Exit criteria:
 - Updated `tests/history/test_history_snapshots.py`
 - Updated `tests/test_app_dialogs.py`
 - Updated `tests/test_history_cleanup_service.py`
+- Updated `tests/test_history_dialogs.py`
 - Updated `tests/test_settings_mutations_service.py`
 - Updated `tests/test_settings_read_service.py`
 - Updated `tests/test_exchange_dialogs.py`
@@ -566,9 +568,15 @@ Exit criteria:
 - Result: `Ran 53 tests in 3.876s` and `OK`
 - `python3 -m unittest tests.test_app_dialogs tests.history.test_history_snapshots`
 - Result: `Ran 15 tests in 0.365s` and `OK`
+- `python3 -m unittest tests.test_settings_read_service tests.test_settings_mutations_service tests.history.test_history_settings tests.test_history_cleanup_service tests.test_history_dialogs tests.test_theme_builder`
+- Result: `Ran 38 tests in 3.756s` and `OK`
+- `python3 -m unittest tests.test_app_dialogs tests.test_qss_autocomplete tests.test_legacy_promoted_field_repair_service`
+- Result: `Ran 25 tests in 0.761s` and `OK`
+- `python3 -m unittest tests.history.test_history_snapshots tests.test_history_cleanup_service`
+- Result: `Ran 16 tests in 0.235s` and `OK`
 
 ## Future Recommendations
 
 - Split narrower follow-up handoffs only after one of the high-risk waves lands and materially changes the repo shape.
-- Refresh this unified strategy when the remaining backlog changes or when Wave 5 introduces new retention/repair policy decisions.
+- Refresh this unified strategy when the remaining backlog changes or when follow-up integration coverage materially changes the storage/repair flows.
 - Keep broad visual restyling and unrelated dock/layout cleanup out of this backlog unless they become required to safely finish one of the defined waves.

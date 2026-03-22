@@ -246,6 +246,26 @@ class HistoryCleanupServiceTests(unittest.TestCase):
         self.assertIsNone(self.history.fetch_snapshot(old_auto_snapshot.snapshot_id))
         self.assertIsNotNone(self.history.fetch_snapshot(manual_snapshot.snapshot_id))
 
+    def test_preview_storage_projection_flags_when_growth_would_exceed_budget(self):
+        self.history.create_manual_snapshot("Manual Keep")
+
+        settings = HistoryRetentionSettings(
+            retention_mode="maximum_safety",
+            auto_cleanup_enabled=True,
+            storage_budget_mb=1,
+            auto_snapshot_keep_latest=50,
+            prune_pre_restore_copies_after_days=0,
+        )
+
+        projection = self.cleanup.preview_storage_projection(
+            settings,
+            additional_bytes=8 * 1024 * 1024,
+        )
+
+        self.assertGreater(projection.projected_over_budget_bytes, 0)
+        self.assertTrue(projection.blocked_by_protected_items)
+        self.assertEqual(len(projection.candidate_items), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

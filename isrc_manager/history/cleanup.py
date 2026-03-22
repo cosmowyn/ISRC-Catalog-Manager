@@ -75,6 +75,20 @@ class HistoryStorageBudgetResult:
     blocked_by_protected_items: bool
 
 
+@dataclass(slots=True)
+class HistoryStorageProjection:
+    additional_bytes: int
+    current_total_bytes: int
+    projected_total_bytes: int
+    budget_bytes: int
+    reclaimable_bytes: int
+    projected_over_budget_bytes: int
+    projected_over_budget_after_cleanup_bytes: int
+    auto_cleanup_enabled: bool
+    candidate_items: tuple[HistoryCleanupItem, ...]
+    blocked_by_protected_items: bool
+
+
 class HistoryStorageCleanupService:
     """Inspects and removes safe-to-delete history artifacts."""
 
@@ -378,6 +392,46 @@ class HistoryStorageCleanupService:
             budget_bytes=preview.budget_bytes,
             over_budget_bytes=preview.over_budget_bytes,
             blocked_by_protected_items=blocked,
+        )
+
+    def preview_storage_projection(
+        self,
+        settings: HistoryRetentionSettings,
+        *,
+        additional_bytes: int = 0,
+    ) -> HistoryStorageProjection:
+        budget_preview = self.preview_storage_budget(settings)
+        added_bytes = max(0, int(additional_bytes or 0))
+        projected_total = budget_preview.total_bytes + added_bytes
+        reclaimable_bytes = sum(
+            int(item.bytes_on_disk or 0) for item in budget_preview.candidate_items
+        )
+        projected_over_budget = (
+            max(0, projected_total - budget_preview.budget_bytes)
+            if budget_preview.budget_bytes > 0
+            else 0
+        )
+        projected_after_cleanup = projected_total
+        if budget_preview.auto_cleanup_enabled:
+            projected_after_cleanup = max(0, projected_total - reclaimable_bytes)
+        projected_over_budget_after_cleanup = (
+            max(0, projected_after_cleanup - budget_preview.budget_bytes)
+            if budget_preview.budget_bytes > 0
+            else 0
+        )
+        return HistoryStorageProjection(
+            additional_bytes=added_bytes,
+            current_total_bytes=budget_preview.total_bytes,
+            projected_total_bytes=projected_total,
+            budget_bytes=budget_preview.budget_bytes,
+            reclaimable_bytes=reclaimable_bytes,
+            projected_over_budget_bytes=projected_over_budget,
+            projected_over_budget_after_cleanup_bytes=projected_over_budget_after_cleanup,
+            auto_cleanup_enabled=budget_preview.auto_cleanup_enabled,
+            candidate_items=budget_preview.candidate_items,
+            blocked_by_protected_items=(
+                budget_preview.budget_bytes > 0 and projected_over_budget_after_cleanup > 0
+            ),
         )
 
     def _raise_if_cleanup_blocked(self) -> None:
