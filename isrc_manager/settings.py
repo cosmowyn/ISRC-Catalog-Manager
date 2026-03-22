@@ -33,6 +33,8 @@ def init_settings() -> QSettings:
         settings.setValue("app/initialized", True)
         settings.setValue("app/schema_version", 1)
         settings.setValue("ui/theme", "system")
+        if not settings.contains("startup/offer_open_settings_on_first_launch_pending"):
+            settings.setValue("startup/offer_open_settings_on_first_launch_pending", True)
         settings.setValue("paths/database_dir", str((preferred_root / "Database").resolve()))
         settings.setValue(STORAGE_ACTIVE_DATA_ROOT_KEY, str(preferred_root))
         settings.setValue("app/uid", str(uuid.uuid4()))

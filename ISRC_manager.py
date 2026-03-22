@@ -160,6 +160,7 @@ from isrc_manager.file_storage import (
     STORAGE_MODE_MANAGED_FILE,
     infer_storage_mode,
     normalize_storage_mode,
+    sanitize_export_basename,
 )
 from isrc_manager.services.gs1_mapping import (
     COMMON_CLASSIFICATION_CHOICES,
@@ -5408,6 +5409,42 @@ class App(QMainWindow):
 
     def _run_post_ready_startup_tasks(self) -> None:
         self._update_add_data_generated_fields()
+        self._offer_settings_on_first_launch_if_pending()
+
+    def _offer_settings_on_first_launch_if_pending(self) -> None:
+        setting_key = "startup/offer_open_settings_on_first_launch_pending"
+        if not self.settings.value(setting_key, False, bool):
+            return
+
+        open_settings_button = None
+
+        def _configure(message_box):
+            nonlocal open_settings_button
+            open_settings_button = message_box.addButton(
+                "Open Settings", QMessageBox.AcceptRole
+            )
+            skip_button = message_box.addButton("Not Now", QMessageBox.RejectRole)
+            if hasattr(message_box, "setDefaultButton"):
+                message_box.setDefaultButton(open_settings_button or skip_button)
+
+        message_box = self._run_startup_message_box(
+            title="Open Settings",
+            icon=QMessageBox.Question,
+            text=(
+                "This looks like the first time the app has been opened here.\n\n"
+                "Do you want to open Application Settings now? You can skip this and keep the defaults."
+            ),
+            configure=_configure,
+        )
+        self.settings.setValue(setting_key, False)
+        self.settings.sync()
+
+        if (
+            message_box is not None
+            and hasattr(message_box, "clickedButton")
+            and message_box.clickedButton() is open_settings_button
+        ):
+            self.open_settings_dialog()
 
     def _apply_storage_layout(self, *, active_data_root: str | Path | None = None) -> None:
         self.storage_layout = resolve_app_storage_layout(
@@ -8904,38 +8941,38 @@ class App(QMainWindow):
             },
             {
                 "id": "export_selected",
-                "label": "Export Selected to XML",
+                "label": "Export Selected Catalog XML",
                 "category": "File",
-                "description": "Export the current selected batch to XML.",
+                "description": "Export the current selected catalog rows to XML.",
                 "action": self.export_selected_action,
                 "default": True,
             },
             {
                 "id": "export_all",
-                "label": "Export Entire Library to XML",
+                "label": "Export Full Catalog XML",
                 "category": "File",
-                "description": "Export the full active profile library to XML.",
+                "description": "Export the full active profile catalog to XML.",
                 "action": self.export_all_action,
             },
             {
                 "id": "export_selected_csv",
-                "label": "Export Selected to CSV",
+                "label": "Export Selected Exchange CSV",
                 "category": "File",
-                "description": "Export the current selected batch to CSV.",
+                "description": "Export the current selected catalog rows as exchange CSV.",
                 "action": self.export_selected_csv_action,
             },
             {
                 "id": "export_selected_json",
-                "label": "Export Selected to JSON",
+                "label": "Export Selected Exchange JSON",
                 "category": "File",
-                "description": "Export the current selected batch to JSON.",
+                "description": "Export the current selected catalog rows as exchange JSON.",
                 "action": self.export_selected_json_action,
             },
             {
                 "id": "export_package",
-                "label": "Export ZIP Package",
+                "label": "Export Selected Exchange ZIP Package",
                 "category": "File",
-                "description": "Create a ZIP package with JSON metadata and referenced media copies.",
+                "description": "Create an exchange ZIP package with metadata and referenced media copies.",
                 "action": self.export_selected_package_action,
             },
             {
@@ -9190,6 +9227,18 @@ class App(QMainWindow):
         if hasattr(self, "action_ribbon_toolbar") and self.action_ribbon_toolbar is not None:
             self.action_ribbon_toolbar.setVisible(bool(visible))
 
+    def _apply_profiles_toolbar_visibility(self, visible: bool) -> None:
+        toolbar = getattr(self, "toolbar", None)
+        if toolbar is not None:
+            toolbar.setVisible(bool(visible))
+            toolbar.updateGeometry()
+        if hasattr(self, "profiles_toolbar_visibility_action"):
+            self._set_action_checked_silently(
+                self.profiles_toolbar_visibility_action,
+                bool(visible),
+            )
+        self._queue_top_chrome_boundary_refresh()
+
     def _open_action_ribbon_context_menu(self, pos):
         toolbar = getattr(self, "action_ribbon_toolbar", None)
         if toolbar is None:
@@ -9211,6 +9260,11 @@ class App(QMainWindow):
             row_height_enabled = self.settings.value("display/interactive_row_height", False, bool)
             add_data_enabled = self.settings.value("display/add_data_panel", False, bool)
             catalog_table_enabled = self.settings.value("display/catalog_table_panel", True, bool)
+            profiles_toolbar_visible = self.settings.value(
+                "display/profiles_toolbar_visible",
+                True,
+                bool,
+            )
             action_ribbon_visible = self.settings.value("display/action_ribbon_visible", True, bool)
             action_ribbon_ids = self._load_saved_action_ribbon_action_ids()
 
@@ -9228,6 +9282,10 @@ class App(QMainWindow):
             self._set_action_checked_silently(self.add_data_action, add_data_enabled)
             self._set_action_checked_silently(self.catalog_table_action, catalog_table_enabled)
             self._set_action_checked_silently(
+                self.profiles_toolbar_visibility_action,
+                profiles_toolbar_visible,
+            )
+            self._set_action_checked_silently(
                 self.action_ribbon_visibility_action, action_ribbon_visible
             )
 
@@ -9237,6 +9295,7 @@ class App(QMainWindow):
             if apply_workspace_panel_visibility:
                 self._apply_add_data_panel_state(add_data_enabled)
                 self._apply_catalog_table_panel_state(catalog_table_enabled)
+            self._apply_profiles_toolbar_visibility(profiles_toolbar_visible)
             self._apply_action_ribbon_configuration(action_ribbon_ids, action_ribbon_visible)
         finally:
             self._suspend_layout_history = previous_suspend_state
@@ -12332,8 +12391,16 @@ class App(QMainWindow):
                             path, mapping=mapping, options=options
                         )
                     if normalized_format == "package":
-                        return bundle.exchange_service.import_package(path, options=options)
-                    return bundle.exchange_service.import_json(path, options=options)
+                        return bundle.exchange_service.import_package(
+                            path,
+                            mapping=mapping,
+                            options=options,
+                        )
+                    return bundle.exchange_service.import_json(
+                        path,
+                        mapping=mapping,
+                        options=options,
+                    )
 
                 if options.mode == "dry_run":
                     return _mutation()
@@ -12419,6 +12486,26 @@ class App(QMainWindow):
                 failure,
                 user_message="Could not inspect the selected file:",
             ),
+        )
+
+    def reset_saved_exchange_import_choices(self) -> None:
+        if (
+            QMessageBox.question(
+                self,
+                "Reset Saved Import Choices",
+                "Clear the remembered import choices for CSV, XLSX, JSON, and ZIP package imports?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            != QMessageBox.Yes
+        ):
+            return
+        self.settings.remove("exchange/import_preferences")
+        self.settings.sync()
+        QMessageBox.information(
+            self,
+            "Reset Saved Import Choices",
+            "Saved exchange import choices were cleared.",
         )
 
     def _show_exchange_import_report(self, path: str, report: ExchangeImportReport) -> None:
@@ -13185,6 +13272,21 @@ class App(QMainWindow):
             entity_id="display/add_data_panel",
         )
 
+    def _on_toggle_profiles_toolbar(self, enabled: bool):
+        enabled = bool(enabled)
+
+        def mutation():
+            self._apply_profiles_toolbar_visibility(enabled)
+            self.settings.setValue("display/profiles_toolbar_visible", enabled)
+            self.settings.sync()
+
+        self._run_setting_bundle_history_action(
+            action_label="Toggle Profiles Ribbon",
+            setting_keys=["display/profiles_toolbar_visible"],
+            mutation=mutation,
+            entity_id="display/profiles_toolbar_visible",
+        )
+
     def _on_toggle_catalog_table(self, enabled: bool):
         enabled = bool(enabled)
 
@@ -13821,10 +13923,16 @@ class App(QMainWindow):
             menu.addAction(act_attach_standard)
 
             if self.track_has_media(track_id, standard_media_key):
-                act_export_standard = QAction(f"Export '{track_title}'…", self)
+                export_basename = self._media_export_basename_for_track(
+                    track_id,
+                    standard_media_key,
+                )
+                act_export_standard = QAction(f"Export '{export_basename}'…", self)
                 act_export_standard.triggered.connect(
                     lambda: self._export_standard_media_for_track(
-                        track_id, standard_media_key, track_title
+                        track_id,
+                        standard_media_key,
+                        export_basename,
                     )
                 )
                 menu.addAction(act_export_standard)
@@ -13993,6 +14101,21 @@ class App(QMainWindow):
 
                         act_del.triggered.connect(_do_del)
                         menu.addAction(act_del)
+
+        media_export_spec = self._focused_media_export_spec(col)
+        if bulk_count > 1 and media_export_spec is not None:
+            menu.addSeparator()
+            act_bulk_export = QAction(
+                f"Export {bulk_count} Files from '{media_export_spec['column_label']}' Column…",
+                self,
+            )
+            act_bulk_export.triggered.connect(
+                lambda checked=False, column=col, track_ids=list(selected_ids): self._export_focused_media_column(
+                    column,
+                    track_ids=track_ids,
+                )
+            )
+            menu.addAction(act_bulk_export)
 
         menu.exec(self.table.viewport().mapToGlobal(pos))
 
@@ -15111,19 +15234,7 @@ class App(QMainWindow):
             data = data.tobytes()
         elif isinstance(data, bytearray):
             data = bytes(data)
-
-        ext = mimetypes.guess_extension(mime or "")
-        if ext == ".jpe":
-            ext = ".jpg"
-        if not ext:
-            if mime.startswith("image/"):
-                ext = ".png"
-            elif mime.startswith("audio/"):
-                ext = ".wav"
-            else:
-                ext = ".bin"
-
-        default_filename = f"{self._sanitize_filename(suggested_basename)}{ext}"
+        default_filename = self._default_export_filename(suggested_basename, mime or "")
         dest_path, _ = QFileDialog.getSaveFileName(
             parent_widget or self, dialog_title, default_filename, "All files (*)"
         )
@@ -15152,8 +15263,9 @@ class App(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Export failed", str(e))
             return
-        default_basename = suggested_basename or self._sanitize_filename(
-            self._get_track_title(track_id)
+        default_basename = suggested_basename or self._media_export_basename_for_track(
+            track_id,
+            media_key,
         )
         self._export_bytes_with_picker(
             data,
@@ -15165,6 +15277,214 @@ class App(QMainWindow):
             entity_type="Track",
             entity_id=str(track_id),
             payload={"track_id": track_id, "media_key": media_key},
+        )
+
+    @staticmethod
+    def _export_extension_for_mime(mime: str) -> str:
+        ext = mimetypes.guess_extension(mime or "")
+        if ext == ".jpe":
+            ext = ".jpg"
+        if not ext:
+            if str(mime or "").startswith("image/"):
+                return ".png"
+            if str(mime or "").startswith("audio/"):
+                return ".wav"
+            return ".bin"
+        return ext
+
+    def _default_export_filename(self, suggested_basename: str | None, mime: str) -> str:
+        return (
+            f"{sanitize_export_basename(suggested_basename)}"
+            f"{self._export_extension_for_mime(mime)}"
+        )
+
+    @staticmethod
+    def _deduplicate_export_destination(output_dir: Path, filename: str) -> Path:
+        candidate = output_dir / filename
+        if not candidate.exists():
+            return candidate
+        stem = candidate.stem
+        suffix = candidate.suffix
+        index = 2
+        while True:
+            deduplicated = output_dir / f"{stem} ({index}){suffix}"
+            if not deduplicated.exists():
+                return deduplicated
+            index += 1
+
+    def _media_export_basename_for_track(self, track_id: int, media_key: str) -> str:
+        snapshot = None
+        if self.track_service is not None:
+            snapshot = self.track_service.fetch_track_snapshot(track_id, cursor=self.cursor)
+        track_title = ""
+        if snapshot is not None:
+            track_title = str(snapshot.track_title or "").strip()
+        if not track_title:
+            try:
+                track_title = self._get_track_title(track_id)
+            except Exception:
+                track_title = ""
+        if media_key == "album_art" and snapshot is not None:
+            album_title = str(snapshot.album_title or "").strip()
+            if album_title and album_title.casefold() != "single":
+                return album_title
+        return track_title or f"track_{track_id}"
+
+    def _custom_blob_export_basename(self, track_id: int, field_def_id: int) -> str:
+        track_title = self._media_export_basename_for_track(track_id, "audio_file")
+        field_name = self.custom_field_definitions.get_field_name(field_def_id)
+        clean_field_name = str(field_name or "").strip()
+        if clean_field_name:
+            return f"{track_title} - {clean_field_name}"
+        return track_title
+
+    def _focused_media_export_spec(self, column: int) -> dict[str, object] | None:
+        header_item = self.table.horizontalHeaderItem(column)
+        header_text = header_item.text() if header_item is not None else ""
+        media_key = self._standard_media_key_for_header(header_text)
+        if media_key:
+            return {
+                "kind": "standard",
+                "column_label": header_text or media_key.replace("_", " ").title(),
+                "media_key": media_key,
+            }
+        if column < len(self.BASE_HEADERS):
+            return None
+        field_index = column - len(self.BASE_HEADERS)
+        if field_index < 0 or field_index >= len(self.active_custom_fields):
+            return None
+        field = self.active_custom_fields[field_index]
+        field_type = str(field.get("field_type") or "").strip()
+        if field_type not in {"blob_audio", "blob_image"}:
+            return None
+        return {
+            "kind": "custom_blob",
+            "column_label": header_text or str(field.get("name") or "File"),
+            "field_id": int(field["id"]),
+            "field_name": str(field.get("name") or "").strip(),
+            "field_type": field_type,
+        }
+
+    def _export_focused_media_column(
+        self,
+        column: int,
+        *,
+        track_ids: list[int] | None = None,
+    ) -> None:
+        spec = self._focused_media_export_spec(column)
+        if spec is None:
+            QMessageBox.warning(
+                self,
+                "Export Files",
+                "Focus a stored audio, album art, or blob media column first.",
+            )
+            return
+        selected_ids = self._normalize_track_ids(track_ids or self._selected_track_ids())
+        if not selected_ids:
+            QMessageBox.information(
+                self,
+                "Export Files",
+                "Select one or more rows before exporting the focused column.",
+            )
+            return
+        output_dir = QFileDialog.getExistingDirectory(
+            self,
+            f"Export {spec['column_label']} Files",
+        )
+        if not output_dir:
+            return
+        output_root = Path(output_dir)
+        exported = 0
+        skipped: list[str] = []
+        history_changed = False
+        for track_id in selected_ids:
+            try:
+                if spec["kind"] == "standard":
+                    media_key = str(spec["media_key"])
+                    if not self.track_has_media(track_id, media_key):
+                        raise FileNotFoundError(
+                            f"No stored {str(spec['column_label']).lower()} is available."
+                        )
+                    data, mime = self.track_fetch_media(track_id, media_key)
+                    suggested_basename = self._media_export_basename_for_track(track_id, media_key)
+                    payload = {
+                        "track_id": track_id,
+                        "media_key": media_key,
+                        "column_label": spec["column_label"],
+                    }
+                    entity_id = str(track_id)
+                else:
+                    field_id = int(spec["field_id"])
+                    if not self.cf_has_blob(track_id, field_id):
+                        raise FileNotFoundError(
+                            f"No stored file is available in {spec['column_label']}."
+                        )
+                    data, mime = self.cf_fetch_blob(track_id, field_id)
+                    suggested_basename = self._custom_blob_export_basename(track_id, field_id)
+                    payload = {
+                        "track_id": track_id,
+                        "field_id": field_id,
+                        "column_label": spec["column_label"],
+                    }
+                    entity_id = f"{track_id}:{field_id}"
+                if isinstance(data, memoryview):
+                    data = data.tobytes()
+                elif isinstance(data, bytearray):
+                    data = bytes(data)
+                dest_path = self._deduplicate_export_destination(
+                    output_root,
+                    self._default_export_filename(suggested_basename, mime or ""),
+                )
+                if self.history_manager is None:
+                    dest_path.write_bytes(data)
+                else:
+                    run_file_history_action(
+                        history_manager=self.history_manager,
+                        action_label=f"Export {spec['column_label']}: {dest_path.name}",
+                        action_type="file.export_bulk_media",
+                        target_path=dest_path,
+                        mutation=lambda data=data, dest_path=dest_path: dest_path.write_bytes(data),
+                        entity_type="Export",
+                        entity_id=entity_id,
+                        payload={"path": str(dest_path), **payload},
+                        logger=self.logger,
+                    )
+                    history_changed = True
+                exported += 1
+            except Exception as exc:
+                try:
+                    track_label = self._get_track_title(track_id) or f"track_{track_id}"
+                except Exception:
+                    track_label = f"track_{track_id}"
+                skipped.append(f"{track_label}: {exc}")
+        if history_changed:
+            self._refresh_history_actions()
+        if not exported:
+            QMessageBox.warning(
+                self,
+                f"Export {spec['column_label']}",
+                "No files were exported."
+                + (
+                    "\n\nSkipped:\n" + "\n".join(skipped[:10])
+                    if skipped
+                    else ""
+                ),
+            )
+            return
+        message_lines = [
+            f"Exported {exported} file{'s' if exported != 1 else ''} to:",
+            str(output_root),
+        ]
+        if skipped:
+            message_lines.append("")
+            message_lines.append(
+                f"Skipped {len(skipped)} row{'s' if len(skipped) != 1 else ''}:"
+            )
+            message_lines.extend(skipped[:10])
+        QMessageBox.information(
+            self,
+            f"Export {spec['column_label']}",
+            "\n".join(message_lines),
         )
 
     def _convert_standard_media_for_track(
@@ -15421,12 +15741,7 @@ class App(QMainWindow):
         return self.track_service.fetch_track_title(track_id, cursor=self.cursor)
 
     def _sanitize_filename(self, text: str) -> str:
-        text = (text or "").strip()
-        if not text:
-            return "file"
-        cleaned = re.sub(r'[<>:"/\\\\|?*\\x00-\\x1f]+', "_", text)
-        cleaned = re.sub(r"\\s+", " ", cleaned).strip().rstrip(".")
-        return cleaned or "file"
+        return sanitize_export_basename(text)
 
     def _set_blob_indicator(self, row: int, col: int, track_id: int, field_id: int) -> None:
         try:
@@ -17528,6 +17843,7 @@ class EditDialog(QDialog):
                 track_id for track_id in album_group_track_ids if track_id != row_id
             ]
             album_shared_fields_changed = list(album_field_updates.keys())
+            propagated_field_labels: list[str] = []
             if album_art_changed:
                 album_shared_fields_changed.append("album_art")
 

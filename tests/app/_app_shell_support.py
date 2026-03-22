@@ -164,6 +164,7 @@ class AppShellTestCase(unittest.TestCase):
         ]
         for patcher in self._patchers:
             patcher.start()
+        self._set_first_launch_prompt_pending(False)
         self.window = app_module.App()
         self.window.show()
         pump_events(app=self.app)
@@ -230,6 +231,12 @@ class AppShellTestCase(unittest.TestCase):
         settings.setFallbacksEnabled(False)
         return settings
 
+    def _set_first_launch_prompt_pending(self, pending: bool) -> None:
+        settings = self._settings()
+        settings.setValue("startup/offer_open_settings_on_first_launch_pending", bool(pending))
+        settings.sync()
+        settings.deleteLater() if hasattr(settings, "deleteLater") else None
+
     def _seed_startup_settings_for_legacy_db(self, legacy_db: Path) -> None:
         settings = self._settings()
         settings.setValue("storage/legacy_data_root", str(legacy_db.parent.parent.resolve()))
@@ -264,6 +271,38 @@ class AppShellTestCase(unittest.TestCase):
                 catalog_number=None,
             )
         )
+
+    def _create_media_file(self, name: str, payload: bytes) -> Path:
+        path = self.root / name
+        path.write_bytes(payload)
+        return path
+
+    def _table_row_for_track_id(self, track_id: int) -> int:
+        for row in range(self.window.table.rowCount()):
+            item = self.window.table.item(row, 0)
+            if item is None:
+                continue
+            try:
+                current_track_id = int(item.text())
+            except Exception:
+                continue
+            if current_track_id == int(track_id):
+                return row
+        raise AssertionError(f"Track row not found: {track_id}")
+
+    def _table_context_action_texts(self, row: int, col: int) -> list[str]:
+        captured: dict[str, list[str]] = {}
+
+        def _fake_exec(menu_self, *_args, **_kwargs):
+            captured["texts"] = [action.text() for action in menu_self.actions() if action.text()]
+            return None
+
+        with mock.patch.object(app_module.QMenu, "exec", new=_fake_exec):
+            index = self.window.table.model().index(row, col)
+            rect = self.window.table.visualRect(index)
+            self.window._on_table_context_menu(rect.center())
+            self.app.processEvents()
+        return captured.get("texts", [])
 
     def _select_track_ids(self, track_ids: list[int]) -> None:
         track_id_set = {int(track_id) for track_id in track_ids}
@@ -388,6 +427,69 @@ class AppShellTestCase(unittest.TestCase):
         )
         self.assertEqual(splash.finish_calls, [self.window])
 
+    def case_startup_first_launch_prompt_can_open_settings_and_clears_pending_flag(self):
+        self._close_window()
+        self._set_first_launch_prompt_pending(True)
+
+        prompts: list[tuple[str, str]] = []
+
+        class _FakePromptBox:
+            def __init__(self):
+                self._buttons = {}
+                self._clicked_button = None
+
+            def addButton(self, label, _role):
+                button = object()
+                self._buttons[str(label)] = button
+                return button
+
+            def setDefaultButton(self, _button):
+                return None
+
+            def clickedButton(self):
+                return self._clicked_button
+
+        def _fake_startup_message_box(
+            window,
+            *,
+            title,
+            icon,
+            text,
+            configure=None,
+        ):
+            _ = icon
+            prompts.append((str(title), str(text)))
+            box = _FakePromptBox()
+            if callable(configure):
+                configure(box)
+            box._clicked_button = box._buttons.get("Open Settings")
+            return box
+
+        with mock.patch.object(
+            app_module.App,
+            "_run_startup_message_box",
+            new=_fake_startup_message_box,
+        ), mock.patch.object(app_module.App, "open_settings_dialog", autospec=True) as open_settings:
+            self.window = app_module.App()
+            self.window.show()
+            self._drain_events()
+
+        self.assertEqual(len(prompts), 1)
+        self.assertEqual(prompts[0][0], "Open Settings")
+        self.assertIn("first time", prompts[0][1])
+        self.assertFalse(
+            self.window.settings.value(
+                "startup/offer_open_settings_on_first_launch_pending",
+                True,
+                bool,
+            )
+        )
+        open_settings.assert_called_once_with(self.window)
+
+        with mock.patch.object(app_module.App, "_run_startup_message_box") as prompt_again:
+            self._reopen_window()
+            prompt_again.assert_not_called()
+
     def case_file_menu_groups_xml_import_under_import_exchange_and_preserves_wiring(self):
         file_menu = self._menu_by_text("File")
         file_texts = [action.text() for action in file_menu.actions() if action.text()]
@@ -413,6 +515,7 @@ class AppShellTestCase(unittest.TestCase):
                 self.window.import_package_action,
             ],
         )
+        self.assertIs(submenu_actions[-1], self.window.reset_saved_import_choices_action)
         self.assertTrue(
             any(not shortcut.isEmpty() for shortcut in self.window.import_xml_action.shortcuts())
         )
@@ -431,6 +534,48 @@ class AppShellTestCase(unittest.TestCase):
             "",
             "XML Files (*.xml)",
         )
+
+    def case_file_menu_groups_exchange_exports_and_saved_import_reset(self):
+        file_menu = self._menu_by_text("File")
+
+        export_action = next(
+            action
+            for action in file_menu.actions()
+            if action.menu() is not None and action.text() == "Export Files"
+        )
+        export_menu = export_action.menu()
+        assert export_menu is not None
+        export_texts = [action.text() for action in export_menu.actions() if action.text()]
+        self.assertEqual(
+            export_texts[:3],
+            [
+                "Export Selected Catalog XML…",
+                "Export Full Catalog XML…",
+                "Exchange Data",
+            ],
+        )
+
+        exchange_action = next(
+            action
+            for action in export_menu.actions()
+            if action.menu() is not None and action.text() == "Exchange Data"
+        )
+        exchange_menu = exchange_action.menu()
+        assert exchange_menu is not None
+        exchange_texts = [action.text() for action in exchange_menu.actions() if action.text()]
+        self.assertIn("Export Selected Exchange CSV…", exchange_texts)
+        self.assertIn("Export Full Exchange ZIP Package…", exchange_texts)
+
+        contracts_action = next(
+            action
+            for action in file_menu.actions()
+            if action.menu() is not None and action.text() == "Contracts and Rights Exchange"
+        )
+        contracts_menu = contracts_action.menu()
+        assert contracts_menu is not None
+        contracts_texts = [action.text() for action in contracts_menu.actions() if action.text()]
+        self.assertIn("Export Contracts and Rights JSON…", contracts_texts)
+        self.assertIn("Import Contracts and Rights ZIP Package…", contracts_texts)
 
     def case_startup_can_defer_legacy_storage_migration_and_keep_current_folder(self):
         self._close_window()
@@ -1388,6 +1533,119 @@ class AppShellTestCase(unittest.TestCase):
         self.assertTrue(self.window.catalog_table_dock.isVisible())
         self.assertTrue(self.window.settings.value("display/catalog_table_panel", False, bool))
 
+    def case_profiles_toolbar_visibility_persists_in_view_preferences(self):
+        view_action = next(
+            action for action in self.window.menuBar().actions() if action.text() == "View"
+        )
+        view_menu = view_action.menu()
+        view_texts = [action.text() for action in view_menu.actions() if action.text()]
+
+        self.assertIn("Show Profiles Ribbon", view_texts)
+        self.assertTrue(self.window.toolbar.isVisible())
+
+        self.window.profiles_toolbar_visibility_action.trigger()
+        self.app.processEvents()
+        self.assertFalse(self.window.toolbar.isVisible())
+        self.assertFalse(
+            self.window.settings.value("display/profiles_toolbar_visible", True, bool)
+        )
+
+        self._reopen_window()
+        self.assertFalse(self.window.toolbar.isVisible())
+
+        self.window.profiles_toolbar_visibility_action.trigger()
+        self.app.processEvents()
+        self.assertTrue(self.window.toolbar.isVisible())
+        self.assertTrue(
+            self.window.settings.value("display/profiles_toolbar_visible", False, bool)
+        )
+
+    def case_album_art_export_uses_album_title_and_bulk_export_stays_on_focused_column(self):
+        track_one = self._create_track(index=151, title="Comet Signal", album_title="Aurora Heights")
+        track_two = self._create_track(index=152, title="Harbor Glow", album_title="Neon Tides")
+        cover_one = self._create_media_file("aurora.png", b"\x89PNG\r\n\x1a\naurora")
+        cover_two = self._create_media_file("neon.png", b"\x89PNG\r\n\x1a\nneon")
+        audio_one = self._create_media_file("aurora.wav", b"RIFFaurora")
+        audio_two = self._create_media_file("neon.wav", b"RIFFneon")
+
+        self.window.track_service.set_media_path(
+            track_one,
+            "album_art",
+            cover_one,
+            storage_mode=app_module.STORAGE_MODE_DATABASE,
+            cursor=self.window.cursor,
+        )
+        self.window.track_service.set_media_path(
+            track_two,
+            "album_art",
+            cover_two,
+            storage_mode=app_module.STORAGE_MODE_DATABASE,
+            cursor=self.window.cursor,
+        )
+        self.window.track_service.set_media_path(
+            track_one,
+            "audio_file",
+            audio_one,
+            storage_mode=app_module.STORAGE_MODE_DATABASE,
+            cursor=self.window.cursor,
+        )
+        self.window.track_service.set_media_path(
+            track_two,
+            "audio_file",
+            audio_two,
+            storage_mode=app_module.STORAGE_MODE_DATABASE,
+            cursor=self.window.cursor,
+        )
+        self.window.refresh_table_preserve_view(focus_id=track_one)
+        self.app.processEvents()
+
+        with mock.patch.object(
+            app_module.QFileDialog,
+            "getSaveFileName",
+            return_value=("", ""),
+        ) as get_save_file_name:
+            self.window._export_standard_media_for_track(track_one, "album_art")
+
+        suggested_filename = get_save_file_name.call_args.args[2]
+        self.assertTrue(suggested_filename.startswith("Aurora Heights"))
+        self.assertFalse(suggested_filename.startswith("Comet Signal"))
+
+        self._select_track_ids([track_one, track_two])
+        album_art_col = self.window._column_index_by_header("Album Art")
+        self.assertGreaterEqual(album_art_col, 0)
+        self.assertEqual(
+            self.window._focused_media_export_spec(album_art_col),
+            {
+                "kind": "standard",
+                "column_label": "Album Art",
+                "media_key": "album_art",
+            },
+        )
+        track_title_col = self.window._column_index_by_header("Track Title")
+        self.assertIsNone(self.window._focused_media_export_spec(track_title_col))
+
+        output_dir = self.root / "album-art-export"
+        output_dir.mkdir()
+        with mock.patch.object(
+            app_module.QFileDialog,
+            "getExistingDirectory",
+            return_value=str(output_dir),
+        ), mock.patch.object(app_module.QMessageBox, "information"):
+            self.window._export_focused_media_column(
+                album_art_col,
+                track_ids=[track_one, track_two],
+            )
+
+        exported_names = sorted(path.name for path in output_dir.iterdir() if path.is_file())
+        self.assertEqual(
+            exported_names,
+            [
+                "Aurora Heights.png",
+                "Neon Tides.png",
+            ],
+        )
+        self.assertFalse(any(name.endswith(".wav") for name in exported_names))
+
     def case_hidden_catalog_table_does_not_block_workspace_dock_access_or_peer_tabifying(self):
         self.assertTrue(self.window.catalog_table_dock.isVisible())
         self.window.catalog_table_action.trigger()
@@ -1690,6 +1948,31 @@ class AppShellTestCase(unittest.TestCase):
             )
             self.assertIsInstance(dialog.upc, app_module.QComboBox)
             self.assertTrue(dialog.upc.isEditable())
+        finally:
+            dialog.close()
+
+    def case_track_editor_save_succeeds_without_album_propagation(self):
+        track_id = self._create_track(index=188, title="Single Edit Source", album_title="Solo Album")
+
+        dialog = app_module.EditDialog(track_id, self.window)
+        try:
+            dialog.track_title.setText("Single Edit Updated")
+            dialog.save_changes()
+            wait_for(
+                lambda: (
+                    not self.window.background_tasks.has_running_tasks()
+                    and self.window.track_service.fetch_track_snapshot(track_id).track_title
+                    == "Single Edit Updated"
+                ),
+                timeout_ms=5000,
+                interval_ms=25,
+                app=self.app,
+                description="single-track edit save to finish",
+            )
+            snapshot = self.window.track_service.fetch_track_snapshot(track_id)
+            self.assertIsNotNone(snapshot)
+            assert snapshot is not None
+            self.assertEqual(snapshot.track_title, "Single Edit Updated")
         finally:
             dialog.close()
 

@@ -2,6 +2,9 @@ from tests.catalog._contract_rights_asset_support import ContractRightsAssetServ
 
 
 class ContractDialogTests(ContractRightsAssetServiceTestCase):
+    test_contract_browser_uses_compact_action_cluster = (
+        ContractRightsAssetServiceTestCase.case_contract_browser_uses_compact_action_cluster
+    )
     test_contract_document_editor_open_and_export_helpers = (
         ContractRightsAssetServiceTestCase.case_contract_document_editor_open_and_export_helpers
     )

@@ -12,6 +12,8 @@ STORAGE_MODE_MANAGED_FILE = "managed_file"
 VALID_STORAGE_MODES = {STORAGE_MODE_DATABASE, STORAGE_MODE_MANAGED_FILE}
 
 _FILENAME_SANITIZE_RE = re.compile(r"[^A-Za-z0-9._-]+")
+_EXPORT_BASENAME_SANITIZE_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]+')
+_EXPORT_BASENAME_WHITESPACE_RE = re.compile(r"\s+")
 
 
 def normalize_storage_mode(value: str | None, *, default: str | None = None) -> str | None:
@@ -60,6 +62,17 @@ def sanitize_filename(filename: str | None, *, default_stem: str = "file") -> st
     stem = _FILENAME_SANITIZE_RE.sub("_", Path(clean_name).stem).strip("._-") or default_stem
     suffix = _FILENAME_SANITIZE_RE.sub("", Path(clean_name).suffix)
     return f"{stem}{suffix}" if suffix else stem
+
+
+def sanitize_export_basename(value: str | None, *, default_stem: str = "file") -> str:
+    """Sanitize a user-facing export basename without altering leading letters."""
+
+    clean = str(value or "").strip()
+    if not clean:
+        clean = default_stem
+    clean = _EXPORT_BASENAME_SANITIZE_RE.sub("_", clean)
+    clean = _EXPORT_BASENAME_WHITESPACE_RE.sub(" ", clean).strip().rstrip(".")
+    return clean or default_stem
 
 
 def coalesce_filename(

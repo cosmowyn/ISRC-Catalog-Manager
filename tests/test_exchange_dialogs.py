@@ -209,6 +209,110 @@ class ExchangeImportDialogTests(unittest.TestCase):
         finally:
             dlg.close()
 
+    def test_dialog_can_remember_import_choices_per_format(self):
+        settings = _FakeSettings()
+        inspection = ExchangeInspection(
+            file_path="/tmp/catalog.csv",
+            format_name="csv",
+            headers=["track_title", "artist_name"],
+            preview_rows=[{"track_title": "Orbit", "artist_name": "Cosmowyn"}],
+            suggested_mapping={"track_title": "track_title", "artist_name": "artist_name"},
+            resolved_delimiter=",",
+        )
+
+        def _reinspect(delimiter):
+            return ExchangeInspection(
+                file_path="/tmp/catalog.csv",
+                format_name="csv",
+                headers=["track_title", "artist_name"],
+                preview_rows=[{"track_title": "Orbit", "artist_name": "Cosmowyn"}],
+                suggested_mapping={
+                    "track_title": "track_title",
+                    "artist_name": "artist_name",
+                },
+                resolved_delimiter=delimiter or ",",
+            )
+
+        dlg = ExchangeImportDialog(
+            inspection=inspection,
+            supported_headers=["track_title", "artist_name"],
+            settings=settings,
+            csv_reinspect_callback=_reinspect,
+        )
+        try:
+            dlg.mode_combo.setCurrentIndex(dlg.mode_combo.findData("merge"))
+            dlg.match_internal_checkbox.setChecked(False)
+            dlg.match_isrc_checkbox.setChecked(False)
+            dlg.heuristic_checkbox.setChecked(True)
+            delimiter_combo = dlg.findChild(QComboBox, "csvDelimiterCombo")
+            self.assertIsNotNone(delimiter_combo)
+            delimiter_combo.setCurrentIndex(delimiter_combo.findData(";"))
+            self.app.processEvents()
+            dlg.remember_choices_checkbox.setChecked(True)
+            dlg.accept()
+        finally:
+            dlg.close()
+
+        saved = settings.value("exchange/import_preferences/csv")
+        self.assertIn('"mode": "merge"', saved)
+        self.assertIn('"csv_delimiter_mode": ";"', saved)
+
+        remembered = ExchangeImportDialog(
+            inspection=inspection,
+            supported_headers=["track_title", "artist_name"],
+            settings=settings,
+            csv_reinspect_callback=_reinspect,
+        )
+        try:
+            self.assertEqual(remembered.mode_combo.currentData(), "merge")
+            self.assertFalse(remembered.match_internal_checkbox.isChecked())
+            self.assertFalse(remembered.match_isrc_checkbox.isChecked())
+            self.assertTrue(remembered.heuristic_checkbox.isChecked())
+            self.assertEqual(remembered.resolved_csv_delimiter(), ";")
+        finally:
+            remembered.close()
+
+    def test_mapping_can_explicitly_skip_a_source_field(self):
+        inspection = ExchangeInspection(
+            file_path="/tmp/catalog.csv",
+            format_name="csv",
+            headers=["track_title", "artist_name", "Mood Source"],
+            preview_rows=[
+                {
+                    "track_title": "Orbit",
+                    "artist_name": "Cosmowyn",
+                    "Mood Source": "Dreamy",
+                }
+            ],
+            suggested_mapping={
+                "track_title": "track_title",
+                "artist_name": "artist_name",
+                "Mood Source": "custom::Mood",
+            },
+            resolved_delimiter=",",
+        )
+        dlg = ExchangeImportDialog(
+            inspection=inspection,
+            supported_headers=["track_title", "artist_name", "custom::Mood"],
+            settings=_FakeSettings(),
+            csv_reinspect_callback=lambda delimiter: inspection,
+        )
+        try:
+            mapping_combo = dlg.mapping_table.cellWidget(2, 1)
+            mapping_combo.setCurrentIndex(
+                mapping_combo.findData(ExchangeImportDialog.SKIP_MAPPING_TARGET)
+            )
+            self.assertEqual(
+                dlg.mapping(),
+                {
+                    "track_title": "track_title",
+                    "artist_name": "artist_name",
+                },
+            )
+            self.assertEqual(dlg.import_options().skip_targets, ["Mood Source"])
+        finally:
+            dlg.close()
+
 
 if __name__ == "__main__":
     unittest.main()

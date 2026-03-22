@@ -74,6 +74,7 @@ class MigrationIntegrationTests(unittest.TestCase):
         ]
         for patcher in self._patchers:
             patcher.start()
+        self._set_first_launch_prompt_pending(False)
 
     def tearDown(self):
         for patcher in reversed(getattr(self, "_patchers", [])):
@@ -85,6 +86,15 @@ class MigrationIntegrationTests(unittest.TestCase):
         path = self.qt_settings_root / location_name
         path.mkdir(parents=True, exist_ok=True)
         return str(path)
+
+    def _settings_path(self) -> Path:
+        return self.qt_settings_root / "AppDataLocation" / "settings.ini"
+
+    def _set_first_launch_prompt_pending(self, pending: bool) -> None:
+        settings = QSettings(str(self._settings_path()), QSettings.IniFormat)
+        settings.setFallbacksEnabled(False)
+        settings.setValue("startup/offer_open_settings_on_first_launch_pending", bool(pending))
+        settings.sync()
 
     def _initialize_profile(self) -> None:
         session = DatabaseSessionService().open(self.db_path)

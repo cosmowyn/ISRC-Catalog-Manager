@@ -20,6 +20,9 @@ class ExchangePackageTests(ExchangeServiceTestCase):
     test_package_import_supports_legacy_relative_media_without_index = (
         ExchangeServiceTestCase.case_package_import_supports_legacy_relative_media_without_index
     )
+    test_import_package_respects_mapping_when_skipping_custom_field = (
+        ExchangeServiceTestCase.case_import_package_respects_mapping_when_skipping_custom_field
+    )
 
 
 del ExchangeServiceTestCase

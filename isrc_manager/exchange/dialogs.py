@@ -33,6 +33,8 @@ from .models import ExchangeImportOptions, ExchangeInspection
 class ExchangeImportDialog(QDialog):
     """Preview source columns, map them, and choose import mode/options."""
 
+    SKIP_MAPPING_TARGET = "__skip_field__"
+
     def __init__(
         self,
         *,
@@ -171,6 +173,12 @@ class ExchangeImportDialog(QDialog):
         option_row.addWidget(self.create_custom_checkbox)
         setup_layout.addLayout(option_row)
 
+        self.remember_choices_checkbox = QCheckBox(
+            f"Remember these {inspection.format_name.upper()} import choices"
+        )
+        self.remember_choices_checkbox.setObjectName("rememberImportChoicesCheckbox")
+        setup_layout.addWidget(self.remember_choices_checkbox)
+
         self.mode_hint_label = QLabel()
         self.mode_hint_label.setWordWrap(True)
         setup_layout.addWidget(self.mode_hint_label)
@@ -214,6 +222,7 @@ class ExchangeImportDialog(QDialog):
             self.custom_delimiter_edit.textChanged.connect(self._on_csv_delimiter_changed)
             self._update_csv_delimiter_widgets()
             self._set_csv_delimiter_error(None)
+        self._load_saved_import_preferences()
         self._update_mode_affordances()
         _apply_compact_dialog_control_heights(self)
 
@@ -238,6 +247,79 @@ class ExchangeImportDialog(QDialog):
         for name in sorted(self._read_presets()):
             self.preset_combo.addItem(name)
 
+    def _import_preferences_key(self) -> str:
+        return f"exchange/import_preferences/{self.inspection.format_name}"
+
+    def _read_import_preferences(self) -> dict[str, object]:
+        raw = self.settings.value(self._import_preferences_key(), "{}", str)
+        try:
+            payload = json.loads(str(raw or "{}"))
+        except Exception:
+            payload = {}
+        return payload if isinstance(payload, dict) else {}
+
+    def _write_import_preferences(self, payload: dict[str, object]) -> None:
+        self.settings.setValue(
+            self._import_preferences_key(),
+            json.dumps(payload, ensure_ascii=False, sort_keys=True),
+        )
+        self.settings.sync()
+
+    def _load_saved_import_preferences(self) -> None:
+        payload = self._read_import_preferences()
+        if not payload:
+            return
+        mode = str(payload.get("mode") or "").strip()
+        if mode:
+            index = self.mode_combo.findData(mode)
+            if index >= 0:
+                self.mode_combo.setCurrentIndex(index)
+        self.match_internal_checkbox.setChecked(
+            bool(payload.get("match_by_internal_id", self.match_internal_checkbox.isChecked()))
+        )
+        self.match_isrc_checkbox.setChecked(
+            bool(payload.get("match_by_isrc", self.match_isrc_checkbox.isChecked()))
+        )
+        self.match_upc_title_checkbox.setChecked(
+            bool(payload.get("match_by_upc_title", self.match_upc_title_checkbox.isChecked()))
+        )
+        self.heuristic_checkbox.setChecked(
+            bool(payload.get("heuristic_match", self.heuristic_checkbox.isChecked()))
+        )
+        self.create_custom_checkbox.setChecked(
+            bool(
+                payload.get(
+                    "create_missing_custom_fields",
+                    self.create_custom_checkbox.isChecked(),
+                )
+            )
+        )
+        if self.delimiter_combo is None:
+            return
+        delimiter_mode = str(payload.get("csv_delimiter_mode") or "").strip()
+        custom_delimiter = str(payload.get("csv_custom_delimiter") or "")
+        if delimiter_mode:
+            index = self.delimiter_combo.findData(delimiter_mode)
+            if index >= 0:
+                self.delimiter_combo.setCurrentIndex(index)
+        if self.custom_delimiter_edit is not None and custom_delimiter:
+            self.custom_delimiter_edit.setText(custom_delimiter)
+
+    def _current_import_preference_payload(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "mode": str(self.mode_combo.currentData() or "dry_run"),
+            "match_by_internal_id": self.match_internal_checkbox.isChecked(),
+            "match_by_isrc": self.match_isrc_checkbox.isChecked(),
+            "match_by_upc_title": self.match_upc_title_checkbox.isChecked(),
+            "heuristic_match": self.heuristic_checkbox.isChecked(),
+            "create_missing_custom_fields": self.create_custom_checkbox.isChecked(),
+        }
+        if self.delimiter_combo is not None:
+            payload["csv_delimiter_mode"] = str(self.delimiter_combo.currentData() or "auto")
+            if self.custom_delimiter_edit is not None:
+                payload["csv_custom_delimiter"] = self.custom_delimiter_edit.text()
+        return payload
+
     def _update_warning_label(self) -> None:
         warnings = self.inspection.warnings
         if warnings:
@@ -250,11 +332,13 @@ class ExchangeImportDialog(QDialog):
     def _populate_mapping_table(self, preferred_mapping: dict[str, str] | None = None) -> None:
         headers = self.inspection.headers
         self.mapping_table.setRowCount(len(headers))
-        choices = [""] + self.supported_headers
         for row, header in enumerate(headers):
             self.mapping_table.setItem(row, 0, QTableWidgetItem(header))
             combo = QComboBox(self.mapping_table)
-            combo.addItems(choices)
+            combo.addItem("", "")
+            combo.addItem("Skip this field", self.SKIP_MAPPING_TARGET)
+            for target_name in self.supported_headers:
+                combo.addItem(target_name, target_name)
             suggested = (
                 preferred_mapping.get(header, "")
                 if preferred_mapping is not None
@@ -262,7 +346,7 @@ class ExchangeImportDialog(QDialog):
             )
             if not suggested:
                 suggested = self.inspection.suggested_mapping.get(header, "")
-            index = combo.findText(suggested)
+            index = combo.findData(suggested)
             combo.setCurrentIndex(index if index >= 0 else 0)
             self.mapping_table.setCellWidget(row, 1, combo)
 
@@ -325,7 +409,7 @@ class ExchangeImportDialog(QDialog):
             if header_item is None or combo is None:
                 continue
             value = str(preset.get(header_item.text(), ""))
-            index = combo.findText(value)
+            index = combo.findData(value)
             combo.setCurrentIndex(index if index >= 0 else 0)
 
     def mapping(self) -> dict[str, str]:
@@ -336,10 +420,21 @@ class ExchangeImportDialog(QDialog):
             if header_item is None or combo is None:
                 continue
             source = header_item.text()
-            target = combo.currentText().strip()
-            if target:
+            target = str(combo.currentData() or "").strip()
+            if target and target != self.SKIP_MAPPING_TARGET:
                 mapped[source] = target
         return mapped
+
+    def skipped_source_headers(self) -> list[str]:
+        skipped: list[str] = []
+        for row in range(self.mapping_table.rowCount()):
+            header_item = self.mapping_table.item(row, 0)
+            combo = self.mapping_table.cellWidget(row, 1)
+            if header_item is None or combo is None:
+                continue
+            if str(combo.currentData() or "") == self.SKIP_MAPPING_TARGET:
+                skipped.append(header_item.text())
+        return skipped
 
     def import_options(self) -> ExchangeImportOptions:
         return ExchangeImportOptions(
@@ -349,6 +444,7 @@ class ExchangeImportDialog(QDialog):
             match_by_upc_title=self.match_upc_title_checkbox.isChecked(),
             heuristic_match=self.heuristic_checkbox.isChecked(),
             create_missing_custom_fields=self.create_custom_checkbox.isChecked(),
+            skip_targets=self.skipped_source_headers(),
         )
 
     def resolved_csv_delimiter(self) -> str | None:
@@ -438,3 +534,8 @@ class ExchangeImportDialog(QDialog):
             return
         self._set_csv_delimiter_error(None)
         self._apply_inspection(inspection, preferred_mapping=preferred_mapping)
+
+    def accept(self) -> None:
+        if self.remember_choices_checkbox.isChecked():
+            self._write_import_preferences(self._current_import_preference_payload())
+        super().accept()

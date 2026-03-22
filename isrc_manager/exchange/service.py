@@ -815,16 +815,28 @@ class ExchangeService:
         )
 
     def import_json(
-        self, path: str | Path, *, options: ExchangeImportOptions | None = None
+        self,
+        path: str | Path,
+        *,
+        mapping: dict[str, str] | None = None,
+        options: ExchangeImportOptions | None = None,
     ) -> ExchangeImportReport:
         payload = self._load_json_payload(path)
         rows = [dict(row) for row in payload.get("rows") or []]
         return self._import_rows(
-            rows, mapping=None, options=options, format_name="json", source_dir=Path(path).parent
+            rows,
+            mapping=mapping,
+            options=options,
+            format_name="json",
+            source_dir=Path(path).parent,
         )
 
     def import_package(
-        self, path: str | Path, *, options: ExchangeImportOptions | None = None
+        self,
+        path: str | Path,
+        *,
+        mapping: dict[str, str] | None = None,
+        options: ExchangeImportOptions | None = None,
     ) -> ExchangeImportReport:
         payload = self._load_package_payload(path)
         with tempfile.TemporaryDirectory(prefix="exchange-package-") as temp_dir:
@@ -833,7 +845,7 @@ class ExchangeService:
             rows = self._prepare_packaged_rows(payload, extracted_root=extracted_root)
             return self._import_rows(
                 rows,
-                mapping=None,
+                mapping=mapping,
                 options=options,
                 format_name="package",
                 source_dir=extracted_root,
@@ -856,11 +868,22 @@ class ExchangeService:
         self, rows: list[dict[str, object]], *, create_missing: bool
     ) -> list[str]:
         custom_specs: list[dict[str, object]] = []
+        seen_names: set[str] = set()
+        existing_fields = {
+            str(field["name"]): field for field in self.custom_fields.list_active_fields()
+        }
         for row in rows:
             for key in row:
                 if not str(key).startswith("custom::"):
                     continue
-                custom_specs.append({"name": str(key).split("::", 1)[1], "field_type": "text"})
+                field_name = str(key).split("::", 1)[1]
+                if not field_name or field_name in seen_names:
+                    continue
+                seen_names.add(field_name)
+                existing = existing_fields.get(field_name)
+                if existing is not None:
+                    continue
+                custom_specs.append({"name": field_name, "field_type": "text"})
         if custom_specs and create_missing:
             self.custom_fields.ensure_fields(custom_specs)
         return [spec["name"] for spec in custom_specs]
@@ -1202,7 +1225,9 @@ class ExchangeService:
         updated_tracks: list[int] = []
 
         custom_defs = {
-            field["name"]: field["id"] for field in self.custom_fields.list_active_fields()
+            field["name"]: field["id"]
+            for field in self.custom_fields.list_active_fields()
+            if str(field.get("field_type") or "text") not in {"blob_audio", "blob_image"}
         }
 
         def _apply_custom_fields(track_id: int, row: dict[str, object]) -> None:

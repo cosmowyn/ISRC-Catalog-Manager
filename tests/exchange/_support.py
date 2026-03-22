@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from datetime import time, timedelta
 from pathlib import Path
-from zipfile import ZipFile
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from openpyxl import Workbook
 
@@ -1344,6 +1344,127 @@ class ExchangeServiceTestCase(unittest.TestCase):
                 """
             ).fetchall(),
             [("Mood", "Dreamy")],
+        )
+
+    def case_import_csv_reuses_same_name_existing_custom_field_type(self):
+        self.custom_defs.ensure_fields(
+            [
+                {
+                    "name": "Distribution Status",
+                    "field_type": "dropdown",
+                    "options": json.dumps(["Draft", "Approved"]),
+                }
+            ]
+        )
+        csv_path = self.data_root / "distribution-status-import.csv"
+        csv_path.write_text(
+            "track_title,artist_name,custom::Distribution Status\n"
+            "Orbit,Cosmowyn,Approved\n",
+            encoding="utf-8",
+        )
+
+        report = self.service.import_csv(
+            csv_path,
+            mapping={
+                "track_title": "track_title",
+                "artist_name": "artist_name",
+                "custom::Distribution Status": "custom::Distribution Status",
+            },
+            options=ExchangeImportOptions(mode="create"),
+        )
+
+        self.assertEqual(report.passed, 1)
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT COUNT(*) FROM CustomFieldDefs WHERE name='Distribution Status'"
+            ).fetchone()[0],
+            1,
+        )
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT field_type FROM CustomFieldDefs WHERE name='Distribution Status'"
+            ).fetchone()[0],
+            "dropdown",
+        )
+        self.assertEqual(
+            self.conn.execute(
+                """
+                SELECT cfv.value
+                FROM CustomFieldValues cfv
+                JOIN CustomFieldDefs cfd ON cfd.id = cfv.field_def_id
+                WHERE cfd.name='Distribution Status'
+                """
+            ).fetchone()[0],
+            "Approved",
+        )
+
+    def case_import_json_respects_mapping_when_skipping_custom_field(self):
+        json_path = self.data_root / "skip-json-field.json"
+        json_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "columns": ["track_title", "artist_name", "custom::Mood"],
+                    "rows": [
+                        {
+                            "track_title": "Orbit",
+                            "artist_name": "Cosmowyn",
+                            "custom::Mood": "Dreamy",
+                        }
+                    ],
+                    "custom_field_defs": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        report = self.service.import_json(
+            json_path,
+            mapping={
+                "track_title": "track_title",
+                "artist_name": "artist_name",
+            },
+            options=ExchangeImportOptions(mode="create"),
+        )
+
+        self.assertEqual(report.passed, 1)
+        self.assertEqual(
+            self.conn.execute("SELECT COUNT(*) FROM CustomFieldDefs").fetchone()[0],
+            0,
+        )
+
+    def case_import_package_respects_mapping_when_skipping_custom_field(self):
+        package_path = self.data_root / "skip-package-field.zip"
+        manifest = {
+            "schema_version": 1,
+            "columns": ["track_title", "artist_name", "custom::Mood"],
+            "rows": [
+                {
+                    "track_title": "Orbit",
+                    "artist_name": "Cosmowyn",
+                    "custom::Mood": "Dreamy",
+                }
+            ],
+            "custom_field_defs": [],
+            "packaged_media": False,
+            "packaged_media_index": {},
+        }
+        with ZipFile(package_path, "w", compression=ZIP_DEFLATED) as archive:
+            archive.writestr("manifest.json", json.dumps(manifest))
+
+        report = self.service.import_package(
+            package_path,
+            mapping={
+                "track_title": "track_title",
+                "artist_name": "artist_name",
+            },
+            options=ExchangeImportOptions(mode="create"),
+        )
+
+        self.assertEqual(report.passed, 1)
+        self.assertEqual(
+            self.conn.execute("SELECT COUNT(*) FROM CustomFieldDefs").fetchone()[0],
+            0,
         )
 
 

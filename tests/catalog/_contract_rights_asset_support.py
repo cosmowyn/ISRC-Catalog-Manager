@@ -23,10 +23,17 @@ from isrc_manager.works import WorkPayload, WorkService
 from tests.qt_test_helpers import require_qapplication
 
 try:
-    from isrc_manager.contracts.dialogs import ContractDocumentEditor, ContractEditorDialog
+    from isrc_manager.contracts.dialogs import (
+        ContractBrowserPanel,
+        ContractDocumentEditor,
+        ContractEditorDialog,
+    )
+    from PySide6.QtWidgets import QFrame
 except Exception:  # pragma: no cover - environment-specific fallback
+    ContractBrowserPanel = None
     ContractDocumentEditor = None
     ContractEditorDialog = None
+    QFrame = None
 
 
 class ContractRightsAssetServiceTestCase(unittest.TestCase):
@@ -696,6 +703,22 @@ class ContractRightsAssetServiceTestCase(unittest.TestCase):
             self.assertEqual(payload.documents[0].supersedes_document_id, 999)
         finally:
             dialog.close()
+
+    def case_contract_browser_uses_compact_action_cluster(self):
+        if ContractBrowserPanel is None or QFrame is None:
+            self.skipTest("Contract browser panel unavailable")
+        require_qapplication()
+
+        panel = ContractBrowserPanel(contract_service_provider=lambda: self.contract_service)
+        try:
+            compact_groups = [
+                frame
+                for frame in panel.findChildren(QFrame)
+                if frame.property("role") == "compactControlGroup"
+            ]
+            self.assertTrue(compact_groups)
+        finally:
+            panel.deleteLater()
 
     def case_contract_validation_rejects_invalid_date_ranges(self):
         with self.assertRaises(ValueError):

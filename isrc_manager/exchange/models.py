@@ -24,6 +24,7 @@ class ExchangeImportOptions:
     match_by_upc_title: bool = True
     heuristic_match: bool = False
     create_missing_custom_fields: bool = True
+    skip_targets: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)

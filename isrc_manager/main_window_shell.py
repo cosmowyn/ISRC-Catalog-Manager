@@ -160,61 +160,67 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         slot=lambda: app.import_exchange_file("package"),
     )
     import_exchange_menu.addAction(app.import_package_action)
+    import_exchange_menu.addSeparator()
+    app.reset_saved_import_choices_action = app._create_action(
+        "Reset Saved Import Choices…",
+        slot=app.reset_saved_exchange_import_choices,
+    )
+    import_exchange_menu.addAction(app.reset_saved_import_choices_action)
 
-    export_submenu = file_menu.addMenu("Export")
+    export_submenu = file_menu.addMenu("Export Files")
     app.export_selected_action = app._create_action(
-        "Export Selected to XML…",
+        "Export Selected Catalog XML…",
         slot=app.export_selected_to_xml,
         shortcuts=("Ctrl+E", "Meta+E"),
     )
     export_submenu.addAction(app.export_selected_action)
 
     app.export_all_action = app._create_action(
-        "Export Entire Library to XML…",
+        "Export Full Catalog XML…",
         slot=app.export_full_to_xml,
         shortcuts=("Ctrl+Shift+E", "Meta+Shift+E"),
     )
     export_submenu.addAction(app.export_all_action)
 
-    exchange_export_menu = export_submenu.addMenu("Exchange Formats")
+    exchange_export_menu = export_submenu.addMenu("Exchange Data")
     app.export_selected_csv_action = app._create_action(
-        "Export Selected to CSV…",
+        "Export Selected Exchange CSV…",
         slot=lambda: app.export_exchange_file("csv", selected_only=True),
     )
     exchange_export_menu.addAction(app.export_selected_csv_action)
     app.export_selected_xlsx_action = app._create_action(
-        "Export Selected to XLSX…",
+        "Export Selected Exchange XLSX…",
         slot=lambda: app.export_exchange_file("xlsx", selected_only=True),
     )
     exchange_export_menu.addAction(app.export_selected_xlsx_action)
     app.export_selected_json_action = app._create_action(
-        "Export Selected to JSON…",
+        "Export Selected Exchange JSON…",
         slot=lambda: app.export_exchange_file("json", selected_only=True),
     )
     exchange_export_menu.addAction(app.export_selected_json_action)
     app.export_selected_package_action = app._create_action(
-        "Export Selected to ZIP Package…",
+        "Export Selected Exchange ZIP Package…",
         slot=lambda: app.export_exchange_file("package", selected_only=True),
     )
     exchange_export_menu.addAction(app.export_selected_package_action)
     exchange_export_menu.addSeparator()
     app.export_all_csv_action = app._create_action(
-        "Export Entire Library to CSV…",
+        "Export Full Exchange CSV…",
         slot=lambda: app.export_exchange_file("csv", selected_only=False),
     )
     exchange_export_menu.addAction(app.export_all_csv_action)
     app.export_all_xlsx_action = app._create_action(
-        "Export Entire Library to XLSX…",
+        "Export Full Exchange XLSX…",
         slot=lambda: app.export_exchange_file("xlsx", selected_only=False),
     )
     exchange_export_menu.addAction(app.export_all_xlsx_action)
     app.export_all_json_action = app._create_action(
-        "Export Entire Library to JSON…",
+        "Export Full Exchange JSON…",
         slot=lambda: app.export_exchange_file("json", selected_only=False),
     )
     exchange_export_menu.addAction(app.export_all_json_action)
     app.export_all_package_action = app._create_action(
-        "Export Entire Library to ZIP Package…",
+        "Export Full Exchange ZIP Package…",
         slot=lambda: app.export_exchange_file("package", selected_only=False),
     )
     exchange_export_menu.addAction(app.export_all_package_action)
@@ -377,45 +383,45 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     )
     catalog_menu.addAction(app.gs1_metadata_action)
 
-    repertoire_menu = file_menu.addMenu("Repertoire Exchange")
+    repertoire_menu = file_menu.addMenu("Contracts and Rights Exchange")
     app.export_repertoire_json_action = app._create_action(
-        "Export Repertoire to JSON…",
+        "Export Contracts and Rights JSON…",
         slot=lambda: app.export_repertoire_exchange("json"),
     )
     repertoire_menu.addAction(app.export_repertoire_json_action)
     app.export_repertoire_xlsx_action = app._create_action(
-        "Export Repertoire to XLSX…",
+        "Export Contracts and Rights XLSX…",
         slot=lambda: app.export_repertoire_exchange("xlsx"),
     )
     repertoire_menu.addAction(app.export_repertoire_xlsx_action)
     app.export_repertoire_csv_action = app._create_action(
-        "Export Repertoire CSV Bundle…",
+        "Export Contracts and Rights CSV Bundle…",
         slot=lambda: app.export_repertoire_exchange("csv"),
     )
     repertoire_menu.addAction(app.export_repertoire_csv_action)
     app.export_repertoire_package_action = app._create_action(
-        "Export Repertoire ZIP Package…",
+        "Export Contracts and Rights ZIP Package…",
         slot=lambda: app.export_repertoire_exchange("package"),
     )
     repertoire_menu.addAction(app.export_repertoire_package_action)
     repertoire_menu.addSeparator()
     app.import_repertoire_json_action = app._create_action(
-        "Import Repertoire JSON…",
+        "Import Contracts and Rights JSON…",
         slot=lambda: app.import_repertoire_exchange("json"),
     )
     repertoire_menu.addAction(app.import_repertoire_json_action)
     app.import_repertoire_xlsx_action = app._create_action(
-        "Import Repertoire XLSX…",
+        "Import Contracts and Rights XLSX…",
         slot=lambda: app.import_repertoire_exchange("xlsx"),
     )
     repertoire_menu.addAction(app.import_repertoire_xlsx_action)
     app.import_repertoire_csv_action = app._create_action(
-        "Import Repertoire CSV Bundle…",
+        "Import Contracts and Rights CSV Bundle…",
         slot=lambda: app.import_repertoire_exchange("csv"),
     )
     repertoire_menu.addAction(app.import_repertoire_csv_action)
     app.import_repertoire_package_action = app._create_action(
-        "Import Repertoire ZIP Package…",
+        "Import Contracts and Rights ZIP Package…",
         slot=lambda: app.import_repertoire_exchange("package"),
     )
     repertoire_menu.addAction(app.import_repertoire_package_action)
@@ -460,6 +466,13 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         toggled_slot=app._on_toggle_action_ribbon,
         shortcuts=("Ctrl+Alt+R", "Meta+Alt+R"),
     )
+    app.profiles_toolbar_visibility_action = app._create_action(
+        "Show Profiles Ribbon",
+        checkable=True,
+        checked=True,
+        toggled_slot=app._on_toggle_profiles_toolbar,
+    )
+    view_menu.addAction(app.profiles_toolbar_visibility_action)
     view_menu.addAction(app.action_ribbon_visibility_action)
 
     app.customize_action_ribbon_action = app._create_action(

@@ -41,6 +41,7 @@ from isrc_manager.file_storage import (
 from isrc_manager.ui_common import (
     FocusWheelComboBox,
     _add_standard_dialog_header,
+    _create_action_button_cluster,
     _apply_compact_dialog_control_heights,
     _apply_standard_dialog_chrome,
     _apply_standard_widget_chrome,
@@ -1496,7 +1497,14 @@ class ContractBrowserPanel(QWidget):
             button = QPushButton(label)
             button.clicked.connect(handler)
             action_buttons.append(button)
-        controls_layout.addWidget(_create_action_button_grid(self, action_buttons, columns=3))
+        controls_layout.addWidget(
+            _create_action_button_cluster(
+                self,
+                action_buttons,
+                columns=3,
+                min_button_width=140,
+            )
+        )
         root.addWidget(controls_box)
 
         table_box, table_layout = _create_standard_section(
