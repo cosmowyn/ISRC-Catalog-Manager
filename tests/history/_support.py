@@ -335,6 +335,35 @@ class HistoryManagerTestCase(unittest.TestCase):
         self.assertIsNotNone(restored)
         self.assertTrue(self.license_service.resolve_path(restored.file_path).exists())
 
+    def case_snapshot_actions_restore_custom_field_media_and_gs1_templates(self):
+        custom_media_dir = self.data_root / "custom_field_media"
+        gs1_templates_dir = self.data_root / "gs1_templates"
+        custom_media_dir.mkdir(parents=True, exist_ok=True)
+        gs1_templates_dir.mkdir(parents=True, exist_ok=True)
+        custom_file = custom_media_dir / "waveform.bin"
+        gs1_file = gs1_templates_dir / "template.pdf"
+        custom_file.write_bytes(b"custom-field-media")
+        gs1_file.write_bytes(b"%PDF-gs1-template")
+
+        snapshot = self.history.capture_snapshot(
+            kind="managed_roots",
+            label="Before Managed Root Restore",
+        )
+        managed_directories = snapshot.manifest.get("managed_directories", {})
+        self.assertTrue(managed_directories["custom_field_media"]["exists"])
+        self.assertTrue(managed_directories["gs1_templates"]["exists"])
+
+        custom_file.unlink()
+        gs1_file.unlink()
+        self.assertFalse(custom_file.exists())
+        self.assertFalse(gs1_file.exists())
+
+        self.history.restore_snapshot(snapshot.snapshot_id)
+        self.assertTrue(custom_file.exists())
+        self.assertEqual(custom_file.read_bytes(), b"custom-field-media")
+        self.assertTrue(gs1_file.exists())
+        self.assertEqual(gs1_file.read_bytes(), b"%PDF-gs1-template")
+
     def case_registered_snapshot_can_be_restored(self):
         snapshot = self.history.create_manual_snapshot("Initial State")
         registered = self.history.register_snapshot(

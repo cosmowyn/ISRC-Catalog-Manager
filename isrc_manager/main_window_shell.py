@@ -358,6 +358,11 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         slot=app.add_selected_tracks_to_release,
     )
     catalog_menu.addSeparator()
+    app.bulk_attach_audio_action = app._create_action(
+        "Bulk Attach Audio Files…",
+        slot=app.bulk_attach_audio_files,
+    )
+    catalog_menu.addAction(app.bulk_attach_audio_action)
     app.import_tags_action = app._create_action(
         "Import Tags from Audio…",
         slot=app.import_tags_from_audio,

@@ -13,10 +13,15 @@ except Exception:  # pragma: no cover - optional in constrained local test envs
 from isrc_manager.tags import (
     ArtworkPayload,
     AudioTagData,
+    BulkAudioAttachTrackCandidate,
     catalog_metadata_to_tags,
     merge_imported_tags,
 )
-from isrc_manager.tags.service import AudioTagService, TaggedAudioExportService
+from isrc_manager.tags.service import (
+    AudioTagService,
+    BulkAudioAttachService,
+    TaggedAudioExportService,
+)
 
 
 class _DummyID3Audio:
@@ -63,6 +68,14 @@ class _DummyMp4:
 
     def save(self):
         self.saved = True
+
+
+class _StubAudioTagReader:
+    def __init__(self, payloads=None):
+        self.payloads = dict(payloads or {})
+
+    def read_tags(self, file_path):
+        return self.payloads.get(Path(file_path).name, AudioTagData())
 
 
 @unittest.skipIf(ID3 is None or MP4Cover is None, "mutagen is not installed")
@@ -240,6 +253,44 @@ class AudioTagServiceTests(unittest.TestCase):
                     exports=[(str(source_path), "orbit_export", self.tag_data)],
                     is_cancelled=lambda: True,
                 )
+
+
+class BulkAudioAttachServiceTests(unittest.TestCase):
+    def test_bulk_audio_attach_service_matches_by_filename_and_suggests_artist(self):
+        service = BulkAudioAttachService(_StubAudioTagReader())
+        with tempfile.TemporaryDirectory() as tmpdir:
+            orbit_path = Path(tmpdir) / "Artist One - Orbit.wav"
+            aurora_path = Path(tmpdir) / "Artist One - Aurora.wav"
+            orbit_path.write_bytes(b"")
+            aurora_path.write_bytes(b"")
+
+            plan = service.build_plan(
+                file_paths=[orbit_path, aurora_path],
+                tracks=[
+                    BulkAudioAttachTrackCandidate(track_id=1, title="Orbit", artist="Artist One"),
+                    BulkAudioAttachTrackCandidate(track_id=2, title="Aurora", artist="Artist One"),
+                ],
+            )
+
+        self.assertEqual([item.matched_track_id for item in plan.items], [1, 2])
+        self.assertEqual(plan.suggested_artist, "Artist One")
+
+    def test_bulk_audio_attach_service_marks_duplicate_matches_as_ambiguous(self):
+        service = BulkAudioAttachService(_StubAudioTagReader())
+        with tempfile.TemporaryDirectory() as tmpdir:
+            exact_path = Path(tmpdir) / "Orbit.wav"
+            weaker_path = Path(tmpdir) / "Orbit Live.wav"
+            exact_path.write_bytes(b"")
+            weaker_path.write_bytes(b"")
+
+            plan = service.build_plan(
+                file_paths=[exact_path, weaker_path],
+                tracks=[BulkAudioAttachTrackCandidate(track_id=11, title="Orbit")],
+            )
+
+        self.assertEqual(plan.items[0].matched_track_id, 11)
+        self.assertIsNone(plan.items[1].matched_track_id)
+        self.assertEqual(plan.items[1].status, "ambiguous")
 
 
 if __name__ == "__main__":

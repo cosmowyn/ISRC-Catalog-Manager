@@ -310,12 +310,13 @@ from isrc_manager.storage_migration import (
 )
 from isrc_manager.tags import (
     AudioTagService,
+    BulkAudioAttachService,
     TaggedAudioExportService,
     catalog_metadata_to_tags,
     merge_imported_tags,
 )
-from isrc_manager.tags.dialogs import TagPreviewDialog
-from isrc_manager.tags.models import ArtworkPayload
+from isrc_manager.tags.dialogs import BulkAudioAttachDialog, TagPreviewDialog
+from isrc_manager.tags.models import ArtworkPayload, BulkAudioAttachTrackCandidate
 from isrc_manager.ui_common import (
     DatePickerDialog,
     FocusWheelCalendarWidget,
@@ -5949,13 +5950,14 @@ class App(QMainWindow):
 
         return "\n".join(rendered).strip() or "(No trace entries found.)"
 
-    def _history_snapshot_summary(self) -> str:
-        if self.conn is None:
+    def _history_snapshot_summary(self, conn=None) -> str:
+        connection = conn if conn is not None else self.conn
+        if connection is None:
             return "History unavailable"
         try:
-            count_row = self.conn.execute("SELECT COUNT(*) FROM HistorySnapshots").fetchone()
+            count_row = connection.execute("SELECT COUNT(*) FROM HistorySnapshots").fetchone()
             total = int(count_row[0] or 0) if count_row else 0
-            latest = self.conn.execute(
+            latest = connection.execute(
                 "SELECT label, created_at FROM HistorySnapshots ORDER BY id DESC LIMIT 1"
             ).fetchone()
             if not latest:
@@ -5966,13 +5968,14 @@ class App(QMainWindow):
         except Exception:
             return "Snapshot history unavailable"
 
-    def _custom_value_field_column_name(self) -> str | None:
-        if self.conn is None:
+    def _custom_value_field_column_name(self, conn=None) -> str | None:
+        connection = conn if conn is not None else self.conn
+        if connection is None:
             return None
         try:
             columns = {
                 row[1]
-                for row in self.conn.execute("PRAGMA table_info(CustomFieldValues)").fetchall()
+                for row in connection.execute("PRAGMA table_info(CustomFieldValues)").fetchall()
             }
         except Exception:
             return None
@@ -5982,13 +5985,14 @@ class App(QMainWindow):
             return "custom_field_id"
         return None
 
-    def _count_orphaned_custom_values(self) -> int:
-        if self.conn is None:
+    def _count_orphaned_custom_values(self, conn=None) -> int:
+        connection = conn if conn is not None else self.conn
+        if connection is None:
             return 0
-        field_column = self._custom_value_field_column_name()
+        field_column = self._custom_value_field_column_name(conn=connection)
         if field_column is None:
             return 0
-        row = self.conn.execute(
+        row = connection.execute(
             f"""
             SELECT COUNT(*)
             FROM CustomFieldValues cfv
@@ -6147,21 +6151,68 @@ class App(QMainWindow):
 
         raise ValueError(f"Unknown diagnostics repair: {repair_key}")
 
-    def _build_diagnostics_report(self) -> dict[str, object]:
+    def _build_diagnostics_report(
+        self,
+        *,
+        conn=None,
+        schema_service=None,
+        current_db_path: str | Path | None = None,
+        data_root: str | Path | None = None,
+        logs_dir: str | Path | None = None,
+        track_service=None,
+        license_service=None,
+        history_manager=None,
+        database_maintenance=None,
+        storage_migration_service=None,
+        app_version: str | None = None,
+        status_callback=None,
+    ) -> dict[str, object]:
+        connection = conn if conn is not None else self.conn
+        current_path = str(
+            current_db_path if current_db_path is not None else getattr(self, "current_db_path", "")
+        ).strip()
+        current_data_root = Path(data_root if data_root is not None else self.data_root)
+        current_logs_dir = Path(logs_dir if logs_dir is not None else self.logs_dir)
+        active_track_service = track_service if track_service is not None else self.track_service
+        active_license_service = (
+            license_service if license_service is not None else self.license_service
+        )
+        active_history_manager = history_manager if history_manager is not None else self.history_manager
+        active_database_maintenance = (
+            database_maintenance
+            if database_maintenance is not None
+            else self.database_maintenance
+        )
+        active_storage_migration_service = (
+            storage_migration_service
+            if storage_migration_service is not None
+            else self.storage_migration_service
+        )
+        active_schema_service = schema_service
+        if active_schema_service is None and connection is not None:
+            active_schema_service = DatabaseSchemaService(connection, data_root=current_data_root)
+
+        def _set_status(message: str) -> None:
+            if callable(status_callback):
+                status_callback(str(message))
+
+        db_version = 0
+        schema_version_text = "Unknown"
+        if active_schema_service is not None:
+            try:
+                db_version = int(active_schema_service.get_db_version())
+                schema_version_text = str(db_version)
+            except Exception:
+                db_version = 0
+
         environment = {
-            "App version": self._app_version_text(),
-            "Schema version": str(self._get_db_version()),
-            "Current profile": (
-                Path(self.current_db_path).name
-                if getattr(self, "current_db_path", "")
-                else "(none)"
-            ),
-            "Database path": (
-                str(self.current_db_path) if getattr(self, "current_db_path", "") else "(none)"
-            ),
-            "Data folder": str(self.data_root),
-            "Log folder": str(self.logs_dir),
-            "Restore points": self._history_snapshot_summary(),
+            "App version": str(app_version or self._app_version_text()),
+            "Schema version": schema_version_text,
+            "Current profile": Path(current_path).name if current_path else "(none)",
+            "Database path": current_path or "(none)",
+            "Data folder": str(current_data_root),
+            "Log folder": str(current_logs_dir),
+            "Restore points": self._history_snapshot_summary(conn=connection),
             "Platform": f"{platform.system()} {platform.release()}",
             "Python": platform.python_version(),
         }
@@ -6192,10 +6243,11 @@ class App(QMainWindow):
                 }
             )
 
-        db_version = self._get_db_version()
+        _set_status("Inspecting storage layout...")
         try:
-            storage_inspection = self.storage_migration_service.inspect()
-            if self.storage_layout.portable:
+            storage_inspection = active_storage_migration_service.inspect()
+            active_layout = active_storage_migration_service.layout
+            if active_layout.portable:
                 add_check(
                     "Storage layout",
                     "ok",
@@ -6207,10 +6259,10 @@ class App(QMainWindow):
                     "Storage layout",
                     "ok",
                     "App-owned data already uses the preferred app folder layout.",
-                    f"Active data root: {self.storage_layout.active_data_root}\nPreferred data root: {self.storage_layout.preferred_data_root}",
+                    f"Active data root: {active_layout.active_data_root}\nPreferred data root: {active_layout.preferred_data_root}",
                 )
             else:
-                current_root = self.storage_layout.active_data_root
+                current_root = active_layout.active_data_root
                 preferred_state_text = (
                     ", ".join(storage_inspection.preferred_items)
                     if storage_inspection.preferred_items
@@ -6233,7 +6285,7 @@ class App(QMainWindow):
                         [
                             f"Legacy root: {storage_inspection.legacy_root}",
                             f"Active root: {current_root}",
-                            f"Preferred root: {self.storage_layout.preferred_data_root}",
+                            f"Preferred root: {active_layout.preferred_data_root}",
                             f"Legacy items: {', '.join(storage_inspection.legacy_items)}",
                             f"Preferred state: {storage_inspection.preferred_state}",
                             f"Preferred-root contents: {preferred_state_text}",
@@ -6260,6 +6312,7 @@ class App(QMainWindow):
                 repair_label="Migrate App Data",
             )
 
+        _set_status("Checking schema version...")
         if db_version == SCHEMA_TARGET:
             add_check(
                 "Schema version",
@@ -6278,15 +6331,16 @@ class App(QMainWindow):
                 repair_label="Run Schema Migration",
             )
 
+        _set_status("Inspecting schema layout...")
         try:
             table_names = (
                 {
                     row[0]
-                    for row in self.conn.execute(
+                    for row in connection.execute(
                         "SELECT name FROM sqlite_master WHERE type='table'"
                     ).fetchall()
                 }
-                if self.conn is not None
+                if connection is not None
                 else set()
             )
             required_tables = {
@@ -6307,8 +6361,8 @@ class App(QMainWindow):
             missing_tables = sorted(required_tables - table_names)
 
             track_columns = (
-                {row[1] for row in self.conn.execute("PRAGMA table_info(Tracks)").fetchall()}
-                if self.conn is not None and "Tracks" in table_names
+                {row[1] for row in connection.execute("PRAGMA table_info(Tracks)").fetchall()}
+                if connection is not None and "Tracks" in table_names
                 else set()
             )
             required_track_columns = {
@@ -6365,8 +6419,11 @@ class App(QMainWindow):
                 f"An exception occurred while reading table metadata:\n{exc}",
             )
 
+        _set_status("Running SQLite integrity checks...")
         try:
-            result = self.database_maintenance.verify_integrity(self.current_db_path)
+            if active_database_maintenance is None or not current_path:
+                raise RuntimeError("No active profile is open.")
+            result = active_database_maintenance.verify_integrity(current_path)
             status = "ok" if str(result).strip().lower() == "ok" else "error"
             add_check(
                 "SQLite integrity",
@@ -6382,10 +6439,11 @@ class App(QMainWindow):
                 f"An exception occurred while running PRAGMA integrity_check:\n{exc}",
             )
 
+        _set_status("Checking foreign-key consistency...")
         try:
             fk_rows = (
-                self.conn.execute("PRAGMA foreign_key_check").fetchall()
-                if self.conn is not None
+                connection.execute("PRAGMA foreign_key_check").fetchall()
+                if connection is not None
                 else []
             )
             if not fk_rows:
@@ -6414,8 +6472,9 @@ class App(QMainWindow):
                 f"An exception occurred while running PRAGMA foreign_key_check:\n{exc}",
             )
 
+        _set_status("Checking custom-value integrity...")
         try:
-            orphan_count = self._count_orphaned_custom_values()
+            orphan_count = self._count_orphaned_custom_values(conn=connection)
             if orphan_count == 0:
                 add_check(
                     "Custom-value integrity",
@@ -6443,11 +6502,12 @@ class App(QMainWindow):
                 repair_label="Delete Orphaned Custom Values",
             )
 
+        _set_status("Checking managed files...")
         try:
             missing_files = []
 
-            if self.conn is not None:
-                media_rows = self.conn.execute(
+            if connection is not None:
+                media_rows = connection.execute(
                     """
                     SELECT id, track_title, audio_file_path
                     FROM Tracks
@@ -6457,8 +6517,8 @@ class App(QMainWindow):
                 for track_id, track_title, audio_path in media_rows:
                     if audio_path:
                         resolved = (
-                            self.track_service.resolve_media_path(audio_path)
-                            if self.track_service
+                            active_track_service.resolve_media_path(audio_path)
+                            if active_track_service
                             else Path(audio_path)
                         )
                         if resolved is not None and not resolved.exists():
@@ -6466,7 +6526,7 @@ class App(QMainWindow):
                                 f"Track #{track_id} '{track_title}': missing audio file -> {resolved}"
                             )
 
-                album_art_rows = self.conn.execute(
+                album_art_rows = connection.execute(
                     """
                     SELECT id, title, album_art_path
                     FROM Albums
@@ -6476,8 +6536,8 @@ class App(QMainWindow):
                 ).fetchall()
                 for album_id, album_title, art_path in album_art_rows:
                     resolved = (
-                        self.track_service.resolve_media_path(art_path)
-                        if self.track_service
+                        active_track_service.resolve_media_path(art_path)
+                        if active_track_service
                         else Path(art_path)
                     )
                     if resolved is not None and not resolved.exists():
@@ -6485,15 +6545,15 @@ class App(QMainWindow):
                             f"Album #{album_id} '{album_title or 'Untitled Album'}': missing album art -> {resolved}"
                         )
 
-                license_rows = self.conn.execute(
+                license_rows = connection.execute(
                     "SELECT id, filename, file_path FROM Licenses ORDER BY id"
                 ).fetchall()
                 for record_id, filename, file_path in license_rows:
                     if not file_path:
                         continue
                     resolved = (
-                        self.license_service.resolve_path(file_path)
-                        if self.license_service
+                        active_license_service.resolve_path(file_path)
+                        if active_license_service
                         else Path(file_path)
                     )
                     if not resolved.exists():
@@ -6524,10 +6584,11 @@ class App(QMainWindow):
                 f"An exception occurred while checking managed media and license files:\n{exc}",
             )
 
+        _set_status("Inspecting history snapshots and backups...")
         try:
-            if self.history_manager is None:
+            if active_history_manager is None:
                 raise RuntimeError("No active history manager")
-            recovery_issues = self.history_manager.inspect_recovery_state()
+            recovery_issues = active_history_manager.inspect_recovery_state()
 
             snapshot_issues = [
                 issue
@@ -6548,7 +6609,7 @@ class App(QMainWindow):
                 )
                 for issue in snapshot_issues[:20]
             )
-            snapshot_total = len(self.history_manager.list_snapshots(limit=10_000))
+            snapshot_total = len(active_history_manager.list_snapshots(limit=10_000))
             if not snapshot_issues:
                 add_check(
                     "History snapshots",
@@ -6580,8 +6641,8 @@ class App(QMainWindow):
             backup_details = "\n\n".join(
                 "\n".join([issue.message] + ([str(issue.path)] if issue.path else []))
                 for issue in backup_issues[:20]
-            )
-            backup_total = len(self.history_manager.list_backups(limit=10_000))
+                )
+            backup_total = len(active_history_manager.list_backups(limit=10_000))
             if not backup_issues:
                 add_check(
                     "Backup artifacts",
@@ -6638,6 +6699,250 @@ class App(QMainWindow):
             )
 
         return {"environment": environment, "checks": checks}
+
+    def _load_diagnostics_report_async(
+        self,
+        *,
+        owner: QWidget | None = None,
+        on_success=None,
+        on_error=None,
+        on_cancelled=None,
+        on_finished=None,
+        on_status=None,
+    ):
+        current_path = str(getattr(self, "current_db_path", "") or "").strip()
+        if not current_path:
+            report = self._build_diagnostics_report()
+            if on_success is not None:
+                on_success(report)
+            if on_finished is not None:
+                on_finished()
+            return None
+
+        app_version = self._app_version_text()
+        data_root = self.data_root
+        logs_dir = self.logs_dir
+        storage_layout = self.storage_layout
+
+        def _task(bundle, ctx):
+            ctx.set_status("Loading diagnostics...")
+            storage_service = StorageMigrationService(storage_layout, settings=bundle.settings)
+            schema_service = DatabaseSchemaService(bundle.conn, data_root=data_root)
+            return self._build_diagnostics_report(
+                conn=bundle.conn,
+                schema_service=schema_service,
+                current_db_path=current_path,
+                data_root=data_root,
+                logs_dir=logs_dir,
+                track_service=bundle.track_service,
+                license_service=bundle.license_service,
+                history_manager=bundle.history_manager,
+                database_maintenance=bundle.database_maintenance,
+                storage_migration_service=storage_service,
+                app_version=app_version,
+                status_callback=ctx.set_status,
+            )
+
+        return self._submit_background_bundle_task(
+            title="Diagnostics",
+            description="Loading diagnostics...",
+            task_fn=_task,
+            kind="read",
+            unique_key="diagnostics.report",
+            show_dialog=False,
+            owner=owner or self,
+            on_success=on_success,
+            on_error=on_error,
+            on_cancelled=on_cancelled,
+            on_finished=on_finished,
+            on_status=on_status,
+        )
+
+    def _run_bundle_diagnostics_repair(
+        self,
+        repair_key: str,
+        check: dict | None = None,
+        *,
+        bundle,
+        current_db_path: str,
+        data_root: str | Path,
+        status_callback=None,
+    ) -> dict[str, object]:
+        def _set_status(message: str) -> None:
+            if callable(status_callback):
+                status_callback(str(message))
+
+        if repair_key == "schema_migrate":
+            _set_status("Applying schema migration...")
+            schema_service = DatabaseSchemaService(bundle.conn, data_root=data_root)
+            schema_service.init_db()
+            schema_service.migrate_schema()
+            return {
+                "result_text": "Schema bootstrap and migration completed successfully.",
+                "post_action": "refresh_schema",
+                "audit_entity": "Schema",
+                "audit_ref_id": current_db_path,
+                "audit_details": "schema_migrate",
+                "log_event": "diagnostics.repair.schema_migrate",
+                "log_message": "Diagnostics repair applied",
+                "log_fields": {
+                    "repair_key": repair_key,
+                    "status": "ok",
+                },
+            }
+
+        if repair_key == "custom_value_cleanup":
+            _set_status("Deleting orphaned custom values...")
+            field_column = self._custom_value_field_column_name(conn=bundle.conn)
+            if field_column is None:
+                raise RuntimeError("Could not determine the custom field reference column.")
+            before_count = self._count_orphaned_custom_values(conn=bundle.conn)
+            with bundle.conn:
+                bundle.conn.execute(
+                    f"""
+                    DELETE FROM CustomFieldValues
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM CustomFieldDefs cfd WHERE cfd.id = CustomFieldValues.{field_column}
+                    )
+                    OR NOT EXISTS (
+                        SELECT 1 FROM Tracks t WHERE t.id = CustomFieldValues.track_id
+                    )
+                    """
+                )
+            after_count = self._count_orphaned_custom_values(conn=bundle.conn)
+            removed = max(0, before_count - after_count)
+            return {
+                "result_text": f"Removed {removed} orphaned custom value row(s).",
+                "audit_entity": "CustomFieldValues",
+                "audit_ref_id": "orphans",
+                "audit_details": f"removed={removed}; remaining={after_count}",
+                "log_event": "diagnostics.repair.custom_value_cleanup",
+                "log_message": "Diagnostics repair applied",
+                "log_fields": {
+                    "repair_key": repair_key,
+                    "removed": removed,
+                    "remaining": after_count,
+                },
+            }
+
+        if repair_key == "history_reconcile":
+            if bundle.history_manager is None:
+                raise RuntimeError("Open a profile first.")
+            _set_status("Reconciling history artifacts...")
+            result = bundle.history_manager.repair_recovery_state()
+            summary_parts = []
+            if result.changes:
+                summary_parts.append("\n".join(result.changes))
+            else:
+                summary_parts.append("No registry changes were needed.")
+            if result.unresolved:
+                summary_parts.append("Unresolved:\n" + "\n".join(result.unresolved))
+            return {
+                "result_text": "\n\n".join(summary_parts),
+                "post_action": "refresh_history",
+                "audit_entity": "History",
+                "audit_ref_id": current_db_path,
+                "audit_details": "history_reconcile",
+                "log_event": "diagnostics.repair.history_reconcile",
+                "log_message": "History diagnostics repair applied",
+                "log_fields": {
+                    "repair_key": repair_key,
+                    "changes": len(result.changes),
+                    "unresolved": len(result.unresolved),
+                },
+            }
+
+        raise ValueError(f"Unknown diagnostics repair: {repair_key}")
+
+    def _apply_diagnostics_repair_result(
+        self, repair_key: str, result: dict[str, object] | None
+    ) -> str:
+        payload = dict(result or {})
+        post_action = str(payload.get("post_action") or "").strip()
+        if post_action == "refresh_schema":
+            if self.conn is not None:
+                try:
+                    self.conn.commit()
+                except Exception:
+                    pass
+            self.active_custom_fields = self.load_active_custom_fields()
+            self.refresh_table_preserve_view()
+            self.populate_all_comboboxes()
+        elif post_action == "refresh_history":
+            self._refresh_history_actions()
+            if self.history_dialog is not None and self.history_dialog.isVisible():
+                self.history_dialog.refresh_data()
+
+        audit_entity = str(payload.get("audit_entity") or "").strip()
+        if audit_entity:
+            self._audit(
+                "REPAIR",
+                audit_entity,
+                ref_id=payload.get("audit_ref_id"),
+                details=(
+                    str(payload.get("audit_details"))
+                    if payload.get("audit_details") is not None
+                    else None
+                ),
+            )
+            self._audit_commit()
+
+        event_name = str(payload.get("log_event") or "").strip()
+        if event_name:
+            log_fields = dict(payload.get("log_fields") or {})
+            self._log_event(
+                event_name,
+                str(payload.get("log_message") or "Diagnostics repair applied"),
+                **log_fields,
+            )
+
+        return str(payload.get("result_text") or "")
+
+    def _run_diagnostics_repair_async(
+        self,
+        repair_key: str,
+        check: dict | None = None,
+        *,
+        owner: QWidget | None = None,
+        on_success=None,
+        on_error=None,
+        on_cancelled=None,
+        on_finished=None,
+        on_status=None,
+    ):
+        current_path = str(getattr(self, "current_db_path", "") or "").strip()
+
+        def _handle_success(result: dict[str, object]) -> None:
+            result_text = self._apply_diagnostics_repair_result(repair_key, result)
+            if on_success is not None:
+                on_success(result_text)
+
+        def _task(bundle, ctx):
+            return self._run_bundle_diagnostics_repair(
+                repair_key,
+                check,
+                bundle=bundle,
+                current_db_path=current_path,
+                data_root=self.data_root,
+                status_callback=ctx.set_status,
+            )
+
+        return self._submit_background_bundle_task(
+            title="Diagnostics Repair",
+            description=(
+                str((check or {}).get("repair_label") or "Applying diagnostics repair...")
+            ),
+            task_fn=_task,
+            kind="write",
+            unique_key=f"diagnostics.repair.{repair_key}",
+            show_dialog=False,
+            owner=owner or self,
+            on_success=_handle_success,
+            on_error=on_error,
+            on_cancelled=on_cancelled,
+            on_finished=on_finished,
+            on_status=on_status,
+        )
 
     def open_application_log_dialog(self):
         ApplicationLogDialog(self, parent=self).exec()
@@ -6986,6 +7291,76 @@ class App(QMainWindow):
         app.setStyleSheet(self._build_theme_stylesheet(raw_values))
         self._queue_top_chrome_boundary_refresh()
 
+    def _prepare_theme_application_payload(
+        self, raw_values: dict[str, object] | None = None
+    ) -> dict[str, object]:
+        normalized = self._normalize_theme_settings(raw_values)
+        effective = self._effective_theme_settings(normalized)
+        return {
+            "normalized_theme": normalized,
+            "effective_theme": effective,
+            "stylesheet": build_app_theme_stylesheet(normalized),
+        }
+
+    def _apply_prepared_theme_payload(self, payload: dict[str, object]) -> None:
+        app = QApplication.instance()
+        if app is None:
+            return
+        effective = dict(payload.get("effective_theme") or self._effective_theme_settings())
+        normalized = dict(payload.get("normalized_theme") or self.theme_settings or {})
+        font = QFont(str(effective["font_family"]))
+        font.setPointSize(int(effective["font_size"]))
+        app.setFont(font)
+        palette = build_app_theme_palette(normalized)
+        app.setPalette(palette)
+        self.setPalette(palette)
+        app.setStyleSheet(str(payload.get("stylesheet") or self._build_theme_stylesheet(normalized)))
+        self._queue_top_chrome_boundary_refresh()
+
+    def _apply_theme_with_loading(
+        self,
+        raw_values: dict[str, object] | None = None,
+        *,
+        title: str = "Apply Theme",
+        description: str = "Preparing updated theme styles...",
+    ) -> None:
+        prepared: dict[str, object] = {}
+        failure: dict[str, TaskFailure] = {}
+        cancelled = {"value": False}
+        loop = QEventLoop(self)
+
+        def _task(ctx):
+            ctx.set_status("Preparing updated theme styles...")
+            return self._prepare_theme_application_payload(raw_values)
+
+        def _quit_loop() -> None:
+            if loop.isRunning():
+                loop.quit()
+
+        task_id = self._submit_background_task(
+            title=title,
+            description=description,
+            task_fn=_task,
+            kind="read",
+            unique_key="theme.apply.prepare",
+            requires_profile=False,
+            show_dialog=True,
+            owner=self,
+            on_success=lambda payload: (prepared.update(payload), _quit_loop()),
+            on_error=lambda task_failure: (failure.setdefault("value", task_failure), _quit_loop()),
+            on_cancelled=lambda: (cancelled.__setitem__("value", True), _quit_loop()),
+        )
+        if task_id is None:
+            message = failure.get("value").message if "value" in failure else "Task could not start."
+            raise RuntimeError(message)
+        if not prepared and "value" not in failure and not cancelled["value"]:
+            loop.exec()
+        if "value" in failure:
+            raise RuntimeError(failure["value"].message)
+        if cancelled["value"]:
+            return
+        self._apply_prepared_theme_payload(prepared)
+
     def _apply_top_chrome_boundary(self) -> None:
         toolbar = getattr(self, "toolbar", None)
         if not isinstance(toolbar, QToolBar):
@@ -7262,7 +7637,14 @@ class App(QMainWindow):
                 after_theme["selected_name"] = ""
             if after_theme != before_theme:
                 self._save_theme_settings(after_theme)
-                self._apply_theme()
+                try:
+                    self._apply_theme_with_loading(after_theme)
+                except Exception as exc:
+                    self.logger.warning(
+                        "Theme preparation task failed, falling back to direct apply: %s",
+                        exc,
+                    )
+                    self._apply_theme(after_theme)
                 self.logger.info("Theme settings updated")
                 self._log_event(
                     "settings.theme",
@@ -9024,6 +9406,13 @@ class App(QMainWindow):
                 "description": "Browse, edit, duplicate, and attach tracks to first-class releases.",
                 "action": self.release_browser_action,
                 "default": True,
+            },
+            {
+                "id": "bulk_attach_audio",
+                "label": "Bulk Attach Audio",
+                "category": "Catalog",
+                "description": "Match audio files to the current selection or visible catalog scope and attach them in one batch.",
+                "action": self.bulk_attach_audio_action,
             },
             {
                 "id": "import_tags",
@@ -10820,6 +11209,28 @@ class App(QMainWindow):
             return self._normalize_track_ids(visible_ids)
         return self._normalize_track_ids(self._selected_track_ids())
 
+    def _current_visible_track_ids(self) -> list[int]:
+        visible_ids: list[int] = []
+        for row in range(self.table.rowCount()):
+            if self.table.isRowHidden(row):
+                continue
+            track_id = self._track_id_for_table_row(row)
+            if track_id is not None:
+                visible_ids.append(track_id)
+        return self._normalize_track_ids(visible_ids)
+
+    def _bulk_audio_attach_scope_track_ids(
+        self, track_ids: list[int] | None = None
+    ) -> tuple[list[int], str]:
+        explicit_ids = self._normalize_track_ids(track_ids)
+        if explicit_ids:
+            return explicit_ids, "selected tracks"
+        selected_ids = self._normalize_track_ids(self._selected_track_ids())
+        if selected_ids:
+            return selected_ids, "current selection"
+        visible_ids = self._current_visible_track_ids()
+        return visible_ids, "visible catalog rows"
+
     def _catalog_track_choices(self) -> list[TrackChoice]:
         header_names = {
             str(self.table.horizontalHeaderItem(column).text() or ""): column
@@ -12007,6 +12418,314 @@ class App(QMainWindow):
         finally:
             if temp_artwork_path:
                 Path(temp_artwork_path).unlink(missing_ok=True)
+
+    def bulk_attach_audio_files(self, track_ids: list[int] | None = None):
+        if self.audio_tag_service is None or self.track_service is None:
+            QMessageBox.warning(self, "Bulk Attach Audio Files", "Open a profile first.")
+            return
+
+        scope_track_ids, scope_label = self._bulk_audio_attach_scope_track_ids(track_ids)
+        if not scope_track_ids:
+            QMessageBox.information(
+                self,
+                "Bulk Attach Audio Files",
+                "Select one or more tracks first, or leave the catalog rows visible so audio files can be matched against them.",
+            )
+            return
+
+        chosen_files, _selected_filter = QFileDialog.getOpenFileNames(
+            self,
+            "Choose Audio Files to Attach",
+            str(self.data_root),
+            (
+                "Audio Files (*.mp3 *.flac *.ogg *.oga *.opus *.m4a *.mp4 *.aac *.wav *.aif *.aiff);;"
+                "All Files (*)"
+            ),
+        )
+        file_paths = [str(Path(path)) for path in dict.fromkeys(chosen_files) if str(path).strip()]
+        if not file_paths:
+            return
+
+        def _preview_worker(bundle, ctx):
+            track_candidates: list[BulkAudioAttachTrackCandidate] = []
+            total_tracks = len(scope_track_ids)
+            overall_total = max(1, total_tracks + len(file_paths))
+            for index, track_id in enumerate(scope_track_ids, start=1):
+                snapshot = bundle.track_service.fetch_track_snapshot(track_id)
+                if snapshot is not None:
+                    track_candidates.append(
+                        BulkAudioAttachTrackCandidate(
+                            track_id=snapshot.track_id,
+                            title=snapshot.track_title,
+                            artist=snapshot.artist_name,
+                            album=snapshot.album_title,
+                            isrc=snapshot.isrc,
+                        )
+                    )
+                ctx.report_progress(
+                    value=index,
+                    maximum=overall_total,
+                    message=f"Loading track {index} of {total_tracks} for audio matching...",
+                )
+
+            matcher = BulkAudioAttachService(bundle.audio_tag_service)
+            plan = matcher.build_plan(
+                file_paths=file_paths,
+                tracks=track_candidates,
+                progress_callback=lambda value, maximum, message: ctx.report_progress(
+                    value=total_tracks + value,
+                    maximum=total_tracks + maximum,
+                    message=message,
+                ),
+            )
+            return {
+                "plan": plan,
+                "track_choices": [
+                    (
+                        candidate.track_id,
+                        " / ".join(
+                            part
+                            for part in (
+                                f"{candidate.track_id} - {candidate.title}",
+                                candidate.artist or "",
+                            )
+                            if part
+                        ),
+                        candidate.artist,
+                    )
+                    for candidate in track_candidates
+                ],
+                "scope_label": scope_label,
+                "scope_track_count": len(track_candidates),
+            }
+
+        def _preview_success(result: dict[str, object]):
+            plan = result.get("plan")
+            track_choices = list(result.get("track_choices") or [])
+            if plan is None or not track_choices:
+                QMessageBox.information(
+                    self,
+                    "Bulk Attach Audio Files",
+                    "No track candidates were available for the current bulk-attach scope.",
+                )
+                return
+
+            plan_items = list(getattr(plan, "items", []) or [])
+            dialog_rows = [
+                {
+                    "source_path": item.source_path,
+                    "source_name": item.source_name,
+                    "detected_title": item.detected_title,
+                    "detected_artist": item.detected_artist,
+                    "matched_track_id": item.matched_track_id,
+                    "matched_track_artist": item.matched_track_artist,
+                    "match_basis": item.match_basis,
+                    "status": item.status,
+                    "warning": item.warning,
+                }
+                for item in plan_items
+            ]
+            dlg = BulkAudioAttachDialog(
+                title="Bulk Attach Audio Files",
+                intro=(
+                    f"Review {len(file_paths)} audio file(s) against "
+                    f"{int(result.get('scope_track_count') or 0)} track(s) from the {result.get('scope_label') or scope_label}. "
+                    "You can reassign unmatched rows before the files are attached."
+                ),
+                items=dialog_rows,
+                track_choices=track_choices,
+                suggested_artist=getattr(plan, "suggested_artist", None),
+                parent=self,
+            )
+            if dlg.exec() != QDialog.Accepted:
+                return
+
+            assignments = dlg.selected_matches()
+            storage_mode = _prompt_storage_mode_choice(
+                self,
+                title="Bulk Attach Audio Files",
+                subject="the audio files",
+                default_mode=STORAGE_MODE_MANAGED_FILE,
+            )
+            if storage_mode is None:
+                return
+            batch_artist = dlg.selected_artist_name()
+            plan_warnings = list(getattr(plan, "warnings", []) or [])
+            skipped_count = max(0, len(file_paths) - len(assignments))
+
+            def _apply_worker(bundle, ctx):
+                profile_name = self._current_profile_name()
+
+                def _artist_payload(snapshot: TrackSnapshot, artist_name: str) -> TrackUpdatePayload:
+                    return TrackUpdatePayload(
+                        track_id=snapshot.track_id,
+                        isrc=str(snapshot.isrc or "").strip(),
+                        track_title=str(snapshot.track_title or "").strip(),
+                        artist_name=str(artist_name or "").strip(),
+                        additional_artists=list(snapshot.additional_artists),
+                        album_title=str(snapshot.album_title or "").strip() or None,
+                        release_date=str(snapshot.release_date or "").strip() or None,
+                        track_length_sec=int(snapshot.track_length_sec or 0),
+                        iswc=snapshot.iswc,
+                        upc=str(snapshot.upc or "").strip() or None,
+                        genre=str(snapshot.genre or "").strip() or None,
+                        catalog_number=snapshot.catalog_number,
+                        buma_work_number=snapshot.buma_work_number,
+                        composer=str(snapshot.composer or "").strip() or None,
+                        publisher=str(snapshot.publisher or "").strip() or None,
+                        comments=str(snapshot.comments or "").strip() or None,
+                        lyrics=str(snapshot.lyrics or "").strip() or None,
+                        audio_file_source_path=None,
+                        album_art_source_path=None,
+                        clear_audio_file=False,
+                        clear_album_art=False,
+                    )
+
+                def _mutation():
+                    attached_track_ids: list[int] = []
+                    artist_updated_ids: list[int] = []
+                    total = max(1, len(assignments))
+                    with bundle.conn:
+                        cur = bundle.conn.cursor()
+                        for index, assignment in enumerate(assignments, start=1):
+                            track_id = int(assignment["track_id"])
+                            bundle.track_service.set_media_path(
+                                track_id,
+                                "audio_file",
+                                str(assignment["source_path"]),
+                                storage_mode=storage_mode,
+                                cursor=cur,
+                            )
+                            attached_track_ids.append(track_id)
+                            if batch_artist:
+                                snapshot = bundle.track_service.fetch_track_snapshot(
+                                    track_id, cursor=cur
+                                )
+                                if snapshot is not None and batch_artist.strip() != str(
+                                    snapshot.artist_name or ""
+                                ).strip():
+                                    bundle.track_service.update_track(
+                                        _artist_payload(snapshot, batch_artist),
+                                        cursor=cur,
+                                    )
+                                    artist_updated_ids.append(track_id)
+                            ctx.report_progress(
+                                value=index,
+                                maximum=total,
+                                message=(
+                                    f"Attaching audio file {index} of {total} to track {track_id}..."
+                                ),
+                            )
+                        if artist_updated_ids:
+                            self._sync_releases_for_tracks(
+                                artist_updated_ids,
+                                cursor=cur,
+                                track_service=bundle.track_service,
+                                release_service=bundle.release_service,
+                                profile_name=profile_name,
+                            )
+                    return {
+                        "attached_track_ids": attached_track_ids,
+                        "artist_updated_ids": artist_updated_ids,
+                    }
+
+                return run_snapshot_history_action(
+                    history_manager=bundle.history_manager,
+                    action_label=f"Bulk Attach Audio Files ({len(assignments)} files)",
+                    action_type="track.audio_file.bulk_attach",
+                    entity_type="Track",
+                    entity_id="batch",
+                    payload={
+                        "track_ids": [int(item["track_id"]) for item in assignments],
+                        "storage_mode": storage_mode,
+                        "scope_label": scope_label,
+                        "artist_name": batch_artist,
+                    },
+                    mutation=_mutation,
+                    logger=self.logger,
+                )
+
+            def _apply_success(result: dict[str, object]):
+                attached_track_ids = list(result.get("attached_track_ids") or [])
+                artist_updated_ids = list(result.get("artist_updated_ids") or [])
+                warnings = plan_warnings
+                try:
+                    self.conn.commit()
+                except Exception:
+                    pass
+                self._refresh_history_actions()
+                self._log_event(
+                    "track.audio_file.bulk_attach",
+                    "Bulk attached audio files",
+                    track_ids=attached_track_ids,
+                    artist_updated_ids=artist_updated_ids,
+                    skipped=skipped_count,
+                    storage_mode=storage_mode,
+                    scope_label=scope_label,
+                    warnings=warnings,
+                )
+                self._audit(
+                    "UPDATE",
+                    "TrackAudio",
+                    ref_id="batch",
+                    details=(
+                        f"attached={len(attached_track_ids)}; "
+                        f"artist_updates={len(artist_updated_ids)}; "
+                        f"skipped={skipped_count}; storage_mode={storage_mode}"
+                    ),
+                )
+                self._audit_commit()
+                if artist_updated_ids:
+                    self.populate_all_comboboxes()
+                self.refresh_table_preserve_view(
+                    focus_id=attached_track_ids[0] if attached_track_ids else None
+                )
+                QMessageBox.information(
+                    self,
+                    "Bulk Attach Audio Files",
+                    f"Attached audio to {len(attached_track_ids)} track(s)."
+                    + (
+                        f"\nUpdated the main artist on {len(artist_updated_ids)} matched track(s)."
+                        if artist_updated_ids
+                        else ""
+                    )
+                    + (
+                        f"\nSkipped {skipped_count} file(s) that were left unmatched."
+                        if skipped_count
+                        else ""
+                    )
+                    + (f"\n\nWarnings:\n- " + "\n- ".join(warnings[:12]) if warnings else ""),
+                )
+
+            self._submit_background_bundle_task(
+                title="Bulk Attach Audio Files",
+                description="Attaching the selected audio files to matched catalog tracks...",
+                task_fn=_apply_worker,
+                kind="write",
+                unique_key="track.audio_file.bulk_attach",
+                cancellable=False,
+                on_success=_apply_success,
+                on_error=lambda failure: self._show_background_task_error(
+                    "Bulk Attach Audio Files",
+                    failure,
+                    user_message="Could not attach the selected audio files:",
+                ),
+            )
+
+        self._submit_background_bundle_task(
+            title="Bulk Attach Audio Files",
+            description="Matching selected audio files to catalog tracks...",
+            task_fn=_preview_worker,
+            kind="read",
+            unique_key="track.audio_file.bulk_attach.preview",
+            cancellable=False,
+            on_success=_preview_success,
+            on_error=lambda failure: self._show_background_task_error(
+                "Bulk Attach Audio Files",
+                failure,
+                user_message="Could not prepare the bulk audio attach preview:",
+            ),
+        )
 
     def import_tags_from_audio(self, track_ids: list[int] | None = None):
         if self.audio_tag_service is None or self.track_service is None:

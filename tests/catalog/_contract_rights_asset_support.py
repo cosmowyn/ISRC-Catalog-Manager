@@ -27,12 +27,14 @@ try:
         ContractBrowserPanel,
         ContractDocumentEditor,
         ContractEditorDialog,
+        ContractObligationEditor,
     )
     from PySide6.QtWidgets import QFrame
 except Exception:  # pragma: no cover - environment-specific fallback
     ContractBrowserPanel = None
     ContractDocumentEditor = None
     ContractEditorDialog = None
+    ContractObligationEditor = None
     QFrame = None
 
 
@@ -701,6 +703,85 @@ class ContractRightsAssetServiceTestCase(unittest.TestCase):
             self.assertEqual(payload.track_ids, [992])
             self.assertEqual(payload.release_ids, [993])
             self.assertEqual(payload.documents[0].supersedes_document_id, 999)
+        finally:
+            dialog.close()
+
+    def case_contract_editor_structured_obligations_round_trip_all_fields(self):
+        if ContractEditorDialog is None or ContractObligationEditor is None:
+            self.skipTest("Contract editor dialog unavailable")
+        require_qapplication()
+
+        detail = ContractDetail(
+            contract=ContractRecord(
+                id=17,
+                title="Structured Obligation Contract",
+                contract_type="license",
+                draft_date=None,
+                signature_date=None,
+                effective_date=None,
+                start_date=None,
+                end_date=None,
+                renewal_date=None,
+                notice_deadline=None,
+                option_periods=None,
+                reversion_date=None,
+                termination_date=None,
+                status="active",
+                supersedes_contract_id=None,
+                superseded_by_contract_id=None,
+                summary="Structured editor regression",
+                notes=None,
+                profile_name=None,
+                created_at=None,
+                updated_at=None,
+                obligation_count=1,
+                document_count=0,
+            ),
+            parties=[],
+            obligations=[
+                ContractObligationPayload(
+                    obligation_id=501,
+                    obligation_type="approval",
+                    title="Approve artwork",
+                    due_date="2026-04-01",
+                    follow_up_date="2026-04-03",
+                    reminder_date="2026-03-29",
+                    completed=True,
+                    completed_at="2026-04-02",
+                    notes="Final sign-off required.",
+                )
+            ],
+            documents=[],
+            work_ids=[],
+            track_ids=[],
+            release_ids=[],
+        )
+
+        dialog = ContractEditorDialog(contract_service=self.contract_service, detail=detail)
+        try:
+            self.assertIsInstance(dialog.obligations_editor, ContractObligationEditor)
+            self.assertEqual(dialog.obligations_editor.obligation_title_edit.text(), "Approve artwork")
+            self.assertEqual(dialog.obligations_editor.completed_at_edit.text(), "2026-04-02")
+            self.assertEqual(
+                dialog.obligations_editor.obligation_notes_edit.toPlainText(),
+                "Final sign-off required.",
+            )
+
+            payload = dialog.payload()
+            self.assertEqual(len(payload.obligations), 1)
+            obligation = payload.obligations[0]
+            self.assertEqual(obligation.obligation_type, "approval")
+            self.assertEqual(obligation.title, "Approve artwork")
+            self.assertEqual(obligation.due_date, "2026-04-01")
+            self.assertEqual(obligation.follow_up_date, "2026-04-03")
+            self.assertEqual(obligation.reminder_date, "2026-03-29")
+            self.assertTrue(obligation.completed)
+            self.assertEqual(obligation.completed_at, "2026-04-02")
+            self.assertEqual(obligation.notes, "Final sign-off required.")
+
+            dialog.obligations_editor._append_obligation()
+            blank_payload = dialog.payload()
+            self.assertEqual(len(blank_payload.obligations), 1)
         finally:
             dialog.close()
 

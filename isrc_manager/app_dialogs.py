@@ -22,11 +22,13 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QPlainTextEdit,
+    QProgressBar,
     QPushButton,
     QSizePolicy,
     QSplitter,
     QTextBrowser,
     QVBoxLayout,
+    QWidget,
 )
 
 from isrc_manager.blob_icons import BlobIconDialog, describe_blob_icon_spec
@@ -744,6 +746,7 @@ class DiagnosticsDialog(QDialog):
         super().__init__(parent or app)
         self.app = app
         self._checks = []
+        self._busy = False
         self.setObjectName("diagnosticsDialog")
         self.setProperty("role", "panel")
         self.setAttribute(Qt.WA_StyledBackground, True)
@@ -794,6 +797,21 @@ class DiagnosticsDialog(QDialog):
         subtitle.setWordWrap(True)
         root.addWidget(title)
         root.addWidget(subtitle)
+
+        self.loading_panel = QWidget(self)
+        loading_row = QHBoxLayout(self.loading_panel)
+        loading_row.setContentsMargins(0, 0, 0, 0)
+        loading_row.setSpacing(10)
+        self.loading_bar = QProgressBar(self)
+        self.loading_bar.setRange(0, 0)
+        self.loading_bar.setTextVisible(False)
+        self.loading_bar.setFixedWidth(180)
+        self.loading_status_label = QLabel("Loading diagnostics...")
+        self.loading_status_label.setWordWrap(True)
+        loading_row.addWidget(self.loading_bar)
+        loading_row.addWidget(self.loading_status_label, 1)
+        self.loading_panel.hide()
+        root.addWidget(self.loading_panel)
 
         self.environment_group = QGroupBox("Environment")
         env_layout = QGridLayout(self.environment_group)
@@ -891,7 +909,27 @@ class DiagnosticsDialog(QDialog):
         self.refresh()
 
     def refresh(self):
+        if self._busy:
+            return
+        if hasattr(self.app, "_load_diagnostics_report_async"):
+            self._set_busy(True, "Loading diagnostics...")
+            self.app._load_diagnostics_report_async(
+                owner=self,
+                on_success=self._apply_loaded_report,
+                on_error=lambda failure: self._handle_background_error(
+                    "Diagnostics",
+                    failure,
+                    "Could not load diagnostics.",
+                ),
+                on_cancelled=self._handle_background_cancelled,
+                on_status=self._set_busy_message,
+            )
+            return
         report = self.app._build_diagnostics_report()
+        self._apply_loaded_report(report)
+
+    def _apply_loaded_report(self, report: dict):
+        self._set_busy(False)
         for key, value in report["environment"].items():
             label = self.environment_labels.get(key)
             if label is not None:
@@ -912,6 +950,41 @@ class DiagnosticsDialog(QDialog):
         else:
             self.details_edit.setPlainText("No diagnostics are available for the current profile.")
             self._update_repair_buttons(None)
+
+    def _set_busy(self, busy: bool, message: str | None = None) -> None:
+        self._busy = bool(busy)
+        if self._busy:
+            self.loading_panel.show()
+            self._set_busy_message(message or "Working...")
+        else:
+            self.loading_panel.hide()
+            self.loading_status_label.setText("")
+        for widget in (
+            self.refresh_button,
+            self.preview_repair_button,
+            self.repair_button,
+            self.open_logs_button,
+            self.open_data_button,
+            self.close_button,
+            self.checks_list,
+        ):
+            widget.setEnabled(not self._busy)
+        self._update_repair_buttons(self._selected_check())
+
+    def _set_busy_message(self, message: str) -> None:
+        self.loading_status_label.setText(str(message or "Working..."))
+
+    def _handle_background_cancelled(self) -> None:
+        self._set_busy(False)
+        self.details_edit.setPlainText("The diagnostics task was cancelled.")
+
+    def _handle_background_error(self, title: str, failure, user_message: str) -> None:
+        self._set_busy(False)
+        if hasattr(self.app, "_show_background_task_error"):
+            self.app._show_background_task_error(title, failure, user_message=user_message)
+            return
+        message = str(getattr(failure, "message", failure) or "Unknown error.")
+        QMessageBox.critical(self, title, f"{user_message}\n{message}")
 
     def _show_selected_check(self, row: int):
         if row < 0 or row >= len(self._checks):
@@ -934,7 +1007,7 @@ class DiagnosticsDialog(QDialog):
                 name_label.setMinimumHeight(label.minimumHeight())
 
     def _update_repair_buttons(self, check: dict | None):
-        repairable = bool(check and check.get("repair_key"))
+        repairable = bool(check and check.get("repair_key")) and not self._busy
         self.preview_repair_button.setEnabled(repairable)
         self.repair_button.setEnabled(repairable)
         label = "Repair Issue"
@@ -949,6 +1022,8 @@ class DiagnosticsDialog(QDialog):
         return self._checks[row]
 
     def _preview_selected_repair(self):
+        if self._busy:
+            return
         check = self._selected_check()
         if not check or not check.get("repair_key"):
             return
@@ -957,6 +1032,8 @@ class DiagnosticsDialog(QDialog):
         self.details_edit.setPlainText(f"{base}\n\nRepair Preview\n\n{preview_text}")
 
     def _run_selected_repair(self):
+        if self._busy:
+            return
         check = self._selected_check()
         if not check or not check.get("repair_key"):
             return
@@ -972,12 +1049,36 @@ class DiagnosticsDialog(QDialog):
             != QMessageBox.Yes
         ):
             return
+        if (
+            check["repair_key"] != "storage_layout_migrate"
+            and hasattr(self.app, "_run_diagnostics_repair_async")
+        ):
+            self._set_busy(True, label)
+            self.app._run_diagnostics_repair_async(
+                check["repair_key"],
+                check,
+                owner=self,
+                on_success=self._handle_repair_success,
+                on_error=lambda failure: self._handle_background_error(
+                    "Repair Failed",
+                    failure,
+                    "Could not apply the selected diagnostics repair.",
+                ),
+                on_cancelled=self._handle_background_cancelled,
+                on_status=self._set_busy_message,
+            )
+            return
         try:
             result_text = self.app._run_diagnostics_repair(check["repair_key"], check)
         except Exception as exc:
             QMessageBox.critical(self, "Repair Failed", str(exc))
             return
         QMessageBox.information(self, "Repair Complete", result_text)
+        self.refresh()
+
+    def _handle_repair_success(self, result_text: str) -> None:
+        self._set_busy(False)
+        QMessageBox.information(self, "Repair Complete", str(result_text or "Repair complete."))
         self.refresh()
 
     def resizeEvent(self, event):

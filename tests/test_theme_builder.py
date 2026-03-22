@@ -33,6 +33,37 @@ class _ThemePreviewHost(QWidget):
         self.applied.append(dict(values or {}))
 
 
+class _ThemeApplyHost(QWidget):
+    _normalize_theme_settings = app_module.App._normalize_theme_settings
+    _effective_theme_settings = app_module.App._effective_theme_settings
+    _build_theme_stylesheet = app_module.App._build_theme_stylesheet
+    _prepare_theme_application_payload = app_module.App._prepare_theme_application_payload
+    _apply_prepared_theme_payload = app_module.App._apply_prepared_theme_payload
+    _apply_theme_with_loading = app_module.App._apply_theme_with_loading
+
+    def __init__(self):
+        super().__init__()
+        self.theme_settings = {}
+        self.submissions = []
+        self.boundary_refresh_count = 0
+
+    def _queue_top_chrome_boundary_refresh(self):
+        self.boundary_refresh_count += 1
+
+    def _submit_background_task(self, **kwargs):
+        self.submissions.append(dict(kwargs))
+
+        class _Ctx:
+            def set_status(self, _message):
+                return None
+
+        payload = kwargs["task_fn"](_Ctx())
+        on_success = kwargs.get("on_success")
+        if on_success is not None:
+            on_success(payload)
+        return "task-1"
+
+
 class ThemeBuilderTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -262,6 +293,33 @@ class ThemeBuilderTests(unittest.TestCase):
             self.assertEqual(values["blob_icon_settings"]["audio"]["emoji"], "🎧")
         finally:
             dialog.close()
+            host.close()
+
+    def test_apply_theme_with_loading_prepares_payload_before_ui_apply(self):
+        host = _ThemeApplyHost()
+        previous_stylesheet = self.app.styleSheet()
+        previous_font = self.app.font()
+        try:
+            host._apply_theme_with_loading(
+                {
+                    "font_family": "Courier New",
+                    "font_size": 13,
+                    "window_bg": "#101820",
+                    "window_fg": "#F8FAFC",
+                    "accent": "#F97316",
+                }
+            )
+
+            self.assertEqual(len(host.submissions), 1)
+            submission = host.submissions[0]
+            self.assertTrue(submission["show_dialog"])
+            self.assertEqual(submission["unique_key"], "theme.apply.prepare")
+            self.assertEqual(self.app.font().pointSize(), 13)
+            self.assertTrue(self.app.styleSheet())
+            self.assertGreater(host.boundary_refresh_count, 0)
+        finally:
+            self.app.setStyleSheet(previous_stylesheet)
+            self.app.setFont(previous_font)
             host.close()
 
     def test_application_settings_dialog_lists_bundled_themes_and_protects_delete(self):

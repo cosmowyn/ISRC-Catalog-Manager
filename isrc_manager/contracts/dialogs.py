@@ -54,6 +54,7 @@ from isrc_manager.ui_common import (
 from .models import (
     CONTRACT_STATUS_CHOICES,
     DOCUMENT_TYPE_CHOICES,
+    OBLIGATION_TYPE_CHOICES,
     ContractDocumentPayload,
     ContractDocumentRecord,
     ContractObligationPayload,
@@ -1076,6 +1077,387 @@ class ContractDocumentEditor(QWidget):
         self._set_selected_storage_mode(target_mode)
 
 
+class ContractObligationEditor(QWidget):
+    """Structured editor for contract obligations and follow-up dates."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._obligations: list[ContractObligationPayload] = []
+        self._current_row: int = -1
+        self._suspend_updates = False
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(12)
+
+        self.add_button = QPushButton("Add Obligation")
+        self.add_button.clicked.connect(self._append_obligation)
+        self.complete_button = QPushButton("Mark Completed")
+        self.complete_button.clicked.connect(lambda: self._set_selected_completed(True))
+        self.reopen_button = QPushButton("Mark Open")
+        self.reopen_button.clicked.connect(lambda: self._set_selected_completed(False))
+        self.remove_button = QPushButton("Remove Selected")
+        self.remove_button.clicked.connect(self._remove_selected_obligation)
+        root.addWidget(
+            _create_action_button_cluster(
+                self,
+                [
+                    self.add_button,
+                    self.complete_button,
+                    self.reopen_button,
+                    self.remove_button,
+                ],
+                columns=2,
+                min_button_width=150,
+            )
+        )
+
+        splitter = QSplitter(Qt.Horizontal, self)
+        splitter.setChildrenCollapsible(False)
+        root.addWidget(splitter, 1)
+
+        table_box = QGroupBox("Obligations", self)
+        table_layout = QVBoxLayout(table_box)
+        table_layout.setContentsMargins(14, 18, 14, 14)
+        table_layout.setSpacing(10)
+        self.obligations_table = QTableWidget(0, 6, table_box)
+        self.obligations_table.setHorizontalHeaderLabels(
+            ["Type", "Title", "Due", "Follow-Up", "Reminder", "Completed"]
+        )
+        self.obligations_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.obligations_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.obligations_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.obligations_table.verticalHeader().setVisible(False)
+        header = self.obligations_table.horizontalHeader()
+        header.setMinimumSectionSize(36)
+        header.setSectionResizeMode(0, QHeaderView.Interactive)
+        header.resizeSection(0, 116)
+        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        for column, width in ((2, 96), (3, 96), (4, 96), (5, 82)):
+            header.setSectionResizeMode(column, QHeaderView.Interactive)
+            header.resizeSection(column, width)
+        self.obligations_table.itemSelectionChanged.connect(self._on_selection_changed)
+        table_layout.addWidget(self.obligations_table, 1)
+        splitter.addWidget(table_box)
+
+        detail_panel = QWidget(splitter)
+        detail_panel.setMinimumWidth(340)
+        detail_layout = QVBoxLayout(detail_panel)
+        detail_layout.setContentsMargins(0, 0, 0, 0)
+        detail_layout.setSpacing(0)
+        detail_scroll_area, _, detail_content_layout = _create_scrollable_dialog_content(
+            detail_panel
+        )
+        detail_layout.addWidget(detail_scroll_area, 1)
+
+        detail_intro = QLabel(
+            "Track each obligation as structured metadata so due dates, reminders, completion state, and notes stay readable."
+        )
+        detail_intro.setWordWrap(True)
+        detail_content_layout.addWidget(detail_intro)
+
+        summary_box, summary_layout = _create_standard_section(
+            self,
+            "Obligation Summary",
+            "Choose the obligation type and define the task title users will actually recognize later.",
+        )
+        summary_form = QFormLayout()
+        _configure_standard_form_layout(summary_form)
+        self.obligation_id_label = QLabel("")
+        self.obligation_type_combo = QComboBox(self)
+        for value in OBLIGATION_TYPE_CHOICES:
+            self.obligation_type_combo.addItem(value.replace("_", " ").title(), value)
+        self.obligation_title_edit = QLineEdit(self)
+        summary_form.addRow("Obligation ID", self.obligation_id_label)
+        summary_form.addRow("Obligation Type", self.obligation_type_combo)
+        summary_form.addRow("Title", self.obligation_title_edit)
+        summary_layout.addLayout(summary_form)
+        detail_content_layout.addWidget(summary_box)
+
+        dates_box, dates_layout = _create_standard_section(
+            self,
+            "Timeline",
+            "Use ISO dates so the timeline stays consistent with the rest of the contract workflow.",
+        )
+        dates_form = QFormLayout()
+        _configure_standard_form_layout(dates_form)
+        self.due_date_edit = QLineEdit(self)
+        self.follow_up_date_edit = QLineEdit(self)
+        self.reminder_date_edit = QLineEdit(self)
+        self.completed_at_edit = QLineEdit(self)
+        for widget in (
+            self.due_date_edit,
+            self.follow_up_date_edit,
+            self.reminder_date_edit,
+            self.completed_at_edit,
+        ):
+            widget.setPlaceholderText("YYYY-MM-DD")
+        dates_form.addRow("Due Date", self.due_date_edit)
+        dates_form.addRow("Follow-Up Date", self.follow_up_date_edit)
+        dates_form.addRow("Reminder Date", self.reminder_date_edit)
+        dates_form.addRow("Completed At", self.completed_at_edit)
+        dates_layout.addLayout(dates_form)
+        detail_content_layout.addWidget(dates_box)
+
+        status_box, status_layout = _create_standard_section(
+            self,
+            "Status and Notes",
+            "Keep completion state and context together instead of encoding them into a keyword string.",
+        )
+        status_form = QFormLayout()
+        _configure_standard_form_layout(status_form)
+        self.completed_checkbox = QCheckBox("Completed", self)
+        status_form.addRow("Status", self.completed_checkbox)
+        status_layout.addLayout(status_form)
+        self.obligation_notes_edit = QPlainTextEdit(self)
+        self.obligation_notes_edit.setMinimumHeight(96)
+        status_layout.addWidget(self.obligation_notes_edit)
+        detail_content_layout.addWidget(status_box)
+        detail_content_layout.addStretch(1)
+
+        splitter.addWidget(detail_panel)
+        splitter.setStretchFactor(0, 4)
+        splitter.setStretchFactor(1, 5)
+        splitter.setSizes([420, 520])
+
+        for widget in (
+            self.obligation_type_combo,
+            self.obligation_title_edit,
+            self.due_date_edit,
+            self.follow_up_date_edit,
+            self.reminder_date_edit,
+            self.completed_checkbox,
+            self.completed_at_edit,
+            self.obligation_notes_edit,
+        ):
+            self._connect_obligation_widget(widget)
+
+        self._refresh_action_state()
+
+    @staticmethod
+    def _payload_from_record(record) -> ContractObligationPayload:
+        return ContractObligationPayload(
+            obligation_id=getattr(record, "obligation_id", getattr(record, "id", None)),
+            obligation_type=getattr(record, "obligation_type", "other") or "other",
+            title=getattr(record, "title", "") or "",
+            due_date=getattr(record, "due_date", None),
+            follow_up_date=getattr(record, "follow_up_date", None),
+            reminder_date=getattr(record, "reminder_date", None),
+            completed=bool(getattr(record, "completed", False)),
+            completed_at=getattr(record, "completed_at", None),
+            notes=getattr(record, "notes", None),
+        )
+
+    def load_obligations(self, obligations) -> None:
+        self._suspend_updates = True
+        try:
+            self._obligations = [self._payload_from_record(item) for item in obligations]
+            self.obligations_table.blockSignals(True)
+            try:
+                self.obligations_table.setRowCount(0)
+                for row, obligation in enumerate(self._obligations):
+                    self._insert_obligation_row(row, obligation)
+            finally:
+                self.obligations_table.blockSignals(False)
+            if self._obligations:
+                self.obligations_table.selectRow(0)
+                self._load_obligation_into_form(0)
+            else:
+                self._current_row = -1
+                self._clear_form()
+        finally:
+            self._suspend_updates = False
+        self._refresh_action_state()
+
+    def obligations(self) -> list[ContractObligationPayload]:
+        self._sync_current_obligation_from_form()
+        return [
+            ContractObligationPayload(
+                obligation_id=item.obligation_id,
+                obligation_type=item.obligation_type,
+                title=item.title,
+                due_date=item.due_date,
+                follow_up_date=item.follow_up_date,
+                reminder_date=item.reminder_date,
+                completed=item.completed,
+                completed_at=item.completed_at,
+                notes=item.notes,
+            )
+            for item in self._obligations
+            if str(item.title or "").strip()
+        ]
+
+    def _connect_obligation_widget(self, widget) -> None:
+        if isinstance(widget, QLineEdit):
+            widget.textChanged.connect(self._sync_current_obligation_from_form)
+        elif isinstance(widget, QPlainTextEdit):
+            widget.textChanged.connect(self._sync_current_obligation_from_form)
+        elif isinstance(widget, QComboBox):
+            widget.currentIndexChanged.connect(self._sync_current_obligation_from_form)
+        elif isinstance(widget, QCheckBox):
+            widget.stateChanged.connect(self._sync_current_obligation_from_form)
+
+    def _current_obligation(self) -> tuple[int, ContractObligationPayload] | None:
+        row = self._current_row
+        if row < 0 or row >= len(self._obligations):
+            return None
+        return row, self._obligations[row]
+
+    def _refresh_action_state(self) -> None:
+        current = self._current_obligation()
+        has_selection = current is not None
+        self.remove_button.setEnabled(has_selection)
+        self.complete_button.setEnabled(has_selection)
+        self.reopen_button.setEnabled(has_selection)
+        if current is not None:
+            _, obligation = current
+            self.complete_button.setEnabled(not obligation.completed)
+            self.reopen_button.setEnabled(obligation.completed)
+
+    def _clear_form(self) -> None:
+        self.obligation_id_label.setText("")
+        self._set_type_value("other")
+        self.obligation_title_edit.clear()
+        self.due_date_edit.clear()
+        self.follow_up_date_edit.clear()
+        self.reminder_date_edit.clear()
+        self.completed_checkbox.setChecked(False)
+        self.completed_at_edit.clear()
+        self.obligation_notes_edit.clear()
+
+    def _set_type_value(self, obligation_type: str | None) -> None:
+        normalized = str(obligation_type or "other").strip().lower().replace(" ", "_") or "other"
+        index = self.obligation_type_combo.findData(normalized)
+        if index < 0:
+            self.obligation_type_combo.addItem(normalized.replace("_", " ").title(), normalized)
+            index = self.obligation_type_combo.count() - 1
+        self.obligation_type_combo.setCurrentIndex(index)
+
+    def _insert_obligation_row(self, row: int, obligation: ContractObligationPayload) -> None:
+        if row >= self.obligations_table.rowCount():
+            self.obligations_table.insertRow(row)
+        values = [
+            (obligation.obligation_type or "other").replace("_", " ").title(),
+            obligation.title or "",
+            obligation.due_date or "",
+            obligation.follow_up_date or "",
+            obligation.reminder_date or "",
+            "Yes" if obligation.completed else "No",
+        ]
+        for column, value in enumerate(values):
+            item = QTableWidgetItem(value)
+            if column in {2, 3, 4, 5}:
+                item.setTextAlignment(Qt.AlignCenter)
+            self.obligations_table.setItem(row, column, item)
+
+    def _update_obligation_row(self, row: int) -> None:
+        if row < 0 or row >= len(self._obligations):
+            return
+        obligation = self._obligations[row]
+        values = [
+            (obligation.obligation_type or "other").replace("_", " ").title(),
+            obligation.title or "",
+            obligation.due_date or "",
+            obligation.follow_up_date or "",
+            obligation.reminder_date or "",
+            "Yes" if obligation.completed else "No",
+        ]
+        for column, value in enumerate(values):
+            item = self.obligations_table.item(row, column)
+            if item is None:
+                item = QTableWidgetItem()
+                self.obligations_table.setItem(row, column, item)
+            item.setText(value)
+
+    def _load_obligation_into_form(self, row: int) -> None:
+        if row < 0 or row >= len(self._obligations):
+            self._current_row = -1
+            self._clear_form()
+            self._refresh_action_state()
+            return
+        obligation = self._obligations[row]
+        self._current_row = row
+        self._suspend_updates = True
+        try:
+            self.obligation_id_label.setText(str(obligation.obligation_id or ""))
+            self._set_type_value(obligation.obligation_type)
+            self.obligation_title_edit.setText(obligation.title or "")
+            self.due_date_edit.setText(obligation.due_date or "")
+            self.follow_up_date_edit.setText(obligation.follow_up_date or "")
+            self.reminder_date_edit.setText(obligation.reminder_date or "")
+            self.completed_checkbox.setChecked(bool(obligation.completed))
+            self.completed_at_edit.setText(obligation.completed_at or "")
+            self.obligation_notes_edit.setPlainText(obligation.notes or "")
+        finally:
+            self._suspend_updates = False
+        self._refresh_action_state()
+
+    def _on_selection_changed(self) -> None:
+        if self._suspend_updates:
+            return
+        self._sync_current_obligation_from_form()
+        self._load_obligation_into_form(self.obligations_table.currentRow())
+
+    def _sync_current_obligation_from_form(self) -> None:
+        if self._suspend_updates:
+            return
+        current = self._current_obligation()
+        if current is None:
+            return
+        row, obligation = current
+        obligation.obligation_type = (
+            str(self.obligation_type_combo.currentData() or "other")
+            .strip()
+            .lower()
+            .replace(" ", "_")
+            or "other"
+        )
+        obligation.title = self.obligation_title_edit.text().strip()
+        obligation.due_date = self.due_date_edit.text().strip() or None
+        obligation.follow_up_date = self.follow_up_date_edit.text().strip() or None
+        obligation.reminder_date = self.reminder_date_edit.text().strip() or None
+        obligation.completed = self.completed_checkbox.isChecked()
+        obligation.completed_at = self.completed_at_edit.text().strip() or None
+        obligation.notes = self.obligation_notes_edit.toPlainText().strip() or None
+        self._obligations[row] = obligation
+        self._update_obligation_row(row)
+        self._refresh_action_state()
+
+    def _append_obligation(self) -> None:
+        self._sync_current_obligation_from_form()
+        obligation = ContractObligationPayload(obligation_type="other", title="")
+        row = len(self._obligations)
+        self._obligations.append(obligation)
+        self._insert_obligation_row(row, obligation)
+        self.obligations_table.selectRow(row)
+        self._load_obligation_into_form(row)
+
+    def _remove_selected_obligation(self) -> None:
+        current = self._current_obligation()
+        if current is None:
+            return
+        row, _obligation = current
+        del self._obligations[row]
+        self.obligations_table.removeRow(row)
+        if self._obligations:
+            next_row = min(row, len(self._obligations) - 1)
+            self.obligations_table.selectRow(next_row)
+            self._load_obligation_into_form(next_row)
+        else:
+            self._current_row = -1
+            self._clear_form()
+            self._refresh_action_state()
+
+    def _set_selected_completed(self, completed: bool) -> None:
+        current = self._current_obligation()
+        if current is None:
+            return
+        self.completed_checkbox.setChecked(bool(completed))
+        if not completed:
+            self.completed_at_edit.clear()
+        self._sync_current_obligation_from_form()
+
+
 class ContractEditorDialog(QDialog):
     """Create or edit a contract lifecycle record."""
 
@@ -1255,14 +1637,10 @@ class ContractEditorDialog(QDialog):
         obligations_box, obligations_box_layout = _create_standard_section(
             self,
             "Obligations",
-            "Use one line per obligation in the form `type|title|due_date|follow_up_date|reminder_date|completed`.",
+            "Track deadlines, reminders, completion state, and notes with dedicated fields instead of encoding them into a keyword string.",
         )
-        self.obligations_edit = QPlainTextEdit()
-        self.obligations_edit.setPlaceholderText(
-            "One line per obligation: type|title|due_date|follow_up_date|reminder_date|completed"
-        )
-        self.obligations_edit.setMinimumHeight(180)
-        obligations_box_layout.addWidget(self.obligations_edit)
+        self.obligations_editor = ContractObligationEditor(self)
+        obligations_box_layout.addWidget(self.obligations_editor)
         obligations_layout.addWidget(obligations_box)
         obligations_layout.addStretch(1)
         tabs.addTab(obligations_scroll, "Obligations")
@@ -1312,23 +1690,10 @@ class ContractEditorDialog(QDialog):
                     for item in detail.parties
                 )
             )
-            self.obligations_edit.setPlainText(
-                "\n".join(
-                    "|".join(
-                        [
-                            item.obligation_type,
-                            item.title,
-                            item.due_date or "",
-                            item.follow_up_date or "",
-                            item.reminder_date or "",
-                            "1" if item.completed else "0",
-                        ]
-                    )
-                    for item in detail.obligations
-                )
-            )
+            self.obligations_editor.load_obligations(detail.obligations)
             self.documents_editor.load_documents(detail.documents)
         else:
+            self.obligations_editor.load_obligations([])
             self.documents_editor.load_documents([])
 
     def _reference_choices_from_query(self, query: str, formatter) -> list[_ReferenceChoice]:
@@ -1404,21 +1769,6 @@ class ContractEditorDialog(QDialog):
                     is_primary=_parse_bool_token(parts[2]) if len(parts) > 2 else False,
                 )
             )
-        obligations: list[ContractObligationPayload] = []
-        for line in self.obligations_edit.toPlainText().splitlines():
-            parts = [part.strip() for part in line.split("|")]
-            if len(parts) < 2 or not parts[1]:
-                continue
-            obligations.append(
-                ContractObligationPayload(
-                    obligation_type=parts[0] or "other",
-                    title=parts[1],
-                    due_date=parts[2] if len(parts) > 2 and parts[2] else None,
-                    follow_up_date=parts[3] if len(parts) > 3 and parts[3] else None,
-                    reminder_date=parts[4] if len(parts) > 4 and parts[4] else None,
-                    completed=_parse_bool_token(parts[5]) if len(parts) > 5 else False,
-                )
-            )
         return ContractPayload(
             title=self.title_edit.text().strip(),
             contract_type=self.type_edit.text().strip() or None,
@@ -1436,7 +1786,7 @@ class ContractEditorDialog(QDialog):
             summary=self.summary_edit.toPlainText().strip() or None,
             notes=self.notes_edit.toPlainText().strip() or None,
             parties=parties,
-            obligations=obligations,
+            obligations=self.obligations_editor.obligations(),
             documents=self.documents_editor.documents(),
             work_ids=self.work_ids_edit.value_ids(),
             track_ids=self.track_ids_edit.value_ids(),

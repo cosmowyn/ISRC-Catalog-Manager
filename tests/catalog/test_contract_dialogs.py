@@ -14,6 +14,9 @@ class ContractDialogTests(ContractRightsAssetServiceTestCase):
     test_contract_editor_preserves_unresolved_reference_ids_in_dialog_payload = (
         ContractRightsAssetServiceTestCase.case_contract_editor_preserves_unresolved_reference_ids_in_dialog_payload
     )
+    test_contract_editor_structured_obligations_round_trip_all_fields = (
+        ContractRightsAssetServiceTestCase.case_contract_editor_structured_obligations_round_trip_all_fields
+    )
 
 
 del ContractRightsAssetServiceTestCase

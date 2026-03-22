@@ -5,17 +5,23 @@ from unittest import mock
 
 try:
     from PySide6.QtCore import Qt
-    from PySide6.QtWidgets import QApplication, QDialog, QWidget
+    from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QWidget
 except ImportError as exc:  # pragma: no cover - environment-specific fallback
     Qt = None
     QApplication = None
     QDialog = None
+    QMessageBox = None
     QWidget = None
     QT_IMPORT_ERROR = exc
 else:
     QT_IMPORT_ERROR = None
 
-from isrc_manager.app_dialogs import ActionRibbonDialog, CustomColumnsDialog, HelpContentsDialog
+from isrc_manager.app_dialogs import (
+    ActionRibbonDialog,
+    CustomColumnsDialog,
+    DiagnosticsDialog,
+    HelpContentsDialog,
+)
 from isrc_manager.help_content import HELP_CHAPTERS_BY_ID, render_help_html
 
 
@@ -33,6 +39,93 @@ class _HelpDialogHost(QWidget):
 
     def _open_local_path(self, path, _title):
         self.opened_paths.append(Path(path))
+
+
+class _DiagnosticsDialogHost(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.logs_dir = Path("/tmp/test-logs")
+        self.data_root = Path("/tmp/test-data")
+        self.opened_paths = []
+        self.load_calls = 0
+        self.repair_calls = []
+        self.background_errors = []
+        self._report = {
+            "environment": {
+                "App version": "2.0.0",
+                "Schema version": "77",
+                "Current profile": "catalog.db",
+                "Database path": "/tmp/catalog.db",
+                "Data folder": str(self.data_root),
+                "Log folder": str(self.logs_dir),
+                "Restore points": "2 snapshot(s), latest: Snapshot @ now",
+                "Platform": "TestOS",
+                "Python": "3.12.0",
+            },
+            "checks": [
+                {
+                    "title": "Schema layout",
+                    "status": "warning",
+                    "summary": "Missing promoted columns.",
+                    "details": "Tracks is missing one promoted column.",
+                    "repair_key": "schema_migrate",
+                    "repair_label": "Repair Schema Layout",
+                }
+            ],
+        }
+
+    def _load_diagnostics_report_async(
+        self,
+        *,
+        owner=None,
+        on_success=None,
+        on_error=None,
+        on_cancelled=None,
+        on_finished=None,
+        on_status=None,
+    ):
+        del owner, on_error, on_cancelled
+        self.load_calls += 1
+        if on_status is not None:
+            on_status("Inspecting schema layout...")
+        if on_success is not None:
+            on_success(self._report)
+        if on_finished is not None:
+            on_finished()
+        return f"load-{self.load_calls}"
+
+    def _preview_diagnostics_repair(self, repair_key, check=None):
+        del check
+        return f"Preview for {repair_key}"
+
+    def _run_diagnostics_repair_async(
+        self,
+        repair_key,
+        check=None,
+        *,
+        owner=None,
+        on_success=None,
+        on_error=None,
+        on_cancelled=None,
+        on_finished=None,
+        on_status=None,
+    ):
+        del check, owner, on_error, on_cancelled
+        self.repair_calls.append(repair_key)
+        if on_status is not None:
+            on_status("Applying repair...")
+        if on_success is not None:
+            on_success("Schema bootstrap and migration completed successfully.")
+        if on_finished is not None:
+            on_finished()
+        return f"repair-{len(self.repair_calls)}"
+
+    def _show_background_task_error(self, title, failure, *, user_message):
+        self.background_errors.append((title, user_message, getattr(failure, "message", str(failure))))
+
+    def _open_local_path(self, path, _title):
+        self.opened_paths.append(Path(path))
+        return True
 
 
 class AppDialogsTests(unittest.TestCase):
@@ -137,6 +230,41 @@ class AppDialogsTests(unittest.TestCase):
             finally:
                 dialog.close()
                 host.close()
+
+    def test_diagnostics_dialog_uses_async_loader(self):
+        host = _DiagnosticsDialogHost()
+        dialog = DiagnosticsDialog(host)
+        try:
+            self.assertEqual(host.load_calls, 1)
+            self.assertFalse(dialog.loading_panel.isVisible())
+            self.assertEqual(dialog.environment_labels["App version"].text(), "2.0.0")
+            self.assertEqual(dialog.checks_list.count(), 1)
+            self.assertIn("Schema layout", dialog.details_edit.toPlainText())
+            self.assertTrue(dialog.repair_button.isEnabled())
+            self.assertEqual(dialog.repair_button.text(), "Repair Schema Layout")
+        finally:
+            dialog.close()
+            host.close()
+
+    def test_diagnostics_dialog_runs_async_repair(self):
+        host = _DiagnosticsDialogHost()
+        dialog = DiagnosticsDialog(host)
+        try:
+            with (
+                mock.patch(
+                    "isrc_manager.app_dialogs.QMessageBox.question",
+                    return_value=QMessageBox.Yes,
+                ),
+                mock.patch("isrc_manager.app_dialogs.QMessageBox.information") as info_mock,
+            ):
+                dialog._run_selected_repair()
+
+            self.assertEqual(host.repair_calls, ["schema_migrate"])
+            self.assertEqual(host.load_calls, 2)
+            info_mock.assert_called_once()
+        finally:
+            dialog.close()
+            host.close()
 
 
 if __name__ == "__main__":

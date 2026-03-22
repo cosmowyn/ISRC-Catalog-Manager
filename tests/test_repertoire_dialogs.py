@@ -7,6 +7,7 @@ try:
         QComboBox,
         QDialogButtonBox,
         QLineEdit,
+        QPlainTextEdit,
         QScrollArea,
         QTabWidget,
     )
@@ -95,7 +96,9 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
             self.assertTrue(hasattr(dialog.work_ids_edit, "value_ids"))
             self.assertTrue(hasattr(dialog.track_ids_edit, "value_ids"))
             self.assertTrue(hasattr(dialog.release_ids_edit, "value_ids"))
+            self.assertTrue(hasattr(dialog.obligations_editor, "obligations"))
             self.assertFalse(isinstance(dialog.work_ids_edit, QLineEdit))
+            self.assertFalse(isinstance(dialog.obligations_editor, QPlainTextEdit))
             self.assertFalse(isinstance(dialog.documents_editor.supersedes_edit, QLineEdit))
             self.assertFalse(isinstance(dialog.documents_editor.superseded_by_edit, QLineEdit))
             self.assertIsInstance(dialog.documents_editor.detail_scroll_area, QScrollArea)

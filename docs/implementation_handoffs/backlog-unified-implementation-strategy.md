@@ -7,7 +7,7 @@ Date: 2026-03-22
 
 This document uses the live repository as the source of truth. It was created from a full repo inspection plus focused analysis of UI, services, responsiveness, storage/history, tests, and handoff conventions.
 
-Implementation is in progress after the planning pass. Wave 1 and Wave 2 are complete in this pass, with focused regression coverage run locally. Wave 3 through Wave 5 remain open and should continue in the original order.
+Implementation is in progress after the planning pass. Wave 1 and Wave 2 are complete from the earlier pass, Wave 3 and Wave 4 are now implemented in this continuation pass, and Wave 5 has started with the managed-root snapshot coverage extension. The remaining open Wave 5 work is the legacy-field repair flow plus retention/budget policy.
 
 ## Source Of Truth
 
@@ -447,20 +447,41 @@ Exit criteria:
 - Changed album-art export basenames to use the linked album title when available.
 - Renamed and regrouped the File menu export surfaces and related ribbon labels so XML catalog export, exchange data export, and contracts/rights exchange are clearer.
 
+### Wave 3 Completed
+
+- Added staged theme application helpers in `ISRC_manager.py` so theme payload preparation runs through the background task manager while the final palette/font/stylesheet mutation stays on the UI thread.
+- Changed settings-save theme application to use the staged background-prep path with a direct-apply fallback if the worker cannot start.
+- Extended diagnostics report building to support bundle-backed async execution and status callbacks instead of always using the main-thread connection and services.
+- Added async diagnostics report loading plus async diagnostics repairs for schema migration, orphan custom-value cleanup, and history reconciliation.
+- Added an inline diagnostics loading state in `isrc_manager/app_dialogs.py` so the dialog shows busy status instead of appearing hung during refresh and repair.
+
+### Wave 4 Completed
+
+- Replaced the contract obligations pipe-delimited text block with a structured `ContractObligationEditor` in `isrc_manager/contracts/dialogs.py`.
+- Preserved `ContractPayload.obligations` compatibility while restoring fields the old UI dropped, including `completed_at` and `notes`.
+- Added `BulkAudioAttachService` in `isrc_manager/tags/service.py` for filename/tag-based matching, ambiguity handling, and artist suggestion.
+- Added `BulkAudioAttachDialog` in `isrc_manager/tags/dialogs.py` so users can review matches, manually reassign rows, and optionally apply one artist across matched tracks.
+- Added `Catalog > Bulk Attach Audio Files…` and the supporting `ISRC_manager.py` workflow to select files, preview matches, choose storage mode, attach audio in a history-wrapped batch, and optionally update matched track artists.
+
+### Wave 5 Partial
+
+- Extended `HistoryManager.MANAGED_DIRECTORIES` so snapshots now capture and restore `custom_field_media` and `gs1_templates` alongside the existing managed roots.
+- Added history snapshot regression coverage proving those managed roots are present in manifests and restored on snapshot restore.
+- The retention/budget policy engine and the legacy custom/default field merge-repair flow remain open.
+
 ## Remaining Work
 
 ### Next Wave To Start
 
-- Wave 3. Responsiveness and loading
-  - async diagnostics loading
-  - diagnostics repair task wiring
-  - staged theme save/apply with UI-thread-safe final mutation
+- Wave 5. Repair and storage hardening
+  - diagnostics-driven merge repair for legacy custom/default field collisions
+  - history retention/security settings and storage-budget enforcement
+  - cleanup prompt/refusal behavior when only protected/manual artifacts remain
 
 ### Still Open After This Pass
 
-- Wave 3. Responsiveness and loading
-- Wave 4. Bulk audio attach workflow and structured obligations editor
 - Wave 5. Legacy-field repair flow and history/storage hardening
+- Additional integration coverage for the new bulk-audio attach app workflow
 
 ### Important Continuation Notes
 
@@ -471,7 +492,8 @@ Exit criteria:
   - same-name custom-field reuse during import
   - shared media export basename and focused-column export helpers
 - The legacy custom/default column merge repair is still not implemented. Only the defensive import-side reuse path is complete.
-- History storage budgeting, retention controls, and snapshot-coverage expansion are still untouched in code.
+- History storage budgeting and retention controls are still untouched in code.
+- Snapshot coverage now includes `custom_field_media` and `gs1_templates`, so future Wave 5 work can build policy enforcement on top of the broader managed-root baseline instead of adding that coverage later.
 
 ## Tests
 
@@ -507,17 +529,28 @@ Exit criteria:
 - Updated `tests/app/test_app_shell_startup_core.py`
 - Updated `tests/catalog/_contract_rights_asset_support.py`
 - Updated `tests/catalog/test_contract_dialogs.py`
+- Updated `tests/history/_support.py`
+- Updated `tests/history/test_history_snapshots.py`
+- Updated `tests/test_app_dialogs.py`
 - Updated `tests/test_exchange_dialogs.py`
 - Updated `tests/exchange/_support.py`
 - Updated `tests/exchange/test_exchange_custom_fields.py`
 - Updated `tests/exchange/test_exchange_json.py`
 - Updated `tests/exchange/test_exchange_package.py`
+- Updated `tests/test_repertoire_dialogs.py`
+- Updated `tests/test_tag_dialogs.py`
+- Updated `tests/test_tag_service.py`
 - Updated `tests/test_migration_integration.py`
+- Updated `tests/test_theme_builder.py`
 
 ### Validated In This Pass
 
 - `python3 -m unittest tests.test_export_filename_helpers tests.test_exchange_dialogs tests.exchange.test_exchange_custom_fields tests.exchange.test_exchange_json tests.exchange.test_exchange_package tests.app.test_app_shell_startup_core tests.catalog.test_contract_dialogs tests.test_migration_integration`
 - Result: `Ran 40 tests in 51.823s` and `OK`
+- `python3 -m unittest tests.catalog.test_contract_dialogs tests.test_repertoire_dialogs tests.test_app_dialogs tests.test_theme_builder tests.test_task_manager tests.test_background_app_services tests.test_tag_service tests.test_tag_dialogs`
+- Result: `Ran 56 tests in 3.919s` and `OK`
+- `python3 -m unittest tests.history.test_history_snapshots tests.test_history_cleanup_service`
+- Result: `Ran 13 tests in 0.192s` and `OK`
 
 ## Future Recommendations
 

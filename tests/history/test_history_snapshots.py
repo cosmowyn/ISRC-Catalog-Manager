@@ -5,6 +5,9 @@ class HistorySnapshotTests(HistoryManagerTestCase):
     test_snapshot_actions_restore_managed_license_files = (
         HistoryManagerTestCase.case_snapshot_actions_restore_managed_license_files
     )
+    test_snapshot_actions_restore_custom_field_media_and_gs1_templates = (
+        HistoryManagerTestCase.case_snapshot_actions_restore_custom_field_media_and_gs1_templates
+    )
     test_registered_snapshot_can_be_restored = (
         HistoryManagerTestCase.case_registered_snapshot_can_be_restored
     )
