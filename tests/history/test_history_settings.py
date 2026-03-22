@@ -8,6 +8,9 @@ class HistorySettingsTests(HistoryManagerTestCase):
     test_auto_snapshot_setting_changes_undo_and_redo = (
         HistoryManagerTestCase.case_auto_snapshot_setting_changes_undo_and_redo
     )
+    test_history_retention_setting_changes_undo_and_redo = (
+        HistoryManagerTestCase.case_history_retention_setting_changes_undo_and_redo
+    )
     test_expanded_theme_settings_undo_and_redo_restore_new_fields = (
         HistoryManagerTestCase.case_expanded_theme_settings_undo_and_redo_restore_new_fields
     )

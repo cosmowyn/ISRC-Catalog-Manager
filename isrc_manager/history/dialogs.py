@@ -412,16 +412,45 @@ class HistoryCleanupDialog(QDialog):
             return
 
         preview = self.cleanup_service.inspect()
+        budget_preview = None
+        settings_reads = getattr(self.app, "settings_reads", None)
+        if settings_reads is not None:
+            try:
+                budget_preview = self.cleanup_service.preview_storage_budget(
+                    settings_reads.load_history_retention_settings()
+                )
+            except Exception:
+                budget_preview = None
         if preview.repair_required:
-            self.summary_label.setText(
+            summary_text = (
                 "Cleanup is currently blocked because history diagnostics found issues that must be repaired first.\n\n"
                 + "\n".join(preview.repair_messages[:6])
             )
         else:
-            self.summary_label.setText(
+            summary_text = (
                 f"{len(preview.eligible_items)} eligible item(s) can be removed safely. "
                 f"{len(preview.protected_items)} item(s) are still protected by history references."
             )
+        if budget_preview is not None and budget_preview.budget_bytes > 0:
+            summary_text += (
+                "\n\n"
+                f"History storage is using {self._human_size(budget_preview.total_bytes)} "
+                f"of a {self._human_size(budget_preview.budget_bytes)} budget."
+            )
+            if budget_preview.over_budget_bytes > 0:
+                summary_text += (
+                    f" The profile is over budget by {self._human_size(budget_preview.over_budget_bytes)}."
+                )
+                if budget_preview.candidate_items:
+                    summary_text += (
+                        f" Automatic cleanup can remove {len(budget_preview.candidate_items)} "
+                        "safe item(s) under the current policy."
+                    )
+                elif budget_preview.protected_over_budget_items:
+                    summary_text += (
+                        " The remaining over-budget storage is protected by retained history or manual restore points."
+                    )
+        self.summary_label.setText(summary_text)
 
         self._populate_cleanup_table(self.eligible_table, preview.eligible_items)
         self._populate_cleanup_table(self.protected_table, preview.protected_items)
@@ -546,3 +575,16 @@ class HistoryCleanupDialog(QDialog):
                 history_dialog.refresh_data()
             except Exception:
                 pass
+
+    @staticmethod
+    def _human_size(size_bytes: int) -> str:
+        try:
+            value = float(int(size_bytes or 0))
+        except Exception:
+            value = 0.0
+        units = ["B", "KB", "MB", "GB", "TB"]
+        index = 0
+        while value >= 1024.0 and index < len(units) - 1:
+            value /= 1024.0
+            index += 1
+        return f"{value:.0f} {units[index]}" if index == 0 else f"{value:.1f} {units[index]}"

@@ -151,6 +151,80 @@ class HistoryManagerTestCase(unittest.TestCase):
         self.history.redo()
         self.assertEqual(self.settings_reads.load_auto_snapshot_interval_minutes(), 45)
 
+    def case_history_retention_setting_changes_undo_and_redo(self):
+        self.settings_mutations.set_history_auto_cleanup_enabled(True)
+        self.settings_mutations.set_history_storage_budget_mb(2048)
+        self.settings_mutations.set_history_auto_snapshot_keep_latest(25)
+        self.settings_mutations.set_history_prune_pre_restore_copies_after_days(0)
+
+        self.history.record_setting_change(
+            key="history_auto_cleanup_enabled",
+            label="History Automatic Cleanup Disabled",
+            before_value=True,
+            after_value=False,
+        )
+        self.settings_mutations.set_history_auto_cleanup_enabled(False)
+
+        self.history.record_setting_change(
+            key="history_storage_budget_mb",
+            label="Set History Storage Budget: 1024 MB",
+            before_value=2048,
+            after_value=1024,
+        )
+        self.settings_mutations.set_history_storage_budget_mb(1024)
+
+        self.history.record_setting_change(
+            key="history_auto_snapshot_keep_latest",
+            label="Set Automatic Snapshot Retention: 12",
+            before_value=25,
+            after_value=12,
+        )
+        self.settings_mutations.set_history_auto_snapshot_keep_latest(12)
+
+        self.history.record_setting_change(
+            key="history_prune_pre_restore_copies_after_days",
+            label="Set Pre-Restore Backup Prune Age: 14 days",
+            before_value=0,
+            after_value=14,
+        )
+        self.settings_mutations.set_history_prune_pre_restore_copies_after_days(14)
+
+        settings = self.settings_reads.load_history_retention_settings()
+        self.assertFalse(settings.auto_cleanup_enabled)
+        self.assertEqual(settings.storage_budget_mb, 1024)
+        self.assertEqual(settings.auto_snapshot_keep_latest, 12)
+        self.assertEqual(settings.prune_pre_restore_copies_after_days, 14)
+
+        self.history.undo()
+        self.assertEqual(
+            self.settings_reads.load_history_prune_pre_restore_copies_after_days(),
+            0,
+        )
+
+        self.history.undo()
+        self.assertEqual(self.settings_reads.load_history_auto_snapshot_keep_latest(), 25)
+
+        self.history.undo()
+        self.assertEqual(self.settings_reads.load_history_storage_budget_mb(), 2048)
+
+        self.history.undo()
+        self.assertTrue(self.settings_reads.load_history_auto_cleanup_enabled())
+
+        self.history.redo()
+        self.assertFalse(self.settings_reads.load_history_auto_cleanup_enabled())
+
+        self.history.redo()
+        self.assertEqual(self.settings_reads.load_history_storage_budget_mb(), 1024)
+
+        self.history.redo()
+        self.assertEqual(self.settings_reads.load_history_auto_snapshot_keep_latest(), 12)
+
+        self.history.redo()
+        self.assertEqual(
+            self.settings_reads.load_history_prune_pre_restore_copies_after_days(),
+            14,
+        )
+
     def case_expanded_theme_settings_undo_and_redo_restore_new_fields(self):
         before_theme = theme_setting_defaults()
         after_theme = dict(before_theme)

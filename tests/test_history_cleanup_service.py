@@ -14,6 +14,7 @@ from isrc_manager.history import (
 from isrc_manager.services import (
     DatabaseSchemaService,
     DatabaseSessionService,
+    HistoryRetentionSettings,
     SettingsMutationService,
 )
 
@@ -201,6 +202,49 @@ class HistoryCleanupServiceTests(unittest.TestCase):
 
         with self.assertRaises(HistoryCleanupBlockedError):
             self.cleanup.trim_history(1)
+
+    def test_preview_storage_budget_identifies_automatic_cleanup_candidates(self):
+        old_auto_snapshot = self.history.capture_snapshot(kind="auto_interval", label="Old Auto")
+        self.history.capture_snapshot(kind="auto_interval", label="Keep Auto")
+
+        stale_bundle = self.history_root / "file_states" / self.db_path.stem / "stale_bundle"
+        stale_bundle.mkdir(parents=True, exist_ok=True)
+        (stale_bundle / "artifact.bin").write_bytes(b"stale")
+
+        settings = HistoryRetentionSettings(
+            auto_cleanup_enabled=True,
+            storage_budget_mb=1,
+            auto_snapshot_keep_latest=1,
+            prune_pre_restore_copies_after_days=0,
+        )
+
+        preview = self.cleanup.preview_storage_budget(settings)
+        candidate_keys = {item.item_key for item in preview.candidate_items}
+
+        self.assertIn(f"snapshot_record:{old_auto_snapshot.snapshot_id}", candidate_keys)
+        self.assertIn(f"file_state_bundle:{stale_bundle}", candidate_keys)
+        self.assertGreater(preview.budget_bytes, 0)
+
+    def test_enforce_storage_budget_removes_old_auto_snapshots_but_not_manual_ones(self):
+        manual_snapshot = self.history.create_manual_snapshot("Manual Keep")
+        old_auto_snapshot = self.history.capture_snapshot(kind="auto_interval", label="Old Auto")
+        self.history.capture_snapshot(kind="auto_interval", label="Keep Auto")
+
+        settings = HistoryRetentionSettings(
+            auto_cleanup_enabled=True,
+            storage_budget_mb=1,
+            auto_snapshot_keep_latest=1,
+            prune_pre_restore_copies_after_days=0,
+        )
+
+        result = self.cleanup.enforce_storage_budget(settings)
+
+        self.assertIn(
+            f"snapshot_record:{old_auto_snapshot.snapshot_id}",
+            set(result.removed_item_keys),
+        )
+        self.assertIsNone(self.history.fetch_snapshot(old_auto_snapshot.snapshot_id))
+        self.assertIsNotNone(self.history.fetch_snapshot(manual_snapshot.snapshot_id))
 
 
 if __name__ == "__main__":

@@ -63,7 +63,13 @@ from isrc_manager.works import (
 
 from .catalog_admin import AlbumUsage, ArtistUsage, CatalogAdminService, LicenseeUsage
 from .catalog_reads import CatalogReadService
-from .custom_fields import CustomFieldDefinitionService, CustomFieldValueService
+from .custom_fields import (
+    CustomFieldDefinitionService,
+    CustomFieldValueService,
+    LegacyPromotedFieldRepairCandidate,
+    LegacyPromotedFieldRepairResult,
+    LegacyPromotedFieldRepairService,
+)
 from .database_admin import (
     BackupResult,
     DatabaseMaintenanceService,
@@ -113,7 +119,12 @@ from .repertoire_status import REPERTOIRE_STATUS_CHOICES, RepertoireWorkflowServ
 from .schema import DatabaseSchemaService
 from .session import DatabaseSessionService, OpenDatabaseSession, ProfileKVService
 from .settings_mutations import SettingsMutationService
-from .settings_reads import AutoSnapshotSettings, RegistrationSettings, SettingsReadService
+from .settings_reads import (
+    AutoSnapshotSettings,
+    HistoryRetentionSettings,
+    RegistrationSettings,
+    SettingsReadService,
+)
 from .tracks import TrackCreatePayload, TrackService, TrackSnapshot, TrackUpdatePayload
 
 __all__ = [
@@ -158,6 +169,7 @@ __all__ = [
     "GS1ValidationIssue",
     "GS1ValidationResult",
     "GS1ValidationService",
+    "HistoryRetentionSettings",
     "XMLExportService",
     "ImportExecutionResult",
     "ImportInspection",
@@ -175,6 +187,9 @@ __all__ = [
     "LegacyLicenseMigrationResult",
     "LegacyLicenseMigrationService",
     "LegacyLicenseMigrationSummary",
+    "LegacyPromotedFieldRepairCandidate",
+    "LegacyPromotedFieldRepairResult",
+    "LegacyPromotedFieldRepairService",
     "LicenseRecord",
     "LicenseRow",
     "LicenseService",

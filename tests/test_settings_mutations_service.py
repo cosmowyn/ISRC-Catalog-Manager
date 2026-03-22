@@ -63,6 +63,10 @@ class SettingsMutationServiceTests(unittest.TestCase):
         self.service.set_artist_code("42")
         self.service.set_auto_snapshot_enabled(False)
         self.service.set_auto_snapshot_interval_minutes(45)
+        self.service.set_history_auto_cleanup_enabled(False)
+        self.service.set_history_storage_budget_mb(4096)
+        self.service.set_history_auto_snapshot_keep_latest(12)
+        self.service.set_history_prune_pre_restore_copies_after_days(21)
         self.service.set_isrc_prefix("NLABC")
         self.service.set_sena_number("SENA-1")
         self.service.set_btw_number("BTW-2")
@@ -84,6 +88,30 @@ class SettingsMutationServiceTests(unittest.TestCase):
                 "SELECT value FROM app_kv WHERE key='auto_snapshot_interval_minutes'"
             ).fetchone(),
             ("45",),
+        )
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT value FROM app_kv WHERE key='history_auto_cleanup_enabled'"
+            ).fetchone(),
+            ("0",),
+        )
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT value FROM app_kv WHERE key='history_storage_budget_mb'"
+            ).fetchone(),
+            ("4096",),
+        )
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT value FROM app_kv WHERE key='history_auto_snapshot_keep_latest'"
+            ).fetchone(),
+            ("12",),
+        )
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT value FROM app_kv WHERE key='history_prune_pre_restore_copies_after_days'"
+            ).fetchone(),
+            ("21",),
         )
         self.assertEqual(
             self.conn.execute("SELECT prefix FROM ISRC_Prefix WHERE id=1").fetchone(), ("NLABC",)

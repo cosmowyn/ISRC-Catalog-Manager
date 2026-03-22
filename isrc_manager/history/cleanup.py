@@ -8,6 +8,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from isrc_manager.services.settings_reads import HistoryRetentionSettings
+
 from .manager import HistoryManager
 from .models import HistoryEntry
 
@@ -26,6 +28,7 @@ class HistoryCleanupItem:
     bytes_on_disk: int
     reason: str
     eligible: bool
+    kind: str = ""
     record_id: int | None = None
     entry_id: int | None = None
 
@@ -52,10 +55,38 @@ class HistoryTrimPreview:
     removable_labels: tuple[str, ...]
 
 
+@dataclass(slots=True)
+class HistoryStorageBudgetPreview:
+    total_bytes: int
+    budget_bytes: int
+    over_budget_bytes: int
+    auto_cleanup_enabled: bool
+    candidate_items: tuple[HistoryCleanupItem, ...]
+    protected_over_budget_items: tuple[HistoryCleanupItem, ...]
+
+
+@dataclass(slots=True)
+class HistoryStorageBudgetResult:
+    removed_item_keys: tuple[str, ...]
+    removed_paths: tuple[str, ...]
+    total_bytes: int
+    budget_bytes: int
+    over_budget_bytes: int
+    blocked_by_protected_items: bool
+
+
 class HistoryStorageCleanupService:
     """Inspects and removes safe-to-delete history artifacts."""
 
     SESSION_SNAPSHOT_SUFFIXES = ("", "-wal", "-shm")
+    AUTO_SNAPSHOT_KIND_PREFIX = "auto_"
+    AUTO_CLEANUP_ITEM_TYPES = {
+        "orphan_snapshot_file",
+        "orphan_backup_file",
+        "snapshot_archive",
+        "file_state_bundle",
+        "session_snapshot",
+    }
     BLOCKING_ISSUE_TYPES = {
         "stale_current_head",
         "missing_snapshot_artifact",
@@ -93,6 +124,7 @@ class HistoryStorageCleanupService:
                 created_at=snapshot.created_at,
                 path=str(snapshot_path),
                 bytes_on_disk=self._path_size(snapshot_path)
+                + self._path_size(self.history_manager._snapshot_sidecar_path(snapshot_path))
                 + self._path_size(snapshot_path.with_suffix(".assets")),
                 reason=(
                     "This snapshot is still referenced by undo, redo, or retained snapshot history."
@@ -100,6 +132,7 @@ class HistoryStorageCleanupService:
                     else "This snapshot is no longer referenced by retained history entries."
                 ),
                 eligible=not is_protected,
+                kind=str(snapshot.kind or ""),
                 record_id=snapshot.snapshot_id,
             )
             (protected if is_protected else eligible).append(item)
@@ -114,13 +147,15 @@ class HistoryStorageCleanupService:
                     label=backup.label,
                     created_at=backup.created_at,
                     path=str(backup_path),
-                    bytes_on_disk=self._path_size(backup_path),
+                    bytes_on_disk=self._path_size(backup_path)
+                    + self._path_size(self.history_manager._backup_sidecar_path(backup_path)),
                     reason=(
                         "Safety backup created before a restore."
                         if "pre_restore" in kind_label
                         else "Backup files are not required for undo/redo history."
                     ),
                     eligible=True,
+                    kind=str(backup.kind or ""),
                     record_id=backup.backup_id,
                 )
             )
@@ -134,6 +169,7 @@ class HistoryStorageCleanupService:
                     created_at=self._path_created_at(path),
                     path=str(path),
                     bytes_on_disk=self._path_size(path)
+                    + self._path_size(self.history_manager._snapshot_sidecar_path(path))
                     + self._path_size(path.with_suffix(".assets")),
                     reason="Snapshot file is present on disk but not registered in HistorySnapshots.",
                     eligible=True,
@@ -148,7 +184,8 @@ class HistoryStorageCleanupService:
                     label=path.name,
                     created_at=self._path_created_at(path),
                     path=str(path),
-                    bytes_on_disk=self._path_size(path),
+                    bytes_on_disk=self._path_size(path)
+                    + self._path_size(self.history_manager._backup_sidecar_path(path)),
                     reason="Backup file is present on disk but not registered in HistoryBackups.",
                     eligible=True,
                 )
@@ -163,6 +200,7 @@ class HistoryStorageCleanupService:
                 created_at=self._path_created_at(archive_path),
                 path=str(archive_path),
                 bytes_on_disk=self._path_size(archive_path)
+                + self._path_size(self.history_manager._snapshot_sidecar_path(archive_path))
                 + self._path_size(archive_path.with_suffix(".assets")),
                 reason=(
                     "This archived snapshot is still required by snapshot create/delete history."
@@ -285,6 +323,63 @@ class HistoryStorageCleanupService:
             removed_entry_ids=tuple(removable_entry_ids),
         )
 
+    def preview_storage_budget(
+        self, settings: HistoryRetentionSettings
+    ) -> HistoryStorageBudgetPreview:
+        preview = self.inspect()
+        candidate_items = self._automatic_cleanup_candidates(
+            preview.eligible_items,
+            settings=settings,
+        )
+        total_bytes = sum(
+            int(item.bytes_on_disk or 0)
+            for item in (*preview.eligible_items, *preview.protected_items)
+        )
+        budget_mb = max(0, int(settings.storage_budget_mb or 0))
+        budget_bytes = budget_mb * 1024 * 1024
+        over_budget_bytes = max(0, total_bytes - budget_bytes) if budget_bytes > 0 else 0
+        candidate_keys = {item.item_key for item in candidate_items}
+        protected_over_budget_items = tuple(
+            item
+            for item in preview.eligible_items
+            if item.item_key not in candidate_keys
+        ) + preview.protected_items
+        return HistoryStorageBudgetPreview(
+            total_bytes=total_bytes,
+            budget_bytes=budget_bytes,
+            over_budget_bytes=over_budget_bytes,
+            auto_cleanup_enabled=bool(settings.auto_cleanup_enabled),
+            candidate_items=candidate_items,
+            protected_over_budget_items=protected_over_budget_items,
+        )
+
+    def enforce_storage_budget(
+        self, settings: HistoryRetentionSettings
+    ) -> HistoryStorageBudgetResult:
+        preview = self.preview_storage_budget(settings)
+        removed_item_keys: tuple[str, ...] = ()
+        removed_paths: tuple[str, ...] = ()
+        if preview.auto_cleanup_enabled and preview.candidate_items:
+            cleanup_result = self.cleanup_selected(
+                [item.item_key for item in preview.candidate_items]
+            )
+            removed_item_keys = cleanup_result.removed_item_keys
+            removed_paths = cleanup_result.removed_paths
+            preview = self.preview_storage_budget(settings)
+        blocked = (
+            preview.budget_bytes > 0
+            and preview.over_budget_bytes > 0
+            and bool(preview.protected_over_budget_items)
+        )
+        return HistoryStorageBudgetResult(
+            removed_item_keys=removed_item_keys,
+            removed_paths=removed_paths,
+            total_bytes=preview.total_bytes,
+            budget_bytes=preview.budget_bytes,
+            over_budget_bytes=preview.over_budget_bytes,
+            blocked_by_protected_items=blocked,
+        )
+
     def _raise_if_cleanup_blocked(self) -> None:
         preview = self.inspect()
         if preview.repair_required:
@@ -338,6 +433,77 @@ class HistoryStorageCleanupService:
             return removed
 
         raise ValueError(f"Unknown cleanup item type: {item.item_type}")
+
+    def _automatic_cleanup_candidates(
+        self,
+        eligible_items: tuple[HistoryCleanupItem, ...],
+        *,
+        settings: HistoryRetentionSettings,
+    ) -> tuple[HistoryCleanupItem, ...]:
+        keep_snapshot_ids = self._auto_snapshot_ids_to_keep(
+            int(settings.auto_snapshot_keep_latest or 0)
+        )
+        candidates: list[HistoryCleanupItem] = []
+        for item in eligible_items:
+            if item.item_type in self.AUTO_CLEANUP_ITEM_TYPES:
+                candidates.append(item)
+                continue
+            if item.item_type == "snapshot_record" and self._is_auto_snapshot_cleanup_candidate(
+                item,
+                keep_snapshot_ids=keep_snapshot_ids,
+            ):
+                candidates.append(item)
+                continue
+            if item.item_type == "backup_record" and self._is_prunable_pre_restore_backup(
+                item,
+                max_age_days=int(settings.prune_pre_restore_copies_after_days or 0),
+            ):
+                candidates.append(item)
+        return tuple(candidates)
+
+    def _auto_snapshot_ids_to_keep(self, keep_latest: int) -> set[int]:
+        keep_count = max(0, int(keep_latest or 0))
+        auto_snapshots = [
+            snapshot
+            for snapshot in self.history_manager._all_snapshots()
+            if str(snapshot.kind or "").strip().lower().startswith(self.AUTO_SNAPSHOT_KIND_PREFIX)
+        ]
+        auto_snapshots.sort(key=lambda snapshot: int(snapshot.snapshot_id), reverse=True)
+        return {
+            int(snapshot.snapshot_id)
+            for snapshot in auto_snapshots[:keep_count]
+            if int(snapshot.snapshot_id or 0) > 0
+        }
+
+    def _is_auto_snapshot_cleanup_candidate(
+        self,
+        item: HistoryCleanupItem,
+        *,
+        keep_snapshot_ids: set[int],
+    ) -> bool:
+        if not item.eligible or int(item.record_id or 0) <= 0:
+            return False
+        kind = str(item.kind or "").strip().lower()
+        if not kind.startswith(self.AUTO_SNAPSHOT_KIND_PREFIX):
+            return False
+        return int(item.record_id or 0) not in keep_snapshot_ids
+
+    def _is_prunable_pre_restore_backup(
+        self,
+        item: HistoryCleanupItem,
+        *,
+        max_age_days: int,
+    ) -> bool:
+        if not item.eligible or max_age_days <= 0:
+            return False
+        kind = str(item.kind or "").strip().lower()
+        if "pre_restore" not in kind:
+            return False
+        created_at = self._parse_created_at(item.created_at)
+        if created_at is None:
+            return False
+        age_days = max(0.0, (datetime.now() - created_at).total_seconds() / 86400.0)
+        return age_days >= float(max_age_days)
 
     def _delete_backup_record(self, backup_id: int) -> list[str]:
         backup = self.history_manager.fetch_backup(backup_id)
@@ -536,6 +702,18 @@ class HistoryStorageCleanupService:
             path = Path(str(snapshot_path) + suffix) if suffix else snapshot_path
             total += self._path_size(path)
         return total
+
+    @staticmethod
+    def _parse_created_at(value: str) -> datetime | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+            try:
+                return datetime.strptime(text, fmt)
+            except ValueError:
+                continue
+        return None
 
     @staticmethod
     def _path_created_at(path: Path) -> str:

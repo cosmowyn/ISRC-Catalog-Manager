@@ -1558,6 +1558,14 @@ class HistoryManager:
             self.settings_mutations.set_auto_snapshot_enabled(bool(value))
         elif key == "auto_snapshot_interval_minutes":
             self.settings_mutations.set_auto_snapshot_interval_minutes(int(value))
+        elif key == "history_auto_cleanup_enabled":
+            self.settings_mutations.set_history_auto_cleanup_enabled(bool(value))
+        elif key == "history_storage_budget_mb":
+            self.settings_mutations.set_history_storage_budget_mb(int(value))
+        elif key == "history_auto_snapshot_keep_latest":
+            self.settings_mutations.set_history_auto_snapshot_keep_latest(int(value))
+        elif key == "history_prune_pre_restore_copies_after_days":
+            self.settings_mutations.set_history_prune_pre_restore_copies_after_days(int(value))
         elif key == "theme_settings":
             if not isinstance(value, dict):
                 raise ValueError("Theme settings payload must be a dict")

@@ -7,7 +7,7 @@ Date: 2026-03-22
 
 This document uses the live repository as the source of truth. It was created from a full repo inspection plus focused analysis of UI, services, responsiveness, storage/history, tests, and handoff conventions.
 
-Implementation is in progress after the planning pass. Wave 1 and Wave 2 are complete from the earlier pass, Wave 3 and Wave 4 are now implemented in this continuation pass, and Wave 5 has started with the managed-root snapshot coverage extension. The remaining open Wave 5 work is the legacy-field repair flow plus retention/budget policy.
+Implementation is in progress after the planning pass. Wave 1 and Wave 2 are complete from the earlier pass, Wave 3 and Wave 4 are complete from the next continuation pass, and Wave 5 is now partially implemented with managed-root snapshot coverage, profile-scoped history retention/budget controls, automatic cleanup enforcement, and a diagnostics-driven legacy promoted-field repair path. The remaining open Wave 5 work is broader history policy expansion and deeper integration coverage around the new repair/storage flows.
 
 ## Source Of Truth
 
@@ -466,21 +466,26 @@ Exit criteria:
 ### Wave 5 Partial
 
 - Extended `HistoryManager.MANAGED_DIRECTORIES` so snapshots now capture and restore `custom_field_media` and `gs1_templates` alongside the existing managed roots.
-- Added history snapshot regression coverage proving those managed roots are present in manifests and restored on snapshot restore.
-- The retention/budget policy engine and the legacy custom/default field merge-repair flow remain open.
+- Added profile-scoped history retention settings in `app_kv` for automatic cleanup enablement, storage budget, automatic snapshot retention count, and optional pre-restore backup aging.
+- Extended `ApplicationSettingsDialog` and the surrounding settings read/write flow so those retention controls are visible, persisted, history-aware, and replayable through undo/redo.
+- Added `HistoryStorageCleanupService.preview_storage_budget()` and `enforce_storage_budget()` so the app can classify automatic-cleanup candidates conservatively, remove only safe auto-generated artifacts, and preserve manual/protected items by default.
+- Wired storage-budget enforcement into automatic snapshot creation, manual snapshot creation, snapshot restore completion, and interactive settings changes, with a direct prompt into `HistoryCleanupDialog` when the profile remains over budget.
+- Extended `HistoryCleanupDialog` summaries so users can see current budget usage and whether the current policy can still free safe space.
+- Added `LegacyPromotedFieldRepairService` for same-name legacy custom fields that now belong in promoted default columns, with conservative merge behavior that only fills blank default-column values and skips conflicting rows entirely.
+- Added a diagnostics check plus synchronous/async diagnostics repair entry for the legacy promoted-field repair flow, reusing the existing `refresh_schema` post-repair path.
 
 ## Remaining Work
 
 ### Next Wave To Start
 
 - Wave 5. Repair and storage hardening
-  - diagnostics-driven merge repair for legacy custom/default field collisions
-  - history retention/security settings and storage-budget enforcement
-  - cleanup prompt/refusal behavior when only protected/manual artifacts remain
+  - extend the conservative storage policy into fuller retention/security presets if the backlog still requires named modes
+  - add diagnostics or cleanup-surface reporting for budget pressure beyond the current prompt-and-cleanup path
+  - add higher-level integration coverage for the new repair/storage flows
 
 ### Still Open After This Pass
 
-- Wave 5. Legacy-field repair flow and history/storage hardening
+- Wave 5. Additional history/security policy shaping and integration coverage
 - Additional integration coverage for the new bulk-audio attach app workflow
 
 ### Important Continuation Notes
@@ -491,8 +496,8 @@ Exit criteria:
   - shared mapping across CSV/XLSX/JSON/package imports
   - same-name custom-field reuse during import
   - shared media export basename and focused-column export helpers
-- The legacy custom/default column merge repair is still not implemented. Only the defensive import-side reuse path is complete.
-- History storage budgeting and retention controls are still untouched in code.
+- The diagnostics-backed legacy promoted-field repair now exists for same-name promoted default columns. It safely merges only into blank default-column cells and skips any field where conflicting default-column values already exist.
+- History storage budgeting and retention controls now exist in code and are enforced conservatively, but they currently focus on automatic snapshots, unreferenced artifacts, and optionally aged pre-restore backups rather than a larger preset matrix.
 - Snapshot coverage now includes `custom_field_media` and `gs1_templates`, so future Wave 5 work can build policy enforcement on top of the broader managed-root baseline instead of adding that coverage later.
 
 ## Tests
@@ -521,6 +526,7 @@ Exit criteria:
 - bulk audio attach workflow coverage
 - contract obligations structured-editor coverage
 - history budget and merge-repair coverage
+- higher-level diagnostics/history integration coverage for Wave 5 prompts and repair refresh behavior
 
 ### Added / Updated In This Pass
 
@@ -530,13 +536,18 @@ Exit criteria:
 - Updated `tests/catalog/_contract_rights_asset_support.py`
 - Updated `tests/catalog/test_contract_dialogs.py`
 - Updated `tests/history/_support.py`
+- Updated `tests/history/test_history_settings.py`
 - Updated `tests/history/test_history_snapshots.py`
 - Updated `tests/test_app_dialogs.py`
+- Updated `tests/test_history_cleanup_service.py`
+- Updated `tests/test_settings_mutations_service.py`
+- Updated `tests/test_settings_read_service.py`
 - Updated `tests/test_exchange_dialogs.py`
 - Updated `tests/exchange/_support.py`
 - Updated `tests/exchange/test_exchange_custom_fields.py`
 - Updated `tests/exchange/test_exchange_json.py`
 - Updated `tests/exchange/test_exchange_package.py`
+- Added `tests/test_legacy_promoted_field_repair_service.py`
 - Updated `tests/test_repertoire_dialogs.py`
 - Updated `tests/test_tag_dialogs.py`
 - Updated `tests/test_tag_service.py`
@@ -551,6 +562,10 @@ Exit criteria:
 - Result: `Ran 56 tests in 3.919s` and `OK`
 - `python3 -m unittest tests.history.test_history_snapshots tests.test_history_cleanup_service`
 - Result: `Ran 13 tests in 0.192s` and `OK`
+- `python3 -m unittest tests.test_settings_read_service tests.test_settings_mutations_service tests.test_history_cleanup_service tests.history.test_history_settings tests.test_legacy_promoted_field_repair_service tests.test_theme_builder tests.test_qss_autocomplete`
+- Result: `Ran 53 tests in 3.876s` and `OK`
+- `python3 -m unittest tests.test_app_dialogs tests.history.test_history_snapshots`
+- Result: `Ran 15 tests in 0.365s` and `OK`
 
 ## Future Recommendations
 

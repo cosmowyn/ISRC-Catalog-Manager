@@ -4,8 +4,17 @@ import unittest
 from isrc_manager.constants import (
     DEFAULT_AUTO_SNAPSHOT_ENABLED,
     DEFAULT_AUTO_SNAPSHOT_INTERVAL_MINUTES,
+    DEFAULT_HISTORY_AUTO_CLEANUP_ENABLED,
+    DEFAULT_HISTORY_AUTO_SNAPSHOT_KEEP_LATEST,
+    DEFAULT_HISTORY_PRUNE_PRE_RESTORE_COPIES_AFTER_DAYS,
+    DEFAULT_HISTORY_STORAGE_BUDGET_MB,
 )
-from isrc_manager.services import AutoSnapshotSettings, RegistrationSettings, SettingsReadService
+from isrc_manager.services import (
+    AutoSnapshotSettings,
+    HistoryRetentionSettings,
+    RegistrationSettings,
+    SettingsReadService,
+)
 
 
 def make_settings_conn():
@@ -93,6 +102,41 @@ class SettingsReadServiceTests(unittest.TestCase):
         self.assertEqual(
             self.service.load_auto_snapshot_settings(),
             AutoSnapshotSettings(enabled=False, interval_minutes=45),
+        )
+
+    def test_load_history_retention_settings_returns_defaults(self):
+        self.assertEqual(
+            self.service.load_history_retention_settings(),
+            HistoryRetentionSettings(
+                auto_cleanup_enabled=DEFAULT_HISTORY_AUTO_CLEANUP_ENABLED,
+                storage_budget_mb=DEFAULT_HISTORY_STORAGE_BUDGET_MB,
+                auto_snapshot_keep_latest=DEFAULT_HISTORY_AUTO_SNAPSHOT_KEEP_LATEST,
+                prune_pre_restore_copies_after_days=(
+                    DEFAULT_HISTORY_PRUNE_PRE_RESTORE_COPIES_AFTER_DAYS
+                ),
+            ),
+        )
+
+    def test_load_history_retention_settings_reads_profile_values(self):
+        with self.conn:
+            self.conn.executemany(
+                "INSERT INTO app_kv(key, value) VALUES(?, ?)",
+                [
+                    ("history_auto_cleanup_enabled", "0"),
+                    ("history_storage_budget_mb", "4096"),
+                    ("history_auto_snapshot_keep_latest", "12"),
+                    ("history_prune_pre_restore_copies_after_days", "21"),
+                ],
+            )
+
+        self.assertEqual(
+            self.service.load_history_retention_settings(),
+            HistoryRetentionSettings(
+                auto_cleanup_enabled=False,
+                storage_budget_mb=4096,
+                auto_snapshot_keep_latest=12,
+                prune_pre_restore_copies_after_days=21,
+            ),
         )
 
 

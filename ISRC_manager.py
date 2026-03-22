@@ -120,22 +120,33 @@ from PySide6.QtWidgets import (
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput, QAudioDecoder, QAudioFormat
 
 from isrc_manager.history import (
+    HistoryCleanupBlockedError,
     HistoryManager,
     HistoryStorageCleanupService,
     SessionHistoryManager,
 )
-from isrc_manager.history.dialogs import HistoryDialog
+from isrc_manager.history.dialogs import HistoryCleanupDialog, HistoryDialog
 from isrc_manager.constants import (
     APP_NAME,
     DEFAULT_AUTO_SNAPSHOT_ENABLED,
     DEFAULT_AUTO_SNAPSHOT_INTERVAL_MINUTES,
     DEFAULT_BASE_HEADERS,
     DEFAULT_HIDDEN_CUSTOM_COLUMN_NAMES,
+    DEFAULT_HISTORY_AUTO_CLEANUP_ENABLED,
+    DEFAULT_HISTORY_AUTO_SNAPSHOT_KEEP_LATEST,
+    DEFAULT_HISTORY_PRUNE_PRE_RESTORE_COPIES_AFTER_DAYS,
+    DEFAULT_HISTORY_STORAGE_BUDGET_MB,
     DEFAULT_ICON_PATH,
     DEFAULT_WINDOW_TITLE,
     FIELD_TYPE_CHOICES,
     MAX_AUTO_SNAPSHOT_INTERVAL_MINUTES,
+    MAX_HISTORY_AUTO_SNAPSHOT_KEEP_LATEST,
+    MAX_HISTORY_PRUNE_PRE_RESTORE_COPIES_AFTER_DAYS,
+    MAX_HISTORY_STORAGE_BUDGET_MB,
     MIN_AUTO_SNAPSHOT_INTERVAL_MINUTES,
+    MIN_HISTORY_AUTO_SNAPSHOT_KEEP_LATEST,
+    MIN_HISTORY_PRUNE_PRE_RESTORE_COPIES_AFTER_DAYS,
+    MIN_HISTORY_STORAGE_BUDGET_MB,
     PROMOTED_CUSTOM_FIELD_NAMES,
     SCHEMA_TARGET,
 )
@@ -278,7 +289,9 @@ from isrc_manager.services import (
     GS1MetadataRepository,
     GS1SettingsService,
     GS1TemplateAsset,
+    HistoryRetentionSettings,
     LegacyLicenseMigrationService,
+    LegacyPromotedFieldRepairService,
     XMLExportService,
     XMLImportService,
     LicenseService,
@@ -538,6 +551,12 @@ class ApplicationSettingsDialog(QDialog):
         stored_themes: dict[str, dict[str, object]] | None,
         current_profile_path: str,
         blob_icon_settings: dict[str, object] | None = None,
+        history_auto_cleanup_enabled: bool = DEFAULT_HISTORY_AUTO_CLEANUP_ENABLED,
+        history_storage_budget_mb: int = DEFAULT_HISTORY_STORAGE_BUDGET_MB,
+        history_auto_snapshot_keep_latest: int = DEFAULT_HISTORY_AUTO_SNAPSHOT_KEEP_LATEST,
+        history_prune_pre_restore_copies_after_days: int = (
+            DEFAULT_HISTORY_PRUNE_PRE_RESTORE_COPIES_AFTER_DAYS
+        ),
         parent=None,
     ):
         super().__init__(parent)
@@ -839,6 +858,119 @@ class ApplicationSettingsDialog(QDialog):
             self.auto_snapshot_interval_spin.setEnabled
         )
         self.auto_snapshot_interval_spin.setEnabled(self.auto_snapshot_enabled_check.isChecked())
+
+        self.history_auto_cleanup_enabled_check = QCheckBox(
+            "Automatically clean safe history artifacts"
+        )
+        self.history_auto_cleanup_enabled_check.setChecked(bool(history_auto_cleanup_enabled))
+        self.history_auto_cleanup_enabled_check.setMinimumWidth(320)
+        self._add_row(
+            snapshots_grid,
+            2,
+            "Automatic Cleanup",
+            self.history_auto_cleanup_enabled_check,
+            "Allow the app to remove older automatic snapshots, unreferenced bundles, and aged pre-restore safety copies when the retention policy allows it.",
+        )
+
+        self.history_storage_budget_spin = FocusWheelSpinBox()
+        self.history_storage_budget_spin.setRange(
+            MIN_HISTORY_STORAGE_BUDGET_MB,
+            MAX_HISTORY_STORAGE_BUDGET_MB,
+        )
+        self.history_storage_budget_spin.setValue(
+            max(
+                MIN_HISTORY_STORAGE_BUDGET_MB,
+                min(
+                    MAX_HISTORY_STORAGE_BUDGET_MB,
+                    int(history_storage_budget_mb or DEFAULT_HISTORY_STORAGE_BUDGET_MB),
+                ),
+            )
+        )
+        self.history_storage_budget_spin.setSuffix(" MB")
+        self.history_storage_budget_spin.setMinimumWidth(180)
+        self.history_storage_budget_spin.setMaximumWidth(220)
+        self._add_row(
+            snapshots_grid,
+            3,
+            "Storage Budget",
+            self.history_storage_budget_spin,
+            "Set a soft cap for history snapshots, backups, and artifact bundles stored for this profile.",
+        )
+
+        self.history_auto_snapshot_keep_latest_spin = FocusWheelSpinBox()
+        self.history_auto_snapshot_keep_latest_spin.setRange(
+            MIN_HISTORY_AUTO_SNAPSHOT_KEEP_LATEST,
+            MAX_HISTORY_AUTO_SNAPSHOT_KEEP_LATEST,
+        )
+        self.history_auto_snapshot_keep_latest_spin.setValue(
+            max(
+                MIN_HISTORY_AUTO_SNAPSHOT_KEEP_LATEST,
+                min(
+                    MAX_HISTORY_AUTO_SNAPSHOT_KEEP_LATEST,
+                    int(
+                        history_auto_snapshot_keep_latest
+                        or DEFAULT_HISTORY_AUTO_SNAPSHOT_KEEP_LATEST
+                    ),
+                ),
+            )
+        )
+        self.history_auto_snapshot_keep_latest_spin.setMinimumWidth(180)
+        self.history_auto_snapshot_keep_latest_spin.setMaximumWidth(220)
+        self._add_row(
+            snapshots_grid,
+            4,
+            "Keep Latest Auto Snapshots",
+            self.history_auto_snapshot_keep_latest_spin,
+            "Older automatic snapshots beyond this count can be trimmed automatically when they are no longer referenced by retained history.",
+        )
+
+        self.history_prune_pre_restore_copies_after_days_spin = FocusWheelSpinBox()
+        self.history_prune_pre_restore_copies_after_days_spin.setRange(
+            MIN_HISTORY_PRUNE_PRE_RESTORE_COPIES_AFTER_DAYS,
+            MAX_HISTORY_PRUNE_PRE_RESTORE_COPIES_AFTER_DAYS,
+        )
+        self.history_prune_pre_restore_copies_after_days_spin.setValue(
+            max(
+                MIN_HISTORY_PRUNE_PRE_RESTORE_COPIES_AFTER_DAYS,
+                min(
+                    MAX_HISTORY_PRUNE_PRE_RESTORE_COPIES_AFTER_DAYS,
+                    int(
+                        history_prune_pre_restore_copies_after_days
+                        or DEFAULT_HISTORY_PRUNE_PRE_RESTORE_COPIES_AFTER_DAYS
+                    ),
+                ),
+            )
+        )
+        self.history_prune_pre_restore_copies_after_days_spin.setSpecialValueText("Never")
+        self.history_prune_pre_restore_copies_after_days_spin.setSuffix(" days")
+        self.history_prune_pre_restore_copies_after_days_spin.setMinimumWidth(180)
+        self.history_prune_pre_restore_copies_after_days_spin.setMaximumWidth(220)
+        self._add_row(
+            snapshots_grid,
+            5,
+            "Prune Restore Safety Copies",
+            self.history_prune_pre_restore_copies_after_days_spin,
+            "Optionally remove pre-restore safety backups after they age past this many days. Set to Never to keep them until you clean them manually.",
+        )
+
+        self.history_auto_cleanup_enabled_check.toggled.connect(
+            self.history_storage_budget_spin.setEnabled
+        )
+        self.history_auto_cleanup_enabled_check.toggled.connect(
+            self.history_auto_snapshot_keep_latest_spin.setEnabled
+        )
+        self.history_auto_cleanup_enabled_check.toggled.connect(
+            self.history_prune_pre_restore_copies_after_days_spin.setEnabled
+        )
+        self.history_storage_budget_spin.setEnabled(
+            self.history_auto_cleanup_enabled_check.isChecked()
+        )
+        self.history_auto_snapshot_keep_latest_spin.setEnabled(
+            self.history_auto_cleanup_enabled_check.isChecked()
+        )
+        self.history_prune_pre_restore_copies_after_days_spin.setEnabled(
+            self.history_auto_cleanup_enabled_check.isChecked()
+        )
 
         general_layout.addStretch(1)
         self.tabs.addTab(self._wrap_tab_page(general_page), "General")
@@ -1168,6 +1300,13 @@ class ApplicationSettingsDialog(QDialog):
             "artist_code": (0, self.artist_code_edit),
             "auto_snapshot_enabled": (0, self.auto_snapshot_enabled_check),
             "auto_snapshot_interval_minutes": (0, self.auto_snapshot_interval_spin),
+            "history_auto_cleanup_enabled": (0, self.history_auto_cleanup_enabled_check),
+            "history_storage_budget_mb": (0, self.history_storage_budget_spin),
+            "history_auto_snapshot_keep_latest": (0, self.history_auto_snapshot_keep_latest_spin),
+            "history_prune_pre_restore_copies_after_days": (
+                0,
+                self.history_prune_pre_restore_copies_after_days_spin,
+            ),
             "sena_number": (0, self.sena_number_edit),
             "btw_number": (0, self.btw_number_edit),
             "buma_relatie_nummer": (0, self.buma_relatie_edit),
@@ -3020,6 +3159,14 @@ class ApplicationSettingsDialog(QDialog):
             "artist_code": self.artist_code_edit.text().strip(),
             "auto_snapshot_enabled": self.auto_snapshot_enabled_check.isChecked(),
             "auto_snapshot_interval_minutes": int(self.auto_snapshot_interval_spin.value()),
+            "history_auto_cleanup_enabled": self.history_auto_cleanup_enabled_check.isChecked(),
+            "history_storage_budget_mb": int(self.history_storage_budget_spin.value()),
+            "history_auto_snapshot_keep_latest": int(
+                self.history_auto_snapshot_keep_latest_spin.value()
+            ),
+            "history_prune_pre_restore_copies_after_days": int(
+                self.history_prune_pre_restore_copies_after_days_spin.value()
+            ),
             "sena_number": self.sena_number_edit.text().strip(),
             "btw_number": self.btw_number_edit.text().strip(),
             "buma_relatie_nummer": self.buma_relatie_edit.text().strip(),
@@ -5240,6 +5387,7 @@ class App(QMainWindow):
         self.auto_snapshot_timer.setSingleShot(False)
         self.auto_snapshot_timer.timeout.connect(self._on_auto_snapshot_timer)
         self._last_auto_snapshot_marker = None
+        self._last_history_budget_warning_signature = None
         self._suspend_layout_history = False
         self._suspend_dock_state_sync = False
         self._is_closing = False
@@ -6003,6 +6151,12 @@ class App(QMainWindow):
         ).fetchone()
         return int(row[0] or 0) if row else 0
 
+    def _legacy_promoted_field_repair_candidates(self, conn=None):
+        connection = conn if conn is not None else self.conn
+        if connection is None:
+            return []
+        return LegacyPromotedFieldRepairService(connection).inspect_candidates()
+
     def _preview_diagnostics_repair(self, repair_key: str, check: dict | None = None) -> str:
         if repair_key == "storage_layout_migrate":
             inspection = self.storage_migration_service.inspect()
@@ -6050,6 +6204,37 @@ class App(QMainWindow):
                 f"This will delete {int(count)} orphaned custom value row(s) that no longer point to a valid "
                 "track or custom field definition."
             )
+        if repair_key == "legacy_promoted_field_repair":
+            candidates = self._legacy_promoted_field_repair_candidates()
+            if not candidates:
+                return "No legacy custom fields currently overlap promoted default columns."
+            eligible = [candidate for candidate in candidates if candidate.eligible]
+            blocked = [candidate for candidate in candidates if not candidate.eligible]
+            lines = [
+                (
+                    f"- {candidate.field_name}: "
+                    f"{candidate.non_empty_value_count} stored value(s), "
+                    f"{candidate.blank_target_count} blank target row(s), "
+                    f"{len(candidate.conflicting_track_ids)} conflicting track(s)"
+                )
+                for candidate in candidates[:10]
+            ]
+            summary = [
+                "This will merge safe legacy custom-field values into their promoted default columns, then remove the redundant custom field definitions and values.",
+                "",
+                f"Safe candidates: {len(eligible)}",
+                f"Blocked by conflicting values: {len(blocked)}",
+            ]
+            if lines:
+                summary.extend(["", "Fields:", *lines])
+            if blocked:
+                summary.extend(
+                    [
+                        "",
+                        "Fields with conflicting values will be skipped so no existing default-column data is overwritten silently.",
+                    ]
+                )
+            return "\n".join(summary)
         if repair_key == "history_reconcile":
             issue_count = 0
             if check is not None:
@@ -6123,6 +6308,50 @@ class App(QMainWindow):
                 remaining=after_count,
             )
             return f"Removed {removed} orphaned custom value row(s)."
+
+        if repair_key == "legacy_promoted_field_repair":
+            if self.conn is None:
+                raise RuntimeError("Open a profile first.")
+            result = LegacyPromotedFieldRepairService(self.conn).repair_candidates()
+            self.active_custom_fields = self.load_active_custom_fields()
+            self.refresh_table_preserve_view()
+            self.populate_all_comboboxes()
+            self._audit(
+                "REPAIR",
+                "CustomFieldDefs",
+                ref_id="legacy_promoted_field_repair",
+                details=(
+                    f"repaired={len(result.repaired_field_names)};"
+                    f" skipped={len(result.skipped_field_names)};"
+                    f" merged_values={result.merged_value_count}"
+                ),
+            )
+            self._audit_commit()
+            self._log_event(
+                "diagnostics.repair.legacy_promoted_field_repair",
+                "Diagnostics repair applied",
+                repair_key=repair_key,
+                repaired=len(result.repaired_field_names),
+                skipped=len(result.skipped_field_names),
+                merged_values=result.merged_value_count,
+            )
+            summary_parts = []
+            if result.repaired_field_names:
+                summary_parts.append(
+                    "Repaired fields:\n" + "\n".join(sorted(result.repaired_field_names))
+                )
+            else:
+                summary_parts.append("No safe legacy default-column custom fields required repair.")
+            if result.skipped_field_names:
+                summary_parts.append(
+                    "Skipped because conflicting default-column values already exist:\n"
+                    + "\n".join(sorted(result.skipped_field_names))
+                )
+            summary_parts.append(
+                f"Merged {result.merged_value_count} blank default-column value(s) and removed "
+                f"{result.removed_field_count} redundant custom field definition(s)."
+            )
+            return "\n\n".join(summary_parts)
 
         if repair_key == "history_reconcile":
             if self.history_manager is None:
@@ -6502,6 +6731,55 @@ class App(QMainWindow):
                 repair_label="Delete Orphaned Custom Values",
             )
 
+        _set_status("Checking legacy default-column custom fields...")
+        try:
+            legacy_candidates = self._legacy_promoted_field_repair_candidates(conn=connection)
+            if not legacy_candidates:
+                add_check(
+                    "Legacy default-column custom fields",
+                    "ok",
+                    "0 legacy custom/default overlaps detected.",
+                    "No legacy custom field definitions currently overlap promoted default columns.",
+                )
+            else:
+                details = []
+                safe_count = 0
+                for candidate in legacy_candidates:
+                    if candidate.eligible:
+                        safe_count += 1
+                    details.append(
+                        (
+                            f"{candidate.field_name} "
+                            f"(custom {candidate.custom_field_type} -> default {candidate.default_field_type}): "
+                            f"{candidate.non_empty_value_count} stored value(s), "
+                            f"{candidate.blank_target_count} blank target row(s), "
+                            f"{len(candidate.conflicting_track_ids)} conflicting track(s)"
+                        )
+                    )
+                details.append("")
+                details.append(
+                    "The repair action merges safe values into the promoted default column first and removes the redundant custom field only when no conflicting default-column data would be overwritten."
+                )
+                add_check(
+                    "Legacy default-column custom fields",
+                    "warning",
+                    f"{len(legacy_candidates)} legacy custom/default overlap(s) detected.",
+                    "\n".join(details),
+                    repair_key="legacy_promoted_field_repair",
+                    repair_label="Merge Into Default Columns",
+                    safe_candidate_count=safe_count,
+                    conflict_candidate_count=len(legacy_candidates) - safe_count,
+                )
+        except Exception as exc:
+            add_check(
+                "Legacy default-column custom fields",
+                "error",
+                "Legacy custom/default overlap inspection failed.",
+                f"An exception occurred while checking for redundant promoted custom fields:\n{exc}",
+                repair_key="legacy_promoted_field_repair",
+                repair_label="Merge Into Default Columns",
+            )
+
         _set_status("Checking managed files...")
         try:
             missing_files = []
@@ -6822,6 +7100,45 @@ class App(QMainWindow):
                     "repair_key": repair_key,
                     "removed": removed,
                     "remaining": after_count,
+                },
+            }
+
+        if repair_key == "legacy_promoted_field_repair":
+            _set_status("Merging legacy custom fields into default columns...")
+            result = LegacyPromotedFieldRepairService(bundle.conn).repair_candidates()
+            summary_parts = []
+            if result.repaired_field_names:
+                summary_parts.append(
+                    "Repaired fields:\n" + "\n".join(sorted(result.repaired_field_names))
+                )
+            else:
+                summary_parts.append("No safe legacy default-column custom fields required repair.")
+            if result.skipped_field_names:
+                summary_parts.append(
+                    "Skipped because conflicting default-column values already exist:\n"
+                    + "\n".join(sorted(result.skipped_field_names))
+                )
+            summary_parts.append(
+                f"Merged {result.merged_value_count} blank default-column value(s) and removed "
+                f"{result.removed_field_count} redundant custom field definition(s)."
+            )
+            return {
+                "result_text": "\n\n".join(summary_parts),
+                "post_action": "refresh_schema",
+                "audit_entity": "CustomFieldDefs",
+                "audit_ref_id": "legacy_promoted_field_repair",
+                "audit_details": (
+                    f"repaired={len(result.repaired_field_names)};"
+                    f" skipped={len(result.skipped_field_names)};"
+                    f" merged_values={result.merged_value_count}"
+                ),
+                "log_event": "diagnostics.repair.legacy_promoted_field_repair",
+                "log_message": "Diagnostics repair applied",
+                "log_fields": {
+                    "repair_key": repair_key,
+                    "repaired": len(result.repaired_field_names),
+                    "skipped": len(result.skipped_field_names),
+                    "merged_values": result.merged_value_count,
                 },
             }
 
@@ -7438,6 +7755,104 @@ class App(QMainWindow):
         snapshot_settings = self.settings_reads.load_auto_snapshot_settings()
         return bool(snapshot_settings.enabled), int(snapshot_settings.interval_minutes)
 
+    def _current_history_retention_settings(self) -> HistoryRetentionSettings:
+        if self.settings_reads is None:
+            return HistoryRetentionSettings()
+        return self.settings_reads.load_history_retention_settings()
+
+    def open_history_cleanup_dialog(self):
+        dialog = HistoryCleanupDialog(self, parent=self)
+        dialog.exec()
+
+    def _enforce_history_storage_budget(
+        self,
+        *,
+        trigger_label: str,
+        interactive: bool = False,
+    ) -> None:
+        if self.history_manager is None or self.settings_reads is None:
+            return
+        cleanup_service = HistoryStorageCleanupService(self.history_manager)
+        settings = self._current_history_retention_settings()
+        try:
+            result = cleanup_service.enforce_storage_budget(settings)
+        except HistoryCleanupBlockedError as exc:
+            self.logger.warning("History cleanup is blocked during %s: %s", trigger_label, exc)
+            if interactive:
+                QMessageBox.warning(
+                    self,
+                    "History Storage",
+                    "History cleanup is currently blocked until diagnostics repairs are applied.\n\n"
+                    + str(exc),
+                )
+            return
+        except Exception as exc:
+            self.logger.warning("History budget enforcement failed during %s: %s", trigger_label, exc)
+            if interactive:
+                QMessageBox.warning(
+                    self,
+                    "History Storage",
+                    f"Could not enforce the history storage policy:\n{exc}",
+                )
+            return
+
+        if result.removed_item_keys:
+            self._refresh_history_actions()
+            if self.history_dialog is not None and self.history_dialog.isVisible():
+                self.history_dialog.refresh_data()
+            self.statusBar().showMessage(
+                f"History cleanup removed {len(result.removed_item_keys)} item(s) after {trigger_label}.",
+                5000,
+            )
+
+        if result.over_budget_bytes <= 0:
+            self._last_history_budget_warning_signature = None
+            return
+
+        signature = (
+            str(trigger_label),
+            int(result.total_bytes or 0) // (1024 * 1024),
+            int(result.budget_bytes or 0) // (1024 * 1024),
+            bool(result.blocked_by_protected_items),
+        )
+        if not interactive and signature == self._last_history_budget_warning_signature:
+            return
+        self._last_history_budget_warning_signature = signature
+
+        message_parts = [
+            (
+                f"History storage is using {self._human_size(result.total_bytes)} while the "
+                f"profile budget is {self._human_size(result.budget_bytes)}."
+            )
+        ]
+        if result.removed_item_keys:
+            message_parts.append(
+                f"Automatic cleanup already removed {len(result.removed_item_keys)} safe item(s)."
+            )
+        elif not settings.auto_cleanup_enabled:
+            message_parts.append(
+                "Automatic cleanup is disabled for this profile, so nothing was deleted automatically."
+            )
+        if result.blocked_by_protected_items:
+            message_parts.append(
+                "The remaining over-budget storage is protected by retained history references or manual restore points."
+            )
+        else:
+            message_parts.append(
+                "The profile is still over budget and may need a manual cleanup review."
+            )
+        message_parts.append("Open History Cleanup now?")
+        if (
+            QMessageBox.question(
+                self,
+                "History Storage Budget",
+                "\n\n".join(message_parts),
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            == QMessageBox.Yes
+        ):
+            self.open_history_cleanup_dialog()
+
     def _refresh_auto_snapshot_schedule(self) -> None:
         if not hasattr(self, "auto_snapshot_timer"):
             return
@@ -7512,6 +7927,7 @@ class App(QMainWindow):
             self.statusBar().showMessage(f"Automatic snapshot created: {snapshot.label}", 4000)
             if self.history_dialog is not None and self.history_dialog.isVisible():
                 self.history_dialog.refresh_data()
+            self._enforce_history_storage_budget(trigger_label="automatic snapshot")
         except Exception as exc:
             self.logger.exception(f"Automatic snapshot failed: {exc}")
 
@@ -7520,6 +7936,7 @@ class App(QMainWindow):
         auto_snapshot_enabled, auto_snapshot_interval_minutes = (
             self._current_auto_snapshot_settings()
         )
+        history_retention = self._current_history_retention_settings()
         gs1_defaults = (
             self.gs1_settings_service.load_profile_defaults()
             if self.gs1_settings_service is not None
@@ -7539,6 +7956,12 @@ class App(QMainWindow):
             "artist_code": self.load_artist_code(),
             "auto_snapshot_enabled": auto_snapshot_enabled,
             "auto_snapshot_interval_minutes": auto_snapshot_interval_minutes,
+            "history_auto_cleanup_enabled": bool(history_retention.auto_cleanup_enabled),
+            "history_storage_budget_mb": int(history_retention.storage_budget_mb),
+            "history_auto_snapshot_keep_latest": int(history_retention.auto_snapshot_keep_latest),
+            "history_prune_pre_restore_copies_after_days": int(
+                history_retention.prune_pre_restore_copies_after_days
+            ),
             "isrc_prefix": registration.isrc_prefix,
             "sena_number": registration.sena_number,
             "btw_number": registration.btw_number,
@@ -7576,6 +7999,7 @@ class App(QMainWindow):
         show_confirmation: bool = False,
     ) -> int:
         changed_count = 0
+        history_policy_changed = False
 
         try:
             before_identity = {
@@ -7742,6 +8166,111 @@ class App(QMainWindow):
                         after_value=after_values["auto_snapshot_interval_minutes"],
                     )
                 changed_count += 1
+
+            if (
+                after_values["history_auto_cleanup_enabled"]
+                != before_values["history_auto_cleanup_enabled"]
+            ):
+                self.settings_mutations.set_history_auto_cleanup_enabled(
+                    bool(after_values["history_auto_cleanup_enabled"])
+                )
+                self._log_event(
+                    "settings.history_auto_cleanup_enabled",
+                    "History automatic cleanup setting updated",
+                    enabled=bool(after_values["history_auto_cleanup_enabled"]),
+                )
+                if self.history_manager is not None:
+                    self.history_manager.record_setting_change(
+                        key="history_auto_cleanup_enabled",
+                        label=(
+                            "History Automatic Cleanup Enabled"
+                            if after_values["history_auto_cleanup_enabled"]
+                            else "History Automatic Cleanup Disabled"
+                        ),
+                        before_value=before_values["history_auto_cleanup_enabled"],
+                        after_value=after_values["history_auto_cleanup_enabled"],
+                    )
+                changed_count += 1
+                history_policy_changed = True
+
+            if (
+                after_values["history_storage_budget_mb"]
+                != before_values["history_storage_budget_mb"]
+            ):
+                self.settings_mutations.set_history_storage_budget_mb(
+                    int(after_values["history_storage_budget_mb"])
+                )
+                self._log_event(
+                    "settings.history_storage_budget_mb",
+                    "History storage budget updated",
+                    budget_mb=int(after_values["history_storage_budget_mb"]),
+                )
+                if self.history_manager is not None:
+                    self.history_manager.record_setting_change(
+                        key="history_storage_budget_mb",
+                        label=(
+                            f"Set History Storage Budget: "
+                            f"{int(after_values['history_storage_budget_mb'])} MB"
+                        ),
+                        before_value=before_values["history_storage_budget_mb"],
+                        after_value=after_values["history_storage_budget_mb"],
+                    )
+                changed_count += 1
+                history_policy_changed = True
+
+            if (
+                after_values["history_auto_snapshot_keep_latest"]
+                != before_values["history_auto_snapshot_keep_latest"]
+            ):
+                self.settings_mutations.set_history_auto_snapshot_keep_latest(
+                    int(after_values["history_auto_snapshot_keep_latest"])
+                )
+                self._log_event(
+                    "settings.history_auto_snapshot_keep_latest",
+                    "History auto-snapshot retention updated",
+                    keep_latest=int(after_values["history_auto_snapshot_keep_latest"]),
+                )
+                if self.history_manager is not None:
+                    self.history_manager.record_setting_change(
+                        key="history_auto_snapshot_keep_latest",
+                        label=(
+                            "Set Automatic Snapshot Retention: "
+                            f"{int(after_values['history_auto_snapshot_keep_latest'])}"
+                        ),
+                        before_value=before_values["history_auto_snapshot_keep_latest"],
+                        after_value=after_values["history_auto_snapshot_keep_latest"],
+                    )
+                changed_count += 1
+                history_policy_changed = True
+
+            if (
+                after_values["history_prune_pre_restore_copies_after_days"]
+                != before_values["history_prune_pre_restore_copies_after_days"]
+            ):
+                self.settings_mutations.set_history_prune_pre_restore_copies_after_days(
+                    int(after_values["history_prune_pre_restore_copies_after_days"])
+                )
+                self._log_event(
+                    "settings.history_prune_pre_restore_copies_after_days",
+                    "History pre-restore backup pruning updated",
+                    days=int(after_values["history_prune_pre_restore_copies_after_days"]),
+                )
+                if self.history_manager is not None:
+                    self.history_manager.record_setting_change(
+                        key="history_prune_pre_restore_copies_after_days",
+                        label=(
+                            "Set Pre-Restore Backup Prune Age: "
+                            f"{int(after_values['history_prune_pre_restore_copies_after_days'])} days"
+                        ),
+                        before_value=before_values[
+                            "history_prune_pre_restore_copies_after_days"
+                        ],
+                        after_value=after_values[
+                            "history_prune_pre_restore_copies_after_days"
+                        ],
+                    )
+                changed_count += 1
+                history_policy_changed = True
 
             if after_values["isrc_prefix"] != before_values["isrc_prefix"]:
                 self.settings_mutations.set_isrc_prefix(after_values["isrc_prefix"])
@@ -7936,6 +8465,11 @@ class App(QMainWindow):
 
         if changed_count:
             self._refresh_auto_snapshot_schedule()
+            if history_policy_changed:
+                self._enforce_history_storage_budget(
+                    trigger_label="settings update",
+                    interactive=True,
+                )
             self._update_add_data_generated_fields()
             self._refresh_history_actions()
             if show_confirmation:
@@ -7969,6 +8503,14 @@ class App(QMainWindow):
             stored_themes=before_values["theme_library"],
             blob_icon_settings=before_values["blob_icon_settings"],
             current_profile_path=getattr(self, "current_db_path", ""),
+            history_auto_cleanup_enabled=before_values["history_auto_cleanup_enabled"],
+            history_storage_budget_mb=before_values["history_storage_budget_mb"],
+            history_auto_snapshot_keep_latest=before_values[
+                "history_auto_snapshot_keep_latest"
+            ],
+            history_prune_pre_restore_copies_after_days=before_values[
+                "history_prune_pre_restore_copies_after_days"
+            ],
             parent=self,
         )
         dlg.focus_field(initial_focus)
@@ -10051,6 +10593,10 @@ class App(QMainWindow):
             self._refresh_history_actions()
             if self.history_dialog is not None and self.history_dialog.isVisible():
                 self.history_dialog.refresh_data()
+            self._enforce_history_storage_budget(
+                trigger_label="manual snapshot",
+                interactive=True,
+            )
 
         self._submit_background_bundle_task(
             title="Create Snapshot",
@@ -10103,7 +10649,13 @@ class App(QMainWindow):
             ),
             kind="write",
             unique_key="snapshot.restore",
-            on_success=lambda _result: self._refresh_after_history_change(),
+            on_success=lambda _result: (
+                self._refresh_after_history_change(),
+                self._enforce_history_storage_budget(
+                    trigger_label="snapshot restore",
+                    interactive=True,
+                ),
+            ),
             on_error=lambda failure: self._show_background_task_error(
                 "Restore Snapshot",
                 failure,

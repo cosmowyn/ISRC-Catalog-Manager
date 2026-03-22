@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 import mimetypes
 import sqlite3
+from dataclasses import dataclass
 from pathlib import Path
 
 from isrc_manager.blob_icons import blob_icon_spec_from_storage, blob_icon_spec_to_storage
+from isrc_manager.domain.standard_fields import promoted_field_spec_by_label_lower
 from isrc_manager.file_storage import (
     STORAGE_MODE_DATABASE,
     STORAGE_MODE_MANAGED_FILE,
@@ -22,6 +24,32 @@ from isrc_manager.media.blob_files import (
     _is_valid_image_path,
     _read_blob_from_path,
 )
+
+
+@dataclass(slots=True)
+class LegacyPromotedFieldRepairCandidate:
+    field_def_id: int
+    field_name: str
+    custom_field_type: str
+    default_field_type: str
+    target_column: str
+    non_empty_value_count: int
+    blank_target_count: int
+    matching_target_count: int
+    conflicting_track_ids: tuple[int, ...]
+
+    @property
+    def eligible(self) -> bool:
+        return not self.conflicting_track_ids
+
+
+@dataclass(slots=True)
+class LegacyPromotedFieldRepairResult:
+    repaired_field_names: tuple[str, ...]
+    skipped_field_names: tuple[str, ...]
+    merged_value_count: int
+    removed_value_count: int
+    removed_field_count: int
 
 
 class CustomFieldDefinitionService:
@@ -333,6 +361,133 @@ class CustomFieldDefinitionService:
         if row and row[0]:
             return str(row[0])
         return "file"
+
+
+class LegacyPromotedFieldRepairService:
+    """Repairs legacy custom fields that now map to promoted default columns."""
+
+    def __init__(self, conn: sqlite3.Connection):
+        self.conn = conn
+        self._promoted_specs = promoted_field_spec_by_label_lower()
+
+    def inspect_candidates(self) -> list[LegacyPromotedFieldRepairCandidate]:
+        if not self._promoted_specs:
+            return []
+        placeholders = ",".join("?" for _ in self._promoted_specs)
+        rows = self.conn.execute(
+            f"""
+            SELECT id, name, field_type
+            FROM CustomFieldDefs
+            WHERE lower(name) IN ({placeholders})
+            ORDER BY lower(name), id
+            """,
+            tuple(self._promoted_specs.keys()),
+        ).fetchall()
+        candidates: list[LegacyPromotedFieldRepairCandidate] = []
+        for field_id, field_name, field_type in rows:
+            spec = self._promoted_specs.get(str(field_name or "").strip().lower())
+            if spec is None or not spec.value_column:
+                continue
+            value_rows = self.conn.execute(
+                """
+                SELECT track_id, value
+                FROM CustomFieldValues
+                WHERE field_def_id=?
+                ORDER BY track_id
+                """,
+                (int(field_id),),
+            ).fetchall()
+            non_empty_value_count = 0
+            blank_target_count = 0
+            matching_target_count = 0
+            conflicting_track_ids: list[int] = []
+            for track_id, value in value_rows:
+                text = str(value or "").strip()
+                if not text:
+                    continue
+                non_empty_value_count += 1
+                row = self.conn.execute(
+                    f"SELECT {spec.value_column} FROM Tracks WHERE id=?",
+                    (int(track_id),),
+                ).fetchone()
+                current_text = str(row[0] or "").strip() if row else ""
+                if not current_text:
+                    blank_target_count += 1
+                elif current_text == text:
+                    matching_target_count += 1
+                else:
+                    conflicting_track_ids.append(int(track_id))
+            candidates.append(
+                LegacyPromotedFieldRepairCandidate(
+                    field_def_id=int(field_id),
+                    field_name=str(field_name or ""),
+                    custom_field_type=str(field_type or "text"),
+                    default_field_type=str(spec.field_type or "text"),
+                    target_column=str(spec.value_column),
+                    non_empty_value_count=non_empty_value_count,
+                    blank_target_count=blank_target_count,
+                    matching_target_count=matching_target_count,
+                    conflicting_track_ids=tuple(conflicting_track_ids),
+                )
+            )
+        return candidates
+
+    def repair_candidates(self) -> LegacyPromotedFieldRepairResult:
+        candidates = self.inspect_candidates()
+        repaired_field_names: list[str] = []
+        skipped_field_names: list[str] = []
+        merged_value_count = 0
+        removed_value_count = 0
+        removed_field_count = 0
+
+        with self.conn:
+            for candidate in candidates:
+                if not candidate.eligible:
+                    skipped_field_names.append(candidate.field_name)
+                    continue
+                rows = self.conn.execute(
+                    """
+                    SELECT track_id, value
+                    FROM CustomFieldValues
+                    WHERE field_def_id=?
+                    ORDER BY track_id
+                    """,
+                    (candidate.field_def_id,),
+                ).fetchall()
+                for track_id, value in rows:
+                    text = str(value or "").strip()
+                    if not text:
+                        continue
+                    current = self.conn.execute(
+                        f"SELECT {candidate.target_column} FROM Tracks WHERE id=?",
+                        (int(track_id),),
+                    ).fetchone()
+                    current_text = str(current[0] or "").strip() if current else ""
+                    if not current_text:
+                        self.conn.execute(
+                            f"UPDATE Tracks SET {candidate.target_column}=? WHERE id=?",
+                            (text, int(track_id)),
+                        )
+                        merged_value_count += 1
+                deleted_rows = self.conn.execute(
+                    "DELETE FROM CustomFieldValues WHERE field_def_id=?",
+                    (candidate.field_def_id,),
+                ).rowcount
+                self.conn.execute(
+                    "DELETE FROM CustomFieldDefs WHERE id=?",
+                    (candidate.field_def_id,),
+                )
+                repaired_field_names.append(candidate.field_name)
+                removed_value_count += max(0, int(deleted_rows or 0))
+                removed_field_count += 1
+
+        return LegacyPromotedFieldRepairResult(
+            repaired_field_names=tuple(repaired_field_names),
+            skipped_field_names=tuple(skipped_field_names),
+            merged_value_count=merged_value_count,
+            removed_value_count=removed_value_count,
+            removed_field_count=removed_field_count,
+        )
 
 
 class CustomFieldValueService:

@@ -8,8 +8,16 @@ from PySide6.QtCore import QSettings
 
 from isrc_manager.constants import (
     DEFAULT_AUTO_SNAPSHOT_INTERVAL_MINUTES,
+    DEFAULT_HISTORY_AUTO_SNAPSHOT_KEEP_LATEST,
+    DEFAULT_HISTORY_STORAGE_BUDGET_MB,
     MAX_AUTO_SNAPSHOT_INTERVAL_MINUTES,
+    MAX_HISTORY_AUTO_SNAPSHOT_KEEP_LATEST,
+    MAX_HISTORY_PRUNE_PRE_RESTORE_COPIES_AFTER_DAYS,
+    MAX_HISTORY_STORAGE_BUDGET_MB,
     MIN_AUTO_SNAPSHOT_INTERVAL_MINUTES,
+    MIN_HISTORY_AUTO_SNAPSHOT_KEEP_LATEST,
+    MIN_HISTORY_PRUNE_PRE_RESTORE_COPIES_AFTER_DAYS,
+    MIN_HISTORY_STORAGE_BUDGET_MB,
 )
 
 
@@ -52,6 +60,34 @@ class SettingsMutationService:
         if value <= 0:
             value = DEFAULT_AUTO_SNAPSHOT_INTERVAL_MINUTES
         self._profile_set("auto_snapshot_interval_minutes", value)
+
+    def set_history_auto_cleanup_enabled(self, enabled: bool) -> None:
+        self._profile_set("history_auto_cleanup_enabled", "1" if bool(enabled) else "0")
+
+    def set_history_storage_budget_mb(self, megabytes: int) -> None:
+        value = int(megabytes)
+        value = max(MIN_HISTORY_STORAGE_BUDGET_MB, min(MAX_HISTORY_STORAGE_BUDGET_MB, value))
+        if value <= 0:
+            value = DEFAULT_HISTORY_STORAGE_BUDGET_MB
+        self._profile_set("history_storage_budget_mb", value)
+
+    def set_history_auto_snapshot_keep_latest(self, keep_latest: int) -> None:
+        value = int(keep_latest)
+        value = max(
+            MIN_HISTORY_AUTO_SNAPSHOT_KEEP_LATEST,
+            min(MAX_HISTORY_AUTO_SNAPSHOT_KEEP_LATEST, value),
+        )
+        if value <= 0:
+            value = DEFAULT_HISTORY_AUTO_SNAPSHOT_KEEP_LATEST
+        self._profile_set("history_auto_snapshot_keep_latest", value)
+
+    def set_history_prune_pre_restore_copies_after_days(self, days: int) -> None:
+        value = int(days)
+        value = max(
+            MIN_HISTORY_PRUNE_PRE_RESTORE_COPIES_AFTER_DAYS,
+            min(MAX_HISTORY_PRUNE_PRE_RESTORE_COPIES_AFTER_DAYS, value),
+        )
+        self._profile_set("history_prune_pre_restore_copies_after_days", value)
 
     def set_isrc_prefix(self, prefix: str) -> None:
         with self.conn:
