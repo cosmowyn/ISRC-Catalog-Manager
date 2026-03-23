@@ -20,6 +20,7 @@ from isrc_manager.works import WorkService
 
 from .crypto import (
     canonical_timestamp,
+    derive_watermark_key,
     generate_private_key,
     key_id_for_public_key,
     load_private_key,
@@ -29,7 +30,6 @@ from .crypto import (
     sign_bytes,
     verify_signature,
     write_private_key,
-    derive_watermark_key,
 )
 from .manifest import (
     build_sidecar_document,
@@ -55,7 +55,6 @@ from .models import (
     AuthenticityVerificationReport,
     PreparedAuthenticityManifest,
     ReferenceAudioSelection,
-    WatermarkExtractionResult,
     WatermarkToken,
 )
 from .watermark import AudioWatermarkCore, supported_audio_path, watermark_settings_payload

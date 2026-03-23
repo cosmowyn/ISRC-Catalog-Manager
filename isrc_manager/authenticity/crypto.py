@@ -19,9 +19,16 @@ else:  # pragma: no cover - fallback aliases when cryptography is optional
     Ed25519PublicKey = Any
 
 try:  # pragma: no cover - optional dependency import boundary
-    from cryptography.hazmat.primitives import hashes as _hashes, serialization as _serialization
+    from cryptography.hazmat.primitives import (
+        hashes as _hashes,
+    )
+    from cryptography.hazmat.primitives import (
+        serialization as _serialization,
+    )
     from cryptography.hazmat.primitives.asymmetric.ed25519 import (
         Ed25519PrivateKey as _Ed25519PrivateKey,
+    )
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import (
         Ed25519PublicKey as _Ed25519PublicKey,
     )
     from cryptography.hazmat.primitives.kdf.hkdf import HKDF as _HKDF

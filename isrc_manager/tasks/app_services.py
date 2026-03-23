@@ -9,6 +9,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QSettings
 
+from isrc_manager.assets import AssetService
 from isrc_manager.authenticity import (
     AUTHENTICITY_FEATURE_AVAILABLE,
     AudioAuthenticityService,
@@ -16,7 +17,6 @@ from isrc_manager.authenticity import (
     AuthenticityKeyService,
     AuthenticityManifestService,
 )
-from isrc_manager.assets import AssetService
 from isrc_manager.contracts import ContractService
 from isrc_manager.exchange.repertoire_service import RepertoireExchangeService
 from isrc_manager.exchange.service import ExchangeService
