@@ -322,6 +322,7 @@ class DatabaseSchemaService:
         self._ensure_release_tables()
         self._ensure_repertoire_tables()
         self._ensure_authenticity_tables()
+        self._ensure_derivative_export_tables()
         self._ensure_blob_icon_schema()
         self._backfill_dual_storage_defaults()
 
@@ -472,6 +473,12 @@ class DatabaseSchemaService:
             elif version == 25:
                 self._apply_migration(25, self._mig_25_to_26)
                 version = 26
+            elif version == 26:
+                self._apply_migration(26, self._mig_26_to_27)
+                version = 27
+            elif version == 27:
+                self._apply_migration(27, self._mig_27_to_28)
+                version = 28
             else:
                 self.logger.warning("Unknown migration path from version %s", version)
                 break
@@ -874,6 +881,12 @@ class DatabaseSchemaService:
 
     def _mig_25_to_26(self) -> None:
         self._ensure_authenticity_tables()
+
+    def _mig_26_to_27(self) -> None:
+        self._ensure_derivative_export_tables()
+
+    def _mig_27_to_28(self) -> None:
+        self._ensure_derivative_export_tables()
 
     def _ensure_current_custom_field_value_schema(self) -> None:
         cols = self._table_columns("CustomFieldValues")
@@ -2063,6 +2076,252 @@ class DatabaseSchemaService:
             """
             CREATE INDEX IF NOT EXISTS idx_authenticity_manifests_payload_sha256
             ON AuthenticityManifests(payload_sha256)
+            """
+        )
+
+    def _ensure_derivative_export_tables(self) -> None:
+        # This ledger is only for managed catalog derivatives and managed authenticity exports.
+        # External utility conversions stay outside these tables.
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS DerivativeExportBatches (
+                id INTEGER PRIMARY KEY,
+                batch_id TEXT NOT NULL,
+                schema_version INTEGER NOT NULL DEFAULT 1,
+                workflow_kind TEXT NOT NULL DEFAULT 'managed_audio_derivative',
+                derivative_kind TEXT NOT NULL DEFAULT 'unclassified',
+                authenticity_basis TEXT NOT NULL DEFAULT 'none',
+                package_mode TEXT NOT NULL DEFAULT 'directory',
+                output_format TEXT,
+                zip_filename TEXT,
+                profile_name TEXT,
+                app_version TEXT,
+                recipe_canonical TEXT NOT NULL,
+                recipe_sha256 TEXT NOT NULL,
+                requested_count INTEGER NOT NULL DEFAULT 0,
+                exported_count INTEGER NOT NULL DEFAULT 0,
+                skipped_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                completed_at TEXT,
+                status TEXT NOT NULL DEFAULT 'pending'
+            )
+            """
+        )
+        batch_columns = self._table_columns("DerivativeExportBatches")
+        for column_name, column_sql in (
+            ("schema_version", "INTEGER NOT NULL DEFAULT 1"),
+            ("workflow_kind", "TEXT NOT NULL DEFAULT 'managed_audio_derivative'"),
+            ("derivative_kind", "TEXT NOT NULL DEFAULT 'unclassified'"),
+            ("authenticity_basis", "TEXT NOT NULL DEFAULT 'none'"),
+            ("package_mode", "TEXT NOT NULL DEFAULT 'directory'"),
+            ("output_format", "TEXT"),
+            ("zip_filename", "TEXT"),
+            ("profile_name", "TEXT"),
+            ("app_version", "TEXT"),
+            ("recipe_canonical", "TEXT NOT NULL DEFAULT '{}'"),
+            ("recipe_sha256", "TEXT NOT NULL DEFAULT ''"),
+            ("requested_count", "INTEGER NOT NULL DEFAULT 0"),
+            ("exported_count", "INTEGER NOT NULL DEFAULT 0"),
+            ("skipped_count", "INTEGER NOT NULL DEFAULT 0"),
+            ("created_at", "TEXT"),
+            ("completed_at", "TEXT"),
+            ("status", "TEXT NOT NULL DEFAULT 'pending'"),
+        ):
+            if column_name not in batch_columns:
+                self.cursor.execute(
+                    f"ALTER TABLE DerivativeExportBatches ADD COLUMN {column_name} {column_sql}"
+                )
+        self.cursor.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_derivative_export_batches_batch_id
+            ON DerivativeExportBatches(batch_id)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_derivative_export_batches_created_at
+            ON DerivativeExportBatches(created_at)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_derivative_export_batches_status
+            ON DerivativeExportBatches(status)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_derivative_export_batches_workflow_kind
+            ON DerivativeExportBatches(workflow_kind)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_derivative_export_batches_derivative_kind
+            ON DerivativeExportBatches(derivative_kind)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_derivative_export_batches_authenticity_basis
+            ON DerivativeExportBatches(authenticity_basis)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_derivative_export_batches_recipe_sha256
+            ON DerivativeExportBatches(recipe_sha256)
+            """
+        )
+
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS TrackAudioDerivatives (
+                id INTEGER PRIMARY KEY,
+                export_id TEXT NOT NULL,
+                batch_id TEXT NOT NULL,
+                track_id INTEGER NOT NULL,
+                sequence_no INTEGER NOT NULL DEFAULT 1,
+                target_key TEXT NOT NULL,
+                workflow_kind TEXT NOT NULL DEFAULT 'managed_audio_derivative',
+                derivative_kind TEXT NOT NULL DEFAULT 'unclassified',
+                authenticity_basis TEXT NOT NULL DEFAULT 'none',
+                source_kind TEXT NOT NULL,
+                source_lineage_ref TEXT,
+                source_asset_id INTEGER,
+                source_audio_sha256 TEXT NOT NULL,
+                source_storage_mode TEXT,
+                derivative_asset_id INTEGER,
+                parent_manifest_id TEXT,
+                derivative_manifest_id TEXT,
+                output_format TEXT NOT NULL,
+                output_suffix TEXT NOT NULL,
+                output_mime_type TEXT,
+                output_filename TEXT NOT NULL,
+                filename_hash_suffix TEXT NOT NULL,
+                watermark_applied INTEGER NOT NULL DEFAULT 0,
+                metadata_embedded INTEGER NOT NULL DEFAULT 0,
+                output_sha256 TEXT,
+                output_size_bytes INTEGER NOT NULL DEFAULT 0,
+                managed_file_path TEXT,
+                sidecar_path TEXT,
+                sidecar_sha256 TEXT,
+                package_member_path TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                error_text TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (batch_id) REFERENCES DerivativeExportBatches(batch_id) ON DELETE CASCADE,
+                FOREIGN KEY (track_id) REFERENCES Tracks(id) ON DELETE CASCADE,
+                FOREIGN KEY (source_asset_id) REFERENCES AssetVersions(id) ON DELETE SET NULL,
+                FOREIGN KEY (derivative_asset_id) REFERENCES AssetVersions(id) ON DELETE SET NULL
+            )
+            """
+        )
+        derivative_columns = self._table_columns("TrackAudioDerivatives")
+        for column_name, column_sql in (
+            ("export_id", "TEXT NOT NULL DEFAULT ''"),
+            ("batch_id", "TEXT NOT NULL DEFAULT ''"),
+            ("track_id", "INTEGER NOT NULL DEFAULT 0"),
+            ("sequence_no", "INTEGER NOT NULL DEFAULT 1"),
+            ("target_key", "TEXT NOT NULL DEFAULT ''"),
+            ("workflow_kind", "TEXT NOT NULL DEFAULT 'managed_audio_derivative'"),
+            ("derivative_kind", "TEXT NOT NULL DEFAULT 'unclassified'"),
+            ("authenticity_basis", "TEXT NOT NULL DEFAULT 'none'"),
+            ("source_kind", "TEXT NOT NULL DEFAULT ''"),
+            ("source_lineage_ref", "TEXT"),
+            ("source_asset_id", "INTEGER"),
+            ("source_audio_sha256", "TEXT NOT NULL DEFAULT ''"),
+            ("source_storage_mode", "TEXT"),
+            ("derivative_asset_id", "INTEGER"),
+            ("parent_manifest_id", "TEXT"),
+            ("derivative_manifest_id", "TEXT"),
+            ("output_format", "TEXT NOT NULL DEFAULT ''"),
+            ("output_suffix", "TEXT NOT NULL DEFAULT ''"),
+            ("output_mime_type", "TEXT"),
+            ("output_filename", "TEXT NOT NULL DEFAULT ''"),
+            ("filename_hash_suffix", "TEXT NOT NULL DEFAULT ''"),
+            ("watermark_applied", "INTEGER NOT NULL DEFAULT 0"),
+            ("metadata_embedded", "INTEGER NOT NULL DEFAULT 0"),
+            ("output_sha256", "TEXT"),
+            ("output_size_bytes", "INTEGER NOT NULL DEFAULT 0"),
+            ("managed_file_path", "TEXT"),
+            ("sidecar_path", "TEXT"),
+            ("sidecar_sha256", "TEXT"),
+            ("package_member_path", "TEXT"),
+            ("status", "TEXT NOT NULL DEFAULT 'pending'"),
+            ("error_text", "TEXT"),
+            ("created_at", "TEXT"),
+            ("updated_at", "TEXT"),
+        ):
+            if column_name not in derivative_columns:
+                self.cursor.execute(
+                    f"ALTER TABLE TrackAudioDerivatives ADD COLUMN {column_name} {column_sql}"
+                )
+        self.cursor.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_track_audio_derivatives_export_id
+            ON TrackAudioDerivatives(export_id)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_track_audio_derivatives_batch_id
+            ON TrackAudioDerivatives(batch_id)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_track_audio_derivatives_track_id
+            ON TrackAudioDerivatives(track_id)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_track_audio_derivatives_workflow_kind
+            ON TrackAudioDerivatives(workflow_kind)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_track_audio_derivatives_derivative_kind
+            ON TrackAudioDerivatives(derivative_kind)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_track_audio_derivatives_authenticity_basis
+            ON TrackAudioDerivatives(authenticity_basis)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_track_audio_derivatives_source_asset_id
+            ON TrackAudioDerivatives(source_asset_id)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_track_audio_derivatives_derivative_asset_id
+            ON TrackAudioDerivatives(derivative_asset_id)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_track_audio_derivatives_parent_manifest_id
+            ON TrackAudioDerivatives(parent_manifest_id)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_track_audio_derivatives_derivative_manifest_id
+            ON TrackAudioDerivatives(derivative_manifest_id)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_track_audio_derivatives_output_sha256
+            ON TrackAudioDerivatives(output_sha256)
             """
         )
 

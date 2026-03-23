@@ -2093,6 +2093,11 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(self.window.left_widget_container.property("role"), "workspaceCanvas")
         self.assertEqual(self.window.table_panel_widget.property("role"), "workspaceCanvas")
         self.assertEqual(self.window.centralWidget().property("role"), "workspaceCanvas")
+        lossy_audio = self._create_media_file("add-warning.mp3", b"ID3add-warning")
+        self.window.audio_file_field.setText(str(lossy_audio))
+        self.app.processEvents()
+        self.assertFalse(self.window.audio_file_warning_label.isHidden())
+        self.assertIn("MP3", self.window.audio_file_warning_label.text())
 
     def case_track_editor_uses_tabbed_sections(self):
         track_id = self.window.track_service.create_track(
@@ -2132,6 +2137,11 @@ class AppShellTestCase(unittest.TestCase):
             )
             self.assertIsInstance(dialog.upc, app_module.QComboBox)
             self.assertTrue(dialog.upc.isEditable())
+            lossy_audio = self._create_media_file("editor-warning.mp3", b"ID3editor-warning")
+            dialog.audio_file.setText(str(lossy_audio))
+            self.app.processEvents()
+            self.assertFalse(dialog.audio_file_warning_label.isHidden())
+            self.assertIn("MP3", dialog.audio_file_warning_label.text())
         finally:
             dialog.close()
 
@@ -2272,11 +2282,27 @@ class AppShellTestCase(unittest.TestCase):
         track_id = self._create_track(
             index=188, title="Single Edit Source", album_title="Solo Album"
         )
+        lossy_audio = self._create_media_file("single-edit-lossy.mp3", b"ID3single-edit-lossy")
 
         dialog = app_module.EditDialog(track_id, self.window)
         try:
             dialog.track_title.setText("Single Edit Updated")
-            dialog.save_changes()
+            dialog.audio_file.setText(str(lossy_audio))
+            self.app.processEvents()
+            self.assertFalse(dialog.audio_file_warning_label.isHidden())
+            with (
+                mock.patch.object(
+                    app_module,
+                    "_prompt_storage_mode_choice",
+                    return_value=app_module.STORAGE_MODE_DATABASE,
+                ),
+                mock.patch.object(
+                    app_module.QMessageBox,
+                    "question",
+                    return_value=app_module.QMessageBox.Yes,
+                ) as confirm_mock,
+            ):
+                dialog.save_changes()
             wait_for(
                 lambda: (
                     not self.window.background_tasks.has_running_tasks()
@@ -2292,6 +2318,9 @@ class AppShellTestCase(unittest.TestCase):
             self.assertIsNotNone(snapshot)
             assert snapshot is not None
             self.assertEqual(snapshot.track_title, "Single Edit Updated")
+            self.assertTrue(self.window.track_media_meta(track_id, "audio_file")["is_lossy"])
+            confirm_mock.assert_called_once()
+            self.assertIn("lossy audio", confirm_mock.call_args.args[2].lower())
         finally:
             dialog.close()
 
@@ -2501,12 +2530,28 @@ class AppShellTestCase(unittest.TestCase):
 
     def case_authenticity_actions_are_present_in_catalog_and_settings_menus(self):
         self.assertEqual(
+            self.window.convert_selected_audio_action.text(),
+            "Export Managed Audio Derivatives…",
+        )
+        self.assertEqual(
+            self.window.convert_external_audio_files_action.text(),
+            "External Audio Conversion Utility…",
+        )
+        self.assertEqual(
             self.window.export_authenticity_watermarked_audio_action.text(),
-            "Export Authenticity Watermarked Audio…",
+            "Export Watermark-Authentic Masters…",
         )
         self.assertEqual(
             self.window.export_authenticity_provenance_audio_action.text(),
-            "Export Authenticity Provenance Audio…",
+            "Export Provenance-Linked Lossy Copies…",
+        )
+        self.assertIn(
+            "Direct watermark master export",
+            self.window.export_authenticity_watermarked_audio_action.toolTip(),
+        )
+        self.assertIn(
+            "No managed derivative registration",
+            self.window.export_authenticity_provenance_audio_action.toolTip(),
         )
         self.assertEqual(
             self.window.verify_audio_authenticity_action.text(),
@@ -2517,24 +2562,53 @@ class AppShellTestCase(unittest.TestCase):
             "Audio Authenticity Keys…",
         )
         action_ids = {entry["id"] for entry in self.window._action_ribbon_specs}
+        self.assertIn("convert_selected_audio", action_ids)
+        self.assertIn("convert_external_audio", action_ids)
         self.assertIn("authenticity_export_audio", action_ids)
         self.assertIn("authenticity_export_provenance_audio", action_ids)
         self.assertIn("authenticity_verify_audio", action_ids)
         self.assertIn("authenticity_keys", action_ids)
 
     def case_authenticity_table_context_menu_exposes_export_actions(self):
-        track_id = self._create_track(index=303, title="Context Auth Track", album_title="Single")
-        source_audio = self._create_wav_file("context-auth.wav")
-        self.window.track_service.set_media_path(track_id, "audio_file", source_audio)
+        lossy_track_id = self._create_track(
+            index=303,
+            title="Context Auth Track",
+            album_title="Single",
+        )
+        lossless_track_id = self._create_track(
+            index=304,
+            title="Context WAV Track",
+            album_title="Single",
+        )
+        lossy_audio = self._create_media_file("context-auth.mp3", b"ID3context-auth")
+        lossless_audio = self._create_wav_file("context-auth.wav")
+        self.window.track_service.set_media_path(lossy_track_id, "audio_file", lossy_audio)
+        self.window.track_service.set_media_path(lossless_track_id, "audio_file", lossless_audio)
         self.window.refresh_table()
-        row = self._table_row_for_track_id(track_id)
+        row = self._table_row_for_track_id(lossy_track_id)
 
         texts = self._table_context_action_texts(row, 0)
 
         self.assertIn("Import Tags from Audio…", texts)
         self.assertIn("Write Tags to Exported Audio…", texts)
-        self.assertIn("Export Authenticity Watermarked Audio…", texts)
-        self.assertIn("Export Authenticity Provenance Audio…", texts)
+        self.assertIn("Export Managed Audio Derivatives…", texts)
+        self.assertIn("External Audio Conversion Utility…", texts)
+        self.assertIn("Export Watermark-Authentic Masters…", texts)
+        self.assertIn("Export Provenance-Linked Lossy Copies…", texts)
+        audio_col = self.window._column_index_by_header("Audio File")
+        self.assertGreaterEqual(audio_col, 0)
+        lossy_item = self.window.table.item(row, audio_col)
+        self.assertIsNotNone(lossy_item)
+        assert lossy_item is not None
+        self.assertIn("Lossy primary audio", lossy_item.toolTip())
+        self.assertIn("MP3", lossy_item.toolTip())
+        lossless_row = self._table_row_for_track_id(lossless_track_id)
+        lossless_item = self.window.table.item(lossless_row, audio_col)
+        self.assertIsNotNone(lossless_item)
+        assert lossless_item is not None
+        self.assertIn("Primary audio", lossless_item.toolTip())
+        self.assertNotIn("Lossy primary audio", lossless_item.toolTip())
+        self.assertNotEqual(lossy_item.icon().cacheKey(), lossless_item.icon().cacheKey())
 
     def case_verify_audio_authenticity_can_choose_external_file_when_track_is_selected(self):
         track_id = self._create_track(index=301, title="Catalog Verify Track", album_title="Single")

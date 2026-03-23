@@ -35,6 +35,7 @@ from isrc_manager.ui_common import (
 )
 
 BLOB_ICON_AUDIO_KEY = "blob_icon.audio"
+BLOB_ICON_AUDIO_LOSSY_KEY = "blob_icon.audio_lossy"
 BLOB_ICON_IMAGE_KEY = "blob_icon.image"
 
 
@@ -107,7 +108,10 @@ EMOJI_BLOB_ICON_PRESETS: dict[str, tuple[tuple[str, str], ...]] = {
 
 
 def default_blob_icon_spec(kind: str) -> dict[str, object]:
-    if str(kind or "").strip().lower() == "audio":
+    clean_kind = str(kind or "").strip().lower()
+    if clean_kind == "audio_lossy":
+        return {"mode": "emoji", "emoji": "🎚️"}
+    if _normalize_blob_icon_kind(clean_kind) == "audio":
         return {"mode": "emoji", "emoji": "🎵"}
     return {"mode": "emoji", "emoji": "🖼️"}
 
@@ -115,12 +119,24 @@ def default_blob_icon_spec(kind: str) -> dict[str, object]:
 def default_blob_icon_settings() -> dict[str, dict[str, object]]:
     return {
         "audio": default_blob_icon_spec("audio"),
+        "audio_lossy": default_blob_icon_spec("audio_lossy"),
         "image": default_blob_icon_spec("image"),
     }
 
 
-def _system_specs_for_kind(kind: str) -> tuple[SystemBlobIconSpec, ...]:
+def _normalize_blob_icon_kind(kind: str) -> str:
     clean_kind = str(kind or "").strip().lower()
+    if clean_kind == "audio_lossy":
+        return "audio"
+    return clean_kind
+
+
+def _display_blob_icon_kind(kind: str) -> str:
+    return str(kind or "").strip().replace("_", " ")
+
+
+def _system_specs_for_kind(kind: str) -> tuple[SystemBlobIconSpec, ...]:
+    clean_kind = _normalize_blob_icon_kind(kind)
     return tuple(spec for spec in SYSTEM_BLOB_ICON_SPECS if clean_kind in spec.kinds)
 
 
@@ -136,7 +152,7 @@ def system_blob_icon_choices(kind: str) -> tuple[SystemBlobIconSpec, ...]:
 
 
 def emoji_blob_icon_presets(kind: str) -> tuple[tuple[str, str], ...]:
-    return EMOJI_BLOB_ICON_PRESETS.get(str(kind or "").strip().lower(), ())
+    return EMOJI_BLOB_ICON_PRESETS.get(_normalize_blob_icon_kind(kind), ())
 
 
 def _coerce_image_payload(raw: object) -> dict[str, object]:
@@ -214,6 +230,10 @@ def normalize_blob_icon_settings(
     payload = dict(settings or {})
     return {
         "audio": normalize_blob_icon_spec(payload.get("audio"), kind="audio"),
+        "audio_lossy": normalize_blob_icon_spec(
+            payload.get("audio_lossy"),
+            kind="audio_lossy",
+        ),
         "image": normalize_blob_icon_spec(payload.get("image"), kind="image"),
     }
 
@@ -266,7 +286,7 @@ def describe_blob_icon_spec(
     normalized = normalize_blob_icon_spec(spec, kind=kind, allow_inherit=allow_inherit)
     mode = str(normalized.get("mode") or "").strip().lower()
     if mode == "inherit":
-        return f"Uses global {kind} icon"
+        return f"Uses global {_display_blob_icon_kind(kind)} icon"
     if mode == "system":
         name = str(normalized.get("system_name") or "").strip()
         label = next(
@@ -410,14 +430,23 @@ class BlobIconSettingsService:
     def load_settings(self) -> dict[str, dict[str, object]]:
         return {
             "audio": blob_icon_spec_from_storage(self._read_kv(BLOB_ICON_AUDIO_KEY), kind="audio"),
+            "audio_lossy": blob_icon_spec_from_storage(
+                self._read_kv(BLOB_ICON_AUDIO_LOSSY_KEY),
+                kind="audio_lossy",
+            ),
             "image": blob_icon_spec_from_storage(self._read_kv(BLOB_ICON_IMAGE_KEY), kind="image"),
         }
 
     def save_settings(self, settings: dict[str, object] | None) -> dict[str, dict[str, object]]:
         normalized = normalize_blob_icon_settings(settings)
         persisted_audio = blob_icon_spec_to_storage(normalized.get("audio"), kind="audio")
+        persisted_audio_lossy = blob_icon_spec_to_storage(
+            normalized.get("audio_lossy"),
+            kind="audio_lossy",
+        )
         persisted_image = blob_icon_spec_to_storage(normalized.get("image"), kind="image")
         self._write_kv(BLOB_ICON_AUDIO_KEY, persisted_audio or "")
+        self._write_kv(BLOB_ICON_AUDIO_LOSSY_KEY, persisted_audio_lossy or "")
         self._write_kv(BLOB_ICON_IMAGE_KEY, persisted_image or "")
         return self.load_settings()
 

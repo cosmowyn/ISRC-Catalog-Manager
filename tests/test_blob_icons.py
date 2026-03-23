@@ -31,11 +31,13 @@ class BlobIconTests(unittest.TestCase):
             raise unittest.SkipTest(f"Blob icon helpers unavailable: {BLOB_ICON_IMPORT_ERROR}")
         cls.app = require_qapplication()
 
-    def test_default_settings_expose_separate_audio_and_image_defaults(self):
+    def test_default_settings_expose_primary_lossy_and_image_defaults(self):
         settings = default_blob_icon_settings()
 
         self.assertEqual(settings["audio"]["mode"], "emoji")
         self.assertEqual(settings["audio"]["emoji"], "🎵")
+        self.assertEqual(settings["audio_lossy"]["mode"], "emoji")
+        self.assertEqual(settings["audio_lossy"]["emoji"], "🎚️")
         self.assertEqual(settings["image"]["mode"], "emoji")
         self.assertEqual(settings["image"]["emoji"], "🖼️")
 
@@ -69,6 +71,7 @@ class BlobIconTests(unittest.TestCase):
             saved = service.save_settings(
                 {
                     "audio": {"mode": "system", "system_name": "SP_MediaPlay"},
+                    "audio_lossy": {"mode": "emoji", "emoji": "📼"},
                     "image": {"mode": "emoji", "emoji": "📷"},
                 }
             )
@@ -76,6 +79,7 @@ class BlobIconTests(unittest.TestCase):
 
             self.assertEqual(saved, loaded)
             self.assertEqual(loaded["audio"]["system_name"], "SP_MediaPlay")
+            self.assertEqual(loaded["audio_lossy"]["emoji"], "📼")
             self.assertEqual(loaded["image"]["emoji"], "📷")
         finally:
             conn.close()
@@ -99,6 +103,7 @@ class BlobIconTests(unittest.TestCase):
         normalized = normalize_blob_icon_settings({"audio": {"mode": "emoji", "emoji": "🎶"}})
 
         self.assertEqual(normalized["audio"]["emoji"], "🎶")
+        self.assertEqual(normalized["audio_lossy"]["emoji"], "🎚️")
         self.assertEqual(normalized["image"]["emoji"], "🖼️")
 
     def test_compress_blob_icon_image_rejects_missing_files(self):

@@ -125,7 +125,13 @@ from .settings_reads import (
     RegistrationSettings,
     SettingsReadService,
 )
-from .tracks import TrackCreatePayload, TrackService, TrackSnapshot, TrackUpdatePayload
+from .tracks import (
+    TrackCreatePayload,
+    TrackMediaSourceHandle,
+    TrackService,
+    TrackSnapshot,
+    TrackUpdatePayload,
+)
 
 __all__ = [
     "AlbumUsage",
@@ -218,6 +224,7 @@ __all__ = [
     "SettingsReadService",
     "SettingsMutationService",
     "TrackCreatePayload",
+    "TrackMediaSourceHandle",
     "TrackService",
     "TrackSnapshot",
     "TrackUpdatePayload",

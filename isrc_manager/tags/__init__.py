@@ -1,5 +1,6 @@
 """Audio metadata tag models and services."""
 
+from .catalog import build_catalog_tag_data
 from .mapping import (
     TagConflictPreview,
     TagImportPatch,
@@ -29,6 +30,7 @@ __all__ = [
     "BulkAudioAttachResult",
     "BulkAudioAttachService",
     "BulkAudioAttachTrackCandidate",
+    "build_catalog_tag_data",
     "catalog_metadata_to_tags",
     "TagConflictPreview",
     "TagFieldConflict",

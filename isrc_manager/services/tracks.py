@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import mimetypes
 import sqlite3
+import tempfile
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
@@ -25,6 +28,7 @@ from isrc_manager.media.blob_files import (
     _is_valid_image_path,
     _read_blob_from_path,
 )
+from isrc_manager.media.audio_formats import classify_audio_format
 
 
 def _build_media_fields() -> dict[str, dict[str, object]]:
@@ -146,6 +150,51 @@ class AlbumArtEditState:
     owner_track_title: str | None
     is_shared_reference: bool
     can_replace_directly: bool
+
+
+@dataclass(slots=True)
+class TrackMediaSourceHandle:
+    track_id: int
+    media_key: str
+    filename: str
+    suffix: str
+    mime_type: str | None
+    size_bytes: int
+    storage_mode: str | None
+    source_path: Path | None
+    source_bytes: bytes | None
+    owner_scope: str | None
+    owner_id: int | None
+
+    def sha256_hex(self) -> str:
+        if self.source_bytes is not None:
+            return hashlib.sha256(self.source_bytes).hexdigest()
+        if self.source_path is None or not self.source_path.exists():
+            raise FileNotFoundError(self.filename or self.media_key)
+        digest = hashlib.sha256()
+        with self.source_path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    @contextmanager
+    def materialize_path(self):
+        if self.source_path is not None and self.source_path.exists():
+            yield self.source_path
+            return
+        suffix = self.suffix or Path(self.filename or "").suffix or ""
+        temp_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as handle:
+                handle.write(bytes(self.source_bytes or b""))
+                temp_path = Path(handle.name)
+            yield temp_path
+        finally:
+            if temp_path is not None:
+                try:
+                    temp_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
 
 
 class TrackService:
@@ -341,19 +390,28 @@ class TrackService:
         **extra: object,
     ) -> dict[str, str | int | bool | object]:
         clean_path = str(path_value or "").strip()
+        clean_filename = str(filename or "").strip() or None
+        clean_mime = str(mime_type or "").strip()
         clean_mode = infer_storage_mode(
             explicit_mode=storage_mode,
             stored_path=clean_path,
             blob_value=b"\x00" if blob_present else None,
         )
+        audio_profile = classify_audio_format(
+            clean_filename or clean_path or None,
+            mime_type=clean_mime or None,
+        )
         payload: dict[str, str | int | bool | object] = {
             "has_media": bool(clean_path or blob_present),
             "path": clean_path,
             "storage_mode": clean_mode,
-            "filename": str(filename or "").strip() or None,
-            "mime_type": str(mime_type or "").strip(),
+            "filename": clean_filename,
+            "mime_type": clean_mime,
             "size_bytes": int(size_bytes or 0),
             "blob_present": bool(blob_present),
+            "format_id": audio_profile.id if audio_profile is not None else None,
+            "format_label": audio_profile.label if audio_profile is not None else None,
+            "is_lossy": bool(audio_profile.lossy) if audio_profile is not None else False,
         }
         payload.update(extra)
         return payload
@@ -868,6 +926,39 @@ class TrackService:
         if not resolved or not resolved.exists():
             raise FileNotFoundError(stored_path or f"{media_key} for track {track_id}")
         return resolved.read_bytes(), str(meta.get("mime_type") or "")
+
+    def resolve_media_source(
+        self,
+        track_id: int,
+        media_key: str,
+        *,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> TrackMediaSourceHandle:
+        meta = self.get_media_meta(track_id, media_key, cursor=cursor)
+        if not bool(meta.get("has_media")):
+            raise FileNotFoundError(f"{media_key} for track {track_id}")
+        resolved_path = self.resolve_media_path(str(meta.get("path") or ""))
+        source_path = (
+            resolved_path if resolved_path is not None and resolved_path.exists() else None
+        )
+        source_bytes = None
+        if source_path is None:
+            source_bytes, _mime_type = self.fetch_media_bytes(track_id, media_key, cursor=cursor)
+        filename = str(meta.get("filename") or "").strip()
+        suffix = Path(filename or str(meta.get("path") or "")).suffix.lower()
+        return TrackMediaSourceHandle(
+            track_id=int(track_id),
+            media_key=str(media_key or ""),
+            filename=filename or f"track-{track_id}{suffix}",
+            suffix=suffix,
+            mime_type=str(meta.get("mime_type") or "").strip() or None,
+            size_bytes=int(meta.get("size_bytes") or 0),
+            storage_mode=str(meta.get("storage_mode") or "").strip() or None,
+            source_path=source_path,
+            source_bytes=source_bytes,
+            owner_scope=str(meta.get("owner_scope") or "").strip() or None,
+            owner_id=int(meta["owner_id"]) if meta.get("owner_id") is not None else None,
+        )
 
     def set_media_path(
         self,

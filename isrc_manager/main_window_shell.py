@@ -374,14 +374,36 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         slot=app.write_tags_to_exported_audio,
     )
     catalog_menu.addAction(app.write_tags_to_exported_audio_action)
+    app.convert_selected_audio_action = app._create_action(
+        "Export Managed Audio Derivatives…",
+        slot=app.convert_selected_audio,
+    )
+    catalog_menu.addAction(app.convert_selected_audio_action)
+    app.convert_external_audio_files_action = app._create_action(
+        "External Audio Conversion Utility…",
+        slot=app.convert_external_audio_files,
+    )
+    catalog_menu.addAction(app.convert_external_audio_files_action)
     app.export_authenticity_watermarked_audio_action = app._create_action(
-        "Export Authenticity Watermarked Audio…",
+        "Export Watermark-Authentic Masters…",
         slot=app.export_authenticity_watermarked_audio,
+    )
+    app.export_authenticity_watermarked_audio_action.setStatusTip(
+        "Direct watermark master export: WAV, FLAC, or AIFF plus a signed authenticity sidecar."
+    )
+    app.export_authenticity_watermarked_audio_action.setToolTip(
+        app.export_authenticity_watermarked_audio_action.statusTip()
     )
     catalog_menu.addAction(app.export_authenticity_watermarked_audio_action)
     app.export_authenticity_provenance_audio_action = app._create_action(
-        "Export Authenticity Provenance Audio…",
+        "Export Provenance-Linked Lossy Copies…",
         slot=app.export_authenticity_provenance_audio,
+    )
+    app.export_authenticity_provenance_audio_action.setStatusTip(
+        "Lossy-copy export with signed lineage sidecars that point back to a watermark-authentic master. No managed derivative registration."
+    )
+    app.export_authenticity_provenance_audio_action.setToolTip(
+        app.export_authenticity_provenance_audio_action.statusTip()
     )
     catalog_menu.addAction(app.export_authenticity_provenance_audio_action)
     app.verify_audio_authenticity_action = app._create_action(
@@ -402,6 +424,8 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         shortcuts=("Ctrl+Shift+G", "Meta+Shift+G"),
     )
     catalog_menu.addAction(app.gs1_metadata_action)
+    file_menu.addSeparator()
+    file_menu.addAction(app.convert_external_audio_files_action)
 
     repertoire_menu = file_menu.addMenu("Contracts and Rights Exchange")
     app.export_repertoire_json_action = app._create_action(
@@ -788,12 +812,26 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.audio_file_clear_button = QPushButton("Clear")
     app.audio_file_clear_button.clicked.connect(app.audio_file_field.clear)
     app.audio_file_row = QWidget()
-    app.audio_file_layout = QHBoxLayout(app.audio_file_row)
+    app.audio_file_layout = QVBoxLayout(app.audio_file_row)
     app.audio_file_layout.setContentsMargins(0, 0, 0, 0)
-    app.audio_file_layout.setSpacing(8)
-    app.audio_file_layout.addWidget(app.audio_file_field, 1)
-    app.audio_file_layout.addWidget(app.audio_file_browse_button)
-    app.audio_file_layout.addWidget(app.audio_file_clear_button)
+    app.audio_file_layout.setSpacing(6)
+    app.audio_file_input_row = QWidget()
+    app.audio_file_input_layout = QHBoxLayout(app.audio_file_input_row)
+    app.audio_file_input_layout.setContentsMargins(0, 0, 0, 0)
+    app.audio_file_input_layout.setSpacing(8)
+    app.audio_file_input_layout.addWidget(app.audio_file_field, 1)
+    app.audio_file_input_layout.addWidget(app.audio_file_browse_button)
+    app.audio_file_input_layout.addWidget(app.audio_file_clear_button)
+    app.audio_file_layout.addWidget(app.audio_file_input_row)
+    app.audio_file_warning_label = QLabel("")
+    app.audio_file_warning_label.setWordWrap(True)
+    app.audio_file_warning_label.setProperty("role", "supportingText")
+    app.audio_file_warning_label.setVisible(False)
+    app.audio_file_layout.addWidget(app.audio_file_warning_label)
+    app.audio_file_field._lossy_audio_warning_label = app.audio_file_warning_label
+    app.audio_file_field.textChanged.connect(
+        lambda _text: app._refresh_line_edit_lossy_audio_warning(app.audio_file_field)
+    )
     app.audio_file_row.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
     app.release_date_label = QLabel("Release Date")

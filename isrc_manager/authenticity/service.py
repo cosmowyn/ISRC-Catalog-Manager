@@ -5,18 +5,15 @@ from __future__ import annotations
 import json
 import secrets
 import sqlite3
-from dataclasses import asdict
 from pathlib import Path
-from typing import Iterable
+from typing import TYPE_CHECKING, Iterable
 
-from isrc_manager.assets import AssetService
 from isrc_manager.file_storage import guess_mime_type, sanitize_export_basename
-from isrc_manager.releases import ReleaseService
-from isrc_manager.rights import RightsService
-from isrc_manager.services.session import ProfileKVService
-from isrc_manager.services.tracks import TrackService
-from isrc_manager.tags import ArtworkPayload, AudioTagService, catalog_metadata_to_tags
-from isrc_manager.works import WorkService
+from isrc_manager.tags import (
+    ArtworkPayload,
+    AudioTagService,
+    build_catalog_tag_data,
+)
 
 from .crypto import (
     canonical_timestamp,
@@ -67,6 +64,14 @@ from .models import (
     WatermarkToken,
 )
 from .watermark import AudioWatermarkCore, watermark_settings_payload
+
+if TYPE_CHECKING:
+    from isrc_manager.assets import AssetService
+    from isrc_manager.releases import ReleaseService
+    from isrc_manager.rights import RightsService
+    from isrc_manager.services.session import ProfileKVService
+    from isrc_manager.services.tracks import TrackService
+    from isrc_manager.works import WorkService
 
 DEFAULT_KEY_ID_KV = "authenticity/default_key_id"
 PROVENANCE_LINEAGE_BASIS = "signed_derivative_of_verified_master"
@@ -123,8 +128,12 @@ class AuthenticityKeyService:
         profile_kv: ProfileKVService | None = None,
         settings_root: str | Path | None = None,
     ):
+        if profile_kv is None:
+            from isrc_manager.services.session import ProfileKVService as _ProfileKVService
+
+            profile_kv = _ProfileKVService(conn)
         self.conn = conn
-        self.profile_kv = profile_kv or ProfileKVService(conn)
+        self.profile_kv = profile_kv
         self.settings_root = Path(settings_root) if settings_root is not None else None
         self.profile_kv.ensure_store()
 
@@ -360,6 +369,35 @@ class AuthenticityManifestService:
             "No supported WAV, FLAC, or AIFF reference audio was found. V1 uses approved main/hi-res masters first, then attached track audio."
         )
 
+    def reference_selection_from_file(
+        self,
+        *,
+        track_id: int,
+        source_path: str | Path,
+        source_kind: str,
+        source_label: str,
+        mime_type: str | None = None,
+    ) -> ReferenceAudioSelection:
+        resolved = Path(source_path)
+        if not resolved.exists():
+            raise FileNotFoundError(resolved)
+        suffix = self._suffix_for(resolved.name)
+        if suffix not in SUPPORTED_AUTHENTICITY_SUFFIXES:
+            raise ValueError("Selected reference file is not a WAV, FLAC, or AIFF file.")
+        return ReferenceAudioSelection(
+            track_id=int(track_id),
+            source_kind=str(source_kind or "file_reference"),
+            source_label=str(source_label or resolved.name),
+            reference_asset_id=None,
+            filename=resolved.name,
+            mime_type=_clean_text(mime_type) or _clean_text(guess_mime_type(resolved.name)),
+            size_bytes=int(resolved.stat().st_size),
+            suffix=suffix,
+            source_path=resolved,
+            source_bytes=None,
+            sha256_hex=sha256_hex(resolved.read_bytes()),
+        )
+
     def _build_release_refs(self, track_id: int) -> list[dict[str, object]]:
         refs: list[dict[str, object]] = []
         for release_id in self.release_service.find_release_ids_for_track(track_id):
@@ -464,11 +502,59 @@ class AuthenticityManifestService:
         app_version: str,
         profile_name: str | None,
     ) -> PreparedAuthenticityManifest:
+        reference = self.select_reference_audio(track_id)
+        return self._prepare_manifest_from_reference(
+            track_id=track_id,
+            reference=reference,
+            key_id=key_id,
+            app_version=app_version,
+            profile_name=profile_name,
+            workflow_kind=WORKFLOW_KIND_AUTHENTICITY_MASTER,
+        )
+
+    def prepare_manifest_for_file_reference(
+        self,
+        *,
+        track_id: int,
+        source_path: str | Path,
+        source_kind: str,
+        source_label: str,
+        key_id: str | None = None,
+        app_version: str,
+        profile_name: str | None,
+        workflow_kind: str,
+        mime_type: str | None = None,
+    ) -> PreparedAuthenticityManifest:
+        reference = self.reference_selection_from_file(
+            track_id=track_id,
+            source_path=source_path,
+            source_kind=source_kind,
+            source_label=source_label,
+            mime_type=mime_type,
+        )
+        return self._prepare_manifest_from_reference(
+            track_id=track_id,
+            reference=reference,
+            key_id=key_id,
+            app_version=app_version,
+            profile_name=profile_name,
+            workflow_kind=workflow_kind,
+        )
+
+    def _prepare_manifest_from_reference(
+        self,
+        *,
+        track_id: int,
+        reference: ReferenceAudioSelection,
+        key_id: str | None,
+        app_version: str,
+        profile_name: str | None,
+        workflow_kind: str,
+    ) -> PreparedAuthenticityManifest:
         snapshot = self.track_service.fetch_track_snapshot(track_id)
         if snapshot is None:
             raise ValueError(f"Track {track_id} not found.")
         key_record, private_key, _watermark_key = self.key_service.signing_material(key_id)
-        reference = self.select_reference_audio(track_id)
         reference_bytes = (
             bytes(reference.source_bytes)
             if reference.source_bytes is not None
@@ -495,7 +581,7 @@ class AuthenticityManifestService:
         payload = {
             "authenticity_version": AUTHENTICITY_SCHEMA_VERSION,
             "watermark_version": WATERMARK_VERSION,
-            "workflow_kind": WORKFLOW_KIND_AUTHENTICITY_MASTER,
+            "workflow_kind": str(workflow_kind or WORKFLOW_KIND_AUTHENTICITY_MASTER),
             "manifest_id": secrets.token_hex(16),
             "app_version": str(app_version),
             "created_at_utc": canonical_timestamp(),
@@ -973,19 +1059,49 @@ class AudioAuthenticityService:
         return release_values, placement_values, artwork
 
     def _build_export_tag_data(self, track_id: int):
-        snapshot = self.manifest_service.track_service.fetch_track_snapshot(track_id)
-        if snapshot is None:
-            raise ValueError(f"Track {track_id} not found.")
-
-        release_values, placement_values, artwork = self._select_tag_release_context(
-            track_id=track_id,
-            snapshot_album_title=snapshot.album_title,
+        return build_catalog_tag_data(
+            track_id,
+            track_service=self.manifest_service.track_service,
+            release_service=self.manifest_service.release_service,
+            release_policy="unambiguous",
+            include_artwork_bytes=True,
         )
-        return catalog_metadata_to_tags(
-            track_values=asdict(snapshot),
-            release_values=release_values,
-            placement_values=placement_values,
-            artwork=artwork,
+
+    def watermark_catalog_derivative(
+        self,
+        *,
+        track_id: int,
+        source_path: str | Path,
+        destination_path: str | Path,
+        key_id: str | None = None,
+        profile_name: str | None = None,
+    ) -> AuthenticityManifestRecord:
+        prepared = self.manifest_service.prepare_manifest_for_file_reference(
+            track_id=track_id,
+            source_path=source_path,
+            source_kind="managed_derivative_export",
+            source_label="Managed catalog derivative export",
+            key_id=key_id,
+            app_version=self.app_version,
+            profile_name=profile_name,
+            workflow_kind="managed_derivative_export",
+        )
+        _key_record, _private_key, watermark_key = self.key_service.signing_material(
+            prepared.key_id
+        )
+        tag_data = self._build_export_tag_data(track_id)
+        embed_metrics = self.watermark_service.embed_to_path(
+            source_path=source_path,
+            destination_path=destination_path,
+            watermark_key=watermark_key,
+            token=prepared.watermark_token,
+        )
+        # Rebuild tags from catalog metadata so the final output does not depend on
+        # round-tripping whatever the intermediate container retained.
+        self.tag_service.write_tags(destination_path, tag_data)
+        return self.manifest_service.save_manifest(
+            prepared,
+            embed_settings={**prepared.embed_settings, **embed_metrics},
         )
 
     def _attached_audio_source(self, track_id: int) -> dict[str, object]:

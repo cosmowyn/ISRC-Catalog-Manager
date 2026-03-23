@@ -50,6 +50,14 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
             row[1]
             for row in self.conn.execute("PRAGMA table_info(AuthenticityManifests)").fetchall()
         }
+        derivative_batch_columns = {
+            row[1]
+            for row in self.conn.execute("PRAGMA table_info(DerivativeExportBatches)").fetchall()
+        }
+        track_audio_derivative_columns = {
+            row[1]
+            for row in self.conn.execute("PRAGMA table_info(TrackAudioDerivatives)").fetchall()
+        }
         track_indexes = {
             row[1] for row in self.conn.execute("PRAGMA index_list(Tracks)").fetchall()
         }
@@ -59,6 +67,14 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
         authenticity_manifest_indexes = {
             row[1]
             for row in self.conn.execute("PRAGMA index_list(AuthenticityManifests)").fetchall()
+        }
+        derivative_batch_indexes = {
+            row[1]
+            for row in self.conn.execute("PRAGMA index_list(DerivativeExportBatches)").fetchall()
+        }
+        track_audio_derivative_indexes = {
+            row[1]
+            for row in self.conn.execute("PRAGMA index_list(TrackAudioDerivatives)").fetchall()
         }
         triggers = {
             row[0]
@@ -90,6 +106,8 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
         self.assertIn("SavedSearches", tables)
         self.assertIn("AuthenticityKeys", tables)
         self.assertIn("AuthenticityManifests", tables)
+        self.assertIn("DerivativeExportBatches", tables)
+        self.assertIn("TrackAudioDerivatives", tables)
         self.assertIn("vw_Licenses", tables)
         self.assertIn("contract_number", gs1_columns)
         self.assertIn("visible_in_history", history_entry_columns)
@@ -116,6 +134,52 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                 "embed_settings_json",
             }
             <= authenticity_manifest_columns
+        )
+        self.assertTrue(
+            {
+                "batch_id",
+                "schema_version",
+                "workflow_kind",
+                "derivative_kind",
+                "authenticity_basis",
+                "package_mode",
+                "recipe_canonical",
+                "recipe_sha256",
+                "requested_count",
+                "exported_count",
+                "skipped_count",
+                "created_at",
+                "status",
+            }
+            <= derivative_batch_columns
+        )
+        self.assertTrue(
+            {
+                "export_id",
+                "batch_id",
+                "track_id",
+                "sequence_no",
+                "target_key",
+                "workflow_kind",
+                "derivative_kind",
+                "authenticity_basis",
+                "source_kind",
+                "source_asset_id",
+                "source_audio_sha256",
+                "derivative_asset_id",
+                "parent_manifest_id",
+                "derivative_manifest_id",
+                "output_format",
+                "output_suffix",
+                "output_filename",
+                "filename_hash_suffix",
+                "output_sha256",
+                "managed_file_path",
+                "sidecar_path",
+                "package_member_path",
+                "status",
+            }
+            <= track_audio_derivative_columns
         )
         self.assertTrue({"blob_value", "mime_type", "size_bytes"} <= value_columns)
         self.assertTrue(
@@ -157,6 +221,34 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
         self.assertIn("idx_authenticity_manifests_watermark_id", authenticity_manifest_indexes)
         self.assertIn("idx_authenticity_manifests_key_id", authenticity_manifest_indexes)
         self.assertIn("idx_authenticity_manifests_payload_sha256", authenticity_manifest_indexes)
+        self.assertIn("idx_derivative_export_batches_batch_id", derivative_batch_indexes)
+        self.assertIn("idx_derivative_export_batches_created_at", derivative_batch_indexes)
+        self.assertIn("idx_derivative_export_batches_status", derivative_batch_indexes)
+        self.assertIn("idx_derivative_export_batches_workflow_kind", derivative_batch_indexes)
+        self.assertIn("idx_derivative_export_batches_derivative_kind", derivative_batch_indexes)
+        self.assertIn(
+            "idx_derivative_export_batches_authenticity_basis",
+            derivative_batch_indexes,
+        )
+        self.assertIn("idx_track_audio_derivatives_export_id", track_audio_derivative_indexes)
+        self.assertIn("idx_track_audio_derivatives_batch_id", track_audio_derivative_indexes)
+        self.assertIn("idx_track_audio_derivatives_track_id", track_audio_derivative_indexes)
+        self.assertIn(
+            "idx_track_audio_derivatives_workflow_kind",
+            track_audio_derivative_indexes,
+        )
+        self.assertIn(
+            "idx_track_audio_derivatives_derivative_kind",
+            track_audio_derivative_indexes,
+        )
+        self.assertIn(
+            "idx_track_audio_derivatives_authenticity_basis",
+            track_audio_derivative_indexes,
+        )
+        self.assertIn(
+            "idx_track_audio_derivatives_derivative_manifest_id",
+            track_audio_derivative_indexes,
+        )
         self.assertIn("trg_auditlog_no_update", triggers)
 
     def case_migrate_20_to_21_adds_repertoire_tables(self):
@@ -275,6 +367,8 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
             conn.execute("PRAGMA user_version = 25")
             conn.execute("DROP TABLE IF EXISTS AuthenticityManifests")
             conn.execute("DROP TABLE IF EXISTS AuthenticityKeys")
+            conn.execute("DROP TABLE IF EXISTS TrackAudioDerivatives")
+            conn.execute("DROP TABLE IF EXISTS DerivativeExportBatches")
             conn.commit()
 
             service.migrate_schema()
@@ -289,9 +383,100 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                 row[1]
                 for row in conn.execute("PRAGMA index_list(AuthenticityManifests)").fetchall()
             }
+            derivative_batch_indexes = {
+                row[1]
+                for row in conn.execute("PRAGMA index_list(DerivativeExportBatches)").fetchall()
+            }
+            track_audio_derivative_indexes = {
+                row[1]
+                for row in conn.execute("PRAGMA index_list(TrackAudioDerivatives)").fetchall()
+            }
 
-            self.assertTrue({"AuthenticityKeys", "AuthenticityManifests"} <= tables)
+            self.assertTrue(
+                {
+                    "AuthenticityKeys",
+                    "AuthenticityManifests",
+                    "DerivativeExportBatches",
+                    "TrackAudioDerivatives",
+                }
+                <= tables
+            )
             self.assertIn("idx_authenticity_manifests_manifest_id", manifest_indexes)
+            self.assertIn("idx_derivative_export_batches_batch_id", derivative_batch_indexes)
+            self.assertIn(
+                "idx_track_audio_derivatives_export_id",
+                track_audio_derivative_indexes,
+            )
+            self.assertEqual(service.get_db_version(), SCHEMA_TARGET)
+        finally:
+            conn.close()
+
+    def case_migrate_26_to_27_adds_derivative_export_tables(self):
+        conn = sqlite3.connect(":memory:")
+        try:
+            service = DatabaseSchemaService(conn)
+            service.init_db()
+            conn.execute("PRAGMA user_version = 26")
+            conn.execute("DROP TABLE IF EXISTS TrackAudioDerivatives")
+            conn.execute("DROP TABLE IF EXISTS DerivativeExportBatches")
+            conn.commit()
+
+            service.migrate_schema()
+
+            tables = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            derivative_batch_indexes = {
+                row[1]
+                for row in conn.execute("PRAGMA index_list(DerivativeExportBatches)").fetchall()
+            }
+            track_audio_derivative_indexes = {
+                row[1]
+                for row in conn.execute("PRAGMA index_list(TrackAudioDerivatives)").fetchall()
+            }
+
+            self.assertTrue({"DerivativeExportBatches", "TrackAudioDerivatives"} <= tables)
+            self.assertIn("idx_derivative_export_batches_batch_id", derivative_batch_indexes)
+            self.assertIn(
+                "idx_track_audio_derivatives_export_id",
+                track_audio_derivative_indexes,
+            )
+            self.assertEqual(service.get_db_version(), SCHEMA_TARGET)
+        finally:
+            conn.close()
+
+    def case_migrate_27_to_28_adds_derivative_ledger_semantics(self):
+        conn = sqlite3.connect(":memory:")
+        try:
+            service = DatabaseSchemaService(conn)
+            service.init_db()
+            conn.execute("PRAGMA user_version = 27")
+            conn.execute("DROP TABLE IF EXISTS TrackAudioDerivatives")
+            conn.execute("DROP TABLE IF EXISTS DerivativeExportBatches")
+            conn.commit()
+
+            service.migrate_schema()
+
+            derivative_batch_columns = {
+                row[1]
+                for row in conn.execute("PRAGMA table_info(DerivativeExportBatches)").fetchall()
+            }
+            track_audio_derivative_columns = {
+                row[1]
+                for row in conn.execute("PRAGMA table_info(TrackAudioDerivatives)").fetchall()
+            }
+
+            self.assertTrue(
+                {"workflow_kind", "derivative_kind", "authenticity_basis"}
+                <= derivative_batch_columns
+            )
+            self.assertTrue(
+                {"workflow_kind", "derivative_kind", "authenticity_basis"}
+                <= track_audio_derivative_columns
+            )
             self.assertEqual(service.get_db_version(), SCHEMA_TARGET)
         finally:
             conn.close()

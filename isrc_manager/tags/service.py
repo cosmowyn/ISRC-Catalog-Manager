@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import base64
 import re
 import shutil
 from collections import Counter
+from io import BytesIO
 from pathlib import Path
 
 try:
@@ -142,7 +144,7 @@ class AudioTagService:
         if suffix == ".opus":
             return self._read_vorbis_like_tags(OggOpus(path))
         if suffix in {".m4a", ".mp4", ".aac"}:
-            return self._read_mp4_tags(MP4(path))
+            return self._read_mp4_tags(self._load_mp4_family_audio(path))
         if suffix == ".wav":
             return self._read_id3_tags(WAVE(path))
         if suffix in {".aif", ".aiff"}:
@@ -181,7 +183,7 @@ class AudioTagService:
             self._write_vorbis_like_tags(OggOpus(path), tag_data)
             return
         if suffix in {".m4a", ".mp4", ".aac"}:
-            self._write_mp4_tags(MP4(path), tag_data)
+            self._write_mp4_tags(self._load_mp4_family_audio(path), tag_data)
             return
         if suffix == ".wav":
             self._write_id3_tags(WAVE(path), tag_data)
@@ -279,7 +281,7 @@ class AudioTagService:
             tags.add(COMM(encoding=3, lang="eng", desc="", text=[tag_data.comments]))
         if tag_data.lyrics:
             tags.add(USLT(encoding=3, lang="eng", desc="", text=tag_data.lyrics))
-        if tag_data.artwork is not None:
+        if tag_data.artwork is not None and tag_data.artwork.data:
             tags.add(
                 APIC(
                     encoding=3,
@@ -341,7 +343,7 @@ class AudioTagService:
         _set("comment", tag_data.comments)
         _set("lyrics", tag_data.lyrics)
         audio.clear_pictures()
-        if tag_data.artwork is not None:
+        if tag_data.artwork is not None and tag_data.artwork.data:
             picture = Picture()
             picture.data = tag_data.artwork.data
             picture.mime = tag_data.artwork.mime_type or "image/jpeg"
@@ -351,15 +353,7 @@ class AudioTagService:
         audio.save()
 
     def _read_vorbis_like_tags(self, audio) -> AudioTagData:
-        artwork = None
-        pictures = getattr(audio, "pictures", None)
-        if pictures:
-            picture = pictures[0]
-            artwork = ArtworkPayload(
-                data=bytes(picture.data),
-                mime_type=str(picture.mime or "image/jpeg"),
-                description=str(picture.desc or ""),
-            )
+        artwork = self._read_vorbis_like_artwork(audio)
         return AudioTagData(
             title=_clean_text(_first(audio.get("title"))),
             artist=_clean_text(_first(audio.get("artist"))),
@@ -400,6 +394,7 @@ class AudioTagService:
         _set("barcode", tag_data.upc)
         _set("comment", tag_data.comments)
         _set("lyrics", tag_data.lyrics)
+        self._write_vorbis_like_artwork(audio, tag_data.artwork)
         audio.save()
 
     def _read_mp4_tags(self, audio: MP4) -> AudioTagData:
@@ -474,7 +469,7 @@ class AudioTagService:
         self._set_mp4_freeform(tags, "LABEL", tag_data.publisher)
         self._set_mp4_freeform(tags, "ISRC", normalize_isrc(tag_data.isrc or ""))
         self._set_mp4_freeform(tags, "UPC", tag_data.upc)
-        if tag_data.artwork is None:
+        if tag_data.artwork is None or not tag_data.artwork.data:
             tags.pop("covr", None)
         else:
             image_format = (
@@ -485,6 +480,81 @@ class AudioTagService:
             tags["covr"] = [MP4Cover(tag_data.artwork.data, imageformat=image_format)]
         audio.tags = tags
         audio.save()
+
+    def _load_mp4_family_audio(self, path: Path) -> MP4:
+        audio = MutagenFile(path, easy=False)
+        if isinstance(audio, MP4):
+            return audio
+        if path.suffix.lower() == ".aac":
+            raise ValueError(
+                "Raw AAC/ADTS files are not supported for embedded metadata writing. Use M4A/MP4 when embedded tags are required."
+            )
+        raise ValueError(f"Unsupported MP4-family audio tag format: {path.suffix}")
+
+    @staticmethod
+    def _decode_base64_bytes(value) -> bytes | None:
+        if value is None:
+            return None
+        raw = (
+            value.strip() if isinstance(value, bytes) else str(value or "").strip().encode("ascii")
+        )
+        if not raw:
+            return None
+        try:
+            return base64.b64decode(raw, validate=False)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _read_vorbis_like_artwork(audio) -> ArtworkPayload | None:
+        pictures = getattr(audio, "pictures", None)
+        if pictures:
+            picture = pictures[0]
+            return ArtworkPayload(
+                data=bytes(picture.data),
+                mime_type=str(picture.mime or "image/jpeg"),
+                description=str(picture.desc or ""),
+            )
+        if Picture is not None:
+            for encoded_picture in audio.get("metadata_block_picture", []):
+                raw_picture = AudioTagService._decode_base64_bytes(encoded_picture)
+                if not raw_picture:
+                    continue
+                try:
+                    picture = Picture()
+                    picture.load(BytesIO(raw_picture))
+                except Exception:
+                    continue
+                return ArtworkPayload(
+                    data=bytes(picture.data),
+                    mime_type=str(picture.mime or "image/jpeg"),
+                    description=str(picture.desc or ""),
+                )
+        coverart_data = AudioTagService._decode_base64_bytes(_first(audio.get("coverart")))
+        if not coverart_data:
+            return None
+        return ArtworkPayload(
+            data=coverart_data,
+            mime_type=_clean_text(_first(audio.get("coverartmime"))) or "image/jpeg",
+        )
+
+    @staticmethod
+    def _write_vorbis_like_artwork(audio, artwork: ArtworkPayload | None) -> None:
+        audio.pop("metadata_block_picture", None)
+        audio.pop("coverart", None)
+        audio.pop("coverartmime", None)
+        if artwork is None or not artwork.data or Picture is None:
+            return
+        picture = Picture()
+        picture.data = artwork.data
+        picture.mime = artwork.mime_type or "image/jpeg"
+        picture.type = 3
+        picture.desc = artwork.description or ""
+        picture.width = 0
+        picture.height = 0
+        picture.depth = 0
+        picture.colors = 0
+        audio["metadata_block_picture"] = [base64.b64encode(picture.write()).decode("ascii")]
 
     @staticmethod
     def _decode_mp4_freeform(audio: MP4, name: str) -> str | None:

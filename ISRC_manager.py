@@ -129,6 +129,7 @@ from isrc_manager.authenticity import (
     AuthenticityKeyService,
     AuthenticityManifestService,
     AuthenticityVerificationDialog,
+    PROVENANCE_ONLY_SUFFIXES,
     VERIFICATION_INPUT_SUFFIXES,
     authenticity_unavailable_message,
 )
@@ -333,6 +334,17 @@ from isrc_manager.settings import enforce_single_instance, init_settings
 from isrc_manager.tasks import BackgroundTaskManager, TaskFailure
 from isrc_manager.tasks.app_services import BackgroundAppServiceFactory
 from isrc_manager.tasks.history_helpers import run_file_history_action, run_snapshot_history_action
+from isrc_manager.media import AudioConversionService
+from isrc_manager.media.derivatives import (
+    MANAGED_DERIVATIVE_KIND_LOSSY,
+    MANAGED_DERIVATIVE_KIND_WATERMARK_AUTHENTIC,
+    ExternalAudioConversionCoordinator,
+    ExternalAudioConversionRequest,
+    ExternalAudioConversionResult,
+    ManagedDerivativeExportCoordinator,
+    ManagedDerivativeExportRequest,
+    ManagedDerivativeExportResult,
+)
 from isrc_manager.storage_migration import (
     PREFERRED_STATE_CONFLICT,
     PREFERRED_STATE_EMPTY,
@@ -345,6 +357,7 @@ from isrc_manager.tags import (
     AudioTagService,
     BulkAudioAttachService,
     TaggedAudioExportService,
+    build_catalog_tag_data,
     catalog_metadata_to_tags,
     merge_imported_tags,
 )
@@ -1726,12 +1739,27 @@ class ApplicationSettingsDialog(QDialog):
             "Shown when the Audio File column or an audio BLOB field contains stored media.",
         )
 
+        audio_lossy_editor = BlobIconEditorWidget(
+            kind="audio_lossy",
+            allow_inherit=False,
+            parent=builder_box,
+        )
+        audio_lossy_editor.set_spec(self._blob_icon_settings.get("audio_lossy"))
+        self._blob_icon_editors["audio_lossy"] = audio_lossy_editor
+        self._add_row(
+            builder_grid,
+            1,
+            "Lossy Primary Audio Icon",
+            audio_lossy_editor,
+            "Shown when the Audio File column contains a lossy primary source such as MP3, AAC, or OGG.",
+        )
+
         image_editor = BlobIconEditorWidget(kind="image", allow_inherit=False, parent=builder_box)
         image_editor.set_spec(self._blob_icon_settings.get("image"))
         self._blob_icon_editors["image"] = image_editor
         self._add_row(
             builder_grid,
-            1,
+            2,
             "Image Blob Icon",
             image_editor,
             "Shown when Album Art or an image BLOB field contains stored media.",
@@ -1744,6 +1772,7 @@ class ApplicationSettingsDialog(QDialog):
         note_layout.setSpacing(8)
         for text in (
             "Blob icons are profile-specific and stay separate from visual theme presets.",
+            "Primary audio can use a dedicated lossy badge so MP3/AAC/OGG sources stand apart from WAV, FLAC, and AIFF masters.",
             "Platform icons use the current operating system's built-in icon set through Qt.",
             "Custom images are scaled down and compressed before they are written into the database, so large source files only occupy a small amount of storage.",
             "Custom BLOB columns can either inherit these global defaults or define their own icon override.",
@@ -7648,6 +7677,7 @@ class App(QMainWindow):
             and AudioWatermarkService is not None
             else None
         )
+        self.audio_conversion_service = AudioConversionService()
         self.audio_tag_service = AudioTagService() if self.conn is not None else None
         self.audio_authenticity_service = (
             AudioAuthenticityService(
@@ -7673,6 +7703,65 @@ class App(QMainWindow):
         self.global_search_service = (
             GlobalSearchService(self.conn) if self.conn is not None else None
         )
+        self._refresh_audio_conversion_action_states()
+
+    def _refresh_audio_conversion_action_states(self) -> None:
+        conversion_available = bool(
+            self.audio_conversion_service is not None and self.audio_conversion_service.is_available()
+        )
+        capabilities = (
+            self.audio_conversion_service.capabilities()
+            if conversion_available and self.audio_conversion_service is not None
+            else None
+        )
+        managed_authentic_available = bool(
+            self.track_service is not None
+            and self.audio_authenticity_service is not None
+            and capabilities is not None
+            and capabilities.managed_targets
+        )
+        managed_lossy_available = bool(
+            self.track_service is not None
+            and capabilities is not None
+            and capabilities.managed_lossy_targets
+        )
+        managed_available = bool(managed_authentic_available or managed_lossy_available)
+        external_available = bool(
+            conversion_available and capabilities is not None and capabilities.external_targets
+        )
+        if managed_available and self.audio_authenticity_service is not None:
+            managed_message = (
+                "Export managed audio derivatives. Lossless outputs stay on the "
+                "watermark-authentic path; lossy outputs become tagged managed derivatives "
+                "with derivative lineage."
+            )
+        elif managed_available:
+            managed_message = (
+                "Export managed lossy derivatives with catalog tags and derivative "
+                "lineage. Lossless outputs stay unavailable until authenticity "
+                "services are available in the open profile."
+            )
+        elif conversion_available and self.track_service is not None:
+            managed_message = (
+                "No supported managed derivative targets are available in this ffmpeg build."
+            )
+        else:
+            managed_message = self._audio_conversion_unavailable_message() or "Open a profile first."
+        external_message = (
+            "Utility conversion only: no catalog metadata, no watermarking, and no managed derivative registration."
+            if external_available
+            else "External audio conversion utility requires ffmpeg on PATH."
+        )
+        for attr_name, enabled, status_tip in (
+            ("convert_selected_audio_action", managed_available, managed_message),
+            ("convert_external_audio_files_action", external_available, external_message),
+        ):
+            action = getattr(self, attr_name, None)
+            if action is None:
+                continue
+            action.setEnabled(enabled)
+            action.setStatusTip(status_tip)
+            action.setToolTip(status_tip)
         self.relationship_explorer_service = (
             RelationshipExplorerService(self.conn) if self.conn is not None else None
         )
@@ -10459,17 +10548,24 @@ class App(QMainWindow):
                 "action": self.write_tags_to_exported_audio_action,
             },
             {
-                "id": "authenticity_export_audio",
-                "label": "Export Authenticity Watermarked Audio",
+                "id": "convert_selected_audio",
+                "label": "Managed Audio Derivatives",
                 "category": "Catalog",
-                "description": "Export WAV, FLAC, or AIFF master copies with a keyed watermark plus a signed authenticity sidecar.",
+                "description": "Export managed audio derivatives with catalog tags, hashing, and derivative tracking. Lossless targets stay on the watermark-authentic path; lossy targets export as tagged managed derivatives.",
+                "action": self.convert_selected_audio_action,
+            },
+            {
+                "id": "authenticity_export_audio",
+                "label": "Watermark-Authentic Masters",
+                "category": "Catalog",
+                "description": "Export WAV, FLAC, or AIFF master copies with a direct watermark plus a signed authenticity sidecar.",
                 "action": self.export_authenticity_watermarked_audio_action,
             },
             {
                 "id": "authenticity_export_provenance_audio",
-                "label": "Export Authenticity Provenance Audio",
+                "label": "Provenance-Linked Lossy Copies",
                 "category": "Catalog",
-                "description": "Export lossy derivatives with signed lineage sidecars that point back to a verified watermarked master.",
+                "description": "Export lossy copies with signed lineage sidecars that point back to a verified watermark-authentic master. No managed derivative registration.",
                 "action": self.export_authenticity_provenance_audio_action,
             },
             {
@@ -10478,6 +10574,13 @@ class App(QMainWindow):
                 "category": "Catalog",
                 "description": "Verify either a direct authenticity watermark or a signed provenance lineage sidecar.",
                 "action": self.verify_audio_authenticity_action,
+            },
+            {
+                "id": "convert_external_audio",
+                "label": "External Conversion Utility",
+                "category": "File",
+                "description": "Convert one or more external audio files with the utility workflow only: no catalog metadata, no watermarking, and no derivative registration.",
+                "action": self.convert_external_audio_files_action,
             },
             {
                 "id": "quality_dashboard",
@@ -11923,6 +12026,132 @@ class App(QMainWindow):
             return "Audio (*.wav *.aif *.aiff *.mp3 *.flac *.m4a *.aac *.ogg *.opus);;All files (*)"
         return "Images (*.png *.jpg *.jpeg *.webp *.gif *.bmp *.tif *.tiff);;All files (*)"
 
+    @staticmethod
+    def _audio_format_label(suffix: str | None) -> str:
+        labels = {
+            ".aac": "AAC",
+            ".aif": "AIFF",
+            ".aiff": "AIFF",
+            ".flac": "FLAC",
+            ".m4a": "M4A",
+            ".mp3": "MP3",
+            ".mp4": "MP4",
+            ".oga": "OGA",
+            ".ogg": "OGG",
+            ".opus": "Opus",
+            ".wav": "WAV",
+        }
+        clean_suffix = str(suffix or "").strip().lower()
+        if clean_suffix in labels:
+            return labels[clean_suffix]
+        if clean_suffix.startswith(".") and len(clean_suffix) > 1:
+            return clean_suffix[1:].upper()
+        return "audio"
+
+    @classmethod
+    def _lossy_audio_suffix_for_values(
+        cls,
+        *,
+        path_value: str | None = None,
+        filename: str | None = None,
+        mime_type: str | None = None,
+    ) -> str | None:
+        for candidate in (filename, path_value):
+            clean_candidate = str(candidate or "").strip()
+            if not clean_candidate:
+                continue
+            suffix = Path(clean_candidate).suffix.lower()
+            if suffix in PROVENANCE_ONLY_SUFFIXES:
+                return suffix
+        clean_mime = str(mime_type or "").strip().lower()
+        mime_suffixes = {
+            "audio/aac": ".aac",
+            "audio/mp4": ".m4a",
+            "audio/mpeg": ".mp3",
+            "audio/ogg": ".ogg",
+            "audio/opus": ".opus",
+            "video/mp4": ".mp4",
+        }
+        return mime_suffixes.get(clean_mime)
+
+    @classmethod
+    def _lossy_primary_audio_warning_text(
+        cls,
+        *,
+        path_value: str | None = None,
+        filename: str | None = None,
+        mime_type: str | None = None,
+        short: bool = False,
+    ) -> str:
+        suffix = cls._lossy_audio_suffix_for_values(
+            path_value=path_value,
+            filename=filename,
+            mime_type=mime_type,
+        )
+        if not suffix:
+            return ""
+        format_label = cls._audio_format_label(suffix)
+        if short:
+            return f"Lossy primary audio selected ({format_label})."
+        return (
+            f"Lossy primary audio selected ({format_label}). Direct watermark and master-audio "
+            "workflows use WAV, FLAC, or AIFF, so this attachment will be treated as a lossy "
+            "primary source."
+        )
+
+    @staticmethod
+    def _set_lossy_audio_warning_label(label: QLabel | None, warning_text: str) -> None:
+        if label is None:
+            return
+        label.setText(warning_text)
+        label.setVisible(bool(warning_text))
+
+    def _refresh_line_edit_lossy_audio_warning(self, line_edit: QLineEdit) -> None:
+        warning_label = getattr(line_edit, "_lossy_audio_warning_label", None)
+        warning_text = self._lossy_primary_audio_warning_text(
+            path_value=line_edit.text(),
+            short=True,
+        )
+        self._set_lossy_audio_warning_label(warning_label, warning_text)
+
+    def _confirm_lossy_primary_audio_selection(
+        self,
+        values,
+        *,
+        title: str,
+        action_label: str,
+        parent_widget: QWidget | None = None,
+    ) -> bool:
+        entries: list[str] = []
+        for value in values or []:
+            clean_value = str(value or "").strip()
+            suffix = self._lossy_audio_suffix_for_values(path_value=clean_value)
+            if not clean_value or not suffix:
+                continue
+            name = Path(clean_value).name or clean_value
+            entries.append(f"{name} ({self._audio_format_label(suffix)})")
+        if not entries:
+            return True
+        extra_note = "" if len(entries) <= 8 else f"\n…and {len(entries) - 8} more."
+        message = (
+            f"{action_label} will keep {len(entries)} lossy audio file"
+            f"{'s' if len(entries) != 1 else ''} as primary catalog audio.\n\n"
+            "Lossy primary audio is shown with the lossy badge, and direct watermark/master "
+            "workflows use WAV, FLAC, or AIFF.\n\n"
+            "Continue?\n\n- "
+            + "\n- ".join(entries[:8])
+            + extra_note
+        )
+        return (
+            QMessageBox.question(
+                parent_widget or self,
+                title,
+                message,
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            == QMessageBox.Yes
+        )
+
     def _browse_track_media_file(self, media_key: str, *, parent_widget=None) -> str:
         title = "Choose Audio File" if media_key == "audio_file" else "Choose Album Art"
         path, _ = QFileDialog.getOpenFileName(
@@ -11939,6 +12168,8 @@ class App(QMainWindow):
         path = self._browse_track_media_file(media_key, parent_widget=parent_widget)
         if path:
             line_edit.setText(path)
+            if media_key == "audio_file":
+                self._refresh_line_edit_lossy_audio_warning(line_edit)
 
     def _replace_additional_artists_for_track(self, track_id: int, names):
         self.track_service.replace_additional_artists(track_id, names, cursor=self.cursor)
@@ -12035,6 +12266,12 @@ class App(QMainWindow):
                 audio_file_source_path=(self.audio_file_field.text().strip() or None),
                 album_art_source_path=(self.album_art_field.text().strip() or None),
             )
+            if payload.audio_file_source_path and not self._confirm_lossy_primary_audio_selection(
+                [payload.audio_file_source_path],
+                title="Save Track Media",
+                action_label="Saving this track",
+            ):
+                return
             media_modes = self._choose_track_media_storage_modes(
                 audio_source_path=payload.audio_file_source_path,
                 album_art_source_path=payload.album_art_source_path,
@@ -12518,45 +12755,12 @@ class App(QMainWindow):
         active_track_service = track_service or self.track_service
         if active_track_service is None:
             raise ValueError("Track service is not available")
-        source_snapshot = snapshot or active_track_service.fetch_track_snapshot(track_id)
-        if source_snapshot is None:
-            raise ValueError(f"Track {track_id} not found")
-        release, placement = self._release_context_for_track(
-            track_id, release_service=release_service
-        )
-        track_values = {
-            "track_title": source_snapshot.track_title,
-            "artist_name": source_snapshot.artist_name,
-            "album_title": source_snapshot.album_title,
-            "genre": source_snapshot.genre,
-            "composer": source_snapshot.composer,
-            "publisher": source_snapshot.publisher,
-            "release_date": source_snapshot.release_date,
-            "isrc": source_snapshot.isrc,
-            "upc": source_snapshot.upc,
-            "comments": source_snapshot.comments,
-            "lyrics": source_snapshot.lyrics,
-        }
-        release_values = release.to_dict() if release is not None else {}
-        placement_values = (
-            {
-                "track_number": placement.track_number,
-                "disc_number": placement.disc_number,
-            }
-            if placement is not None
-            else {}
-        )
-        artwork = self._effective_artwork_payload_for_track(
+        return build_catalog_tag_data(
             track_id,
-            snapshot=source_snapshot,
             track_service=active_track_service,
-            load_bytes=include_artwork_bytes,
-        )
-        return catalog_metadata_to_tags(
-            track_values=track_values,
-            release_values=release_values,
-            placement_values=placement_values,
-            artwork=artwork,
+            release_service=release_service or self.release_service,
+            release_policy="primary",
+            include_artwork_bytes=include_artwork_bytes,
         )
 
     def _release_payload_for_track_ids(
@@ -13799,20 +14003,32 @@ class App(QMainWindow):
                 return
 
             plan_items = list(getattr(plan, "items", []) or [])
-            dialog_rows = [
-                {
-                    "source_path": item.source_path,
-                    "source_name": item.source_name,
-                    "detected_title": item.detected_title,
-                    "detected_artist": item.detected_artist,
-                    "matched_track_id": item.matched_track_id,
-                    "matched_track_artist": item.matched_track_artist,
-                    "match_basis": item.match_basis,
-                    "status": item.status,
-                    "warning": item.warning,
-                }
-                for item in plan_items
-            ]
+            dialog_rows = []
+            for item in plan_items:
+                warning_parts: list[str] = []
+                item_warning = str(item.warning or "").strip()
+                if item_warning:
+                    warning_parts.append(item_warning)
+                lossy_warning = self._lossy_primary_audio_warning_text(
+                    path_value=item.source_path,
+                    filename=item.source_name,
+                    short=True,
+                )
+                if lossy_warning and lossy_warning not in warning_parts:
+                    warning_parts.append(lossy_warning)
+                dialog_rows.append(
+                    {
+                        "source_path": item.source_path,
+                        "source_name": item.source_name,
+                        "detected_title": item.detected_title,
+                        "detected_artist": item.detected_artist,
+                        "matched_track_id": item.matched_track_id,
+                        "matched_track_artist": item.matched_track_artist,
+                        "match_basis": item.match_basis,
+                        "status": item.status,
+                        "warning": "\n".join(warning_parts),
+                    }
+                )
             dlg = BulkAudioAttachDialog(
                 title="Bulk Attach Audio Files",
                 intro=(
@@ -13829,6 +14045,12 @@ class App(QMainWindow):
                 return
 
             assignments = dlg.selected_matches()
+            if not self._confirm_lossy_primary_audio_selection(
+                [str(item.get("source_path") or "") for item in assignments],
+                title="Bulk Attach Audio Files",
+                action_label="Attaching these files",
+            ):
+                return
             storage_mode = _prompt_storage_mode_choice(
                 self,
                 title="Bulk Attach Audio Files",
@@ -14218,6 +14440,308 @@ class App(QMainWindow):
             return "Stored in database"
         return filename
 
+    def _audio_conversion_unavailable_message(self) -> str:
+        if self.audio_conversion_service is None or not self.audio_conversion_service.is_available():
+            return (
+                "Managed audio derivative export requires ffmpeg on PATH. "
+                "Install ffmpeg to enable derivative export and the external conversion utility."
+            )
+        if self.track_service is None:
+            return "Managed audio derivative export requires an open profile."
+        return ""
+
+    def _prompt_audio_conversion_format(
+        self,
+        *,
+        title: str,
+        prompt: str,
+        capability_group: str,
+    ) -> str | None:
+        if self.audio_conversion_service is None:
+            return None
+        capabilities = self.audio_conversion_service.capabilities()
+        if capability_group == "managed_authenticity":
+            profiles = capabilities.managed_targets
+        elif capability_group == "managed_lossy":
+            profiles = capabilities.managed_lossy_targets
+        elif capability_group in {"managed", "managed_any"}:
+            profiles = tuple(
+                list(capabilities.managed_targets)
+                + [
+                    profile
+                    for profile in capabilities.managed_lossy_targets
+                    if all(existing.id != profile.id for existing in capabilities.managed_targets)
+                ]
+            )
+        else:
+            profiles = capabilities.external_targets
+        if not profiles:
+            return None
+        labels = [profile.label for profile in profiles]
+        label, ok = QInputDialog.getItem(self, title, prompt, labels, 0, False)
+        if not ok or not label:
+            return None
+        for profile in profiles:
+            if profile.label == label:
+                return profile.id
+        return None
+
+    def _selected_track_ids_with_audio(self, track_ids: list[int] | None = None) -> list[int]:
+        if self.track_service is None:
+            return []
+        selected_ids = self._normalize_track_ids(track_ids or self._selected_or_visible_track_ids())
+        return [
+            track_id
+            for track_id in selected_ids
+            if self.track_service.has_media(track_id, "audio_file")
+        ]
+
+    def convert_selected_audio(self, track_ids: list[int] | None = None):
+        title = "Export Managed Audio Derivatives"
+        if self.track_service is None:
+            QMessageBox.warning(self, title, "Open a profile first.")
+            return
+        unavailable_message = self._audio_conversion_unavailable_message()
+        if unavailable_message:
+            QMessageBox.warning(self, title, unavailable_message)
+            return
+        selected_ids = self._selected_track_ids_with_audio(track_ids)
+        if not selected_ids:
+            QMessageBox.information(
+                self,
+                title,
+                "Select one or more tracks with attached primary audio first.",
+            )
+            return
+        output_format = self._prompt_audio_conversion_format(
+            title=title,
+            prompt=(
+                "Choose the managed derivative output format. "
+                "Lossless targets stay on the watermark-authentic path; "
+                "lossy targets export as tagged managed derivatives. "
+                "Use the External Audio Conversion Utility when you do not want catalog metadata or derivative tracking."
+            ),
+            capability_group="managed_any",
+        )
+        if not output_format:
+            return
+        authenticity_required = self.audio_conversion_service is not None and self.audio_conversion_service.is_supported_target(
+            output_format,
+            capability_group="managed_authenticity",
+        )
+        if authenticity_required and self.audio_authenticity_service is None:
+            QMessageBox.warning(
+                self,
+                title,
+                "Lossless managed exports require an open profile with audio authenticity services. Choose a lossy output format or use the watermark-authentic master export workflow.",
+            )
+            return
+        output_dir = QFileDialog.getExistingDirectory(
+            self,
+            "Choose Export Folder for Managed Audio Derivatives",
+            str(self.exports_dir / "managed_audio_derivatives"),
+        )
+        if not output_dir:
+            return
+
+        def _worker(bundle, ctx):
+            coordinator = ManagedDerivativeExportCoordinator(
+                conn=bundle.conn,
+                track_service=bundle.track_service,
+                release_service=bundle.release_service,
+                tag_service=bundle.audio_tag_service,
+                authenticity_service=bundle.audio_authenticity_service,
+                conversion_service=AudioConversionService(),
+            )
+            request = ManagedDerivativeExportRequest(
+                track_ids=selected_ids,
+                output_dir=output_dir,
+                output_format=output_format,
+                derivative_kind=(
+                    MANAGED_DERIVATIVE_KIND_WATERMARK_AUTHENTIC
+                    if authenticity_required
+                    else MANAGED_DERIVATIVE_KIND_LOSSY
+                ),
+                profile_name=self._current_profile_name(),
+            )
+            return coordinator.export(
+                request,
+                progress_callback=lambda value, maximum, message: ctx.report_progress(
+                    value=value,
+                    maximum=maximum,
+                    message=message,
+                ),
+                is_cancelled=ctx.is_cancelled,
+            )
+
+        def _success(result: ManagedDerivativeExportResult):
+            self._log_event(
+                "audio.derivative_export",
+                "Exported managed catalog derivatives",
+                output_dir=output_dir,
+                output_format=output_format,
+                derivative_kind=result.derivative_kind,
+                authenticity_basis=result.authenticity_basis,
+                exported=result.exported,
+                skipped=result.skipped,
+                batch_public_id=result.batch_public_id,
+                zip_path=result.zip_path,
+                warnings=result.warnings,
+            )
+            self._audit(
+                "EXPORT",
+                "TrackAudioDerivative",
+                ref_id=result.batch_public_id,
+                details=(
+                    f"exported={result.exported}; skipped={result.skipped}; format={output_format}; "
+                    f"derivative_kind={result.derivative_kind}; authenticity_basis={result.authenticity_basis}"
+                ),
+            )
+            self._audit_commit()
+            target_text = result.zip_path or "\n".join(result.written_paths[:3]) or output_dir
+            QMessageBox.information(
+                self,
+                title,
+                f"Exported {result.exported} managed audio derivative file{'s' if result.exported != 1 else ''}."
+                f"\n\nOutput:\n{target_text}"
+                + (
+                    "\n\nThese exports were finalized on the watermark-authentic path."
+                    if result.watermark_applied
+                    else "\n\nThese exports are managed lossy derivatives with catalog metadata and derivative lineage."
+                )
+                + f"\n\nSkipped: {result.skipped}"
+                + (
+                    "\n\nWarnings:\n- " + "\n- ".join(result.warnings[:12])
+                    if result.warnings
+                    else ""
+                ),
+            )
+
+        self._submit_background_bundle_task(
+            title=title,
+            description=(
+                "Converting selected catalog audio, writing tags, branching into watermark-authentic or lossy managed derivative finalization, and registering derivatives..."
+            ),
+            task_fn=_worker,
+            kind="write",
+            unique_key="audio.derivative_export",
+            cancellable=True,
+            on_success=_success,
+            on_cancelled=lambda: self.statusBar().showMessage(
+                "Managed audio derivative export cancelled.", 5000
+            ),
+            on_error=lambda failure: self._show_background_task_error(
+                title,
+                failure,
+                user_message="Could not export managed audio derivatives:",
+            ),
+        )
+
+    def convert_external_audio_files(self):
+        title = "External Audio Conversion Utility"
+        if self.audio_conversion_service is None or not self.audio_conversion_service.is_available():
+            QMessageBox.warning(
+                self,
+                title,
+                "External audio conversion utility requires ffmpeg on PATH. "
+                "Install ffmpeg to enable plain file conversion.",
+            )
+            return
+        chosen_files, _selected_filter = QFileDialog.getOpenFileNames(
+            self,
+            "Choose External Audio Files for Utility Conversion",
+            "",
+            "Audio Files (*.wav *.aif *.aiff *.mp3 *.flac *.m4a *.aac *.ogg *.oga *.opus *.mp4);;All Files (*)",
+        )
+        input_paths = [str(Path(path)) for path in dict.fromkeys(chosen_files) if str(path).strip()]
+        if not input_paths:
+            return
+        output_format = self._prompt_audio_conversion_format(
+            title=title,
+            prompt=(
+                "Choose the utility conversion output format. "
+                "This does not use catalog metadata, watermarking, or derivative registration."
+            ),
+            capability_group="external",
+        )
+        if not output_format:
+            return
+        output_dir = QFileDialog.getExistingDirectory(
+            self,
+            "Choose Output Folder for Utility Conversion",
+            str(self.exports_dir / "external_audio_conversions"),
+        )
+        if not output_dir:
+            return
+
+        def _worker(ctx):
+            coordinator = ExternalAudioConversionCoordinator(
+                conversion_service=AudioConversionService()
+            )
+            request = ExternalAudioConversionRequest(
+                input_paths=input_paths,
+                output_dir=output_dir,
+                output_format=output_format,
+            )
+            return coordinator.export(
+                request,
+                progress_callback=lambda value, maximum, message: ctx.report_progress(
+                    value=value,
+                    maximum=maximum,
+                    message=message,
+                ),
+                is_cancelled=ctx.is_cancelled,
+            )
+
+        def _success(result: ExternalAudioConversionResult):
+            self._log_event(
+                "audio.external_convert",
+                "Converted external audio files",
+                output_dir=output_dir,
+                output_format=output_format,
+                exported=result.exported,
+                skipped=result.skipped,
+                batch_public_id=result.batch_public_id,
+                zip_path=result.zip_path,
+                warnings=result.warnings,
+            )
+            target_text = result.zip_path or "\n".join(result.written_paths[:3]) or output_dir
+            QMessageBox.information(
+                self,
+                title,
+                f"Converted {result.exported} external audio file{'s' if result.exported != 1 else ''} with the utility workflow."
+                f"\n\nOutput:\n{target_text}"
+                "\n\nNo catalog metadata, watermarking, or managed derivative registration was applied."
+                f"\n\nSkipped: {result.skipped}"
+                + (
+                    "\n\nWarnings:\n- " + "\n- ".join(result.warnings[:12])
+                    if result.warnings
+                    else ""
+                ),
+            )
+
+        self._submit_background_task(
+            title=title,
+            description=(
+                "Converting external audio files with the utility workflow only. "
+                "No catalog metadata, watermarking, or managed derivative registration..."
+            ),
+            task_fn=_worker,
+            kind="read",
+            unique_key="audio.external_convert",
+            requires_profile=False,
+            cancellable=True,
+            on_success=_success,
+            on_cancelled=lambda: self.statusBar().showMessage(
+                "External audio utility conversion cancelled.", 5000
+            ),
+            on_error=lambda failure: self._show_background_task_error(
+                title,
+                failure,
+                user_message="Could not run the external audio conversion utility:",
+            ),
+        )
+
     def write_tags_to_exported_audio(self, track_ids: list[int] | None = None):
         if self.tagged_audio_export_service is None or self.track_service is None:
             QMessageBox.warning(self, "Write Tags to Exported Audio", "Open a profile first.")
@@ -14391,17 +14915,18 @@ class App(QMainWindow):
         ).exec()
 
     def export_authenticity_watermarked_audio(self, track_ids: list[int] | None = None):
+        title = "Export Watermark-Authentic Masters"
         if not AUTHENTICITY_FEATURE_AVAILABLE:
             QMessageBox.warning(
                 self,
-                "Export Authenticity Watermarked Audio",
+                title,
                 authenticity_unavailable_message(),
             )
             return
         if self.audio_authenticity_service is None:
             QMessageBox.warning(
                 self,
-                "Export Authenticity Watermarked Audio",
+                title,
                 "Open a profile first.",
             )
             return
@@ -14409,7 +14934,7 @@ class App(QMainWindow):
         if not selected_ids:
             QMessageBox.information(
                 self,
-                "Export Authenticity Watermarked Audio",
+                title,
                 "Select one or more tracks or apply a filter first.",
             )
             return
@@ -14425,8 +14950,8 @@ class App(QMainWindow):
             if not ready_items:
                 QMessageBox.information(
                     self,
-                    "Export Authenticity Watermarked Audio",
-                    "No supported WAV, FLAC, or AIFF reference audio was available for the selected tracks."
+                    title,
+                    "No supported WAV, FLAC, or AIFF master audio was available for the selected tracks."
                     + (
                         "\n\nWarnings:\n- " + "\n- ".join(plan.warnings[:12])
                         if plan.warnings
@@ -14439,7 +14964,7 @@ class App(QMainWindow):
                 return
             output_dir = QFileDialog.getExistingDirectory(
                 self,
-                "Choose Export Folder for Authenticity Watermarked Audio",
+                "Choose Export Folder for Watermark-Authentic Masters",
                 str(self.exports_dir / "authenticity_audio"),
             )
             if not output_dir:
@@ -14478,8 +15003,9 @@ class App(QMainWindow):
                 self._audit_commit()
                 QMessageBox.information(
                     self,
-                    "Export Authenticity Watermarked Audio",
-                    f"Exported {result.exported} authenticity-watermarked audio cop{'y' if result.exported == 1 else 'ies'} to:\n{output_dir}"
+                    title,
+                    f"Exported {result.exported} watermark-authentic master cop{'y' if result.exported == 1 else 'ies'} to:\n{output_dir}"
+                    "\n\nThese are direct-watermark master exports, not managed lossy derivatives."
                     f"\n\nSkipped: {result.skipped}"
                     + (
                         "\n\nWarnings:\n- " + "\n- ".join(all_warnings[:12]) if all_warnings else ""
@@ -14487,49 +15013,50 @@ class App(QMainWindow):
                 )
 
             self._submit_background_bundle_task(
-                title="Export Authenticity Watermarked Audio",
-                description="Embedding watermarks and writing signed authenticity sidecars...",
+                title=title,
+                description="Embedding direct watermarks and writing signed authenticity sidecars for master exports...",
                 task_fn=_worker,
                 kind="write",
                 unique_key="authenticity.export_audio",
                 cancellable=True,
                 on_success=_success,
                 on_cancelled=lambda: self.statusBar().showMessage(
-                    "Authenticity export cancelled.", 5000
+                    "Watermark-authentic master export cancelled.", 5000
                 ),
                 on_error=lambda failure: self._show_background_task_error(
-                    "Export Authenticity Watermarked Audio",
+                    title,
                     failure,
-                    user_message="Could not export authenticity-watermarked audio:",
+                    user_message="Could not export watermark-authentic masters:",
                 ),
             )
 
         self._submit_background_bundle_task(
-            title="Export Authenticity Watermarked Audio",
-            description="Preparing the direct authenticity watermark export preview...",
+            title=title,
+            description="Preparing the direct-watermark master export preview...",
             task_fn=_preview_worker,
             kind="read",
             unique_key="authenticity.export_audio.preview",
             on_success=_preview_success,
             on_error=lambda failure: self._show_background_task_error(
-                "Export Authenticity Watermarked Audio",
+                title,
                 failure,
-                user_message="Could not prepare the authenticity export preview:",
+                user_message="Could not prepare the watermark-authentic master export preview:",
             ),
         )
 
     def export_authenticity_provenance_audio(self, track_ids: list[int] | None = None):
+        title = "Export Provenance-Linked Lossy Copies"
         if not AUTHENTICITY_FEATURE_AVAILABLE:
             QMessageBox.warning(
                 self,
-                "Export Authenticity Provenance Audio",
+                title,
                 authenticity_unavailable_message(),
             )
             return
         if self.audio_authenticity_service is None:
             QMessageBox.warning(
                 self,
-                "Export Authenticity Provenance Audio",
+                title,
                 "Open a profile first.",
             )
             return
@@ -14537,7 +15064,7 @@ class App(QMainWindow):
         if not selected_ids:
             QMessageBox.information(
                 self,
-                "Export Authenticity Provenance Audio",
+                title,
                 "Select one or more tracks or apply a filter first.",
             )
             return
@@ -14553,7 +15080,7 @@ class App(QMainWindow):
             if not ready_items:
                 QMessageBox.information(
                     self,
-                    "Export Authenticity Provenance Audio",
+                    title,
                     "No supported provenance-only attached audio was available for the selected tracks."
                     + (
                         "\n\nWarnings:\n- " + "\n- ".join(plan.warnings[:12])
@@ -14564,9 +15091,9 @@ class App(QMainWindow):
                 return
             preview_dialog = AuthenticityExportPreviewDialog(
                 plan=plan,
-                title="Export Authenticity Provenance Audio",
+                title=title,
                 subtitle=(
-                    "This workflow copies derivative audio as-is, writes catalog tags, and saves a signed lineage sidecar that points back to a verified watermarked master."
+                    "This workflow copies lossy audio as-is, writes catalog tags, and saves a signed lineage sidecar that points back to a verified watermark-authentic master. It does not create managed derivative records."
                 ),
                 parent=self,
             )
@@ -14574,7 +15101,7 @@ class App(QMainWindow):
                 return
             output_dir = QFileDialog.getExistingDirectory(
                 self,
-                "Choose Export Folder for Authenticity Provenance Audio",
+                "Choose Export Folder for Provenance-Linked Lossy Copies",
                 str(self.exports_dir / "authenticity_lineage"),
             )
             if not output_dir:
@@ -14613,8 +15140,9 @@ class App(QMainWindow):
                 self._audit_commit()
                 QMessageBox.information(
                     self,
-                    "Export Authenticity Provenance Audio",
-                    f"Exported {result.exported} authenticity provenance audio cop{'y' if result.exported == 1 else 'ies'} to:\n{output_dir}"
+                    title,
+                    f"Exported {result.exported} provenance-linked lossy cop{'y' if result.exported == 1 else 'ies'} to:\n{output_dir}"
+                    "\n\nThese copies keep signed lineage sidecars, but they are not managed derivatives."
                     f"\n\nSkipped: {result.skipped}"
                     + (
                         "\n\nWarnings:\n- " + "\n- ".join(all_warnings[:12]) if all_warnings else ""
@@ -14622,34 +15150,34 @@ class App(QMainWindow):
                 )
 
             self._submit_background_bundle_task(
-                title="Export Authenticity Provenance Audio",
-                description="Writing derivative copies and signed provenance sidecars...",
+                title=title,
+                description="Writing lossy copies and signed provenance sidecars that point back to watermark-authentic masters...",
                 task_fn=_worker,
                 kind="write",
                 unique_key="authenticity.export_provenance_audio",
                 cancellable=True,
                 on_success=_success,
                 on_cancelled=lambda: self.statusBar().showMessage(
-                    "Authenticity provenance export cancelled.", 5000
+                    "Provenance-linked lossy export cancelled.", 5000
                 ),
                 on_error=lambda failure: self._show_background_task_error(
-                    "Export Authenticity Provenance Audio",
+                    title,
                     failure,
-                    user_message="Could not export authenticity provenance audio:",
+                    user_message="Could not export provenance-linked lossy copies:",
                 ),
             )
 
         self._submit_background_bundle_task(
-            title="Export Authenticity Provenance Audio",
-            description="Preparing the authenticity provenance export preview...",
+            title=title,
+            description="Preparing the provenance-linked lossy export preview...",
             task_fn=_preview_worker,
             kind="read",
             unique_key="authenticity.export_provenance_audio.preview",
             on_success=_preview_success,
             on_error=lambda failure: self._show_background_task_error(
-                "Export Authenticity Provenance Audio",
+                title,
                 failure,
-                user_message="Could not prepare the authenticity provenance export preview:",
+                user_message="Could not prepare the provenance-linked lossy export preview:",
             ),
         )
 
@@ -16370,13 +16898,37 @@ class App(QMainWindow):
                 )
                 menu.addAction(act_write_tags)
 
-                act_export_authenticity = QAction("Export Authenticity Watermarked Audio…", self)
+                act_convert_selected_audio = QAction(
+                    "Export Managed Audio Derivatives…",
+                    self,
+                )
+                act_convert_selected_audio.triggered.connect(
+                    lambda: self.convert_selected_audio(export_track_ids)
+                )
+                menu.addAction(act_convert_selected_audio)
+
+                act_convert_external_audio = QAction(
+                    "External Audio Conversion Utility…",
+                    self,
+                )
+                act_convert_external_audio.triggered.connect(
+                    self.convert_external_audio_files
+                )
+                menu.addAction(act_convert_external_audio)
+
+                act_export_authenticity = QAction(
+                    "Export Watermark-Authentic Masters…",
+                    self,
+                )
                 act_export_authenticity.triggered.connect(
                     lambda: self.export_authenticity_watermarked_audio(export_track_ids)
                 )
                 menu.addAction(act_export_authenticity)
 
-                act_export_provenance = QAction("Export Authenticity Provenance Audio…", self)
+                act_export_provenance = QAction(
+                    "Export Provenance-Linked Lossy Copies…",
+                    self,
+                )
                 act_export_provenance.triggered.connect(
                     lambda: self.export_authenticity_provenance_audio(export_track_ids)
                 )
@@ -17641,6 +18193,12 @@ class App(QMainWindow):
         )
         if storage_mode is None:
             return
+        if media_key == "audio_file" and not self._confirm_lossy_primary_audio_selection(
+            [path],
+            title=f"Attach {header_label}",
+            action_label="Attaching this audio file",
+        ):
+            return
         try:
             self._run_snapshot_history_action(
                 action_label=f"Attach {header_label}",
@@ -18175,11 +18733,43 @@ class App(QMainWindow):
         _mime_type = mime_type
         return self._human_size(size_bytes)
 
-    def _blob_icon_spec_for_standard_media(self, media_key: str) -> dict[str, object]:
+    @staticmethod
+    def _blob_icon_kind_for_standard_media(
+        media_key: str,
+        *,
+        meta: dict[str, object] | None = None,
+    ) -> str:
+        if media_key == "audio_file" and bool((meta or {}).get("is_lossy")):
+            return "audio_lossy"
+        return "audio" if media_key == "audio_file" else "image"
+
+    def _standard_media_badge_tooltip(
+        self,
+        media_key: str,
+        meta: dict[str, object],
+        display: str,
+    ) -> str:
+        if media_key != "audio_file":
+            return f"Stored size: {display}"
+        format_label = str(meta.get("format_label") or "").strip()
+        if bool(meta.get("is_lossy")):
+            if format_label:
+                return f"Lossy primary audio · {format_label}\nStored size: {display}"
+            return f"Lossy primary audio\nStored size: {display}"
+        if format_label:
+            return f"Primary audio · {format_label}\nStored size: {display}"
+        return f"Primary audio\nStored size: {display}"
+
+    def _blob_icon_spec_for_standard_media(
+        self,
+        media_key: str,
+        *,
+        meta: dict[str, object] | None = None,
+    ) -> dict[str, object]:
         settings = normalize_blob_icon_settings(
             getattr(self, "blob_icon_settings", None) or default_blob_icon_settings()
         )
-        return settings["audio" if media_key == "audio_file" else "image"]
+        return settings[self._blob_icon_kind_for_standard_media(media_key, meta=meta)]
 
     def _blob_icon_spec_for_custom_field(self, field: dict[str, object]) -> dict[str, object]:
         field_type = str(field.get("field_type") or "").strip().lower()
@@ -18197,12 +18787,15 @@ class App(QMainWindow):
         spec: dict[str, object] | None,
         kind: str,
     ) -> QIcon:
+        fallback_media_key = "audio_file" if kind in ("audio", "audio_lossy") else "album_art"
+        fallback_meta = {"is_lossy": True} if kind == "audio_lossy" else None
         return icon_from_blob_icon_spec(
             spec,
             kind=kind,
             style=self.style() if hasattr(self, "style") else None,
             fallback_spec=self._blob_icon_spec_for_standard_media(
-                "audio_file" if kind == "audio" else "album_art"
+                fallback_media_key,
+                meta=fallback_meta,
             ),
             allow_inherit=True,
             size=18,
@@ -18329,14 +18922,14 @@ class App(QMainWindow):
                 else:
                     item.setText(display)
                 if meta.get("has_media"):
-                    kind = "audio" if media_key == "audio_file" else "image"
+                    kind = self._blob_icon_kind_for_standard_media(media_key, meta=meta)
                     item.setIcon(
                         self._resolve_blob_badge_icon(
-                            spec=self._blob_icon_spec_for_standard_media(media_key),
+                            spec=self._blob_icon_spec_for_standard_media(media_key, meta=meta),
                             kind=kind,
                         )
                     )
-                    item.setToolTip(f"Stored size: {display}")
+                    item.setToolTip(self._standard_media_badge_tooltip(media_key, meta, display))
                 else:
                     item.setIcon(QIcon())
                     item.setToolTip("")
@@ -18746,7 +19339,22 @@ class _AlbumTrackSection(QWidget):
         self.audio_clear_button.clicked.connect(self.audio_file.clear)
         audio_layout.addWidget(self.audio_browse_button)
         audio_layout.addWidget(self.audio_clear_button)
-        self._add_labeled_widget(media_layout, "Audio File", audio_row)
+        audio_container = QWidget(self)
+        audio_container_layout = QVBoxLayout(audio_container)
+        audio_container_layout.setContentsMargins(0, 0, 0, 0)
+        audio_container_layout.setSpacing(6)
+        audio_container_layout.addWidget(audio_row)
+        self.audio_file_warning_label = QLabel("")
+        self.audio_file_warning_label.setWordWrap(True)
+        self.audio_file_warning_label.setProperty("role", "supportingText")
+        self.audio_file_warning_label.setVisible(False)
+        audio_container_layout.addWidget(self.audio_file_warning_label)
+        self.audio_file._lossy_audio_warning_label = self.audio_file_warning_label
+        self.audio_file.textChanged.connect(
+            lambda _text: self.app._refresh_line_edit_lossy_audio_warning(self.audio_file)
+        )
+        self.app._refresh_line_edit_lossy_audio_warning(self.audio_file)
+        self._add_labeled_widget(media_layout, "Audio File", audio_container)
 
         root.addStretch(1)
         self.set_track_number(number)
@@ -19190,6 +19798,16 @@ class AlbumEntryDialog(QDialog):
         any_audio_source_path = any(
             (section.audio_file.text() or "").strip() for section in self._track_sections
         )
+        if any_audio_source_path and not self.app._confirm_lossy_primary_audio_selection(
+            [
+                (section.audio_file.text() or "").strip()
+                for section in self._track_sections
+                if (section.audio_file.text() or "").strip()
+            ],
+            title="Save Album Media",
+            action_label="Saving this album",
+        ):
+            return None
         media_modes = self.app._choose_track_media_storage_modes(
             audio_source_path="present" if any_audio_source_path else None,
             album_art_source_path=album_art_source_path,
@@ -19678,7 +20296,22 @@ class EditDialog(QDialog):
             btn_audio_clear.setEnabled(False)
         audio_layout.addWidget(btn_audio_browse)
         audio_layout.addWidget(btn_audio_clear)
-        add_row(audio_layout_section, "Audio File", audio_row)
+        audio_widget = QWidget(self)
+        audio_widget_layout = QVBoxLayout(audio_widget)
+        audio_widget_layout.setContentsMargins(0, 0, 0, 0)
+        audio_widget_layout.setSpacing(6)
+        audio_widget_layout.addWidget(audio_row)
+        self.audio_file_warning_label = QLabel("")
+        self.audio_file_warning_label.setWordWrap(True)
+        self.audio_file_warning_label.setProperty("role", "supportingText")
+        self.audio_file_warning_label.setVisible(False)
+        audio_widget_layout.addWidget(self.audio_file_warning_label)
+        self.audio_file._lossy_audio_warning_label = self.audio_file_warning_label
+        self.audio_file.textChanged.connect(
+            lambda _text: self.parent._refresh_line_edit_lossy_audio_warning(self.audio_file)
+        )
+        self.parent._refresh_line_edit_lossy_audio_warning(self.audio_file)
+        add_row(audio_layout_section, "Audio File", audio_widget)
 
         self.album_art = QLineEdit()
         self._configure_text_field(
@@ -20246,10 +20879,13 @@ class EditDialog(QDialog):
         if path:
             setattr(self, clear_attr, False)
             line_edit.setText(path)
+            if media_key == "audio_file":
+                self.parent._refresh_line_edit_lossy_audio_warning(line_edit)
 
     def _clear_track_media(self, line_edit: QLineEdit, *, clear_attr: str) -> None:
         setattr(self, clear_attr, True)
         line_edit.clear()
+        self.parent._refresh_line_edit_lossy_audio_warning(line_edit)
 
     # --- Copy helpers ---
     def _copy_isrc_iso(self):
@@ -20482,6 +21118,12 @@ class EditDialog(QDialog):
                 audio_source_path = None
             if album_art_source_path == self._existing_album_art_display_path:
                 album_art_source_path = None
+            if audio_source_path and not parent._confirm_lossy_primary_audio_selection(
+                [audio_source_path],
+                title="Update Track Media",
+                action_label="Saving these changes",
+            ):
+                return
             if album_art_source_path:
                 album_art_block_message = self._album_art_upload_block_message([row_id])
                 if album_art_block_message:

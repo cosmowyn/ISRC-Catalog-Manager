@@ -169,7 +169,7 @@ class BulkAudioAttachDialog(QDialog):
         self.summary_label.setProperty("role", "secondary")
         root.addWidget(self.summary_label)
 
-        self.table = QTableWidget(0, 6, self)
+        self.table = QTableWidget(0, 7, self)
         self.table.setHorizontalHeaderLabels(
             [
                 "Attach To Track",
@@ -177,6 +177,7 @@ class BulkAudioAttachDialog(QDialog):
                 "Detected Artist",
                 "Current Artist",
                 "Detected Title",
+                "Warning",
                 "Source File",
             ]
         )
@@ -238,9 +239,14 @@ class BulkAudioAttachDialog(QDialog):
                 4,
                 QTableWidgetItem(str(item.get("detected_title") or "")),
             )
+            warning_text = str(item.get("warning") or "").strip()
+            warning_item = QTableWidgetItem(warning_text)
+            if warning_text:
+                warning_item.setToolTip(warning_text)
+            self.table.setItem(row_index, 5, warning_item)
             self.table.setItem(
                 row_index,
-                5,
+                6,
                 QTableWidgetItem(str(item.get("source_name") or "")),
             )
             self._update_row_artist(row_index, combo)
@@ -267,7 +273,14 @@ class BulkAudioAttachDialog(QDialog):
             return
         matched = len(self.selected_matches())
         total = len(self._items)
-        self.summary_label.setText(f"{matched} of {total} audio file(s) are queued for attachment.")
+        warning_count = sum(1 for item in self._items if str(item.get("warning") or "").strip())
+        summary = f"{matched} of {total} audio file(s) are queued for attachment."
+        if warning_count:
+            if warning_count == 1:
+                summary += " 1 row needs review."
+            else:
+                summary += f" {warning_count} rows need review."
+        self.summary_label.setText(summary)
 
     def selected_matches(self) -> list[dict[str, object]]:
         matches: list[dict[str, object]] = []

@@ -47,14 +47,15 @@ class TagDialogTests(unittest.TestCase):
             intro="Review filename matches before attaching.",
             items=[
                 {
-                    "source_path": "/tmp/orbit.wav",
-                    "source_name": "orbit.wav",
+                    "source_path": "/tmp/orbit.mp3",
+                    "source_name": "orbit.mp3",
                     "detected_title": "Orbit",
                     "detected_artist": "Artist One",
                     "matched_track_id": 1,
                     "matched_track_artist": "Artist One",
                     "match_basis": "Filename + artist",
                     "status": "matched",
+                    "warning": "Lossy primary audio selected (MP3).",
                 },
                 {
                     "source_path": "/tmp/aurora.wav",
@@ -65,6 +66,7 @@ class TagDialogTests(unittest.TestCase):
                     "matched_track_artist": "",
                     "match_basis": "No confident catalog match",
                     "status": "unmatched",
+                    "warning": "",
                 },
             ],
             track_choices=[
@@ -76,9 +78,12 @@ class TagDialogTests(unittest.TestCase):
         try:
             self.assertEqual(len(dialog.selected_matches()), 1)
             self.assertEqual(dialog.selected_artist_name(), "Artist One")
+            self.assertEqual(dialog.table.columnCount(), 7)
+            self.assertEqual(dialog.table.item(0, 5).text(), "Lossy primary audio selected (MP3).")
             dialog._match_combos[1].setCurrentIndex(dialog._match_combos[1].findData(2))
             self.assertEqual([item["track_id"] for item in dialog.selected_matches()], [1, 2])
             self.assertIn("2 of 2", dialog.summary_label.text())
+            self.assertIn("1 row needs review", dialog.summary_label.text())
         finally:
             dialog.close()
 
@@ -96,6 +101,7 @@ class TagDialogTests(unittest.TestCase):
                     "matched_track_artist": "Artist One",
                     "match_basis": "Filename",
                     "status": "matched",
+                    "warning": "",
                 },
                 {
                     "source_path": "/tmp/orbit-live.wav",
@@ -106,6 +112,7 @@ class TagDialogTests(unittest.TestCase):
                     "matched_track_artist": "",
                     "match_basis": "No confident catalog match",
                     "status": "unmatched",
+                    "warning": "",
                 },
             ],
             track_choices=[(1, "1 - Orbit / Artist One", "Artist One")],
