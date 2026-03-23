@@ -15,6 +15,7 @@ from .models import (
     BulkAudioAttachTrackCandidate,
     TagFieldConflict,
     TaggedAudioExportItem,
+    TaggedAudioExportPlanItem,
     TaggedAudioExportResult,
 )
 from .service import AudioTagService, BulkAudioAttachService, TaggedAudioExportService
@@ -33,6 +34,7 @@ __all__ = [
     "TagFieldConflict",
     "TagImportPatch",
     "TaggedAudioExportItem",
+    "TaggedAudioExportPlanItem",
     "TaggedAudioExportResult",
     "TaggedAudioExportService",
     "merge_imported_tags",

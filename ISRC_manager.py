@@ -20,6 +20,7 @@ import tempfile
 import platform
 import logging
 import mimetypes
+from dataclasses import fields as dataclass_fields
 from contextlib import contextmanager
 from importlib import metadata
 from pathlib import Path
@@ -337,9 +338,11 @@ from isrc_manager.tags import (
 )
 from isrc_manager.tags.dialogs import BulkAudioAttachDialog, TagPreviewDialog
 from isrc_manager.tags.models import (
+    AudioTagData,
     ArtworkPayload,
     BulkAudioAttachTrackCandidate,
     TaggedAudioExportItem,
+    TaggedAudioExportPlanItem,
 )
 from isrc_manager.ui_common import (
     DatePickerDialog,
@@ -1460,7 +1463,11 @@ class ApplicationSettingsDialog(QDialog):
                 bool(payload.get("auto_cleanup_enabled", True))
             )
             self.history_auto_snapshot_keep_latest_spin.setValue(
-                int(payload.get("auto_snapshot_keep_latest", DEFAULT_HISTORY_AUTO_SNAPSHOT_KEEP_LATEST))
+                int(
+                    payload.get(
+                        "auto_snapshot_keep_latest", DEFAULT_HISTORY_AUTO_SNAPSHOT_KEEP_LATEST
+                    )
+                )
             )
             self.history_prune_pre_restore_copies_after_days_spin.setValue(
                 int(
@@ -1493,8 +1500,9 @@ class ApplicationSettingsDialog(QDialog):
     def _detect_history_retention_mode(self, *, preferred_mode: str = "") -> str:
         payload = self._history_retention_control_payload()
         preferred = str(preferred_mode or "").strip().lower()
-        if preferred in HISTORY_RETENTION_MODE_PRESETS and payload == self._history_retention_preset(
-            preferred
+        if (
+            preferred in HISTORY_RETENTION_MODE_PRESETS
+            and payload == self._history_retention_preset(preferred)
         ):
             return preferred
         for mode_key in HISTORY_RETENTION_MODE_PRESETS:
@@ -5728,9 +5736,7 @@ class App(QMainWindow):
 
         def _configure(message_box):
             nonlocal open_settings_button
-            open_settings_button = message_box.addButton(
-                "Open Settings", QMessageBox.AcceptRole
-            )
+            open_settings_button = message_box.addButton("Open Settings", QMessageBox.AcceptRole)
             skip_button = message_box.addButton("Not Now", QMessageBox.RejectRole)
             if hasattr(message_box, "setDefaultButton"):
                 message_box.setDefaultButton(open_settings_button or skip_button)
@@ -6319,12 +6325,9 @@ class App(QMainWindow):
     def _preview_diagnostics_repair(self, repair_key: str, check: dict | None = None) -> str:
         if repair_key == "storage_layout_migrate":
             inspection = self.storage_migration_service.inspect()
-            if (
-                inspection.legacy_root is None
-                and inspection.preferred_state not in (
-                    PREFERRED_STATE_VALID_COMPLETE,
-                    PREFERRED_STATE_RESUMABLE_STAGE,
-                )
+            if inspection.legacy_root is None and inspection.preferred_state not in (
+                PREFERRED_STATE_VALID_COMPLETE,
+                PREFERRED_STATE_RESUMABLE_STAGE,
             ):
                 return "No legacy app-owned storage was detected, so no migration is needed."
             if inspection.preferred_state == PREFERRED_STATE_VALID_COMPLETE:
@@ -6338,7 +6341,10 @@ class App(QMainWindow):
                     "and promote the staged root into the preferred app folder."
                 )
             if inspection.preferred_state == PREFERRED_STATE_CONFLICT:
-                conflict_text = "\n".join(f"- {item}" for item in inspection.conflict_items[:10]) or "- (unknown)"
+                conflict_text = (
+                    "\n".join(f"- {item}" for item in inspection.conflict_items[:10])
+                    or "- (unknown)"
+                )
                 return (
                     "The preferred app folder contains conflicting managed content that cannot be overwritten "
                     "automatically.\n\n"
@@ -6565,11 +6571,11 @@ class App(QMainWindow):
         active_license_service = (
             license_service if license_service is not None else self.license_service
         )
-        active_history_manager = history_manager if history_manager is not None else self.history_manager
+        active_history_manager = (
+            history_manager if history_manager is not None else self.history_manager
+        )
         active_database_maintenance = (
-            database_maintenance
-            if database_maintenance is not None
-            else self.database_maintenance
+            database_maintenance if database_maintenance is not None else self.database_maintenance
         )
         active_storage_migration_service = (
             storage_migration_service
@@ -7078,7 +7084,7 @@ class App(QMainWindow):
             backup_details = "\n\n".join(
                 "\n".join([issue.message] + ([str(issue.path)] if issue.path else []))
                 for issue in backup_issues[:20]
-                )
+            )
             backup_total = len(active_history_manager.list_backups(limit=10_000))
             if not backup_issues:
                 add_check(
@@ -7168,13 +7174,13 @@ class App(QMainWindow):
                     "\n".join(budget_details),
                 )
             else:
-                warning_summary = (
-                    f"History storage is over budget by {self._human_size(budget_preview.over_budget_bytes)}."
-                )
+                warning_summary = f"History storage is over budget by {self._human_size(budget_preview.over_budget_bytes)}."
                 if budget_preview.auto_cleanup_enabled and budget_preview.candidate_items:
                     warning_summary += " Safe cleanup candidates are available."
                 elif budget_preview.protected_over_budget_items:
-                    warning_summary += " Remaining space is protected by retained history or manual artifacts."
+                    warning_summary += (
+                        " Remaining space is protected by retained history or manual artifacts."
+                    )
                 budget_details.extend(
                     [
                         "",
@@ -7853,7 +7859,9 @@ class App(QMainWindow):
         palette = build_app_theme_palette(normalized)
         app.setPalette(palette)
         self.setPalette(palette)
-        app.setStyleSheet(str(payload.get("stylesheet") or self._build_theme_stylesheet(normalized)))
+        app.setStyleSheet(
+            str(payload.get("stylesheet") or self._build_theme_stylesheet(normalized))
+        )
         self._queue_top_chrome_boundary_refresh()
 
     def _apply_theme_with_loading(
@@ -7890,7 +7898,9 @@ class App(QMainWindow):
             on_cancelled=lambda: (cancelled.__setitem__("value", True), _quit_loop()),
         )
         if task_id is None:
-            message = failure.get("value").message if "value" in failure else "Task could not start."
+            message = (
+                failure.get("value").message if "value" in failure else "Task could not start."
+            )
             raise RuntimeError(message)
         if not prepared and "value" not in failure and not cancelled["value"]:
             loop.exec()
@@ -8081,7 +8091,9 @@ class App(QMainWindow):
                 f"{self._human_size(projection.budget_bytes)} budget."
             )
             if projection.blocked_by_protected_items:
-                message += " Remaining space is protected by retained history or manual restore points."
+                message += (
+                    " Remaining space is protected by retained history or manual restore points."
+                )
             self.statusBar().showMessage(message, 7000)
             self.logger.info(
                 "Skipped %s because projected history usage would exceed the budget",
@@ -8098,9 +8110,7 @@ class App(QMainWindow):
                 f"Current usage: {self._human_size(projection.current_total_bytes)} of "
                 f"{self._human_size(projection.budget_bytes)}."
             ),
-            (
-                f"Projected usage: {self._human_size(projection.projected_total_bytes)}."
-            ),
+            (f"Projected usage: {self._human_size(projection.projected_total_bytes)}."),
         ]
         if projection.auto_cleanup_enabled and projection.reclaimable_bytes > 0:
             details.append(
@@ -8160,7 +8170,9 @@ class App(QMainWindow):
                 )
             return
         except Exception as exc:
-            self.logger.warning("History budget enforcement failed during %s: %s", trigger_label, exc)
+            self.logger.warning(
+                "History budget enforcement failed during %s: %s", trigger_label, exc
+            )
             if interactive:
                 QMessageBox.warning(
                     self,
@@ -8548,10 +8560,7 @@ class App(QMainWindow):
                     )
                 changed_count += 1
 
-            if (
-                after_values["history_retention_mode"]
-                != before_values["history_retention_mode"]
-            ):
+            if after_values["history_retention_mode"] != before_values["history_retention_mode"]:
                 self.settings_mutations.set_history_retention_mode(
                     str(after_values["history_retention_mode"])
                 )
@@ -8668,12 +8677,8 @@ class App(QMainWindow):
                             "Set Pre-Restore Backup Prune Age: "
                             f"{int(after_values['history_prune_pre_restore_copies_after_days'])} days"
                         ),
-                        before_value=before_values[
-                            "history_prune_pre_restore_copies_after_days"
-                        ],
-                        after_value=after_values[
-                            "history_prune_pre_restore_copies_after_days"
-                        ],
+                        before_value=before_values["history_prune_pre_restore_copies_after_days"],
+                        after_value=after_values["history_prune_pre_restore_copies_after_days"],
                     )
                 changed_count += 1
                 history_policy_changed = True
@@ -8912,9 +8917,7 @@ class App(QMainWindow):
             history_retention_mode=before_values["history_retention_mode"],
             history_auto_cleanup_enabled=before_values["history_auto_cleanup_enabled"],
             history_storage_budget_mb=before_values["history_storage_budget_mb"],
-            history_auto_snapshot_keep_latest=before_values[
-                "history_auto_snapshot_keep_latest"
-            ],
+            history_auto_snapshot_keep_latest=before_values["history_auto_snapshot_keep_latest"],
             history_prune_pre_restore_copies_after_days=before_values[
                 "history_prune_pre_restore_copies_after_days"
             ],
@@ -12360,6 +12363,7 @@ class App(QMainWindow):
         *,
         snapshot: TrackSnapshot | None = None,
         track_service: TrackService | None = None,
+        load_bytes: bool = True,
     ) -> ArtworkPayload | None:
         try:
             active_track_service = track_service or self.track_service
@@ -12376,8 +12380,13 @@ class App(QMainWindow):
             )
             if not has_album_art:
                 return None
+            fallback_mime_type = (
+                str(source_snapshot.album_art_mime_type or "").strip() or "image/jpeg"
+            )
+            if not load_bytes:
+                return ArtworkPayload(data=b"", mime_type=fallback_mime_type)
             data, mime_type = active_track_service.fetch_media_bytes(track_id, "album_art")
-            return ArtworkPayload(data=data, mime_type=mime_type or "image/jpeg")
+            return ArtworkPayload(data=data, mime_type=mime_type or fallback_mime_type)
         except Exception:
             return None
 
@@ -12398,6 +12407,7 @@ class App(QMainWindow):
         snapshot: TrackSnapshot | None = None,
         track_service: TrackService | None = None,
         release_service: ReleaseService | None = None,
+        include_artwork_bytes: bool = True,
     ):
         active_track_service = track_service or self.track_service
         if active_track_service is None:
@@ -12434,6 +12444,7 @@ class App(QMainWindow):
             track_id,
             snapshot=source_snapshot,
             track_service=active_track_service,
+            load_bytes=include_artwork_bytes,
         )
         return catalog_metadata_to_tags(
             track_values=track_values,
@@ -13342,6 +13353,194 @@ class App(QMainWindow):
             "warnings": warnings,
         }
 
+    @staticmethod
+    def _iter_audio_tag_preview_fields(tag_data: AudioTagData) -> list[tuple[str, object]]:
+        return [
+            (field.name, getattr(tag_data, field.name))
+            for field in dataclass_fields(AudioTagData)
+            if field.name not in {"raw_fields", "warnings"}
+        ]
+
+    def _build_tagged_audio_export_preview_rows(
+        self,
+        *,
+        track_title: str,
+        source_label: str,
+        tag_data: AudioTagData,
+    ) -> list[dict[str, object]]:
+        rows: list[dict[str, object]] = []
+        for field_name, value in self._iter_audio_tag_preview_fields(tag_data):
+            if value in (None, "", [], {}, ()):
+                continue
+            rows.append(
+                {
+                    "track": track_title,
+                    "field": field_name.replace("_", " ").title(),
+                    "database": self._display_tag_value(value),
+                    "file": "",
+                    "chosen": self._display_tag_value(value),
+                    "source": source_label,
+                }
+            )
+        return rows
+
+    @staticmethod
+    def _tagged_audio_export_name(track_id: int, track_title: str | None) -> str:
+        safe_title = re.sub(r"[^A-Za-z0-9._-]+", "_", track_title or f"track_{track_id}").strip("_")
+        return f"{track_id:05d}_{safe_title or 'track'}"
+
+    def _prepare_tagged_audio_export_preview(
+        self,
+        track_ids: list[int],
+        *,
+        track_service: TrackService | None = None,
+        release_service: ReleaseService | None = None,
+        progress_callback=None,
+    ) -> dict[str, object]:
+        active_track_service = track_service or self.track_service
+        active_release_service = release_service or self.release_service
+        if active_track_service is None:
+            raise ValueError("Track service is not available.")
+
+        normalized_ids = self._normalize_track_ids(track_ids)
+        prepared: list[TaggedAudioExportPlanItem] = []
+        preview_rows: list[dict[str, object]] = []
+        warnings: list[str] = []
+        total = max(1, len(normalized_ids))
+        for index, track_id in enumerate(normalized_ids, start=1):
+            if callable(progress_callback):
+                progress_callback(
+                    index - 1,
+                    total,
+                    f"Preparing tagged audio export preview for track {index} of {total}...",
+                )
+            snapshot = active_track_service.fetch_track_snapshot(
+                track_id,
+                include_media_blobs=False,
+            )
+            if snapshot is None:
+                warnings.append(f"Track {track_id} could not be loaded.")
+                continue
+
+            source_suffix = self._audio_export_source_suffix(snapshot)
+            resolved = active_track_service.resolve_media_path(snapshot.audio_file_path)
+            if resolved is not None and resolved.exists():
+                source_label = str(resolved)
+            elif (
+                normalize_storage_mode(snapshot.audio_file_storage_mode, default=None)
+                == STORAGE_MODE_DATABASE
+            ):
+                source_label = self._audio_export_source_label(snapshot)
+            else:
+                warnings.append(f"{snapshot.track_title}: no exportable audio file is attached.")
+                continue
+
+            tag_data = self._catalog_tag_data_for_track(
+                track_id,
+                snapshot=snapshot,
+                track_service=active_track_service,
+                release_service=active_release_service,
+                include_artwork_bytes=False,
+            )
+            prepared.append(
+                TaggedAudioExportPlanItem(
+                    track_id=int(track_id),
+                    track_title=str(snapshot.track_title or ""),
+                    suggested_name=self._tagged_audio_export_name(track_id, snapshot.track_title),
+                    source_suffix=source_suffix,
+                    source_label=source_label,
+                )
+            )
+            preview_rows.extend(
+                self._build_tagged_audio_export_preview_rows(
+                    track_title=str(snapshot.track_title or ""),
+                    source_label=source_label,
+                    tag_data=tag_data,
+                )
+            )
+
+        if callable(progress_callback):
+            progress_callback(total, total, "Tagged audio export preview ready.")
+
+        return {
+            "prepared": prepared,
+            "rows": preview_rows,
+            "warnings": warnings,
+        }
+
+    def _build_tagged_audio_export_items(
+        self,
+        plan_items: list[TaggedAudioExportPlanItem],
+        *,
+        track_service: TrackService | None = None,
+        release_service: ReleaseService | None = None,
+        progress_callback=None,
+        is_cancelled=None,
+    ) -> tuple[list[TaggedAudioExportItem], list[str]]:
+        active_track_service = track_service or self.track_service
+        active_release_service = release_service or self.release_service
+        if active_track_service is None:
+            raise ValueError("Track service is not available.")
+
+        exports: list[TaggedAudioExportItem] = []
+        warnings: list[str] = []
+        total = max(1, len(plan_items))
+        for index, plan_item in enumerate(plan_items, start=1):
+            if callable(is_cancelled) and is_cancelled():
+                raise InterruptedError("Tagged audio export cancelled.")
+            if callable(progress_callback):
+                progress_callback(
+                    index - 1,
+                    total,
+                    f"Preparing exported audio copy {index} of {total}: {plan_item.suggested_name}",
+                )
+            snapshot = active_track_service.fetch_track_snapshot(
+                plan_item.track_id,
+                include_media_blobs=False,
+            )
+            if snapshot is None:
+                warnings.append(f"Track {plan_item.track_id} could not be loaded.")
+                continue
+            tag_data = self._catalog_tag_data_for_track(
+                plan_item.track_id,
+                snapshot=snapshot,
+                track_service=active_track_service,
+                release_service=active_release_service,
+                include_artwork_bytes=True,
+            )
+            resolved = active_track_service.resolve_media_path(snapshot.audio_file_path)
+            if resolved is not None and resolved.exists():
+                exports.append(
+                    TaggedAudioExportItem(
+                        suggested_name=plan_item.suggested_name,
+                        tag_data=tag_data,
+                        source_path=resolved,
+                        source_suffix=plan_item.source_suffix,
+                    )
+                )
+                continue
+            try:
+                audio_bytes, _mime_type = active_track_service.fetch_media_bytes(
+                    plan_item.track_id,
+                    "audio_file",
+                )
+            except Exception:
+                warnings.append(f"{plan_item.track_title}: no exportable audio file is attached.")
+                continue
+            exports.append(
+                TaggedAudioExportItem(
+                    suggested_name=plan_item.suggested_name,
+                    tag_data=tag_data,
+                    source_bytes=audio_bytes,
+                    source_suffix=plan_item.source_suffix,
+                )
+            )
+
+        if callable(progress_callback):
+            progress_callback(total, total, "Tagged audio export sources are ready.")
+
+        return exports, warnings
+
     def _apply_tag_patch_to_track(
         self,
         track_id: int,
@@ -13539,7 +13738,9 @@ class App(QMainWindow):
             def _apply_worker(bundle, ctx):
                 profile_name = self._current_profile_name()
 
-                def _artist_payload(snapshot: TrackSnapshot, artist_name: str) -> TrackUpdatePayload:
+                def _artist_payload(
+                    snapshot: TrackSnapshot, artist_name: str
+                ) -> TrackUpdatePayload:
                     return TrackUpdatePayload(
                         track_id=snapshot.track_id,
                         isrc=str(snapshot.isrc or "").strip(),
@@ -13584,9 +13785,11 @@ class App(QMainWindow):
                                 snapshot = bundle.track_service.fetch_track_snapshot(
                                     track_id, cursor=cur
                                 )
-                                if snapshot is not None and batch_artist.strip() != str(
-                                    snapshot.artist_name or ""
-                                ).strip():
+                                if (
+                                    snapshot is not None
+                                    and batch_artist.strip()
+                                    != str(snapshot.artist_name or "").strip()
+                                ):
                                     bundle.track_service.update_track(
                                         _artist_payload(snapshot, batch_artist),
                                         cursor=cur,
@@ -13922,149 +14125,146 @@ class App(QMainWindow):
             )
             return
 
-        exports: list[TaggedAudioExportItem] = []
-        preview_rows: list[dict[str, object]] = []
-        warnings: list[str] = []
-        for track_id in selected_ids:
-            snapshot = self.track_service.fetch_track_snapshot(track_id)
-            if snapshot is None:
-                warnings.append(f"Track {track_id} could not be loaded.")
-                continue
-            tag_data = self._catalog_tag_data_for_track(track_id, snapshot=snapshot)
-            safe_title = re.sub(
-                r"[^A-Za-z0-9._-]+", "_", snapshot.track_title or f"track_{track_id}"
-            ).strip("_")
-            suggested_name = f"{track_id:05d}_{safe_title or 'track'}"
-            source_suffix = self._audio_export_source_suffix(snapshot)
-            source_label = ""
-            resolved = self.track_service.resolve_media_path(snapshot.audio_file_path)
-            if resolved is not None and resolved.exists():
-                source_label = str(resolved)
-                exports.append(
-                    TaggedAudioExportItem(
-                        suggested_name=suggested_name,
-                        tag_data=tag_data,
-                        source_path=resolved,
-                        source_suffix=source_suffix,
-                    )
-                )
-            else:
-                try:
-                    audio_bytes, _mime_type = self.track_service.fetch_media_bytes(
-                        track_id,
-                        "audio_file",
-                    )
-                except Exception:
-                    warnings.append(f"{snapshot.track_title}: no exportable audio file is attached.")
-                    continue
-                source_label = self._audio_export_source_label(snapshot)
-                exports.append(
-                    TaggedAudioExportItem(
-                        suggested_name=suggested_name,
-                        tag_data=tag_data,
-                        source_bytes=audio_bytes,
-                        source_suffix=source_suffix,
-                    )
-                )
-            for field_name, value in tag_data.to_dict().items():
-                if field_name == "raw_fields" or field_name == "warnings":
-                    continue
-                if value in (None, "", [], {}, ()):
-                    continue
-                preview_rows.append(
-                    {
-                        "track": snapshot.track_title,
-                        "field": field_name.replace("_", " ").title(),
-                        "database": self._display_tag_value(value),
-                        "file": "",
-                        "chosen": self._display_tag_value(value),
-                        "source": source_label,
-                    }
-                )
-
-        if not exports:
-            QMessageBox.information(
-                self,
-                "Write Tags to Exported Audio",
-                "No exportable audio files were available for the selected tracks."
-                + (f"\n\nWarnings:\n- " + "\n- ".join(warnings[:12]) if warnings else ""),
-            )
-            return
-
-        dlg = TagPreviewDialog(
-            title="Write Tags to Exported Audio",
-            intro=(
-                "Preview the catalog metadata that will be written into exported audio copies. "
-                "The original stored audio stays untouched."
-            ),
-            rows=preview_rows,
-            initial_policy="prefer_database",
-            allow_policy_change=False,
-            parent=self,
-        )
-        if dlg.exec() != QDialog.Accepted:
-            return
-
-        output_dir = QFileDialog.getExistingDirectory(
-            self,
-            "Choose Export Folder for Tagged Audio Copies",
-            str(self.exports_dir / "tagged_audio"),
-        )
-        if not output_dir:
-            return
-
-        def _worker(bundle, ctx):
-            return bundle.tagged_audio_export_service.export_copies(
-                output_dir=output_dir,
-                exports=exports,
+        def _preview_worker(bundle, ctx):
+            return self._prepare_tagged_audio_export_preview(
+                selected_ids,
+                track_service=bundle.track_service,
+                release_service=bundle.release_service,
                 progress_callback=lambda value, maximum, message: ctx.report_progress(
                     value=value,
                     maximum=maximum,
                     message=message,
                 ),
-                is_cancelled=ctx.is_cancelled,
             )
 
-        def _success(result):
-            all_warnings = warnings + list(result.warnings)
-            self._log_event(
-                "tags.export_audio",
-                "Exported tagged audio copies",
-                output_dir=output_dir,
-                exported=result.exported,
-                skipped=result.skipped,
-                warnings=all_warnings,
+        def _preview_success(result: dict[str, object]):
+            prepared = list(result.get("prepared") or [])
+            preview_rows = list(result.get("rows") or [])
+            warnings = list(result.get("warnings") or [])
+            if not prepared:
+                QMessageBox.information(
+                    self,
+                    "Write Tags to Exported Audio",
+                    "No exportable audio files were available for the selected tracks."
+                    + (f"\n\nWarnings:\n- " + "\n- ".join(warnings[:12]) if warnings else ""),
+                )
+                return
+
+            dlg = TagPreviewDialog(
+                title="Write Tags to Exported Audio",
+                intro=(
+                    "Preview the catalog metadata that will be written into exported audio copies. "
+                    "The original stored audio stays untouched."
+                ),
+                rows=preview_rows,
+                initial_policy="prefer_database",
+                allow_policy_change=False,
+                parent=self,
             )
-            self._audit(
-                "EXPORT",
-                "AudioTags",
-                ref_id=output_dir,
-                details=f"exported={result.exported}; skipped={result.skipped}",
-            )
-            self._audit_commit()
-            QMessageBox.information(
+            if dlg.exec() != QDialog.Accepted:
+                return
+
+            output_dir = QFileDialog.getExistingDirectory(
                 self,
-                "Write Tags to Exported Audio",
-                f"Exported {result.exported} tagged audio cop{'y' if result.exported == 1 else 'ies'} to:\n{output_dir}"
-                f"\n\nSkipped: {result.skipped}"
-                + (f"\n\nWarnings:\n- " + "\n- ".join(all_warnings[:12]) if all_warnings else ""),
+                "Choose Export Folder for Tagged Audio Copies",
+                str(self.exports_dir / "tagged_audio"),
+            )
+            if not output_dir:
+                return
+
+            def _worker(bundle, ctx):
+                overall_total = max(1, len(prepared) * 2)
+                exports, prepare_warnings = self._build_tagged_audio_export_items(
+                    prepared,
+                    track_service=bundle.track_service,
+                    release_service=bundle.release_service,
+                    progress_callback=lambda value, maximum, message: ctx.report_progress(
+                        value=value,
+                        maximum=overall_total,
+                        message=message,
+                    ),
+                    is_cancelled=ctx.is_cancelled,
+                )
+                result = bundle.tagged_audio_export_service.export_copies(
+                    output_dir=output_dir,
+                    exports=exports,
+                    progress_callback=lambda value, maximum, message: ctx.report_progress(
+                        value=max(0, len(prepared)) + value,
+                        maximum=max(0, len(prepared)) + maximum,
+                        message=message,
+                    ),
+                    is_cancelled=ctx.is_cancelled,
+                )
+                return {
+                    "result": result,
+                    "warnings": prepare_warnings,
+                }
+
+            def _success(payload: dict[str, object]):
+                export_result = payload.get("result")
+                if export_result is None:
+                    raise ValueError("Tagged audio export did not return a result.")
+                result = export_result
+                all_warnings = (
+                    warnings + list(payload.get("warnings") or []) + list(result.warnings)
+                )
+                self._log_event(
+                    "tags.export_audio",
+                    "Exported tagged audio copies",
+                    output_dir=output_dir,
+                    exported=result.exported,
+                    skipped=result.skipped,
+                    warnings=all_warnings,
+                )
+                self._audit(
+                    "EXPORT",
+                    "AudioTags",
+                    ref_id=output_dir,
+                    details=f"exported={result.exported}; skipped={result.skipped}",
+                )
+                self._audit_commit()
+                QMessageBox.information(
+                    self,
+                    "Write Tags to Exported Audio",
+                    f"Exported {result.exported} tagged audio cop{'y' if result.exported == 1 else 'ies'} to:\n{output_dir}"
+                    f"\n\nSkipped: {result.skipped}"
+                    + (
+                        f"\n\nWarnings:\n- " + "\n- ".join(all_warnings[:12])
+                        if all_warnings
+                        else ""
+                    ),
+                )
+
+            self._submit_background_bundle_task(
+                title="Write Tags to Exported Audio",
+                description="Writing catalog metadata into exported audio copies...",
+                task_fn=_worker,
+                kind="read",
+                unique_key="tags.export_audio",
+                cancellable=True,
+                on_success=_success,
+                on_cancelled=lambda: self.statusBar().showMessage(
+                    "Tagged audio export cancelled.", 5000
+                ),
+                on_error=lambda failure: self._show_background_task_error(
+                    "Write Tags to Exported Audio",
+                    failure,
+                    user_message="Could not export tagged audio copies:",
+                ),
             )
 
         self._submit_background_bundle_task(
             title="Write Tags to Exported Audio",
-            description="Writing catalog metadata into exported audio copies...",
-            task_fn=_worker,
+            description="Preparing the tagged audio export preview...",
+            task_fn=_preview_worker,
             kind="read",
-            unique_key="tags.export_audio",
-            cancellable=True,
-            on_success=_success,
-            on_cancelled=lambda: self.statusBar().showMessage(
-                "Tagged audio export cancelled.", 5000
-            ),
+            unique_key="tags.export_audio.preview",
+            cancellable=False,
+            on_success=_preview_success,
             on_error=lambda failure: self._show_background_task_error(
                 "Write Tags to Exported Audio",
                 failure,
-                user_message="Could not export tagged audio copies:",
+                user_message="Could not prepare the tagged audio export preview:",
             ),
         )
 
@@ -15856,7 +16056,9 @@ class App(QMainWindow):
                 self,
             )
             act_bulk_export.triggered.connect(
-                lambda checked=False, column=col, track_ids=list(selected_ids): self._export_focused_media_column(
+                lambda checked=False, column=col, track_ids=list(
+                    selected_ids
+                ): self._export_focused_media_column(
                     column,
                     track_ids=track_ids,
                 )
@@ -17210,11 +17412,7 @@ class App(QMainWindow):
                 self,
                 f"Export {spec['column_label']}",
                 "No files were exported."
-                + (
-                    "\n\nSkipped:\n" + "\n".join(skipped[:10])
-                    if skipped
-                    else ""
-                ),
+                + ("\n\nSkipped:\n" + "\n".join(skipped[:10]) if skipped else ""),
             )
             return
         message_lines = [
@@ -17223,9 +17421,7 @@ class App(QMainWindow):
         ]
         if skipped:
             message_lines.append("")
-            message_lines.append(
-                f"Skipped {len(skipped)} row{'s' if len(skipped) != 1 else ''}:"
-            )
+            message_lines.append(f"Skipped {len(skipped)} row{'s' if len(skipped) != 1 else ''}:")
             message_lines.extend(skipped[:10])
         QMessageBox.information(
             self,
@@ -19327,9 +19523,7 @@ class EditDialog(QDialog):
         self.album_art_open_master_button.setEnabled(has_owner_targets)
         if len(self._album_art_hint_owner_targets) > 1:
             self.album_art_open_master_button.setText("Open Master Record…")
-            self.album_art_open_master_button.setToolTip(
-                "Choose which master record to open."
-            )
+            self.album_art_open_master_button.setToolTip("Choose which master record to open.")
         else:
             self.album_art_open_master_button.setText("Open Master Record")
             self.album_art_open_master_button.setToolTip("")

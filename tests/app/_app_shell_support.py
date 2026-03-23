@@ -249,6 +249,8 @@ class AppShellTestCase(unittest.TestCase):
             def raise_if_cancelled(self):
                 return None
 
+        if hasattr(window, "_prepare_for_background_db_task"):
+            window._prepare_for_background_db_task()
         with window.background_service_factory.open_bundle() as bundle:
             result = kwargs["task_fn"](bundle, _InlineTaskContext())
         on_success = kwargs.get("on_success")
@@ -2199,7 +2201,9 @@ class AppShellTestCase(unittest.TestCase):
             storage_mode=app_module.STORAGE_MODE_DATABASE,
         )
 
-        dialog = app_module.EditDialog(lead_track, self.window, batch_track_ids=[lead_track, peer_track])
+        dialog = app_module.EditDialog(
+            lead_track, self.window, batch_track_ids=[lead_track, peer_track]
+        )
         try:
             self.assertFalse(dialog.album_art_browse_button.isEnabled())
             self.assertTrue(dialog.album_art_clear_button.isEnabled())
@@ -2321,12 +2325,18 @@ class AppShellTestCase(unittest.TestCase):
         assert managed_snapshot is not None
         assert database_snapshot is not None
 
+        task_descriptions: list[str] = []
+
+        def _run_bundle_task_and_capture(window, **kwargs):
+            task_descriptions.append(str(kwargs.get("description") or ""))
+            return self._run_bundle_task_inline(window, **kwargs)
+
         with (
             mock.patch.object(
                 app_module.App,
                 "_submit_background_bundle_task",
                 autospec=True,
-                side_effect=self._run_bundle_task_inline,
+                side_effect=_run_bundle_task_and_capture,
             ),
             mock.patch.object(
                 app_module.TagPreviewDialog,
@@ -2346,13 +2356,20 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(len(exported_paths), 2)
 
         exported_tags = {
-            self.window.audio_tag_service.read_tags(path).title: self.window.audio_tag_service.read_tags(
+            self.window.audio_tag_service.read_tags(
                 path
-            )
+            ).title: self.window.audio_tag_service.read_tags(path)
             for path in exported_paths
         }
         self.assertIn("Managed Export Track", exported_tags)
         self.assertIn("Database Export Track", exported_tags)
+        self.assertEqual(
+            task_descriptions,
+            [
+                "Preparing the tagged audio export preview...",
+                "Writing catalog metadata into exported audio copies...",
+            ],
+        )
         self.assertEqual(exported_tags["Managed Export Track"].isrc, managed_snapshot.isrc)
         self.assertEqual(exported_tags["Database Export Track"].isrc, database_snapshot.isrc)
         self.assertIsNotNone(exported_tags["Managed Export Track"].artwork)

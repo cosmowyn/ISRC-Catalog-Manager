@@ -1127,7 +1127,8 @@ class TrackService:
 
             can_replace_directly = owner_track_id in (None, int(track_id))
             is_shared_reference = bool(
-                owner_scope in {"album", "album_track"} and owner_track_id not in (None, int(track_id))
+                owner_scope in {"album", "album_track"}
+                and owner_track_id not in (None, int(track_id))
             )
 
         owner_track_title: str | None = None
@@ -1151,7 +1152,11 @@ class TrackService:
         )
 
     def fetch_track_snapshot(
-        self, track_id: int, *, cursor: sqlite3.Cursor | None = None
+        self,
+        track_id: int,
+        *,
+        cursor: sqlite3.Cursor | None = None,
+        include_media_blobs: bool = True,
     ) -> TrackSnapshot | None:
         cur = cursor or self.conn.cursor()
         row = cur.execute(
@@ -1199,18 +1204,18 @@ class TrackService:
             """,
             (int(track_id),),
         ).fetchall()
-        audio_meta = self._normalize_media_meta(
-            row[17],
-            row[18],
-            row[19],
-            row[20],
-            row[21],
-            blob_present=self._fetch_track_row_media_blob(track_id, "audio_file", cursor=cur)
-            is not None,
-            owner_scope="track",
-            owner_id=int(track_id),
-        )
+        audio_meta = self._get_track_row_media_meta(track_id, "audio_file", cursor=cur)
         album_art_meta = self.get_media_meta(track_id, "album_art", cursor=cur)
+        audio_blob_b64 = None
+        if include_media_blobs and bool(audio_meta.get("blob_present")):
+            audio_blob_b64 = self._encode_blob_b64(
+                self._fetch_track_row_media_blob(track_id, "audio_file", cursor=cur)
+            )
+        album_art_blob_b64 = None
+        if include_media_blobs and bool(album_art_meta.get("blob_present")):
+            album_art_blob_b64 = self._encode_blob_b64(
+                self._fetch_media_blob_for_meta("album_art", album_art_meta, cursor=cur)
+            )
 
         return TrackSnapshot(
             track_id=int(row[0]),
@@ -1234,17 +1239,13 @@ class TrackService:
             audio_file_path=str(audio_meta.get("path") or "") or None,
             audio_file_storage_mode=str(audio_meta.get("storage_mode") or "") or None,
             audio_file_filename=str(audio_meta.get("filename") or "") or None,
-            audio_file_blob_b64=self._encode_blob_b64(
-                self._fetch_track_row_media_blob(track_id, "audio_file", cursor=cur)
-            ),
+            audio_file_blob_b64=audio_blob_b64,
             audio_file_mime_type=str(audio_meta.get("mime_type") or "") or None,
             audio_file_size_bytes=int(audio_meta.get("size_bytes") or 0),
             album_art_path=str(album_art_meta.get("path") or "") or None,
             album_art_storage_mode=str(album_art_meta.get("storage_mode") or "") or None,
             album_art_filename=str(album_art_meta.get("filename") or "") or None,
-            album_art_blob_b64=self._encode_blob_b64(
-                self._fetch_media_blob_for_meta("album_art", album_art_meta, cursor=cur)
-            ),
+            album_art_blob_b64=album_art_blob_b64,
             album_art_mime_type=str(album_art_meta.get("mime_type") or "") or None,
             album_art_size_bytes=int(album_art_meta.get("size_bytes") or 0),
         )

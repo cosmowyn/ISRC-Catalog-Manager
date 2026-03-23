@@ -68,6 +68,15 @@ class TaggedAudioExportItem:
 
 
 @dataclass(slots=True)
+class TaggedAudioExportPlanItem:
+    track_id: int
+    track_title: str
+    suggested_name: str
+    source_suffix: str
+    source_label: str
+
+
+@dataclass(slots=True)
 class BulkAudioAttachTrackCandidate:
     track_id: int
     title: str
