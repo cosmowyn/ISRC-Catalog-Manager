@@ -131,6 +131,21 @@ Tracks and releases can carry multiple managed asset versions, including:
 
 You can track approval state, mark the primary asset, preserve derivation relationships, validate broken or duplicate asset references, and choose whether the underlying asset file lives in the database or in app-managed local storage.
 
+### Audio authenticity and provenance
+
+The app can also produce authenticity-aware audio exports for practical ownership and provenance workflows.
+
+- `Settings > Audio Authenticity Keys…` generates local Ed25519 signing keys
+- `Catalog > Export Authenticity Watermarked Audio…` writes WAV or FLAC export copies with:
+  - a compact keyed watermark token
+  - a signed authenticity manifest sidecar
+  - standard audio metadata tags populated from catalog data when available
+- `Catalog > Verify Audio Authenticity…` can verify either:
+  - the selected catalog track audio, or
+  - an external WAV/FLAC file chosen through the file picker
+
+This feature is intentionally honest about scope. It is not DRM, does not claim zero waveform change, and does not treat watermarking alone as proof. The authenticity claim comes from the signed manifest; the watermark links exported audio back to that signed record.
+
 ### Quality control and operational readiness
 
 The Data Quality Dashboard helps you audit the catalog before export, delivery, or review. It can flag:

@@ -27,6 +27,15 @@ class AppShellEditorSurfaceTests(AppShellTestCase):
     test_gs1_dialog_uses_top_level_workflow_tabs = (
         AppShellTestCase.case_gs1_dialog_uses_top_level_workflow_tabs
     )
+    test_authenticity_actions_are_present_in_catalog_and_settings_menus = (
+        AppShellTestCase.case_authenticity_actions_are_present_in_catalog_and_settings_menus
+    )
+    test_verify_audio_authenticity_can_choose_external_file_when_track_is_selected = (
+        AppShellTestCase.case_verify_audio_authenticity_can_choose_external_file_when_track_is_selected
+    )
+    test_verify_audio_authenticity_can_use_selected_database_audio = (
+        AppShellTestCase.case_verify_audio_authenticity_can_use_selected_database_audio
+    )
 
 
 del AppShellTestCase

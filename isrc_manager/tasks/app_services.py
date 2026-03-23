@@ -4,10 +4,18 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
+from importlib import metadata
 from pathlib import Path
 
 from PySide6.QtCore import QSettings
 
+from isrc_manager.authenticity import (
+    AUTHENTICITY_FEATURE_AVAILABLE,
+    AudioAuthenticityService,
+    AudioWatermarkService,
+    AuthenticityKeyService,
+    AuthenticityManifestService,
+)
 from isrc_manager.assets import AssetService
 from isrc_manager.contracts import ContractService
 from isrc_manager.exchange.repertoire_service import RepertoireExchangeService
@@ -39,6 +47,17 @@ from isrc_manager.services import (
 )
 from isrc_manager.services.db_access import SQLiteConnectionFactory
 from isrc_manager.tags import AudioTagService, TaggedAudioExportService
+
+
+def _app_version_text() -> str:
+    for package_name in ("isrc-catalog-manager", "ISRC Catalog Manager"):
+        try:
+            return metadata.version(package_name)
+        except metadata.PackageNotFoundError:
+            continue
+        except Exception:
+            break
+    return "2.0.0"
 
 
 @dataclass(slots=True)
@@ -74,6 +93,10 @@ class BackgroundAppServiceBundle:
     settings_reads: SettingsReadService
     settings_mutations: SettingsMutationService
     profile_kv: ProfileKVService
+    authenticity_key_service: AuthenticityKeyService
+    authenticity_manifest_service: AuthenticityManifestService
+    audio_watermark_service: AudioWatermarkService
+    audio_authenticity_service: AudioAuthenticityService
 
     def close(self) -> None:
         try:
@@ -183,6 +206,36 @@ class BackgroundAppServiceFactory:
         workflow_service = RepertoireWorkflowService(conn)
         global_search_service = GlobalSearchService(conn)
         relationship_explorer_service = RelationshipExplorerService(conn)
+        profile_kv = ProfileKVService(conn)
+        if AUTHENTICITY_FEATURE_AVAILABLE:
+            authenticity_key_service = AuthenticityKeyService(
+                conn,
+                profile_kv=profile_kv,
+                settings_root=Path(self.settings_path).resolve().parent,
+            )
+            authenticity_manifest_service = AuthenticityManifestService(
+                conn,
+                track_service=track_service,
+                release_service=release_service,
+                work_service=work_service,
+                rights_service=rights_service,
+                asset_service=asset_service,
+                key_service=authenticity_key_service,
+            )
+            audio_watermark_service = AudioWatermarkService()
+            audio_authenticity_service = AudioAuthenticityService(
+                conn,
+                key_service=authenticity_key_service,
+                manifest_service=authenticity_manifest_service,
+                watermark_service=audio_watermark_service,
+                tag_service=audio_tag_service,
+                app_version=_app_version_text(),
+            )
+        else:
+            authenticity_key_service = None
+            authenticity_manifest_service = None
+            audio_watermark_service = None
+            audio_authenticity_service = None
 
         return BackgroundAppServiceBundle(
             conn=conn,
@@ -245,5 +298,9 @@ class BackgroundAppServiceFactory:
             database_maintenance=DatabaseMaintenanceService(self.backups_dir),
             settings_reads=settings_reads,
             settings_mutations=settings_mutations,
-            profile_kv=ProfileKVService(conn),
+            profile_kv=profile_kv,
+            authenticity_key_service=authenticity_key_service,
+            authenticity_manifest_service=authenticity_manifest_service,
+            audio_watermark_service=audio_watermark_service,
+            audio_authenticity_service=audio_authenticity_service,
         )

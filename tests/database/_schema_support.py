@@ -43,11 +43,22 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
         history_entry_columns = {
             row[1] for row in self.conn.execute("PRAGMA table_info(HistoryEntries)").fetchall()
         }
+        authenticity_key_columns = {
+            row[1] for row in self.conn.execute("PRAGMA table_info(AuthenticityKeys)").fetchall()
+        }
+        authenticity_manifest_columns = {
+            row[1]
+            for row in self.conn.execute("PRAGMA table_info(AuthenticityManifests)").fetchall()
+        }
         track_indexes = {
             row[1] for row in self.conn.execute("PRAGMA index_list(Tracks)").fetchall()
         }
         gs1_indexes = {
             row[1] for row in self.conn.execute("PRAGMA index_list(GS1Metadata)").fetchall()
+        }
+        authenticity_manifest_indexes = {
+            row[1]
+            for row in self.conn.execute("PRAGMA index_list(AuthenticityManifests)").fetchall()
         }
         triggers = {
             row[0]
@@ -77,10 +88,35 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
         self.assertIn("RightsRecords", tables)
         self.assertIn("AssetVersions", tables)
         self.assertIn("SavedSearches", tables)
+        self.assertIn("AuthenticityKeys", tables)
+        self.assertIn("AuthenticityManifests", tables)
         self.assertIn("vw_Licenses", tables)
         self.assertIn("contract_number", gs1_columns)
         self.assertIn("visible_in_history", history_entry_columns)
         self.assertIn("blob_icon_payload", custom_field_columns)
+        self.assertTrue(
+            {"key_id", "algorithm", "signer_label", "public_key_b64", "created_at"}
+            <= authenticity_key_columns
+        )
+        self.assertTrue(
+            {
+                "track_id",
+                "reference_asset_id",
+                "key_id",
+                "manifest_id",
+                "watermark_id",
+                "watermark_nonce",
+                "manifest_digest_prefix",
+                "payload_canonical",
+                "payload_sha256",
+                "signature_b64",
+                "reference_audio_sha256",
+                "reference_fingerprint_b64",
+                "reference_source_kind",
+                "embed_settings_json",
+            }
+            <= authenticity_manifest_columns
+        )
         self.assertTrue({"blob_value", "mime_type", "size_bytes"} <= value_columns)
         self.assertTrue(
             {
@@ -116,6 +152,11 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
         self.assertIn("idx_tracks_buma_work_number", track_indexes)
         self.assertIn("idx_gs1_metadata_export_enabled", gs1_indexes)
         self.assertIn("idx_gs1_metadata_contract_number", gs1_indexes)
+        self.assertIn("idx_authenticity_manifests_manifest_id", authenticity_manifest_indexes)
+        self.assertIn("idx_authenticity_manifests_track_id", authenticity_manifest_indexes)
+        self.assertIn("idx_authenticity_manifests_watermark_id", authenticity_manifest_indexes)
+        self.assertIn("idx_authenticity_manifests_key_id", authenticity_manifest_indexes)
+        self.assertIn("idx_authenticity_manifests_payload_sha256", authenticity_manifest_indexes)
         self.assertIn("trg_auditlog_no_update", triggers)
 
     def case_migrate_20_to_21_adds_repertoire_tables(self):
@@ -222,6 +263,35 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                 row[1] for row in conn.execute("PRAGMA table_info(HistoryEntries)").fetchall()
             }
             self.assertIn("visible_in_history", columns)
+            self.assertEqual(service.get_db_version(), SCHEMA_TARGET)
+        finally:
+            conn.close()
+
+    def case_migrate_25_to_26_adds_authenticity_tables(self):
+        conn = sqlite3.connect(":memory:")
+        try:
+            service = DatabaseSchemaService(conn)
+            service.init_db()
+            conn.execute("PRAGMA user_version = 25")
+            conn.execute("DROP TABLE IF EXISTS AuthenticityManifests")
+            conn.execute("DROP TABLE IF EXISTS AuthenticityKeys")
+            conn.commit()
+
+            service.migrate_schema()
+
+            tables = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            manifest_indexes = {
+                row[1]
+                for row in conn.execute("PRAGMA index_list(AuthenticityManifests)").fetchall()
+            }
+
+            self.assertTrue({"AuthenticityKeys", "AuthenticityManifests"} <= tables)
+            self.assertIn("idx_authenticity_manifests_manifest_id", manifest_indexes)
             self.assertEqual(service.get_db_version(), SCHEMA_TARGET)
         finally:
             conn.close()

@@ -374,6 +374,16 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         slot=app.write_tags_to_exported_audio,
     )
     catalog_menu.addAction(app.write_tags_to_exported_audio_action)
+    app.export_authenticity_watermarked_audio_action = app._create_action(
+        "Export Authenticity Watermarked Audio…",
+        slot=app.export_authenticity_watermarked_audio,
+    )
+    catalog_menu.addAction(app.export_authenticity_watermarked_audio_action)
+    app.verify_audio_authenticity_action = app._create_action(
+        "Verify Audio Authenticity…",
+        slot=app.verify_audio_authenticity,
+    )
+    catalog_menu.addAction(app.verify_audio_authenticity_action)
     app.quality_dashboard_action = app._create_action(
         "Data Quality Dashboard…",
         slot=app.open_quality_dashboard,
@@ -438,6 +448,11 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         shortcuts=("Ctrl+,", "Meta+,"),
     )
     settings_menu.addAction(app.settings_action)
+    app.authenticity_keys_action = app._create_action(
+        "Audio Authenticity Keys…",
+        slot=app.open_audio_authenticity_keys_dialog,
+    )
+    settings_menu.addAction(app.authenticity_keys_action)
 
     view_menu = app.menu_bar.addMenu("View")
     app.columns_menu = view_menu.addMenu("Columns")

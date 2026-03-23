@@ -10,6 +10,7 @@ class HelpContentTests(unittest.TestCase):
         self.assertEqual(len(chapter_ids), len(set(chapter_ids)))
         self.assertEqual(set(chapter_ids), set(HELP_CHAPTERS_BY_ID))
         self.assertIn("overview", HELP_CHAPTERS_BY_ID)
+        self.assertIn("audio-authenticity", HELP_CHAPTERS_BY_ID)
         self.assertIn("settings", HELP_CHAPTERS_BY_ID)
         self.assertIn("history", HELP_CHAPTERS_BY_ID)
 

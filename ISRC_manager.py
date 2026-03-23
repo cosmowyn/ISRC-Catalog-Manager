@@ -120,6 +120,17 @@ from PySide6.QtWidgets import (
 
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput, QAudioDecoder, QAudioFormat
 
+from isrc_manager.authenticity import (
+    AUTHENTICITY_FEATURE_AVAILABLE,
+    AudioAuthenticityService,
+    AudioWatermarkService,
+    AuthenticityExportPreviewDialog,
+    AuthenticityKeysDialog,
+    AuthenticityKeyService,
+    AuthenticityManifestService,
+    AuthenticityVerificationDialog,
+    authenticity_unavailable_message,
+)
 from isrc_manager.history import (
     HistoryCleanupBlockedError,
     HistoryManager,
@@ -5584,6 +5595,10 @@ class App(QMainWindow):
         self.xml_export_service = None
         self.xml_import_service = None
         self.release_service = None
+        self.authenticity_key_service = None
+        self.authenticity_manifest_service = None
+        self.audio_watermark_service = None
+        self.audio_authenticity_service = None
         self.audio_tag_service = None
         self.tagged_audio_export_service = None
         self.exchange_service = None
@@ -7592,6 +7607,65 @@ class App(QMainWindow):
         self.asset_service = (
             AssetService(self.conn, self.data_root) if self.conn is not None else None
         )
+        self.authenticity_key_service = (
+            AuthenticityKeyService(
+                self.conn,
+                profile_kv=self.profile_kv,
+                settings_root=Path(self.settings.fileName()).resolve().parent,
+            )
+            if self.conn is not None
+            and self.profile_kv is not None
+            and AUTHENTICITY_FEATURE_AVAILABLE
+            and AuthenticityKeyService is not None
+            else None
+        )
+        self.authenticity_manifest_service = (
+            AuthenticityManifestService(
+                self.conn,
+                track_service=self.track_service,
+                release_service=self.release_service,
+                work_service=self.work_service,
+                rights_service=self.rights_service,
+                asset_service=self.asset_service,
+                key_service=self.authenticity_key_service,
+            )
+            if self.conn is not None
+            and self.track_service is not None
+            and self.release_service is not None
+            and self.work_service is not None
+            and self.rights_service is not None
+            and self.asset_service is not None
+            and self.authenticity_key_service is not None
+            and AUTHENTICITY_FEATURE_AVAILABLE
+            and AuthenticityManifestService is not None
+            else None
+        )
+        self.audio_watermark_service = (
+            AudioWatermarkService()
+            if self.conn is not None
+            and AUTHENTICITY_FEATURE_AVAILABLE
+            and AudioWatermarkService is not None
+            else None
+        )
+        self.audio_tag_service = AudioTagService() if self.conn is not None else None
+        self.audio_authenticity_service = (
+            AudioAuthenticityService(
+                self.conn,
+                key_service=self.authenticity_key_service,
+                manifest_service=self.authenticity_manifest_service,
+                watermark_service=self.audio_watermark_service,
+                tag_service=self.audio_tag_service,
+                app_version=self._app_version_text(),
+            )
+            if self.conn is not None
+            and self.authenticity_key_service is not None
+            and self.authenticity_manifest_service is not None
+            and self.audio_watermark_service is not None
+            and self.audio_tag_service is not None
+            and AUTHENTICITY_FEATURE_AVAILABLE
+            and AudioAuthenticityService is not None
+            else None
+        )
         self.repertoire_workflow_service = (
             RepertoireWorkflowService(self.conn) if self.conn is not None else None
         )
@@ -7601,7 +7675,6 @@ class App(QMainWindow):
         self.relationship_explorer_service = (
             RelationshipExplorerService(self.conn) if self.conn is not None else None
         )
-        self.audio_tag_service = AudioTagService() if self.conn is not None else None
         self.tagged_audio_export_service = (
             TaggedAudioExportService(self.audio_tag_service)
             if self.audio_tag_service is not None
@@ -9209,6 +9282,10 @@ class App(QMainWindow):
         self.xml_export_service = None
         self.xml_import_service = None
         self.release_service = None
+        self.authenticity_key_service = None
+        self.authenticity_manifest_service = None
+        self.audio_watermark_service = None
+        self.audio_authenticity_service = None
         self.party_service = None
         self.work_service = None
         self.contract_service = None
@@ -10381,6 +10458,20 @@ class App(QMainWindow):
                 "action": self.write_tags_to_exported_audio_action,
             },
             {
+                "id": "authenticity_export_audio",
+                "label": "Export Authenticity Watermarked Audio",
+                "category": "Catalog",
+                "description": "Export WAV or FLAC copies with a keyed watermark plus a signed authenticity sidecar.",
+                "action": self.export_authenticity_watermarked_audio_action,
+            },
+            {
+                "id": "authenticity_verify_audio",
+                "label": "Verify Audio Authenticity",
+                "category": "Catalog",
+                "description": "Detect a keyed watermark, resolve the signed manifest, and verify the Ed25519 signature.",
+                "action": self.verify_audio_authenticity_action,
+            },
+            {
                 "id": "quality_dashboard",
                 "label": "Quality Dashboard",
                 "category": "Catalog",
@@ -10403,6 +10494,13 @@ class App(QMainWindow):
                 "description": "Open the consolidated application and profile settings dialog.",
                 "action": self.settings_action,
                 "default": True,
+            },
+            {
+                "id": "authenticity_keys",
+                "label": "Audio Authenticity Keys",
+                "category": "Settings",
+                "description": "Generate Ed25519 keys, set the default signer, and review local key availability.",
+                "action": self.authenticity_keys_action,
             },
             {
                 "id": "add_custom_column",
@@ -14265,6 +14363,303 @@ class App(QMainWindow):
                 "Write Tags to Exported Audio",
                 failure,
                 user_message="Could not prepare the tagged audio export preview:",
+            ),
+        )
+
+    def open_audio_authenticity_keys_dialog(self):
+        if not AUTHENTICITY_FEATURE_AVAILABLE:
+            QMessageBox.warning(
+                self,
+                "Audio Authenticity Keys",
+                authenticity_unavailable_message(),
+            )
+            return
+        if self.authenticity_key_service is None:
+            QMessageBox.warning(self, "Audio Authenticity Keys", "Open a profile first.")
+            return
+        AuthenticityKeysDialog(
+            key_service=self.authenticity_key_service,
+            parent=self,
+        ).exec()
+
+    def export_authenticity_watermarked_audio(self, track_ids: list[int] | None = None):
+        if not AUTHENTICITY_FEATURE_AVAILABLE:
+            QMessageBox.warning(
+                self,
+                "Export Authenticity Watermarked Audio",
+                authenticity_unavailable_message(),
+            )
+            return
+        if self.audio_authenticity_service is None:
+            QMessageBox.warning(
+                self,
+                "Export Authenticity Watermarked Audio",
+                "Open a profile first.",
+            )
+            return
+        selected_ids = self._normalize_track_ids(track_ids or self._selected_or_visible_track_ids())
+        if not selected_ids:
+            QMessageBox.information(
+                self,
+                "Export Authenticity Watermarked Audio",
+                "Select one or more tracks or apply a filter first.",
+            )
+            return
+
+        def _preview_worker(bundle, _ctx):
+            return bundle.audio_authenticity_service.build_export_plan(
+                selected_ids,
+                profile_name=self._current_profile_name(),
+            )
+
+        def _preview_success(plan):
+            ready_items = plan.ready_items()
+            if not ready_items:
+                QMessageBox.information(
+                    self,
+                    "Export Authenticity Watermarked Audio",
+                    "No supported WAV or FLAC reference audio was available for the selected tracks."
+                    + (
+                        f"\n\nWarnings:\n- " + "\n- ".join(plan.warnings[:12])
+                        if plan.warnings
+                        else ""
+                    ),
+                )
+                return
+            preview_dialog = AuthenticityExportPreviewDialog(plan=plan, parent=self)
+            if preview_dialog.exec() != QDialog.Accepted:
+                return
+            output_dir = QFileDialog.getExistingDirectory(
+                self,
+                "Choose Export Folder for Authenticity Watermarked Audio",
+                str(self.exports_dir / "authenticity_audio"),
+            )
+            if not output_dir:
+                return
+
+            def _worker(bundle, ctx):
+                return bundle.audio_authenticity_service.export_watermarked_audio(
+                    output_dir=output_dir,
+                    track_ids=[item.track_id for item in ready_items],
+                    key_id=plan.key_id,
+                    profile_name=self._current_profile_name(),
+                    progress_callback=lambda value, maximum, message: ctx.report_progress(
+                        value=value,
+                        maximum=maximum,
+                        message=message,
+                    ),
+                    is_cancelled=ctx.is_cancelled,
+                )
+
+            def _success(result):
+                all_warnings = list(result.warnings)
+                self._log_event(
+                    "authenticity.export_audio",
+                    "Exported authenticity-watermarked audio",
+                    output_dir=output_dir,
+                    exported=result.exported,
+                    skipped=result.skipped,
+                    warnings=all_warnings,
+                )
+                self._audit(
+                    "EXPORT",
+                    "AudioAuthenticity",
+                    ref_id=output_dir,
+                    details=f"exported={result.exported}; skipped={result.skipped}",
+                )
+                self._audit_commit()
+                QMessageBox.information(
+                    self,
+                    "Export Authenticity Watermarked Audio",
+                    f"Exported {result.exported} authenticity-watermarked audio cop{'y' if result.exported == 1 else 'ies'} to:\n{output_dir}"
+                    f"\n\nSkipped: {result.skipped}"
+                    + (
+                        f"\n\nWarnings:\n- " + "\n- ".join(all_warnings[:12])
+                        if all_warnings
+                        else ""
+                    ),
+                )
+
+            self._submit_background_bundle_task(
+                title="Export Authenticity Watermarked Audio",
+                description="Embedding watermarks and writing signed authenticity sidecars...",
+                task_fn=_worker,
+                kind="write",
+                unique_key="authenticity.export_audio",
+                cancellable=True,
+                on_success=_success,
+                on_cancelled=lambda: self.statusBar().showMessage(
+                    "Authenticity export cancelled.", 5000
+                ),
+                on_error=lambda failure: self._show_background_task_error(
+                    "Export Authenticity Watermarked Audio",
+                    failure,
+                    user_message="Could not export authenticity-watermarked audio:",
+                ),
+            )
+
+        self._submit_background_bundle_task(
+            title="Export Authenticity Watermarked Audio",
+            description="Preparing the authenticity watermark export preview...",
+            task_fn=_preview_worker,
+            kind="read",
+            unique_key="authenticity.export_audio.preview",
+            on_success=_preview_success,
+            on_error=lambda failure: self._show_background_task_error(
+                "Export Authenticity Watermarked Audio",
+                failure,
+                user_message="Could not prepare the authenticity export preview:",
+            ),
+        )
+
+    def _selected_track_audio_verification_option(self):
+        if self.track_service is None:
+            return None
+        selected_ids = self._normalize_track_ids(self._selected_track_ids())
+        if len(selected_ids) != 1:
+            return None
+        track_id = selected_ids[0]
+        snapshot = self.track_service.fetch_track_snapshot(track_id)
+        if snapshot is None or not self.track_service.has_media(track_id, "audio_file"):
+            return None
+        suffix = Path(snapshot.audio_file_filename or snapshot.audio_file_path or "").suffix.lower()
+        if suffix not in {".wav", ".flac"}:
+            return None
+        return int(track_id), str(snapshot.track_title or f"Track {track_id}")
+
+    def _selected_track_audio_verification_candidate(self, track_id: int | None = None):
+        if self.track_service is None:
+            return None, None
+        if track_id is None:
+            selected_option = self._selected_track_audio_verification_option()
+            if selected_option is None:
+                return None, None
+            track_id = int(selected_option[0])
+        snapshot = self.track_service.fetch_track_snapshot(track_id)
+        if snapshot is None or not self.track_service.has_media(track_id, "audio_file"):
+            return None, None
+        suffix = Path(snapshot.audio_file_filename or snapshot.audio_file_path or "").suffix.lower()
+        if suffix not in {".wav", ".flac"}:
+            return None, None
+        resolved = self.track_service.resolve_media_path(snapshot.audio_file_path)
+        if resolved is not None and resolved.exists():
+            return resolved, None
+        try:
+            audio_bytes, _mime_type = self.track_service.fetch_media_bytes(track_id, "audio_file")
+        except Exception:
+            return None, None
+        temp_root = Path(tempfile.mkdtemp(prefix="isrcm-auth-verify-"))
+        temp_path = temp_root / (snapshot.audio_file_filename or f"track-{track_id}{suffix}")
+        temp_path.write_bytes(audio_bytes)
+        return temp_path, temp_root
+
+    def _prompt_audio_authenticity_verification_source(self, track_label: str) -> str | None:
+        chooser = QMessageBox(self)
+        chooser.setWindowTitle("Verify Audio Authenticity")
+        chooser.setIcon(QMessageBox.Question)
+        chooser.setText("Choose which audio you want to verify.")
+        chooser.setInformativeText(
+            "Verify the selected catalog audio for "
+            f"'{track_label}', or choose an external WAV or FLAC file."
+        )
+        selected_button = chooser.addButton("Selected Track Audio", QMessageBox.AcceptRole)
+        external_button = chooser.addButton("Choose External File…", QMessageBox.ActionRole)
+        chooser.addButton("Cancel", QMessageBox.RejectRole)
+        chooser.setDefaultButton(selected_button)
+        chooser.exec()
+        clicked = chooser.clickedButton()
+        if clicked is selected_button:
+            return "selected"
+        if clicked is external_button:
+            return "external"
+        return None
+
+    def _pick_audio_authenticity_verification_file(self) -> Path | None:
+        chosen_path, _selected_filter = QFileDialog.getOpenFileName(
+            self,
+            "Choose Audio File to Verify",
+            "",
+            "Audio Files (*.wav *.flac)",
+        )
+        if not chosen_path:
+            return None
+        return Path(chosen_path).resolve()
+
+    def verify_audio_authenticity(self, path: str | None = None):
+        if not AUTHENTICITY_FEATURE_AVAILABLE:
+            QMessageBox.warning(
+                self,
+                "Verify Audio Authenticity",
+                authenticity_unavailable_message(),
+            )
+            return
+        if self.audio_authenticity_service is None:
+            QMessageBox.warning(self, "Verify Audio Authenticity", "Open a profile first.")
+            return
+        verification_path = Path(path).resolve() if path else None
+        cleanup_root = None
+        if verification_path is None:
+            selected_option = self._selected_track_audio_verification_option()
+            if selected_option is not None:
+                selected_track_id, selected_track_label = selected_option
+                choice = self._prompt_audio_authenticity_verification_source(selected_track_label)
+                if choice is None:
+                    return
+                if choice == "selected":
+                    verification_path, cleanup_root = (
+                        self._selected_track_audio_verification_candidate(selected_track_id)
+                    )
+                    if verification_path is None:
+                        QMessageBox.warning(
+                            self,
+                            "Verify Audio Authenticity",
+                            "The selected track no longer has a supported WAV or FLAC audio file. Choose an external file instead.",
+                        )
+                        verification_path = self._pick_audio_authenticity_verification_file()
+                else:
+                    verification_path = self._pick_audio_authenticity_verification_file()
+            else:
+                verification_path = self._pick_audio_authenticity_verification_file()
+        if verification_path is None:
+            return
+
+        def _worker(bundle, _ctx):
+            return bundle.audio_authenticity_service.verify_file(verification_path)
+
+        def _finished():
+            if cleanup_root is not None:
+                shutil.rmtree(cleanup_root, ignore_errors=True)
+
+        def _success(report):
+            self._log_event(
+                "authenticity.verify_audio",
+                "Verified audio authenticity",
+                path=str(verification_path),
+                status=report.status,
+                manifest_id=report.manifest_id,
+                key_id=report.key_id,
+            )
+            self._audit(
+                "VERIFY",
+                "AudioAuthenticity",
+                ref_id=str(verification_path),
+                details=report.status,
+            )
+            self._audit_commit()
+            AuthenticityVerificationDialog(report=report, parent=self).exec()
+
+        self._submit_background_bundle_task(
+            title="Verify Audio Authenticity",
+            description="Detecting watermark tokens and verifying the signed manifest...",
+            task_fn=_worker,
+            kind="read",
+            unique_key="authenticity.verify_audio",
+            on_success=_success,
+            on_finished=_finished,
+            on_error=lambda failure: self._show_background_task_error(
+                "Verify Audio Authenticity",
+                failure,
+                user_message="Could not verify audio authenticity:",
             ),
         )
 

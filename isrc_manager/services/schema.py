@@ -321,6 +321,7 @@ class DatabaseSchemaService:
         self._ensure_gs1_template_storage_table()
         self._ensure_release_tables()
         self._ensure_repertoire_tables()
+        self._ensure_authenticity_tables()
         self._ensure_blob_icon_schema()
         self._backfill_dual_storage_defaults()
 
@@ -468,6 +469,9 @@ class DatabaseSchemaService:
             elif version == 24:
                 self._apply_migration(24, self._mig_24_to_25)
                 version = 25
+            elif version == 25:
+                self._apply_migration(25, self._mig_25_to_26)
+                version = 26
             else:
                 self.logger.warning("Unknown migration path from version %s", version)
                 break
@@ -867,6 +871,9 @@ class DatabaseSchemaService:
         self._ensure_release_tables()
         self._ensure_repertoire_tables()
         self._backfill_dual_storage_defaults()
+
+    def _mig_25_to_26(self) -> None:
+        self._ensure_authenticity_tables()
 
     def _ensure_current_custom_field_value_schema(self) -> None:
         cols = self._table_columns("CustomFieldValues")
@@ -1980,6 +1987,83 @@ class DatabaseSchemaService:
         )
         self.cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_saved_searches_name ON SavedSearches(name)"
+        )
+
+    def _ensure_authenticity_tables(self) -> None:
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS AuthenticityKeys (
+                key_id TEXT PRIMARY KEY,
+                algorithm TEXT NOT NULL DEFAULT 'ed25519',
+                signer_label TEXT,
+                public_key_b64 TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                retired_at TEXT,
+                notes TEXT
+            )
+            """
+        )
+        self.cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_authenticity_keys_created_at ON AuthenticityKeys(created_at)"
+        )
+
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS AuthenticityManifests (
+                id INTEGER PRIMARY KEY,
+                track_id INTEGER NOT NULL,
+                reference_asset_id INTEGER,
+                key_id TEXT NOT NULL,
+                manifest_schema_version INTEGER NOT NULL DEFAULT 1,
+                watermark_version INTEGER NOT NULL DEFAULT 1,
+                manifest_id TEXT NOT NULL,
+                watermark_id INTEGER NOT NULL,
+                watermark_nonce INTEGER NOT NULL,
+                manifest_digest_prefix TEXT NOT NULL,
+                payload_canonical TEXT NOT NULL,
+                payload_sha256 TEXT NOT NULL,
+                signature_b64 TEXT NOT NULL,
+                reference_audio_sha256 TEXT NOT NULL,
+                reference_fingerprint_b64 TEXT NOT NULL,
+                reference_source_kind TEXT NOT NULL,
+                embed_settings_json TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                revoked_at TEXT,
+                FOREIGN KEY (track_id) REFERENCES Tracks(id) ON DELETE CASCADE,
+                FOREIGN KEY (reference_asset_id) REFERENCES AssetVersions(id) ON DELETE SET NULL,
+                FOREIGN KEY (key_id) REFERENCES AuthenticityKeys(key_id) ON DELETE RESTRICT
+            )
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_authenticity_manifests_manifest_id
+            ON AuthenticityManifests(manifest_id)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_authenticity_manifests_track_id
+            ON AuthenticityManifests(track_id)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_authenticity_manifests_watermark_id
+            ON AuthenticityManifests(watermark_id)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_authenticity_manifests_key_id
+            ON AuthenticityManifests(key_id)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_authenticity_manifests_payload_sha256
+            ON AuthenticityManifests(payload_sha256)
+            """
         )
 
     def _migrate_legacy_releases(self) -> None:

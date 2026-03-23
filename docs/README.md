@@ -18,6 +18,7 @@ Use the repository [`README.md`](../README.md) for the product overview, positio
 ## Catalog & Repertoire Workflows
 
 - [Catalog Workspace Workflows](catalog-workspace-workflows.md) explains the docked workspace model, tabbed managers, release assignment, saved searches, and relationship review.
+- [Audio Authenticity Workflow](audio-authenticity-workflow.md) explains signing keys, watermarked export copies, sidecar manifests, embedded metadata tags, verification from selected catalog audio or external files, and the feature's honest limits.
 - [Repertoire Knowledge System](repertoire_knowledge_system.md) explains how tracks, releases, works, parties, contracts, rights, documents, and assets fit together.
 
 ## Operations & Recovery
@@ -41,4 +42,5 @@ Use the repository [`README.md`](../README.md) for the product overview, positio
 - Start with the product [README](../README.md).
 - Read [Import and Merge Workflows](import-and-merge-workflows.md) if external metadata intake matters to you.
 - Read [Catalog Workspace Workflows](catalog-workspace-workflows.md) and [Repertoire Knowledge System](repertoire_knowledge_system.md) for daily catalog operations.
+- Read [Audio Authenticity Workflow](audio-authenticity-workflow.md) if you need signed watermarked exports or want to verify audio files against the current catalog.
 - Read [Diagnostics and Recovery](diagnostics-and-recovery.md) and [Undo, History, and Snapshots](undo_redo_strategy.md) once you are working with larger or riskier catalog changes.

@@ -195,6 +195,18 @@ class BackgroundAppServiceIntegrationTests(unittest.TestCase):
         join_thread_or_fail(second_thread, timeout_seconds=2.0, description="second write thread")
         self.assertEqual(order, ["first", "second"])
 
+    def test_background_bundle_exposes_authenticity_services(self):
+        with self.factory.open_bundle() as bundle:
+            record = bundle.authenticity_key_service.generate_keypair(signer_label="Background")
+
+            self.assertIsNotNone(bundle.authenticity_manifest_service)
+            self.assertIsNotNone(bundle.audio_watermark_service)
+            self.assertIsNotNone(bundle.audio_authenticity_service)
+            self.assertEqual(bundle.authenticity_key_service.default_key_id(), record.key_id)
+            self.assertTrue(
+                bundle.authenticity_key_service.private_key_path(record.key_id).exists()
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

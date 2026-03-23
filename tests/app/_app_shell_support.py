@@ -2482,6 +2482,167 @@ class AppShellTestCase(unittest.TestCase):
         finally:
             dialog.close()
 
+    def case_authenticity_actions_are_present_in_catalog_and_settings_menus(self):
+        self.assertEqual(
+            self.window.export_authenticity_watermarked_audio_action.text(),
+            "Export Authenticity Watermarked Audio…",
+        )
+        self.assertEqual(
+            self.window.verify_audio_authenticity_action.text(),
+            "Verify Audio Authenticity…",
+        )
+        self.assertEqual(
+            self.window.authenticity_keys_action.text(),
+            "Audio Authenticity Keys…",
+        )
+        action_ids = {entry["id"] for entry in self.window._action_ribbon_specs}
+        self.assertIn("authenticity_export_audio", action_ids)
+        self.assertIn("authenticity_verify_audio", action_ids)
+        self.assertIn("authenticity_keys", action_ids)
+
+    def case_verify_audio_authenticity_can_choose_external_file_when_track_is_selected(self):
+        track_id = self._create_track(index=301, title="Catalog Verify Track", album_title="Single")
+        selected_audio = self._create_wav_file("catalog-verify.wav")
+        external_audio = self._create_wav_file("external-verify.wav")
+        self.window.track_service.set_media_path(track_id, "audio_file", selected_audio)
+        self.window.refresh_table()
+        self._select_track_ids([track_id])
+
+        captured_paths: list[Path] = []
+
+        def _fake_verify(_service, path):
+            resolved = Path(path).resolve()
+            captured_paths.append(resolved)
+            return SimpleNamespace(
+                status="no_watermark_detected",
+                message="No watermark was detected in the inspected audio.",
+                inspected_path=str(resolved),
+                key_id=None,
+                manifest_id=None,
+                watermark_id=None,
+                resolution_source=None,
+                signature_valid=None,
+                exact_hash_match=None,
+                fingerprint_similarity=None,
+                extraction_confidence=None,
+                sidecar_path=None,
+                details=[],
+            )
+
+        with (
+            mock.patch.object(
+                app_module.App,
+                "_submit_background_bundle_task",
+                autospec=True,
+                side_effect=self._run_bundle_task_inline,
+            ),
+            mock.patch.object(
+                app_module.App,
+                "_prompt_audio_authenticity_verification_source",
+                autospec=True,
+                return_value="external",
+            ) as source_prompt_mock,
+            mock.patch.object(
+                app_module.QFileDialog,
+                "getOpenFileName",
+                return_value=(str(external_audio), "Audio Files (*.wav *.flac)"),
+            ) as picker_mock,
+            mock.patch.object(
+                app_module.AudioAuthenticityService,
+                "verify_file",
+                autospec=True,
+                side_effect=_fake_verify,
+            ),
+            mock.patch.object(
+                app_module.AuthenticityVerificationDialog,
+                "exec",
+                return_value=app_module.QDialog.Accepted,
+            ),
+        ):
+            self.window.verify_audio_authenticity()
+
+        self.assertEqual(captured_paths, [external_audio.resolve()])
+        source_prompt_mock.assert_called_once()
+        picker_mock.assert_called_once()
+
+    def case_verify_audio_authenticity_can_use_selected_database_audio(self):
+        track_id = self._create_track(
+            index=302, title="Database Verify Track", album_title="Single"
+        )
+        source_audio = self._create_wav_file("database-verify.wav")
+        expected_bytes = source_audio.read_bytes()
+        self.window.track_service.set_media_path(
+            track_id,
+            "audio_file",
+            source_audio,
+            storage_mode=app_module.STORAGE_MODE_DATABASE,
+        )
+        self.window.refresh_table()
+        self._select_track_ids([track_id])
+
+        captured: dict[str, object] = {}
+
+        def _fake_verify(_service, path):
+            resolved = Path(path).resolve()
+            captured["path"] = resolved
+            captured["exists_during_verify"] = resolved.exists()
+            captured["bytes_during_verify"] = resolved.read_bytes()
+            return SimpleNamespace(
+                status="no_watermark_detected",
+                message="No watermark was detected in the inspected audio.",
+                inspected_path=str(resolved),
+                key_id=None,
+                manifest_id=None,
+                watermark_id=None,
+                resolution_source=None,
+                signature_valid=None,
+                exact_hash_match=None,
+                fingerprint_similarity=None,
+                extraction_confidence=None,
+                sidecar_path=None,
+                details=[],
+            )
+
+        with (
+            mock.patch.object(
+                app_module.App,
+                "_submit_background_bundle_task",
+                autospec=True,
+                side_effect=self._run_bundle_task_inline,
+            ),
+            mock.patch.object(
+                app_module.App,
+                "_prompt_audio_authenticity_verification_source",
+                autospec=True,
+                return_value="selected",
+            ) as source_prompt_mock,
+            mock.patch.object(
+                app_module.QFileDialog,
+                "getOpenFileName",
+            ) as picker_mock,
+            mock.patch.object(
+                app_module.AudioAuthenticityService,
+                "verify_file",
+                autospec=True,
+                side_effect=_fake_verify,
+            ),
+            mock.patch.object(
+                app_module.AuthenticityVerificationDialog,
+                "exec",
+                return_value=app_module.QDialog.Accepted,
+            ),
+        ):
+            self.window.verify_audio_authenticity()
+
+        source_prompt_mock.assert_called_once()
+        picker_mock.assert_not_called()
+        self.assertTrue(bool(captured.get("exists_during_verify")))
+        self.assertEqual(captured.get("bytes_during_verify"), expected_bytes)
+        temp_path = captured.get("path")
+        self.assertIsInstance(temp_path, Path)
+        assert isinstance(temp_path, Path)
+        self.assertFalse(temp_path.exists())
+
 
 if __name__ == "__main__":
     unittest.main()
