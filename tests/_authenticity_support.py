@@ -16,6 +16,8 @@ from isrc_manager.authenticity import (
     AuthenticityKeyService,
     AuthenticityManifestService,
 )
+from isrc_manager.forensics import ForensicExportCoordinator, ForensicWatermarkService
+from isrc_manager.media import AudioConversionService
 from isrc_manager.releases import ReleaseService
 from isrc_manager.rights import RightsService
 from isrc_manager.services import DatabaseSchemaService
@@ -68,6 +70,16 @@ class AuthenticityWorkflowTestCase(unittest.TestCase):
             watermark_service=self.watermark_service,
             tag_service=self.audio_tag_service,
             app_version="test-app",
+        )
+        self.forensic_watermark_service = ForensicWatermarkService()
+        self.forensic_service = ForensicExportCoordinator(
+            conn=self.conn,
+            track_service=self.track_service,
+            release_service=self.release_service,
+            tag_service=self.audio_tag_service,
+            key_service=self.key_service,
+            conversion_service=AudioConversionService(),
+            watermark_service=self.forensic_watermark_service,
         )
         self._track_counter = 0
 

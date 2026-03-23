@@ -46,6 +46,7 @@ packages = [
   "isrc_manager.contracts",
   "isrc_manager.domain",
   "isrc_manager.exchange",
+  "isrc_manager.forensics",
   "isrc_manager.history",
   "isrc_manager.media",
   "isrc_manager.parties",

@@ -2534,6 +2534,10 @@ class AppShellTestCase(unittest.TestCase):
             "Export Managed Audio Derivatives…",
         )
         self.assertEqual(
+            self.window.export_forensic_watermarked_audio_action.text(),
+            "Export Forensic Watermarked Audio…",
+        )
+        self.assertEqual(
             self.window.convert_external_audio_files_action.text(),
             "External Audio Conversion Utility…",
         )
@@ -2553,6 +2557,14 @@ class AppShellTestCase(unittest.TestCase):
             "No managed derivative registration",
             self.window.export_authenticity_provenance_audio_action.toolTip(),
         )
+        self.assertIn(
+            "Recipient-specific lossy delivery export",
+            self.window.export_forensic_watermarked_audio_action.toolTip(),
+        )
+        self.assertEqual(
+            self.window.inspect_forensic_watermark_action.text(),
+            "Inspect Forensic Watermark…",
+        )
         self.assertEqual(
             self.window.verify_audio_authenticity_action.text(),
             "Verify Audio Authenticity…",
@@ -2563,10 +2575,12 @@ class AppShellTestCase(unittest.TestCase):
         )
         action_ids = {entry["id"] for entry in self.window._action_ribbon_specs}
         self.assertIn("convert_selected_audio", action_ids)
+        self.assertIn("forensic_export_audio", action_ids)
         self.assertIn("convert_external_audio", action_ids)
         self.assertIn("authenticity_export_audio", action_ids)
         self.assertIn("authenticity_export_provenance_audio", action_ids)
         self.assertIn("authenticity_verify_audio", action_ids)
+        self.assertIn("forensic_inspect_audio", action_ids)
         self.assertIn("authenticity_keys", action_ids)
 
     def case_authenticity_table_context_menu_exposes_export_actions(self):
@@ -2592,9 +2606,11 @@ class AppShellTestCase(unittest.TestCase):
         self.assertIn("Import Tags from Audio…", texts)
         self.assertIn("Write Tags to Exported Audio…", texts)
         self.assertIn("Export Managed Audio Derivatives…", texts)
+        self.assertIn("Export Forensic Watermarked Audio…", texts)
         self.assertIn("External Audio Conversion Utility…", texts)
         self.assertIn("Export Watermark-Authentic Masters…", texts)
         self.assertIn("Export Provenance-Linked Lossy Copies…", texts)
+        self.assertIn("Inspect Forensic Watermark…", texts)
         audio_col = self.window._column_index_by_header("Audio File")
         self.assertGreaterEqual(audio_col, 0)
         lossy_item = self.window.table.item(row, audio_col)

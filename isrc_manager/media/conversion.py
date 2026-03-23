@@ -15,6 +15,7 @@ from isrc_manager.tags import AudioTagData, AudioTagService
 from .audio_formats import (
     AudioFormatProfile,
     audio_format_profiles,
+    forensic_target_profiles,
     managed_derivative_target_profiles,
     managed_lossy_target_profiles,
 )
@@ -73,6 +74,7 @@ class AudioConversionResult:
 class AudioConversionCapabilities:
     ffmpeg_path: Path | None
     managed_targets: tuple[AudioFormatProfile, ...]
+    managed_forensic_targets: tuple[AudioFormatProfile, ...]
     managed_lossy_targets: tuple[AudioFormatProfile, ...]
     external_targets: tuple[AudioFormatProfile, ...]
 
@@ -84,6 +86,7 @@ class AudioConversionService:
         resolved = Path(ffmpeg_path).expanduser() if ffmpeg_path else None
         self._ffmpeg_path = resolved or self._find_ffmpeg()
         self._encoders: set[str] | None = None
+        self._managed_forensic_targets: tuple[AudioFormatProfile, ...] | None = None
         self._managed_lossy_targets: tuple[AudioFormatProfile, ...] | None = None
 
     @staticmethod
@@ -158,7 +161,7 @@ class AudioConversionService:
             handle.setframerate(48000)
             handle.writeframes(silent_frame * frame_count)
 
-    def _managed_lossy_target_usable(self, profile: AudioFormatProfile) -> bool:
+    def _managed_tagged_target_usable(self, profile: AudioFormatProfile) -> bool:
         if not self.is_available() or not self._supports_target_profile(profile):
             return False
         try:
@@ -181,6 +184,23 @@ class AudioConversionService:
                 return written_tags.title == probe_tags.title
         except Exception:
             return False
+
+    # Backwards-compatible seam retained for existing managed-lossy tests.
+    def _managed_lossy_target_usable(self, profile: AudioFormatProfile) -> bool:
+        return self._managed_tagged_target_usable(profile)
+
+    def _managed_forensic_capabilities(self) -> tuple[AudioFormatProfile, ...]:
+        if self._managed_forensic_targets is not None:
+            return self._managed_forensic_targets
+        if not self.is_available():
+            self._managed_forensic_targets = tuple()
+            return self._managed_forensic_targets
+        supported: list[AudioFormatProfile] = []
+        for profile in forensic_target_profiles():
+            if self._managed_tagged_target_usable(profile):
+                supported.append(profile)
+        self._managed_forensic_targets = tuple(supported)
+        return self._managed_forensic_targets
 
     def _managed_lossy_capabilities(self) -> tuple[AudioFormatProfile, ...]:
         if self._managed_lossy_targets is not None:
@@ -205,6 +225,7 @@ class AudioConversionService:
             if self.is_available()
             else tuple()
         )
+        managed_forensic_targets = self._managed_forensic_capabilities()
         managed_lossy_targets = self._managed_lossy_capabilities()
         external_targets = (
             tuple(
@@ -218,6 +239,7 @@ class AudioConversionService:
         return AudioConversionCapabilities(
             ffmpeg_path=self.ffmpeg_path(),
             managed_targets=managed_targets,
+            managed_forensic_targets=managed_forensic_targets,
             managed_lossy_targets=managed_lossy_targets,
             external_targets=external_targets,
         )
@@ -227,6 +249,9 @@ class AudioConversionService:
 
     def managed_authenticity_target_ids(self) -> tuple[str, ...]:
         return self.managed_target_ids()
+
+    def managed_forensic_target_ids(self) -> tuple[str, ...]:
+        return tuple(profile.id for profile in self.capabilities().managed_forensic_targets)
 
     def managed_lossy_target_ids(self) -> tuple[str, ...]:
         return tuple(profile.id for profile in self.capabilities().managed_lossy_targets)
@@ -251,6 +276,8 @@ class AudioConversionService:
         clean_id = str(format_id or "").strip().lower()
         if capability_group == "managed_authenticity":
             supported = self.managed_authenticity_target_ids()
+        elif capability_group == "managed_forensic":
+            supported = self.managed_forensic_target_ids()
         elif capability_group == "managed_lossy":
             supported = self.managed_lossy_target_ids()
         elif capability_group in {"managed", "managed_any"}:

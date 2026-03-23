@@ -58,6 +58,10 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
             row[1]
             for row in self.conn.execute("PRAGMA table_info(TrackAudioDerivatives)").fetchall()
         }
+        forensic_export_columns = {
+            row[1]
+            for row in self.conn.execute("PRAGMA table_info(ForensicWatermarkExports)").fetchall()
+        }
         track_indexes = {
             row[1] for row in self.conn.execute("PRAGMA index_list(Tracks)").fetchall()
         }
@@ -75,6 +79,10 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
         track_audio_derivative_indexes = {
             row[1]
             for row in self.conn.execute("PRAGMA index_list(TrackAudioDerivatives)").fetchall()
+        }
+        forensic_export_indexes = {
+            row[1]
+            for row in self.conn.execute("PRAGMA index_list(ForensicWatermarkExports)").fetchall()
         }
         triggers = {
             row[0]
@@ -108,6 +116,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
         self.assertIn("AuthenticityManifests", tables)
         self.assertIn("DerivativeExportBatches", tables)
         self.assertIn("TrackAudioDerivatives", tables)
+        self.assertIn("ForensicWatermarkExports", tables)
         self.assertIn("vw_Licenses", tables)
         self.assertIn("contract_number", gs1_columns)
         self.assertIn("visible_in_history", history_entry_columns)
@@ -181,6 +190,31 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
             }
             <= track_audio_derivative_columns
         )
+        self.assertTrue(
+            {
+                "forensic_export_id",
+                "batch_id",
+                "derivative_export_id",
+                "track_id",
+                "key_id",
+                "token_version",
+                "forensic_watermark_version",
+                "token_id",
+                "binding_crc32",
+                "recipient_label",
+                "share_label",
+                "output_format",
+                "output_filename",
+                "output_sha256",
+                "output_size_bytes",
+                "source_lineage_ref",
+                "created_at",
+                "last_verified_at",
+                "last_verification_status",
+                "last_verification_confidence",
+            }
+            <= forensic_export_columns
+        )
         self.assertTrue({"blob_value", "mime_type", "size_bytes"} <= value_columns)
         self.assertTrue(
             {
@@ -249,6 +283,19 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
             "idx_track_audio_derivatives_derivative_manifest_id",
             track_audio_derivative_indexes,
         )
+        self.assertIn("idx_forensic_watermark_exports_export_id", forensic_export_indexes)
+        self.assertIn(
+            "idx_forensic_watermark_exports_token_binding",
+            forensic_export_indexes,
+        )
+        self.assertIn("idx_forensic_watermark_exports_batch_id", forensic_export_indexes)
+        self.assertIn(
+            "idx_forensic_watermark_exports_derivative_export_id",
+            forensic_export_indexes,
+        )
+        self.assertIn("idx_forensic_watermark_exports_track_id", forensic_export_indexes)
+        self.assertIn("idx_forensic_watermark_exports_output_sha256", forensic_export_indexes)
+        self.assertIn("idx_forensic_watermark_exports_created_at", forensic_export_indexes)
         self.assertIn("trg_auditlog_no_update", triggers)
 
     def case_migrate_20_to_21_adds_repertoire_tables(self):
@@ -476,6 +523,60 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
             self.assertTrue(
                 {"workflow_kind", "derivative_kind", "authenticity_basis"}
                 <= track_audio_derivative_columns
+            )
+            self.assertEqual(service.get_db_version(), SCHEMA_TARGET)
+        finally:
+            conn.close()
+
+    def case_migrate_28_to_29_adds_forensic_export_ledger(self):
+        conn = sqlite3.connect(":memory:")
+        try:
+            service = DatabaseSchemaService(conn)
+            service.init_db()
+            conn.execute("PRAGMA user_version = 28")
+            conn.execute("DROP TABLE IF EXISTS ForensicWatermarkExports")
+            conn.commit()
+
+            service.migrate_schema()
+
+            forensic_export_columns = {
+                row[1]
+                for row in conn.execute("PRAGMA table_info(ForensicWatermarkExports)").fetchall()
+            }
+            forensic_export_indexes = {
+                row[1]
+                for row in conn.execute("PRAGMA index_list(ForensicWatermarkExports)").fetchall()
+            }
+
+            self.assertTrue(
+                {
+                    "forensic_export_id",
+                    "batch_id",
+                    "derivative_export_id",
+                    "track_id",
+                    "key_id",
+                    "token_version",
+                    "forensic_watermark_version",
+                    "token_id",
+                    "binding_crc32",
+                    "recipient_label",
+                    "share_label",
+                    "output_format",
+                    "output_filename",
+                    "output_sha256",
+                    "output_size_bytes",
+                    "source_lineage_ref",
+                    "created_at",
+                    "last_verified_at",
+                    "last_verification_status",
+                    "last_verification_confidence",
+                }
+                <= forensic_export_columns
+            )
+            self.assertIn("idx_forensic_watermark_exports_export_id", forensic_export_indexes)
+            self.assertIn(
+                "idx_forensic_watermark_exports_token_binding",
+                forensic_export_indexes,
             )
             self.assertEqual(service.get_db_version(), SCHEMA_TARGET)
         finally:

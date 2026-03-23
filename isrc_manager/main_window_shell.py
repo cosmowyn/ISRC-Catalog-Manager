@@ -379,6 +379,17 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         slot=app.convert_selected_audio,
     )
     catalog_menu.addAction(app.convert_selected_audio_action)
+    app.export_forensic_watermarked_audio_action = app._create_action(
+        "Export Forensic Watermarked Audio…",
+        slot=app.export_forensic_watermarked_audio,
+    )
+    app.export_forensic_watermarked_audio_action.setStatusTip(
+        "Recipient-specific lossy delivery export with catalog metadata, a forensic watermark, derivative lineage, and optional ZIP packaging."
+    )
+    app.export_forensic_watermarked_audio_action.setToolTip(
+        app.export_forensic_watermarked_audio_action.statusTip()
+    )
+    catalog_menu.addAction(app.export_forensic_watermarked_audio_action)
     app.convert_external_audio_files_action = app._create_action(
         "External Audio Conversion Utility…",
         slot=app.convert_external_audio_files,
@@ -406,6 +417,17 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         app.export_authenticity_provenance_audio_action.statusTip()
     )
     catalog_menu.addAction(app.export_authenticity_provenance_audio_action)
+    app.inspect_forensic_watermark_action = app._create_action(
+        "Inspect Forensic Watermark…",
+        slot=app.inspect_forensic_watermark,
+    )
+    app.inspect_forensic_watermark_action.setStatusTip(
+        "Inspect a suspicious audio file and resolve any forensic watermark evidence against the open profile's export ledger."
+    )
+    app.inspect_forensic_watermark_action.setToolTip(
+        app.inspect_forensic_watermark_action.statusTip()
+    )
+    catalog_menu.addAction(app.inspect_forensic_watermark_action)
     app.verify_audio_authenticity_action = app._create_action(
         "Verify Audio Authenticity…",
         slot=app.verify_audio_authenticity,
@@ -426,6 +448,7 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     catalog_menu.addAction(app.gs1_metadata_action)
     file_menu.addSeparator()
     file_menu.addAction(app.convert_external_audio_files_action)
+    file_menu.addAction(app.inspect_forensic_watermark_action)
 
     repertoire_menu = file_menu.addMenu("Contracts and Rights Exchange")
     app.export_repertoire_json_action = app._create_action(

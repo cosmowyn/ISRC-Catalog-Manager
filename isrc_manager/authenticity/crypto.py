@@ -45,6 +45,7 @@ else:  # pragma: no cover - imported when dependency is present
     _CRYPTOGRAPHY_IMPORT_ERROR = None
 
 WATERMARK_KEY_INFO = b"isrcm-watermark-v1"
+FORENSIC_WATERMARK_KEY_INFO = b"isrcm-forensic-watermark-v1"
 
 
 def cryptography_available() -> bool:
@@ -160,11 +161,19 @@ def load_private_key(path: str | Path) -> Ed25519PrivateKey:
     return key
 
 
-def derive_watermark_key(private_key: Ed25519PrivateKey) -> bytes:
+def _derive_named_watermark_key(private_key: Ed25519PrivateKey, *, info: bytes) -> bytes:
     require_cryptography()
     return _HKDF(
         algorithm=_hashes.SHA256(),
         length=32,
         salt=None,
-        info=WATERMARK_KEY_INFO,
+        info=bytes(info),
     ).derive(private_key_raw_bytes(private_key))
+
+
+def derive_watermark_key(private_key: Ed25519PrivateKey) -> bytes:
+    return _derive_named_watermark_key(private_key, info=WATERMARK_KEY_INFO)
+
+
+def derive_forensic_watermark_key(private_key: Ed25519PrivateKey) -> bytes:
+    return _derive_named_watermark_key(private_key, info=FORENSIC_WATERMARK_KEY_INFO)

@@ -271,6 +271,15 @@ from isrc_manager.exchange.dialogs import ExchangeImportDialog
 from isrc_manager.exchange.repertoire_service import RepertoireExchangeService
 from isrc_manager.exchange.models import ExchangeImportReport, ExchangeInspection
 from isrc_manager.exchange.service import ExchangeService
+from isrc_manager.forensics import (
+    ForensicExportCoordinator,
+    ForensicExportDialog,
+    ForensicExportRequest,
+    ForensicExportResult,
+    ForensicInspectionDialog,
+    ForensicInspectionReport,
+    ForensicWatermarkService,
+)
 from isrc_manager.parties import PartyService
 from isrc_manager.parties.dialogs import PartyManagerDialog, PartyManagerPanel
 from isrc_manager.quality.dialogs import QualityDashboardDialog
@@ -5629,6 +5638,8 @@ class App(QMainWindow):
         self.authenticity_manifest_service = None
         self.audio_watermark_service = None
         self.audio_authenticity_service = None
+        self.forensic_watermark_service = None
+        self.forensic_export_service = None
         self.audio_tag_service = None
         self.tagged_audio_export_service = None
         self.exchange_service = None
@@ -7697,6 +7708,32 @@ class App(QMainWindow):
             and AudioAuthenticityService is not None
             else None
         )
+        self.forensic_watermark_service = (
+            ForensicWatermarkService()
+            if self.conn is not None
+            and self.authenticity_key_service is not None
+            and ForensicWatermarkService is not None
+            else None
+        )
+        self.forensic_export_service = (
+            ForensicExportCoordinator(
+                conn=self.conn,
+                track_service=self.track_service,
+                release_service=self.release_service,
+                tag_service=self.audio_tag_service,
+                key_service=self.authenticity_key_service,
+                conversion_service=self.audio_conversion_service,
+                watermark_service=self.forensic_watermark_service,
+            )
+            if self.conn is not None
+            and self.track_service is not None
+            and self.audio_tag_service is not None
+            and self.authenticity_key_service is not None
+            and self.audio_conversion_service is not None
+            and self.forensic_watermark_service is not None
+            and ForensicExportCoordinator is not None
+            else None
+        )
         self.repertoire_workflow_service = (
             RepertoireWorkflowService(self.conn) if self.conn is not None else None
         )
@@ -7707,7 +7744,8 @@ class App(QMainWindow):
 
     def _refresh_audio_conversion_action_states(self) -> None:
         conversion_available = bool(
-            self.audio_conversion_service is not None and self.audio_conversion_service.is_available()
+            self.audio_conversion_service is not None
+            and self.audio_conversion_service.is_available()
         )
         capabilities = (
             self.audio_conversion_service.capabilities()
@@ -7724,6 +7762,12 @@ class App(QMainWindow):
             self.track_service is not None
             and capabilities is not None
             and capabilities.managed_lossy_targets
+        )
+        forensic_available = bool(
+            self.track_service is not None
+            and self.forensic_export_service is not None
+            and capabilities is not None
+            and capabilities.managed_forensic_targets
         )
         managed_available = bool(managed_authentic_available or managed_lossy_available)
         external_available = bool(
@@ -7746,15 +7790,37 @@ class App(QMainWindow):
                 "No supported managed derivative targets are available in this ffmpeg build."
             )
         else:
-            managed_message = self._audio_conversion_unavailable_message() or "Open a profile first."
+            managed_message = (
+                self._audio_conversion_unavailable_message() or "Open a profile first."
+            )
         external_message = (
             "Utility conversion only: no catalog metadata, no watermarking, and no managed derivative registration."
             if external_available
             else "External audio conversion utility requires ffmpeg on PATH."
         )
+        forensic_message = (
+            "Export recipient-specific lossy delivery copies for leak tracing. This stays separate from signed authenticity master exports."
+            if forensic_available
+            else (
+                "Forensic watermark export requires an open profile, available conversion targets, and a local authenticity key."
+                if self.track_service is not None
+                else "Open a profile first."
+            )
+        )
+        forensic_inspect_message = (
+            "Inspect a suspicious file and attempt forensic watermark resolution against the open profile's export ledger."
+            if self.forensic_export_service is not None
+            else "Open a profile with forensic watermark services available first."
+        )
         for attr_name, enabled, status_tip in (
             ("convert_selected_audio_action", managed_available, managed_message),
             ("convert_external_audio_files_action", external_available, external_message),
+            ("export_forensic_watermarked_audio_action", forensic_available, forensic_message),
+            (
+                "inspect_forensic_watermark_action",
+                self.forensic_export_service is not None,
+                forensic_inspect_message,
+            ),
         ):
             action = getattr(self, attr_name, None)
             if action is None:
@@ -9376,6 +9442,8 @@ class App(QMainWindow):
         self.authenticity_manifest_service = None
         self.audio_watermark_service = None
         self.audio_authenticity_service = None
+        self.forensic_watermark_service = None
+        self.forensic_export_service = None
         self.party_service = None
         self.work_service = None
         self.contract_service = None
@@ -10551,8 +10619,15 @@ class App(QMainWindow):
                 "id": "convert_selected_audio",
                 "label": "Managed Audio Derivatives",
                 "category": "Catalog",
-                "description": "Export managed audio derivatives with catalog tags, hashing, and derivative tracking. Lossless targets stay on the watermark-authentic path; lossy targets export as tagged managed derivatives.",
+                "description": "Export managed audio derivatives with catalog tags, hashing, and derivative tracking. Lossless targets stay on the watermark-authentic path; lossy targets export as tagged managed derivatives without recipient-specific forensic watermarking.",
                 "action": self.convert_selected_audio_action,
+            },
+            {
+                "id": "forensic_export_audio",
+                "label": "Forensic Watermarked Audio",
+                "category": "Catalog",
+                "description": "Export recipient-specific lossy delivery copies for leak tracing with catalog metadata, final hashing, derivative lineage, and forensic export registration.",
+                "action": self.export_forensic_watermarked_audio_action,
             },
             {
                 "id": "authenticity_export_audio",
@@ -10574,6 +10649,13 @@ class App(QMainWindow):
                 "category": "Catalog",
                 "description": "Verify either a direct authenticity watermark or a signed provenance lineage sidecar.",
                 "action": self.verify_audio_authenticity_action,
+            },
+            {
+                "id": "forensic_inspect_audio",
+                "label": "Inspect Forensic Watermark",
+                "category": "Catalog",
+                "description": "Inspect a suspicious audio file and attempt forensic watermark resolution against the export ledger in the open profile.",
+                "action": self.inspect_forensic_watermark_action,
             },
             {
                 "id": "convert_external_audio",
@@ -12138,9 +12220,7 @@ class App(QMainWindow):
             f"{'s' if len(entries) != 1 else ''} as primary catalog audio.\n\n"
             "Lossy primary audio is shown with the lossy badge, and direct watermark/master "
             "workflows use WAV, FLAC, or AIFF.\n\n"
-            "Continue?\n\n- "
-            + "\n- ".join(entries[:8])
-            + extra_note
+            "Continue?\n\n- " + "\n- ".join(entries[:8]) + extra_note
         )
         return (
             QMessageBox.question(
@@ -14441,7 +14521,10 @@ class App(QMainWindow):
         return filename
 
     def _audio_conversion_unavailable_message(self) -> str:
-        if self.audio_conversion_service is None or not self.audio_conversion_service.is_available():
+        if (
+            self.audio_conversion_service is None
+            or not self.audio_conversion_service.is_available()
+        ):
             return (
                 "Managed audio derivative export requires ffmpeg on PATH. "
                 "Install ffmpeg to enable derivative export and the external conversion utility."
@@ -14462,6 +14545,8 @@ class App(QMainWindow):
         capabilities = self.audio_conversion_service.capabilities()
         if capability_group == "managed_authenticity":
             profiles = capabilities.managed_targets
+        elif capability_group == "managed_forensic":
+            profiles = capabilities.managed_forensic_targets
         elif capability_group == "managed_lossy":
             profiles = capabilities.managed_lossy_targets
         elif capability_group in {"managed", "managed_any"}:
@@ -14518,16 +14603,19 @@ class App(QMainWindow):
             prompt=(
                 "Choose the managed derivative output format. "
                 "Lossless targets stay on the watermark-authentic path; "
-                "lossy targets export as tagged managed derivatives. "
+                "lossy targets export as tagged managed derivatives without recipient-specific forensic watermarking. "
                 "Use the External Audio Conversion Utility when you do not want catalog metadata or derivative tracking."
             ),
             capability_group="managed_any",
         )
         if not output_format:
             return
-        authenticity_required = self.audio_conversion_service is not None and self.audio_conversion_service.is_supported_target(
-            output_format,
-            capability_group="managed_authenticity",
+        authenticity_required = (
+            self.audio_conversion_service is not None
+            and self.audio_conversion_service.is_supported_target(
+                output_format,
+                capability_group="managed_authenticity",
+            )
         )
         if authenticity_required and self.audio_authenticity_service is None:
             QMessageBox.warning(
@@ -14637,9 +14725,228 @@ class App(QMainWindow):
             ),
         )
 
+    def export_forensic_watermarked_audio(self, track_ids: list[int] | None = None):
+        title = "Export Forensic Watermarked Audio"
+        if self.track_service is None:
+            QMessageBox.warning(self, title, "Open a profile first.")
+            return
+        if self.forensic_export_service is None or self.audio_conversion_service is None:
+            QMessageBox.warning(
+                self,
+                title,
+                "Forensic watermark export requires an open profile, a local authenticity key, and managed conversion support.",
+            )
+            return
+        unavailable_message = self._audio_conversion_unavailable_message()
+        if unavailable_message:
+            QMessageBox.warning(self, title, unavailable_message)
+            return
+        selected_ids = self._selected_track_ids_with_audio(track_ids)
+        if not selected_ids:
+            QMessageBox.information(
+                self,
+                title,
+                "Select one or more tracks with attached primary audio first.",
+            )
+            return
+        format_labels = [
+            (
+                profile.id,
+                (
+                    f"{profile.label} (lossy forensic delivery copy)"
+                    if profile.lossy
+                    else f"{profile.label} (lossless forensic copy)"
+                ),
+            )
+            for profile in self.audio_conversion_service.capabilities().managed_forensic_targets
+        ]
+        if not format_labels:
+            QMessageBox.warning(
+                self,
+                title,
+                "No forensic watermark export targets are available in this runtime.",
+            )
+            return
+        if ForensicExportDialog is None:
+            output_format = self._prompt_audio_conversion_format(
+                title=title,
+                prompt=(
+                    "Choose the lossy forensic delivery output format. "
+                    "These exports are recipient-specific leak-tracing copies, not signed authenticity masters."
+                ),
+                capability_group="managed_forensic",
+            )
+            recipient_label = None
+            share_label = None
+        else:
+            export_dialog = ForensicExportDialog(format_labels=format_labels, parent=self)
+            if export_dialog.exec() != QDialog.Accepted:
+                return
+            output_format = export_dialog.selected_format_id()
+            recipient_label = export_dialog.recipient_label()
+            share_label = export_dialog.share_label()
+        if not output_format:
+            return
+        output_dir = QFileDialog.getExistingDirectory(
+            self,
+            "Choose Export Folder for Forensic Watermarked Audio",
+            str(self.exports_dir / "forensic_audio"),
+        )
+        if not output_dir:
+            return
+
+        def _worker(bundle, ctx):
+            return bundle.forensic_export_service.export(
+                ForensicExportRequest(
+                    track_ids=selected_ids,
+                    output_dir=output_dir,
+                    output_format=output_format,
+                    recipient_label=recipient_label,
+                    share_label=share_label,
+                    profile_name=self._current_profile_name(),
+                ),
+                progress_callback=lambda value, maximum, message: ctx.report_progress(
+                    value=value,
+                    maximum=maximum,
+                    message=message,
+                ),
+                is_cancelled=ctx.is_cancelled,
+            )
+
+        def _success(result: ForensicExportResult):
+            self._log_event(
+                "forensics.export_audio",
+                "Exported forensic watermarked audio copies",
+                output_dir=output_dir,
+                output_format=output_format,
+                recipient_label=recipient_label,
+                share_label=share_label,
+                exported=result.exported,
+                skipped=result.skipped,
+                batch_public_id=result.batch_public_id,
+                zip_path=result.zip_path,
+                warnings=result.warnings,
+            )
+            self._audit(
+                "EXPORT",
+                "ForensicAudio",
+                ref_id=result.batch_public_id,
+                details=(
+                    f"exported={result.exported}; skipped={result.skipped}; "
+                    f"format={output_format}; recipient={recipient_label or ''}; share={share_label or ''}"
+                ),
+            )
+            self._audit_commit()
+            target_text = result.zip_path or "\n".join(result.written_paths[:3]) or output_dir
+            QMessageBox.information(
+                self,
+                title,
+                f"Exported {result.exported} forensic watermarked cop{'y' if result.exported == 1 else 'ies'}."
+                f"\n\nOutput:\n{target_text}"
+                f"\n\nThese are recipient-specific lossy {output_format.upper()} leak-tracing derivatives. They remain distinct from direct authenticity master exports."
+                f"\n\nSkipped: {result.skipped}"
+                + (
+                    "\n\nWarnings:\n- " + "\n- ".join(result.warnings[:12])
+                    if result.warnings
+                    else ""
+                ),
+            )
+
+        self._submit_background_bundle_task(
+            title=title,
+            description=(
+                "Converting selected catalog audio into lossy delivery copies, writing tags, embedding recipient-specific forensic watermarks, hashing final files, and registering forensic export lineage..."
+            ),
+            task_fn=_worker,
+            kind="write",
+            unique_key="forensics.export_audio",
+            cancellable=True,
+            on_success=_success,
+            on_cancelled=lambda: self.statusBar().showMessage(
+                "Forensic watermark export cancelled.", 5000
+            ),
+            on_error=lambda failure: self._show_background_task_error(
+                title,
+                failure,
+                user_message="Could not export forensic watermarked audio:",
+            ),
+        )
+
+    def inspect_forensic_watermark(self):
+        title = "Inspect Forensic Watermark"
+        if self.forensic_export_service is None:
+            QMessageBox.warning(
+                self,
+                title,
+                "Open a profile with forensic export services available first.",
+            )
+            return
+        verification_path, _selected_filter = QFileDialog.getOpenFileName(
+            self,
+            "Choose Audio File to Inspect for Forensic Watermarking",
+            "",
+            "Audio Files (*.wav *.flac *.aif *.aiff *.mp3 *.ogg *.oga *.opus *.m4a *.mp4 *.aac);;All Files (*)",
+        )
+        if not verification_path:
+            return
+
+        def _worker(bundle, ctx):
+            return bundle.forensic_export_service.inspect_file(
+                verification_path,
+                progress_callback=lambda value, maximum, message: ctx.report_progress(
+                    value=value,
+                    maximum=maximum,
+                    message=message,
+                ),
+                is_cancelled=ctx.is_cancelled,
+            )
+
+        def _success(report: ForensicInspectionReport):
+            self._log_event(
+                "forensics.inspect_audio",
+                "Inspected audio for forensic watermarking",
+                inspected_path=verification_path,
+                status=report.status,
+                forensic_export_id=report.forensic_export_id,
+                batch_id=report.batch_id,
+                track_id=report.track_id,
+                resolution_basis=report.resolution_basis,
+            )
+            if ForensicInspectionDialog is not None:
+                ForensicInspectionDialog(report=report, parent=self).exec()
+            else:
+                QMessageBox.information(
+                    self,
+                    title,
+                    f"{report.message}\n\nStatus: {report.status}\nPath: {report.inspected_path}",
+                )
+
+        self._submit_background_bundle_task(
+            title=title,
+            description=(
+                "Inspecting the selected audio file, attempting forensic token extraction, and resolving any matches against the export ledger..."
+            ),
+            task_fn=_worker,
+            kind="read",
+            unique_key="forensics.inspect_audio",
+            cancellable=True,
+            on_success=_success,
+            on_cancelled=lambda: self.statusBar().showMessage(
+                "Forensic watermark inspection cancelled.", 5000
+            ),
+            on_error=lambda failure: self._show_background_task_error(
+                title,
+                failure,
+                user_message="Could not inspect the selected file for forensic watermarking:",
+            ),
+        )
+
     def convert_external_audio_files(self):
         title = "External Audio Conversion Utility"
-        if self.audio_conversion_service is None or not self.audio_conversion_service.is_available():
+        if (
+            self.audio_conversion_service is None
+            or not self.audio_conversion_service.is_available()
+        ):
             QMessageBox.warning(
                 self,
                 title,
@@ -16907,13 +17214,20 @@ class App(QMainWindow):
                 )
                 menu.addAction(act_convert_selected_audio)
 
+                act_export_forensic = QAction(
+                    "Export Forensic Watermarked Audio…",
+                    self,
+                )
+                act_export_forensic.triggered.connect(
+                    lambda: self.export_forensic_watermarked_audio(export_track_ids)
+                )
+                menu.addAction(act_export_forensic)
+
                 act_convert_external_audio = QAction(
                     "External Audio Conversion Utility…",
                     self,
                 )
-                act_convert_external_audio.triggered.connect(
-                    self.convert_external_audio_files
-                )
+                act_convert_external_audio.triggered.connect(self.convert_external_audio_files)
                 menu.addAction(act_convert_external_audio)
 
                 act_export_authenticity = QAction(
@@ -16933,6 +17247,13 @@ class App(QMainWindow):
                     lambda: self.export_authenticity_provenance_audio(export_track_ids)
                 )
                 menu.addAction(act_export_provenance)
+
+                act_inspect_forensic = QAction(
+                    "Inspect Forensic Watermark…",
+                    self,
+                )
+                act_inspect_forensic.triggered.connect(self.inspect_forensic_watermark)
+                menu.addAction(act_inspect_forensic)
 
         cell_item = self.table.item(row, col)
         cell_text = cell_item.text() if cell_item else ""

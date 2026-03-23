@@ -323,6 +323,7 @@ class DatabaseSchemaService:
         self._ensure_repertoire_tables()
         self._ensure_authenticity_tables()
         self._ensure_derivative_export_tables()
+        self._ensure_forensic_watermark_tables()
         self._ensure_blob_icon_schema()
         self._backfill_dual_storage_defaults()
 
@@ -479,6 +480,9 @@ class DatabaseSchemaService:
             elif version == 27:
                 self._apply_migration(27, self._mig_27_to_28)
                 version = 28
+            elif version == 28:
+                self._apply_migration(28, self._mig_28_to_29)
+                version = 29
             else:
                 self.logger.warning("Unknown migration path from version %s", version)
                 break
@@ -887,6 +891,9 @@ class DatabaseSchemaService:
 
     def _mig_27_to_28(self) -> None:
         self._ensure_derivative_export_tables()
+
+    def _mig_28_to_29(self) -> None:
+        self._ensure_forensic_watermark_tables()
 
     def _ensure_current_custom_field_value_schema(self) -> None:
         cols = self._table_columns("CustomFieldValues")
@@ -2322,6 +2329,107 @@ class DatabaseSchemaService:
             """
             CREATE INDEX IF NOT EXISTS idx_track_audio_derivatives_output_sha256
             ON TrackAudioDerivatives(output_sha256)
+            """
+        )
+
+    def _ensure_forensic_watermark_tables(self) -> None:
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ForensicWatermarkExports (
+                id INTEGER PRIMARY KEY,
+                forensic_export_id TEXT NOT NULL,
+                batch_id TEXT NOT NULL,
+                derivative_export_id TEXT,
+                track_id INTEGER NOT NULL,
+                key_id TEXT NOT NULL,
+                token_version INTEGER NOT NULL DEFAULT 1,
+                forensic_watermark_version INTEGER NOT NULL DEFAULT 1,
+                token_id INTEGER NOT NULL,
+                binding_crc32 INTEGER NOT NULL DEFAULT 0,
+                recipient_label TEXT,
+                share_label TEXT,
+                output_format TEXT,
+                output_filename TEXT,
+                output_sha256 TEXT,
+                output_size_bytes INTEGER NOT NULL DEFAULT 0,
+                source_lineage_ref TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                last_verified_at TEXT,
+                last_verification_status TEXT,
+                last_verification_confidence REAL,
+                FOREIGN KEY (batch_id) REFERENCES DerivativeExportBatches(batch_id) ON DELETE CASCADE,
+                FOREIGN KEY (derivative_export_id) REFERENCES TrackAudioDerivatives(export_id) ON DELETE SET NULL,
+                FOREIGN KEY (track_id) REFERENCES Tracks(id) ON DELETE CASCADE
+            )
+            """
+        )
+        forensic_columns = self._table_columns("ForensicWatermarkExports")
+        for column_name, column_sql in (
+            ("forensic_export_id", "TEXT NOT NULL DEFAULT ''"),
+            ("batch_id", "TEXT NOT NULL DEFAULT ''"),
+            ("derivative_export_id", "TEXT"),
+            ("track_id", "INTEGER NOT NULL DEFAULT 0"),
+            ("key_id", "TEXT NOT NULL DEFAULT ''"),
+            ("token_version", "INTEGER NOT NULL DEFAULT 1"),
+            ("forensic_watermark_version", "INTEGER NOT NULL DEFAULT 1"),
+            ("token_id", "INTEGER NOT NULL DEFAULT 0"),
+            ("binding_crc32", "INTEGER NOT NULL DEFAULT 0"),
+            ("recipient_label", "TEXT"),
+            ("share_label", "TEXT"),
+            ("output_format", "TEXT"),
+            ("output_filename", "TEXT"),
+            ("output_sha256", "TEXT"),
+            ("output_size_bytes", "INTEGER NOT NULL DEFAULT 0"),
+            ("source_lineage_ref", "TEXT"),
+            ("created_at", "TEXT"),
+            ("last_verified_at", "TEXT"),
+            ("last_verification_status", "TEXT"),
+            ("last_verification_confidence", "REAL"),
+        ):
+            if column_name not in forensic_columns:
+                self.cursor.execute(
+                    f"ALTER TABLE ForensicWatermarkExports ADD COLUMN {column_name} {column_sql}"
+                )
+        self.cursor.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_forensic_watermark_exports_export_id
+            ON ForensicWatermarkExports(forensic_export_id)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_forensic_watermark_exports_token_binding
+            ON ForensicWatermarkExports(token_id, binding_crc32)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_forensic_watermark_exports_batch_id
+            ON ForensicWatermarkExports(batch_id)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_forensic_watermark_exports_derivative_export_id
+            ON ForensicWatermarkExports(derivative_export_id)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_forensic_watermark_exports_track_id
+            ON ForensicWatermarkExports(track_id)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_forensic_watermark_exports_output_sha256
+            ON ForensicWatermarkExports(output_sha256)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_forensic_watermark_exports_created_at
+            ON ForensicWatermarkExports(created_at)
             """
         )
 

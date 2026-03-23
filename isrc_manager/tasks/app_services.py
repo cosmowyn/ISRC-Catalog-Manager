@@ -20,7 +20,9 @@ from isrc_manager.authenticity import (
 from isrc_manager.contracts import ContractService
 from isrc_manager.exchange.repertoire_service import RepertoireExchangeService
 from isrc_manager.exchange.service import ExchangeService
+from isrc_manager.forensics import ForensicExportCoordinator, ForensicWatermarkService
 from isrc_manager.history import HistoryManager
+from isrc_manager.media import AudioConversionService
 from isrc_manager.parties import PartyService
 from isrc_manager.quality.service import QualityDashboardService
 from isrc_manager.releases import ReleaseService
@@ -97,6 +99,8 @@ class BackgroundAppServiceBundle:
     authenticity_manifest_service: AuthenticityManifestService
     audio_watermark_service: AudioWatermarkService
     audio_authenticity_service: AudioAuthenticityService
+    forensic_watermark_service: ForensicWatermarkService
+    forensic_export_service: ForensicExportCoordinator
 
     def close(self) -> None:
         try:
@@ -231,11 +235,23 @@ class BackgroundAppServiceFactory:
                 tag_service=audio_tag_service,
                 app_version=_app_version_text(),
             )
+            forensic_watermark_service = ForensicWatermarkService()
+            forensic_export_service = ForensicExportCoordinator(
+                conn=conn,
+                track_service=track_service,
+                release_service=release_service,
+                tag_service=audio_tag_service,
+                key_service=authenticity_key_service,
+                conversion_service=AudioConversionService(),
+                watermark_service=forensic_watermark_service,
+            )
         else:
             authenticity_key_service = None
             authenticity_manifest_service = None
             audio_watermark_service = None
             audio_authenticity_service = None
+            forensic_watermark_service = None
+            forensic_export_service = None
 
         return BackgroundAppServiceBundle(
             conn=conn,
@@ -303,4 +319,6 @@ class BackgroundAppServiceFactory:
             authenticity_manifest_service=authenticity_manifest_service,
             audio_watermark_service=audio_watermark_service,
             audio_authenticity_service=audio_authenticity_service,
+            forensic_watermark_service=forensic_watermark_service,
+            forensic_export_service=forensic_export_service,
         )

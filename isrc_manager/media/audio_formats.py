@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 _AUTHENTICITY_SAFE_SUFFIXES = frozenset({".wav", ".flac", ".aif", ".aiff"})
+_FORENSIC_LOSSY_FORMAT_IDS = frozenset({"mp3"})
 _MANAGED_LOSSY_FORMAT_IDS = frozenset({"mp3", "ogg", "opus", "m4a"})
-_MANAGED_LOSSY_DERIVATIVE_IDS = frozenset({"mp3", "ogg", "opus", "m4a"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,6 +152,12 @@ def authenticity_safe_target_profiles() -> tuple[AudioFormatProfile, ...]:
     )
 
 
+def forensic_target_profiles() -> tuple[AudioFormatProfile, ...]:
+    return tuple(
+        profile for profile in _AUDIO_FORMAT_PROFILES if profile.id in _FORENSIC_LOSSY_FORMAT_IDS
+    )
+
+
 def managed_derivative_target_profiles() -> tuple[AudioFormatProfile, ...]:
     # Backwards-compatible alias for the watermark-safe managed branch.
     return authenticity_safe_target_profiles()
@@ -160,10 +166,4 @@ def managed_derivative_target_profiles() -> tuple[AudioFormatProfile, ...]:
 def managed_lossy_target_profiles() -> tuple[AudioFormatProfile, ...]:
     return tuple(
         profile for profile in _AUDIO_FORMAT_PROFILES if profile.id in _MANAGED_LOSSY_FORMAT_IDS
-    )
-
-
-def managed_lossy_target_profiles() -> tuple[AudioFormatProfile, ...]:
-    return tuple(
-        profile for profile in _AUDIO_FORMAT_PROFILES if profile.id in _MANAGED_LOSSY_DERIVATIVE_IDS
     )

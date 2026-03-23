@@ -202,6 +202,8 @@ class BackgroundAppServiceIntegrationTests(unittest.TestCase):
             self.assertIsNotNone(bundle.authenticity_manifest_service)
             self.assertIsNotNone(bundle.audio_watermark_service)
             self.assertIsNotNone(bundle.audio_authenticity_service)
+            self.assertIsNotNone(bundle.forensic_watermark_service)
+            self.assertIsNotNone(bundle.forensic_export_service)
             self.assertEqual(bundle.authenticity_key_service.default_key_id(), record.key_id)
             self.assertTrue(
                 bundle.authenticity_key_service.private_key_path(record.key_id).exists()

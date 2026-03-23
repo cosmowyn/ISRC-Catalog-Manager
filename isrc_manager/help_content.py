@@ -609,8 +609,8 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Catalog &gt; Verify Audio Authenticity…</strong>: inspect either selected catalog audio or a chosen external file, then either verify the direct watermark path for WAV/FLAC/AIFF or verify a signed provenance lineage sidecar for supported derivatives.</li>
         </ul>
         <p>This feature is <strong>not DRM</strong> and does not promise forensic certainty. A watermark always changes the waveform slightly, so the goal is perceptual transparency rather than mathematical identity. The strongest in-app verification happens when the open profile still contains the original reference audio, because the app can compare the inspected export against that stored source directly.</p>
-        <p>Direct embedded watermark verification is intentionally limited to WAV, FLAC, and AIFF. Lossy formats such as MP3, OGG/OGA, Opus, and M4A/MP4/AAC are handled through signed provenance lineage only in this pass; the app does not claim that the same embedded watermark guarantee survives those formats equally.</p>
-        <p>Future forensic watermarking for recipient-specific leak tracing is a separate direction. It is not merged into the current authenticity workflow, and the current manifests and lineage sidecars are structured so a later forensic export ledger can attach cleanly without changing what today’s authenticity documents mean.</p>
+        <p>Direct embedded authenticity verification is intentionally limited to WAV, FLAC, and AIFF. Lossy formats such as MP3, OGG/OGA, Opus, and M4A/MP4/AAC are not treated as direct authenticity masters in this workflow; use provenance lineage sidecars or the separate forensic export workflow when you need lossy delivery copies.</p>
+        <p>Recipient-specific forensic watermarking for leak tracing is now a separate managed export workflow. It remains distinct from authenticity: authenticity proves signed linkage to a canonical master record, while forensic delivery exports focus on tracing shared copies and use conservative inspection semantics.</p>
         """,
     ),
     HelpChapter(
