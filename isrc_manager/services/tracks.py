@@ -135,6 +135,19 @@ class TrackSnapshot:
         return asdict(self)
 
 
+@dataclass(slots=True)
+class AlbumArtEditState:
+    track_id: int
+    album_id: int | None
+    album_title: str | None
+    has_effective_art: bool
+    owner_scope: str | None
+    owner_track_id: int | None
+    owner_track_title: str | None
+    is_shared_reference: bool
+    can_replace_directly: bool
+
+
 class TrackService:
     """Centralizes track mutations and related catalog row creation."""
 
@@ -771,6 +784,47 @@ class TrackService:
             except Exception:
                 pass
 
+    @staticmethod
+    def _format_album_art_owner_label(track_id: int | None, track_title: str | None) -> str:
+        if track_id is None:
+            return "another track"
+        clean_title = str(track_title or "").strip()
+        if clean_title:
+            return f'Track #{int(track_id)} "{clean_title}"'
+        return f"Track #{int(track_id)}"
+
+    def _format_album_art_replacement_message(self, state: AlbumArtEditState) -> str:
+        owner_label = self._format_album_art_owner_label(
+            state.owner_track_id,
+            state.owner_track_title,
+        )
+        return (
+            f"Album art for this track is managed by {owner_label}. "
+            "Edit that record to replace the shared image."
+        )
+
+    def _require_direct_album_art_edit(
+        self,
+        track_id: int,
+        *,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> AlbumArtEditState:
+        state = self.describe_album_art_edit_state(track_id, cursor=cursor)
+        if state.has_effective_art and not state.can_replace_directly:
+            raise ValueError(self._format_album_art_replacement_message(state))
+        return state
+
+    def album_art_replacement_message(
+        self,
+        track_id: int,
+        *,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> str | None:
+        state = self.describe_album_art_edit_state(track_id, cursor=cursor)
+        if not state.has_effective_art or state.can_replace_directly:
+            return None
+        return self._format_album_art_replacement_message(state)
+
     def get_media_meta(
         self,
         track_id: int,
@@ -827,6 +881,7 @@ class TrackService:
         cur = cursor or self.conn.cursor()
 
         if media_key == "album_art":
+            self._require_direct_album_art_edit(track_id, cursor=cur)
             album_id, album_title = self._fetch_album_context(track_id, cursor=cur)
             if self._album_supports_shared_art(album_id, album_title):
                 current_shared_meta = self._get_album_art_meta(int(album_id), cursor=cur)
@@ -950,6 +1005,8 @@ class TrackService:
         cursor: sqlite3.Cursor | None = None,
     ) -> dict[str, str | int | bool]:
         cur = cursor or self.conn.cursor()
+        if media_key == "album_art":
+            self._require_direct_album_art_edit(track_id, cursor=cur)
         meta = self.get_media_meta(track_id, media_key, cursor=cur)
         if not bool(meta.get("has_media")):
             raise FileNotFoundError(f"{media_key} for track {track_id}")
@@ -1033,6 +1090,65 @@ class TrackService:
             (int(album_id),),
         ).fetchall()
         return [int(group_track_id) for (group_track_id,) in rows]
+
+    def describe_album_art_edit_state(
+        self,
+        track_id: int,
+        *,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> AlbumArtEditState:
+        cur = cursor or self.conn.cursor()
+        album_id, album_title_raw = self._fetch_album_context(track_id, cursor=cur)
+        album_title = str(album_title_raw or "").strip() or None
+        meta = self.get_media_meta(track_id, "album_art", cursor=cur)
+        has_effective_art = bool(meta.get("has_media"))
+        owner_scope = str(meta.get("owner_scope") or "").strip() or None
+        owner_track_id: int | None = None
+        is_shared_reference = False
+        can_replace_directly = True
+
+        if has_effective_art:
+            if owner_scope == "track":
+                owner_track_id = int(meta.get("owner_id") or track_id)
+            elif owner_scope == "album_track":
+                raw_owner_id = meta.get("owner_id")
+                owner_track_id = int(raw_owner_id) if raw_owner_id is not None else None
+            elif owner_scope == "album":
+                album_group_track_ids = self.list_album_group_track_ids(track_id, cursor=cur)
+                if len(album_group_track_ids) <= 1:
+                    owner_track_id = (
+                        int(album_group_track_ids[0]) if album_group_track_ids else int(track_id)
+                    )
+                else:
+                    owner_track_id = min(album_group_track_ids)
+            else:
+                raw_owner_id = meta.get("owner_id")
+                owner_track_id = int(raw_owner_id) if raw_owner_id is not None else int(track_id)
+
+            can_replace_directly = owner_track_id in (None, int(track_id))
+            is_shared_reference = bool(
+                owner_scope in {"album", "album_track"} and owner_track_id not in (None, int(track_id))
+            )
+
+        owner_track_title: str | None = None
+        if owner_track_id is not None:
+            owner_row = cur.execute(
+                "SELECT track_title FROM Tracks WHERE id=?",
+                (int(owner_track_id),),
+            ).fetchone()
+            owner_track_title = str(owner_row[0] or "").strip() or None if owner_row else None
+
+        return AlbumArtEditState(
+            track_id=int(track_id),
+            album_id=album_id,
+            album_title=album_title,
+            has_effective_art=has_effective_art,
+            owner_scope=owner_scope,
+            owner_track_id=owner_track_id,
+            owner_track_title=owner_track_title,
+            is_shared_reference=is_shared_reference,
+            can_replace_directly=can_replace_directly,
+        )
 
     def fetch_track_snapshot(
         self, track_id: int, *, cursor: sqlite3.Cursor | None = None

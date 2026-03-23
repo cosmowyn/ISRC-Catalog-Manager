@@ -56,6 +56,7 @@ from .models import (
     BulkAudioAttachPlan,
     BulkAudioAttachPlanItem,
     BulkAudioAttachTrackCandidate,
+    TaggedAudioExportItem,
     TaggedAudioExportResult,
 )
 
@@ -755,16 +756,38 @@ class BulkAudioAttachService:
 
 
 class TaggedAudioExportService:
-    """Copies managed audio files to an export folder and writes catalog tags to the copies."""
+    """Materializes audio export copies and writes catalog tags to the copies."""
 
     def __init__(self, tag_service: AudioTagService):
         self.tag_service = tag_service
+
+    @staticmethod
+    def _normalize_suffix(source_suffix: str) -> str:
+        suffix = str(source_suffix or "").strip()
+        if suffix and not suffix.startswith("."):
+            suffix = f".{suffix}"
+        return suffix
+
+    @staticmethod
+    def _coerce_export_item(
+        item: TaggedAudioExportItem | tuple[str, str, AudioTagData],
+    ) -> TaggedAudioExportItem:
+        if isinstance(item, TaggedAudioExportItem):
+            return item
+        source_path, suggested_name, tag_data = item
+        source_path = Path(source_path)
+        return TaggedAudioExportItem(
+            suggested_name=suggested_name,
+            tag_data=tag_data,
+            source_path=source_path,
+            source_suffix=source_path.suffix,
+        )
 
     def export_copies(
         self,
         *,
         output_dir: str | Path,
-        exports: list[tuple[str, str, AudioTagData]],
+        exports: list[TaggedAudioExportItem | tuple[str, str, AudioTagData]],
         progress_callback=None,
         is_cancelled=None,
     ) -> TaggedAudioExportResult:
@@ -777,25 +800,30 @@ class TaggedAudioExportService:
         written_paths: list[str] = []
 
         total = len(exports)
-        for index, (source_path, suggested_name, tag_data) in enumerate(exports, start=1):
+        for index, raw_item in enumerate(exports, start=1):
+            item = self._coerce_export_item(raw_item)
             if progress_callback is not None:
                 progress_callback(
                     index - 1,
                     total,
-                    f"Writing tags to exported copy {index} of {total}: {suggested_name}",
+                    f"Writing tags to exported copy {index} of {total}: {item.suggested_name}",
                 )
             if is_cancelled is not None and is_cancelled():
                 raise InterruptedError("Tagged audio export cancelled.")
-            source = Path(source_path)
-            if not source.exists():
-                skipped += 1
-                warnings.append(f"Missing source audio: {source}")
-                continue
-            destination = destination_root / suggested_name
-            destination = destination.with_suffix(source.suffix)
-            shutil.copy2(source, destination)
+            destination = (destination_root / item.suggested_name).with_suffix(
+                self._normalize_suffix(item.source_suffix)
+            )
             try:
-                self.tag_service.write_tags(destination, tag_data)
+                if item.source_path is not None:
+                    source = Path(item.source_path)
+                    if not source.exists():
+                        skipped += 1
+                        warnings.append(f"Missing source audio: {source}")
+                        continue
+                    shutil.copy2(source, destination)
+                else:
+                    destination.write_bytes(bytes(item.source_bytes or b""))
+                self.tag_service.write_tags(destination, item.tag_data)
                 exported += 1
                 written_paths.append(str(destination))
             except Exception as exc:

@@ -1,3 +1,4 @@
+import io
 import tempfile
 import unittest
 import wave
@@ -17,6 +18,7 @@ from isrc_manager.tags import (
     catalog_metadata_to_tags,
     merge_imported_tags,
 )
+from isrc_manager.tags.models import TaggedAudioExportItem
 from isrc_manager.tags.service import (
     AudioTagService,
     BulkAudioAttachService,
@@ -99,6 +101,16 @@ class AudioTagServiceTests(unittest.TestCase):
             lyrics="wordless",
             artwork=ArtworkPayload(data=b"\x89PNGfake", mime_type="image/png"),
         )
+
+    @staticmethod
+    def _make_wav_bytes(frame_count: int = 22050) -> bytes:
+        buffer = io.BytesIO()
+        with wave.open(buffer, "wb") as handle:
+            handle.setnchannels(1)
+            handle.setsampwidth(2)
+            handle.setframerate(44100)
+            handle.writeframes(b"\x00\x00" * frame_count)
+        return buffer.getvalue()
 
     def test_catalog_metadata_to_tags_prefers_release_metadata(self):
         result = catalog_metadata_to_tags(
@@ -213,6 +225,59 @@ class AudioTagServiceTests(unittest.TestCase):
         self.assertEqual(reread.isrc, self.tag_data.isrc)
         self.assertEqual(reread.upc, self.tag_data.upc)
 
+    def test_tagged_audio_export_copies_managed_file_and_preserves_source(self):
+        export_service = TaggedAudioExportService(self.service)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source_path = Path(tmpdir) / "sample.wav"
+            with wave.open(str(source_path), "wb") as handle:
+                handle.setnchannels(1)
+                handle.setsampwidth(2)
+                handle.setframerate(44100)
+                handle.writeframes(b"\x00\x00" * 22050)
+
+            original_bytes = source_path.read_bytes()
+            result = export_service.export_copies(
+                output_dir=Path(tmpdir) / "exports",
+                exports=[
+                    TaggedAudioExportItem(
+                        suggested_name="orbit_export.mp3",
+                        tag_data=self.tag_data,
+                        source_path=source_path,
+                        source_suffix=".wav",
+                    )
+                ],
+            )
+            exported_path = Path(result.written_paths[0])
+            exported_tags = self.service.read_tags(exported_path)
+            self.assertEqual(source_path.read_bytes(), original_bytes)
+
+        self.assertEqual(result.exported, 1)
+        self.assertEqual(exported_path.name, "orbit_export.wav")
+        self.assertEqual(exported_tags.title, self.tag_data.title)
+        self.assertEqual(exported_tags.isrc, self.tag_data.isrc)
+
+    def test_tagged_audio_export_copies_byte_backed_source(self):
+        export_service = TaggedAudioExportService(self.service)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = export_service.export_copies(
+                output_dir=Path(tmpdir) / "exports",
+                exports=[
+                    TaggedAudioExportItem(
+                        suggested_name="blob_export.mp3",
+                        tag_data=self.tag_data,
+                        source_bytes=self._make_wav_bytes(),
+                        source_suffix=".wav",
+                    )
+                ],
+            )
+            exported_path = Path(result.written_paths[0])
+            exported_tags = self.service.read_tags(exported_path)
+
+        self.assertEqual(result.exported, 1)
+        self.assertEqual(exported_path.name, "blob_export.wav")
+        self.assertEqual(exported_tags.artist, self.tag_data.artist)
+        self.assertEqual(exported_tags.isrc, self.tag_data.isrc)
+
     def test_tagged_audio_export_reports_progress(self):
         export_service = TaggedAudioExportService(self.service)
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -226,7 +291,14 @@ class AudioTagServiceTests(unittest.TestCase):
             progress_updates = []
             result = export_service.export_copies(
                 output_dir=Path(tmpdir) / "exports",
-                exports=[(str(source_path), "orbit_export", self.tag_data)],
+                exports=[
+                    TaggedAudioExportItem(
+                        suggested_name="orbit_export.mp3",
+                        tag_data=self.tag_data,
+                        source_path=source_path,
+                        source_suffix=".wav",
+                    )
+                ],
                 progress_callback=lambda value, maximum, message: progress_updates.append(
                     (value, maximum, message)
                 ),
@@ -250,7 +322,14 @@ class AudioTagServiceTests(unittest.TestCase):
             with self.assertRaises(InterruptedError):
                 export_service.export_copies(
                     output_dir=Path(tmpdir) / "exports",
-                    exports=[(str(source_path), "orbit_export", self.tag_data)],
+                    exports=[
+                        TaggedAudioExportItem(
+                            suggested_name="orbit_export.mp3",
+                            tag_data=self.tag_data,
+                            source_path=source_path,
+                            source_suffix=".wav",
+                        )
+                    ],
                     is_cancelled=lambda: True,
                 )
 

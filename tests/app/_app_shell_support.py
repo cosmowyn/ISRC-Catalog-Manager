@@ -1,8 +1,10 @@
+import io
 import json
 import os
 import shutil
 import tempfile
 import unittest
+import wave
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -241,6 +243,9 @@ class AppShellTestCase(unittest.TestCase):
                 del args, kwargs
                 return None
 
+            def is_cancelled(self):
+                return False
+
             def raise_if_cancelled(self):
                 return None
 
@@ -299,6 +304,15 @@ class AppShellTestCase(unittest.TestCase):
         path = self.root / name
         path.write_bytes(payload)
         return path
+
+    def _create_wav_file(self, name: str, *, frame_count: int = 22050) -> Path:
+        buffer = io.BytesIO()
+        with wave.open(buffer, "wb") as handle:
+            handle.setnchannels(1)
+            handle.setsampwidth(2)
+            handle.setframerate(44100)
+            handle.writeframes(b"\x00\x00" * frame_count)
+        return self._create_media_file(name, buffer.getvalue())
 
     def _table_row_for_track_id(self, track_id: int) -> int:
         for row in range(self.window.table.rowCount()):
@@ -2102,6 +2116,137 @@ class AppShellTestCase(unittest.TestCase):
         finally:
             dialog.close()
 
+    def case_track_editor_disables_album_art_upload_for_shared_art_slave(self):
+        lead_track = self._create_track(
+            index=189,
+            title="Lead Shared Track",
+            album_title="Shared Editor Album",
+        )
+        peer_track = self._create_track(
+            index=190,
+            title="Peer Shared Track",
+            album_title="Shared Editor Album",
+        )
+        cover_path = self._create_media_file("shared-editor-cover.png", b"\x89PNGshared-editor")
+        self.window.track_service.set_media_path(
+            lead_track,
+            "album_art",
+            cover_path,
+            storage_mode=app_module.STORAGE_MODE_DATABASE,
+        )
+
+        dialog = app_module.EditDialog(peer_track, self.window)
+        try:
+            self.assertEqual(
+                dialog.album_art.text(),
+                "shared-editor-cover.png (stored in database)",
+            )
+            self.assertFalse(dialog.album_art_browse_button.isEnabled())
+            self.assertTrue(dialog.album_art_clear_button.isEnabled())
+            self.assertFalse(dialog.album_art_hint_label.isHidden())
+            self.assertFalse(dialog.album_art_open_master_button.isHidden())
+            self.assertEqual(dialog.album_art_open_master_button.text(), "Open Master Record")
+            self.assertIn(f"Track #{lead_track}", dialog.album_art_hint_label.text())
+            self.assertIn("Lead Shared Track", dialog.album_art_hint_label.text())
+        finally:
+            dialog.close()
+
+    def case_track_editor_keeps_album_art_upload_enabled_for_shared_art_master(self):
+        lead_track = self._create_track(
+            index=191,
+            title="Lead Shared Track",
+            album_title="Shared Editor Album",
+        )
+        self._create_track(
+            index=192,
+            title="Peer Shared Track",
+            album_title="Shared Editor Album",
+        )
+        cover_path = self._create_media_file("shared-editor-master.png", b"\x89PNGmaster-editor")
+        self.window.track_service.set_media_path(
+            lead_track,
+            "album_art",
+            cover_path,
+            storage_mode=app_module.STORAGE_MODE_DATABASE,
+        )
+
+        dialog = app_module.EditDialog(lead_track, self.window)
+        try:
+            self.assertTrue(dialog.album_art_browse_button.isEnabled())
+            self.assertTrue(dialog.album_art_clear_button.isEnabled())
+            self.assertTrue(dialog.album_art_hint_label.isHidden())
+            self.assertEqual(dialog.album_art_hint_label.text(), "")
+            self.assertTrue(dialog.album_art_open_master_button.isHidden())
+        finally:
+            dialog.close()
+
+    def case_bulk_track_editor_disables_album_art_upload_when_selection_includes_slave(self):
+        lead_track = self._create_track(
+            index=193,
+            title="Lead Shared Track",
+            album_title="Shared Bulk Album",
+        )
+        peer_track = self._create_track(
+            index=194,
+            title="Peer Shared Track",
+            album_title="Shared Bulk Album",
+        )
+        cover_path = self._create_media_file("shared-bulk-cover.png", b"\x89PNGshared-bulk")
+        self.window.track_service.set_media_path(
+            lead_track,
+            "album_art",
+            cover_path,
+            storage_mode=app_module.STORAGE_MODE_DATABASE,
+        )
+
+        dialog = app_module.EditDialog(lead_track, self.window, batch_track_ids=[lead_track, peer_track])
+        try:
+            self.assertFalse(dialog.album_art_browse_button.isEnabled())
+            self.assertTrue(dialog.album_art_clear_button.isEnabled())
+            self.assertFalse(dialog.album_art_hint_label.isHidden())
+            self.assertFalse(dialog.album_art_open_master_button.isHidden())
+            self.assertEqual(dialog.album_art_open_master_button.text(), "Open Master Record")
+            self.assertIn(f"Track #{lead_track}", dialog.album_art_hint_label.text())
+            self.assertIn("Lead Shared Track", dialog.album_art_hint_label.text())
+        finally:
+            dialog.close()
+
+    def case_track_editor_open_master_action_opens_owner_editor(self):
+        lead_track = self._create_track(
+            index=197,
+            title="Lead Shared Track",
+            album_title="Shared Action Album",
+        )
+        peer_track = self._create_track(
+            index=198,
+            title="Peer Shared Track",
+            album_title="Shared Action Album",
+        )
+        cover_path = self._create_media_file("shared-action-cover.png", b"\x89PNGshared-action")
+        self.window.track_service.set_media_path(
+            lead_track,
+            "album_art",
+            cover_path,
+            storage_mode=app_module.STORAGE_MODE_DATABASE,
+        )
+
+        dialog = app_module.EditDialog(peer_track, self.window)
+        try:
+            with (
+                mock.patch.object(self.window, "refresh_table_preserve_view") as refresh_table,
+                mock.patch.object(self.window, "open_track_editor") as open_track_editor,
+            ):
+                dialog.album_art_open_master_button.click()
+                self.app.processEvents()
+
+            refresh_table.assert_called_once_with(focus_id=lead_track)
+            open_track_editor.assert_called_once_with(
+                lead_track,
+                batch_track_ids=[lead_track],
+            )
+        finally:
+            dialog.close()
+
     def case_track_editor_save_succeeds_without_album_propagation(self):
         track_id = self._create_track(
             index=188, title="Single Edit Source", album_title="Solo Album"
@@ -2128,6 +2273,63 @@ class AppShellTestCase(unittest.TestCase):
             self.assertEqual(snapshot.track_title, "Single Edit Updated")
         finally:
             dialog.close()
+
+    def case_write_tags_to_exported_audio_exports_managed_and_database_wav_sources(self):
+        managed_track = self._create_track(index=195, title="Managed Export Track")
+        database_track = self._create_track(index=196, title="Database Export Track")
+        managed_audio = self._create_wav_file("managed-export.wav")
+        database_audio = self._create_wav_file("database-export.wav")
+        self.window.track_service.set_media_path(managed_track, "audio_file", managed_audio)
+        self.window.track_service.set_media_path(
+            database_track,
+            "audio_file",
+            database_audio,
+            storage_mode=app_module.STORAGE_MODE_DATABASE,
+        )
+
+        export_dir = self.root / "tagged-audio-exports"
+        export_dir.mkdir()
+        managed_snapshot = self.window.track_service.fetch_track_snapshot(managed_track)
+        database_snapshot = self.window.track_service.fetch_track_snapshot(database_track)
+        self.assertIsNotNone(managed_snapshot)
+        self.assertIsNotNone(database_snapshot)
+        assert managed_snapshot is not None
+        assert database_snapshot is not None
+
+        with (
+            mock.patch.object(
+                app_module.App,
+                "_submit_background_bundle_task",
+                autospec=True,
+                side_effect=self._run_bundle_task_inline,
+            ),
+            mock.patch.object(
+                app_module.TagPreviewDialog,
+                "exec",
+                return_value=app_module.QDialog.Accepted,
+            ),
+            mock.patch.object(
+                app_module.QFileDialog,
+                "getExistingDirectory",
+                return_value=str(export_dir),
+            ),
+            mock.patch.object(app_module.QMessageBox, "information"),
+        ):
+            self.window.write_tags_to_exported_audio([managed_track, database_track])
+
+        exported_paths = sorted(export_dir.glob("*.wav"))
+        self.assertEqual(len(exported_paths), 2)
+
+        exported_tags = {
+            self.window.audio_tag_service.read_tags(path).title: self.window.audio_tag_service.read_tags(
+                path
+            )
+            for path in exported_paths
+        }
+        self.assertIn("Managed Export Track", exported_tags)
+        self.assertIn("Database Export Track", exported_tags)
+        self.assertEqual(exported_tags["Managed Export Track"].isrc, managed_snapshot.isrc)
+        self.assertEqual(exported_tags["Database Export Track"].isrc, database_snapshot.isrc)
 
     def case_album_entry_track_sections_use_internal_tabs(self):
         dialog = app_module.AlbumEntryDialog(self.window)

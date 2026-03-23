@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 
 
 @dataclass(slots=True)
@@ -51,6 +52,19 @@ class TaggedAudioExportResult:
     skipped: int
     warnings: list[str]
     written_paths: list[str]
+
+
+@dataclass(slots=True)
+class TaggedAudioExportItem:
+    suggested_name: str
+    tag_data: AudioTagData
+    source_suffix: str
+    source_path: str | Path | None = None
+    source_bytes: bytes | bytearray | memoryview | None = None
+
+    def __post_init__(self) -> None:
+        if (self.source_path is None) == (self.source_bytes is None):
+            raise ValueError("TaggedAudioExportItem requires exactly one source input.")
 
 
 @dataclass(slots=True)

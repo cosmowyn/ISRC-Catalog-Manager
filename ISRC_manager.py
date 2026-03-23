@@ -336,7 +336,11 @@ from isrc_manager.tags import (
     merge_imported_tags,
 )
 from isrc_manager.tags.dialogs import BulkAudioAttachDialog, TagPreviewDialog
-from isrc_manager.tags.models import ArtworkPayload, BulkAudioAttachTrackCandidate
+from isrc_manager.tags.models import (
+    ArtworkPayload,
+    BulkAudioAttachTrackCandidate,
+    TaggedAudioExportItem,
+)
 from isrc_manager.ui_common import (
     DatePickerDialog,
     FocusWheelCalendarWidget,
@@ -11977,6 +11981,15 @@ class App(QMainWindow):
         dlg = AlbumEntryDialog(self)
         dlg.exec()
 
+    def open_track_editor(self, track_id: int, *, batch_track_ids: list[int] | None = None):
+        try:
+            dlg = EditDialog(int(track_id), self, batch_track_ids=batch_track_ids)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Edit Entry", str(exc))
+            return
+        dlg.exec()
+        self.populate_all_comboboxes()
+
     def open_selected_editor(self, track_id: int | None = None):
         if isinstance(track_id, bool):
             track_id = None
@@ -12006,14 +12019,7 @@ class App(QMainWindow):
             batch_ids = self._selected_track_ids()
             if track_id not in batch_ids:
                 batch_ids = [track_id]
-
-        try:
-            dlg = EditDialog(int(track_id), self, batch_track_ids=batch_ids)
-        except ValueError as exc:
-            QMessageBox.warning(self, "Edit Entry", str(exc))
-            return
-        dlg.exec()
-        self.populate_all_comboboxes()
+        self.open_track_editor(int(track_id), batch_track_ids=batch_ids)
 
     def edit_entry(self, item):
         row_idx = item.row()
@@ -13877,6 +13883,24 @@ class App(QMainWindow):
             ),
         )
 
+    def _audio_export_source_suffix(self, snapshot: TrackSnapshot) -> str:
+        filename = str(snapshot.audio_file_filename or "").strip()
+        if filename:
+            suffix = Path(filename).suffix.strip()
+            if suffix:
+                return suffix
+        return self._export_extension_for_mime(str(snapshot.audio_file_mime_type or ""))
+
+    @staticmethod
+    def _audio_export_source_label(snapshot: TrackSnapshot) -> str:
+        filename = str(snapshot.audio_file_filename or "").strip()
+        storage_mode = normalize_storage_mode(snapshot.audio_file_storage_mode, default=None)
+        if storage_mode == STORAGE_MODE_DATABASE or snapshot.audio_file_blob_b64:
+            if filename:
+                return f"{filename} (stored in database)"
+            return "Stored in database"
+        return filename
+
     def write_tags_to_exported_audio(self, track_ids: list[int] | None = None):
         if self.tagged_audio_export_service is None or self.track_service is None:
             QMessageBox.warning(self, "Write Tags to Exported Audio", "Open a profile first.")
@@ -13890,7 +13914,7 @@ class App(QMainWindow):
             )
             return
 
-        exports: list[tuple[str, str, object]] = []
+        exports: list[TaggedAudioExportItem] = []
         preview_rows: list[dict[str, object]] = []
         warnings: list[str] = []
         for track_id in selected_ids:
@@ -13898,16 +13922,42 @@ class App(QMainWindow):
             if snapshot is None:
                 warnings.append(f"Track {track_id} could not be loaded.")
                 continue
-            resolved = self.track_service.resolve_media_path(snapshot.audio_file_path)
-            if resolved is None or not resolved.exists():
-                warnings.append(f"{snapshot.track_title}: no managed audio file is attached.")
-                continue
             tag_data = self._catalog_tag_data_for_track(track_id, snapshot=snapshot)
             safe_title = re.sub(
                 r"[^A-Za-z0-9._-]+", "_", snapshot.track_title or f"track_{track_id}"
             ).strip("_")
             suggested_name = f"{track_id:05d}_{safe_title or 'track'}"
-            exports.append((str(resolved), suggested_name, tag_data))
+            source_suffix = self._audio_export_source_suffix(snapshot)
+            source_label = ""
+            resolved = self.track_service.resolve_media_path(snapshot.audio_file_path)
+            if resolved is not None and resolved.exists():
+                source_label = str(resolved)
+                exports.append(
+                    TaggedAudioExportItem(
+                        suggested_name=suggested_name,
+                        tag_data=tag_data,
+                        source_path=resolved,
+                        source_suffix=source_suffix,
+                    )
+                )
+            else:
+                try:
+                    audio_bytes, _mime_type = self.track_service.fetch_media_bytes(
+                        track_id,
+                        "audio_file",
+                    )
+                except Exception:
+                    warnings.append(f"{snapshot.track_title}: no exportable audio file is attached.")
+                    continue
+                source_label = self._audio_export_source_label(snapshot)
+                exports.append(
+                    TaggedAudioExportItem(
+                        suggested_name=suggested_name,
+                        tag_data=tag_data,
+                        source_bytes=audio_bytes,
+                        source_suffix=source_suffix,
+                    )
+                )
             for field_name, value in tag_data.to_dict().items():
                 if field_name == "raw_fields" or field_name == "warnings":
                     continue
@@ -13920,7 +13970,7 @@ class App(QMainWindow):
                         "database": self._display_tag_value(value),
                         "file": "",
                         "chosen": self._display_tag_value(value),
-                        "source": str(resolved),
+                        "source": source_label,
                     }
                 )
 
@@ -13928,7 +13978,7 @@ class App(QMainWindow):
             QMessageBox.information(
                 self,
                 "Write Tags to Exported Audio",
-                "No exportable managed audio files were available for the selected tracks."
+                "No exportable audio files were available for the selected tracks."
                 + (f"\n\nWarnings:\n- " + "\n- ".join(warnings[:12]) if warnings else ""),
             )
             return
@@ -13937,7 +13987,7 @@ class App(QMainWindow):
             title="Write Tags to Exported Audio",
             intro=(
                 "Preview the catalog metadata that will be written into exported audio copies. "
-                "The original managed audio files are left untouched."
+                "The original stored audio stays untouched."
             ),
             rows=preview_rows,
             initial_policy="prefer_database",
@@ -18603,6 +18653,7 @@ class EditDialog(QDialog):
         self._bulk_focus_targets: dict[object, str] = {}
 
         self._bulk_snapshots = self._load_bulk_snapshots()
+        self._album_art_edit_states = self._load_album_art_edit_states()
         self.snapshot = next(
             snapshot for snapshot in self._bulk_snapshots if snapshot.track_id == self.track_id
         )
@@ -18611,9 +18662,8 @@ class EditDialog(QDialog):
         self._existing_audio_display_path = self._resolve_snapshot_media_display(
             self.snapshot.audio_file_path
         )
-        self._existing_album_art_display_path = self._resolve_snapshot_media_display(
-            self.snapshot.album_art_path
-        )
+        self._existing_album_art_display_path = self._resolve_album_art_display(self.snapshot)
+        self._album_art_hint_owner_targets: list[tuple[int, str]] = []
         self._clear_audio_file = False
         self._clear_album_art = False
 
@@ -18889,19 +18939,34 @@ class EditDialog(QDialog):
         art_layout.setContentsMargins(0, 0, 0, 0)
         art_layout.setSpacing(8)
         art_layout.addWidget(self.album_art, 1)
-        btn_art_browse = QPushButton("Browse…")
-        btn_art_clear = QPushButton("Clear")
-        btn_art_browse.clicked.connect(
+        self.album_art_browse_button = QPushButton("Browse…")
+        self.album_art_clear_button = QPushButton("Clear")
+        self.album_art_browse_button.clicked.connect(
             lambda: self._choose_track_media(
                 "album_art", self.album_art, clear_attr="_clear_album_art"
             )
         )
-        btn_art_clear.clicked.connect(
+        self.album_art_clear_button.clicked.connect(
             lambda: self._clear_track_media(self.album_art, clear_attr="_clear_album_art")
         )
-        art_layout.addWidget(btn_art_browse)
-        art_layout.addWidget(btn_art_clear)
+        art_layout.addWidget(self.album_art_browse_button)
+        art_layout.addWidget(self.album_art_clear_button)
         add_row(artwork_layout_section, "Album Art", art_row)
+        hint_row = QWidget(self)
+        hint_layout = QHBoxLayout(hint_row)
+        hint_layout.setContentsMargins(0, 0, 0, 0)
+        hint_layout.setSpacing(8)
+        self.album_art_hint_label = QLabel("")
+        self.album_art_hint_label.setWordWrap(True)
+        self.album_art_hint_label.setProperty("role", "supportingText")
+        hint_layout.addWidget(self.album_art_hint_label, 1)
+        self.album_art_open_master_button = QPushButton("Open Master Record")
+        self.album_art_open_master_button.setObjectName("albumArtOpenMasterButton")
+        self.album_art_open_master_button.setAutoDefault(False)
+        self.album_art_open_master_button.clicked.connect(self._open_album_art_owner_from_hint)
+        hint_layout.addWidget(self.album_art_open_master_button, 0, Qt.AlignTop)
+        artwork_layout_section.addWidget(hint_row)
+        self._refresh_album_art_controls()
 
         self.catalog_number = combo(
             registration_layout,
@@ -19115,8 +19180,151 @@ class EditDialog(QDialog):
             snapshots.append(snapshot)
         return snapshots
 
+    def _load_album_art_edit_states(self) -> dict[int, object]:
+        track_service = getattr(self.parent, "track_service", None)
+        if track_service is None:
+            return {}
+        return {
+            snapshot.track_id: track_service.describe_album_art_edit_state(snapshot.track_id)
+            for snapshot in self._bulk_snapshots
+        }
+
     def _resolve_snapshot_media_display(self, stored_path: str | None) -> str:
         return str(self.parent.track_service.resolve_media_path(stored_path) or "")
+
+    def _resolve_album_art_display(self, snapshot: TrackSnapshot) -> str:
+        resolved = self._resolve_snapshot_media_display(snapshot.album_art_path)
+        if resolved:
+            return resolved
+        if (
+            normalize_storage_mode(snapshot.album_art_storage_mode, default=None)
+            == STORAGE_MODE_DATABASE
+            or snapshot.album_art_blob_b64
+        ):
+            filename = str(snapshot.album_art_filename or "").strip()
+            if filename:
+                return f"{filename} (stored in database)"
+            return "Stored in database"
+        return ""
+
+    @staticmethod
+    def _album_art_owner_label(state: object) -> str:
+        owner_track_id = getattr(state, "owner_track_id", None)
+        owner_track_title = str(getattr(state, "owner_track_title", "") or "").strip()
+        if owner_track_id is None:
+            return "another track"
+        if owner_track_title:
+            return f'Track #{int(owner_track_id)} "{owner_track_title}"'
+        return f"Track #{int(owner_track_id)}"
+
+    def _album_art_owner_targets(self) -> list[tuple[int, str]]:
+        targets: list[tuple[int, str]] = []
+        seen: set[int] = set()
+        for state in self._album_art_edit_states.values():
+            if not bool(getattr(state, "is_shared_reference", False)):
+                continue
+            owner_track_id = getattr(state, "owner_track_id", None)
+            if owner_track_id is None:
+                continue
+            owner_track_id = int(owner_track_id)
+            if owner_track_id in seen:
+                continue
+            seen.add(owner_track_id)
+            targets.append((owner_track_id, self._album_art_owner_label(state)))
+        return targets
+
+    def _single_album_art_hint_text(self) -> str:
+        state = self._album_art_edit_states.get(self.track_id)
+        if state is None or not bool(getattr(state, "is_shared_reference", False)):
+            return ""
+        return (
+            "This track uses shared album art managed by "
+            f"{self._album_art_owner_label(state)}. "
+            "Edit that record to replace the shared image."
+        )
+
+    def _bulk_album_art_hint_text(self) -> str:
+        owners: list[str] = []
+        seen: set[str] = set()
+        for state in self._album_art_edit_states.values():
+            if not bool(getattr(state, "is_shared_reference", False)):
+                continue
+            label = self._album_art_owner_label(state)
+            if label in seen:
+                continue
+            seen.add(label)
+            owners.append(label)
+        if not owners:
+            return ""
+        if len(owners) == 1:
+            return (
+                "Some selected tracks use shared album art managed by "
+                f"{owners[0]}. Edit that record to replace the shared image."
+            )
+        owner_list = "; ".join(owners[:4])
+        if len(owners) > 4:
+            owner_list += "; …"
+        return (
+            "Some selected tracks use shared album art managed by "
+            f"{owner_list}. Edit those records to replace the shared image."
+        )
+
+    def _open_album_art_owner_track(self, owner_track_id: int) -> None:
+        parent = self.parentWidget()
+        if parent is None:
+            return
+        parent.refresh_table_preserve_view(focus_id=int(owner_track_id))
+        parent.open_track_editor(int(owner_track_id), batch_track_ids=[int(owner_track_id)])
+
+    def _open_album_art_owner_from_hint(self) -> None:
+        if len(self._album_art_hint_owner_targets) == 1:
+            self._open_album_art_owner_track(self._album_art_hint_owner_targets[0][0])
+            return
+        if not self._album_art_hint_owner_targets:
+            return
+        menu = QMenu(self.album_art_open_master_button)
+        for owner_track_id, owner_label in self._album_art_hint_owner_targets:
+            action = menu.addAction(owner_label)
+            action.triggered.connect(
+                lambda _checked=False, track_id=owner_track_id: self._open_album_art_owner_track(
+                    track_id
+                )
+            )
+        menu.exec(
+            self.album_art_open_master_button.mapToGlobal(
+                self.album_art_open_master_button.rect().bottomLeft()
+            )
+        )
+
+    def _refresh_album_art_controls(self) -> None:
+        browse_enabled = True
+        hint_text = ""
+        if self._is_bulk_edit:
+            browse_enabled = all(
+                bool(getattr(state, "can_replace_directly", True))
+                for state in self._album_art_edit_states.values()
+            )
+            hint_text = self._bulk_album_art_hint_text()
+        else:
+            state = self._album_art_edit_states.get(self.track_id)
+            browse_enabled = bool(getattr(state, "can_replace_directly", True))
+            hint_text = self._single_album_art_hint_text()
+        self._album_art_hint_owner_targets = self._album_art_owner_targets()
+        self.album_art_browse_button.setEnabled(browse_enabled)
+        self.album_art_clear_button.setEnabled(True)
+        self.album_art_hint_label.setText(hint_text)
+        self.album_art_hint_label.setVisible(bool(hint_text))
+        has_owner_targets = bool(self._album_art_hint_owner_targets)
+        self.album_art_open_master_button.setVisible(has_owner_targets)
+        self.album_art_open_master_button.setEnabled(has_owner_targets)
+        if len(self._album_art_hint_owner_targets) > 1:
+            self.album_art_open_master_button.setText("Open Master Record…")
+            self.album_art_open_master_button.setToolTip(
+                "Choose which master record to open."
+            )
+        else:
+            self.album_art_open_master_button.setText("Open Master Record")
+            self.album_art_open_master_button.setToolTip("")
 
     def _build_bulk_field_states(self) -> None:
         if not self._is_bulk_edit:
@@ -19149,10 +19357,7 @@ class EditDialog(QDialog):
         )
         self._set_bulk_field_state(
             "album_art",
-            [
-                self._resolve_snapshot_media_display(snapshot.album_art_path)
-                for snapshot in snapshots
-            ],
+            [self._resolve_album_art_display(snapshot) for snapshot in snapshots],
         )
         self._set_bulk_field_state(
             "catalog_number", [snapshot.catalog_number or "" for snapshot in snapshots]
@@ -19386,6 +19591,26 @@ class EditDialog(QDialog):
         clear_requested = bool(self._clear_album_art and not album_art_source_path)
         return bool(clear_requested or album_art_source_path)
 
+    def _album_art_upload_block_message(self, track_ids: list[int]) -> str | None:
+        track_service = getattr(self.parent, "track_service", None)
+        if track_service is None:
+            return None
+        messages: list[str] = []
+        seen: set[str] = set()
+        for track_id in track_ids:
+            message = track_service.album_art_replacement_message(track_id)
+            if not message or message in seen:
+                continue
+            seen.add(message)
+            messages.append(message)
+        if not messages:
+            return None
+        if len(messages) == 1:
+            return messages[0]
+        return "Album art cannot be replaced for some selected tracks:\n- " + "\n- ".join(
+            messages[:6]
+        )
+
     def _display_album_shared_field_names(self, field_names: list[str]) -> list[str]:
         labels: list[str] = []
         for field_name in field_names:
@@ -19393,6 +19618,28 @@ class EditDialog(QDialog):
             if label and label not in labels:
                 labels.append(label)
         return labels
+
+    @staticmethod
+    def _album_art_update_group_key(payload: TrackUpdatePayload) -> tuple[str, object]:
+        album_title = str(payload.album_title or "").strip()
+        if album_title and album_title.casefold() != "single":
+            return ("album", album_title.casefold())
+        return ("track", int(payload.track_id))
+
+    def _deduplicate_bulk_album_art_updates(
+        self,
+        update_payloads: list[TrackUpdatePayload],
+    ) -> None:
+        seen_group_keys: set[tuple[str, object]] = set()
+        for payload in update_payloads:
+            if not payload.album_art_source_path:
+                continue
+            group_key = self._album_art_update_group_key(payload)
+            if group_key in seen_group_keys:
+                payload.album_art_source_path = None
+                payload.album_art_storage_mode = None
+                continue
+            seen_group_keys.add(group_key)
 
     def save_changes(self):
         if self._is_bulk_edit:
@@ -19484,6 +19731,15 @@ class EditDialog(QDialog):
                 audio_source_path = None
             if album_art_source_path == self._existing_album_art_display_path:
                 album_art_source_path = None
+            if album_art_source_path:
+                album_art_block_message = self._album_art_upload_block_message([row_id])
+                if album_art_block_message:
+                    QMessageBox.warning(
+                        self,
+                        "Album Art Managed Elsewhere",
+                        album_art_block_message,
+                    )
+                    return
             media_modes = parent._choose_track_media_storage_modes(
                 audio_source_path=audio_source_path,
                 album_art_source_path=album_art_source_path,
@@ -19534,8 +19790,10 @@ class EditDialog(QDialog):
             propagated_field_labels: list[str] = []
             if album_art_changed:
                 album_shared_fields_changed.append("album_art")
+            propagated_mode = bool(propagated_track_ids and album_shared_fields_changed)
+            needs_peer_album_metadata_update = bool(propagated_track_ids and album_field_updates)
 
-            if propagated_track_ids and album_shared_fields_changed:
+            if propagated_mode:
                 propagated_field_labels = self._display_album_shared_field_names(
                     album_shared_fields_changed
                 )
@@ -19544,17 +19802,12 @@ class EditDialog(QDialog):
                     with parent.conn:
                         cur = parent.conn.cursor()
                         parent.track_service.update_track(source_payload, cursor=cur)
-                        parent.track_service.apply_album_metadata_to_tracks(
-                            propagated_track_ids,
-                            field_updates=album_field_updates,
-                            album_art_source_path=(
-                                album_art_source_path if not self._clear_album_art else None
-                            ),
-                            clear_album_art=bool(
-                                self._clear_album_art and not album_art_source_path
-                            ),
-                            cursor=cur,
-                        )
+                        if needs_peer_album_metadata_update:
+                            parent.track_service.apply_album_metadata_to_tracks(
+                                propagated_track_ids,
+                                field_updates=album_field_updates,
+                                cursor=cur,
+                            )
                         parent._sync_releases_for_tracks(
                             [row_id, *propagated_track_ids], cursor=cur
                         )
@@ -19607,7 +19860,6 @@ class EditDialog(QDialog):
                 additional_artists=new_additional_artist,
                 album_title=new_album_title,
             )
-            propagated_mode = bool(propagated_track_ids and album_shared_fields_changed)
             profile_name = parent._current_profile_name()
             action_label = (
                 f"Update Album Metadata: {new_track_title}"
@@ -19632,7 +19884,7 @@ class EditDialog(QDialog):
             )
 
             def _worker(bundle, ctx):
-                total_steps = 3 if propagated_mode else 2
+                total_steps = 3 if needs_peer_album_metadata_update else 2
 
                 def _mutation():
                     with bundle.conn:
@@ -19641,21 +19893,16 @@ class EditDialog(QDialog):
                         bundle.track_service.update_track(source_payload, cursor=cur)
                         sync_track_ids = [row_id]
                         if propagated_mode:
+                            sync_track_ids = [row_id, *propagated_track_ids]
+                        if needs_peer_album_metadata_update:
                             ctx.report_progress(
                                 1, total_steps, message="Propagating shared album fields..."
                             )
                             bundle.track_service.apply_album_metadata_to_tracks(
                                 propagated_track_ids,
                                 field_updates=album_field_updates,
-                                album_art_source_path=(
-                                    album_art_source_path if not self._clear_album_art else None
-                                ),
-                                clear_album_art=bool(
-                                    self._clear_album_art and not album_art_source_path
-                                ),
                                 cursor=cur,
                             )
-                            sync_track_ids = [row_id, *propagated_track_ids]
                         ctx.report_progress(
                             total_steps - 1, total_steps, message="Synchronizing release records..."
                         )
@@ -19810,6 +20057,15 @@ class EditDialog(QDialog):
                 self, "Invalid UPC/EAN", "UPC/EAN must be 12 or 13 digits (or leave empty)."
             )
             return
+        if apply_album_art and new_album_art_path:
+            album_art_block_message = self._album_art_upload_block_message(self.batch_track_ids)
+            if album_art_block_message:
+                QMessageBox.warning(
+                    self,
+                    "Album Art Managed Elsewhere",
+                    album_art_block_message,
+                )
+                return
 
         changed_fields = []
         if apply_track_title:
@@ -19917,6 +20173,7 @@ class EditDialog(QDialog):
             )
             for snapshot in self._bulk_snapshots
         ]
+        self._deduplicate_bulk_album_art_updates(update_payloads)
 
         def _worker(bundle, ctx):
             total = max(1, len(update_payloads))

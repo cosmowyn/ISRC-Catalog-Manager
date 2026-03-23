@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from isrc_manager.file_storage import STORAGE_MODE_DATABASE, STORAGE_MODE_MANAGED_FILE
 from isrc_manager.services import TrackCreatePayload, TrackService, TrackUpdatePayload
 
 
@@ -73,6 +74,11 @@ class TrackServiceTests(unittest.TestCase):
     def tearDown(self):
         self.conn.close()
         self.temp_dir.cleanup()
+
+    def _create_media_file(self, name: str, payload: bytes) -> Path:
+        path = self.data_root / name
+        path.write_bytes(payload)
+        return path
 
     def test_create_track_persists_relations_and_metadata(self):
         track_id = self.service.create_track(
@@ -494,6 +500,354 @@ class TrackServiceTests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(album_row, (None,))
         self.assertFalse(managed_path.exists())
+
+    def test_describe_album_art_edit_state_for_direct_track_art(self):
+        track_id = self.service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00050",
+                track_title="Direct Art Track",
+                artist_name="Solo Artist",
+                additional_artists=[],
+                album_title="Single",
+                release_date="2026-03-13",
+                track_length_sec=245,
+                iswc=None,
+                upc=None,
+                genre=None,
+            )
+        )
+        source_image = self._create_media_file("direct-art.png", b"direct-art")
+
+        self.service.set_media_path(track_id, "album_art", source_image)
+        state = self.service.describe_album_art_edit_state(track_id)
+
+        self.assertTrue(state.has_effective_art)
+        self.assertEqual(state.owner_scope, "track")
+        self.assertEqual(state.owner_track_id, track_id)
+        self.assertEqual(state.owner_track_title, "Direct Art Track")
+        self.assertFalse(state.is_shared_reference)
+        self.assertTrue(state.can_replace_directly)
+
+    def test_describe_album_art_edit_state_for_shared_album_master_and_slave(self):
+        lead_track = self.service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00051",
+                track_title="Lead Shared Track",
+                artist_name="Album Artist",
+                additional_artists=[],
+                album_title="Shared Album",
+                release_date="2026-03-13",
+                track_length_sec=245,
+                iswc=None,
+                upc=None,
+                genre=None,
+            )
+        )
+        peer_track = self.service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00052",
+                track_title="Peer Shared Track",
+                artist_name="Album Artist",
+                additional_artists=[],
+                album_title="Shared Album",
+                release_date="2026-03-13",
+                track_length_sec=245,
+                iswc=None,
+                upc=None,
+                genre=None,
+            )
+        )
+        source_image = self._create_media_file("shared-art-db.png", b"shared-art-db")
+
+        self.service.set_media_path(
+            lead_track,
+            "album_art",
+            source_image,
+            storage_mode=STORAGE_MODE_DATABASE,
+        )
+
+        master_state = self.service.describe_album_art_edit_state(lead_track)
+        slave_state = self.service.describe_album_art_edit_state(peer_track)
+
+        self.assertEqual(master_state.owner_scope, "album")
+        self.assertEqual(master_state.owner_track_id, lead_track)
+        self.assertEqual(master_state.owner_track_title, "Lead Shared Track")
+        self.assertFalse(master_state.is_shared_reference)
+        self.assertTrue(master_state.can_replace_directly)
+
+        self.assertEqual(slave_state.owner_scope, "album")
+        self.assertEqual(slave_state.owner_track_id, lead_track)
+        self.assertEqual(slave_state.owner_track_title, "Lead Shared Track")
+        self.assertTrue(slave_state.is_shared_reference)
+        self.assertFalse(slave_state.can_replace_directly)
+
+    def test_describe_album_art_edit_state_for_album_track_fallback(self):
+        owner_track = self.service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00053",
+                track_title="Fallback Owner",
+                artist_name="Album Artist",
+                additional_artists=[],
+                album_title="Legacy Shared Album",
+                release_date="2026-03-13",
+                track_length_sec=245,
+                iswc=None,
+                upc=None,
+                genre=None,
+            )
+        )
+        peer_track = self.service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00054",
+                track_title="Fallback Peer",
+                artist_name="Album Artist",
+                additional_artists=[],
+                album_title="Legacy Shared Album",
+                release_date="2026-03-13",
+                track_length_sec=245,
+                iswc=None,
+                upc=None,
+                genre=None,
+            )
+        )
+        stored_path = self.service.media_store.write_bytes(
+            b"legacy-shared-art",
+            filename="legacy-fallback.png",
+            subdir="images",
+        )
+        with self.conn:
+            self.conn.execute(
+                """
+                UPDATE Tracks
+                SET album_art_path=?,
+                    album_art_storage_mode=?,
+                    album_art_filename=?,
+                    album_art_mime_type=?,
+                    album_art_size_bytes=?
+                WHERE id=?
+                """,
+                (
+                    stored_path,
+                    STORAGE_MODE_MANAGED_FILE,
+                    "legacy-fallback.png",
+                    "image/png",
+                    len(b"legacy-shared-art"),
+                    owner_track,
+                ),
+            )
+
+        owner_state = self.service.describe_album_art_edit_state(owner_track)
+        peer_state = self.service.describe_album_art_edit_state(peer_track)
+
+        self.assertEqual(owner_state.owner_scope, "album_track")
+        self.assertEqual(owner_state.owner_track_id, owner_track)
+        self.assertTrue(owner_state.can_replace_directly)
+        self.assertFalse(owner_state.is_shared_reference)
+
+        self.assertEqual(peer_state.owner_scope, "album_track")
+        self.assertEqual(peer_state.owner_track_id, owner_track)
+        self.assertEqual(peer_state.owner_track_title, "Fallback Owner")
+        self.assertFalse(peer_state.can_replace_directly)
+        self.assertTrue(peer_state.is_shared_reference)
+
+    def test_slave_track_cannot_replace_shared_album_art_directly(self):
+        lead_track = self.service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00055",
+                track_title="Master Track",
+                artist_name="Album Artist",
+                additional_artists=[],
+                album_title="Guarded Album",
+                release_date="2026-03-13",
+                track_length_sec=245,
+                iswc=None,
+                upc=None,
+                genre=None,
+            )
+        )
+        peer_track = self.service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00056",
+                track_title="Slave Track",
+                artist_name="Album Artist",
+                additional_artists=[],
+                album_title="Guarded Album",
+                release_date="2026-03-13",
+                track_length_sec=245,
+                iswc=None,
+                upc=None,
+                genre=None,
+            )
+        )
+        source_image = self._create_media_file("guarded-master.png", b"master-art")
+        replacement_image = self._create_media_file("guarded-peer.png", b"peer-art")
+
+        self.service.set_media_path(
+            lead_track,
+            "album_art",
+            source_image,
+            storage_mode=STORAGE_MODE_DATABASE,
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            r'Album art for this track is managed by Track #\d+ "Master Track"\. Edit that record to replace the shared image\.',
+        ):
+            self.service.set_media_path(
+                peer_track,
+                "album_art",
+                replacement_image,
+                storage_mode=STORAGE_MODE_DATABASE,
+            )
+
+    def test_slave_track_cannot_convert_shared_album_art_storage_mode_directly(self):
+        lead_track = self.service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00057",
+                track_title="Master Track",
+                artist_name="Album Artist",
+                additional_artists=[],
+                album_title="Guarded Album",
+                release_date="2026-03-13",
+                track_length_sec=245,
+                iswc=None,
+                upc=None,
+                genre=None,
+            )
+        )
+        peer_track = self.service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00058",
+                track_title="Slave Track",
+                artist_name="Album Artist",
+                additional_artists=[],
+                album_title="Guarded Album",
+                release_date="2026-03-13",
+                track_length_sec=245,
+                iswc=None,
+                upc=None,
+                genre=None,
+            )
+        )
+        source_image = self._create_media_file("guarded-managed.png", b"managed-art")
+
+        self.service.set_media_path(lead_track, "album_art", source_image)
+
+        with self.assertRaisesRegex(
+            ValueError,
+            r'Album art for this track is managed by Track #\d+ "Master Track"\. Edit that record to replace the shared image\.',
+        ):
+            self.service.convert_media_storage_mode(
+                peer_track,
+                "album_art",
+                STORAGE_MODE_DATABASE,
+            )
+
+    def test_master_track_can_still_replace_shared_album_art(self):
+        lead_track = self.service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00059",
+                track_title="Master Track",
+                artist_name="Album Artist",
+                additional_artists=[],
+                album_title="Replaceable Album",
+                release_date="2026-03-13",
+                track_length_sec=245,
+                iswc=None,
+                upc=None,
+                genre=None,
+            )
+        )
+        peer_track = self.service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00060",
+                track_title="Peer Track",
+                artist_name="Album Artist",
+                additional_artists=[],
+                album_title="Replaceable Album",
+                release_date="2026-03-13",
+                track_length_sec=245,
+                iswc=None,
+                upc=None,
+                genre=None,
+            )
+        )
+        initial_image = self._create_media_file("replace-initial.png", b"initial-art")
+        replacement_image = self._create_media_file("replace-final.png", b"replacement-art")
+
+        self.service.set_media_path(
+            lead_track,
+            "album_art",
+            initial_image,
+            storage_mode=STORAGE_MODE_DATABASE,
+        )
+        self.service.set_media_path(
+            lead_track,
+            "album_art",
+            replacement_image,
+            storage_mode=STORAGE_MODE_DATABASE,
+        )
+
+        lead_bytes, _ = self.service.fetch_media_bytes(lead_track, "album_art")
+        peer_bytes, _ = self.service.fetch_media_bytes(peer_track, "album_art")
+        self.assertEqual(lead_bytes, b"replacement-art")
+        self.assertEqual(peer_bytes, b"replacement-art")
+
+    def test_clearing_shared_album_art_allows_former_slave_to_upload_again(self):
+        lead_track = self.service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00061",
+                track_title="Lead Track",
+                artist_name="Album Artist",
+                additional_artists=[],
+                album_title="Resettable Album",
+                release_date="2026-03-13",
+                track_length_sec=245,
+                iswc=None,
+                upc=None,
+                genre=None,
+            )
+        )
+        peer_track = self.service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00062",
+                track_title="Peer Track",
+                artist_name="Album Artist",
+                additional_artists=[],
+                album_title="Resettable Album",
+                release_date="2026-03-13",
+                track_length_sec=245,
+                iswc=None,
+                upc=None,
+                genre=None,
+            )
+        )
+        initial_image = self._create_media_file("reset-initial.png", b"initial-reset-art")
+        replacement_image = self._create_media_file("reset-peer.png", b"peer-reset-art")
+
+        self.service.set_media_path(
+            lead_track,
+            "album_art",
+            initial_image,
+            storage_mode=STORAGE_MODE_DATABASE,
+        )
+        self.service.clear_media(peer_track, "album_art")
+
+        cleared_state = self.service.describe_album_art_edit_state(peer_track)
+        self.assertFalse(cleared_state.has_effective_art)
+        self.assertTrue(cleared_state.can_replace_directly)
+
+        self.service.set_media_path(
+            peer_track,
+            "album_art",
+            replacement_image,
+            storage_mode=STORAGE_MODE_DATABASE,
+        )
+
+        lead_bytes, _ = self.service.fetch_media_bytes(lead_track, "album_art")
+        peer_bytes, _ = self.service.fetch_media_bytes(peer_track, "album_art")
+        self.assertEqual(lead_bytes, b"peer-reset-art")
+        self.assertEqual(peer_bytes, b"peer-reset-art")
 
     def test_delete_track_removes_track_and_join_rows(self):
         track_id = self.service.create_track(
