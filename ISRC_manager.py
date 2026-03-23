@@ -12366,7 +12366,15 @@ class App(QMainWindow):
             if active_track_service is None:
                 return None
             source_snapshot = snapshot or active_track_service.fetch_track_snapshot(track_id)
-            if source_snapshot is None or not source_snapshot.album_art_path:
+            if source_snapshot is None:
+                return None
+            has_album_art = bool(
+                source_snapshot.album_art_path
+                or source_snapshot.album_art_blob_b64
+                or source_snapshot.album_art_filename
+                or int(source_snapshot.album_art_size_bytes or 0) > 0
+            )
+            if not has_album_art:
                 return None
             data, mime_type = active_track_service.fetch_media_bytes(track_id, "album_art")
             return ArtworkPayload(data=data, mime_type=mime_type or "image/jpeg")

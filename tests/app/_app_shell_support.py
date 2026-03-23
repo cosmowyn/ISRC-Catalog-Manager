@@ -2275,15 +2275,40 @@ class AppShellTestCase(unittest.TestCase):
             dialog.close()
 
     def case_write_tags_to_exported_audio_exports_managed_and_database_wav_sources(self):
-        managed_track = self._create_track(index=195, title="Managed Export Track")
-        database_track = self._create_track(index=196, title="Database Export Track")
+        managed_track = self._create_track(
+            index=195,
+            title="Managed Export Track",
+            album_title="Single",
+        )
+        database_track = self._create_track(
+            index=196,
+            title="Database Export Track",
+            album_title="Single",
+        )
         managed_audio = self._create_wav_file("managed-export.wav")
         database_audio = self._create_wav_file("database-export.wav")
+        managed_cover = self._create_media_file("managed-export-cover.png", b"\x89PNGmanaged-cover")
+        database_cover = self._create_media_file(
+            "database-export-cover.png",
+            b"\x89PNGdatabase-cover",
+        )
         self.window.track_service.set_media_path(managed_track, "audio_file", managed_audio)
         self.window.track_service.set_media_path(
             database_track,
             "audio_file",
             database_audio,
+            storage_mode=app_module.STORAGE_MODE_DATABASE,
+        )
+        self.window.track_service.set_media_path(
+            managed_track,
+            "album_art",
+            managed_cover,
+            storage_mode=app_module.STORAGE_MODE_DATABASE,
+        )
+        self.window.track_service.set_media_path(
+            database_track,
+            "album_art",
+            database_cover,
             storage_mode=app_module.STORAGE_MODE_DATABASE,
         )
 
@@ -2330,6 +2355,16 @@ class AppShellTestCase(unittest.TestCase):
         self.assertIn("Database Export Track", exported_tags)
         self.assertEqual(exported_tags["Managed Export Track"].isrc, managed_snapshot.isrc)
         self.assertEqual(exported_tags["Database Export Track"].isrc, database_snapshot.isrc)
+        self.assertIsNotNone(exported_tags["Managed Export Track"].artwork)
+        self.assertEqual(
+            exported_tags["Managed Export Track"].artwork.data,
+            managed_cover.read_bytes(),
+        )
+        self.assertIsNotNone(exported_tags["Database Export Track"].artwork)
+        self.assertEqual(
+            exported_tags["Database Export Track"].artwork.data,
+            database_cover.read_bytes(),
+        )
 
     def case_album_entry_track_sections_use_internal_tabs(self):
         dialog = app_module.AlbumEntryDialog(self.window)
