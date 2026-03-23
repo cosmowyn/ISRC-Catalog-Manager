@@ -138,10 +138,19 @@ class AuthenticityKeysDialog(QDialog):
 class AuthenticityExportPreviewDialog(QDialog):
     """Preview supported and unsupported watermark export items."""
 
-    def __init__(self, *, plan: AuthenticityExportPlan, parent=None):
+    def __init__(
+        self,
+        *,
+        plan: AuthenticityExportPlan,
+        title: str = "Export Authenticity Watermarked Audio",
+        subtitle: str = (
+            "This workflow writes authenticity export copies and sidecar manifests. Original source audio stays unchanged."
+        ),
+        parent=None,
+    ):
         super().__init__(parent)
         self.plan = plan
-        self.setWindowTitle("Export Authenticity Watermarked Audio")
+        self.setWindowTitle(title)
         self.resize(920, 620)
         _apply_standard_dialog_chrome(self, "authenticityExportPreviewDialog")
 
@@ -151,10 +160,8 @@ class AuthenticityExportPreviewDialog(QDialog):
         _add_standard_dialog_header(
             root,
             self,
-            title="Export Authenticity Watermarked Audio",
-            subtitle=(
-                "This workflow writes watermarked export copies and sidecar manifests. Original reference audio stays unchanged."
-            ),
+            title=title,
+            subtitle=subtitle,
         )
         summary = QLabel(
             f"Signing key: {plan.key_id}" + (f" ({plan.signer_label})" if plan.signer_label else "")
@@ -221,33 +228,55 @@ class AuthenticityVerificationDialog(QDialog):
 
         details = QTextEdit(self)
         details.setReadOnly(True)
+        manifest_id = getattr(report, "manifest_id", None)
+        parent_manifest_id = getattr(report, "parent_manifest_id", None)
+        watermark_id = getattr(report, "watermark_id", None)
+        key_id = getattr(report, "key_id", None)
+        resolution_source = getattr(report, "resolution_source", None)
+        verification_basis = getattr(report, "verification_basis", None)
+        document_type = getattr(report, "document_type", None)
+        workflow_kind = getattr(report, "workflow_kind", None)
+        signature_valid = getattr(report, "signature_valid", None)
+        exact_hash_match = getattr(report, "exact_hash_match", None)
+        fingerprint_similarity = getattr(report, "fingerprint_similarity", None)
+        extraction_confidence = getattr(report, "extraction_confidence", None)
+        sidecar_path = getattr(report, "sidecar_path", None)
+        extra_details = getattr(report, "details", None)
         detail_lines = [
             f"Status: {report.status}",
             f"Message: {report.message}",
             f"Path: {report.inspected_path}",
         ]
-        if report.manifest_id:
-            detail_lines.append(f"Manifest ID: {report.manifest_id}")
-        if report.watermark_id is not None:
-            detail_lines.append(f"Watermark ID: {report.watermark_id}")
-        if report.key_id:
-            detail_lines.append(f"Key ID: {report.key_id}")
-        if report.resolution_source:
-            detail_lines.append(f"Resolved From: {report.resolution_source}")
-        if report.signature_valid is not None:
-            detail_lines.append(f"Signature Valid: {report.signature_valid}")
-        if report.exact_hash_match is not None:
-            detail_lines.append(f"Exact Hash Match: {report.exact_hash_match}")
-        if report.fingerprint_similarity is not None:
-            detail_lines.append(f"Fingerprint Similarity: {report.fingerprint_similarity:.3f}")
-        if report.extraction_confidence is not None:
-            detail_lines.append(f"Extraction Confidence: {report.extraction_confidence:.3f}")
-        if report.sidecar_path:
-            detail_lines.append(f"Sidecar: {report.sidecar_path}")
-        if report.details:
+        if manifest_id:
+            detail_lines.append(f"Manifest ID: {manifest_id}")
+        if parent_manifest_id:
+            detail_lines.append(f"Parent Manifest ID: {parent_manifest_id}")
+        if watermark_id is not None:
+            detail_lines.append(f"Watermark ID: {watermark_id}")
+        if key_id:
+            detail_lines.append(f"Key ID: {key_id}")
+        if resolution_source:
+            detail_lines.append(f"Resolved From: {resolution_source}")
+        if verification_basis:
+            detail_lines.append(f"Verification Basis: {verification_basis}")
+        if document_type:
+            detail_lines.append(f"Document Type: {document_type}")
+        if workflow_kind:
+            detail_lines.append(f"Workflow Kind: {workflow_kind}")
+        if signature_valid is not None:
+            detail_lines.append(f"Signature Valid: {signature_valid}")
+        if exact_hash_match is not None:
+            detail_lines.append(f"Exact Hash Match: {exact_hash_match}")
+        if fingerprint_similarity is not None:
+            detail_lines.append(f"Fingerprint Similarity: {fingerprint_similarity:.3f}")
+        if extraction_confidence is not None:
+            detail_lines.append(f"Extraction Confidence: {extraction_confidence:.3f}")
+        if sidecar_path:
+            detail_lines.append(f"Sidecar: {sidecar_path}")
+        if extra_details:
             detail_lines.append("")
             detail_lines.append("Details:")
-            detail_lines.extend(report.details)
+            detail_lines.extend(extra_details)
         details.setPlainText("\n".join(detail_lines))
         root.addWidget(details, 1)
 

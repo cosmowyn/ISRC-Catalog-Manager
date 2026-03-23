@@ -47,6 +47,13 @@ class HelpContentTests(unittest.TestCase):
         self.assertIn("background: #17324E", html)
         self.assertIn("color: #38BDF8", html)
 
+    def test_audio_authenticity_help_chapter_mentions_direct_and_lineage_scope(self):
+        chapter = HELP_CHAPTERS_BY_ID["audio-authenticity"]
+
+        self.assertIn("AIFF", chapter.content_html)
+        self.assertIn("Provenance", chapter.content_html)
+        self.assertIn("future forensic watermarking", chapter.content_html.lower())
+
 
 if __name__ == "__main__":
     unittest.main()

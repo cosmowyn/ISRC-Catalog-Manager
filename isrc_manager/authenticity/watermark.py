@@ -1,4 +1,4 @@
-"""Keyed spread-spectrum watermark helpers for WAV and FLAC files."""
+"""Keyed spread-spectrum watermark helpers for supported PCM/lossless files."""
 
 from __future__ import annotations
 
@@ -117,7 +117,13 @@ def _write_audio(
 ) -> None:
     destination_path = Path(destination)
     destination_path.parent.mkdir(parents=True, exist_ok=True)
-    format_name = "FLAC" if destination_path.suffix.lower() == ".flac" else "WAV"
+    suffix = destination_path.suffix.lower()
+    if suffix == ".flac":
+        format_name = "FLAC"
+    elif suffix in {".aif", ".aiff"}:
+        format_name = "AIFF"
+    else:
+        format_name = "WAV"
     subtype = source_subtype or "PCM_24"
     try:
         sf.write(str(destination_path), audio, sample_rate, format=format_name, subtype=subtype)

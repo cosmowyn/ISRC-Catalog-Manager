@@ -30,6 +30,9 @@ class AppShellEditorSurfaceTests(AppShellTestCase):
     test_authenticity_actions_are_present_in_catalog_and_settings_menus = (
         AppShellTestCase.case_authenticity_actions_are_present_in_catalog_and_settings_menus
     )
+    test_authenticity_table_context_menu_exposes_export_actions = (
+        AppShellTestCase.case_authenticity_table_context_menu_exposes_export_actions
+    )
     test_verify_audio_authenticity_can_choose_external_file_when_track_is_selected = (
         AppShellTestCase.case_verify_audio_authenticity_can_choose_external_file_when_track_is_selected
     )

@@ -10,7 +10,7 @@ This implementation does not treat watermarking as a standalone proof of ownersh
 
 For that reason, the shipped design is hybrid:
 
-- a compact keyed watermark token is embedded into exported WAV or FLAC copies
+- a compact keyed watermark token is embedded into exported WAV, FLAC, or AIFF master copies
 - a deterministic manifest is signed with Ed25519
 - verification reports only what the implementation can actually support
 
@@ -132,7 +132,7 @@ This is the most important practical choice in v1. It keeps the system technical
 
 `AudioAuthenticityService.verify_file()` follows this sequence:
 
-1. Reject unsupported files early unless they are WAV or FLAC.
+1. Reject unsupported files early unless they are direct-authenticity WAV/FLAC/AIFF files or supported provenance-sidecar derivative formats.
 2. Load any adjacent `*.authenticity.json` sidecar.
 3. Verify the sidecar signature if enough data is present.
 4. Attempt blind watermark extraction with local extraction keys.
@@ -146,12 +146,13 @@ This is the most important practical choice in v1. It keeps the system technical
    - reference fingerprint similarity
 9. Report exactly one result state:
    - `verified_authentic`
-   - `watermark_found_signature_invalid`
+   - `verified_by_lineage`
+   - `signature_invalid`
    - `manifest_found_reference_mismatch`
    - `no_watermark_detected`
    - `unsupported_format_or_insufficient_confidence`
 
-During authenticity export, the app also writes standard file metadata tags onto the exported WAV or FLAC copy. Track-level fields always come from the catalog snapshot, while release-level fields such as album title, album artist, UPC, label, disc number, and track number are only added when the linked release context is unambiguous enough to avoid mis-tagging alternate releases or compilations.
+During authenticity export, the app also writes standard file metadata tags onto exported master or provenance copies. Track-level fields always come from the catalog snapshot, while release-level fields such as album title, album artist, UPC, label, disc number, and track number are only added when the linked release context is unambiguous enough to avoid mis-tagging alternate releases or compilations.
 
 ### Fingerprint thresholds
 
@@ -211,7 +212,7 @@ The added coverage checks:
 - deterministic manifest serialization
 - Ed25519 sign/verify round-trip
 - manifest persistence
-- WAV and FLAC watermark embedding
+- WAV, FLAC, and AIFF watermark embedding
 - bounded waveform deltas
 - short-audio failure behavior
 - reference-aware token recovery from clean exports
@@ -228,11 +229,12 @@ These limits should remain explicit in product language and future code review:
 - This is not copy protection.
 - This does not claim forensic certainty.
 - Watermarking is perceptually transparent, not waveform-identical.
-- Version 1 is WAV/FLAC-first. MP3/AAC/OGG/Opus workflows are out of scope for embedding and strong verification.
+- Version 1 is direct-master-first. WAV, FLAC, and AIFF support direct embedding and verification, while MP3/AAC/OGG/Opus-style derivatives should be handled through signed provenance lineage rather than direct watermark claims.
 - The strongest keyed verification depends on the open profile still having the original reference audio available.
 - Sidecar-only verification can prove the manifest signature, but without a local extraction key and reference audio it may not be able to prove the watermark binding strongly enough.
 - Robustness claims should stay limited to same-program export/reload, trivial rewrites, and modest non-adversarial handling.
 - Local private-key storage is only best-effort protected by filesystem permissions.
+- Future recipient-specific forensic watermarking is intentionally out of scope for this authenticity workflow.
 
 ## 10. Future Roadmap
 
@@ -241,6 +243,7 @@ The most useful next steps would be:
 - stronger blind extraction for sidecar-only verification
 - optional forward-error-correction around the compact token
 - codec- and transcode-tolerance evaluation before making any robustness claims beyond PCM workflows
+- a separate forensic export ledger keyed by export identity for recipient-specific delivery watermarking
 - reference-audio caching or derived verification artifacts for faster repeated verification
 - remote or delegated signing support for teams that do not want private keys on workstation disks
 - clearer operator UX around “signature valid but keyed watermark insufficient” versus “reference mismatch”

@@ -129,6 +129,7 @@ from isrc_manager.authenticity import (
     AuthenticityKeyService,
     AuthenticityManifestService,
     AuthenticityVerificationDialog,
+    VERIFICATION_INPUT_SUFFIXES,
     authenticity_unavailable_message,
 )
 from isrc_manager.history import (
@@ -10461,14 +10462,21 @@ class App(QMainWindow):
                 "id": "authenticity_export_audio",
                 "label": "Export Authenticity Watermarked Audio",
                 "category": "Catalog",
-                "description": "Export WAV or FLAC copies with a keyed watermark plus a signed authenticity sidecar.",
+                "description": "Export WAV, FLAC, or AIFF master copies with a keyed watermark plus a signed authenticity sidecar.",
                 "action": self.export_authenticity_watermarked_audio_action,
+            },
+            {
+                "id": "authenticity_export_provenance_audio",
+                "label": "Export Authenticity Provenance Audio",
+                "category": "Catalog",
+                "description": "Export lossy derivatives with signed lineage sidecars that point back to a verified watermarked master.",
+                "action": self.export_authenticity_provenance_audio_action,
             },
             {
                 "id": "authenticity_verify_audio",
                 "label": "Verify Audio Authenticity",
                 "category": "Catalog",
-                "description": "Detect a keyed watermark, resolve the signed manifest, and verify the Ed25519 signature.",
+                "description": "Verify either a direct authenticity watermark or a signed provenance lineage sidecar.",
                 "action": self.verify_audio_authenticity_action,
             },
             {
@@ -14418,9 +14426,9 @@ class App(QMainWindow):
                 QMessageBox.information(
                     self,
                     "Export Authenticity Watermarked Audio",
-                    "No supported WAV or FLAC reference audio was available for the selected tracks."
+                    "No supported WAV, FLAC, or AIFF reference audio was available for the selected tracks."
                     + (
-                        f"\n\nWarnings:\n- " + "\n- ".join(plan.warnings[:12])
+                        "\n\nWarnings:\n- " + "\n- ".join(plan.warnings[:12])
                         if plan.warnings
                         else ""
                     ),
@@ -14474,9 +14482,7 @@ class App(QMainWindow):
                     f"Exported {result.exported} authenticity-watermarked audio cop{'y' if result.exported == 1 else 'ies'} to:\n{output_dir}"
                     f"\n\nSkipped: {result.skipped}"
                     + (
-                        f"\n\nWarnings:\n- " + "\n- ".join(all_warnings[:12])
-                        if all_warnings
-                        else ""
+                        "\n\nWarnings:\n- " + "\n- ".join(all_warnings[:12]) if all_warnings else ""
                     ),
                 )
 
@@ -14500,7 +14506,7 @@ class App(QMainWindow):
 
         self._submit_background_bundle_task(
             title="Export Authenticity Watermarked Audio",
-            description="Preparing the authenticity watermark export preview...",
+            description="Preparing the direct authenticity watermark export preview...",
             task_fn=_preview_worker,
             kind="read",
             unique_key="authenticity.export_audio.preview",
@@ -14509,6 +14515,141 @@ class App(QMainWindow):
                 "Export Authenticity Watermarked Audio",
                 failure,
                 user_message="Could not prepare the authenticity export preview:",
+            ),
+        )
+
+    def export_authenticity_provenance_audio(self, track_ids: list[int] | None = None):
+        if not AUTHENTICITY_FEATURE_AVAILABLE:
+            QMessageBox.warning(
+                self,
+                "Export Authenticity Provenance Audio",
+                authenticity_unavailable_message(),
+            )
+            return
+        if self.audio_authenticity_service is None:
+            QMessageBox.warning(
+                self,
+                "Export Authenticity Provenance Audio",
+                "Open a profile first.",
+            )
+            return
+        selected_ids = self._normalize_track_ids(track_ids or self._selected_or_visible_track_ids())
+        if not selected_ids:
+            QMessageBox.information(
+                self,
+                "Export Authenticity Provenance Audio",
+                "Select one or more tracks or apply a filter first.",
+            )
+            return
+
+        def _preview_worker(bundle, _ctx):
+            return bundle.audio_authenticity_service.build_provenance_export_plan(
+                selected_ids,
+                profile_name=self._current_profile_name(),
+            )
+
+        def _preview_success(plan):
+            ready_items = plan.ready_items()
+            if not ready_items:
+                QMessageBox.information(
+                    self,
+                    "Export Authenticity Provenance Audio",
+                    "No supported provenance-only attached audio was available for the selected tracks."
+                    + (
+                        "\n\nWarnings:\n- " + "\n- ".join(plan.warnings[:12])
+                        if plan.warnings
+                        else ""
+                    ),
+                )
+                return
+            preview_dialog = AuthenticityExportPreviewDialog(
+                plan=plan,
+                title="Export Authenticity Provenance Audio",
+                subtitle=(
+                    "This workflow copies derivative audio as-is, writes catalog tags, and saves a signed lineage sidecar that points back to a verified watermarked master."
+                ),
+                parent=self,
+            )
+            if preview_dialog.exec() != QDialog.Accepted:
+                return
+            output_dir = QFileDialog.getExistingDirectory(
+                self,
+                "Choose Export Folder for Authenticity Provenance Audio",
+                str(self.exports_dir / "authenticity_lineage"),
+            )
+            if not output_dir:
+                return
+
+            def _worker(bundle, ctx):
+                return bundle.audio_authenticity_service.export_provenance_audio(
+                    output_dir=output_dir,
+                    track_ids=[item.track_id for item in ready_items],
+                    key_id=plan.key_id,
+                    profile_name=self._current_profile_name(),
+                    progress_callback=lambda value, maximum, message: ctx.report_progress(
+                        value=value,
+                        maximum=maximum,
+                        message=message,
+                    ),
+                    is_cancelled=ctx.is_cancelled,
+                )
+
+            def _success(result):
+                all_warnings = list(result.warnings)
+                self._log_event(
+                    "authenticity.export_provenance_audio",
+                    "Exported authenticity provenance audio",
+                    output_dir=output_dir,
+                    exported=result.exported,
+                    skipped=result.skipped,
+                    warnings=all_warnings,
+                )
+                self._audit(
+                    "EXPORT",
+                    "AudioAuthenticityLineage",
+                    ref_id=output_dir,
+                    details=f"exported={result.exported}; skipped={result.skipped}",
+                )
+                self._audit_commit()
+                QMessageBox.information(
+                    self,
+                    "Export Authenticity Provenance Audio",
+                    f"Exported {result.exported} authenticity provenance audio cop{'y' if result.exported == 1 else 'ies'} to:\n{output_dir}"
+                    f"\n\nSkipped: {result.skipped}"
+                    + (
+                        "\n\nWarnings:\n- " + "\n- ".join(all_warnings[:12]) if all_warnings else ""
+                    ),
+                )
+
+            self._submit_background_bundle_task(
+                title="Export Authenticity Provenance Audio",
+                description="Writing derivative copies and signed provenance sidecars...",
+                task_fn=_worker,
+                kind="write",
+                unique_key="authenticity.export_provenance_audio",
+                cancellable=True,
+                on_success=_success,
+                on_cancelled=lambda: self.statusBar().showMessage(
+                    "Authenticity provenance export cancelled.", 5000
+                ),
+                on_error=lambda failure: self._show_background_task_error(
+                    "Export Authenticity Provenance Audio",
+                    failure,
+                    user_message="Could not export authenticity provenance audio:",
+                ),
+            )
+
+        self._submit_background_bundle_task(
+            title="Export Authenticity Provenance Audio",
+            description="Preparing the authenticity provenance export preview...",
+            task_fn=_preview_worker,
+            kind="read",
+            unique_key="authenticity.export_provenance_audio.preview",
+            on_success=_preview_success,
+            on_error=lambda failure: self._show_background_task_error(
+                "Export Authenticity Provenance Audio",
+                failure,
+                user_message="Could not prepare the authenticity provenance export preview:",
             ),
         )
 
@@ -14523,7 +14664,7 @@ class App(QMainWindow):
         if snapshot is None or not self.track_service.has_media(track_id, "audio_file"):
             return None
         suffix = Path(snapshot.audio_file_filename or snapshot.audio_file_path or "").suffix.lower()
-        if suffix not in {".wav", ".flac"}:
+        if suffix not in VERIFICATION_INPUT_SUFFIXES:
             return None
         return int(track_id), str(snapshot.track_title or f"Track {track_id}")
 
@@ -14539,7 +14680,7 @@ class App(QMainWindow):
         if snapshot is None or not self.track_service.has_media(track_id, "audio_file"):
             return None, None
         suffix = Path(snapshot.audio_file_filename or snapshot.audio_file_path or "").suffix.lower()
-        if suffix not in {".wav", ".flac"}:
+        if suffix not in VERIFICATION_INPUT_SUFFIXES:
             return None, None
         resolved = self.track_service.resolve_media_path(snapshot.audio_file_path)
         if resolved is not None and resolved.exists():
@@ -14560,7 +14701,7 @@ class App(QMainWindow):
         chooser.setText("Choose which audio you want to verify.")
         chooser.setInformativeText(
             "Verify the selected catalog audio for "
-            f"'{track_label}', or choose an external WAV or FLAC file."
+            f"'{track_label}', or choose an external direct/provenance-supported file."
         )
         selected_button = chooser.addButton("Selected Track Audio", QMessageBox.AcceptRole)
         external_button = chooser.addButton("Choose External File…", QMessageBox.ActionRole)
@@ -14579,7 +14720,7 @@ class App(QMainWindow):
             self,
             "Choose Audio File to Verify",
             "",
-            "Audio Files (*.wav *.flac)",
+            "Audio Files (*.wav *.flac *.aif *.aiff *.mp3 *.ogg *.oga *.opus *.m4a *.mp4 *.aac)",
         )
         if not chosen_path:
             return None
@@ -14613,7 +14754,7 @@ class App(QMainWindow):
                         QMessageBox.warning(
                             self,
                             "Verify Audio Authenticity",
-                            "The selected track no longer has a supported WAV or FLAC audio file. Choose an external file instead.",
+                            "The selected track no longer has a supported direct or provenance audio file. Choose an external file instead.",
                         )
                         verification_path = self._pick_audio_authenticity_verification_file()
                 else:
@@ -14650,7 +14791,7 @@ class App(QMainWindow):
 
         self._submit_background_bundle_task(
             title="Verify Audio Authenticity",
-            description="Detecting watermark tokens and verifying the signed manifest...",
+            description="Verifying the direct watermark path or signed provenance lineage...",
             task_fn=_worker,
             kind="read",
             unique_key="authenticity.verify_audio",
@@ -16218,15 +16359,28 @@ class App(QMainWindow):
             menu.addAction(act_view_licenses)
 
             if self.track_has_media(track_id, "audio_file"):
+                export_track_ids = selected_ids if track_id in selected_ids else [track_id]
                 act_import_tags = QAction("Import Tags from Audio…", self)
                 act_import_tags.triggered.connect(lambda: self.import_tags_from_audio([track_id]))
                 menu.addAction(act_import_tags)
 
                 act_write_tags = QAction("Write Tags to Exported Audio…", self)
                 act_write_tags.triggered.connect(
-                    lambda: self.write_tags_to_exported_audio([track_id])
+                    lambda: self.write_tags_to_exported_audio(export_track_ids)
                 )
                 menu.addAction(act_write_tags)
+
+                act_export_authenticity = QAction("Export Authenticity Watermarked Audio…", self)
+                act_export_authenticity.triggered.connect(
+                    lambda: self.export_authenticity_watermarked_audio(export_track_ids)
+                )
+                menu.addAction(act_export_authenticity)
+
+                act_export_provenance = QAction("Export Authenticity Provenance Audio…", self)
+                act_export_provenance.triggered.connect(
+                    lambda: self.export_authenticity_provenance_audio(export_track_ids)
+                )
+                menu.addAction(act_export_provenance)
 
         cell_item = self.table.item(row, col)
         cell_text = cell_item.text() if cell_item else ""

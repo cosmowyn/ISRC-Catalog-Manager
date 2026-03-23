@@ -136,15 +136,16 @@ You can track approval state, mark the primary asset, preserve derivation relati
 The app can also produce authenticity-aware audio exports for practical ownership and provenance workflows.
 
 - `Settings > Audio Authenticity Keys…` generates local Ed25519 signing keys
-- `Catalog > Export Authenticity Watermarked Audio…` writes WAV or FLAC export copies with:
+- `Catalog > Export Authenticity Watermarked Audio…` writes direct WAV, FLAC, or AIFF master copies with:
   - a compact keyed watermark token
   - a signed authenticity manifest sidecar
   - standard audio metadata tags populated from catalog data when available
+- `Catalog > Export Authenticity Provenance Audio…` writes signed provenance-sidecar copies for supported lossy derivatives without claiming direct watermark extraction from those files
 - `Catalog > Verify Audio Authenticity…` can verify either:
   - the selected catalog track audio, or
-  - an external WAV/FLAC file chosen through the file picker
+  - an external direct/provenance-supported file chosen through the file picker
 
-This feature is intentionally honest about scope. It is not DRM, does not claim zero waveform change, and does not treat watermarking alone as proof. The authenticity claim comes from the signed manifest; the watermark links exported audio back to that signed record.
+This feature is intentionally honest about scope. It is not DRM, does not claim zero waveform change, and does not treat watermarking alone as proof. The authenticity claim comes from the signed manifest; the watermark links direct master exports back to that signed record, while lossy derivatives are verified through signed lineage to a previously watermarked master.
 
 ### Quality control and operational readiness
 

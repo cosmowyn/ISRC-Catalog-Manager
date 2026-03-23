@@ -106,14 +106,15 @@ This workflow is useful when the track rows already exist and the remaining job 
 
 The catalog menu also exposes the audio authenticity workflow directly from the main workspace.
 
-- `Catalog > Export Authenticity Watermarked Audio…` uses the current track selection to build signed WAV/FLAC export copies without changing the original stored audio.
+- `Catalog > Export Authenticity Watermarked Audio…` uses the current track selection to build signed WAV/FLAC/AIFF master export copies without changing the original canonical source audio.
 - Those exported copies carry:
   - a compact keyed watermark token
   - a sibling signed manifest sidecar
   - normal embedded audio metadata tags when the catalog already has those values available
+- `Catalog > Export Authenticity Provenance Audio…` copies supported lossy derivatives as-is, writes the available metadata tags, and saves a signed lineage sidecar that points back to a previously verified watermarked master.
 - `Catalog > Verify Audio Authenticity…` can work in two ways:
-  - verify the currently selected track audio when one supported WAV/FLAC source is selected
-  - verify any external WAV/FLAC file through the file picker
+  - verify the currently selected track audio when one supported direct/provenance source is selected
+  - verify any external direct/provenance-supported file through the file picker
 
 This matters in the workspace because authenticity review is not limited to files that are already attached to the current profile. You can stay in the catalog when a track is selected, but you can also inspect an outside delivery or export copy without first importing or attaching it.
 

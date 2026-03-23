@@ -98,6 +98,37 @@ class AudioWatermarkServiceTests(AuthenticityWorkflowTestCase):
             result.token.manifest_digest_prefix, prepared.watermark_token.manifest_digest_prefix
         )
 
+    def test_reference_aware_verification_recovers_expected_token_from_clean_aiff_export(self):
+        track_id, audio_path = self.create_track_with_audio(
+            duration_seconds=30,
+            seed=5,
+            suffix=".aiff",
+        )
+        prepared = self.manifest_service.prepare_manifest(
+            track_id=track_id,
+            app_version="test-app",
+            profile_name="Test Profile",
+        )
+        destination = self.root / "watermarked.aiff"
+        self.watermark_service.embed_to_path(
+            source_path=audio_path,
+            destination_path=destination,
+            watermark_key=self.key_service.extraction_keys()[0][1],
+            token=prepared.watermark_token,
+        )
+
+        result = self.watermark_service.verify_expected_token_against_reference(
+            destination,
+            reference_path=audio_path,
+            watermark_keys=self.key_service.extraction_keys(),
+            token=prepared.watermark_token,
+        )
+
+        self.assertIn(result.status, {"detected", "insufficient"})
+        self.assertEqual(result.token.watermark_id, prepared.watermark_token.watermark_id)
+        self.assertGreaterEqual(result.mean_confidence, 0.90)
+        self.assertGreaterEqual(result.group_agreement, 0.83)
+
     def test_embed_to_path_rejects_audio_that_is_too_short(self):
         track_id, audio_path = self.create_track_with_audio(
             duration_seconds=3,
@@ -121,6 +152,8 @@ class AudioWatermarkServiceTests(AuthenticityWorkflowTestCase):
     def test_supported_audio_path_rejects_non_pcm_extensions(self):
         self.assertTrue(supported_audio_path("track.wav"))
         self.assertTrue(supported_audio_path("track.flac"))
+        self.assertTrue(supported_audio_path("track.aif"))
+        self.assertTrue(supported_audio_path("track.aiff"))
         self.assertFalse(supported_audio_path("track.mp3"))
 
 

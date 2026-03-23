@@ -119,6 +119,8 @@ def fingerprint_similarity(
 def build_sidecar_document(
     *,
     schema_version: int,
+    document_type: str,
+    workflow_kind: str,
     payload: dict[str, object],
     signature_b64: str,
     public_key_b64: str,
@@ -127,9 +129,30 @@ def build_sidecar_document(
 ) -> dict[str, object]:
     return {
         "schema_version": int(schema_version),
+        "document_type": str(document_type),
+        "workflow_kind": str(workflow_kind),
         "key_id": str(key_id),
         "payload": payload,
         "signature_b64": signature_b64,
         "public_key_b64": public_key_b64,
         "payload_sha256": payload_sha256,
+    }
+
+
+def build_provenance_sidecar_document(
+    *,
+    schema_version: int,
+    document_type: str,
+    workflow_kind: str,
+    key_id: str,
+    parent_document: dict[str, object],
+    derivative_document: dict[str, object],
+) -> dict[str, object]:
+    return {
+        "schema_version": int(schema_version),
+        "document_type": str(document_type),
+        "workflow_kind": str(workflow_kind),
+        "key_id": str(key_id),
+        "parent_document": parent_document,
+        "derivative_document": derivative_document,
     }

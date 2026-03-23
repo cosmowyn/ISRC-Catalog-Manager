@@ -7,10 +7,19 @@ from pathlib import Path
 
 AUTHENTICITY_SCHEMA_VERSION = 1
 WATERMARK_VERSION = 1
-SUPPORTED_AUTHENTICITY_SUFFIXES = frozenset({".wav", ".flac"})
+DOCUMENT_TYPE_DIRECT_WATERMARK = "direct_watermark"
+DOCUMENT_TYPE_PROVENANCE_LINEAGE = "provenance_lineage"
+WORKFLOW_KIND_AUTHENTICITY_MASTER = "authenticity_master"
+WORKFLOW_KIND_AUTHENTICITY_LINEAGE = "authenticity_lineage"
+
+DIRECT_WATERMARK_SUFFIXES = frozenset({".wav", ".flac", ".aif", ".aiff"})
+PROVENANCE_ONLY_SUFFIXES = frozenset({".mp3", ".ogg", ".oga", ".opus", ".m4a", ".mp4", ".aac"})
+VERIFICATION_INPUT_SUFFIXES = frozenset(DIRECT_WATERMARK_SUFFIXES | PROVENANCE_ONLY_SUFFIXES)
+SUPPORTED_AUTHENTICITY_SUFFIXES = DIRECT_WATERMARK_SUFFIXES
 
 VERIFICATION_STATUS_VERIFIED = "verified_authentic"
-VERIFICATION_STATUS_SIGNATURE_INVALID = "watermark_found_signature_invalid"
+VERIFICATION_STATUS_VERIFIED_BY_LINEAGE = "verified_by_lineage"
+VERIFICATION_STATUS_SIGNATURE_INVALID = "signature_invalid"
 VERIFICATION_STATUS_MANIFEST_REFERENCE_MISMATCH = "manifest_found_reference_mismatch"
 VERIFICATION_STATUS_NO_WATERMARK = "no_watermark_detected"
 VERIFICATION_STATUS_UNSUPPORTED_OR_INSUFFICIENT = "unsupported_format_or_insufficient_confidence"
@@ -127,6 +136,8 @@ class AuthenticityExportPlanItem:
     source_suffix: str
     suggested_name: str
     key_id: str
+    document_type: str = DOCUMENT_TYPE_DIRECT_WATERMARK
+    workflow_kind: str = WORKFLOW_KIND_AUTHENTICITY_MASTER
     status: str = "ready"
     warning: str | None = None
 
@@ -138,6 +149,8 @@ class AuthenticityExportPlanItem:
 class AuthenticityExportPlan:
     key_id: str
     signer_label: str | None
+    document_type: str = DOCUMENT_TYPE_DIRECT_WATERMARK
+    workflow_kind: str = WORKFLOW_KIND_AUTHENTICITY_MASTER
     items: list[AuthenticityExportPlanItem] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
@@ -148,6 +161,8 @@ class AuthenticityExportPlan:
         return {
             "key_id": self.key_id,
             "signer_label": self.signer_label,
+            "document_type": self.document_type,
+            "workflow_kind": self.workflow_kind,
             "items": [item.to_dict() for item in self.items],
             "warnings": list(self.warnings),
         }
@@ -193,6 +208,10 @@ class AuthenticityVerificationReport:
     manifest_id: str | None = None
     watermark_id: int | None = None
     resolution_source: str | None = None
+    verification_basis: str | None = None
+    document_type: str | None = None
+    workflow_kind: str | None = None
+    parent_manifest_id: str | None = None
     signature_valid: bool | None = None
     exact_hash_match: bool | None = None
     fingerprint_similarity: float | None = None

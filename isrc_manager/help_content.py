@@ -585,7 +585,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
     HelpChapter(
         chapter_id="audio-authenticity",
         title="Audio Authenticity",
-        summary="Export signed WAV or FLAC copies with a keyed watermark, manage signing keys, and verify authenticity honestly inside the catalog.",
+        summary="Export direct master authenticity copies, export provenance-only derivatives, manage signing keys, and verify authenticity honestly inside the catalog.",
         keywords=(
             "audio authenticity",
             "watermark",
@@ -597,16 +597,20 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "authenticity keys",
             "wav",
             "flac",
+            "aiff",
+            "provenance",
         ),
         content_html="""
         <p>The audio authenticity workflow combines two layers: a compact keyed watermark embedded into exported audio plus an Ed25519-signed manifest that carries the real authenticity claim. The watermark links the file back to the catalog record; the signature proves which manifest was issued.</p>
         <ul>
           <li><strong>Settings &gt; Audio Authenticity Keys…</strong>: generate or review local signing keys. Public keys are stored in the profile, while private keys stay as local key files under the app settings root.</li>
-          <li><strong>Catalog &gt; Export Authenticity Watermarked Audio…</strong>: write WAV or FLAC copies that keep the original master or attached audio unchanged, embed a compact keyed watermark token, write the catalog metadata tags that are already available for the track, and save a sibling <code>.authenticity.json</code> sidecar with the signed manifest.</li>
-          <li><strong>Catalog &gt; Verify Audio Authenticity…</strong>: inspect either the selected catalog track audio or a chosen external WAV/FLAC file, try keyed watermark recovery, resolve the manifest from the open profile or a sidecar, verify the Ed25519 signature, and compare the inspected audio against the signed reference fingerprint.</li>
+          <li><strong>Catalog &gt; Export Authenticity Watermarked Audio…</strong>: write WAV, FLAC, or AIFF master copies that keep the original canonical source unchanged, embed a compact keyed watermark token, write the catalog metadata tags that are already available for the track, and save a sibling <code>.authenticity.json</code> sidecar with the signed direct-authenticity manifest.</li>
+          <li><strong>Catalog &gt; Export Authenticity Provenance Audio…</strong>: copy supported lossy derivatives as-is, write the available catalog tags, and save a signed provenance sidecar that binds the exported derivative back to a previously verified watermarked master.</li>
+          <li><strong>Catalog &gt; Verify Audio Authenticity…</strong>: inspect either selected catalog audio or a chosen external file, then either verify the direct watermark path for WAV/FLAC/AIFF or verify a signed provenance lineage sidecar for supported derivatives.</li>
         </ul>
         <p>This feature is <strong>not DRM</strong> and does not promise forensic certainty. A watermark always changes the waveform slightly, so the goal is perceptual transparency rather than mathematical identity. The strongest in-app verification happens when the open profile still contains the original reference audio, because the app can compare the inspected export against that stored source directly.</p>
-        <p>Version 1 is intentionally practical: it focuses on PCM-style WAV and FLAC workflows, keeps original stored audio untouched, and treats lossy-transcode robustness as future work rather than making claims the implementation cannot support yet.</p>
+        <p>Direct embedded watermark verification is intentionally limited to WAV, FLAC, and AIFF. Lossy formats such as MP3, OGG/OGA, Opus, and M4A/MP4/AAC are handled through signed provenance lineage only in this pass; the app does not claim that the same embedded watermark guarantee survives those formats equally.</p>
+        <p>Future forensic watermarking for recipient-specific leak tracing is a separate direction. It is not merged into the current authenticity workflow, and the current manifests and lineage sidecars are structured so a later forensic export ledger can attach cleanly without changing what today’s authenticity documents mean.</p>
         """,
     ),
     HelpChapter(

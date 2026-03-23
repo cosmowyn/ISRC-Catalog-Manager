@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -8,6 +9,8 @@ import soundfile as sf
 
 from isrc_manager.assets import AssetService
 from isrc_manager.authenticity import (
+    DOCUMENT_TYPE_DIRECT_WATERMARK,
+    WORKFLOW_KIND_AUTHENTICITY_MASTER,
     AudioAuthenticityService,
     AudioWatermarkService,
     AuthenticityKeyService,
@@ -148,6 +151,61 @@ class AuthenticityWorkflowTestCase(unittest.TestCase):
         signal = np.clip(signal, -0.95, 0.95)
         stereo = np.stack([signal, np.roll(signal, 97)], axis=1)
         path = self.root / name
-        format_name = "FLAC" if suffix.lower() == ".flac" else "WAV"
-        sf.write(path, stereo, sample_rate, format=format_name, subtype="PCM_24")
+        clean_suffix = suffix.lower()
+        if clean_suffix == ".flac":
+            format_name = "FLAC"
+            subtype = "PCM_24"
+        elif clean_suffix in {".aif", ".aiff"}:
+            format_name = "AIFF"
+            subtype = "PCM_24"
+        elif clean_suffix == ".mp3":
+            format_name = "MP3"
+            subtype = "MPEG_LAYER_III"
+        elif clean_suffix in {".ogg", ".oga"}:
+            format_name = "OGG"
+            subtype = "VORBIS"
+        elif clean_suffix == ".opus":
+            format_name = "OGG"
+            subtype = "OPUS"
+        else:
+            format_name = "WAV"
+            subtype = "PCM_24"
+        sf.write(path, stereo, sample_rate, format=format_name, subtype=subtype)
         return path
+
+    def export_direct_authenticity_fixture(
+        self,
+        *,
+        suffix: str = ".wav",
+        duration_seconds: int = 30,
+        seed: int = 1,
+    ):
+        track_id, audio_path = self.create_track_with_audio(
+            duration_seconds=duration_seconds,
+            seed=seed,
+            suffix=suffix,
+        )
+        result = self.audio_service.export_watermarked_audio(
+            output_dir=self.root / "exports",
+            track_ids=[track_id],
+            profile_name="Test Profile",
+        )
+        return track_id, audio_path, result
+
+    def build_direct_sidecar(self, manifest_id: str) -> dict[str, object]:
+        manifest_record = self.manifest_service.fetch_manifest_by_manifest_id(manifest_id)
+        if manifest_record is None:
+            raise AssertionError(f"Unknown manifest id: {manifest_id}")
+        key_record = self.key_service.fetch_key(manifest_record.key_id)
+        if key_record is None:
+            raise AssertionError(f"Unknown key id: {manifest_record.key_id}")
+        return {
+            "schema_version": 1,
+            "document_type": DOCUMENT_TYPE_DIRECT_WATERMARK,
+            "workflow_kind": WORKFLOW_KIND_AUTHENTICITY_MASTER,
+            "key_id": manifest_record.key_id,
+            "payload": json.loads(manifest_record.payload_canonical),
+            "signature_b64": manifest_record.signature_b64,
+            "public_key_b64": key_record.public_key_b64,
+            "payload_sha256": manifest_record.payload_sha256,
+        }

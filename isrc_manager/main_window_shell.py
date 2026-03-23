@@ -379,6 +379,11 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         slot=app.export_authenticity_watermarked_audio,
     )
     catalog_menu.addAction(app.export_authenticity_watermarked_audio_action)
+    app.export_authenticity_provenance_audio_action = app._create_action(
+        "Export Authenticity Provenance Audio…",
+        slot=app.export_authenticity_provenance_audio,
+    )
+    catalog_menu.addAction(app.export_authenticity_provenance_audio_action)
     app.verify_audio_authenticity_action = app._create_action(
         "Verify Audio Authenticity…",
         slot=app.verify_audio_authenticity,

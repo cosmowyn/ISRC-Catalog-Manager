@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Iterable
 
 from isrc_manager.assets import AssetService
-from isrc_manager.file_storage import sanitize_export_basename
+from isrc_manager.file_storage import guess_mime_type, sanitize_export_basename
 from isrc_manager.releases import ReleaseService
 from isrc_manager.rights import RightsService
 from isrc_manager.services.session import ProfileKVService
@@ -32,6 +32,7 @@ from .crypto import (
     write_private_key,
 )
 from .manifest import (
+    build_provenance_sidecar_document,
     build_sidecar_document,
     canonical_text,
     compute_reference_fingerprint,
@@ -40,13 +41,21 @@ from .manifest import (
 )
 from .models import (
     AUTHENTICITY_SCHEMA_VERSION,
+    DIRECT_WATERMARK_SUFFIXES,
+    DOCUMENT_TYPE_DIRECT_WATERMARK,
+    DOCUMENT_TYPE_PROVENANCE_LINEAGE,
+    PROVENANCE_ONLY_SUFFIXES,
     SUPPORTED_AUTHENTICITY_SUFFIXES,
+    VERIFICATION_INPUT_SUFFIXES,
     VERIFICATION_STATUS_MANIFEST_REFERENCE_MISMATCH,
     VERIFICATION_STATUS_NO_WATERMARK,
     VERIFICATION_STATUS_SIGNATURE_INVALID,
     VERIFICATION_STATUS_UNSUPPORTED_OR_INSUFFICIENT,
     VERIFICATION_STATUS_VERIFIED,
+    VERIFICATION_STATUS_VERIFIED_BY_LINEAGE,
     WATERMARK_VERSION,
+    WORKFLOW_KIND_AUTHENTICITY_LINEAGE,
+    WORKFLOW_KIND_AUTHENTICITY_MASTER,
     AuthenticityExportPlan,
     AuthenticityExportPlanItem,
     AuthenticityExportResult,
@@ -57,14 +66,51 @@ from .models import (
     ReferenceAudioSelection,
     WatermarkToken,
 )
-from .watermark import AudioWatermarkCore, supported_audio_path, watermark_settings_payload
+from .watermark import AudioWatermarkCore, watermark_settings_payload
 
 DEFAULT_KEY_ID_KV = "authenticity/default_key_id"
+PROVENANCE_LINEAGE_BASIS = "signed_derivative_of_verified_master"
 
 
 def _clean_text(value: object | None) -> str | None:
     text = str(value or "").strip()
     return text or None
+
+
+def _signed_document_is_valid(document: dict[str, object]) -> bool:
+    payload = document.get("payload")
+    signature_b64 = str(document.get("signature_b64") or "")
+    public_key_b64_value = str(document.get("public_key_b64") or "")
+    if not isinstance(payload, dict) or not signature_b64 or not public_key_b64_value:
+        return False
+    canonical = manifest_bytes(payload)
+    payload_sha256 = str(document.get("payload_sha256") or sha256_hex(canonical))
+    if sha256_hex(canonical) != payload_sha256:
+        return False
+    try:
+        return verify_signature(
+            public_key_from_b64(public_key_b64_value),
+            canonical,
+            signature_b64,
+        )
+    except Exception:
+        return False
+
+
+def _watermark_token_from_payload(payload: dict[str, object]) -> WatermarkToken | None:
+    binding = payload.get("watermark_binding") or {}
+    try:
+        candidate_token = WatermarkToken(
+            version=int(binding.get("watermark_version") or WATERMARK_VERSION),
+            watermark_id=int(binding.get("watermark_id") or 0),
+            manifest_digest_prefix=str(binding.get("manifest_digest_prefix") or ""),
+            nonce=int(binding.get("watermark_nonce") or 0),
+        )
+    except Exception:
+        return None
+    if candidate_token.watermark_id <= 0 or len(candidate_token.manifest_digest_prefix) != 16:
+        return None
+    return candidate_token
 
 
 class AuthenticityKeyService:
@@ -248,7 +294,7 @@ class AuthenticityManifestService:
         data, mime_type = self.asset_service.fetch_asset_bytes(asset_id)
         suffix = self._suffix_for(asset.filename or asset.stored_path)
         if suffix not in SUPPORTED_AUTHENTICITY_SUFFIXES:
-            raise ValueError("Selected reference asset is not a WAV or FLAC file.")
+            raise ValueError("Selected reference asset is not a WAV, FLAC, or AIFF file.")
         return ReferenceAudioSelection(
             track_id=int(track_id),
             source_kind="asset",
@@ -272,7 +318,7 @@ class AuthenticityManifestService:
             raise ValueError(f"Track {track_id} not found.")
         suffix = self._suffix_for(snapshot.audio_file_filename or snapshot.audio_file_path)
         if suffix not in SUPPORTED_AUTHENTICITY_SUFFIXES:
-            raise ValueError("Attached track audio is not a WAV or FLAC file.")
+            raise ValueError("Attached track audio is not a WAV, FLAC, or AIFF file.")
         data, mime_type = self.track_service.fetch_media_bytes(track_id, "audio_file")
         return ReferenceAudioSelection(
             track_id=int(track_id),
@@ -311,7 +357,7 @@ class AuthenticityManifestService:
         if snapshot is not None and self.track_service.has_media(track_id, "audio_file"):
             return self._reference_selection_from_track_audio(track_id)
         raise ValueError(
-            "No supported WAV or FLAC reference audio was found. V1 uses approved main/hi-res masters first, then attached track audio."
+            "No supported WAV, FLAC, or AIFF reference audio was found. V1 uses approved main/hi-res masters first, then attached track audio."
         )
 
     def _build_release_refs(self, track_id: int) -> list[dict[str, object]]:
@@ -449,6 +495,7 @@ class AuthenticityManifestService:
         payload = {
             "authenticity_version": AUTHENTICITY_SCHEMA_VERSION,
             "watermark_version": WATERMARK_VERSION,
+            "workflow_kind": WORKFLOW_KIND_AUTHENTICITY_MASTER,
             "manifest_id": secrets.token_hex(16),
             "app_version": str(app_version),
             "created_at_utc": canonical_timestamp(),
@@ -718,6 +765,39 @@ class AuthenticityManifestService:
         ).fetchone()
         return self._row_to_manifest(row) if row else None
 
+    def fetch_latest_manifest_for_track(self, track_id: int) -> AuthenticityManifestRecord | None:
+        row = self.conn.execute(
+            """
+            SELECT
+                id,
+                track_id,
+                reference_asset_id,
+                key_id,
+                manifest_schema_version,
+                watermark_version,
+                manifest_id,
+                watermark_id,
+                watermark_nonce,
+                manifest_digest_prefix,
+                payload_canonical,
+                payload_sha256,
+                signature_b64,
+                reference_audio_sha256,
+                reference_fingerprint_b64,
+                reference_source_kind,
+                embed_settings_json,
+                created_at,
+                revoked_at
+            FROM AuthenticityManifests
+            WHERE track_id=?
+              AND revoked_at IS NULL
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (int(track_id),),
+        ).fetchone()
+        return self._row_to_manifest(row) if row else None
+
     def resolve_reference_for_payload(
         self,
         payload: dict[str, object],
@@ -908,6 +988,177 @@ class AudioAuthenticityService:
             artwork=artwork,
         )
 
+    def _attached_audio_source(self, track_id: int) -> dict[str, object]:
+        snapshot = self.manifest_service.track_service.fetch_track_snapshot(track_id)
+        if snapshot is None:
+            raise ValueError(f"Track {track_id} not found.")
+        if not self.manifest_service.track_service.has_media(track_id, "audio_file"):
+            raise ValueError("No attached track audio is available.")
+        filename = str(snapshot.audio_file_filename or "").strip()
+        suffix = Path(filename or snapshot.audio_file_path or "").suffix.lower()
+        resolved_path = self.manifest_service.track_service.resolve_media_path(
+            snapshot.audio_file_path
+        )
+        data, mime_type = self.manifest_service.track_service.fetch_media_bytes(
+            track_id, "audio_file"
+        )
+        return {
+            "snapshot": snapshot,
+            "filename": filename or f"track-{track_id}{suffix}",
+            "suffix": suffix,
+            "source_label": "Attached track audio",
+            "mime_type": _clean_text(mime_type) or _clean_text(snapshot.audio_file_mime_type),
+            "source_path": resolved_path,
+            "source_bytes": None if resolved_path is not None and resolved_path.exists() else data,
+        }
+
+    def _payload_watermark_id(self, payload: dict[str, object]) -> int | None:
+        binding = payload.get("watermark_binding") or {}
+        try:
+            watermark_id = int(binding.get("watermark_id") or 0)
+        except Exception:
+            return None
+        return watermark_id if watermark_id > 0 else None
+
+    def _build_signed_document(
+        self,
+        *,
+        document_type: str,
+        workflow_kind: str,
+        payload: dict[str, object],
+        signature_b64: str,
+        public_key_b64_value: str,
+        payload_sha256: str,
+        key_id: str,
+    ) -> dict[str, object]:
+        return build_sidecar_document(
+            schema_version=AUTHENTICITY_SCHEMA_VERSION,
+            document_type=document_type,
+            workflow_kind=workflow_kind,
+            payload=payload,
+            signature_b64=signature_b64,
+            public_key_b64=public_key_b64_value,
+            payload_sha256=payload_sha256,
+            key_id=key_id,
+        )
+
+    def _build_parent_direct_document(
+        self, manifest_record: AuthenticityManifestRecord
+    ) -> dict[str, object]:
+        payload = json.loads(manifest_record.payload_canonical)
+        key_record = self.key_service.fetch_key(manifest_record.key_id)
+        if key_record is None:
+            raise ValueError(f"Authenticity key '{manifest_record.key_id}' was not found.")
+        return self._build_signed_document(
+            document_type=DOCUMENT_TYPE_DIRECT_WATERMARK,
+            workflow_kind=str(payload.get("workflow_kind") or WORKFLOW_KIND_AUTHENTICITY_MASTER),
+            payload=payload,
+            signature_b64=manifest_record.signature_b64,
+            public_key_b64_value=key_record.public_key_b64,
+            payload_sha256=manifest_record.payload_sha256,
+            key_id=manifest_record.key_id,
+        )
+
+    def _direct_manifest_ready_for_lineage(
+        self, track_id: int
+    ) -> tuple[AuthenticityManifestRecord, dict[str, object], ReferenceAudioSelection]:
+        manifest_record = self.manifest_service.fetch_latest_manifest_for_track(track_id)
+        if manifest_record is None:
+            raise ValueError(
+                "No direct authenticity manifest exists for this track yet. Export a watermarked master first."
+            )
+        payload = json.loads(manifest_record.payload_canonical)
+        reference = self.manifest_service.select_reference_audio(track_id)
+        if reference.sha256_hex is None:
+            reference_bytes = (
+                bytes(reference.source_bytes)
+                if reference.source_bytes is not None
+                else (
+                    Path(reference.source_path).read_bytes()
+                    if reference.source_path is not None
+                    else None
+                )
+            )
+            if reference_bytes is None:
+                raise ValueError("Reference audio could not be read for lineage verification.")
+            reference.sha256_hex = sha256_hex(reference_bytes)
+        if reference.sha256_hex != manifest_record.reference_audio_sha256:
+            raise ValueError(
+                "The current canonical reference audio no longer matches the stored direct authenticity manifest. Export a new watermarked master first."
+            )
+        return manifest_record, payload, reference
+
+    def _build_provenance_payload(
+        self,
+        *,
+        track_id: int,
+        derivative_path: Path,
+        derivative_mime_type: str | None,
+        parent_manifest: AuthenticityManifestRecord,
+        parent_payload: dict[str, object],
+        app_version: str,
+        profile_name: str | None,
+        signer_key_id: str,
+        signer_label: str | None,
+        derived_from_asset_id: int | None,
+    ) -> dict[str, object]:
+        snapshot = self.manifest_service.track_service.fetch_track_snapshot(track_id)
+        if snapshot is None:
+            raise ValueError(f"Track {track_id} not found.")
+        derivative_sha256 = sha256_hex(derivative_path.read_bytes())
+        derivative_size = derivative_path.stat().st_size
+        parent_binding = parent_payload.get("watermark_binding") or {}
+        return {
+            "authenticity_version": AUTHENTICITY_SCHEMA_VERSION,
+            "document_type": DOCUMENT_TYPE_PROVENANCE_LINEAGE,
+            "workflow_kind": WORKFLOW_KIND_AUTHENTICITY_LINEAGE,
+            "export_id": secrets.token_hex(16),
+            "manifest_id": secrets.token_hex(16),
+            "app_version": str(app_version),
+            "created_at_utc": canonical_timestamp(),
+            "track_ref": {
+                "track_id": int(snapshot.track_id),
+                "isrc": snapshot.isrc,
+                "track_title": snapshot.track_title,
+                "catalog_number": snapshot.catalog_number,
+                "buma_work_number": snapshot.buma_work_number,
+                "release_date": snapshot.release_date,
+                "iswc": snapshot.iswc,
+                "upc": snapshot.upc,
+                "profile_name": profile_name,
+            },
+            "artist_ref": {
+                "primary_artist_name": snapshot.artist_name,
+            },
+            "derivative_audio": {
+                "filename": derivative_path.name,
+                "mime_type": derivative_mime_type or guess_mime_type(derivative_path.name),
+                "format": derivative_path.suffix.lower().lstrip("."),
+                "suffix": derivative_path.suffix.lower(),
+                "size_bytes": int(derivative_size),
+                "sha256": derivative_sha256,
+            },
+            "parent_authenticity": {
+                "parent_manifest_id": parent_manifest.manifest_id,
+                "payload_sha256": parent_manifest.payload_sha256,
+                "watermark_id": int(
+                    parent_binding.get("watermark_id") or parent_manifest.watermark_id
+                ),
+                "key_id": parent_manifest.key_id,
+                "reference_audio_sha256": parent_manifest.reference_audio_sha256,
+                "reference_asset_id": parent_manifest.reference_asset_id,
+                "reference_source_kind": parent_manifest.reference_source_kind,
+            },
+            "lineage": {
+                "basis": PROVENANCE_LINEAGE_BASIS,
+                "derived_from_asset_id": derived_from_asset_id,
+            },
+            "signer": {
+                "key_id": signer_key_id,
+                "signer_label": signer_label,
+            },
+        }
+
     def build_export_plan(
         self,
         track_ids: Iterable[int],
@@ -961,6 +1212,78 @@ class AudioAuthenticityService:
         return AuthenticityExportPlan(
             key_id=key_record.key_id,
             signer_label=key_record.signer_label,
+            document_type=DOCUMENT_TYPE_DIRECT_WATERMARK,
+            workflow_kind=WORKFLOW_KIND_AUTHENTICITY_MASTER,
+            items=items,
+            warnings=warnings,
+        )
+
+    def build_provenance_export_plan(
+        self,
+        track_ids: Iterable[int],
+        *,
+        key_id: str | None = None,
+        profile_name: str | None = None,
+    ) -> AuthenticityExportPlan:
+        del profile_name
+        key_record = self.key_service.resolve_key(key_id)
+        items: list[AuthenticityExportPlanItem] = []
+        warnings: list[str] = []
+        for raw_track_id in track_ids:
+            try:
+                track_id = int(raw_track_id)
+            except Exception:
+                continue
+            snapshot = self.manifest_service.track_service.fetch_track_snapshot(track_id)
+            if snapshot is None:
+                warnings.append(f"Track {track_id} no longer exists and was skipped.")
+                continue
+            try:
+                source = self._attached_audio_source(track_id)
+                suffix = str(source["suffix"] or "")
+                if suffix not in PROVENANCE_ONLY_SUFFIXES:
+                    raise ValueError(
+                        "Attached track audio is not a supported provenance format. Use MP3, OGG/OGA, Opus, or M4A/MP4/AAC derivatives for provenance-only export."
+                    )
+                self._direct_manifest_ready_for_lineage(track_id)
+                items.append(
+                    AuthenticityExportPlanItem(
+                        track_id=track_id,
+                        track_title=snapshot.track_title,
+                        source_label=str(source["source_label"]),
+                        source_suffix=suffix,
+                        suggested_name=sanitize_export_basename(
+                            f"{snapshot.track_title} - authenticity lineage"
+                        ),
+                        key_id=key_record.key_id,
+                        document_type=DOCUMENT_TYPE_PROVENANCE_LINEAGE,
+                        workflow_kind=WORKFLOW_KIND_AUTHENTICITY_LINEAGE,
+                    )
+                )
+            except Exception as exc:
+                warning = f"{snapshot.track_title}: {exc}"
+                warnings.append(warning)
+                items.append(
+                    AuthenticityExportPlanItem(
+                        track_id=track_id,
+                        track_title=snapshot.track_title,
+                        source_label="Unsupported",
+                        source_suffix="",
+                        suggested_name=sanitize_export_basename(
+                            f"{snapshot.track_title} - authenticity lineage"
+                        ),
+                        key_id=key_record.key_id,
+                        document_type=DOCUMENT_TYPE_PROVENANCE_LINEAGE,
+                        workflow_kind=WORKFLOW_KIND_AUTHENTICITY_LINEAGE,
+                        status="unsupported",
+                        warning=str(exc),
+                    )
+                )
+        return AuthenticityExportPlan(
+            key_id=key_record.key_id,
+            signer_label=key_record.signer_label,
+            document_type=DOCUMENT_TYPE_PROVENANCE_LINEAGE,
+            workflow_kind=WORKFLOW_KIND_AUTHENTICITY_LINEAGE,
             items=items,
             warnings=warnings,
         )
@@ -1019,11 +1342,12 @@ class AudioAuthenticityService:
                     prepared,
                     embed_settings={**prepared.embed_settings, **embed_metrics},
                 )
-                sidecar = build_sidecar_document(
-                    schema_version=AUTHENTICITY_SCHEMA_VERSION,
+                sidecar = self._build_signed_document(
+                    document_type=DOCUMENT_TYPE_DIRECT_WATERMARK,
+                    workflow_kind=WORKFLOW_KIND_AUTHENTICITY_MASTER,
                     payload=prepared.payload,
                     signature_b64=prepared.signature_b64,
-                    public_key_b64=prepared.public_key_b64,
+                    public_key_b64_value=prepared.public_key_b64,
                     payload_sha256=prepared.payload_sha256,
                     key_id=prepared.key_id,
                 )
@@ -1056,6 +1380,117 @@ class AudioAuthenticityService:
             manifest_ids=manifest_ids,
         )
 
+    def export_provenance_audio(
+        self,
+        *,
+        output_dir: str | Path,
+        track_ids: Iterable[int],
+        key_id: str | None = None,
+        profile_name: str | None = None,
+        progress_callback=None,
+        is_cancelled=None,
+    ) -> AuthenticityExportResult:
+        plan = self.build_provenance_export_plan(
+            track_ids,
+            key_id=key_id,
+            profile_name=profile_name,
+        )
+        key_record, private_key, _watermark_key = self.key_service.signing_material(plan.key_id)
+        destination_root = Path(output_dir)
+        destination_root.mkdir(parents=True, exist_ok=True)
+        exported = 0
+        skipped = 0
+        warnings = list(plan.warnings)
+        written_audio_paths: list[str] = []
+        written_sidecar_paths: list[str] = []
+        manifest_ids: list[str] = []
+        ready_items = plan.ready_items()
+        total = len(ready_items)
+        for index, item in enumerate(ready_items, start=1):
+            if progress_callback is not None:
+                progress_callback(
+                    index - 1,
+                    total,
+                    f"Exporting authenticity provenance {index} of {total}: {item.track_title}",
+                )
+            if is_cancelled is not None and is_cancelled():
+                raise InterruptedError("Authenticity provenance export cancelled.")
+            destination = (destination_root / item.suggested_name).with_suffix(item.source_suffix)
+            try:
+                source = self._attached_audio_source(item.track_id)
+                parent_manifest, parent_payload, _reference = (
+                    self._direct_manifest_ready_for_lineage(item.track_id)
+                )
+                parent_document = self._build_parent_direct_document(parent_manifest)
+                if source["source_path"] is not None:
+                    source_bytes = Path(source["source_path"]).read_bytes()
+                else:
+                    source_bytes = bytes(source["source_bytes"] or b"")
+                destination.write_bytes(source_bytes)
+                tag_data = self._build_export_tag_data(item.track_id)
+                self.tag_service.write_tags(destination, tag_data)
+                derivative_payload = self._build_provenance_payload(
+                    track_id=item.track_id,
+                    derivative_path=destination,
+                    derivative_mime_type=_clean_text(source["mime_type"])
+                    or guess_mime_type(destination.name),
+                    parent_manifest=parent_manifest,
+                    parent_payload=parent_payload,
+                    app_version=self.app_version,
+                    profile_name=profile_name,
+                    signer_key_id=key_record.key_id,
+                    signer_label=key_record.signer_label,
+                    derived_from_asset_id=parent_manifest.reference_asset_id,
+                )
+                derivative_canonical = manifest_bytes(derivative_payload)
+                derivative_sha256 = sha256_hex(derivative_canonical)
+                derivative_signature_b64 = sign_bytes(private_key, derivative_canonical)
+                derivative_document = self._build_signed_document(
+                    document_type=DOCUMENT_TYPE_PROVENANCE_LINEAGE,
+                    workflow_kind=WORKFLOW_KIND_AUTHENTICITY_LINEAGE,
+                    payload=derivative_payload,
+                    signature_b64=derivative_signature_b64,
+                    public_key_b64_value=key_record.public_key_b64,
+                    payload_sha256=derivative_sha256,
+                    key_id=key_record.key_id,
+                )
+                sidecar = build_provenance_sidecar_document(
+                    schema_version=AUTHENTICITY_SCHEMA_VERSION,
+                    document_type=DOCUMENT_TYPE_PROVENANCE_LINEAGE,
+                    workflow_kind=WORKFLOW_KIND_AUTHENTICITY_LINEAGE,
+                    key_id=key_record.key_id,
+                    parent_document=parent_document,
+                    derivative_document=derivative_document,
+                )
+                sidecar_path = destination.with_suffix(destination.suffix + ".authenticity.json")
+                sidecar_path.write_text(
+                    json.dumps(sidecar, indent=2, sort_keys=True, ensure_ascii=True),
+                    encoding="utf-8",
+                )
+                exported += 1
+                written_audio_paths.append(str(destination))
+                written_sidecar_paths.append(str(sidecar_path))
+                manifest_ids.append(str(derivative_payload["manifest_id"]))
+            except Exception as exc:
+                skipped += 1
+                warnings.append(f"{destination.name}: {exc}")
+                destination.unlink(missing_ok=True)
+                destination.with_suffix(destination.suffix + ".authenticity.json").unlink(
+                    missing_ok=True
+                )
+        if progress_callback is not None:
+            progress_callback(total, total, "Authenticity provenance export finished.")
+        skipped += max(0, len(plan.items) - len(ready_items))
+        return AuthenticityExportResult(
+            requested=len(plan.items),
+            exported=exported,
+            skipped=skipped,
+            warnings=warnings,
+            written_audio_paths=written_audio_paths,
+            written_sidecar_paths=written_sidecar_paths,
+            manifest_ids=manifest_ids,
+        )
+
     def _load_adjacent_sidecar(self, inspected_path: Path) -> tuple[dict[str, object], Path] | None:
         candidates = [
             inspected_path.with_suffix(inspected_path.suffix + ".authenticity.json"),
@@ -1070,65 +1505,197 @@ class AudioAuthenticityService:
                 continue
         return None
 
-    def verify_file(self, path: str | Path) -> AuthenticityVerificationReport:
-        inspected_path = Path(path)
-        if not inspected_path.exists() or not supported_audio_path(inspected_path):
+    def _verify_provenance_sidecar(
+        self,
+        *,
+        inspected_path: Path,
+        sidecar_doc: dict[str, object],
+        sidecar_path_str: str | None,
+    ) -> AuthenticityVerificationReport:
+        parent_document = sidecar_doc.get("parent_document")
+        derivative_document = sidecar_doc.get("derivative_document")
+        if not isinstance(parent_document, dict) or not isinstance(derivative_document, dict):
             return AuthenticityVerificationReport(
                 status=VERIFICATION_STATUS_UNSUPPORTED_OR_INSUFFICIENT,
-                message="Verification currently supports existing WAV and FLAC files only.",
+                message="The adjacent provenance sidecar is incomplete.",
+                inspected_path=str(inspected_path),
+                sidecar_path=sidecar_path_str,
+                verification_basis="provenance_lineage",
+                document_type=DOCUMENT_TYPE_PROVENANCE_LINEAGE,
+                workflow_kind=WORKFLOW_KIND_AUTHENTICITY_LINEAGE,
+            )
+        if not _signed_document_is_valid(parent_document) or not _signed_document_is_valid(
+            derivative_document
+        ):
+            derivative_payload = derivative_document.get("payload")
+            manifest_id = (
+                str(derivative_payload.get("manifest_id") or "")
+                if isinstance(derivative_payload, dict)
+                else ""
+            )
+            return AuthenticityVerificationReport(
+                status=VERIFICATION_STATUS_SIGNATURE_INVALID,
+                message="The provenance sidecar was found, but its signature chain did not verify.",
+                inspected_path=str(inspected_path),
+                manifest_id=manifest_id or None,
+                sidecar_path=sidecar_path_str,
+                verification_basis="provenance_lineage",
+                document_type=DOCUMENT_TYPE_PROVENANCE_LINEAGE,
+                workflow_kind=WORKFLOW_KIND_AUTHENTICITY_LINEAGE,
+                signature_valid=False,
+            )
+
+        parent_payload = parent_document["payload"]
+        derivative_payload = derivative_document["payload"]
+        derivative_audio = derivative_payload.get("derivative_audio") or {}
+        expected_sha256 = str(derivative_audio.get("sha256") or "")
+        inspected_sha256 = sha256_hex(inspected_path.read_bytes())
+        if expected_sha256 and expected_sha256 != inspected_sha256:
+            return AuthenticityVerificationReport(
+                status=VERIFICATION_STATUS_MANIFEST_REFERENCE_MISMATCH,
+                message="The inspected derivative file did not match the signed provenance record.",
+                inspected_path=str(inspected_path),
+                key_id=str((derivative_payload.get("signer") or {}).get("key_id") or ""),
+                manifest_id=str(derivative_payload.get("manifest_id") or ""),
+                parent_manifest_id=str(
+                    (derivative_payload.get("parent_authenticity") or {}).get("parent_manifest_id")
+                    or ""
+                )
+                or None,
+                sidecar_path=sidecar_path_str,
+                verification_basis="provenance_lineage",
+                document_type=DOCUMENT_TYPE_PROVENANCE_LINEAGE,
+                workflow_kind=WORKFLOW_KIND_AUTHENTICITY_LINEAGE,
+                signature_valid=True,
+                exact_hash_match=False,
+                details=[
+                    f"expected_sha256={expected_sha256}",
+                    f"inspected_sha256={inspected_sha256}",
+                ],
+            )
+
+        parent_authenticity = derivative_payload.get("parent_authenticity") or {}
+        parent_manifest_id = str(parent_authenticity.get("parent_manifest_id") or "")
+        expected_parent_payload_sha256 = str(parent_authenticity.get("payload_sha256") or "")
+        expected_parent_watermark_id = int(parent_authenticity.get("watermark_id") or 0)
+        resolution_source = "sidecar"
+        if parent_manifest_id:
+            manifest_record = self.manifest_service.fetch_manifest_by_manifest_id(
+                parent_manifest_id
+            )
+            if manifest_record is not None:
+                resolution_source = "database"
+                if expected_parent_payload_sha256 and (
+                    manifest_record.payload_sha256 != expected_parent_payload_sha256
+                    or (
+                        expected_parent_watermark_id > 0
+                        and manifest_record.watermark_id != expected_parent_watermark_id
+                    )
+                ):
+                    return AuthenticityVerificationReport(
+                        status=VERIFICATION_STATUS_UNSUPPORTED_OR_INSUFFICIENT,
+                        message="The provenance sidecar did not match the parent authenticity record in the open profile.",
+                        inspected_path=str(inspected_path),
+                        key_id=str((derivative_payload.get("signer") or {}).get("key_id") or ""),
+                        manifest_id=str(derivative_payload.get("manifest_id") or ""),
+                        parent_manifest_id=parent_manifest_id,
+                        resolution_source=resolution_source,
+                        sidecar_path=sidecar_path_str,
+                        verification_basis="provenance_lineage",
+                        document_type=DOCUMENT_TYPE_PROVENANCE_LINEAGE,
+                        workflow_kind=WORKFLOW_KIND_AUTHENTICITY_LINEAGE,
+                        signature_valid=True,
+                        exact_hash_match=True,
+                        details=[
+                            f"expected_parent_payload_sha256={expected_parent_payload_sha256}",
+                            f"profile_parent_payload_sha256={manifest_record.payload_sha256}",
+                            f"expected_parent_watermark_id={expected_parent_watermark_id}",
+                            f"profile_parent_watermark_id={manifest_record.watermark_id}",
+                        ],
+                    )
+
+        parent_binding = parent_payload.get("watermark_binding") or {}
+        return AuthenticityVerificationReport(
+            status=VERIFICATION_STATUS_VERIFIED_BY_LINEAGE,
+            message="The inspected file matched a signed provenance record linked to a previously watermarked master.",
+            inspected_path=str(inspected_path),
+            key_id=str((derivative_payload.get("signer") or {}).get("key_id") or ""),
+            manifest_id=str(derivative_payload.get("manifest_id") or ""),
+            parent_manifest_id=parent_manifest_id or None,
+            resolution_source=resolution_source,
+            verification_basis="provenance_lineage",
+            document_type=DOCUMENT_TYPE_PROVENANCE_LINEAGE,
+            workflow_kind=WORKFLOW_KIND_AUTHENTICITY_LINEAGE,
+            signature_valid=True,
+            exact_hash_match=True,
+            sidecar_path=sidecar_path_str,
+            details=[
+                f"derivative_sha256={expected_sha256 or inspected_sha256}",
+                f"parent_manifest_id={parent_manifest_id}",
+                f"parent_watermark_id={int(parent_binding.get('watermark_id') or expected_parent_watermark_id)}",
+            ],
+        )
+
+    def verify_file(self, path: str | Path) -> AuthenticityVerificationReport:
+        inspected_path = Path(path)
+        if (
+            not inspected_path.exists()
+            or inspected_path.suffix.lower() not in VERIFICATION_INPUT_SUFFIXES
+        ):
+            return AuthenticityVerificationReport(
+                status=VERIFICATION_STATUS_UNSUPPORTED_OR_INSUFFICIENT,
+                message="Verification currently supports direct WAV/FLAC/AIFF files and provenance-sidecar derivative formats.",
                 inspected_path=str(inspected_path),
             )
+
         sidecar_payload = self._load_adjacent_sidecar(inspected_path)
         sidecar_doc: dict[str, object] | None = None
-        sidecar_payload_dict: dict[str, object] | None = None
         sidecar_path_obj: Path | None = None
         sidecar_path_str: str | None = None
+        sidecar_document_type = DOCUMENT_TYPE_DIRECT_WATERMARK
+        sidecar_workflow_kind = WORKFLOW_KIND_AUTHENTICITY_MASTER
+        sidecar_payload_dict: dict[str, object] | None = None
         sidecar_signature_valid = False
-        sidecar_signature_b64 = ""
-        sidecar_public_key_b64 = ""
-        sidecar_payload_sha256 = ""
         sidecar_token: WatermarkToken | None = None
         if sidecar_payload is not None:
             sidecar_doc, sidecar_path_obj = sidecar_payload
             sidecar_path_str = str(sidecar_path_obj)
+            sidecar_document_type = str(
+                sidecar_doc.get("document_type") or DOCUMENT_TYPE_DIRECT_WATERMARK
+            )
+            sidecar_workflow_kind = str(
+                sidecar_doc.get("workflow_kind") or WORKFLOW_KIND_AUTHENTICITY_MASTER
+            )
             payload_candidate = sidecar_doc.get("payload")
             if isinstance(payload_candidate, dict):
                 sidecar_payload_dict = payload_candidate
-                sidecar_signature_b64 = str(sidecar_doc.get("signature_b64") or "")
-                sidecar_public_key_b64 = str(sidecar_doc.get("public_key_b64") or "")
-                canonical = manifest_bytes(payload_candidate)
-                sidecar_payload_sha256 = str(
-                    sidecar_doc.get("payload_sha256") or sha256_hex(canonical)
+                sidecar_signature_valid = _signed_document_is_valid(sidecar_doc)
+                sidecar_token = _watermark_token_from_payload(payload_candidate)
+
+        if sidecar_document_type == DOCUMENT_TYPE_PROVENANCE_LINEAGE:
+            if sidecar_doc is None:
+                return AuthenticityVerificationReport(
+                    status=VERIFICATION_STATUS_UNSUPPORTED_OR_INSUFFICIENT,
+                    message="Lossy provenance verification requires an adjacent authenticity sidecar.",
+                    inspected_path=str(inspected_path),
+                    document_type=DOCUMENT_TYPE_PROVENANCE_LINEAGE,
+                    workflow_kind=WORKFLOW_KIND_AUTHENTICITY_LINEAGE,
                 )
-                if (
-                    sidecar_signature_b64
-                    and sidecar_public_key_b64
-                    and sha256_hex(canonical) == sidecar_payload_sha256
-                ):
-                    try:
-                        sidecar_signature_valid = verify_signature(
-                            public_key_from_b64(sidecar_public_key_b64),
-                            canonical,
-                            sidecar_signature_b64,
-                        )
-                    except Exception:
-                        sidecar_signature_valid = False
-                binding = payload_candidate.get("watermark_binding") or {}
-                try:
-                    candidate_token = WatermarkToken(
-                        version=int(binding.get("watermark_version") or WATERMARK_VERSION),
-                        watermark_id=int(binding.get("watermark_id") or 0),
-                        manifest_digest_prefix=str(binding.get("manifest_digest_prefix") or ""),
-                        nonce=int(binding.get("watermark_nonce") or 0),
-                    )
-                except Exception:
-                    candidate_token = None
-                if (
-                    candidate_token is not None
-                    and candidate_token.watermark_id > 0
-                    and len(candidate_token.manifest_digest_prefix) == 16
-                ):
-                    sidecar_token = candidate_token
+            return self._verify_provenance_sidecar(
+                inspected_path=inspected_path,
+                sidecar_doc=sidecar_doc,
+                sidecar_path_str=sidecar_path_str,
+            )
+
+        if inspected_path.suffix.lower() not in DIRECT_WATERMARK_SUFFIXES:
+            return AuthenticityVerificationReport(
+                status=VERIFICATION_STATUS_UNSUPPORTED_OR_INSUFFICIENT,
+                message="This format is only supported through signed provenance sidecars in this version.",
+                inspected_path=str(inspected_path),
+                sidecar_path=sidecar_path_str,
+                document_type=sidecar_document_type,
+                workflow_kind=sidecar_workflow_kind,
+            )
 
         extraction_keys = self.key_service.extraction_keys()
         if not extraction_keys:
@@ -1142,8 +1709,11 @@ class AudioAuthenticityService:
                 message="No local extraction key is available for watermark detection.",
                 inspected_path=str(inspected_path),
                 sidecar_path=sidecar_path_str,
+                document_type=sidecar_document_type,
+                workflow_kind=sidecar_workflow_kind,
                 details=details,
             )
+
         extraction = self.watermark_service.extract_from_path(
             inspected_path,
             watermark_keys=extraction_keys,
@@ -1208,7 +1778,7 @@ class AudioAuthenticityService:
                 reference_guided_extraction is not None
                 and reference_guided_extraction.status == "none"
             ) or all(candidate.status == "none" for candidate in candidates):
-                details = []
+                details: list[str] = []
                 no_watermark_result = (
                     reference_guided_extraction
                     if reference_guided_extraction is not None
@@ -1226,6 +1796,9 @@ class AudioAuthenticityService:
                     key_id=no_watermark_result.key_id,
                     extraction_confidence=no_watermark_result.mean_confidence,
                     sidecar_path=sidecar_path_str,
+                    verification_basis="direct_watermark",
+                    document_type=DOCUMENT_TYPE_DIRECT_WATERMARK,
+                    workflow_kind=WORKFLOW_KIND_AUTHENTICITY_MASTER,
                     details=details,
                 )
             detail_lines = [
@@ -1248,6 +1821,9 @@ class AudioAuthenticityService:
                 key_id=active_result.key_id,
                 extraction_confidence=active_result.mean_confidence,
                 sidecar_path=sidecar_path_str,
+                verification_basis="direct_watermark",
+                document_type=DOCUMENT_TYPE_DIRECT_WATERMARK,
+                workflow_kind=WORKFLOW_KIND_AUTHENTICITY_MASTER,
                 details=detail_lines,
             )
 
@@ -1261,6 +1837,8 @@ class AudioAuthenticityService:
         reference_fingerprint_b64 = ""
         key_id = extraction.key_id
         manifest_id = None
+        workflow_kind = WORKFLOW_KIND_AUTHENTICITY_MASTER
+        verification_basis = "direct_watermark"
         if manifest_record is not None:
             resolution_source = "database"
             payload = json.loads(manifest_record.payload_canonical)
@@ -1272,6 +1850,7 @@ class AudioAuthenticityService:
             reference_fingerprint_b64 = manifest_record.reference_fingerprint_b64
             key_id = manifest_record.key_id
             manifest_id = manifest_record.manifest_id
+            workflow_kind = str(payload.get("workflow_kind") or WORKFLOW_KIND_AUTHENTICITY_MASTER)
         elif (
             sidecar_signature_valid
             and sidecar_payload_dict is not None
@@ -1283,15 +1862,16 @@ class AudioAuthenticityService:
         ):
             resolution_source = "sidecar"
             payload = sidecar_payload_dict
-            signature_b64 = sidecar_signature_b64
-            public_key_b64_value = sidecar_public_key_b64
-            payload_sha256 = sidecar_payload_sha256
+            signature_b64 = str(sidecar_doc.get("signature_b64") or "")
+            public_key_b64_value = str(sidecar_doc.get("public_key_b64") or "")
+            payload_sha256 = str(sidecar_doc.get("payload_sha256") or "")
             reference_audio = payload.get("reference_audio") or {}
             reference_audio_sha256 = str(reference_audio.get("sha256") or "")
             reference_fingerprint_b64 = str(payload.get("reference_fingerprint_b64") or "")
             signer = payload.get("signer") or {}
             key_id = str(signer.get("key_id") or key_id or "")
             manifest_id = str(payload.get("manifest_id") or "")
+            workflow_kind = str(payload.get("workflow_kind") or WORKFLOW_KIND_AUTHENTICITY_MASTER)
         if payload is None or not public_key_b64_value:
             return AuthenticityVerificationReport(
                 status=VERIFICATION_STATUS_UNSUPPORTED_OR_INSUFFICIENT,
@@ -1300,6 +1880,9 @@ class AudioAuthenticityService:
                 key_id=key_id,
                 watermark_id=extraction.token.watermark_id,
                 extraction_confidence=extraction.mean_confidence,
+                verification_basis="direct_watermark",
+                document_type=DOCUMENT_TYPE_DIRECT_WATERMARK,
+                workflow_kind=workflow_kind,
             )
 
         canonical = manifest_bytes(payload)
@@ -1319,6 +1902,9 @@ class AudioAuthenticityService:
                 manifest_id=manifest_id,
                 watermark_id=extraction.token.watermark_id,
                 resolution_source=resolution_source,
+                verification_basis="direct_watermark",
+                document_type=DOCUMENT_TYPE_DIRECT_WATERMARK,
+                workflow_kind=workflow_kind,
                 signature_valid=False,
                 extraction_confidence=extraction.mean_confidence,
                 sidecar_path=sidecar_path_str,
@@ -1342,6 +1928,10 @@ class AudioAuthenticityService:
             f"exact_hash_match={exact_hash_match}",
             f"fingerprint_similarity={fingerprint_score:.3f}",
         ]
+        if reference_guided_extraction is not None and extraction is reference_guided_extraction:
+            verification_basis = "reference_guided_direct"
+        elif sidecar_guided_extraction is not None and extraction is sidecar_guided_extraction:
+            verification_basis = "sidecar_guided_direct"
         if fingerprint_score >= 0.92:
             return AuthenticityVerificationReport(
                 status=VERIFICATION_STATUS_VERIFIED,
@@ -1351,6 +1941,9 @@ class AudioAuthenticityService:
                 manifest_id=manifest_id,
                 watermark_id=extraction.token.watermark_id,
                 resolution_source=resolution_source,
+                verification_basis=verification_basis,
+                document_type=DOCUMENT_TYPE_DIRECT_WATERMARK,
+                workflow_kind=workflow_kind,
                 signature_valid=True,
                 exact_hash_match=exact_hash_match,
                 fingerprint_similarity=fingerprint_score,
@@ -1371,6 +1964,9 @@ class AudioAuthenticityService:
             manifest_id=manifest_id,
             watermark_id=extraction.token.watermark_id,
             resolution_source=resolution_source,
+            verification_basis=verification_basis,
+            document_type=DOCUMENT_TYPE_DIRECT_WATERMARK,
+            workflow_kind=workflow_kind,
             signature_valid=True,
             exact_hash_match=exact_hash_match,
             fingerprint_similarity=fingerprint_score,

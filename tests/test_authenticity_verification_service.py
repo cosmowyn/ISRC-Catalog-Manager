@@ -1,22 +1,29 @@
+import json
 import shutil
 import unittest
 from pathlib import Path
 from unittest import mock
 
+from isrc_manager.assets import AssetVersionPayload
 from isrc_manager.authenticity.models import (
     VERIFICATION_STATUS_MANIFEST_REFERENCE_MISMATCH,
     VERIFICATION_STATUS_NO_WATERMARK,
     VERIFICATION_STATUS_SIGNATURE_INVALID,
     VERIFICATION_STATUS_UNSUPPORTED_OR_INSUFFICIENT,
     VERIFICATION_STATUS_VERIFIED,
+    VERIFICATION_STATUS_VERIFIED_BY_LINEAGE,
 )
 from isrc_manager.releases import ReleasePayload, ReleaseTrackPlacement
 from tests._authenticity_support import AuthenticityWorkflowTestCase
 
 
 class AudioAuthenticityVerificationServiceTests(AuthenticityWorkflowTestCase):
-    def _export_fixture(self):
-        track_id, audio_path = self.create_track_with_audio(duration_seconds=30, seed=1)
+    def _export_fixture(self, *, suffix: str = ".wav", seed: int = 1):
+        track_id, audio_path = self.create_track_with_audio(
+            duration_seconds=30,
+            seed=seed,
+            suffix=suffix,
+        )
         result = self.audio_service.export_watermarked_audio(
             output_dir=self.root / "exports",
             track_ids=[track_id],
@@ -36,6 +43,18 @@ class AudioAuthenticityVerificationServiceTests(AuthenticityWorkflowTestCase):
         self.assertFalse(report.exact_hash_match)
         self.assertGreaterEqual(report.extraction_confidence or 0.0, 0.90)
         self.assertGreaterEqual(report.fingerprint_similarity or 0.0, 0.92)
+
+    def test_verify_file_reports_verified_authentic_for_aiff_exported_copy(self):
+        _track_id, _audio_path, exported_path, _sidecar_path, _result = self._export_fixture(
+            suffix=".aiff",
+            seed=8,
+        )
+
+        report = self.audio_service.verify_file(exported_path)
+
+        self.assertEqual(report.status, VERIFICATION_STATUS_VERIFIED)
+        self.assertEqual(report.document_type, "direct_watermark")
+        self.assertEqual(report.verification_basis, "reference_guided_direct")
 
     def test_verify_file_reports_signature_invalid_when_manifest_signature_is_tampered(self):
         _track_id, _audio_path, exported_path, _sidecar_path, result = self._export_fixture()
@@ -82,6 +101,160 @@ class AudioAuthenticityVerificationServiceTests(AuthenticityWorkflowTestCase):
         report = self.audio_service.verify_file(target)
 
         self.assertEqual(report.status, VERIFICATION_STATUS_UNSUPPORTED_OR_INSUFFICIENT)
+
+    def test_export_provenance_audio_writes_signed_lineage_sidecar_for_lossy_copy(self):
+        track_id, _master_audio, direct_result = self.export_direct_authenticity_fixture()
+        direct_manifest_id = direct_result.manifest_ids[0]
+        derivative_audio = self.write_audio_fixture(
+            "lineage-derivative.mp3",
+            duration_seconds=30,
+            seed=12,
+            suffix=".mp3",
+        )
+        self.track_service.set_media_path(
+            track_id,
+            "audio_file",
+            derivative_audio,
+            storage_mode="managed_file",
+        )
+        master_asset = self.write_audio_fixture(
+            "lineage-master.wav",
+            duration_seconds=30,
+            seed=1,
+            suffix=".wav",
+        )
+        self.asset_service.create_asset(
+            AssetVersionPayload(
+                track_id=track_id,
+                asset_type="main_master",
+                source_path=str(master_asset),
+                approved_for_use=True,
+                primary_flag=True,
+            )
+        )
+
+        result = self.audio_service.export_provenance_audio(
+            output_dir=self.root / "exports" / "lineage",
+            track_ids=[track_id],
+            profile_name="Test Profile",
+        )
+
+        exported_path = Path(result.written_audio_paths[0])
+        sidecar_path = Path(result.written_sidecar_paths[0])
+        sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(result.exported, 1)
+        self.assertEqual(exported_path.suffix.lower(), ".mp3")
+        self.assertEqual(sidecar["document_type"], "provenance_lineage")
+        self.assertEqual(
+            sidecar["derivative_document"]["payload"]["parent_authenticity"]["parent_manifest_id"],
+            direct_manifest_id,
+        )
+
+    def test_verify_file_reports_verified_by_lineage_for_lossy_provenance_export(self):
+        track_id, _master_audio, _direct_result = self.export_direct_authenticity_fixture()
+        derivative_audio = self.write_audio_fixture(
+            "lineage-verify.mp3",
+            duration_seconds=30,
+            seed=13,
+            suffix=".mp3",
+        )
+        self.track_service.set_media_path(
+            track_id,
+            "audio_file",
+            derivative_audio,
+            storage_mode="managed_file",
+        )
+        master_asset = self.write_audio_fixture(
+            "lineage-verify-master.wav",
+            duration_seconds=30,
+            seed=1,
+            suffix=".wav",
+        )
+        self.asset_service.create_asset(
+            AssetVersionPayload(
+                track_id=track_id,
+                asset_type="main_master",
+                source_path=str(master_asset),
+                approved_for_use=True,
+                primary_flag=True,
+            )
+        )
+
+        result = self.audio_service.export_provenance_audio(
+            output_dir=self.root / "exports" / "lineage_verify",
+            track_ids=[track_id],
+            profile_name="Test Profile",
+        )
+
+        report = self.audio_service.verify_file(result.written_audio_paths[0])
+
+        self.assertEqual(report.status, VERIFICATION_STATUS_VERIFIED_BY_LINEAGE)
+        self.assertEqual(report.verification_basis, "provenance_lineage")
+        self.assertEqual(report.document_type, "provenance_lineage")
+        self.assertTrue(report.signature_valid)
+
+    def test_verify_file_reports_signature_invalid_for_tampered_provenance_sidecar(self):
+        track_id, _master_audio, _direct_result = self.export_direct_authenticity_fixture()
+        derivative_audio = self.write_audio_fixture(
+            "lineage-tampered.mp3",
+            duration_seconds=30,
+            seed=14,
+            suffix=".mp3",
+        )
+        self.track_service.set_media_path(
+            track_id,
+            "audio_file",
+            derivative_audio,
+            storage_mode="managed_file",
+        )
+        master_asset = self.write_audio_fixture(
+            "lineage-tampered-master.wav",
+            duration_seconds=30,
+            seed=1,
+            suffix=".wav",
+        )
+        self.asset_service.create_asset(
+            AssetVersionPayload(
+                track_id=track_id,
+                asset_type="main_master",
+                source_path=str(master_asset),
+                approved_for_use=True,
+                primary_flag=True,
+            )
+        )
+
+        result = self.audio_service.export_provenance_audio(
+            output_dir=self.root / "exports" / "lineage_tampered",
+            track_ids=[track_id],
+            profile_name="Test Profile",
+        )
+        sidecar_path = Path(result.written_sidecar_paths[0])
+        sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+        sidecar["derivative_document"]["signature_b64"] = "broken-signature"
+        sidecar_path.write_text(json.dumps(sidecar), encoding="utf-8")
+
+        report = self.audio_service.verify_file(result.written_audio_paths[0])
+
+        self.assertEqual(report.status, VERIFICATION_STATUS_SIGNATURE_INVALID)
+        self.assertEqual(report.verification_basis, "provenance_lineage")
+
+    def test_export_provenance_audio_skips_tracks_without_parent_direct_manifest(self):
+        track_id, _audio_path = self.create_track_with_audio(
+            duration_seconds=30,
+            seed=15,
+            suffix=".mp3",
+        )
+
+        result = self.audio_service.export_provenance_audio(
+            output_dir=self.root / "exports" / "lineage_missing_parent",
+            track_ids=[track_id],
+            profile_name="Test Profile",
+        )
+
+        self.assertEqual(result.exported, 0)
+        self.assertEqual(result.skipped, 1)
+        self.assertTrue(result.warnings)
 
     def test_export_watermarked_audio_writes_catalog_metadata_tags_to_exported_copy(self):
         track_id, _audio_path = self.create_track_with_audio(

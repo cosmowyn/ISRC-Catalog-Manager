@@ -331,15 +331,32 @@ class AppShellTestCase(unittest.TestCase):
 
     def _table_context_action_texts(self, row: int, col: int) -> list[str]:
         captured: dict[str, list[str]] = {}
+        index = self.window.table.model().index(row, col)
 
-        def _fake_exec(menu_self, *_args, **_kwargs):
-            captured["texts"] = [action.text() for action in menu_self.actions() if action.text()]
-            return None
+        class _CapturedMenu:
+            def __init__(self, *_args, **_kwargs):
+                self._actions: list[object] = []
 
-        with mock.patch.object(app_module.QMenu, "exec", new=_fake_exec):
-            index = self.window.table.model().index(row, col)
-            rect = self.window.table.visualRect(index)
-            self.window._on_table_context_menu(rect.center())
+            def addAction(self, action):
+                self._actions.append(action)
+                return action
+
+            def addSeparator(self):
+                return None
+
+            def exec(self, *_args, **_kwargs):
+                captured["texts"] = [
+                    action.text()
+                    for action in self._actions
+                    if hasattr(action, "text") and action.text()
+                ]
+                return None
+
+        with (
+            mock.patch.object(app_module, "QMenu", _CapturedMenu),
+            mock.patch.object(self.window.table, "indexAt", return_value=index),
+        ):
+            self.window._on_table_context_menu(app_module.QPoint(0, 0))
             self.app.processEvents()
         return captured.get("texts", [])
 
@@ -2488,6 +2505,10 @@ class AppShellTestCase(unittest.TestCase):
             "Export Authenticity Watermarked Audio…",
         )
         self.assertEqual(
+            self.window.export_authenticity_provenance_audio_action.text(),
+            "Export Authenticity Provenance Audio…",
+        )
+        self.assertEqual(
             self.window.verify_audio_authenticity_action.text(),
             "Verify Audio Authenticity…",
         )
@@ -2497,8 +2518,23 @@ class AppShellTestCase(unittest.TestCase):
         )
         action_ids = {entry["id"] for entry in self.window._action_ribbon_specs}
         self.assertIn("authenticity_export_audio", action_ids)
+        self.assertIn("authenticity_export_provenance_audio", action_ids)
         self.assertIn("authenticity_verify_audio", action_ids)
         self.assertIn("authenticity_keys", action_ids)
+
+    def case_authenticity_table_context_menu_exposes_export_actions(self):
+        track_id = self._create_track(index=303, title="Context Auth Track", album_title="Single")
+        source_audio = self._create_wav_file("context-auth.wav")
+        self.window.track_service.set_media_path(track_id, "audio_file", source_audio)
+        self.window.refresh_table()
+        row = self._table_row_for_track_id(track_id)
+
+        texts = self._table_context_action_texts(row, 0)
+
+        self.assertIn("Import Tags from Audio…", texts)
+        self.assertIn("Write Tags to Exported Audio…", texts)
+        self.assertIn("Export Authenticity Watermarked Audio…", texts)
+        self.assertIn("Export Authenticity Provenance Audio…", texts)
 
     def case_verify_audio_authenticity_can_choose_external_file_when_track_is_selected(self):
         track_id = self._create_track(index=301, title="Catalog Verify Track", album_title="Single")
@@ -2545,7 +2581,10 @@ class AppShellTestCase(unittest.TestCase):
             mock.patch.object(
                 app_module.QFileDialog,
                 "getOpenFileName",
-                return_value=(str(external_audio), "Audio Files (*.wav *.flac)"),
+                return_value=(
+                    str(external_audio),
+                    "Audio Files (*.wav *.flac *.aif *.aiff *.mp3 *.ogg *.oga *.opus *.m4a *.mp4 *.aac)",
+                ),
             ) as picker_mock,
             mock.patch.object(
                 app_module.AudioAuthenticityService,
