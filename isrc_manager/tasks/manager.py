@@ -9,9 +9,37 @@ from threading import Event
 from typing import Callable
 
 from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
-from PySide6.QtWidgets import QProgressDialog, QWidget
+from PySide6.QtWidgets import (
+    QLabel,
+    QProgressBar,
+    QProgressDialog,
+    QPushButton,
+    QSizePolicy,
+    QWidget,
+)
 
 from .models import TaskCancelledError, TaskFailure, TaskProgressUpdate
+
+
+def _configure_progress_dialog(dialog: QProgressDialog) -> None:
+    dialog.setMinimumWidth(360)
+    dialog.setMaximumWidth(500)
+    dialog.setSizeGripEnabled(False)
+    for label in dialog.findChildren(QLabel):
+        label.setWordWrap(True)
+        label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+        label.setMaximumWidth(440)
+    for progress_bar in dialog.findChildren(QProgressBar):
+        progress_bar.setMinimumWidth(200)
+        progress_bar.setMaximumWidth(380)
+        progress_bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+    for button in dialog.findChildren(QPushButton):
+        button.setMinimumWidth(96)
+        button.setMaximumWidth(132)
+    dialog.adjustSize()
+    hint = dialog.sizeHint()
+    width = min(max(int(hint.width()), 360), 500)
+    dialog.resize(width, int(hint.height()))
 
 
 class BackgroundTaskContext:
@@ -269,6 +297,7 @@ class BackgroundTaskManager(QObject):
                 dialog.setCancelButton(None)
             else:
                 dialog.canceled.connect(context.cancel)
+            _configure_progress_dialog(dialog)
             dialog.show()
 
         def _apply_progress(update: TaskProgressUpdate) -> None:
@@ -282,12 +311,14 @@ class BackgroundTaskManager(QObject):
                     dialog.setMaximum(max(0, int(update.maximum)))
                 elif update.value is not None:
                     dialog.setValue(max(0, int(update.value)))
+                _configure_progress_dialog(dialog)
             if on_progress is not None:
                 on_progress(update)
 
         def _apply_status(message: str) -> None:
             if dialog is not None and message:
                 dialog.setLabelText(message)
+                _configure_progress_dialog(dialog)
             if on_status is not None:
                 on_status(message)
 

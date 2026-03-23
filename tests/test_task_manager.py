@@ -4,9 +4,12 @@ import unittest
 
 try:
     from PySide6.QtCore import QTimer
-    from PySide6.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication, QLabel, QProgressBar, QPushButton
 except ImportError as exc:  # pragma: no cover - environment-specific fallback
     QApplication = None
+    QLabel = None
+    QProgressBar = None
+    QPushButton = None
     QTimer = None
     QT_IMPORT_ERROR = exc
 else:
@@ -176,6 +179,66 @@ class BackgroundTaskManagerTests(unittest.TestCase):
         self._wait_for_task_completion(
             finished.is_set,
             description="duplicate-key cancellation completion",
+        )
+
+    def test_progress_dialog_uses_compact_width_constraints(self):
+        finished = threading.Event()
+        release = threading.Event()
+
+        def _long_running(ctx):
+            ctx.report_progress(
+                value=1,
+                maximum=4,
+                message=(
+                    "Preparing an intentionally long progress message so the dialog has to wrap "
+                    "instead of stretching across the full window width."
+                ),
+            )
+            while not release.is_set():
+                time.sleep(0.01)
+            return "done"
+
+        task_id = self.manager.submit(
+            title="Compact Progress Task",
+            description="Testing compact progress dialog sizing.",
+            task_fn=_long_running,
+            show_dialog=True,
+            cancellable=True,
+            on_finished=finished.set,
+        )
+        self.assertIsNotNone(task_id)
+        record = self.manager._tasks[task_id]
+        dialog = record.dialog
+        self.assertIsNotNone(dialog)
+        assert dialog is not None
+
+        self._wait_for_task_completion(
+            lambda: dialog.isVisible(),
+            description="progress dialog visibility",
+        )
+        pump_events(app=self.app)
+
+        self.assertEqual(dialog.minimumWidth(), 360)
+        self.assertEqual(dialog.maximumWidth(), 500)
+        self.assertLessEqual(dialog.width(), 500)
+
+        labels = dialog.findChildren(QLabel)
+        self.assertTrue(labels)
+        self.assertTrue(all(label.wordWrap() for label in labels))
+        self.assertTrue(all(label.maximumWidth() <= 440 for label in labels))
+
+        progress_bars = dialog.findChildren(QProgressBar)
+        self.assertTrue(progress_bars)
+        self.assertTrue(all(bar.maximumWidth() <= 380 for bar in progress_bars))
+
+        buttons = dialog.findChildren(QPushButton)
+        self.assertTrue(buttons)
+        self.assertTrue(all(button.maximumWidth() <= 132 for button in buttons))
+
+        release.set()
+        self._wait_for_task_completion(
+            finished.is_set,
+            description="compact progress dialog completion",
         )
 
 

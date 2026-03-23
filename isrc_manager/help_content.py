@@ -302,9 +302,9 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         <ul>
           <li><strong>Supported read/write families</strong>: MP3/ID3, FLAC/Vorbis comments, OGG Vorbis/Opus comments, M4A/MP4 atoms, and WAV/AIFF where ID3-style metadata is available.</li>
           <li><strong>Mapped fields</strong>: title, artist, album, album artist, track number, disc number, genre, composer, publisher/label, release date, ISRC, UPC/EAN, comments, lyrics, and artwork.</li>
-          <li><strong>Import Tags From Audio…</strong>: open it from the Catalog menu or the table context menu to preview extracted tags and conflicts before catalog values are changed.</li>
+          <li><strong>Import Metadata from Audio Files…</strong>: open it from the Catalog menu or the table context menu to preview extracted tags and conflicts before catalog values are changed.</li>
           <li><strong>Conflict policy</strong>: choose whether file tags should fill blanks only, override database values, or defer to the existing catalog data.</li>
-          <li><strong>Write Tags To Exported Audio…</strong>: exports tagged audio copies to a folder without touching the managed source files in place.</li>
+          <li><strong>Export Tagged Audio Copies…</strong>: exports tagged audio copies to a folder without touching the managed source files in place.</li>
         </ul>
         <p>The app preserves the original audio data when writing tags to exported copies. Unsupported or malformed tags are skipped with warnings instead of crashing the workflow, which makes the feature useful for preparing tagged deliverables without risking the original master file. When the track rows already exist and the job is to attach local files in bulk, use <strong>Catalog &gt; Bulk Attach Audio Files…</strong> instead.</p>
         """,

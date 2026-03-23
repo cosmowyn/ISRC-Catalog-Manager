@@ -28,6 +28,7 @@ from isrc_manager.ui_common import (
     DatePickerDialog,
     TwoDigitSpinBox,
     _apply_compact_dialog_control_heights,
+    _apply_dialog_width_constraints,
     _apply_standard_dialog_chrome,
     _compose_widget_stylesheet,
     _configure_standard_form_layout,
@@ -188,6 +189,18 @@ class UICommonTests(unittest.TestCase):
             self.assertEqual(dialog.objectName(), "demoDialog")
             self.assertEqual(dialog.property("role"), "panel")
             self.assertTrue(dialog.testAttribute(Qt.WA_StyledBackground))
+        finally:
+            dialog.close()
+
+    def test_apply_dialog_width_constraints_caps_dialog_width(self):
+        dialog = QDialog()
+        try:
+            dialog.resize(900, 200)
+            _apply_dialog_width_constraints(dialog, min_width=360, max_width=480)
+            self.assertEqual(dialog.minimumWidth(), 360)
+            self.assertEqual(dialog.maximumWidth(), 480)
+            self.assertGreaterEqual(dialog.width(), 360)
+            self.assertLessEqual(dialog.width(), 480)
         finally:
             dialog.close()
 

@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 from isrc_manager.ui_common import (
     _add_standard_dialog_header,
     _apply_compact_dialog_control_heights,
+    _apply_dialog_width_constraints,
     _apply_standard_dialog_chrome,
     _configure_standard_form_layout,
 )
@@ -36,7 +37,6 @@ class ForensicExportDialog(QDialog):
         super().__init__(parent)
         self._format_labels = list(format_labels)
         self.setWindowTitle("Export Forensic Watermarked Audio")
-        self.resize(640, 360)
         _apply_standard_dialog_chrome(self, "forensicExportDialog")
 
         root = QVBoxLayout(self)
@@ -89,6 +89,7 @@ class ForensicExportDialog(QDialog):
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
         _apply_compact_dialog_control_heights(self)
+        _apply_dialog_width_constraints(self, min_width=420, max_width=520)
 
     def selected_format_id(self) -> str | None:
         return str(self.format_combo.currentData() or "").strip().lower() or None

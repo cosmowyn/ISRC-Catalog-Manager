@@ -271,54 +271,55 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     edit_menu.addAction(app.copy_with_headers_action)
 
     catalog_menu = app.menu_bar.addMenu("Catalog")
+    workspace_menu = catalog_menu.addMenu("Workspace")
     app.catalog_managers_action = app._create_action(
         "Catalog Managers…",
         slot=app.open_catalog_managers_dialog,
         shortcuts=("Ctrl+Alt+G", "Meta+Alt+G"),
     )
-    catalog_menu.addAction(app.catalog_managers_action)
+    workspace_menu.addAction(app.catalog_managers_action)
     app.release_browser_action = app._create_action(
         "Release Browser…",
         slot=app.open_release_browser,
         shortcuts=("Ctrl+Alt+Shift+R", "Meta+Alt+Shift+R"),
     )
-    catalog_menu.addAction(app.release_browser_action)
+    workspace_menu.addAction(app.release_browser_action)
     app.work_manager_action = app._create_action(
         "Work Manager…",
         slot=app.open_work_manager,
         shortcuts=("Ctrl+Alt+W", "Meta+Alt+W"),
     )
-    catalog_menu.addAction(app.work_manager_action)
+    workspace_menu.addAction(app.work_manager_action)
     app.party_manager_action = app._create_action(
         "Party Manager…",
         slot=app.open_party_manager,
         shortcuts=("Ctrl+Alt+P", "Meta+Alt+P"),
     )
-    catalog_menu.addAction(app.party_manager_action)
+    workspace_menu.addAction(app.party_manager_action)
     app.contract_manager_action = app._create_action(
         "Contract Manager…",
         slot=app.open_contract_manager,
         shortcuts=("Ctrl+Alt+C", "Meta+Alt+C"),
     )
-    catalog_menu.addAction(app.contract_manager_action)
+    workspace_menu.addAction(app.contract_manager_action)
     app.rights_matrix_action = app._create_action(
         "Rights Matrix…",
         slot=app.open_rights_matrix,
         shortcuts=("Ctrl+Alt+M", "Meta+Alt+M"),
     )
-    catalog_menu.addAction(app.rights_matrix_action)
+    workspace_menu.addAction(app.rights_matrix_action)
     app.asset_registry_action = app._create_action(
         "Asset Version Registry…",
         slot=app.open_asset_registry,
         shortcuts=("Ctrl+Alt+A", "Meta+Alt+A"),
     )
-    catalog_menu.addAction(app.asset_registry_action)
+    workspace_menu.addAction(app.asset_registry_action)
     app.global_search_action = app._create_action(
         "Global Search and Relationships…",
         slot=app.open_global_search,
         shortcuts=("Ctrl+Alt+F", "Meta+Alt+F"),
     )
-    catalog_menu.addAction(app.global_search_action)
+    workspace_menu.addAction(app.global_search_action)
     app.add_data_action = app._create_action(
         "Show Add Data Panel",
         checkable=True,
@@ -326,7 +327,8 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         toggled_slot=app._on_toggle_add_data,
         shortcuts=("Ctrl+Shift+D", "Meta+Shift+D"),
     )
-    catalog_menu.addAction(app.add_data_action)
+    workspace_menu.addSeparator()
+    workspace_menu.addAction(app.add_data_action)
 
     app.catalog_table_action = app._create_action(
         "Show Catalog Table",
@@ -335,9 +337,9 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         toggled_slot=app._on_toggle_catalog_table,
         shortcuts=("Ctrl+Shift+T", "Meta+Shift+T"),
     )
-    catalog_menu.addAction(app.catalog_table_action)
-    catalog_menu.addSeparator()
-    legacy_menu = catalog_menu.addMenu("Legacy License Archive")
+    workspace_menu.addAction(app.catalog_table_action)
+    legacy_special_menu = catalog_menu.addMenu("Legacy & Special")
+    legacy_menu = legacy_special_menu.addMenu("Legacy License Archive")
     app.license_browser_action = app._create_action(
         "License Browser…",
         slot=lambda: app.open_licenses_browser(track_filter_id=None),
@@ -358,27 +360,58 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         slot=app.add_selected_tracks_to_release,
     )
     catalog_menu.addSeparator()
+    audio_ingest_menu = catalog_menu.addMenu("Audio Ingest")
     app.bulk_attach_audio_action = app._create_action(
         "Bulk Attach Audio Files…",
         slot=app.bulk_attach_audio_files,
     )
-    catalog_menu.addAction(app.bulk_attach_audio_action)
+    audio_ingest_menu.addAction(app.bulk_attach_audio_action)
     app.import_tags_action = app._create_action(
-        "Import Tags from Audio…",
+        "Import Metadata from Audio Files…",
         slot=app.import_tags_from_audio,
         shortcuts=("Ctrl+Alt+T", "Meta+Alt+T"),
     )
-    catalog_menu.addAction(app.import_tags_action)
+    audio_ingest_menu.addAction(app.import_tags_action)
+    audio_export_menu = catalog_menu.addMenu("Audio Export & Conversion")
     app.write_tags_to_exported_audio_action = app._create_action(
-        "Write Tags to Exported Audio…",
+        "Export Tagged Audio Copies…",
         slot=app.write_tags_to_exported_audio,
     )
-    catalog_menu.addAction(app.write_tags_to_exported_audio_action)
     app.convert_selected_audio_action = app._create_action(
-        "Export Managed Audio Derivatives…",
+        "Export Audio Derivatives…",
         slot=app.convert_selected_audio,
     )
-    catalog_menu.addAction(app.convert_selected_audio_action)
+    audio_export_menu.addAction(app.convert_selected_audio_action)
+    app.convert_external_audio_files_action = app._create_action(
+        "Convert External Audio Files…",
+        slot=app.convert_external_audio_files,
+    )
+    audio_export_menu.addAction(app.convert_external_audio_files_action)
+    audio_export_menu.addSeparator()
+    audio_export_menu.addAction(app.write_tags_to_exported_audio_action)
+    authenticity_menu = catalog_menu.addMenu("Audio Authenticity")
+    app.export_authenticity_watermarked_audio_action = app._create_action(
+        "Export Authentic Masters…",
+        slot=app.export_authenticity_watermarked_audio,
+    )
+    app.export_authenticity_watermarked_audio_action.setStatusTip(
+        "Direct watermark master export: WAV, FLAC, or AIFF plus a signed authenticity sidecar."
+    )
+    app.export_authenticity_watermarked_audio_action.setToolTip(
+        app.export_authenticity_watermarked_audio_action.statusTip()
+    )
+    authenticity_menu.addAction(app.export_authenticity_watermarked_audio_action)
+    app.export_authenticity_provenance_audio_action = app._create_action(
+        "Export Provenance Copies…",
+        slot=app.export_authenticity_provenance_audio,
+    )
+    app.export_authenticity_provenance_audio_action.setStatusTip(
+        "Lossy-copy export with signed lineage sidecars that point back to a watermark-authentic master. No managed derivative registration."
+    )
+    app.export_authenticity_provenance_audio_action.setToolTip(
+        app.export_authenticity_provenance_audio_action.statusTip()
+    )
+    authenticity_menu.addAction(app.export_authenticity_provenance_audio_action)
     app.export_forensic_watermarked_audio_action = app._create_action(
         "Export Forensic Watermarked Audio…",
         slot=app.export_forensic_watermarked_audio,
@@ -389,34 +422,8 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     app.export_forensic_watermarked_audio_action.setToolTip(
         app.export_forensic_watermarked_audio_action.statusTip()
     )
-    catalog_menu.addAction(app.export_forensic_watermarked_audio_action)
-    app.convert_external_audio_files_action = app._create_action(
-        "External Audio Conversion Utility…",
-        slot=app.convert_external_audio_files,
-    )
-    catalog_menu.addAction(app.convert_external_audio_files_action)
-    app.export_authenticity_watermarked_audio_action = app._create_action(
-        "Export Watermark-Authentic Masters…",
-        slot=app.export_authenticity_watermarked_audio,
-    )
-    app.export_authenticity_watermarked_audio_action.setStatusTip(
-        "Direct watermark master export: WAV, FLAC, or AIFF plus a signed authenticity sidecar."
-    )
-    app.export_authenticity_watermarked_audio_action.setToolTip(
-        app.export_authenticity_watermarked_audio_action.statusTip()
-    )
-    catalog_menu.addAction(app.export_authenticity_watermarked_audio_action)
-    app.export_authenticity_provenance_audio_action = app._create_action(
-        "Export Provenance-Linked Lossy Copies…",
-        slot=app.export_authenticity_provenance_audio,
-    )
-    app.export_authenticity_provenance_audio_action.setStatusTip(
-        "Lossy-copy export with signed lineage sidecars that point back to a watermark-authentic master. No managed derivative registration."
-    )
-    app.export_authenticity_provenance_audio_action.setToolTip(
-        app.export_authenticity_provenance_audio_action.statusTip()
-    )
-    catalog_menu.addAction(app.export_authenticity_provenance_audio_action)
+    authenticity_menu.addAction(app.export_forensic_watermarked_audio_action)
+    authenticity_menu.addSeparator()
     app.inspect_forensic_watermark_action = app._create_action(
         "Inspect Forensic Watermark…",
         slot=app.inspect_forensic_watermark,
@@ -427,25 +434,25 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     app.inspect_forensic_watermark_action.setToolTip(
         app.inspect_forensic_watermark_action.statusTip()
     )
-    catalog_menu.addAction(app.inspect_forensic_watermark_action)
+    authenticity_menu.addAction(app.inspect_forensic_watermark_action)
     app.verify_audio_authenticity_action = app._create_action(
         "Verify Audio Authenticity…",
         slot=app.verify_audio_authenticity,
     )
-    catalog_menu.addAction(app.verify_audio_authenticity_action)
+    authenticity_menu.addAction(app.verify_audio_authenticity_action)
+    catalog_menu.addSeparator()
     app.quality_dashboard_action = app._create_action(
         "Data Quality Dashboard…",
         slot=app.open_quality_dashboard,
         shortcuts=("Ctrl+Shift+Q", "Meta+Shift+Q"),
     )
     catalog_menu.addAction(app.quality_dashboard_action)
-    catalog_menu.addSeparator()
     app.gs1_metadata_action = app._create_action(
         "GS1 Metadata…",
         slot=app.open_gs1_dialog,
         shortcuts=("Ctrl+Shift+G", "Meta+Shift+G"),
     )
-    catalog_menu.addAction(app.gs1_metadata_action)
+    legacy_special_menu.addAction(app.gs1_metadata_action)
     file_menu.addSeparator()
     file_menu.addAction(app.convert_external_audio_files_action)
     file_menu.addAction(app.inspect_forensic_watermark_action)

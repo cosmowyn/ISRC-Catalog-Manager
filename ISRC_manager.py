@@ -394,6 +394,7 @@ from isrc_manager.ui_common import (
     _create_scrollable_dialog_content,
     _create_round_help_button,
     _create_standard_section,
+    _prompt_compact_choice_dialog,
 )
 from isrc_manager.works import WorkService
 from isrc_manager.works.dialogs import WorkBrowserPanel, WorkEditorDialog
@@ -7796,7 +7797,7 @@ class App(QMainWindow):
         external_message = (
             "Utility conversion only: no catalog metadata, no watermarking, and no managed derivative registration."
             if external_available
-            else "External audio conversion utility requires ffmpeg on PATH."
+            else "External audio conversion requires ffmpeg on PATH."
         )
         forensic_message = (
             "Export recipient-specific lossy delivery copies for leak tracing. This stays separate from signed authenticity master exports."
@@ -10603,21 +10604,21 @@ class App(QMainWindow):
             },
             {
                 "id": "import_tags",
-                "label": "Import Tags from Audio",
+                "label": "Import Metadata from Audio Files",
                 "category": "Catalog",
                 "description": "Read embedded metadata from managed audio files into the catalog.",
                 "action": self.import_tags_action,
             },
             {
                 "id": "write_tags_audio",
-                "label": "Write Tags to Exported Audio",
+                "label": "Export Tagged Audio Copies",
                 "category": "Catalog",
                 "description": "Export audio copies with catalog metadata written into the file tags.",
                 "action": self.write_tags_to_exported_audio_action,
             },
             {
                 "id": "convert_selected_audio",
-                "label": "Managed Audio Derivatives",
+                "label": "Export Audio Derivatives",
                 "category": "Catalog",
                 "description": "Export managed audio derivatives with catalog tags, hashing, and derivative tracking. Lossless targets stay on the watermark-authentic path; lossy targets export as tagged managed derivatives without recipient-specific forensic watermarking.",
                 "action": self.convert_selected_audio_action,
@@ -10631,14 +10632,14 @@ class App(QMainWindow):
             },
             {
                 "id": "authenticity_export_audio",
-                "label": "Watermark-Authentic Masters",
+                "label": "Export Authentic Masters",
                 "category": "Catalog",
                 "description": "Export WAV, FLAC, or AIFF master copies with a direct watermark plus a signed authenticity sidecar.",
                 "action": self.export_authenticity_watermarked_audio_action,
             },
             {
                 "id": "authenticity_export_provenance_audio",
-                "label": "Provenance-Linked Lossy Copies",
+                "label": "Export Provenance Copies",
                 "category": "Catalog",
                 "description": "Export lossy copies with signed lineage sidecars that point back to a verified watermark-authentic master. No managed derivative registration.",
                 "action": self.export_authenticity_provenance_audio_action,
@@ -10659,7 +10660,7 @@ class App(QMainWindow):
             },
             {
                 "id": "convert_external_audio",
-                "label": "External Conversion Utility",
+                "label": "Convert External Audio Files",
                 "category": "File",
                 "description": "Convert one or more external audio files with the utility workflow only: no catalog metadata, no watermarking, and no derivative registration.",
                 "action": self.convert_external_audio_files_action,
@@ -14322,13 +14323,14 @@ class App(QMainWindow):
         )
 
     def import_tags_from_audio(self, track_ids: list[int] | None = None):
+        title = "Import Metadata from Audio Files"
         if self.audio_tag_service is None or self.track_service is None:
-            QMessageBox.warning(self, "Import Tags", "Open a profile first.")
+            QMessageBox.warning(self, title, "Open a profile first.")
             return
         selected_ids = self._normalize_track_ids(track_ids or self._selected_track_ids())
         if not selected_ids:
             QMessageBox.information(
-                self, "Import Tags", "Select one or more tracks with attached audio first."
+                self, title, "Select one or more tracks with attached audio first."
             )
             return
 
@@ -14357,14 +14359,14 @@ class App(QMainWindow):
             if not prepared:
                 QMessageBox.information(
                     self,
-                    "Import Tags",
+                    title,
                     "No readable managed audio files were available for the selected tracks."
                     + (f"\n\nWarnings:\n- " + "\n- ".join(warnings[:12]) if warnings else ""),
                 )
                 return
 
             dlg = TagPreviewDialog(
-                title="Import Tags from Audio",
+                title=title,
                 intro=(
                     "Review how embedded file tags map onto the selected catalog records. "
                     "Choose the conflict policy you want to apply before importing."
@@ -14467,13 +14469,13 @@ class App(QMainWindow):
                 self.populate_all_comboboxes()
                 QMessageBox.information(
                     self,
-                    "Import Tags",
+                    title,
                     f"Imported tags for {len(changed_ids or [])} track{'s' if len(changed_ids or []) != 1 else ''}."
                     + (f"\n\nWarnings:\n- " + "\n- ".join(warnings[:12]) if warnings else ""),
                 )
 
             self._submit_background_bundle_task(
-                title="Import Tags from Audio",
+                title=title,
                 description="Applying imported audio tags to the selected catalog tracks...",
                 task_fn=_import_worker,
                 kind="write",
@@ -14481,14 +14483,14 @@ class App(QMainWindow):
                 cancellable=False,
                 on_success=_import_success,
                 on_error=lambda failure: self._show_background_task_error(
-                    "Import Tags",
+                    title,
                     failure,
                     user_message="Could not import audio tags:",
                 ),
             )
 
         self._submit_background_bundle_task(
-            title="Import Tags from Audio",
+            title=title,
             description="Reading embedded tags from the selected audio files...",
             task_fn=_preview_worker,
             kind="read",
@@ -14496,7 +14498,7 @@ class App(QMainWindow):
             cancellable=False,
             on_success=_preview_success,
             on_error=lambda failure: self._show_background_task_error(
-                "Import Tags",
+                title,
                 failure,
                 user_message="Could not prepare the audio tag preview:",
             ),
@@ -14562,14 +14564,13 @@ class App(QMainWindow):
             profiles = capabilities.external_targets
         if not profiles:
             return None
-        labels = [profile.label for profile in profiles]
-        label, ok = QInputDialog.getItem(self, title, prompt, labels, 0, False)
-        if not ok or not label:
-            return None
-        for profile in profiles:
-            if profile.label == label:
-                return profile.id
-        return None
+        return _prompt_compact_choice_dialog(
+            self,
+            title=title,
+            prompt=prompt,
+            choices=[(profile.id, profile.label) for profile in profiles],
+            ok_text="Choose Format",
+        )
 
     def _selected_track_ids_with_audio(self, track_ids: list[int] | None = None) -> list[int]:
         if self.track_service is None:
@@ -14582,7 +14583,7 @@ class App(QMainWindow):
         ]
 
     def convert_selected_audio(self, track_ids: list[int] | None = None):
-        title = "Export Managed Audio Derivatives"
+        title = "Export Audio Derivatives"
         if self.track_service is None:
             QMessageBox.warning(self, title, "Open a profile first.")
             return
@@ -14604,7 +14605,7 @@ class App(QMainWindow):
                 "Choose the managed derivative output format. "
                 "Lossless targets stay on the watermark-authentic path; "
                 "lossy targets export as tagged managed derivatives without recipient-specific forensic watermarking. "
-                "Use the External Audio Conversion Utility when you do not want catalog metadata or derivative tracking."
+                "Use Convert External Audio Files when you do not want catalog metadata or derivative tracking."
             ),
             capability_group="managed_any",
         )
@@ -14626,7 +14627,7 @@ class App(QMainWindow):
             return
         output_dir = QFileDialog.getExistingDirectory(
             self,
-            "Choose Export Folder for Managed Audio Derivatives",
+            "Choose Export Folder for Audio Derivatives",
             str(self.exports_dir / "managed_audio_derivatives"),
         )
         if not output_dir:
@@ -14716,12 +14717,12 @@ class App(QMainWindow):
             cancellable=True,
             on_success=_success,
             on_cancelled=lambda: self.statusBar().showMessage(
-                "Managed audio derivative export cancelled.", 5000
+                "Audio derivative export cancelled.", 5000
             ),
             on_error=lambda failure: self._show_background_task_error(
                 title,
                 failure,
-                user_message="Could not export managed audio derivatives:",
+                user_message="Could not export audio derivatives:",
             ),
         )
 
@@ -14942,7 +14943,7 @@ class App(QMainWindow):
         )
 
     def convert_external_audio_files(self):
-        title = "External Audio Conversion Utility"
+        title = "Convert External Audio Files"
         if (
             self.audio_conversion_service is None
             or not self.audio_conversion_service.is_available()
@@ -14950,13 +14951,13 @@ class App(QMainWindow):
             QMessageBox.warning(
                 self,
                 title,
-                "External audio conversion utility requires ffmpeg on PATH. "
+                "External audio conversion requires ffmpeg on PATH. "
                 "Install ffmpeg to enable plain file conversion.",
             )
             return
         chosen_files, _selected_filter = QFileDialog.getOpenFileNames(
             self,
-            "Choose External Audio Files for Utility Conversion",
+            "Choose External Audio Files to Convert",
             "",
             "Audio Files (*.wav *.aif *.aiff *.mp3 *.flac *.m4a *.aac *.ogg *.oga *.opus *.mp4);;All Files (*)",
         )
@@ -14975,7 +14976,7 @@ class App(QMainWindow):
             return
         output_dir = QFileDialog.getExistingDirectory(
             self,
-            "Choose Output Folder for Utility Conversion",
+            "Choose Output Folder for External Audio Conversion",
             str(self.exports_dir / "external_audio_conversions"),
         )
         if not output_dir:
@@ -15016,7 +15017,7 @@ class App(QMainWindow):
             QMessageBox.information(
                 self,
                 title,
-                f"Converted {result.exported} external audio file{'s' if result.exported != 1 else ''} with the utility workflow."
+                f"Converted {result.exported} external audio file{'s' if result.exported != 1 else ''} with the plain conversion workflow."
                 f"\n\nOutput:\n{target_text}"
                 "\n\nNo catalog metadata, watermarking, or managed derivative registration was applied."
                 f"\n\nSkipped: {result.skipped}"
@@ -15030,7 +15031,7 @@ class App(QMainWindow):
         self._submit_background_task(
             title=title,
             description=(
-                "Converting external audio files with the utility workflow only. "
+                "Converting external audio files with the plain conversion workflow only. "
                 "No catalog metadata, watermarking, or managed derivative registration..."
             ),
             task_fn=_worker,
@@ -15040,24 +15041,25 @@ class App(QMainWindow):
             cancellable=True,
             on_success=_success,
             on_cancelled=lambda: self.statusBar().showMessage(
-                "External audio utility conversion cancelled.", 5000
+                "External audio conversion cancelled.", 5000
             ),
             on_error=lambda failure: self._show_background_task_error(
                 title,
                 failure,
-                user_message="Could not run the external audio conversion utility:",
+                user_message="Could not convert the selected external audio files:",
             ),
         )
 
     def write_tags_to_exported_audio(self, track_ids: list[int] | None = None):
+        title = "Export Tagged Audio Copies"
         if self.tagged_audio_export_service is None or self.track_service is None:
-            QMessageBox.warning(self, "Write Tags to Exported Audio", "Open a profile first.")
+            QMessageBox.warning(self, title, "Open a profile first.")
             return
         selected_ids = self._normalize_track_ids(track_ids or self._selected_or_visible_track_ids())
         if not selected_ids:
             QMessageBox.information(
                 self,
-                "Write Tags to Exported Audio",
+                title,
                 "Select one or more tracks or apply a filter first.",
             )
             return
@@ -15081,14 +15083,14 @@ class App(QMainWindow):
             if not prepared:
                 QMessageBox.information(
                     self,
-                    "Write Tags to Exported Audio",
+                    title,
                     "No exportable audio files were available for the selected tracks."
                     + (f"\n\nWarnings:\n- " + "\n- ".join(warnings[:12]) if warnings else ""),
                 )
                 return
 
             dlg = TagPreviewDialog(
-                title="Write Tags to Exported Audio",
+                title=title,
                 intro=(
                     "Preview the catalog metadata that will be written into exported audio copies. "
                     "The original stored audio stays untouched."
@@ -15162,7 +15164,7 @@ class App(QMainWindow):
                 self._audit_commit()
                 QMessageBox.information(
                     self,
-                    "Write Tags to Exported Audio",
+                    title,
                     f"Exported {result.exported} tagged audio cop{'y' if result.exported == 1 else 'ies'} to:\n{output_dir}"
                     f"\n\nSkipped: {result.skipped}"
                     + (
@@ -15173,7 +15175,7 @@ class App(QMainWindow):
                 )
 
             self._submit_background_bundle_task(
-                title="Write Tags to Exported Audio",
+                title=title,
                 description="Writing catalog metadata into exported audio copies...",
                 task_fn=_worker,
                 kind="read",
@@ -15184,14 +15186,14 @@ class App(QMainWindow):
                     "Tagged audio export cancelled.", 5000
                 ),
                 on_error=lambda failure: self._show_background_task_error(
-                    "Write Tags to Exported Audio",
+                    title,
                     failure,
                     user_message="Could not export tagged audio copies:",
                 ),
             )
 
         self._submit_background_bundle_task(
-            title="Write Tags to Exported Audio",
+            title=title,
             description="Preparing the tagged audio export preview...",
             task_fn=_preview_worker,
             kind="read",
@@ -15199,7 +15201,7 @@ class App(QMainWindow):
             cancellable=False,
             on_success=_preview_success,
             on_error=lambda failure: self._show_background_task_error(
-                "Write Tags to Exported Audio",
+                title,
                 failure,
                 user_message="Could not prepare the tagged audio export preview:",
             ),
@@ -15222,7 +15224,7 @@ class App(QMainWindow):
         ).exec()
 
     def export_authenticity_watermarked_audio(self, track_ids: list[int] | None = None):
-        title = "Export Watermark-Authentic Masters"
+        title = "Export Authentic Masters"
         if not AUTHENTICITY_FEATURE_AVAILABLE:
             QMessageBox.warning(
                 self,
@@ -15271,7 +15273,7 @@ class App(QMainWindow):
                 return
             output_dir = QFileDialog.getExistingDirectory(
                 self,
-                "Choose Export Folder for Watermark-Authentic Masters",
+                "Choose Export Folder for Authentic Masters",
                 str(self.exports_dir / "authenticity_audio"),
             )
             if not output_dir:
@@ -15328,7 +15330,7 @@ class App(QMainWindow):
                 cancellable=True,
                 on_success=_success,
                 on_cancelled=lambda: self.statusBar().showMessage(
-                    "Watermark-authentic master export cancelled.", 5000
+                    "Authentic master export cancelled.", 5000
                 ),
                 on_error=lambda failure: self._show_background_task_error(
                     title,
@@ -15352,7 +15354,7 @@ class App(QMainWindow):
         )
 
     def export_authenticity_provenance_audio(self, track_ids: list[int] | None = None):
-        title = "Export Provenance-Linked Lossy Copies"
+        title = "Export Provenance Copies"
         if not AUTHENTICITY_FEATURE_AVAILABLE:
             QMessageBox.warning(
                 self,
@@ -15408,7 +15410,7 @@ class App(QMainWindow):
                 return
             output_dir = QFileDialog.getExistingDirectory(
                 self,
-                "Choose Export Folder for Provenance-Linked Lossy Copies",
+                "Choose Export Folder for Provenance Copies",
                 str(self.exports_dir / "authenticity_lineage"),
             )
             if not output_dir:
@@ -15465,7 +15467,7 @@ class App(QMainWindow):
                 cancellable=True,
                 on_success=_success,
                 on_cancelled=lambda: self.statusBar().showMessage(
-                    "Provenance-linked lossy export cancelled.", 5000
+                    "Provenance export cancelled.", 5000
                 ),
                 on_error=lambda failure: self._show_background_task_error(
                     title,
@@ -17195,24 +17197,46 @@ class App(QMainWindow):
 
             if self.track_has_media(track_id, "audio_file"):
                 export_track_ids = selected_ids if track_id in selected_ids else [track_id]
-                act_import_tags = QAction("Import Tags from Audio…", self)
-                act_import_tags.triggered.connect(lambda: self.import_tags_from_audio([track_id]))
-                menu.addAction(act_import_tags)
+                audio_menu = menu.addMenu("Audio")
 
-                act_write_tags = QAction("Write Tags to Exported Audio…", self)
+                act_import_tags = QAction("Import Metadata from Audio Files…", self)
+                act_import_tags.triggered.connect(lambda: self.import_tags_from_audio([track_id]))
+                audio_menu.addAction(act_import_tags)
+
+                act_write_tags = QAction("Export Tagged Audio Copies…", self)
                 act_write_tags.triggered.connect(
                     lambda: self.write_tags_to_exported_audio(export_track_ids)
                 )
-                menu.addAction(act_write_tags)
+                audio_menu.addAction(act_write_tags)
 
                 act_convert_selected_audio = QAction(
-                    "Export Managed Audio Derivatives…",
+                    "Export Audio Derivatives…",
                     self,
                 )
                 act_convert_selected_audio.triggered.connect(
                     lambda: self.convert_selected_audio(export_track_ids)
                 )
-                menu.addAction(act_convert_selected_audio)
+                audio_menu.addAction(act_convert_selected_audio)
+
+                audio_menu.addSeparator()
+
+                act_export_authenticity = QAction(
+                    "Export Authentic Masters…",
+                    self,
+                )
+                act_export_authenticity.triggered.connect(
+                    lambda: self.export_authenticity_watermarked_audio(export_track_ids)
+                )
+                audio_menu.addAction(act_export_authenticity)
+
+                act_export_provenance = QAction(
+                    "Export Provenance Copies…",
+                    self,
+                )
+                act_export_provenance.triggered.connect(
+                    lambda: self.export_authenticity_provenance_audio(export_track_ids)
+                )
+                audio_menu.addAction(act_export_provenance)
 
                 act_export_forensic = QAction(
                     "Export Forensic Watermarked Audio…",
@@ -17221,39 +17245,23 @@ class App(QMainWindow):
                 act_export_forensic.triggered.connect(
                     lambda: self.export_forensic_watermarked_audio(export_track_ids)
                 )
-                menu.addAction(act_export_forensic)
+                audio_menu.addAction(act_export_forensic)
 
-                act_convert_external_audio = QAction(
-                    "External Audio Conversion Utility…",
-                    self,
-                )
-                act_convert_external_audio.triggered.connect(self.convert_external_audio_files)
-                menu.addAction(act_convert_external_audio)
-
-                act_export_authenticity = QAction(
-                    "Export Watermark-Authentic Masters…",
-                    self,
-                )
-                act_export_authenticity.triggered.connect(
-                    lambda: self.export_authenticity_watermarked_audio(export_track_ids)
-                )
-                menu.addAction(act_export_authenticity)
-
-                act_export_provenance = QAction(
-                    "Export Provenance-Linked Lossy Copies…",
-                    self,
-                )
-                act_export_provenance.triggered.connect(
-                    lambda: self.export_authenticity_provenance_audio(export_track_ids)
-                )
-                menu.addAction(act_export_provenance)
+                audio_menu.addSeparator()
 
                 act_inspect_forensic = QAction(
                     "Inspect Forensic Watermark…",
                     self,
                 )
                 act_inspect_forensic.triggered.connect(self.inspect_forensic_watermark)
-                menu.addAction(act_inspect_forensic)
+                audio_menu.addAction(act_inspect_forensic)
+
+                act_verify_authenticity = QAction(
+                    "Verify Audio Authenticity…",
+                    self,
+                )
+                act_verify_authenticity.triggered.connect(self.verify_audio_authenticity)
+                audio_menu.addAction(act_verify_authenticity)
 
         cell_item = self.table.item(row, col)
         cell_text = cell_item.text() if cell_item else ""

@@ -329,27 +329,76 @@ class AppShellTestCase(unittest.TestCase):
                 return row
         raise AssertionError(f"Track row not found: {track_id}")
 
-    def _table_context_action_texts(self, row: int, col: int) -> list[str]:
-        captured: dict[str, list[str]] = {}
+    @staticmethod
+    def _menu_action_texts(menu) -> list[str]:
+        return [action.text() for action in menu.actions() if action.text()]
+
+    @classmethod
+    def _menu_snapshot(cls, menu) -> dict[str, object]:
+        texts: list[str] = []
+        submenus: dict[str, dict[str, object]] = {}
+        for action in menu.actions():
+            text = action.text()
+            if not text:
+                continue
+            texts.append(text)
+            if action.menu() is not None:
+                submenus[text] = cls._menu_snapshot(action.menu())
+        return {"texts": texts, "submenus": submenus}
+
+    @staticmethod
+    def _menu_snapshot_at_path(snapshot: dict[str, object], *path: str) -> dict[str, object]:
+        current = snapshot
+        for title in path:
+            current = (current.get("submenus") or {}).get(title) or None
+            if current is None:
+                raise AssertionError(f"Submenu path not found: {' > '.join(path)}")
+        return current
+
+    @staticmethod
+    def _flatten_menu_snapshot(snapshot: dict[str, object]) -> list[str]:
+        texts = list(snapshot.get("texts") or [])
+        for submenu in (snapshot.get("submenus") or {}).values():
+            texts.extend(AppShellTestCase._flatten_menu_snapshot(submenu))
+        return texts
+
+    def _table_context_menu_snapshot(self, row: int, col: int) -> dict[str, object]:
+        captured: dict[str, dict[str, object]] = {}
         index = self.window.table.model().index(row, col)
 
         class _CapturedMenu:
-            def __init__(self, *_args, **_kwargs):
-                self._actions: list[object] = []
+            def __init__(self, *_args, title: str = "", **_kwargs):
+                self._title = str(title or "")
+                self._entries: list[object] = []
 
             def addAction(self, action):
-                self._actions.append(action)
+                self._entries.append(action)
                 return action
 
             def addSeparator(self):
+                self._entries.append(None)
                 return None
 
+            def addMenu(self, title):
+                submenu = _CapturedMenu(title=title)
+                self._entries.append(submenu)
+                return submenu
+
+            def _snapshot(self) -> dict[str, object]:
+                texts: list[str] = []
+                submenus: dict[str, dict[str, object]] = {}
+                for entry in self._entries:
+                    if isinstance(entry, _CapturedMenu):
+                        if entry._title:
+                            texts.append(entry._title)
+                            submenus[entry._title] = entry._snapshot()
+                        continue
+                    if hasattr(entry, "text") and entry.text():
+                        texts.append(entry.text())
+                return {"texts": texts, "submenus": submenus}
+
             def exec(self, *_args, **_kwargs):
-                captured["texts"] = [
-                    action.text()
-                    for action in self._actions
-                    if hasattr(action, "text") and action.text()
-                ]
+                captured["snapshot"] = self._snapshot()
                 return None
 
         with (
@@ -358,7 +407,12 @@ class AppShellTestCase(unittest.TestCase):
         ):
             self.window._on_table_context_menu(app_module.QPoint(0, 0))
             self.app.processEvents()
-        return captured.get("texts", [])
+
+        return captured.get("snapshot", {"texts": [], "submenus": {}})
+
+    def _table_context_action_texts(self, row: int, col: int) -> list[str]:
+        snapshot = self._table_context_menu_snapshot(row, col)
+        return self._flatten_menu_snapshot(snapshot)
 
     def _select_track_ids(self, track_ids: list[int]) -> None:
         track_id_set = {int(track_id) for track_id in track_ids}
@@ -1540,18 +1594,31 @@ class AppShellTestCase(unittest.TestCase):
             action for action in self.window.menuBar().actions() if action.text() == "Catalog"
         )
         catalog_menu = catalog_action.menu()
-        menu_texts = [action.text() for action in catalog_menu.actions() if action.text()]
+        catalog_snapshot = self._menu_snapshot(catalog_menu)
+        menu_texts = list(catalog_snapshot.get("texts") or [])
         self.assertNotIn("Create Release from Selection…", menu_texts)
         self.assertNotIn("Add Selected Tracks to Release…", menu_texts)
-        legacy_action = next(
-            action
-            for action in catalog_menu.actions()
-            if action.menu() is not None and action.text() == "Legacy License Archive"
+        self.assertEqual(
+            menu_texts,
+            [
+                "Workspace",
+                "Legacy & Special",
+                "Audio Ingest",
+                "Audio Export & Conversion",
+                "Audio Authenticity",
+                "Data Quality Dashboard…",
+            ],
         )
-        legacy_menu = legacy_action.menu()
-        legacy_texts = [action.text() for action in legacy_menu.actions() if action.text()]
+        legacy_special_snapshot = self._menu_snapshot_at_path(catalog_snapshot, "Legacy & Special")
+        legacy_texts = list(
+            self._menu_snapshot_at_path(
+                catalog_snapshot, "Legacy & Special", "Legacy License Archive"
+            ).get("texts")
+            or []
+        )
         self.assertIn("License Browser…", legacy_texts)
         self.assertIn("Migrate Legacy Licenses to Contracts…", legacy_texts)
+        self.assertIn("GS1 Metadata…", list(legacy_special_snapshot.get("texts") or []))
         self.assertNotIn("create_release", self.window._action_ribbon_specs_by_id)
         self.assertNotIn("add_selected_to_release", self.window._action_ribbon_specs_by_id)
 
@@ -1564,11 +1631,14 @@ class AppShellTestCase(unittest.TestCase):
         )
         catalog_menu = catalog_action.menu()
         view_menu = view_action.menu()
-        catalog_texts = [action.text() for action in catalog_menu.actions() if action.text()]
-        view_texts = [action.text() for action in view_menu.actions() if action.text()]
+        catalog_snapshot = self._menu_snapshot(catalog_menu)
+        workspace_texts = list(
+            self._menu_snapshot_at_path(catalog_snapshot, "Workspace").get("texts") or []
+        )
+        view_texts = self._menu_action_texts(view_menu)
 
-        self.assertIn("Show Add Data Panel", catalog_texts)
-        self.assertIn("Show Catalog Table", catalog_texts)
+        self.assertIn("Show Add Data Panel", workspace_texts)
+        self.assertIn("Show Catalog Table", workspace_texts)
         self.assertNotIn("Show Add Data Panel", view_texts)
         self.assertNotIn("Show Catalog Table", view_texts)
         self.assertEqual(
@@ -2531,7 +2601,7 @@ class AppShellTestCase(unittest.TestCase):
     def case_authenticity_actions_are_present_in_catalog_and_settings_menus(self):
         self.assertEqual(
             self.window.convert_selected_audio_action.text(),
-            "Export Managed Audio Derivatives…",
+            "Export Audio Derivatives…",
         )
         self.assertEqual(
             self.window.export_forensic_watermarked_audio_action.text(),
@@ -2539,15 +2609,15 @@ class AppShellTestCase(unittest.TestCase):
         )
         self.assertEqual(
             self.window.convert_external_audio_files_action.text(),
-            "External Audio Conversion Utility…",
+            "Convert External Audio Files…",
         )
         self.assertEqual(
             self.window.export_authenticity_watermarked_audio_action.text(),
-            "Export Watermark-Authentic Masters…",
+            "Export Authentic Masters…",
         )
         self.assertEqual(
             self.window.export_authenticity_provenance_audio_action.text(),
-            "Export Provenance-Linked Lossy Copies…",
+            "Export Provenance Copies…",
         )
         self.assertIn(
             "Direct watermark master export",
@@ -2598,19 +2668,53 @@ class AppShellTestCase(unittest.TestCase):
         lossless_audio = self._create_wav_file("context-auth.wav")
         self.window.track_service.set_media_path(lossy_track_id, "audio_file", lossy_audio)
         self.window.track_service.set_media_path(lossless_track_id, "audio_file", lossless_audio)
+        self.window.release_service.create_release(
+            app_module.ReleasePayload(
+                title="Context Auth Release",
+                primary_artist="Context Artist",
+                release_type="single",
+                release_date="2026-03-23",
+                placements=[
+                    app_module.ReleaseTrackPlacement(
+                        track_id=lossy_track_id,
+                        disc_number=1,
+                        track_number=1,
+                        sequence_number=1,
+                    )
+                ],
+            )
+        )
         self.window.refresh_table()
         row = self._table_row_for_track_id(lossy_track_id)
 
-        texts = self._table_context_action_texts(row, 0)
+        snapshot = self._table_context_menu_snapshot(row, 0)
+        top_level_texts = list(snapshot.get("texts") or [])
+        audio_snapshot = (snapshot.get("submenus") or {}).get("Audio") or {}
+        audio_texts = self._flatten_menu_snapshot(audio_snapshot)
 
-        self.assertIn("Import Tags from Audio…", texts)
-        self.assertIn("Write Tags to Exported Audio…", texts)
-        self.assertIn("Export Managed Audio Derivatives…", texts)
-        self.assertIn("Export Forensic Watermarked Audio…", texts)
-        self.assertIn("External Audio Conversion Utility…", texts)
-        self.assertIn("Export Watermark-Authentic Masters…", texts)
-        self.assertIn("Export Provenance-Linked Lossy Copies…", texts)
-        self.assertIn("Inspect Forensic Watermark…", texts)
+        self.assertIn("Edit Entry", top_level_texts)
+        self.assertIn("GS1 Metadata…", top_level_texts)
+        self.assertIn("Open Primary Release…", top_level_texts)
+        self.assertIn("Link Selected Track(s) to Work…", top_level_texts)
+        self.assertIn("Delete Entry", top_level_texts)
+        self.assertIn("Add License to this Track…", top_level_texts)
+        self.assertIn("View Licenses for this Track…", top_level_texts)
+        self.assertIn("Audio", top_level_texts)
+
+        self.assertNotIn("Import Metadata from Audio Files…", top_level_texts)
+        self.assertNotIn("Export Audio Derivatives…", top_level_texts)
+        self.assertNotIn("Export Tagged Audio Copies…", top_level_texts)
+        self.assertNotIn("Convert External Audio Files…", top_level_texts)
+
+        self.assertIn("Import Metadata from Audio Files…", audio_texts)
+        self.assertIn("Export Tagged Audio Copies…", audio_texts)
+        self.assertIn("Export Audio Derivatives…", audio_texts)
+        self.assertIn("Export Authentic Masters…", audio_texts)
+        self.assertIn("Export Provenance Copies…", audio_texts)
+        self.assertIn("Export Forensic Watermarked Audio…", audio_texts)
+        self.assertIn("Inspect Forensic Watermark…", audio_texts)
+        self.assertIn("Verify Audio Authenticity…", audio_texts)
+        self.assertNotIn("Convert External Audio Files…", audio_texts)
         audio_col = self.window._column_index_by_header("Audio File")
         self.assertGreaterEqual(audio_col, 0)
         lossy_item = self.window.table.item(row, audio_col)

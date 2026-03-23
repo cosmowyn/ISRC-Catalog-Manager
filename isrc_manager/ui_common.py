@@ -266,6 +266,68 @@ def _apply_compact_dialog_control_heights(owner: QWidget) -> None:
             widget.setMinimumHeight(target_height)
 
 
+def _apply_dialog_width_constraints(
+    dialog: QDialog,
+    *,
+    min_width: int = 360,
+    max_width: int = 500,
+) -> None:
+    dialog.setMinimumWidth(int(min_width))
+    dialog.setMaximumWidth(int(max_width))
+    dialog.adjustSize()
+    hint = dialog.sizeHint()
+    width = min(max(int(hint.width()), int(min_width)), int(max_width))
+    dialog.resize(width, int(hint.height()))
+
+
+def _prompt_compact_choice_dialog(
+    parent: QWidget | None,
+    *,
+    title: str,
+    prompt: str,
+    choices: list[tuple[str, str]],
+    object_name: str = "compactChoiceDialog",
+    ok_text: str = "Continue",
+    min_width: int = 360,
+    max_width: int = 480,
+) -> str | None:
+    if not choices:
+        return None
+    dialog = QDialog(parent)
+    dialog.setWindowTitle(str(title or "Choose Option"))
+    dialog.setModal(True)
+    _apply_standard_dialog_chrome(dialog, object_name)
+
+    root = QVBoxLayout(dialog)
+    root.setContentsMargins(16, 16, 16, 16)
+    root.setSpacing(12)
+
+    prompt_label = QLabel(str(prompt or ""), dialog)
+    prompt_label.setWordWrap(True)
+    root.addWidget(prompt_label)
+
+    combo = QComboBox(dialog)
+    combo.setMinimumWidth(240)
+    combo.setMaximumWidth(360)
+    for value, label in choices:
+        combo.addItem(str(label), str(value))
+    root.addWidget(combo, 0, Qt.AlignLeft)
+
+    buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, Qt.Horizontal, dialog)
+    ok_button = buttons.button(QDialogButtonBox.Ok)
+    if ok_button is not None:
+        ok_button.setText(str(ok_text or "Continue"))
+    buttons.accepted.connect(dialog.accept)
+    buttons.rejected.connect(dialog.reject)
+    root.addWidget(buttons)
+
+    _apply_compact_dialog_control_heights(dialog)
+    _apply_dialog_width_constraints(dialog, min_width=min_width, max_width=max_width)
+    if dialog.exec() != QDialog.Accepted:
+        return None
+    return str(combo.currentData() or "").strip() or None
+
+
 def _create_action_button_grid(
     owner: QWidget,
     buttons: list[QPushButton],
