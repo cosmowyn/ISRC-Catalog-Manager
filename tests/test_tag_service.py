@@ -3,6 +3,7 @@ import tempfile
 import unittest
 import wave
 from pathlib import Path
+from unittest import mock
 
 try:
     from mutagen.id3 import ID3
@@ -332,6 +333,41 @@ class AudioTagServiceTests(unittest.TestCase):
                     ],
                     is_cancelled=lambda: True,
                 )
+
+    def test_tagged_audio_export_keeps_output_when_metadata_embedding_is_skipped(self):
+        export_service = TaggedAudioExportService(self.service)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source_path = Path(tmpdir) / "sample.wav"
+            with wave.open(str(source_path), "wb") as handle:
+                handle.setnchannels(1)
+                handle.setsampwidth(2)
+                handle.setframerate(44100)
+                handle.writeframes(b"\x00\x00" * 22050)
+
+            with mock.patch.object(
+                export_service.tag_service,
+                "write_tags",
+                side_effect=RuntimeError("tag write failed"),
+            ):
+                result = export_service.export_copies(
+                    output_dir=Path(tmpdir) / "exports",
+                    exports=[
+                        TaggedAudioExportItem(
+                            suggested_name="orbit_export.mp3",
+                            tag_data=self.tag_data,
+                            source_path=source_path,
+                            source_suffix=".wav",
+                        )
+                    ],
+                )
+
+            exported_path = Path(result.written_paths[0])
+            self.assertEqual(result.exported, 1)
+            self.assertEqual(result.skipped, 0)
+            self.assertTrue(exported_path.exists())
+            self.assertTrue(
+                any("metadata embedding skipped" in warning for warning in result.warnings)
+            )
 
 
 class BulkAudioAttachServiceTests(unittest.TestCase):

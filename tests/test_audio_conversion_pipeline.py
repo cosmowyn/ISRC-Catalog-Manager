@@ -39,6 +39,7 @@ class _StubConversionService:
         self._managed_authentic = {"wav", "flac", "aiff"}
         self._managed_lossy = {"mp3"}
         self._external = {"wav", "flac", "aiff", "mp3", "ogg", "opus"}
+        self.calls: list[dict[str, object]] = []
 
     def is_supported_target(
         self,
@@ -66,7 +67,16 @@ class _StubConversionService:
         source_path: str | Path,
         destination_path: str | Path,
         target_id: str,
+        metadata_behavior: str = "inherit",
     ) -> AudioConversionResult:
+        self.calls.append(
+            {
+                "source_path": str(source_path),
+                "destination_path": str(destination_path),
+                "target_id": str(target_id),
+                "metadata_behavior": str(metadata_behavior),
+            }
+        )
         data, sample_rate = sf.read(str(source_path), dtype="float32", always_2d=True)
         target = str(target_id or "").strip().lower()
         destination = Path(destination_path)
@@ -222,9 +232,27 @@ class AudioConversionPipelineTests(AuthenticityWorkflowTestCase):
     def test_managed_export_supports_blob_backed_source_without_mutating_source_bytes(self):
         track_id, _source_path = self.create_track_with_audio(
             title="Blob Master",
+            artist_name="Cosmowyn",
+            album_title="Blob Album",
             duration_seconds=30,
             seed=9,
             suffix=".wav",
+        )
+        self.release_service.create_release(
+            ReleasePayload(
+                title="Blob Album",
+                primary_artist="Cosmowyn",
+                album_artist="Cosmowyn",
+                release_date="2026-03-24",
+                placements=[
+                    ReleaseTrackPlacement(
+                        track_id=track_id,
+                        disc_number=1,
+                        track_number=1,
+                        sequence_number=1,
+                    )
+                ],
+            )
         )
         self.track_service.convert_media_storage_mode(track_id, "audio_file", "database")
         before_bytes, _mime_type = self.track_service.fetch_media_bytes(track_id, "audio_file")
@@ -241,10 +269,15 @@ class AudioConversionPipelineTests(AuthenticityWorkflowTestCase):
 
         after_bytes, _mime_type = self.track_service.fetch_media_bytes(track_id, "audio_file")
         output_path = Path(result.written_paths[0])
+        exported_tags = self.audio_tag_service.read_tags(output_path)
 
         self.assertEqual(result.exported, 1)
         self.assertEqual(before_bytes, after_bytes)
         self.assertEqual(output_path.suffix.lower(), ".aiff")
+        self.assertEqual(exported_tags.title, "Blob Master")
+        self.assertEqual(exported_tags.album, "Blob Album")
+        self.assertEqual(exported_tags.album_artist, "Cosmowyn")
+        self.assertEqual(exported_tags.track_number, 1)
         self.assertEqual(
             self.conn.execute("SELECT COUNT(*) FROM TrackAudioDerivatives").fetchone()[0],
             1,
@@ -411,6 +444,7 @@ class AudioConversionPipelineTests(AuthenticityWorkflowTestCase):
         after_blob_bytes, _mime_type = self.track_service.fetch_media_bytes(track_two, "audio_file")
         self.assertEqual(after_blob_bytes, source_two_bytes_before)
         archive_hashes: dict[str, str] = {}
+        extracted_titles: set[str] = set()
         with zipfile.ZipFile(result.zip_path) as archive:
             names = archive.namelist()
             self.assertEqual(len(names), 2)
@@ -419,9 +453,10 @@ class AudioConversionPipelineTests(AuthenticityWorkflowTestCase):
                 archive_hashes[name] = hashlib.sha256(archive.read(name)).hexdigest()
             extract_root = Path(tempfile.mkdtemp(prefix="lossy-bulk-extract-"))
             self.addCleanup(shutil.rmtree, extract_root, True)
-            archive.extract(names[0], path=extract_root)
-            extracted = extract_root / names[0]
-        extracted_tags = self.audio_tag_service.read_tags(extracted)
+            for name in names:
+                archive.extract(name, path=extract_root)
+                extracted = extract_root / name
+                extracted_titles.add(str(self.audio_tag_service.read_tags(extracted).title or ""))
         derivative_rows = self.conn.execute(
             """
             SELECT track_id, workflow_kind, derivative_kind, authenticity_basis, source_storage_mode,
@@ -438,7 +473,7 @@ class AudioConversionPipelineTests(AuthenticityWorkflowTestCase):
             """
         ).fetchone()
 
-        self.assertEqual(extracted_tags.artist, "Cosmowyn")
+        self.assertEqual(extracted_titles, {"Managed Lossy Source", "Blob Lossy Source"})
         self.assertEqual(
             [(row[0], row[1], row[2], row[3], row[4], row[5]) for row in derivative_rows],
             [
@@ -481,9 +516,27 @@ class AudioConversionPipelineTests(AuthenticityWorkflowTestCase):
     ):
         track_id, _source_path = self.create_track_with_audio(
             title="Blob Lossy Export",
+            artist_name="Cosmowyn",
+            album_title="Blob Lossy Album",
             duration_seconds=30,
             seed=19,
             suffix=".wav",
+        )
+        self.release_service.create_release(
+            ReleasePayload(
+                title="Blob Lossy Album",
+                primary_artist="Cosmowyn",
+                album_artist="Cosmowyn",
+                release_date="2026-03-24",
+                placements=[
+                    ReleaseTrackPlacement(
+                        track_id=track_id,
+                        disc_number=1,
+                        track_number=5,
+                        sequence_number=1,
+                    )
+                ],
+            )
         )
         self.track_service.convert_media_storage_mode(track_id, "audio_file", "database")
         before_bytes, _mime_type = self.track_service.fetch_media_bytes(track_id, "audio_file")
@@ -503,6 +556,7 @@ class AudioConversionPipelineTests(AuthenticityWorkflowTestCase):
             )
 
         after_bytes, _mime_type = self.track_service.fetch_media_bytes(track_id, "audio_file")
+        exported_tags = self.audio_tag_service.read_tags(result.written_paths[0])
         derivative_row = self.conn.execute(
             """
             SELECT source_storage_mode, output_format, watermark_applied
@@ -514,6 +568,9 @@ class AudioConversionPipelineTests(AuthenticityWorkflowTestCase):
         watermark_mock.assert_not_called()
         self.assertEqual(before_bytes, after_bytes)
         self.assertEqual(Path(result.written_paths[0]).suffix.lower(), ".mp3")
+        self.assertEqual(exported_tags.title, "Blob Lossy Export")
+        self.assertEqual(exported_tags.album, "Blob Lossy Album")
+        self.assertEqual(exported_tags.track_number, 5)
         self.assertEqual(derivative_row, ("database", "mp3", 0))
 
     def test_managed_lossless_export_still_requires_authenticity_support(self):
@@ -619,6 +676,9 @@ class AudioConversionPipelineTests(AuthenticityWorkflowTestCase):
 
         self.assertEqual(result.exported, 2)
         self.assertIsNotNone(result.zip_path)
+        self.assertTrue(
+            all(call["metadata_behavior"] == "strip" for call in self.stub_conversion_service.calls)
+        )
         self.assertEqual(
             self.conn.execute("SELECT COUNT(*) FROM TrackAudioDerivatives").fetchone()[0],
             derivative_count_before,
@@ -636,6 +696,47 @@ class AudioConversionPipelineTests(AuthenticityWorkflowTestCase):
         tags = self.audio_tag_service.read_tags(extracted)
         self.assertIsNone(tags.title)
         self.assertIsNone(tags.artist)
+        self.assertIsNone(tags.album)
+        self.assertIsNone(tags.album_artist)
+        self.assertIsNone(tags.isrc)
+        self.assertIsNone(tags.upc)
+
+    def test_audio_conversion_service_strip_metadata_mode_adds_ffmpeg_strip_flags(self):
+        source = self.write_audio_fixture(
+            "strip-metadata-source.wav",
+            duration_seconds=5,
+            seed=29,
+            suffix=".wav",
+        )
+        destination = self.root / "strip-metadata-destination.wav"
+        fake_ffmpeg = self.root / "ffmpeg"
+        fake_ffmpeg.write_text("", encoding="utf-8")
+        captured_commands: list[list[str]] = []
+
+        def _fake_run(command, **_kwargs):
+            captured_commands.append(list(command))
+            Path(command[-1]).write_bytes(b"RIFF")
+            return mock.Mock()
+
+        with (
+            mock.patch("isrc_manager.media.conversion.shutil.which", return_value=str(fake_ffmpeg)),
+            mock.patch("isrc_manager.media.conversion.subprocess.run", side_effect=_fake_run),
+        ):
+            service = AudioConversionService()
+            service.transcode(
+                source_path=source,
+                destination_path=destination,
+                target_id="wav",
+                metadata_behavior="strip",
+            )
+
+        self.assertEqual(len(captured_commands), 1)
+        command = captured_commands[0]
+        self.assertIn("-map_metadata", command)
+        self.assertIn("-1", command)
+        self.assertIn("-vn", command)
+        self.assertIn("-sn", command)
+        self.assertIn("-dn", command)
 
     def test_audio_conversion_service_reports_unavailable_without_ffmpeg(self):
         with mock.patch("isrc_manager.media.conversion.shutil.which", return_value=None):

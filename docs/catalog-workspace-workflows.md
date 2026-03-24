@@ -131,6 +131,14 @@ The catalog workflow now includes a dedicated batch media-intake path for existi
 
 This workflow is useful when the track rows already exist and the remaining job is to connect the right audio files quickly and safely.
 
+## Audio Export From The Catalog
+
+The catalog menu exposes the main audio export families directly from the workspace, and the rule is consistent across them: when a workflow exports catalog-backed audio, it automatically attempts to embed trustworthy catalog metadata into the exported copy.
+
+- `Catalog > Export Audio Derivatives…` transcodes selected catalog audio into managed derivative formats, writes catalog metadata when available, hashes the final outputs, and registers them in the Derivative Ledger.
+- `Catalog > Export Catalog Audio Copies…` writes original-format catalog audio copies without touching the stored source audio, then embeds catalog metadata into those exported copies when the target container supports it.
+- `Catalog > Convert External Audio Files…` is intentionally different: it strips inherited source metadata, does not invent catalog metadata, and does not create derivative or authenticity records.
+
 ## Audio Authenticity From The Catalog
 
 The catalog menu also exposes the audio authenticity workflow directly from the main workspace.

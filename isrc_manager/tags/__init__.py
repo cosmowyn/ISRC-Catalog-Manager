@@ -1,6 +1,12 @@
 """Audio metadata tag models and services."""
 
-from .catalog import build_catalog_tag_data
+from .catalog import (
+    CATALOG_EXPORT_RELEASE_POLICY,
+    build_catalog_export_tag_data,
+    build_catalog_tag_data,
+    has_exportable_catalog_tag_data,
+    write_catalog_export_tags,
+)
 from .mapping import (
     TagConflictPreview,
     TagImportPatch,
@@ -30,7 +36,10 @@ __all__ = [
     "BulkAudioAttachResult",
     "BulkAudioAttachService",
     "BulkAudioAttachTrackCandidate",
+    "CATALOG_EXPORT_RELEASE_POLICY",
+    "build_catalog_export_tag_data",
     "build_catalog_tag_data",
+    "has_exportable_catalog_tag_data",
     "catalog_metadata_to_tags",
     "TagConflictPreview",
     "TagFieldConflict",
@@ -40,4 +49,5 @@ __all__ = [
     "TaggedAudioExportResult",
     "TaggedAudioExportService",
     "merge_imported_tags",
+    "write_catalog_export_tags",
 ]

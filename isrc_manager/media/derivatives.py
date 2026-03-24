@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 from isrc_manager.file_storage import sanitize_export_basename
 from isrc_manager.media.audio_formats import audio_format_profile
-from isrc_manager.tags import AudioTagService, build_catalog_tag_data
+from isrc_manager.tags import AudioTagService, write_catalog_export_tags
 
 from .conversion import AudioConversionService
 
@@ -745,22 +745,18 @@ class ManagedDerivativeExportCoordinator:
                                 destination_path=converted_path,
                                 target_id=output_format,
                             )
+                        metadata_embedded = False
                         _report_stage(
                             progress_callback,
                             item_index=item_index,
                             item_total=len(track_ids),
                             stage_index=2,
                             stage_count=_MANAGED_STAGE_COUNT,
-                            message=f"Writing metadata {item_index} of {len(track_ids)}: {snapshot.track_title}",
+                            message=(
+                                f"{'Preparing' if workflow.apply_watermark else 'Writing'} metadata "
+                                f"{item_index} of {len(track_ids)}: {snapshot.track_title}"
+                            ),
                         )
-                        tag_data = build_catalog_tag_data(
-                            track_id,
-                            track_service=self.track_service,
-                            release_service=self.release_service,
-                            release_policy="unambiguous",
-                            include_artwork_bytes=True,
-                        )
-                        self.tag_service.write_tags(converted_path, tag_data)
                         manifest_record = None
                         finalized_output_path = converted_path
                         if workflow.apply_watermark:
@@ -786,6 +782,18 @@ class ManagedDerivativeExportCoordinator:
                             )
                             finalized_output_path = watermarked_path
                         else:
+                            metadata_embedded, metadata_warning = write_catalog_export_tags(
+                                converted_path,
+                                track_id=track_id,
+                                track_service=self.track_service,
+                                release_service=self.release_service,
+                                tag_service=self.tag_service,
+                                include_artwork_bytes=True,
+                            )
+                            if metadata_warning:
+                                warnings.append(
+                                    f"{snapshot.track_title}: metadata embedding skipped; {metadata_warning}."
+                                )
                             _report_stage(
                                 progress_callback,
                                 item_index=item_index,
@@ -797,6 +805,19 @@ class ManagedDerivativeExportCoordinator:
                                     f"{snapshot.track_title}"
                                 ),
                             )
+                        if workflow.apply_watermark:
+                            metadata_embedded, metadata_warning = write_catalog_export_tags(
+                                finalized_output_path,
+                                track_id=track_id,
+                                track_service=self.track_service,
+                                release_service=self.release_service,
+                                tag_service=self.tag_service,
+                                include_artwork_bytes=True,
+                            )
+                            if metadata_warning:
+                                warnings.append(
+                                    f"{snapshot.track_title}: metadata embedding skipped; {metadata_warning}."
+                                )
                         _report_stage(
                             progress_callback,
                             item_index=item_index,
@@ -825,7 +846,7 @@ class ManagedDerivativeExportCoordinator:
                             authenticity_basis=workflow.authenticity_basis,
                             output_format=output_format,
                             watermark_applied=workflow.apply_watermark,
-                            metadata_embedded=True,
+                            metadata_embedded=metadata_embedded,
                             final_sha256=final_sha256,
                             output_filename=final_name,
                             source_lineage_ref=source_lineage_ref,
@@ -1010,6 +1031,7 @@ class ExternalAudioConversionCoordinator:
                         source_path=input_path,
                         destination_path=temp_destination,
                         target_id=output_format,
+                        metadata_behavior="strip",
                     )
                     finalized_paths.append(temp_destination)
                     exported += 1

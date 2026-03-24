@@ -35,6 +35,8 @@ The default key is used for new authenticity exports.
 
 Use `Catalog > Export Authenticity Watermarked Audio…`.
 
+This workflow follows the same global export rule as the rest of the catalog-backed audio pipeline: the catalog remains the only metadata source of truth, and export-time metadata embedding is automatic when trustworthy catalog values are available.
+
 The export workflow:
 
 1. Uses the selected tracks from the catalog.

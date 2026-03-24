@@ -52,6 +52,7 @@ except ImportError:  # pragma: no cover - exercised indirectly in runtime packag
 
 from isrc_manager.domain.codes import normalize_isrc, to_iso_isrc
 
+from .catalog import has_exportable_catalog_tag_data
 from .models import (
     ArtworkPayload,
     AudioTagData,
@@ -876,10 +877,10 @@ class TaggedAudioExportService:
                 progress_callback(
                     index - 1,
                     total,
-                    f"Writing tags to exported copy {index} of {total}: {item.suggested_name}",
+                    f"Preparing catalog audio copy {index} of {total}: {item.suggested_name}",
                 )
             if is_cancelled is not None and is_cancelled():
-                raise InterruptedError("Tagged audio export cancelled.")
+                raise InterruptedError("Catalog audio copy export cancelled.")
             destination = (destination_root / item.suggested_name).with_suffix(
                 self._normalize_suffix(item.source_suffix)
             )
@@ -893,7 +894,17 @@ class TaggedAudioExportService:
                     shutil.copy2(source, destination)
                 else:
                     destination.write_bytes(bytes(item.source_bytes or b""))
-                self.tag_service.write_tags(destination, item.tag_data)
+                if has_exportable_catalog_tag_data(item.tag_data):
+                    try:
+                        self.tag_service.write_tags(destination, item.tag_data)
+                    except Exception as exc:
+                        warnings.append(
+                            f"{destination.name}: metadata embedding skipped; embedded metadata could not be written ({exc})."
+                        )
+                else:
+                    warnings.append(
+                        f"{destination.name}: metadata embedding skipped; catalog metadata was empty, so no embedded tags were written."
+                    )
                 exported += 1
                 written_paths.append(str(destination))
             except Exception as exc:
@@ -902,7 +913,7 @@ class TaggedAudioExportService:
                 destination.unlink(missing_ok=True)
 
         if progress_callback is not None:
-            progress_callback(total, total, "Tagged audio export finished.")
+            progress_callback(total, total, "Catalog audio copy export finished.")
 
         return TaggedAudioExportResult(
             requested=len(exports),

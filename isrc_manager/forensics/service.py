@@ -19,7 +19,7 @@ from isrc_manager.file_storage import sanitize_export_basename
 from isrc_manager.media.audio_formats import audio_format_profile
 from isrc_manager.media.conversion import AudioConversionService
 from isrc_manager.media.derivatives import DerivativeLedgerService
-from isrc_manager.tags import AudioTagService, build_catalog_tag_data
+from isrc_manager.tags import AudioTagService, write_catalog_export_tags
 
 from .models import (
     AUTHENTICITY_BASIS_FORENSIC_TRACE,
@@ -690,22 +690,15 @@ class ForensicExportCoordinator:
                                 destination_path=converted_path,
                                 target_id=output_format,
                             )
-                        tag_data = build_catalog_tag_data(
-                            track_id,
-                            track_service=self.track_service,
-                            release_service=self.release_service,
-                            release_policy="unambiguous",
-                            include_artwork_bytes=True,
-                        )
+                        metadata_embedded = False
                         _report_stage(
                             progress_callback,
                             item_index=item_index,
                             item_total=len(track_ids),
                             stage_index=2,
                             stage_count=_FORENSIC_STAGE_COUNT,
-                            message=f"Writing metadata {item_index} of {len(track_ids)}: {snapshot.track_title}",
+                            message=f"Preparing metadata {item_index} of {len(track_ids)}: {snapshot.track_title}",
                         )
-                        self.tag_service.write_tags(converted_path, tag_data)
                         token = ForensicWatermarkToken(
                             version=FORENSIC_TOKEN_VERSION,
                             token_id=max(1, int(secrets.randbits(48))),
@@ -733,8 +726,18 @@ class ForensicExportCoordinator:
                             watermark_key=forensic_watermark_key,
                             token=token,
                         )
-                        # Keep DB metadata on the final delivery file after watermark finalization.
-                        self.tag_service.write_tags(watermarked_path, tag_data)
+                        metadata_embedded, metadata_warning = write_catalog_export_tags(
+                            watermarked_path,
+                            track_id=track_id,
+                            track_service=self.track_service,
+                            release_service=self.release_service,
+                            tag_service=self.tag_service,
+                            include_artwork_bytes=True,
+                        )
+                        if metadata_warning:
+                            warnings.append(
+                                f"{snapshot.track_title}: metadata embedding skipped; {metadata_warning}."
+                            )
                         _report_stage(
                             progress_callback,
                             item_index=item_index,
@@ -763,7 +766,7 @@ class ForensicExportCoordinator:
                             authenticity_basis=AUTHENTICITY_BASIS_FORENSIC_TRACE,
                             output_format=output_format,
                             watermark_applied=True,
-                            metadata_embedded=True,
+                            metadata_embedded=metadata_embedded,
                             final_sha256=final_sha256,
                             output_filename=final_name,
                             source_lineage_ref=source_lineage_ref,

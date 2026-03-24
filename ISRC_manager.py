@@ -366,9 +366,10 @@ from isrc_manager.tags import (
     AudioTagService,
     BulkAudioAttachService,
     TaggedAudioExportService,
-    build_catalog_tag_data,
+    build_catalog_export_tag_data,
     catalog_metadata_to_tags,
     merge_imported_tags,
+    write_catalog_export_tags,
 )
 from isrc_manager.tags.dialogs import BulkAudioAttachDialog, TagPreviewDialog
 from isrc_manager.tags.models import (
@@ -10739,9 +10740,9 @@ class App(QMainWindow):
             },
             {
                 "id": "write_tags_audio",
-                "label": "Export Tagged Audio Copies",
+                "label": "Export Catalog Audio Copies",
                 "category": "Catalog",
-                "description": "Export audio copies with catalog metadata written into the file tags.",
+                "description": "Export original-format catalog audio copies with automatic metadata embedding. No transcode, watermarking, or derivative registration.",
                 "action": self.write_tags_to_exported_audio_action,
             },
             {
@@ -10790,7 +10791,7 @@ class App(QMainWindow):
                 "id": "convert_external_audio",
                 "label": "Convert External Audio Files",
                 "category": "Catalog",
-                "description": "Convert one or more external audio files with the utility workflow only: no catalog metadata, no watermarking, and no derivative registration.",
+                "description": "Convert one or more external audio files with the utility workflow only: inherited source metadata is stripped, and no catalog metadata, watermarking, or derivative registration is applied.",
                 "action": self.convert_external_audio_files_action,
             },
             {
@@ -12964,13 +12965,30 @@ class App(QMainWindow):
         active_track_service = track_service or self.track_service
         if active_track_service is None:
             raise ValueError("Track service is not available")
-        return build_catalog_tag_data(
+        return build_catalog_export_tag_data(
             track_id,
             track_service=active_track_service,
             release_service=release_service or self.release_service,
-            release_policy="primary",
             include_artwork_bytes=include_artwork_bytes,
         )
+
+    def _attempt_catalog_audio_export_metadata(
+        self,
+        destination_path: str | Path,
+        *,
+        track_id: int,
+    ) -> str | None:
+        if self.track_service is None or self.audio_tag_service is None:
+            return "catalog metadata services were unavailable"
+        _metadata_embedded, metadata_warning = write_catalog_export_tags(
+            destination_path,
+            track_id=track_id,
+            track_service=self.track_service,
+            release_service=self.release_service,
+            tag_service=self.audio_tag_service,
+            include_artwork_bytes=True,
+        )
+        return metadata_warning
 
     def _release_payload_for_track_ids(
         self,
@@ -13953,7 +13971,7 @@ class App(QMainWindow):
                 progress_callback(
                     index - 1,
                     total,
-                    f"Preparing tagged audio export preview for track {index} of {total}...",
+                    f"Preparing catalog audio copy preview for track {index} of {total}...",
                 )
             snapshot = active_track_service.fetch_track_snapshot(
                 track_id,
@@ -14001,7 +14019,7 @@ class App(QMainWindow):
             )
 
         if callable(progress_callback):
-            progress_callback(total, total, "Tagged audio export preview ready.")
+            progress_callback(total, total, "Catalog audio copy export preview ready.")
 
         return {
             "prepared": prepared,
@@ -14028,7 +14046,7 @@ class App(QMainWindow):
         total = max(1, len(plan_items))
         for index, plan_item in enumerate(plan_items, start=1):
             if callable(is_cancelled) and is_cancelled():
-                raise InterruptedError("Tagged audio export cancelled.")
+                raise InterruptedError("Catalog audio copy export cancelled.")
             if callable(progress_callback):
                 progress_callback(
                     index - 1,
@@ -14078,7 +14096,7 @@ class App(QMainWindow):
             )
 
         if callable(progress_callback):
-            progress_callback(total, total, "Tagged audio export sources are ready.")
+            progress_callback(total, total, "Catalog audio copy export sources are ready.")
 
         return exports, warnings
 
@@ -15118,7 +15136,8 @@ class App(QMainWindow):
             title=title,
             prompt=(
                 "Choose the utility conversion output format. "
-                "This does not use catalog metadata, watermarking, or derivative registration."
+                "This strips inherited source metadata and does not use catalog metadata, "
+                "watermarking, or derivative registration."
             ),
             capability_group="external",
         )
@@ -15169,7 +15188,7 @@ class App(QMainWindow):
                 title,
                 f"Converted {result.exported} external audio file{'s' if result.exported != 1 else ''} with the plain conversion workflow."
                 f"\n\nOutput:\n{target_text}"
-                "\n\nNo catalog metadata, watermarking, or managed derivative registration was applied."
+                "\n\nInherited source metadata was stripped. No catalog metadata, watermarking, or managed derivative registration was applied."
                 f"\n\nSkipped: {result.skipped}"
                 + (
                     "\n\nWarnings:\n- " + "\n- ".join(result.warnings[:12])
@@ -15182,7 +15201,8 @@ class App(QMainWindow):
             title=title,
             description=(
                 "Converting external audio files with the plain conversion workflow only. "
-                "No catalog metadata, watermarking, or managed derivative registration..."
+                "Inherited source metadata is stripped, and no catalog metadata, "
+                "watermarking, or managed derivative registration is applied..."
             ),
             task_fn=_worker,
             kind="read",
@@ -15200,8 +15220,8 @@ class App(QMainWindow):
             ),
         )
 
-    def write_tags_to_exported_audio(self, track_ids: list[int] | None = None):
-        title = "Export Tagged Audio Copies"
+    def export_catalog_audio_copies(self, track_ids: list[int] | None = None):
+        title = "Export Catalog Audio Copies"
         if self.tagged_audio_export_service is None or self.track_service is None:
             QMessageBox.warning(self, title, "Open a profile first.")
             return
@@ -15242,8 +15262,8 @@ class App(QMainWindow):
             dlg = TagPreviewDialog(
                 title=title,
                 intro=(
-                    "Preview the catalog metadata that will be written into exported audio copies. "
-                    "The original stored audio stays untouched."
+                    "Preview the catalog metadata that will be embedded into exported catalog "
+                    "audio copies. The original stored audio stays untouched."
                 ),
                 rows=preview_rows,
                 initial_policy="prefer_database",
@@ -15255,8 +15275,8 @@ class App(QMainWindow):
 
             output_dir = QFileDialog.getExistingDirectory(
                 self,
-                "Choose Export Folder for Tagged Audio Copies",
-                str(self.exports_dir / "tagged_audio"),
+                "Choose Export Folder for Catalog Audio Copies",
+                str(self.exports_dir / "catalog_audio_copies"),
             )
             if not output_dir:
                 return
@@ -15292,14 +15312,14 @@ class App(QMainWindow):
             def _success(payload: dict[str, object]):
                 export_result = payload.get("result")
                 if export_result is None:
-                    raise ValueError("Tagged audio export did not return a result.")
+                    raise ValueError("Catalog audio copy export did not return a result.")
                 result = export_result
                 all_warnings = (
                     warnings + list(payload.get("warnings") or []) + list(result.warnings)
                 )
                 self._log_event(
-                    "tags.export_audio",
-                    "Exported tagged audio copies",
+                    "audio.export_catalog_copies",
+                    "Exported catalog audio copies",
                     output_dir=output_dir,
                     exported=result.exported,
                     skipped=result.skipped,
@@ -15307,7 +15327,7 @@ class App(QMainWindow):
                 )
                 self._audit(
                     "EXPORT",
-                    "AudioTags",
+                    "CatalogAudioCopy",
                     ref_id=output_dir,
                     details=f"exported={result.exported}; skipped={result.skipped}",
                 )
@@ -15315,7 +15335,9 @@ class App(QMainWindow):
                 QMessageBox.information(
                     self,
                     title,
-                    f"Exported {result.exported} tagged audio cop{'y' if result.exported == 1 else 'ies'} to:\n{output_dir}"
+                    f"Exported {result.exported} catalog audio cop{'y' if result.exported == 1 else 'ies'} to:\n{output_dir}"
+                    "\n\nThese copies preserve the current source format and automatically "
+                    "embed trustworthy catalog metadata when it is available."
                     f"\n\nSkipped: {result.skipped}"
                     + (
                         f"\n\nWarnings:\n- " + "\n- ".join(all_warnings[:12])
@@ -15326,36 +15348,42 @@ class App(QMainWindow):
 
             self._submit_background_bundle_task(
                 title=title,
-                description="Writing catalog metadata into exported audio copies...",
+                description=(
+                    "Copying selected catalog audio in its current source format and embedding "
+                    "catalog metadata when it is available..."
+                ),
                 task_fn=_worker,
                 kind="read",
-                unique_key="tags.export_audio",
+                unique_key="audio.export_catalog_copies",
                 cancellable=True,
                 on_success=_success,
                 on_cancelled=lambda: self.statusBar().showMessage(
-                    "Tagged audio export cancelled.", 5000
+                    "Catalog audio copy export cancelled.", 5000
                 ),
                 on_error=lambda failure: self._show_background_task_error(
                     title,
                     failure,
-                    user_message="Could not export tagged audio copies:",
+                    user_message="Could not export catalog audio copies:",
                 ),
             )
 
         self._submit_background_bundle_task(
             title=title,
-            description="Preparing the tagged audio export preview...",
+            description="Preparing the catalog audio copy export preview...",
             task_fn=_preview_worker,
             kind="read",
-            unique_key="tags.export_audio.preview",
+            unique_key="audio.export_catalog_copies.preview",
             cancellable=False,
             on_success=_preview_success,
             on_error=lambda failure: self._show_background_task_error(
                 title,
                 failure,
-                user_message="Could not prepare the tagged audio export preview:",
+                user_message="Could not prepare the catalog audio copy export preview:",
             ),
         )
+
+    def write_tags_to_exported_audio(self, track_ids: list[int] | None = None):
+        self.export_catalog_audio_copies(track_ids)
 
     def open_audio_authenticity_keys_dialog(self):
         if not AUTHENTICITY_FEATURE_AVAILABLE:
@@ -17351,12 +17379,6 @@ class App(QMainWindow):
                 act_import_tags.triggered.connect(lambda: self.import_tags_from_audio([track_id]))
                 audio_menu.addAction(act_import_tags)
 
-                act_write_tags = QAction("Export Tagged Audio Copies…", self)
-                act_write_tags.triggered.connect(
-                    lambda: self.write_tags_to_exported_audio(export_track_ids)
-                )
-                audio_menu.addAction(act_write_tags)
-
                 act_convert_selected_audio = QAction(
                     "Export Audio Derivatives…",
                     self,
@@ -17394,6 +17416,14 @@ class App(QMainWindow):
                     lambda: self.export_forensic_watermarked_audio(export_track_ids)
                 )
                 audio_menu.addAction(act_export_forensic)
+
+                audio_menu.addSeparator()
+
+                act_write_tags = QAction("Export Catalog Audio Copies…", self)
+                act_write_tags.triggered.connect(
+                    lambda: self.export_catalog_audio_copies(export_track_ids)
+                )
+                audio_menu.addAction(act_write_tags)
 
                 audio_menu.addSeparator()
 
@@ -18770,6 +18800,7 @@ class App(QMainWindow):
         *,
         mime: str,
         suggested_basename: str,
+        catalog_track_id: int | None = None,
         parent_widget=None,
         action_label: str,
         action_type: str,
@@ -18789,17 +18820,32 @@ class App(QMainWindow):
         if not dest_path:
             return
 
+        metadata_warning: str | None = None
+
         try:
+
+            def _mutation():
+                nonlocal metadata_warning
+                Path(dest_path).write_bytes(data)
+                if catalog_track_id is not None:
+                    metadata_warning = self._attempt_catalog_audio_export_metadata(
+                        dest_path,
+                        track_id=int(catalog_track_id),
+                    )
+
             self._run_file_history_action(
                 action_label=action_label.format(filename=Path(dest_path).name),
                 action_type=action_type,
                 target_path=dest_path,
-                mutation=lambda: Path(dest_path).write_bytes(data),
+                mutation=_mutation,
                 entity_type=entity_type,
                 entity_id=entity_id,
                 payload={"path": str(dest_path), **(payload or {})},
             )
-            QMessageBox.information(parent_widget or self, "Export", f"Saved:\n{dest_path}")
+            message = f"Saved:\n{dest_path}"
+            if metadata_warning:
+                message += f"\n\nMetadata embedding skipped: {metadata_warning}."
+            QMessageBox.information(parent_widget or self, "Export", message)
         except Exception as e:
             QMessageBox.critical(parent_widget or self, "Export failed", str(e))
 
@@ -18819,6 +18865,7 @@ class App(QMainWindow):
             data,
             mime=mime or "",
             suggested_basename=default_basename,
+            catalog_track_id=(track_id if media_key == "audio_file" else None),
             parent_widget=self,
             action_label=f"Export {media_key.replace('_', ' ').title()}: {{filename}}",
             action_type=f"file.export_{media_key}",
@@ -18944,6 +18991,7 @@ class App(QMainWindow):
         output_root = Path(output_dir)
         exported = 0
         skipped: list[str] = []
+        metadata_skipped: list[str] = []
         history_changed = False
         for track_id in selected_ids:
             try:
@@ -18998,6 +19046,13 @@ class App(QMainWindow):
                         logger=self.logger,
                     )
                     history_changed = True
+                if spec["kind"] == "standard" and str(spec["media_key"]) == "audio_file":
+                    metadata_warning = self._attempt_catalog_audio_export_metadata(
+                        dest_path,
+                        track_id=track_id,
+                    )
+                    if metadata_warning:
+                        metadata_skipped.append(f"{dest_path.name}: {metadata_warning}")
                 exported += 1
             except Exception as exc:
                 try:
@@ -19023,6 +19078,12 @@ class App(QMainWindow):
             message_lines.append("")
             message_lines.append(f"Skipped {len(skipped)} row{'s' if len(skipped) != 1 else ''}:")
             message_lines.extend(skipped[:10])
+        if metadata_skipped:
+            message_lines.append("")
+            message_lines.append(
+                f"Metadata skipped for {len(metadata_skipped)} export{'s' if len(metadata_skipped) != 1 else ''}:"
+            )
+            message_lines.extend(metadata_skipped[:10])
         QMessageBox.information(
             self,
             f"Export {spec['column_label']}",

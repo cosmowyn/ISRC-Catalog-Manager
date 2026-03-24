@@ -151,6 +151,50 @@ class AudioAuthenticityVerificationServiceTests(AuthenticityWorkflowTestCase):
             direct_manifest_id,
         )
 
+    def test_export_provenance_audio_writes_catalog_metadata_tags_to_exported_copy(self):
+        track_id, _master_audio, _direct_result = self.export_direct_authenticity_fixture()
+        derivative_audio = self.write_audio_fixture(
+            "lineage-tagged.mp3",
+            duration_seconds=30,
+            seed=40,
+            suffix=".mp3",
+        )
+        self.track_service.set_media_path(
+            track_id,
+            "audio_file",
+            derivative_audio,
+            storage_mode="database",
+        )
+        self.asset_service.create_asset(
+            AssetVersionPayload(
+                track_id=track_id,
+                asset_type="main_master",
+                source_path=str(
+                    self.write_audio_fixture(
+                        "lineage-tagged-master.wav",
+                        duration_seconds=30,
+                        seed=1,
+                        suffix=".wav",
+                    )
+                ),
+                approved_for_use=True,
+                primary_flag=True,
+            )
+        )
+
+        result = self.audio_service.export_provenance_audio(
+            output_dir=self.root / "exports" / "lineage_tagged",
+            track_ids=[track_id],
+            profile_name="Test Profile",
+        )
+
+        exported_tags = self.audio_tag_service.read_tags(result.written_audio_paths[0])
+
+        self.assertEqual(exported_tags.title, "Authenticity Track")
+        self.assertEqual(exported_tags.artist, "Cosmowyn")
+        self.assertEqual(exported_tags.album, "Authenticity Tests")
+        self.assertEqual(exported_tags.isrc, "NL-TST-26-00001")
+
     def test_verify_file_reports_verified_by_lineage_for_lossy_provenance_export(self):
         track_id, _master_audio, _direct_result = self.export_direct_authenticity_fixture()
         derivative_audio = self.write_audio_fixture(
@@ -313,6 +357,48 @@ class AudioAuthenticityVerificationServiceTests(AuthenticityWorkflowTestCase):
         self.assertEqual(exported_tags.upc, "4006381333931")
         self.assertEqual(exported_tags.comments, "Watermarked authenticity export")
         self.assertEqual(exported_tags.lyrics, "instrumental")
+
+    def test_export_watermarked_audio_blob_backed_source_writes_catalog_metadata_tags(self):
+        track_id, _audio_path = self.create_track_with_audio(
+            title="Blob Authentic Export",
+            artist_name="Cosmowyn",
+            album_title="Blob Authentic Album",
+            duration_seconds=30,
+            seed=41,
+            suffix=".wav",
+            comments="Blob-backed authenticity export",
+        )
+        self.release_service.create_release(
+            ReleasePayload(
+                title="Blob Authentic Album",
+                primary_artist="Cosmowyn",
+                album_artist="Cosmowyn",
+                release_date="2026-03-24",
+                placements=[
+                    ReleaseTrackPlacement(
+                        track_id=track_id,
+                        disc_number=1,
+                        track_number=6,
+                        sequence_number=1,
+                    )
+                ],
+            )
+        )
+        self.track_service.convert_media_storage_mode(track_id, "audio_file", "database")
+
+        result = self.audio_service.export_watermarked_audio(
+            output_dir=self.root / "exports" / "blob_authentic",
+            track_ids=[track_id],
+            profile_name="Test Profile",
+        )
+
+        exported_tags = self.audio_tag_service.read_tags(result.written_audio_paths[0])
+
+        self.assertEqual(exported_tags.title, "Blob Authentic Export")
+        self.assertEqual(exported_tags.album, "Blob Authentic Album")
+        self.assertEqual(exported_tags.album_artist, "Cosmowyn")
+        self.assertEqual(exported_tags.track_number, 6)
+        self.assertEqual(exported_tags.comments, "Blob-backed authenticity export")
 
 
 if __name__ == "__main__":

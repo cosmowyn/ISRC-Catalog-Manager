@@ -12,7 +12,7 @@ Use the repository [`README.md`](../README.md) for the product overview, positio
 
 ## Import & Exchange
 
-- [Import and Merge Workflows](import-and-merge-workflows.md) covers exchange import, saved per-format choices, explicit skip targets, JSON/package mapping behavior, XML import, bulk audio attachment, audio tag import/export, matching rules, merge behavior, and package round-tripping.
+- [Import and Merge Workflows](import-and-merge-workflows.md) covers exchange import, saved per-format choices, explicit skip targets, JSON/package mapping behavior, XML import, bulk audio attachment, audio tag import, automatic export-time metadata embedding, matching rules, merge behavior, and package round-tripping.
 - [GS1 Workflow Guide](gs1_workflow.md) covers workbook preparation and verified export from catalog data.
 
 ## Catalog & Repertoire Workflows

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from dataclasses import fields as dataclass_fields
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .mapping import catalog_metadata_to_tags
@@ -11,6 +13,10 @@ from .models import ArtworkPayload, AudioTagData
 if TYPE_CHECKING:
     from isrc_manager.releases import ReleaseService
     from isrc_manager.services.tracks import TrackService, TrackSnapshot
+    from .service import AudioTagService
+
+
+CATALOG_EXPORT_RELEASE_POLICY = "unambiguous"
 
 
 def _effective_artwork_payload_for_track(
@@ -131,3 +137,68 @@ def build_catalog_tag_data(
         placement_values=placement_values,
         artwork=artwork,
     )
+
+
+def build_catalog_export_tag_data(
+    track_id: int,
+    *,
+    track_service: TrackService,
+    release_service: ReleaseService | None = None,
+    include_artwork_bytes: bool = True,
+) -> AudioTagData:
+    """Build tag data for user-facing catalog-backed audio exports.
+
+    Export workflows should only add release context when it is unambiguous enough
+    to keep the catalog as the trustworthy source of truth.
+    """
+
+    return build_catalog_tag_data(
+        track_id,
+        track_service=track_service,
+        release_service=release_service,
+        release_policy=CATALOG_EXPORT_RELEASE_POLICY,
+        include_artwork_bytes=include_artwork_bytes,
+    )
+
+
+def has_exportable_catalog_tag_data(tag_data: AudioTagData) -> bool:
+    for field in dataclass_fields(AudioTagData):
+        if field.name in {"raw_fields", "warnings"}:
+            continue
+        value = getattr(tag_data, field.name)
+        if value not in (None, "", [], {}, ()):
+            return True
+    return False
+
+
+def write_catalog_export_tags(
+    destination_path: str | Path,
+    *,
+    track_id: int,
+    track_service: TrackService,
+    release_service: ReleaseService | None = None,
+    tag_service: AudioTagService,
+    include_artwork_bytes: bool = True,
+) -> tuple[bool, str | None]:
+    """Best-effort metadata embedding for catalog-backed audio exports.
+
+    Exports should succeed even when trustworthy catalog metadata cannot be
+    resolved or a target container cannot accept the tag payload.
+    """
+
+    try:
+        tag_data = build_catalog_export_tag_data(
+            track_id,
+            track_service=track_service,
+            release_service=release_service,
+            include_artwork_bytes=include_artwork_bytes,
+        )
+    except Exception as exc:
+        return False, f"catalog metadata was unavailable ({exc})"
+    if not has_exportable_catalog_tag_data(tag_data):
+        return False, "catalog metadata was empty, so no embedded tags were written"
+    try:
+        tag_service.write_tags(Path(destination_path), tag_data)
+    except Exception as exc:
+        return False, f"embedded metadata could not be written ({exc})"
+    return True, None

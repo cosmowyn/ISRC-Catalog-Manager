@@ -118,7 +118,7 @@ The storage layer preserves the file bytes plus the record metadata already trac
 - size
 - checksum where applicable
 
-Format-aware tag writing remains a separate workflow used for exported tagged audio copies. Storage conversion itself is focused on preserving bytes and catalog metadata rather than inventing format-specific metadata rewrites during every mode change.
+Format-aware tag writing happens when catalog-backed audio is exported, not during storage conversion itself. Storage conversion stays focused on preserving bytes and catalog metadata rather than inventing format-specific metadata rewrites during every mode change.
 
 ## Exchange And Portability
 

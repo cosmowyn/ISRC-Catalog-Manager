@@ -300,6 +300,7 @@ class AudioConversionService:
         source_path: str | Path,
         destination_path: str | Path,
         target_id: str,
+        metadata_behavior: str = "inherit",
     ) -> AudioConversionResult:
         executable = self.require_available()
         source = Path(source_path)
@@ -308,6 +309,9 @@ class AudioConversionService:
             raise FileNotFoundError(source)
         destination.parent.mkdir(parents=True, exist_ok=True)
         args, codec_name = self._transcode_args(target_id)
+        clean_metadata_behavior = str(metadata_behavior or "inherit").strip().lower()
+        if clean_metadata_behavior not in {"inherit", "strip"}:
+            raise ValueError(f"Unsupported metadata behavior: {metadata_behavior}")
         command = [
             str(executable),
             "-y",
@@ -316,8 +320,14 @@ class AudioConversionService:
             "-i",
             str(source),
             *args,
-            str(destination),
         ]
+        if clean_metadata_behavior == "strip":
+            command.extend(["-map_metadata", "-1", "-vn", "-sn", "-dn"])
+        command.extend(
+            [
+                str(destination),
+            ]
+        )
         subprocess.run(command, check=True, capture_output=True, text=True)
         if not destination.exists():
             raise RuntimeError(f"ffmpeg did not create {destination}")

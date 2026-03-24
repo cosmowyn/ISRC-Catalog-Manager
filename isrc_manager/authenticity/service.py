@@ -12,7 +12,7 @@ from isrc_manager.file_storage import guess_mime_type, sanitize_export_basename
 from isrc_manager.tags import (
     ArtworkPayload,
     AudioTagService,
-    build_catalog_tag_data,
+    write_catalog_export_tags,
 )
 
 from .crypto import (
@@ -1058,15 +1058,6 @@ class AudioAuthenticityService:
         }
         return release_values, placement_values, artwork
 
-    def _build_export_tag_data(self, track_id: int):
-        return build_catalog_tag_data(
-            track_id,
-            track_service=self.manifest_service.track_service,
-            release_service=self.manifest_service.release_service,
-            release_policy="unambiguous",
-            include_artwork_bytes=True,
-        )
-
     def watermark_catalog_derivative(
         self,
         *,
@@ -1089,16 +1080,12 @@ class AudioAuthenticityService:
         _key_record, _private_key, watermark_key = self.key_service.signing_material(
             prepared.key_id
         )
-        tag_data = self._build_export_tag_data(track_id)
         embed_metrics = self.watermark_service.embed_to_path(
             source_path=source_path,
             destination_path=destination_path,
             watermark_key=watermark_key,
             token=prepared.watermark_token,
         )
-        # Rebuild tags from catalog metadata so the final output does not depend on
-        # round-tripping whatever the intermediate container retained.
-        self.tag_service.write_tags(destination_path, tag_data)
         return self.manifest_service.save_manifest(
             prepared,
             embed_settings={**prepared.embed_settings, **embed_metrics},
@@ -1445,7 +1432,6 @@ class AudioAuthenticityService:
                 prepared.reference.suffix
             )
             try:
-                tag_data = self._build_export_tag_data(item.track_id)
                 embed_metrics = self.watermark_service.embed_to_path(
                     source_path=prepared.reference.source_path,
                     source_bytes=prepared.reference.source_bytes,
@@ -1453,7 +1439,18 @@ class AudioAuthenticityService:
                     watermark_key=watermark_key,
                     token=prepared.watermark_token,
                 )
-                self.tag_service.write_tags(destination, tag_data)
+                _metadata_embedded, metadata_warning = write_catalog_export_tags(
+                    destination,
+                    track_id=item.track_id,
+                    track_service=self.manifest_service.track_service,
+                    release_service=self.manifest_service.release_service,
+                    tag_service=self.tag_service,
+                    include_artwork_bytes=True,
+                )
+                if metadata_warning:
+                    warnings.append(
+                        f"{destination.name}: metadata embedding skipped; {metadata_warning}."
+                    )
                 stored_manifest = self.manifest_service.save_manifest(
                     prepared,
                     embed_settings={**prepared.embed_settings, **embed_metrics},
@@ -1543,8 +1540,18 @@ class AudioAuthenticityService:
                 else:
                     source_bytes = bytes(source["source_bytes"] or b"")
                 destination.write_bytes(source_bytes)
-                tag_data = self._build_export_tag_data(item.track_id)
-                self.tag_service.write_tags(destination, tag_data)
+                _metadata_embedded, metadata_warning = write_catalog_export_tags(
+                    destination,
+                    track_id=item.track_id,
+                    track_service=self.manifest_service.track_service,
+                    release_service=self.manifest_service.release_service,
+                    tag_service=self.tag_service,
+                    include_artwork_bytes=True,
+                )
+                if metadata_warning:
+                    warnings.append(
+                        f"{destination.name}: metadata embedding skipped; {metadata_warning}."
+                    )
                 derivative_payload = self._build_provenance_payload(
                     track_id=item.track_id,
                     derivative_path=destination,

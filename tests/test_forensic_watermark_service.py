@@ -211,6 +211,54 @@ class ForensicWatermarkServiceTests(AuthenticityWorkflowTestCase):
             2,
         )
 
+    def test_blob_backed_forensic_export_writes_catalog_metadata_tags(self):
+        self._require_mp3_forensic_support()
+        track_id, _ = self.create_track_with_audio(
+            title="Blob Forensic Source",
+            artist_name="Cosmowyn",
+            album_title="Blob Forensic Album",
+            duration_seconds=30,
+            seed=42,
+            suffix=".wav",
+            publisher="Northern Current",
+        )
+        self.release_service.create_release(
+            ReleasePayload(
+                title="Blob Forensic Album",
+                primary_artist="Cosmowyn",
+                album_artist="Cosmowyn",
+                release_date="2026-03-24",
+                placements=[
+                    ReleaseTrackPlacement(
+                        track_id=track_id,
+                        disc_number=1,
+                        track_number=7,
+                        sequence_number=1,
+                    )
+                ],
+            )
+        )
+        self.track_service.convert_media_storage_mode(track_id, "audio_file", "database")
+
+        result = self.forensic_service.export(
+            ForensicExportRequest(
+                track_ids=[track_id],
+                output_dir=str(self.root / "forensic_blob_exports"),
+                output_format="mp3",
+                recipient_label="Blob Reviewer",
+                share_label="Blob Batch",
+                profile_name="Test Profile",
+            )
+        )
+
+        exported_tags = self.audio_tag_service.read_tags(result.written_paths[0])
+
+        self.assertEqual(exported_tags.title, "Blob Forensic Source")
+        self.assertEqual(exported_tags.album, "Blob Forensic Album")
+        self.assertEqual(exported_tags.album_artist, "Cosmowyn")
+        self.assertEqual(exported_tags.track_number, 7)
+        self.assertEqual(exported_tags.publisher, "Northern Current")
+
     def test_inspect_file_resolves_known_exported_copy(self):
         self._require_mp3_forensic_support()
         track_id, _ = self.create_track_with_audio(

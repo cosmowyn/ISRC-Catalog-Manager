@@ -2820,7 +2820,7 @@ class AppShellTestCase(unittest.TestCase):
         finally:
             dialog.close()
 
-    def case_write_tags_to_exported_audio_exports_managed_and_database_wav_sources(self):
+    def case_export_catalog_audio_copies_exports_managed_and_database_wav_sources(self):
         managed_track = self._create_track(
             index=195,
             title="Managed Export Track",
@@ -2858,7 +2858,7 @@ class AppShellTestCase(unittest.TestCase):
             storage_mode=app_module.STORAGE_MODE_DATABASE,
         )
 
-        export_dir = self.root / "tagged-audio-exports"
+        export_dir = self.root / "catalog-audio-exports"
         export_dir.mkdir()
         managed_snapshot = self.window.track_service.fetch_track_snapshot(managed_track)
         database_snapshot = self.window.track_service.fetch_track_snapshot(database_track)
@@ -2892,7 +2892,7 @@ class AppShellTestCase(unittest.TestCase):
             ),
             mock.patch.object(app_module.QMessageBox, "information"),
         ):
-            self.window.write_tags_to_exported_audio([managed_track, database_track])
+            self.window.export_catalog_audio_copies([managed_track, database_track])
 
         exported_paths = sorted(export_dir.glob("*.wav"))
         self.assertEqual(len(exported_paths), 2)
@@ -2908,8 +2908,8 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(
             task_descriptions,
             [
-                "Preparing the tagged audio export preview...",
-                "Writing catalog metadata into exported audio copies...",
+                "Preparing the catalog audio copy export preview...",
+                "Copying selected catalog audio in its current source format and embedding catalog metadata when it is available...",
             ],
         )
         self.assertEqual(exported_tags["Managed Export Track"].isrc, managed_snapshot.isrc)
@@ -2924,6 +2924,35 @@ class AppShellTestCase(unittest.TestCase):
             exported_tags["Database Export Track"].artwork.data,
             database_cover.read_bytes(),
         )
+
+    def case_export_standard_audio_file_embeds_catalog_metadata_on_export(self):
+        track_id = self._create_track(
+            index=197,
+            title="Direct Audio Export Track",
+            album_title="Direct Export Album",
+        )
+        audio_path = self._create_wav_file("direct-export.wav")
+        self.window.track_service.set_media_path(track_id, "audio_file", audio_path)
+        export_path = self.root / "direct-audio-export.wav"
+
+        with (
+            mock.patch.object(
+                app_module.QFileDialog,
+                "getSaveFileName",
+                return_value=(str(export_path), "All files (*)"),
+            ),
+            mock.patch.object(app_module.QMessageBox, "information"),
+        ):
+            self.window._export_standard_media_for_track(track_id, "audio_file")
+
+        exported_tags = self.window.audio_tag_service.read_tags(export_path)
+        snapshot = self.window.track_service.fetch_track_snapshot(track_id)
+        self.assertIsNotNone(snapshot)
+        assert snapshot is not None
+        self.assertEqual(exported_tags.title, "Direct Audio Export Track")
+        self.assertEqual(exported_tags.artist, snapshot.artist_name)
+        self.assertEqual(exported_tags.album, "Direct Export Album")
+        self.assertEqual(exported_tags.isrc, snapshot.isrc)
 
     def case_album_entry_track_sections_use_internal_tabs(self):
         dialog = app_module.AlbumEntryDialog(self.window)
@@ -3026,6 +3055,10 @@ class AppShellTestCase(unittest.TestCase):
 
     def case_authenticity_actions_are_present_in_catalog_and_settings_menus(self):
         self.assertEqual(
+            self.window.write_tags_to_exported_audio_action.text(),
+            "Export Catalog Audio Copies…",
+        )
+        self.assertEqual(
             self.window.convert_selected_audio_action.text(),
             "Export Audio Derivatives…",
         )
@@ -3056,6 +3089,14 @@ class AppShellTestCase(unittest.TestCase):
         self.assertIn(
             "Recipient-specific lossy delivery export",
             self.window.export_forensic_watermarked_audio_action.toolTip(),
+        )
+        self.assertIn(
+            "automatic catalog metadata embedding",
+            self.window.write_tags_to_exported_audio_action.toolTip(),
+        )
+        self.assertIn(
+            "Source metadata is stripped".lower(),
+            self.window.convert_external_audio_files_action.toolTip().lower(),
         )
         self.assertEqual(
             self.window.inspect_forensic_watermark_action.text(),
@@ -3130,17 +3171,17 @@ class AppShellTestCase(unittest.TestCase):
 
         self.assertNotIn("Import Metadata from Audio Files…", top_level_texts)
         self.assertNotIn("Export Audio Derivatives…", top_level_texts)
-        self.assertNotIn("Export Tagged Audio Copies…", top_level_texts)
+        self.assertNotIn("Export Catalog Audio Copies…", top_level_texts)
         self.assertNotIn("Convert External Audio Files…", top_level_texts)
         self.assertIn("Add License to this Track…", license_texts)
         self.assertIn("View Licenses for this Track…", license_texts)
 
         self.assertIn("Import Metadata from Audio Files…", audio_texts)
-        self.assertIn("Export Tagged Audio Copies…", audio_texts)
         self.assertIn("Export Audio Derivatives…", audio_texts)
         self.assertIn("Export Authentic Masters…", audio_texts)
         self.assertIn("Export Provenance Copies…", audio_texts)
         self.assertIn("Export Forensic Watermarked Audio…", audio_texts)
+        self.assertIn("Export Catalog Audio Copies…", audio_texts)
         self.assertIn("Inspect Forensic Watermark…", audio_texts)
         self.assertIn("Verify Audio Authenticity…", audio_texts)
         self.assertNotIn("Convert External Audio Files…", audio_texts)

@@ -204,7 +204,7 @@ That makes the app useful for bringing in structured exports from labels, catalo
 The app also includes:
 
 - a separate XML import path for supported XML catalog files
-- audio tag import/export for reading embedded tags and writing metadata to exported copies
+- audio tag import plus catalog-backed audio exports that embed trustworthy catalog metadata automatically
 - a separate repertoire exchange workflow for works, parties, contracts, rights, assets, and their relationships
 
 For existing catalog rows that already need their audio attached, the separate `Catalog > Bulk Attach Audio Files…` workflow can inspect filenames and embedded tags, suggest track matches, let you reassign or skip files, choose the storage mode, and optionally apply one artist name across the matched set before committing one history-wrapped batch.
@@ -271,7 +271,7 @@ Some of the strongest workflow features are easy to underestimate from a quick s
 - `Catalog > Bulk Attach Audio Files…` can match filenames and tags to existing tracks, attach them in one reviewed batch, and optionally update matched artist names
 - global search and relationship browsing give the richer catalog model a usable navigation layer
 - package exchange can carry managed files and restore their recorded storage mode on import
-- audio tag workflows can preview conflicts before writing metadata back to exported copies
+- audio tag import workflows can preview conflicts before writing metadata into the catalog, while catalog-backed audio exports embed metadata automatically and plain external conversion stays metadata-free
 - legacy license migration can move older PDF-based license records into the richer contract/document model with snapshot protection
 - history settings now include retention and safety presets, storage budgets, and cleanup prompts that keep manual restore points protected by default
 - theme tooling goes beyond colors into starter themes, optional hint text, a live preview pane, app-wide preview, BLOB badge icons, selector discovery, and QSS autocomplete

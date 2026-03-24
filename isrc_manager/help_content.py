@@ -145,11 +145,11 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         content_html="""
         <p>Long-running operations no longer have to compete with the interface. The app runs heavier workflows outside the UI thread so the workspace stays responsive while real work is happening.</p>
         <ul>
-          <li><strong>Central task runner</strong>: imports, exports, ZIP packaging, snapshots, restores, quality scans, tagged-audio export, backup, and integrity checks are dispatched through one shared Qt background-task manager.</li>
+          <li><strong>Central task runner</strong>: imports, exports, ZIP packaging, snapshots, restores, quality scans, catalog-audio copy export, backup, and integrity checks are dispatched through one shared Qt background-task manager.</li>
           <li><strong>Main-thread UI updates only</strong>: worker threads report back through Qt signals, and dialogs, tables, messages, and status text are updated on the main thread only.</li>
           <li><strong>Per-thread SQLite connections</strong>: background jobs never reuse the main window's SQLite connection. Each worker opens and closes its own connection safely.</li>
           <li><strong>SQLite concurrency</strong>: the app enables WAL mode, foreign-key enforcement, and a busy timeout. Write-heavy jobs are serialized per profile so concurrent background writers do not fight each other.</li>
-          <li><strong>Progress and cancellation</strong>: longer jobs show a progress dialog or in-place status text where practical. Some file-based jobs, such as tagged-audio export, can be cancelled safely.</li>
+          <li><strong>Progress and cancellation</strong>: longer jobs show a progress dialog or in-place status text where practical. Some file-based jobs, such as catalog-audio copy export, can be cancelled safely.</li>
           <li><strong>Safe shutdown</strong>: the app blocks closing while background jobs are still running so restores, imports, and other file/database writes cannot be interrupted mid-operation.</li>
         </ul>
         <p>If a background task fails, the app reports it clearly, logs the details, and rolls database work back cleanly. The result is a system that feels responsive without becoming fragile.</p>
@@ -289,7 +289,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
     HelpChapter(
         chapter_id="audio-tags",
         title="Audio Tags",
-        summary="Import embedded tags from supported audio files and write catalog metadata back to exported copies.",
+        summary="Import embedded tags from supported audio files and understand how catalog-backed audio exports embed metadata automatically.",
         keywords=(
             "audio tags",
             "id3",
@@ -303,15 +303,17 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "write tags",
         ),
         content_html="""
-        <p>The app can read and write embedded audio metadata so the catalog and exported audio files stay aligned.</p>
+        <p>The app can read embedded audio metadata into the catalog, and catalog-backed audio exports automatically attempt to embed trustworthy catalog metadata into the exported copy.</p>
         <ul>
           <li><strong>Supported read/write families</strong>: MP3/ID3, FLAC/Vorbis comments, OGG Vorbis/Opus comments, M4A/MP4 atoms, and WAV/AIFF where ID3-style metadata is available.</li>
           <li><strong>Mapped fields</strong>: title, artist, album, album artist, track number, disc number, genre, composer, publisher/label, release date, ISRC, UPC/EAN, comments, lyrics, and artwork.</li>
           <li><strong>Import Metadata from Audio Files…</strong>: open it from the Catalog menu or the table context menu to preview extracted tags and conflicts before catalog values are changed.</li>
           <li><strong>Conflict policy</strong>: choose whether file tags should fill blanks only, override database values, or defer to the existing catalog data.</li>
-          <li><strong>Export Tagged Audio Copies…</strong>: exports tagged audio copies to a folder without touching the managed source files in place.</li>
+          <li><strong>Export Catalog Audio Copies…</strong>: exports original-format catalog audio copies to a folder and embeds catalog metadata automatically without touching the stored source audio.</li>
+          <li><strong>Other catalog-backed audio exports</strong>: <strong>Export Audio Derivatives…</strong>, <strong>Export Authentic Masters…</strong>, <strong>Export Provenance Copies…</strong>, and <strong>Export Forensic Watermarked Audio…</strong> also embed catalog metadata automatically when trustworthy catalog values are available.</li>
+          <li><strong>Plain external conversion</strong>: <strong>Convert External Audio Files…</strong> strips inherited source metadata and does not invent catalog metadata, watermarking, or derivative registration.</li>
         </ul>
-        <p>The app preserves the original audio data when writing tags to exported copies. Unsupported or malformed tags are skipped with warnings instead of crashing the workflow, which makes the feature useful for preparing tagged deliverables without risking the original master file. When the track rows already exist and the job is to attach local files in bulk, use <strong>Catalog &gt; Bulk Attach Audio Files…</strong> instead.</p>
+        <p>The app preserves the original stored audio when exporting copies. If catalog metadata is unavailable, ambiguous, or cannot be written safely into the target container, the export still succeeds and the metadata step is skipped with warnings instead of crashing the workflow. When the track rows already exist and the job is to attach local files in bulk, use <strong>Catalog &gt; Bulk Attach Audio Files…</strong> instead.</p>
         """,
     ),
     HelpChapter(
@@ -426,7 +428,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Legacy compatibility</strong>: older records remain readable because the app can infer storage mode from existing BLOB or managed-path data when a legacy row has no explicit mode yet.</li>
           <li><strong>Portable packages</strong>: ZIP package export/import materializes both database-backed and managed-file-backed records into portable files and preserves the recorded storage mode on import.</li>
         </ul>
-        <p>The storage layer preserves the file bytes plus catalog metadata such as filename, MIME type, size, and checksums where supported. Format-aware tag writing remains a separate export workflow rather than something the app silently rewrites during every storage conversion.</p>
+        <p>The storage layer preserves the file bytes plus catalog metadata such as filename, MIME type, size, and checksums where supported. Format-aware tag writing happens during catalog-backed audio export, not during storage conversion itself, so changing storage mode never silently rewrites the managed source file.</p>
         """,
     ),
     HelpChapter(
@@ -481,7 +483,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "custom::",
         ),
         content_html="""
-        <p>The app has three separate ingest surfaces: exchange import for structured rows and packages, XML import for supported XML shapes, and audio-tag import/export for embedded file metadata. They overlap in the fields they can touch, but they are not the same workflow.</p>
+        <p>The app has three separate ingest surfaces: exchange import for structured rows and packages, XML import for supported XML shapes, and audio-tag import for embedded file metadata. They overlap in the fields they can touch, but they are not the same workflow.</p>
         <ul>
           <li><strong>Exchange import</strong>: supports <code>CSV</code>, <code>XLSX</code>, <code>JSON</code>, and <code>ZIP package</code>. CSV import can auto-detect comma, semicolon, tab, or pipe delimiters, and the exchange setup surface can map or skip supported fields across the structured import formats.</li>
           <li><strong>Mapping presets</strong>: reusable CSV/XLSX mappings can be saved and loaded again for recurring imports.</li>
@@ -491,7 +493,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Release upsert and package restore</strong>: exchange import can update or create linked releases from supplied release fields, while ZIP package import restores packaged files and their recorded storage mode.</li>
           <li><strong>XML import</strong>: accepts supported catalog XML shapes, performs a stronger inspection and dry-run style preflight, reports duplicate ISRCs and custom-field conflicts, can create missing custom fields when allowed, and then imports valid new rows. XML import is insert-oriented rather than merge-oriented.</li>
           <li><strong>Bulk audio attach</strong>: <strong>Catalog &gt; Bulk Attach Audio Files…</strong> is the better fit when track rows already exist and you need to match local files onto them in one reviewed batch.</li>
-          <li><strong>Audio tags</strong>: read embedded tags from supported audio files, preview conflicts before writing to the catalog, and write tags only to exported copies rather than rewriting managed source files in place.</li>
+          <li><strong>Audio tags</strong>: read embedded tags from supported audio files and preview conflicts before writing to the catalog. Catalog-backed audio export workflows embed metadata automatically, while the plain external conversion workflow stays metadata-free.</li>
         </ul>
         <p>This workflow is useful for structured exports from labels, catalog administrators, collection societies, and PRO-style sources such as BUMA, STEMRA, SENA, and similar organizations, provided the data can be exported into a supported format. That support is format-based and mapping-based, not a direct third-party integration.</p>
         <p>Keep the current limits in mind: blob custom fields are not tabular import targets, JSON and ZIP package imports do not use CSV delimiter controls because their source structure is already defined, standard exchange <code>dry_run</code> is a conservative preflight rather than a full validation engine, and matched release rows can be updated from imported release data.</p>

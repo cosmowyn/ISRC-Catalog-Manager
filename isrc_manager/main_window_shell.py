@@ -421,8 +421,14 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     )
     audio_ingest_menu.addAction(app.import_tags_action)
     app.write_tags_to_exported_audio_action = app._create_action(
-        "Export Tagged Audio Copies…",
-        slot=app.write_tags_to_exported_audio,
+        "Export Catalog Audio Copies…",
+        slot=app.export_catalog_audio_copies,
+    )
+    app.write_tags_to_exported_audio_action.setStatusTip(
+        "Export original-format catalog audio copies with automatic catalog metadata embedding. No transcode, watermarking, or derivative registration."
+    )
+    app.write_tags_to_exported_audio_action.setToolTip(
+        app.write_tags_to_exported_audio_action.statusTip()
     )
     app.convert_selected_audio_action = app._create_action(
         "Export Audio Derivatives…",
@@ -432,6 +438,12 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     app.convert_external_audio_files_action = app._create_action(
         "Convert External Audio Files…",
         slot=app.convert_external_audio_files,
+    )
+    app.convert_external_audio_files_action.setStatusTip(
+        "Plain external file conversion only. Source metadata is stripped, and no catalog metadata, watermarking, or derivative registration is applied."
+    )
+    app.convert_external_audio_files_action.setToolTip(
+        app.convert_external_audio_files_action.statusTip()
     )
     audio_export_menu.addAction(app.convert_external_audio_files_action)
     audio_export_menu.addSeparator()

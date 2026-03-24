@@ -6,7 +6,7 @@ The product has three distinct ingest paths:
 
 - exchange import for structured catalog rows
 - XML import for supported XML exchange files
-- audio tag import/export for embedded metadata round-tripping
+- audio tag import for embedded metadata round-tripping, plus export-time metadata embedding on catalog-backed audio workflows
 
 The workflows overlap in the data they can touch, but they are not the same feature. Each path has different match rules, write behavior, and limits.
 
@@ -232,9 +232,9 @@ Rows with invalid or missing essential values are skipped during parsing. Duplic
 - XML import does not expose per-row manual assignment
 - custom field type conflicts must be resolved before import
 
-## Audio Tag Import / Export
+## Audio Tag Import And Export Metadata Behavior
 
-Audio tag workflows let the app read and write embedded metadata in supported audio files.
+Audio tag workflows let the app read embedded metadata from supported audio files, while catalog-backed audio export workflows embed trustworthy catalog metadata automatically when they create exported copies.
 
 ### Supported Formats
 
@@ -252,13 +252,14 @@ The current audio tag service handles common formats including:
 
 - The app can preview tag data before writing
 - The app applies a conflict policy when catalog data and file tags differ
-- Export writes tags to exported copies rather than rewriting the source file in place
+- Catalog-backed audio exports write metadata to exported copies rather than rewriting the source file in place
+- Plain external conversion strips inherited source metadata and does not invent catalog metadata
 
 That distinction matters if you want to prepare tagged deliverables without risking the original audio file.
 
 ### What This Enables
 
-Audio tag workflows let you keep catalog metadata and file metadata aligned when you are preparing deliverables, checking packaged audio, or exporting tagged copies for downstream use.
+Audio tag workflows let you keep catalog metadata and file metadata aligned when you are preparing deliverables, checking packaged audio, or exporting catalog-backed audio copies for downstream use.
 
 ## Explicit Limits
 

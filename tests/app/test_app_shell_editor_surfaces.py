@@ -18,8 +18,11 @@ class AppShellEditorSurfaceTests(AppShellTestCase):
     test_track_editor_open_master_action_opens_owner_editor = (
         AppShellTestCase.case_track_editor_open_master_action_opens_owner_editor
     )
-    test_write_tags_to_exported_audio_exports_managed_and_database_wav_sources = (
-        AppShellTestCase.case_write_tags_to_exported_audio_exports_managed_and_database_wav_sources
+    test_export_catalog_audio_copies_exports_managed_and_database_wav_sources = (
+        AppShellTestCase.case_export_catalog_audio_copies_exports_managed_and_database_wav_sources
+    )
+    test_export_standard_audio_file_embeds_catalog_metadata_on_export = (
+        AppShellTestCase.case_export_standard_audio_file_embeds_catalog_metadata_on_export
     )
     test_album_entry_track_sections_use_internal_tabs = (
         AppShellTestCase.case_album_entry_track_sections_use_internal_tabs
