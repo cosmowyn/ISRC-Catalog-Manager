@@ -9,7 +9,7 @@ import tempfile
 import uuid
 import zipfile
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -167,7 +167,7 @@ class _ManagedItemState:
 
 
 def _batch_public_id() -> str:
-    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return f"AEX-{timestamp}-{uuid.uuid4().hex[:8]}"
 
 
