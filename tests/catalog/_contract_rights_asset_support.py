@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from datetime import date, timedelta
 from pathlib import Path
+from unittest import mock
 
 from isrc_manager.assets import AssetService, AssetVersionPayload
 from isrc_manager.contracts import (
@@ -558,6 +559,52 @@ class ContractRightsAssetServiceTestCase(unittest.TestCase):
                 self.assertEqual(written, export_path)
                 self.assertTrue(export_path.exists())
                 self.assertEqual(export_path.read_bytes(), preview_path.read_bytes())
+        finally:
+            editor.close()
+
+    def case_contract_document_editor_export_button_ignores_clicked_bool_payload(self):
+        if ContractDocumentEditor is None:
+            self.skipTest("Contract document editor unavailable")
+        require_qapplication()
+
+        document_path = self.data_root / "button-export.pdf"
+        document_path.write_bytes(b"%PDF-1.4\n%button export\n")
+        contract_id = self.contract_service.create_contract(
+            ContractPayload(
+                title="Button Export Contract",
+                contract_type="license",
+                documents=[
+                    ContractDocumentPayload(
+                        title="Button Export",
+                        document_type="signed_agreement",
+                        source_path=str(document_path),
+                        storage_mode="managed_file",
+                    )
+                ],
+            )
+        )
+
+        detail = self.contract_service.fetch_contract_detail(contract_id)
+        self.assertIsNotNone(detail)
+        assert detail is not None
+        editor = ContractDocumentEditor(contract_service=self.contract_service)
+        try:
+            editor.load_documents(detail.documents)
+            editor.documents_table.selectRow(0)
+            editor._load_document_into_form(0)
+            export_path = self.data_root / "button-exported.pdf"
+            with (
+                mock.patch(
+                    "isrc_manager.contracts.dialogs.QFileDialog.getSaveFileName",
+                    return_value=(str(export_path), ""),
+                ),
+                mock.patch("isrc_manager.contracts.dialogs.QMessageBox.critical") as critical_mock,
+            ):
+                editor.export_button.click()
+
+            critical_mock.assert_not_called()
+            self.assertTrue(export_path.exists())
+            self.assertEqual(export_path.read_bytes(), document_path.read_bytes())
         finally:
             editor.close()
 

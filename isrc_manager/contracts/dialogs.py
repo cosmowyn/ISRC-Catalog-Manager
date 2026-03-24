@@ -1583,6 +1583,8 @@ class ContractDocumentEditor(QWidget):
         return preview_path
 
     def _export_selected_document(self, path: str | Path | None = None) -> Path | None:
+        if isinstance(path, bool):
+            path = None
         current = self._current_document()
         if current is None:
             QMessageBox.information(self, "Export Document", "Select a document first.")

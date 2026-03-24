@@ -8,6 +8,9 @@ class ContractDialogTests(ContractRightsAssetServiceTestCase):
     test_contract_document_editor_open_and_export_helpers = (
         ContractRightsAssetServiceTestCase.case_contract_document_editor_open_and_export_helpers
     )
+    test_contract_document_editor_export_button_ignores_clicked_bool_payload = (
+        ContractRightsAssetServiceTestCase.case_contract_document_editor_export_button_ignores_clicked_bool_payload
+    )
     test_contract_editor_selector_widgets_round_trip_known_reference_ids = (
         ContractRightsAssetServiceTestCase.case_contract_editor_selector_widgets_round_trip_known_reference_ids
     )
