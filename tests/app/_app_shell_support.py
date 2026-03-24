@@ -44,6 +44,11 @@ def _no_catalog_background_refresh(self, *args, **kwargs):
     return None
 
 
+def _fast_test_apply_theme(self, raw_values=None):
+    del self, raw_values
+    return None
+
+
 class _DeferredMigrationMessageBox:
     Warning = object()
     Information = object()
@@ -166,6 +171,7 @@ class AppShellTestCase(unittest.TestCase):
                 "_refresh_catalog_ui_in_background",
                 _no_catalog_background_refresh,
             ),
+            mock.patch.object(app_module.App, "_apply_theme", _fast_test_apply_theme),
         ]
         for patcher in self._patchers:
             patcher.start()
