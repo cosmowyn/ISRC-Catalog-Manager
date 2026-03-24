@@ -94,6 +94,51 @@ class ManagedDerivativeExportResult:
     zip_path: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class DerivativeBatchRecord:
+    batch_id: str
+    created_at: str
+    completed_at: str | None
+    workflow_kind: str
+    derivative_kind: str
+    authenticity_basis: str
+    output_format: str
+    requested_count: int
+    exported_count: int
+    skipped_count: int
+    status: str
+    package_mode: str
+    zip_filename: str | None
+    profile_name: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class DerivativeLedgerRecord:
+    export_id: str
+    batch_id: str
+    track_id: int | None
+    track_title: str
+    output_filename: str
+    output_format: str
+    derivative_kind: str
+    authenticity_basis: str
+    watermark_applied: bool
+    metadata_embedded: bool
+    output_size_bytes: int
+    output_sha256: str
+    status: str
+    source_storage_mode: str | None
+    source_lineage_ref: str
+    derivative_manifest_id: str | None
+    batch_created_at: str
+    batch_completed_at: str | None
+    package_mode: str
+    zip_filename: str | None
+    managed_file_path: str | None
+    sidecar_path: str | None
+    package_member_path: str | None
+
+
 @dataclass(slots=True)
 class ExternalAudioConversionRequest:
     input_paths: list[str]
@@ -257,6 +302,179 @@ class DerivativeLedgerService:
         self.conn.execute("DELETE FROM TrackAudioDerivatives WHERE batch_id=?", (str(batch_id),))
         self.conn.execute("DELETE FROM DerivativeExportBatches WHERE batch_id=?", (str(batch_id),))
 
+    def list_batches(
+        self,
+        *,
+        search_text: str = "",
+        limit: int = 250,
+    ) -> list[DerivativeBatchRecord]:
+        params: list[object] = []
+        where_clause = ""
+        search = str(search_text or "").strip().lower()
+        if search:
+            like_value = f"%{search}%"
+            where_clause = """
+                WHERE (
+                    lower(b.batch_id) LIKE ?
+                    OR lower(coalesce(b.output_format, '')) LIKE ?
+                    OR lower(coalesce(b.derivative_kind, '')) LIKE ?
+                    OR lower(coalesce(b.authenticity_basis, '')) LIKE ?
+                    OR lower(coalesce(b.profile_name, '')) LIKE ?
+                    OR EXISTS (
+                        SELECT 1
+                        FROM TrackAudioDerivatives d
+                        LEFT JOIN Tracks t ON t.id = d.track_id
+                        WHERE d.batch_id = b.batch_id
+                          AND (
+                              lower(coalesce(d.output_filename, '')) LIKE ?
+                              OR lower(coalesce(d.output_sha256, '')) LIKE ?
+                              OR lower(coalesce(t.track_title, '')) LIKE ?
+                          )
+                    )
+                )
+            """
+            params.extend([like_value] * 8)
+        params.append(max(1, int(limit or 250)))
+        rows = self.conn.execute(
+            f"""
+            SELECT
+                b.batch_id,
+                b.created_at,
+                b.completed_at,
+                b.workflow_kind,
+                b.derivative_kind,
+                b.authenticity_basis,
+                b.output_format,
+                b.requested_count,
+                b.exported_count,
+                b.skipped_count,
+                b.status,
+                b.package_mode,
+                b.zip_filename,
+                b.profile_name
+            FROM DerivativeExportBatches b
+            {where_clause}
+            ORDER BY datetime(b.created_at) DESC, b.batch_id DESC
+            LIMIT ?
+            """,
+            params,
+        ).fetchall()
+        return [
+            DerivativeBatchRecord(
+                batch_id=str(row[0] or ""),
+                created_at=str(row[1] or ""),
+                completed_at=str(row[2] or "").strip() or None,
+                workflow_kind=str(row[3] or ""),
+                derivative_kind=str(row[4] or ""),
+                authenticity_basis=str(row[5] or ""),
+                output_format=str(row[6] or ""),
+                requested_count=int(row[7] or 0),
+                exported_count=int(row[8] or 0),
+                skipped_count=int(row[9] or 0),
+                status=str(row[10] or ""),
+                package_mode=str(row[11] or ""),
+                zip_filename=str(row[12] or "").strip() or None,
+                profile_name=str(row[13] or "").strip() or None,
+            )
+            for row in rows
+        ]
+
+    def list_derivatives(
+        self,
+        *,
+        batch_id: str | None = None,
+        search_text: str = "",
+        limit: int = 1000,
+    ) -> list[DerivativeLedgerRecord]:
+        params: list[object] = []
+        where_parts: list[str] = []
+        clean_batch_id = str(batch_id or "").strip()
+        if clean_batch_id:
+            where_parts.append("d.batch_id = ?")
+            params.append(clean_batch_id)
+        search = str(search_text or "").strip().lower()
+        if search:
+            like_value = f"%{search}%"
+            where_parts.append(
+                """
+                (
+                    lower(coalesce(t.track_title, '')) LIKE ?
+                    OR lower(coalesce(d.output_filename, '')) LIKE ?
+                    OR lower(coalesce(d.output_format, '')) LIKE ?
+                    OR lower(coalesce(d.derivative_kind, '')) LIKE ?
+                    OR lower(coalesce(d.authenticity_basis, '')) LIKE ?
+                    OR lower(coalesce(d.output_sha256, '')) LIKE ?
+                    OR lower(coalesce(d.export_id, '')) LIKE ?
+                )
+                """
+            )
+            params.extend([like_value] * 7)
+        where_clause = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
+        params.append(max(1, int(limit or 1000)))
+        rows = self.conn.execute(
+            f"""
+            SELECT
+                d.export_id,
+                d.batch_id,
+                d.track_id,
+                coalesce(t.track_title, ''),
+                d.output_filename,
+                d.output_format,
+                d.derivative_kind,
+                d.authenticity_basis,
+                d.watermark_applied,
+                d.metadata_embedded,
+                d.output_size_bytes,
+                d.output_sha256,
+                d.status,
+                d.source_storage_mode,
+                d.source_lineage_ref,
+                d.derivative_manifest_id,
+                b.created_at,
+                b.completed_at,
+                b.package_mode,
+                b.zip_filename,
+                d.managed_file_path,
+                d.sidecar_path,
+                d.package_member_path
+            FROM TrackAudioDerivatives d
+            LEFT JOIN Tracks t ON t.id = d.track_id
+            LEFT JOIN DerivativeExportBatches b ON b.batch_id = d.batch_id
+            {where_clause}
+            ORDER BY datetime(b.created_at) DESC, d.output_filename COLLATE NOCASE ASC
+            LIMIT ?
+            """,
+            params,
+        ).fetchall()
+        return [
+            DerivativeLedgerRecord(
+                export_id=str(row[0] or ""),
+                batch_id=str(row[1] or ""),
+                track_id=int(row[2]) if row[2] is not None else None,
+                track_title=str(row[3] or ""),
+                output_filename=str(row[4] or ""),
+                output_format=str(row[5] or ""),
+                derivative_kind=str(row[6] or ""),
+                authenticity_basis=str(row[7] or ""),
+                watermark_applied=bool(row[8]),
+                metadata_embedded=bool(row[9]),
+                output_size_bytes=int(row[10] or 0),
+                output_sha256=str(row[11] or ""),
+                status=str(row[12] or ""),
+                source_storage_mode=str(row[13] or "").strip() or None,
+                source_lineage_ref=str(row[14] or ""),
+                derivative_manifest_id=str(row[15] or "").strip() or None,
+                batch_created_at=str(row[16] or ""),
+                batch_completed_at=str(row[17] or "").strip() or None,
+                package_mode=str(row[18] or ""),
+                zip_filename=str(row[19] or "").strip() or None,
+                managed_file_path=str(row[20] or "").strip() or None,
+                sidecar_path=str(row[21] or "").strip() or None,
+                package_member_path=str(row[22] or "").strip() or None,
+            )
+            for row in rows
+        ]
+
     def create_derivative(
         self,
         *,
@@ -277,6 +495,8 @@ class DerivativeLedgerService:
         output_size_bytes: int,
         filename_hash_suffix: str,
         output_mime_type: str | None = None,
+        managed_file_path: str | None = None,
+        sidecar_path: str | None = None,
         package_member_path: str | None = None,
     ) -> str:
         derivative_id = uuid.uuid4().hex
@@ -304,10 +524,12 @@ class DerivativeLedgerService:
                 metadata_embedded,
                 output_sha256,
                 output_size_bytes,
+                managed_file_path,
+                sidecar_path,
                 package_member_path,
                 status
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 derivative_id,
@@ -331,11 +553,38 @@ class DerivativeLedgerService:
                 1 if metadata_embedded else 0,
                 str(final_sha256 or ""),
                 int(output_size_bytes or 0),
+                str(managed_file_path or "").strip() or None,
+                str(sidecar_path or "").strip() or None,
                 str(package_member_path or "").strip() or None,
                 "completed",
             ),
         )
         return derivative_id
+
+    def update_derivative_artifacts(
+        self,
+        export_id: str,
+        *,
+        managed_file_path: str | None = None,
+        sidecar_path: str | None = None,
+        package_member_path: str | None = None,
+    ) -> None:
+        self.conn.execute(
+            """
+            UPDATE TrackAudioDerivatives
+            SET managed_file_path=?,
+                sidecar_path=?,
+                package_member_path=?,
+                updated_at=datetime('now')
+            WHERE export_id=?
+            """,
+            (
+                str(managed_file_path or "").strip() or None,
+                str(sidecar_path or "").strip() or None,
+                str(package_member_path or "").strip() or None,
+                str(export_id or ""),
+            ),
+        )
 
 
 class ManagedDerivativeExportCoordinator:
@@ -597,6 +846,12 @@ class ManagedDerivativeExportCoordinator:
                                     exported_state.temp_final_path,
                                     arcname=exported_state.final_name,
                                 )
+                                self.ledger.update_derivative_artifacts(
+                                    exported_state.derivative_id,
+                                    managed_file_path=None,
+                                    sidecar_path=None,
+                                    package_member_path=exported_state.final_name,
+                                )
                         self.ledger.update_batch_completion(
                             batch_id,
                             exported_count=exported,
@@ -609,6 +864,12 @@ class ManagedDerivativeExportCoordinator:
                         final_destination = destination_root / exported_states[0].final_name
                         shutil.move(str(exported_states[0].temp_final_path), str(final_destination))
                         written_paths.append(str(final_destination))
+                        self.ledger.update_derivative_artifacts(
+                            exported_states[0].derivative_id,
+                            managed_file_path=str(final_destination),
+                            sidecar_path=None,
+                            package_member_path=None,
+                        )
                         self.ledger.update_batch_completion(
                             batch_id,
                             exported_count=exported,

@@ -17,6 +17,12 @@ class AppShellStartupCoreTests(AppShellTestCase):
     test_file_menu_groups_exchange_exports_and_saved_import_reset = (
         AppShellTestCase.case_file_menu_groups_exchange_exports_and_saved_import_reset
     )
+    test_settings_view_history_help_menus_and_action_ribbon_context_menu_use_streamlined_structure = (
+        AppShellTestCase.case_settings_view_history_help_menus_and_action_ribbon_context_menu_use_streamlined_structure
+    )
+    test_moved_and_renamed_actions_preserve_dialog_routing = (
+        AppShellTestCase.case_moved_and_renamed_actions_preserve_dialog_routing
+    )
     test_bundled_themes_are_available_and_not_persisted_as_user_library_entries = (
         AppShellTestCase.case_bundled_themes_are_available_and_not_persisted_as_user_library_entries
     )

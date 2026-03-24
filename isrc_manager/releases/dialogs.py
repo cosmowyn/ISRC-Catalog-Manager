@@ -77,19 +77,26 @@ class ReleaseEditorDialog(QDialog):
         self.selected_track_ids_provider = selected_track_ids_provider
         self.release = release
         self.profile_name = profile_name
+        self.setObjectName("releaseEditorDialog")
         self.setWindowTitle("Edit Release" if release is not None else "Create Release")
-        self.resize(980, 760)
+        self.resize(960, 720)
+        self.setMinimumSize(880, 640)
         self.setModal(True)
+        _apply_standard_dialog_chrome(self, "releaseEditorDialog")
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(16, 16, 16, 16)
-        root.setSpacing(12)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(14)
 
-        intro = QLabel(
-            "Manage release-level metadata separately from track metadata, then attach and order tracks below."
+        _add_standard_dialog_header(
+            root,
+            self,
+            title=self.windowTitle(),
+            subtitle=(
+                "Keep release identity, dates, artwork, and ordered track placement together "
+                "without leaving the current selection workflow."
+            ),
         )
-        intro.setWordWrap(True)
-        root.addWidget(intro)
 
         splitter = QSplitter(Qt.Horizontal, self)
         root.addWidget(splitter, 1)
@@ -118,14 +125,27 @@ class ReleaseEditorDialog(QDialog):
             return combo
 
         metadata_box = QGroupBox("Release Metadata", metadata_scroll)
-        form = QFormLayout(metadata_box)
-        _configure_standard_form_layout(form)
+        metadata_box_layout = QVBoxLayout(metadata_box)
+        metadata_box_layout.setContentsMargins(12, 12, 12, 12)
+        metadata_box_layout.setSpacing(12)
+
+        identity_group = QGroupBox("Identity & Credits", metadata_box)
+        identity_form = QFormLayout(identity_group)
+        _configure_standard_form_layout(identity_form)
+
+        scheduling_group = QGroupBox("Release Details", metadata_box)
+        scheduling_form = QFormLayout(scheduling_group)
+        _configure_standard_form_layout(scheduling_form)
+
+        artwork_group = QGroupBox("Artwork & Notes", metadata_box)
+        artwork_form = QFormLayout(artwork_group)
+        _configure_standard_form_layout(artwork_form)
 
         self.title_edit = QLineEdit()
-        form.addRow("Release Title", self.title_edit)
+        identity_form.addRow("Release Title", self.title_edit)
 
         self.subtitle_edit = QLineEdit()
-        form.addRow("Version / Subtitle", self.subtitle_edit)
+        identity_form.addRow("Version / Subtitle", self.subtitle_edit)
 
         self.primary_artist_edit = stored_value_combo(
             """
@@ -146,7 +166,7 @@ class ReleaseEditorDialog(QDialog):
             ORDER BY value
             """
         )
-        form.addRow("Primary Artist", self.primary_artist_edit)
+        identity_form.addRow("Primary Artist", self.primary_artist_edit)
 
         self.album_artist_edit = stored_value_combo(
             """
@@ -167,21 +187,21 @@ class ReleaseEditorDialog(QDialog):
             ORDER BY value
             """
         )
-        form.addRow("Album Artist", self.album_artist_edit)
+        identity_form.addRow("Album Artist", self.album_artist_edit)
 
         self.release_type_combo = QComboBox()
         self.release_type_combo.addItems(
             [value.replace("_", " ").title() for value in RELEASE_TYPE_CHOICES]
         )
-        form.addRow("Release Type", self.release_type_combo)
+        scheduling_form.addRow("Release Type", self.release_type_combo)
 
         self.release_date_edit = QLineEdit()
         self.release_date_edit.setPlaceholderText("YYYY-MM-DD")
-        form.addRow("Release Date", self.release_date_edit)
+        scheduling_form.addRow("Release Date", self.release_date_edit)
 
         self.original_release_date_edit = QLineEdit()
         self.original_release_date_edit.setPlaceholderText("YYYY-MM-DD")
-        form.addRow("Original Release Date", self.original_release_date_edit)
+        scheduling_form.addRow("Original Release Date", self.original_release_date_edit)
 
         self.label_edit = stored_value_combo(
             """
@@ -198,7 +218,7 @@ class ReleaseEditorDialog(QDialog):
             ORDER BY value
             """
         )
-        form.addRow("Label", self.label_edit)
+        identity_form.addRow("Label", self.label_edit)
 
         self.sublabel_edit = stored_value_combo(
             """
@@ -209,7 +229,7 @@ class ReleaseEditorDialog(QDialog):
             ORDER BY sublabel
             """
         )
-        form.addRow("Sublabel", self.sublabel_edit)
+        identity_form.addRow("Sublabel", self.sublabel_edit)
 
         self.catalog_number_edit = stored_value_combo(
             """
@@ -226,7 +246,7 @@ class ReleaseEditorDialog(QDialog):
             ORDER BY value
             """
         )
-        form.addRow("Catalog#", self.catalog_number_edit)
+        scheduling_form.addRow("Catalog#", self.catalog_number_edit)
 
         self.upc_edit = stored_value_combo(
             """
@@ -239,18 +259,18 @@ class ReleaseEditorDialog(QDialog):
             ORDER BY value
             """
         )
-        form.addRow("UPC / EAN", self.upc_edit)
+        scheduling_form.addRow("UPC / EAN", self.upc_edit)
 
         self.territory_edit = QLineEdit()
         self.territory_edit.setPlaceholderText("Worldwide / EU / NL / etc.")
-        form.addRow("Territory / Market", self.territory_edit)
+        scheduling_form.addRow("Territory / Market", self.territory_edit)
 
         self.status_combo = QComboBox()
         self.status_combo.addItem("")
         self.status_combo.addItems(
             [value.replace("_", " ").title() for value in REPERTOIRE_STATUS_CHOICES]
         )
-        form.addRow("Workflow Status", self.status_combo)
+        scheduling_form.addRow("Workflow Status", self.status_combo)
 
         self.explicit_checkbox = QCheckBox("Explicit release")
         self.metadata_checkbox = QCheckBox("Metadata Complete")
@@ -268,7 +288,7 @@ class ReleaseEditorDialog(QDialog):
         ):
             checklist_layout.addWidget(widget)
         checklist_layout.addStretch(1)
-        form.addRow("Checklist", checklist_row)
+        scheduling_form.addRow("Checklist", checklist_row)
 
         self.artwork_path_edit = QLineEdit()
         self.artwork_path_edit.setReadOnly(True)
@@ -283,16 +303,20 @@ class ReleaseEditorDialog(QDialog):
         clear_button.clicked.connect(self._clear_artwork)
         artwork_layout.addWidget(browse_button)
         artwork_layout.addWidget(clear_button)
-        form.addRow("Artwork", artwork_row)
+        artwork_form.addRow("Artwork", artwork_row)
 
         self.artwork_storage_mode_combo = QComboBox()
-        self.artwork_storage_mode_combo.addItem("Database (BLOB)", STORAGE_MODE_DATABASE)
-        self.artwork_storage_mode_combo.addItem("Managed file", STORAGE_MODE_MANAGED_FILE)
-        form.addRow("Artwork Storage", self.artwork_storage_mode_combo)
+        self.artwork_storage_mode_combo.addItem("Stored in Database", STORAGE_MODE_DATABASE)
+        self.artwork_storage_mode_combo.addItem("Managed File", STORAGE_MODE_MANAGED_FILE)
+        artwork_form.addRow("Artwork Storage", self.artwork_storage_mode_combo)
 
         self.notes_edit = QPlainTextEdit()
         self.notes_edit.setMinimumHeight(120)
-        form.addRow("Release Notes", self.notes_edit)
+        artwork_form.addRow("Release Notes", self.notes_edit)
+
+        metadata_box_layout.addWidget(identity_group)
+        metadata_box_layout.addWidget(scheduling_group)
+        metadata_box_layout.addWidget(artwork_group)
 
         metadata_layout.addWidget(metadata_box)
         metadata_layout.addStretch(1)
@@ -367,6 +391,7 @@ class ReleaseEditorDialog(QDialog):
         buttons.addWidget(save_button)
         buttons.addWidget(cancel_button)
         root.addLayout(buttons)
+        _apply_compact_dialog_control_heights(self)
 
         self._clear_artwork_requested = False
         self._original_artwork_display_path = ""

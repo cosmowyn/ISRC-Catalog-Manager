@@ -82,15 +82,23 @@ class _ReadableSplashScreen(QSplashScreen):
         font.setPointSizeF(max(font.pointSizeF(), 10.5))
         painter.setFont(font)
         painter.setPen(QColor("#f7f7f7"))
+        progress_text = f"{self._progress}%"
+        reserved_width = painter.fontMetrics().horizontalAdvance(progress_text) + 24
+        message_width = max(120, text_rect.width() - reserved_width)
+        rendered_message = painter.fontMetrics().elidedText(
+            message,
+            Qt.ElideRight,
+            message_width,
+        )
         painter.drawText(
             text_rect,
             int(Qt.AlignLeft | Qt.AlignVCenter | Qt.TextSingleLine),
-            message,
+            rendered_message,
         )
         painter.drawText(
             text_rect,
             int(Qt.AlignRight | Qt.AlignVCenter | Qt.TextSingleLine),
-            f"{self._progress}%",
+            progress_text,
         )
 
         progress_rect = QRect(

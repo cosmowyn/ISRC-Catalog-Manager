@@ -23,6 +23,9 @@ class AppShellWorkspaceDockTests(AppShellTestCase):
     test_catalog_managers_open_as_tabified_dock_and_focus_requested_tab = (
         AppShellTestCase.case_catalog_managers_open_as_tabified_dock_and_focus_requested_tab
     )
+    test_catalog_managers_dialog_uses_compact_size_and_consistent_tabs = (
+        AppShellTestCase.case_catalog_managers_dialog_uses_compact_size_and_consistent_tabs
+    )
     test_catalog_managers_tabs_keep_bottom_actions_inside_themed_scroll_surfaces = (
         AppShellTestCase.case_catalog_managers_tabs_keep_bottom_actions_inside_themed_scroll_surfaces
     )

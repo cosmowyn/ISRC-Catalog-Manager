@@ -49,6 +49,7 @@ class _DiagnosticsDialogHost(QWidget):
         self.opened_paths = []
         self.load_calls = 0
         self.repair_calls = []
+        self.history_cleanup_open_count = 0
         self.background_errors = []
         self._report = {
             "environment": {
@@ -72,6 +73,21 @@ class _DiagnosticsDialogHost(QWidget):
                     "repair_label": "Repair Schema Layout",
                 }
             ],
+            "history_storage_budget": {
+                "available": True,
+                "usage_text": "1.8 GB",
+                "budget_text": "1.0 GB",
+                "over_budget_text": "820.0 MB",
+                "reclaimable_text": "512.0 MB",
+                "retention_mode_label": "Balanced",
+                "auto_cleanup_text": "Enabled",
+                "candidate_count": 3,
+                "summary": (
+                    "History storage is using 1.8 GB of a 1.0 GB budget "
+                    "and is over budget by 820.0 MB."
+                ),
+                "within_budget": False,
+            },
         }
 
     def _load_diagnostics_report_async(
@@ -128,6 +144,9 @@ class _DiagnosticsDialogHost(QWidget):
     def _open_local_path(self, path, _title):
         self.opened_paths.append(Path(path))
         return True
+
+    def open_history_cleanup_dialog(self):
+        self.history_cleanup_open_count += 1
 
 
 class AppDialogsTests(unittest.TestCase):
@@ -239,11 +258,21 @@ class AppDialogsTests(unittest.TestCase):
         try:
             self.assertEqual(host.load_calls, 1)
             self.assertFalse(dialog.loading_panel.isVisible())
+            self.assertIsNotNone(dialog.body_scroll.widget())
             self.assertEqual(dialog.environment_labels["App version"].text(), "2.0.0")
+            self.assertIn("1.8 GB", dialog.history_storage_summary_label.text())
+            self.assertEqual(dialog.history_storage_metric_labels["budget"].text(), "1.0 GB")
+            self.assertEqual(
+                dialog.history_storage_metric_labels["over_budget"].text(),
+                "820.0 MB",
+            )
+            self.assertTrue(dialog.open_cleanup_button.isEnabled())
             self.assertEqual(dialog.checks_list.count(), 1)
             self.assertIn("Schema layout", dialog.details_edit.toPlainText())
             self.assertTrue(dialog.repair_button.isEnabled())
             self.assertEqual(dialog.repair_button.text(), "Repair Schema Layout")
+            dialog.open_cleanup_button.click()
+            self.assertEqual(host.history_cleanup_open_count, 1)
         finally:
             dialog.close()
             host.close()
@@ -264,6 +293,26 @@ class AppDialogsTests(unittest.TestCase):
             self.assertEqual(host.repair_calls, ["schema_migrate"])
             self.assertEqual(host.load_calls, 2)
             info_mock.assert_called_once()
+        finally:
+            dialog.close()
+            host.close()
+
+    def test_diagnostics_dialog_loading_strip_scales_with_window_width(self):
+        host = _DiagnosticsDialogHost()
+        dialog = DiagnosticsDialog(host)
+        try:
+            dialog.show()
+            self.app.processEvents()
+            dialog.resize(980, 680)
+            dialog._set_busy(True, "Loading diagnostics with a longer status message.")
+            self.app.processEvents()
+
+            dialog.resize(1280, 820)
+            self.app.processEvents()
+
+            self.assertGreaterEqual(dialog.loading_bar.width(), 220)
+            self.assertLessEqual(dialog.loading_bar.width(), 320)
+            self.assertGreaterEqual(dialog.loading_status_label.minimumWidth(), 260)
         finally:
             dialog.close()
             host.close()

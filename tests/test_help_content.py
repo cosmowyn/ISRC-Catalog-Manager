@@ -20,6 +20,7 @@ class HelpContentTests(unittest.TestCase):
         self.assertIn("Table of Contents", html)
         self.assertIn("Keyword Index", html)
         self.assertIn("Version 1.2.3", html)
+        self.assertNotIn("SF Pro Text", html)
 
         for chapter in HELP_CHAPTERS:
             self.assertIn(f"id='{chapter.chapter_id}'", html)
@@ -38,6 +39,7 @@ class HelpContentTests(unittest.TestCase):
                 "header_bg": "#17324E",
                 "header_fg": "#F8FAFC",
                 "link_color": "#38BDF8",
+                "font_family": "Courier New",
             },
         )
 
@@ -46,13 +48,14 @@ class HelpContentTests(unittest.TestCase):
         self.assertIn("color: #E2E8F0", html)
         self.assertIn("background: #17324E", html)
         self.assertIn("color: #38BDF8", html)
+        self.assertIn('font-family: "Courier New", sans-serif', html)
 
     def test_audio_authenticity_help_chapter_mentions_direct_and_lineage_scope(self):
         chapter = HELP_CHAPTERS_BY_ID["audio-authenticity"]
 
         self.assertIn("AIFF", chapter.content_html)
         self.assertIn("Provenance", chapter.content_html)
-        self.assertIn("future forensic watermarking", chapter.content_html.lower())
+        self.assertIn("separate managed export workflow", chapter.content_html.lower())
 
 
 if __name__ == "__main__":

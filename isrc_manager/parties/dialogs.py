@@ -206,12 +206,12 @@ class PartyManagerPanel(QWidget):
                 "link it across works, contracts, and rights."
             ),
         )
-        intro = QLabel(
-            "Maintain one reusable record per important person or company, then link it across works, contracts, and rights."
-        )
-        intro.setWordWrap(True)
-        root.addWidget(intro)
 
+        controls_box, controls_layout = _create_standard_section(
+            self,
+            "Find and Manage",
+            "Search the canonical party list, then add, edit, merge, delete, or refresh the selected records.",
+        )
         top_row = QHBoxLayout()
         top_row.setContentsMargins(0, 0, 0, 0)
         top_row.setSpacing(10)
@@ -219,6 +219,7 @@ class PartyManagerPanel(QWidget):
         self.search_edit.setPlaceholderText("Search parties by name, email, or IPI/CAE...")
         self.search_edit.textChanged.connect(self.refresh)
         top_row.addWidget(self.search_edit, 1)
+        controls_layout.addLayout(top_row)
 
         add_button = QPushButton("Add")
         add_button.clicked.connect(self.create_party)
@@ -230,14 +231,14 @@ class PartyManagerPanel(QWidget):
         delete_button.clicked.connect(self.delete_selected)
         refresh_button = QPushButton("Refresh")
         refresh_button.clicked.connect(self.refresh)
-        root.addLayout(top_row)
-        root.addWidget(
+        controls_layout.addWidget(
             _create_action_button_grid(
                 self,
                 [add_button, edit_button, merge_button, delete_button, refresh_button],
                 columns=3,
             )
         )
+        root.addWidget(controls_box)
 
         self.table = QTableWidget(0, 6, self)
         self.table.setHorizontalHeaderLabels(
@@ -249,9 +250,16 @@ class PartyManagerPanel(QWidget):
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.doubleClicked.connect(lambda _index: self.edit_selected())
-        root.addWidget(self.table, 1)
+        table_box, table_layout = _create_standard_section(
+            self,
+            "Party Records",
+            "Double-click a row to edit the selected party, or use multi-select to merge duplicates safely.",
+        )
+        table_layout.addWidget(self.table, 1)
+        root.addWidget(table_box, 1)
 
         self.refresh()
+        _apply_compact_dialog_control_heights(self)
 
     def _party_service(self) -> PartyService | None:
         return self.party_service_provider()

@@ -10,6 +10,8 @@ from types import SimpleNamespace
 from unittest import mock
 
 from isrc_manager.constants import APP_NAME
+from isrc_manager.file_storage import STORAGE_MODE_DATABASE
+from isrc_manager.media.derivatives import DerivativeLedgerService
 from isrc_manager.paths import AppStorageLayout
 from isrc_manager.services import (
     AssetVersionPayload,
@@ -410,6 +412,50 @@ class AppShellTestCase(unittest.TestCase):
 
         return captured.get("snapshot", {"texts": [], "submenus": {}})
 
+    def _action_ribbon_context_menu_snapshot(self) -> dict[str, object]:
+        captured: dict[str, dict[str, object]] = {}
+
+        class _CapturedMenu:
+            def __init__(self, *_args, title: str = "", **_kwargs):
+                self._title = str(title or "")
+                self._entries: list[object] = []
+
+            def addAction(self, action):
+                self._entries.append(action)
+                return action
+
+            def addSeparator(self):
+                self._entries.append(None)
+                return None
+
+            def addMenu(self, title):
+                submenu = _CapturedMenu(title=title)
+                self._entries.append(submenu)
+                return submenu
+
+            def _snapshot(self) -> dict[str, object]:
+                texts: list[str] = []
+                submenus: dict[str, dict[str, object]] = {}
+                for entry in self._entries:
+                    if isinstance(entry, _CapturedMenu):
+                        if entry._title:
+                            texts.append(entry._title)
+                            submenus[entry._title] = entry._snapshot()
+                        continue
+                    if hasattr(entry, "text") and entry.text():
+                        texts.append(entry.text())
+                return {"texts": texts, "submenus": submenus}
+
+            def exec(self, *_args, **_kwargs):
+                captured["snapshot"] = self._snapshot()
+                return None
+
+        with mock.patch.object(app_module, "QMenu", _CapturedMenu):
+            self.window._open_action_ribbon_context_menu(app_module.QPoint(0, 0))
+            self.app.processEvents()
+
+        return captured.get("snapshot", {"texts": [], "submenus": {}})
+
     def _table_context_action_texts(self, row: int, col: int) -> list[str]:
         snapshot = self._table_context_menu_snapshot(row, col)
         return self._flatten_menu_snapshot(snapshot)
@@ -496,6 +542,7 @@ class AppShellTestCase(unittest.TestCase):
             "Release Browser…": self.window.release_browser_action,
             "Work Manager…": self.window.work_manager_action,
             "Contract Manager…": self.window.contract_manager_action,
+            "Derivative Ledger…": self.window.derivative_ledger_action,
             "Global Search and Relationships…": self.window.global_search_action,
             "Create Snapshot…": self.window.create_snapshot_action,
         }
@@ -608,29 +655,52 @@ class AppShellTestCase(unittest.TestCase):
     def case_file_menu_groups_xml_import_under_import_exchange_and_preserves_wiring(self):
         file_menu = self._menu_by_text("File")
         file_texts = [action.text() for action in file_menu.actions() if action.text()]
-        self.assertNotIn("Import XML…", file_texts)
+        self.assertNotIn("Import Catalog XML…", file_texts)
+        self.assertNotIn("Convert External Audio Files…", file_texts)
+        self.assertNotIn("Inspect Forensic Watermark…", file_texts)
 
-        import_exchange_action = next(
+        import_action = next(
             action
             for action in file_menu.actions()
-            if action.menu() is not None and action.text() == "Import Exchange"
+            if action.menu() is not None and action.text() == "Import & Exchange"
         )
-        import_exchange_menu = import_exchange_action.menu()
-        assert import_exchange_menu is not None
-        submenu_actions = [
-            action for action in import_exchange_menu.actions() if not action.isSeparator()
-        ]
+        import_menu = import_action.menu()
+        assert import_menu is not None
+        import_snapshot = self._menu_snapshot(import_menu)
         self.assertEqual(
-            submenu_actions[:5],
+            list(import_snapshot.get("texts") or []),
             [
-                self.window.import_xml_action,
-                self.window.import_csv_action,
-                self.window.import_xlsx_action,
-                self.window.import_json_action,
-                self.window.import_package_action,
+                "Import Catalog XML…",
+                "Catalog Exchange",
+                "Contracts and Rights",
             ],
         )
-        self.assertIs(submenu_actions[-1], self.window.reset_saved_import_choices_action)
+        import_exchange_menu = self._menu_snapshot_at_path(import_snapshot, "Catalog Exchange")
+        contracts_menu = self._menu_snapshot_at_path(import_snapshot, "Contracts and Rights")
+        submenu_actions = [
+            action.text()
+            for action in self.window.import_xml_action.parent().findChildren(app_module.QAction)
+            if False
+        ]
+        self.assertEqual(
+            list(import_exchange_menu.get("texts") or []),
+            [
+                "Import CSV…",
+                "Import XLSX…",
+                "Import JSON…",
+                "Import ZIP Package…",
+                "Reset Saved Import Choices…",
+            ],
+        )
+        self.assertEqual(
+            list(contracts_menu.get("texts") or []),
+            [
+                "Import Contracts and Rights JSON…",
+                "Import Contracts and Rights XLSX…",
+                "Import Contracts and Rights CSV Bundle…",
+                "Import Contracts and Rights ZIP Package…",
+            ],
+        )
         self.assertTrue(
             any(not shortcut.isEmpty() for shortcut in self.window.import_xml_action.shortcuts())
         )
@@ -652,28 +722,32 @@ class AppShellTestCase(unittest.TestCase):
 
     def case_file_menu_groups_exchange_exports_and_saved_import_reset(self):
         file_menu = self._menu_by_text("File")
+        file_texts = [action.text() for action in file_menu.actions() if action.text()]
+        self.assertNotIn("Convert External Audio Files…", file_texts)
+        self.assertNotIn("Inspect Forensic Watermark…", file_texts)
 
         export_action = next(
             action
             for action in file_menu.actions()
-            if action.menu() is not None and action.text() == "Export Files"
+            if action.menu() is not None and action.text() == "Export"
         )
         export_menu = export_action.menu()
         assert export_menu is not None
         export_texts = [action.text() for action in export_menu.actions() if action.text()]
         self.assertEqual(
-            export_texts[:3],
+            export_texts,
             [
                 "Export Selected Catalog XML…",
                 "Export Full Catalog XML…",
-                "Exchange Data",
+                "Catalog Exchange",
+                "Contracts and Rights",
             ],
         )
 
         exchange_action = next(
             action
             for action in export_menu.actions()
-            if action.menu() is not None and action.text() == "Exchange Data"
+            if action.menu() is not None and action.text() == "Catalog Exchange"
         )
         exchange_menu = exchange_action.menu()
         assert exchange_menu is not None
@@ -683,14 +757,149 @@ class AppShellTestCase(unittest.TestCase):
 
         contracts_action = next(
             action
-            for action in file_menu.actions()
-            if action.menu() is not None and action.text() == "Contracts and Rights Exchange"
+            for action in export_menu.actions()
+            if action.menu() is not None and action.text() == "Contracts and Rights"
         )
         contracts_menu = contracts_action.menu()
         assert contracts_menu is not None
         contracts_texts = [action.text() for action in contracts_menu.actions() if action.text()]
         self.assertIn("Export Contracts and Rights JSON…", contracts_texts)
-        self.assertIn("Import Contracts and Rights ZIP Package…", contracts_texts)
+        self.assertIn("Export Contracts and Rights ZIP Package…", contracts_texts)
+
+        maintenance_action = next(
+            action
+            for action in file_menu.actions()
+            if action.menu() is not None and action.text() == "Profile Maintenance"
+        )
+        maintenance_menu = maintenance_action.menu()
+        assert maintenance_menu is not None
+        self.assertEqual(
+            [action.text() for action in maintenance_menu.actions() if action.text()],
+            [
+                "Backup Database",
+                "Restore from Backup…",
+                "Verify Integrity",
+            ],
+        )
+
+    def case_settings_view_history_help_menus_and_action_ribbon_context_menu_use_streamlined_structure(
+        self,
+    ):
+        settings_texts = self._menu_action_texts(self._menu_by_text("Settings"))
+        self.assertEqual(
+            settings_texts,
+            [
+                "Application Settings…",
+                "Audio Authenticity Keys…",
+            ],
+        )
+
+        view_snapshot = self._menu_snapshot(self._menu_by_text("View"))
+        self.assertEqual(
+            list(view_snapshot.get("texts") or []),
+            [
+                "Columns",
+                "Show Profiles Ribbon",
+                "Show Action Ribbon",
+                "Customize Action Ribbon…",
+                "Table Layout",
+            ],
+        )
+        table_layout_texts = list(
+            self._menu_snapshot_at_path(view_snapshot, "Table Layout").get("texts") or []
+        )
+        self.assertEqual(
+            table_layout_texts,
+            [
+                "Edit Column Widths",
+                "Edit Row Heights",
+                "Allow Column Reordering",
+            ],
+        )
+
+        history_texts = self._menu_action_texts(self._menu_by_text("History"))
+        self.assertEqual(history_texts, ["Show Undo History…", "Create Snapshot…"])
+
+        help_texts = self._menu_action_texts(self._menu_by_text("Help"))
+        self.assertEqual(
+            help_texts,
+            [
+                "Help Contents…",
+                "About ISRC Catalog Manager…",
+                "Diagnostics…",
+                "Application Log…",
+                "Open Logs Folder…",
+                "Open Data Folder…",
+            ],
+        )
+
+        ribbon_snapshot = self._action_ribbon_context_menu_snapshot()
+        self.assertEqual(
+            list(ribbon_snapshot.get("texts") or []),
+            [
+                "Customize Action Ribbon…",
+                "Show Action Ribbon",
+            ],
+        )
+        self.assertEqual(
+            self.window._action_ribbon_default_ids,
+            [
+                "save_entry",
+                "release_browser",
+                "quality_dashboard",
+                "gs1_metadata",
+                "settings",
+                "show_history",
+                "create_snapshot",
+            ],
+        )
+
+    def case_moved_and_renamed_actions_preserve_dialog_routing(self):
+        self._close_window()
+        routed_calls: list[tuple[str, object]] = []
+
+        def _record(name):
+            def _inner(instance, *args, **kwargs):
+                routed_calls.append((name, args[0] if args else kwargs or None))
+                return None
+
+            return _inner
+
+        with (
+            mock.patch.object(app_module.App, "open_settings_dialog", autospec=True, side_effect=_record("settings")),
+            mock.patch.object(app_module.App, "open_history_dialog", autospec=True, side_effect=_record("history")),
+            mock.patch.object(app_module.App, "open_help_dialog", autospec=True, side_effect=_record("help")),
+            mock.patch.object(app_module.App, "open_diagnostics_dialog", autospec=True, side_effect=_record("diagnostics")),
+            mock.patch.object(app_module.App, "open_application_log_dialog", autospec=True, side_effect=_record("application_log")),
+            mock.patch.object(app_module.App, "open_quality_dashboard", autospec=True, side_effect=_record("quality")),
+            mock.patch.object(app_module.App, "open_gs1_dialog", autospec=True, side_effect=_record("gs1")),
+        ):
+            self.window = app_module.App()
+            self.window.show()
+            self._drain_events()
+
+            self.window.settings_action.trigger()
+            self.window.show_history_action.trigger()
+            self.window.help_contents_action.trigger()
+            self.window.diagnostics_action.trigger()
+            self.window.application_log_action.trigger()
+            self.window.quality_dashboard_action.trigger()
+            self.window.gs1_metadata_action.trigger()
+            self._drain_events()
+
+        self.assertEqual(
+            [name for name, _payload in routed_calls],
+            [
+                "settings",
+                "history",
+                "help",
+                "diagnostics",
+                "application_log",
+                "quality",
+                "gs1",
+            ],
+        )
+        self.assertEqual(routed_calls[-1][1], None)
 
     def case_startup_can_defer_legacy_storage_migration_and_keep_current_folder(self):
         self._close_window()
@@ -1558,8 +1767,25 @@ class AppShellTestCase(unittest.TestCase):
         )
 
         self.assertEqual(panel.tabs.currentWidget(), panel.licensees_tab)
-        self.assertEqual(panel.tabs.tabText(panel.tabs.currentIndex()), "Legacy Licensees")
+        self.assertEqual(panel.tabs.tabText(panel.tabs.currentIndex()), "Licensees")
         self.assertTrue(panel.isVisible())
+
+    def case_catalog_managers_dialog_uses_compact_size_and_consistent_tabs(self):
+        dialog = app_module.CatalogManagersDialog(self.window, initial_tab="licensees", parent=self.window)
+        try:
+            dialog.show()
+            self._drain_events()
+            self.assertEqual(dialog.minimumWidth(), 920)
+            self.assertEqual(dialog.minimumHeight(), 620)
+            self.assertEqual(dialog.size().width(), 1020)
+            self.assertEqual(dialog.size().height(), 700)
+            self.assertEqual(
+                [dialog.tabs.tabText(index) for index in range(dialog.tabs.count())],
+                ["Artists", "Albums", "Licensees"],
+            )
+            self.assertIs(dialog.tabs.currentWidget(), dialog.licensees_tab)
+        finally:
+            dialog.close()
 
     def case_catalog_managers_tabs_keep_bottom_actions_inside_themed_scroll_surfaces(self):
         self.window.resize(980, 620)
@@ -1602,23 +1828,31 @@ class AppShellTestCase(unittest.TestCase):
             menu_texts,
             [
                 "Workspace",
-                "Legacy & Special",
-                "Audio Ingest",
-                "Audio Export & Conversion",
-                "Audio Authenticity",
-                "Data Quality Dashboard…",
+                "Metadata & Standards",
+                "Legacy",
+                "Audio",
+                "Quality & Repair",
             ],
         )
-        legacy_special_snapshot = self._menu_snapshot_at_path(catalog_snapshot, "Legacy & Special")
+        catalog_quality_snapshot = self._menu_snapshot_at_path(catalog_snapshot, "Quality & Repair")
+        self.assertEqual(list(catalog_quality_snapshot.get("texts") or []), ["Data Quality Dashboard…"])
+        metadata_snapshot = self._menu_snapshot_at_path(catalog_snapshot, "Metadata & Standards")
+        legacy_snapshot = self._menu_snapshot_at_path(catalog_snapshot, "Legacy")
+        audio_snapshot = self._menu_snapshot_at_path(catalog_snapshot, "Audio")
         legacy_texts = list(
-            self._menu_snapshot_at_path(
-                catalog_snapshot, "Legacy & Special", "Legacy License Archive"
-            ).get("texts")
+            self._menu_snapshot_at_path(catalog_snapshot, "Legacy", "Legacy License Archive").get(
+                "texts"
+            )
             or []
         )
         self.assertIn("License Browser…", legacy_texts)
         self.assertIn("Migrate Legacy Licenses to Contracts…", legacy_texts)
-        self.assertIn("GS1 Metadata…", list(legacy_special_snapshot.get("texts") or []))
+        self.assertEqual(list(metadata_snapshot.get("texts") or []), ["GS1 Metadata…"])
+        self.assertEqual(
+            list(audio_snapshot.get("texts") or []),
+            ["Import & Attach", "Delivery & Conversion", "Authenticity & Provenance"],
+        )
+        self.assertEqual(list(legacy_snapshot.get("texts") or []), ["Legacy License Archive"])
         self.assertNotIn("create_release", self.window._action_ribbon_specs_by_id)
         self.assertNotIn("add_selected_to_release", self.window._action_ribbon_specs_by_id)
 
@@ -1637,9 +1871,10 @@ class AppShellTestCase(unittest.TestCase):
         )
         view_texts = self._menu_action_texts(view_menu)
 
-        self.assertIn("Show Add Data Panel", workspace_texts)
+        self.assertIn("Derivative Ledger…", workspace_texts)
+        self.assertIn("Show Add Track Panel", workspace_texts)
         self.assertIn("Show Catalog Table", workspace_texts)
-        self.assertNotIn("Show Add Data Panel", view_texts)
+        self.assertNotIn("Show Add Track Panel", view_texts)
         self.assertNotIn("Show Catalog Table", view_texts)
         self.assertEqual(
             self.window._action_ribbon_specs_by_id["show_add_data"]["category"], "Catalog"
@@ -2105,6 +2340,36 @@ class AppShellTestCase(unittest.TestCase):
                 version_status="approved",
             )
         )
+        ledger_service = DerivativeLedgerService(self.window.conn)
+        batch_id = ledger_service.create_batch(
+            batch_public_id="AEX-TEST-LEDGER-0001",
+            track_count=1,
+            output_format="mp3",
+            workflow_kind="managed_audio_derivative",
+            derivative_kind="lossy_derivative",
+            authenticity_basis="catalog_lineage_only",
+            profile_name=Path(self.window.current_db_path).name,
+        )
+        ledger_service.create_derivative(
+            source_track_id=track_id,
+            export_batch_id=batch_id,
+            workflow_kind="managed_audio_derivative",
+            derivative_kind="lossy_derivative",
+            authenticity_basis="catalog_lineage_only",
+            output_format="mp3",
+            watermark_applied=False,
+            metadata_embedded=True,
+            final_sha256="f" * 64,
+            output_filename="north-star-master--ledger.mp3",
+            source_lineage_ref="track-audio:north-star-master.wav",
+            source_sha256="a" * 64,
+            source_storage_mode=STORAGE_MODE_DATABASE,
+            authenticity_manifest_id="manifest-test-001",
+            output_size_bytes=2_097_152,
+            filename_hash_suffix="ledgerhash001",
+            output_mime_type="audio/mpeg",
+        )
+        self.window.conn.commit()
 
         self.window.open_party_manager(party_id)
         self.app.processEvents()
@@ -2141,6 +2406,22 @@ class AppShellTestCase(unittest.TestCase):
             panel_name="assetBrowserPanel",
         )
         self.assertEqual(asset_panel._selected_asset_id(), asset_id)
+        self.assertEqual(
+            [asset_panel.workspace_tabs.tabText(index) for index in range(asset_panel.workspace_tabs.count())],
+            ["Asset Registry", "Derivative Ledger"],
+        )
+        self.assertIs(asset_panel.workspace_tabs.currentWidget(), asset_panel.asset_registry_tab)
+
+        derivative_panel = self.window.open_derivative_ledger(batch_id)
+        self.app.processEvents()
+        self.assertIs(derivative_panel, asset_panel)
+        self.assertIs(
+            asset_panel.workspace_tabs.currentWidget(),
+            asset_panel.derivative_ledger_tab,
+        )
+        self.assertGreaterEqual(asset_panel.derivative_ledger_tab.batch_table.rowCount(), 1)
+        self.assertGreaterEqual(asset_panel.derivative_ledger_tab.derivative_table.rowCount(), 1)
+        self.assertIn("north-star-master--ledger.mp3", asset_panel.derivative_ledger_tab.details_edit.toPlainText())
 
         tabified = set(self.window.tabifiedDockWidgets(self.window.catalog_table_dock))
         self.assertIn(self.window.party_manager_dock, tabified)
@@ -2689,22 +2970,25 @@ class AppShellTestCase(unittest.TestCase):
 
         snapshot = self._table_context_menu_snapshot(row, 0)
         top_level_texts = list(snapshot.get("texts") or [])
+        licenses_snapshot = (snapshot.get("submenus") or {}).get("Licenses") or {}
+        license_texts = self._flatten_menu_snapshot(licenses_snapshot)
         audio_snapshot = (snapshot.get("submenus") or {}).get("Audio") or {}
         audio_texts = self._flatten_menu_snapshot(audio_snapshot)
 
-        self.assertIn("Edit Entry", top_level_texts)
+        self.assertIn("Edit Track", top_level_texts)
         self.assertIn("GS1 Metadata…", top_level_texts)
         self.assertIn("Open Primary Release…", top_level_texts)
         self.assertIn("Link Selected Track(s) to Work…", top_level_texts)
-        self.assertIn("Delete Entry", top_level_texts)
-        self.assertIn("Add License to this Track…", top_level_texts)
-        self.assertIn("View Licenses for this Track…", top_level_texts)
+        self.assertIn("Delete Track", top_level_texts)
+        self.assertIn("Licenses", top_level_texts)
         self.assertIn("Audio", top_level_texts)
 
         self.assertNotIn("Import Metadata from Audio Files…", top_level_texts)
         self.assertNotIn("Export Audio Derivatives…", top_level_texts)
         self.assertNotIn("Export Tagged Audio Copies…", top_level_texts)
         self.assertNotIn("Convert External Audio Files…", top_level_texts)
+        self.assertIn("Add License to this Track…", license_texts)
+        self.assertIn("View Licenses for this Track…", license_texts)
 
         self.assertIn("Import Metadata from Audio Files…", audio_texts)
         self.assertIn("Export Tagged Audio Copies…", audio_texts)
@@ -2729,6 +3013,96 @@ class AppShellTestCase(unittest.TestCase):
         self.assertIn("Primary audio", lossless_item.toolTip())
         self.assertNotIn("Lossy primary audio", lossless_item.toolTip())
         self.assertNotEqual(lossy_item.icon().cacheKey(), lossless_item.icon().cacheKey())
+
+    def case_table_context_menu_keeps_multi_selection_when_right_clicking_selected_row(self):
+        first_track_id = self._create_track(index=330, title="Selection A")
+        second_track_id = self._create_track(index=331, title="Selection B")
+        self.window.refresh_table()
+        self._select_track_ids([first_track_id, second_track_id])
+        first_row = self._table_row_for_track_id(first_track_id)
+
+        snapshot = self._table_context_menu_snapshot(first_row, 0)
+        self.assertIn("Bulk Edit 2 Selected Tracks…", list(snapshot.get("texts") or []))
+        self.assertEqual(sorted(self.window._selected_track_ids()), [first_track_id, second_track_id])
+
+    def case_audioless_row_context_menu_omits_audio_submenu(self):
+        track_id = self._create_track(index=332, title="Metadata Only Track")
+        self.window.refresh_table()
+        row = self._table_row_for_track_id(track_id)
+
+        snapshot = self._table_context_menu_snapshot(row, 0)
+        self.assertNotIn("Audio", list(snapshot.get("texts") or []))
+
+    def case_standard_media_context_menu_groups_file_and_storage_actions(self):
+        track_id = self._create_track(index=333, title="Managed Media Track")
+        audio_path = self._create_wav_file("standard-media.wav")
+        self.window.track_service.set_media_path(track_id, "audio_file", audio_path)
+        self.window.refresh_table()
+        row = self._table_row_for_track_id(track_id)
+        audio_col = self.window._column_index_by_header("Audio File")
+
+        snapshot = self._table_context_menu_snapshot(row, audio_col)
+        file_snapshot = (snapshot.get("submenus") or {}).get("File") or {}
+        storage_snapshot = (snapshot.get("submenus") or {}).get("Storage") or {}
+        self.assertIn("File", list(snapshot.get("texts") or []))
+        self.assertIn("Storage", list(snapshot.get("texts") or []))
+        self.assertEqual(
+            list(file_snapshot.get("texts") or []),
+            [
+                "Preview File…",
+                "Attach/Replace File…",
+                "Export 'Managed Media Track'…",
+                "Delete File…",
+            ],
+        )
+        self.assertEqual(list(storage_snapshot.get("texts") or []), ["Store in Database"])
+
+    def case_custom_blob_context_menu_groups_file_and_storage_actions(self):
+        track_id = self._create_track(index=334, title="Blob Custom Track")
+        self.assertTrue(
+            self.window._apply_custom_field_configuration(
+                [
+                    {
+                        "id": None,
+                        "name": "Session Artwork",
+                        "field_type": "blob_image",
+                        "options": None,
+                        "blob_icon_payload": {"mode": "inherit"},
+                    }
+                ],
+                action_label="Add Custom Column: Session Artwork",
+                action_type="fields.add",
+            )
+        )
+        field = next(
+            field for field in self.window.active_custom_fields if field.get("name") == "Session Artwork"
+        )
+        image_path = self._create_media_file("session-artwork.png", b"\x89PNG\r\n\x1a\ncustom")
+        self.window.cf_save_value(
+            track_id,
+            int(field["id"]),
+            blob_path=str(image_path),
+            storage_mode=STORAGE_MODE_DATABASE,
+        )
+        self.window.refresh_table()
+        row = self._table_row_for_track_id(track_id)
+        col = self.window._column_index_by_header("Session Artwork")
+
+        snapshot = self._table_context_menu_snapshot(row, col)
+        file_snapshot = (snapshot.get("submenus") or {}).get("File") or {}
+        storage_snapshot = (snapshot.get("submenus") or {}).get("Storage") or {}
+        self.assertIn("File", list(snapshot.get("texts") or []))
+        self.assertIn("Storage", list(snapshot.get("texts") or []))
+        self.assertEqual(
+            list(file_snapshot.get("texts") or []),
+            [
+                "Preview File…",
+                "Attach/Replace File…",
+                "Export 'Blob Custom Track'…",
+                "Delete File…",
+            ],
+        )
+        self.assertEqual(list(storage_snapshot.get("texts") or []), ["Store as Managed File"])
 
     def case_verify_audio_authenticity_can_choose_external_file_when_track_is_selected(self):
         track_id = self._create_track(index=301, title="Catalog Verify Track", album_title="Single")

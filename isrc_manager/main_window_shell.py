@@ -74,7 +74,7 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         shortcuts=("Ctrl+Shift+C", "Meta+Shift+C"),
     )
     app.save_entry_action = app._create_action(
-        "Save Entry",
+        "Save Track",
         slot=app.save,
         standard_key=QKeySequence.Save,
     )
@@ -88,7 +88,7 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         slot=app.open_selected_editor,
     )
     app.delete_entry_action = app._create_action(
-        "Delete Selected Entry",
+        "Delete Selected Track",
         slot=app.delete_entry,
         shortcuts=("Delete", "Meta+Backspace"),
     )
@@ -131,14 +131,17 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
 
     file_menu.addSeparator()
 
+    import_menu = file_menu.addMenu("Import & Exchange")
+
     app.import_xml_action = app._create_action(
-        "Import XML…",
+        "Import Catalog XML…",
         slot=app.import_from_xml,
         shortcuts=("Ctrl+Shift+I", "Meta+Shift+I"),
     )
+    import_menu.addAction(app.import_xml_action)
+    import_menu.addSeparator()
 
-    import_exchange_menu = file_menu.addMenu("Import Exchange")
-    import_exchange_menu.addAction(app.import_xml_action)
+    import_exchange_menu = import_menu.addMenu("Catalog Exchange")
     app.import_csv_action = app._create_action(
         "Import CSV…",
         slot=lambda: app.import_exchange_file("csv"),
@@ -167,7 +170,29 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     )
     import_exchange_menu.addAction(app.reset_saved_import_choices_action)
 
-    export_submenu = file_menu.addMenu("Export Files")
+    repertoire_import_menu = import_menu.addMenu("Contracts and Rights")
+    app.import_repertoire_json_action = app._create_action(
+        "Import Contracts and Rights JSON…",
+        slot=lambda: app.import_repertoire_exchange("json"),
+    )
+    repertoire_import_menu.addAction(app.import_repertoire_json_action)
+    app.import_repertoire_xlsx_action = app._create_action(
+        "Import Contracts and Rights XLSX…",
+        slot=lambda: app.import_repertoire_exchange("xlsx"),
+    )
+    repertoire_import_menu.addAction(app.import_repertoire_xlsx_action)
+    app.import_repertoire_csv_action = app._create_action(
+        "Import Contracts and Rights CSV Bundle…",
+        slot=lambda: app.import_repertoire_exchange("csv"),
+    )
+    repertoire_import_menu.addAction(app.import_repertoire_csv_action)
+    app.import_repertoire_package_action = app._create_action(
+        "Import Contracts and Rights ZIP Package…",
+        slot=lambda: app.import_repertoire_exchange("package"),
+    )
+    repertoire_import_menu.addAction(app.import_repertoire_package_action)
+
+    export_submenu = file_menu.addMenu("Export")
     app.export_selected_action = app._create_action(
         "Export Selected Catalog XML…",
         slot=app.export_selected_to_xml,
@@ -182,7 +207,7 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     )
     export_submenu.addAction(app.export_all_action)
 
-    exchange_export_menu = export_submenu.addMenu("Exchange Data")
+    exchange_export_menu = export_submenu.addMenu("Catalog Exchange")
     app.export_selected_csv_action = app._create_action(
         "Export Selected Exchange CSV…",
         slot=lambda: app.export_exchange_file("csv", selected_only=True),
@@ -225,9 +250,31 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     )
     exchange_export_menu.addAction(app.export_all_package_action)
 
+    repertoire_export_menu = export_submenu.addMenu("Contracts and Rights")
+    app.export_repertoire_json_action = app._create_action(
+        "Export Contracts and Rights JSON…",
+        slot=lambda: app.export_repertoire_exchange("json"),
+    )
+    repertoire_export_menu.addAction(app.export_repertoire_json_action)
+    app.export_repertoire_xlsx_action = app._create_action(
+        "Export Contracts and Rights XLSX…",
+        slot=lambda: app.export_repertoire_exchange("xlsx"),
+    )
+    repertoire_export_menu.addAction(app.export_repertoire_xlsx_action)
+    app.export_repertoire_csv_action = app._create_action(
+        "Export Contracts and Rights CSV Bundle…",
+        slot=lambda: app.export_repertoire_exchange("csv"),
+    )
+    repertoire_export_menu.addAction(app.export_repertoire_csv_action)
+    app.export_repertoire_package_action = app._create_action(
+        "Export Contracts and Rights ZIP Package…",
+        slot=lambda: app.export_repertoire_exchange("package"),
+    )
+    repertoire_export_menu.addAction(app.export_repertoire_package_action)
+
     file_menu.addSeparator()
 
-    database_submenu = file_menu.addMenu("Database")
+    database_submenu = file_menu.addMenu("Profile Maintenance")
     app.backup_action = app._create_action(
         "Backup Database",
         slot=app.backup_database,
@@ -248,14 +295,6 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         shortcuts=("Ctrl+Shift+V", "Meta+Shift+V"),
     )
     database_submenu.addAction(app.verify_action)
-
-    file_menu.addSeparator()
-    app.quit_action = app._create_action(
-        "Quit",
-        slot=app.close,
-        standard_key=QKeySequence.Quit,
-    )
-    file_menu.addAction(app.quit_action)
 
     edit_menu = app.menu_bar.addMenu("Edit")
     edit_menu.addAction(app.undo_action)
@@ -309,11 +348,16 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     )
     workspace_menu.addAction(app.rights_matrix_action)
     app.asset_registry_action = app._create_action(
-        "Asset Version Registry…",
+        "Deliverables & Asset Versions…",
         slot=app.open_asset_registry,
         shortcuts=("Ctrl+Alt+A", "Meta+Alt+A"),
     )
     workspace_menu.addAction(app.asset_registry_action)
+    app.derivative_ledger_action = app._create_action(
+        "Derivative Ledger…",
+        slot=app.open_derivative_ledger,
+    )
+    workspace_menu.addAction(app.derivative_ledger_action)
     app.global_search_action = app._create_action(
         "Global Search and Relationships…",
         slot=app.open_global_search,
@@ -321,7 +365,7 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     )
     workspace_menu.addAction(app.global_search_action)
     app.add_data_action = app._create_action(
-        "Show Add Data Panel",
+        "Show Add Track Panel",
         checkable=True,
         checked=False,
         toggled_slot=app._on_toggle_add_data,
@@ -338,7 +382,13 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         shortcuts=("Ctrl+Shift+T", "Meta+Shift+T"),
     )
     workspace_menu.addAction(app.catalog_table_action)
-    legacy_special_menu = catalog_menu.addMenu("Legacy & Special")
+    metadata_menu = catalog_menu.addMenu("Metadata & Standards")
+    legacy_special_menu = catalog_menu.addMenu("Legacy")
+    audio_menu = catalog_menu.addMenu("Audio")
+    audio_ingest_menu = audio_menu.addMenu("Import & Attach")
+    audio_export_menu = audio_menu.addMenu("Delivery & Conversion")
+    authenticity_menu = audio_menu.addMenu("Authenticity & Provenance")
+    quality_menu = catalog_menu.addMenu("Quality & Repair")
     legacy_menu = legacy_special_menu.addMenu("Legacy License Archive")
     app.license_browser_action = app._create_action(
         "License Browser…",
@@ -359,8 +409,6 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         "Add Selected Tracks to Release…",
         slot=app.add_selected_tracks_to_release,
     )
-    catalog_menu.addSeparator()
-    audio_ingest_menu = catalog_menu.addMenu("Audio Ingest")
     app.bulk_attach_audio_action = app._create_action(
         "Bulk Attach Audio Files…",
         slot=app.bulk_attach_audio_files,
@@ -372,7 +420,6 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         shortcuts=("Ctrl+Alt+T", "Meta+Alt+T"),
     )
     audio_ingest_menu.addAction(app.import_tags_action)
-    audio_export_menu = catalog_menu.addMenu("Audio Export & Conversion")
     app.write_tags_to_exported_audio_action = app._create_action(
         "Export Tagged Audio Copies…",
         slot=app.write_tags_to_exported_audio,
@@ -389,7 +436,6 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     audio_export_menu.addAction(app.convert_external_audio_files_action)
     audio_export_menu.addSeparator()
     audio_export_menu.addAction(app.write_tags_to_exported_audio_action)
-    authenticity_menu = catalog_menu.addMenu("Audio Authenticity")
     app.export_authenticity_watermarked_audio_action = app._create_action(
         "Export Authentic Masters…",
         slot=app.export_authenticity_watermarked_audio,
@@ -440,65 +486,26 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         slot=app.verify_audio_authenticity,
     )
     authenticity_menu.addAction(app.verify_audio_authenticity_action)
-    catalog_menu.addSeparator()
     app.quality_dashboard_action = app._create_action(
         "Data Quality Dashboard…",
         slot=app.open_quality_dashboard,
         shortcuts=("Ctrl+Shift+Q", "Meta+Shift+Q"),
     )
-    catalog_menu.addAction(app.quality_dashboard_action)
+    quality_menu.addAction(app.quality_dashboard_action)
     app.gs1_metadata_action = app._create_action(
         "GS1 Metadata…",
         slot=app.open_gs1_dialog,
         shortcuts=("Ctrl+Shift+G", "Meta+Shift+G"),
     )
-    legacy_special_menu.addAction(app.gs1_metadata_action)
-    file_menu.addSeparator()
-    file_menu.addAction(app.convert_external_audio_files_action)
-    file_menu.addAction(app.inspect_forensic_watermark_action)
+    metadata_menu.addAction(app.gs1_metadata_action)
 
-    repertoire_menu = file_menu.addMenu("Contracts and Rights Exchange")
-    app.export_repertoire_json_action = app._create_action(
-        "Export Contracts and Rights JSON…",
-        slot=lambda: app.export_repertoire_exchange("json"),
+    file_menu.addSeparator()
+    app.quit_action = app._create_action(
+        "Quit",
+        slot=app.close,
+        standard_key=QKeySequence.Quit,
     )
-    repertoire_menu.addAction(app.export_repertoire_json_action)
-    app.export_repertoire_xlsx_action = app._create_action(
-        "Export Contracts and Rights XLSX…",
-        slot=lambda: app.export_repertoire_exchange("xlsx"),
-    )
-    repertoire_menu.addAction(app.export_repertoire_xlsx_action)
-    app.export_repertoire_csv_action = app._create_action(
-        "Export Contracts and Rights CSV Bundle…",
-        slot=lambda: app.export_repertoire_exchange("csv"),
-    )
-    repertoire_menu.addAction(app.export_repertoire_csv_action)
-    app.export_repertoire_package_action = app._create_action(
-        "Export Contracts and Rights ZIP Package…",
-        slot=lambda: app.export_repertoire_exchange("package"),
-    )
-    repertoire_menu.addAction(app.export_repertoire_package_action)
-    repertoire_menu.addSeparator()
-    app.import_repertoire_json_action = app._create_action(
-        "Import Contracts and Rights JSON…",
-        slot=lambda: app.import_repertoire_exchange("json"),
-    )
-    repertoire_menu.addAction(app.import_repertoire_json_action)
-    app.import_repertoire_xlsx_action = app._create_action(
-        "Import Contracts and Rights XLSX…",
-        slot=lambda: app.import_repertoire_exchange("xlsx"),
-    )
-    repertoire_menu.addAction(app.import_repertoire_xlsx_action)
-    app.import_repertoire_csv_action = app._create_action(
-        "Import Contracts and Rights CSV Bundle…",
-        slot=lambda: app.import_repertoire_exchange("csv"),
-    )
-    repertoire_menu.addAction(app.import_repertoire_csv_action)
-    app.import_repertoire_package_action = app._create_action(
-        "Import Contracts and Rights ZIP Package…",
-        slot=lambda: app.import_repertoire_exchange("package"),
-    )
-    repertoire_menu.addAction(app.import_repertoire_package_action)
+    file_menu.addAction(app.quit_action)
 
     settings_menu = app.menu_bar.addMenu("Settings")
     app.settings_action = app._create_action(
@@ -743,7 +750,7 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.add_data_title.setProperty("role", "sectionTitle")
 
     app.add_data_subtitle = QLabel(
-        "Create a new catalog entry with all core metadata, release details, and managed media in one place."
+        "Create a new track with all core metadata, release details, and managed media in one place."
     )
     app.add_data_subtitle.setWordWrap(True)
     app.add_data_subtitle.setProperty("role", "secondary")
@@ -751,7 +758,7 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.add_data_title_row.addWidget(app.add_data_title)
     app.add_data_title_row.addStretch(1)
     app.add_data_title_row.addWidget(
-        _create_round_help_button(app, "add-data", "Open help for the Add Data panel")
+        _create_round_help_button(app, "add-data", "Open help for the Add Track panel")
     )
     app.add_data_header_layout.addLayout(app.add_data_title_row)
     app.add_data_header_layout.addWidget(app.add_data_subtitle)
@@ -1053,7 +1060,7 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.left_scroll.setWidgetResizable(True)
     app.left_scroll.setWidget(app.left_widget_container)
     app.left_scroll.setMinimumWidth(300)
-    app.add_data_dock = QDockWidget("Add Data", app)
+    app.add_data_dock = QDockWidget("Add Track", app)
     app.add_data_dock.setObjectName("addDataDock")
     app.add_data_dock.setAllowedAreas(Qt.AllDockWidgetAreas)
     app.add_data_dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)

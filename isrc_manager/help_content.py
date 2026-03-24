@@ -3,6 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from html import escape
 
+try:
+    from PySide6.QtWidgets import QApplication
+except Exception:  # pragma: no cover - optional in non-Qt documentation contexts
+    QApplication = None
+
 
 @dataclass(frozen=True)
 class HelpChapter:
@@ -49,7 +54,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         <p>The app is organized around a few core ideas:</p>
         <ul>
           <li><strong>Profiles</strong>: each profile is a self-contained catalog database, so separate catalogs remain clean and portable.</li>
-          <li><strong>Add Data</strong>: the dockable track-entry workspace for fast single-record creation.</li>
+          <li><strong>Add Track</strong>: the dockable track-entry workspace for fast single-record creation.</li>
           <li><strong>Add Album</strong>: a structured multi-track workflow for releases that share core metadata.</li>
           <li><strong>Releases</strong>: first-class product records for UPC/EAN, release artwork, ordering, and release-level metadata.</li>
           <li><strong>Works</strong>: a composition layer that stays distinct from recordings so the same work can connect to multiple tracks.</li>
@@ -87,7 +92,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "quick actions",
         ),
         content_html="""
-        <p>The main window is designed as a practical catalog workspace rather than a single fixed screen. By default, the left side contains the <strong>Add Data</strong> workspace and the right side contains the <strong>Catalog Table</strong>, but both can be shown, hidden, floated, and re-docked.</p>
+        <p>The main window is designed as a practical catalog workspace rather than a single fixed screen. By default, the left side contains the <strong>Add Track</strong> workspace and the right side contains the <strong>Catalog Table</strong>, but both can be shown, hidden, floated, and re-docked.</p>
         <ul>
           <li><strong>Action ribbon</strong>: a customizable strip of high-frequency actions. Use <strong>View &gt; Customize Action Ribbon…</strong> to make it match your workflow.</li>
           <li><strong>Profiles toolbar</strong>: switch databases, create a new profile, browse to an external profile, reload the profile list, or remove the selected entry.</li>
@@ -152,7 +157,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
     ),
     HelpChapter(
         chapter_id="add-data",
-        title="Add Data Panel",
+        title="Add Track Panel",
         summary="How to add a track quickly, organize the entry flow by tab, and attach the metadata and media needed for a real catalog.",
         keywords=(
             "add data",
@@ -166,7 +171,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "dsp",
         ),
         content_html="""
-        <p>The Add Data panel is the fastest way to create a new recording. It is organized into focused tabs so you can move quickly without losing access to the full metadata path.</p>
+        <p>The Add Track panel is the fastest way to create a new recording. It is organized into focused tabs so you can move quickly without losing access to the full metadata path.</p>
         <ul>
           <li><strong>Track</strong>: track title, main artist, additional artists, and genre.</li>
           <li><strong>Release</strong>: album title, release date, and track length.</li>
@@ -254,7 +259,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
     ),
     HelpChapter(
         chapter_id="edit-entry",
-        title="Edit Entry",
+        title="Edit Track",
         summary="How the full editor works for existing tracks, including single-edit, bulk-edit, validation, and related handoff flows.",
         keywords=(
             "edit entry",
@@ -269,7 +274,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "release sync",
         ),
         content_html="""
-        <p>The Edit Entry dialog is the full maintenance editor for existing records. When one row is selected, it behaves as a detailed track editor. When multiple rows are selected, it switches into <strong>bulk edit</strong> mode and protects fields that should not be overwritten casually.</p>
+        <p>The Edit Track dialog is the full maintenance editor for existing records. When one row is selected, it behaves as a detailed track editor. When multiple rows are selected, it switches into <strong>bulk edit</strong> mode and protects fields that should not be overwritten casually.</p>
         <ul>
           <li><strong>Copy buttons</strong>: copy ISO or compact forms of ISRC and ISWC values.</li>
           <li><strong>Media replacement</strong>: browse for new audio or album art files, choose database or managed-file storage for replacements, or clear the currently stored media.</li>
@@ -355,7 +360,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Add Album integration</strong>: saving a grouped album entry automatically creates or updates a real release and attaches the created tracks.</li>
           <li><strong>Release Browser…</strong>: browse releases, inspect the ordered track list, duplicate releases, add the current track selection, and filter the main catalog table to a chosen release.</li>
           <li><strong>Docked workflow</strong>: the Release Browser stays open as a tabbed workspace panel, so you can keep changing the track-table selection while assigning or reviewing releases.</li>
-          <li><strong>Single-track workflows</strong>: saving the Add Data panel or the Edit Entry dialog also keeps the corresponding release record synchronized when release-level fields change.</li>
+          <li><strong>Single-track workflows</strong>: saving the Add Track panel or the Edit Track dialog also keeps the corresponding release record synchronized when release-level fields change.</li>
         </ul>
         <p>Older databases are migrated additively. Existing catalog data remains usable, while release records are inferred where possible to give older profiles access to the richer product model without destructive change.</p>
         """,
@@ -388,7 +393,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Rights matrix</strong>: rights records store the right type, exclusivity, territory, media/use scope, dates, source contract, and who granted, received, or retained the right.</li>
           <li><strong>Assets and deliverables</strong>: tracks and releases can keep primary masters, alternates, derivatives, artwork variants, and approval state in one registry.</li>
           <li><strong>Global Search and Relationships…</strong>: search across the full model and inspect everything linked to the selected record from one panel.</li>
-          <li><strong>Docked managers</strong>: Work Manager, Party Manager, Contract Manager, Rights Matrix, Deliverables and Asset Versions, and Global Search now stay available as tabbed workspace panels instead of blocking dialogs.</li>
+          <li><strong>Docked managers</strong>: Work Manager, Party Manager, Contract Manager, Rights Matrix, Deliverables and Asset Versions, Derivative Ledger, and Global Search now stay available as tabbed workspace panels instead of blocking dialogs.</li>
         </ul>
         <p>This richer model is intentionally catalog-focused. It gives independent teams a practical way to understand what they own, what is linked, and what is ready, without turning the app into a royalty or distribution platform.</p>
         """,
@@ -447,7 +452,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Import formats</strong>: CSV, XLSX, JSON, ZIP packages, and XML.</li>
           <li><strong>Import setup</strong>: CSV, XLSX, JSON, and ZIP package imports all open the exchange setup surface so you can review preview rows, match rules, and field targets before running the job.</li>
           <li><strong>Saved mapping presets</strong>: frequently used column mappings can be saved per format and reused later.</li>
-          <li><strong>Saved choices</strong>: per-format import choices can be remembered and later cleared from <strong>File &gt; Import Exchange &gt; Reset Saved Import Choices…</strong>.</li>
+          <li><strong>Saved choices</strong>: per-format import choices can be remembered and later cleared from <strong>File &gt; Import &amp; Exchange &gt; Catalog Exchange &gt; Reset Saved Import Choices…</strong>.</li>
           <li><strong>Skip targets</strong>: any incoming field can be marked as <strong>Skip this field</strong> when you want it inspected but not applied.</li>
           <li><strong>Import modes</strong>: dry-run validation, create new rows, merge into existing matches, update existing matches only, or insert-new-when-duplicate-exists.</li>
           <li><strong>Matching options</strong>: internal ID, ISRC, UPC/EAN plus title, and optional title/artist heuristics.</li>
@@ -606,7 +611,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Settings &gt; Audio Authenticity Keys…</strong>: generate or review local signing keys. Public keys are stored in the profile, while private keys stay as local key files under the app settings root.</li>
           <li><strong>Catalog &gt; Export Authenticity Watermarked Audio…</strong>: write WAV, FLAC, or AIFF master copies that keep the original canonical source unchanged, embed a compact keyed watermark token, write the catalog metadata tags that are already available for the track, and save a sibling <code>.authenticity.json</code> sidecar with the signed direct-authenticity manifest.</li>
           <li><strong>Catalog &gt; Export Authenticity Provenance Audio…</strong>: copy supported lossy derivatives as-is, write the available catalog tags, and save a signed provenance sidecar that binds the exported derivative back to a previously verified watermarked master.</li>
-          <li><strong>Catalog &gt; Verify Audio Authenticity…</strong>: inspect either selected catalog audio or a chosen external file, then either verify the direct watermark path for WAV/FLAC/AIFF or verify a signed provenance lineage sidecar for supported derivatives.</li>
+          <li><strong>Catalog &gt; Audio &gt; Authenticity &amp; Provenance &gt; Verify Audio Authenticity…</strong>: inspect either selected catalog audio or a chosen external file, then either verify the direct watermark path for WAV/FLAC/AIFF or verify a signed provenance lineage sidecar for supported derivatives.</li>
         </ul>
         <p>This feature is <strong>not DRM</strong> and does not promise forensic certainty. A watermark always changes the waveform slightly, so the goal is perceptual transparency rather than mathematical identity. The strongest in-app verification happens when the open profile still contains the original reference audio, because the app can compare the inspected export against that stored source directly.</p>
         <p>Direct embedded authenticity verification is intentionally limited to WAV, FLAC, and AIFF. Lossy formats such as MP3, OGG/OGA, Opus, and M4A/MP4/AAC are not treated as direct authenticity masters in this workflow; use provenance lineage sidecars or the separate forensic export workflow when you need lossy delivery copies.</p>
@@ -823,6 +828,10 @@ def render_help_html(
     table_header_bg = str(palette.get("header_bg") or "#edf2f7")
     table_header_fg = str(palette.get("header_fg") or heading_fg)
     link_fg = str(palette.get("link_color") or "#0f62fe")
+    app = QApplication.instance() if QApplication is not None else None
+    fallback_body_font = app.font().family().replace('"', '\\"').strip() if app is not None else "Arial"
+    body_font = str(palette.get("font_family") or "").replace('"', '\\"').strip() or fallback_body_font
+    font_family_css = f'"{body_font}", sans-serif'
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -830,7 +839,7 @@ def render_help_html(
   <title>{escape(app_name)} Help</title>
   <style>
     body {{
-      font-family: "SF Pro Text", "Helvetica Neue", "Segoe UI", Arial, sans-serif;
+      font-family: {font_family_css};
       margin: 24px;
       line-height: 1.55;
       color: {body_fg};

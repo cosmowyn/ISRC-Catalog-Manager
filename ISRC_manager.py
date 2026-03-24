@@ -387,6 +387,7 @@ from isrc_manager.ui_common import (
     FocusWheelSpinBox,
     TwoDigitSpinBox,
     _add_standard_dialog_header,
+    _apply_compact_dialog_control_heights,
     _apply_standard_dialog_chrome,
     _apply_standard_widget_chrome,
     _compose_widget_stylesheet,
@@ -635,8 +636,8 @@ class ApplicationSettingsDialog(QDialog):
         self.setObjectName("applicationSettingsDialog")
         self.setWindowTitle("Application Settings")
         self.setModal(True)
-        self.setMinimumSize(1320, 880)
-        self.resize(1400, 920)
+        self.setMinimumSize(1040, 720)
+        self.resize(1180, 820)
         self._theme_settings = dict(theme_settings or {})
         self._bundled_theme_order = tuple(spec.name for spec in STARTER_THEME_SPECS)
         self._bundled_theme_names = frozenset(self._bundled_theme_order)
@@ -1333,6 +1334,16 @@ class ApplicationSettingsDialog(QDialog):
             "When enabled, the current theme draft is applied to the running app in real time. Canceling the dialog restores the original theme.",
         )
 
+        self.theme_show_preview_check = QCheckBox("Show preview pane while editing")
+        self.theme_show_preview_check.setChecked(False)
+        self._add_row(
+            theme_library_grid,
+            2,
+            "Preview Pane",
+            self.theme_show_preview_check,
+            "Turn on the preview pane only when you want a side-by-side test surface while editing.",
+        )
+
         theme_layout.addWidget(theme_library_box)
 
         theme_intro = QLabel(
@@ -1343,9 +1354,9 @@ class ApplicationSettingsDialog(QDialog):
         theme_intro.setProperty("role", "secondary")
         theme_layout.addWidget(theme_intro)
 
-        theme_splitter = QSplitter(Qt.Horizontal, theme_page)
+        self.theme_splitter = QSplitter(Qt.Horizontal, theme_page)
 
-        theme_editor_host = QWidget(theme_splitter)
+        theme_editor_host = QWidget(self.theme_splitter)
         theme_editor_layout = QVBoxLayout(theme_editor_host)
         theme_editor_layout.setContentsMargins(0, 0, 0, 0)
         theme_editor_layout.setSpacing(10)
@@ -1354,35 +1365,35 @@ class ApplicationSettingsDialog(QDialog):
         theme_editor_layout.addWidget(self.theme_builder_tabs, 1)
         self._build_theme_builder_tabs()
 
-        theme_preview_host = QWidget(theme_splitter)
-        theme_preview_layout = QVBoxLayout(theme_preview_host)
+        self.theme_preview_host = QWidget(self.theme_splitter)
+        theme_preview_layout = QVBoxLayout(self.theme_preview_host)
         theme_preview_layout.setContentsMargins(0, 0, 0, 0)
         theme_preview_layout.setSpacing(10)
-        preview_title = QLabel("Live Preview", theme_preview_host)
+        preview_title = QLabel("Live Preview", self.theme_preview_host)
         preview_title.setProperty("role", "sectionTitle")
         theme_preview_layout.addWidget(preview_title)
         preview_subtitle = QLabel(
             "Hover, click, switch tabs, focus fields, and inspect disabled states here before you save the theme.",
-            theme_preview_host,
+            self.theme_preview_host,
         )
         preview_subtitle.setProperty("role", "secondary")
         preview_subtitle.setWordWrap(True)
         theme_preview_layout.addWidget(preview_subtitle)
-        self.theme_preview_status_label = QLabel("", theme_preview_host)
+        self.theme_preview_status_label = QLabel("", self.theme_preview_host)
         self.theme_preview_status_label.setWordWrap(True)
         self.theme_preview_status_label.setProperty("role", "secondary")
         theme_preview_layout.addWidget(self.theme_preview_status_label)
-        self.theme_preview_tabs = QTabWidget(theme_preview_host)
+        self.theme_preview_tabs = QTabWidget(self.theme_preview_host)
         self.theme_preview_tabs.setDocumentMode(True)
         self.theme_preview_tabs.tabBar().hide()
         theme_preview_layout.addWidget(self.theme_preview_tabs, 1)
         self._build_theme_preview_tabs()
 
-        theme_splitter.addWidget(theme_editor_host)
-        theme_splitter.addWidget(theme_preview_host)
-        theme_splitter.setStretchFactor(0, 3)
-        theme_splitter.setStretchFactor(1, 2)
-        theme_layout.addWidget(theme_splitter, 1)
+        self.theme_splitter.addWidget(theme_editor_host)
+        self.theme_splitter.addWidget(self.theme_preview_host)
+        self.theme_splitter.setStretchFactor(0, 3)
+        self.theme_splitter.setStretchFactor(1, 2)
+        theme_layout.addWidget(self.theme_splitter, 1)
 
         self.tabs.addTab(self._wrap_tab_page(theme_page), "Theme")
 
@@ -1439,14 +1450,14 @@ class ApplicationSettingsDialog(QDialog):
         self._configure_gs1_default_option_combos()
         self._refresh_gs1_template_options(show_errors=False)
         self._refresh_qss_selector_reference()
+        self._set_theme_preview_pane_visible(self.theme_show_preview_check.isChecked())
+        _apply_compact_dialog_control_heights(self)
 
     @staticmethod
     def _configure_grid(grid: QGridLayout):
         grid.setColumnMinimumWidth(0, 0)
         grid.setColumnMinimumWidth(1, 300)
-        grid.setColumnStretch(1, 2)
-        grid.setColumnMinimumWidth(2, 240)
-        grid.setColumnStretch(2, 1)
+        grid.setColumnStretch(1, 1)
         grid.setHorizontalSpacing(10)
         grid.setVerticalSpacing(10)
 
@@ -1582,9 +1593,16 @@ class ApplicationSettingsDialog(QDialog):
         self, grid: QGridLayout, row: int, label: str, editor: QWidget, hint: str | None = None
     ):
         grid.addWidget(self._make_label(label), row, 0)
-        grid.addWidget(editor, row, 1)
         if hint:
-            grid.addWidget(self._make_hint(hint), row, 2)
+            editor_box = QWidget(self)
+            editor_layout = QVBoxLayout(editor_box)
+            editor_layout.setContentsMargins(0, 0, 0, 0)
+            editor_layout.setSpacing(4)
+            editor_layout.addWidget(editor)
+            editor_layout.addWidget(self._make_hint(hint))
+            grid.addWidget(editor_box, row, 1)
+            return
+        grid.addWidget(editor, row, 1)
 
     def _create_color_editor(self, key: str, value: str, *, placeholder: str = "Auto") -> QWidget:
         row = QWidget(self)
@@ -2552,6 +2570,16 @@ class ApplicationSettingsDialog(QDialog):
         else:
             self._restore_original_application_theme()
 
+    def _set_theme_preview_pane_visible(self, visible: bool) -> None:
+        visible = bool(visible)
+        if hasattr(self, "theme_preview_host"):
+            self.theme_preview_host.setVisible(visible)
+        if hasattr(self, "theme_splitter"):
+            if visible:
+                self.theme_splitter.setSizes([720, 420])
+            else:
+                self.theme_splitter.setSizes([1, 0])
+
     def _handle_theme_dialog_finished(self, result: int) -> None:
         self._theme_preview_timer.stop()
         if result != QDialog.Accepted:
@@ -2788,6 +2816,7 @@ class ApplicationSettingsDialog(QDialog):
         self.theme_font_family_combo.currentFontChanged.connect(self._mark_theme_selection_custom)
         self.theme_auto_contrast_check.toggled.connect(self._mark_theme_selection_custom)
         self.theme_live_preview_check.toggled.connect(self._handle_theme_live_preview_toggled)
+        self.theme_show_preview_check.toggled.connect(self._set_theme_preview_pane_visible)
         self.theme_custom_qss_edit.textChanged.connect(self._mark_theme_selection_custom)
         for edit in self._theme_color_edits.values():
             edit.textChanged.connect(self._mark_theme_selection_custom)
@@ -5474,7 +5503,7 @@ class CatalogManagersPanel(QWidget):
         self.licensees_tab = _CatalogLicenseesPane(app, self)
         self.tabs.addTab(self.artists_tab, "Artists")
         self.tabs.addTab(self.albums_tab, "Albums")
-        self.tabs.addTab(self.licensees_tab, "Legacy Licensees")
+        self.tabs.addTab(self.licensees_tab, "Licensees")
         root.addWidget(self.tabs, 1)
 
         self.focus_tab(initial_tab)
@@ -5501,8 +5530,8 @@ class CatalogManagersDialog(QDialog):
         self.setObjectName("catalogManagersDialog")
         self.setWindowTitle("Catalog Managers")
         self.setModal(True)
-        self.setMinimumSize(1100, 720)
-        self.resize(1180, 760)
+        self.setMinimumSize(920, 620)
+        self.resize(1020, 700)
         _apply_standard_dialog_chrome(self, "catalogManagersDialog")
 
         root = QVBoxLayout(self)
@@ -5522,6 +5551,12 @@ class CatalogManagersDialog(QDialog):
         root.addWidget(buttons)
 
         self.focus_tab(initial_tab)
+
+    def focus_tab(self, tab_name: str = "artists") -> None:
+        self.panel.focus_tab(tab_name)
+
+    def refresh(self) -> None:
+        self.panel.refresh()
 
 
 class App(QMainWindow):
@@ -6669,6 +6704,18 @@ class App(QMainWindow):
         }
 
         checks = []
+        history_storage_budget_summary: dict[str, object] = {
+            "available": False,
+            "usage_text": "Not available",
+            "budget_text": "Not available",
+            "over_budget_text": "Not available",
+            "reclaimable_text": "Not available",
+            "retention_mode_label": "",
+            "auto_cleanup_text": "",
+            "candidate_count": 0,
+            "summary": "History storage information is not available for the current profile.",
+            "within_budget": True,
+        }
 
         def add_check(
             title: str,
@@ -7202,6 +7249,27 @@ class App(QMainWindow):
             reclaimable_bytes = sum(
                 int(item.bytes_on_disk or 0) for item in budget_preview.candidate_items
             )
+            history_storage_budget_summary = {
+                "available": True,
+                "total_bytes": int(budget_preview.total_bytes or 0),
+                "budget_bytes": int(budget_preview.budget_bytes or 0),
+                "over_budget_bytes": int(budget_preview.over_budget_bytes or 0),
+                "reclaimable_bytes": int(reclaimable_bytes or 0),
+                "candidate_count": len(budget_preview.candidate_items),
+                "retention_mode_label": mode_labels.get(
+                    retention_settings.retention_mode,
+                    str(retention_settings.retention_mode or ""),
+                ),
+                "auto_cleanup_enabled": bool(retention_settings.auto_cleanup_enabled),
+                "auto_cleanup_text": (
+                    "Enabled" if retention_settings.auto_cleanup_enabled else "Disabled"
+                ),
+                "usage_text": self._human_size(budget_preview.total_bytes),
+                "budget_text": self._human_size(budget_preview.budget_bytes),
+                "over_budget_text": self._human_size(budget_preview.over_budget_bytes),
+                "reclaimable_text": self._human_size(reclaimable_bytes),
+                "within_budget": budget_preview.over_budget_bytes <= 0,
+            }
             budget_details = [
                 f"Retention level: {mode_labels.get(retention_settings.retention_mode, retention_settings.retention_mode)}",
                 (
@@ -7230,6 +7298,10 @@ class App(QMainWindow):
                     "History storage is within the configured budget.",
                     "\n".join(budget_details),
                 )
+                history_storage_budget_summary["summary"] = (
+                    f"History storage is using {self._human_size(budget_preview.total_bytes)} "
+                    f"of a {self._human_size(budget_preview.budget_bytes)} budget."
+                )
             else:
                 warning_summary = f"History storage is over budget by {self._human_size(budget_preview.over_budget_bytes)}."
                 if budget_preview.auto_cleanup_enabled and budget_preview.candidate_items:
@@ -7250,6 +7322,11 @@ class App(QMainWindow):
                     warning_summary,
                     "\n".join(budget_details),
                 )
+                history_storage_budget_summary["summary"] = (
+                    f"History storage is using {self._human_size(budget_preview.total_bytes)} "
+                    f"of a {self._human_size(budget_preview.budget_bytes)} budget and is over budget by "
+                    f"{self._human_size(budget_preview.over_budget_bytes)}."
+                )
         except Exception as exc:
             add_check(
                 "History snapshots",
@@ -7260,8 +7337,17 @@ class App(QMainWindow):
                 repair_label="Repair History Artifacts",
                 orphan_count=0,
             )
+            history_storage_budget_summary = {
+                **history_storage_budget_summary,
+                "available": False,
+                "summary": f"History storage information could not be inspected: {exc}",
+            }
 
-        return {"environment": environment, "checks": checks}
+        return {
+            "environment": environment,
+            "checks": checks,
+            "history_storage_budget": history_storage_budget_summary,
+        }
 
     def _load_diagnostics_report_async(
         self,
@@ -9400,11 +9486,36 @@ class App(QMainWindow):
         if self.catalog_service is None:
             QMessageBox.warning(self, "Catalog Managers", "Open a profile first.")
             return
-        dock = self._ensure_catalog_managers_dock()
-        panel = dock.show_panel()
-        panel.focus_tab(initial_tab)
-        self.catalog_managers_dialog = panel
+        panel = self._show_workspace_panel(
+            self._ensure_catalog_managers_dock,
+            panel_attr="catalog_managers_panel",
+            legacy_attr="catalog_managers_dialog",
+            configure=lambda widget: widget.focus_tab(initial_tab),
+        )
         self.populate_all_comboboxes()
+        return panel
+
+    def _show_workspace_panel(
+        self,
+        ensure_dock,
+        *,
+        panel_attr: str,
+        legacy_attr: str | None = None,
+        configure=None,
+        refresh_scope: bool = False,
+    ):
+        dock = ensure_dock()
+        panel = dock.show_panel()
+        if callable(configure):
+            configure(panel)
+        if refresh_scope:
+            refresh_selection_scope = getattr(panel, "refresh_selection_scope", None)
+            if callable(refresh_selection_scope):
+                refresh_selection_scope()
+        setattr(self, panel_attr, panel)
+        if legacy_attr:
+            setattr(self, legacy_attr, panel)
+        return panel
 
     def _manage_stored_artists(self):
         self.open_catalog_managers_dialog(initial_tab="artists")
@@ -10179,6 +10290,7 @@ class App(QMainWindow):
     def _create_asset_registry_panel(self, parent: QWidget) -> AssetBrowserPanel:
         return AssetBrowserPanel(
             asset_service_provider=lambda: self.asset_service,
+            drill_in_host_provider=lambda: self,
             parent=parent,
         )
 
@@ -10378,9 +10490,9 @@ class App(QMainWindow):
         specs = [
             {
                 "id": "save_entry",
-                "label": "Save Entry",
+                "label": "Save Track",
                 "category": "Edit",
-                "description": "Create a new catalog row from the Add Data form.",
+                "description": "Create a new track from the Add Track form.",
                 "action": self.save_entry_action,
                 "default": True,
             },
@@ -10390,7 +10502,6 @@ class App(QMainWindow):
                 "category": "Edit",
                 "description": "Open the structured album-entry dialog with dynamic track sections.",
                 "action": self.add_album_action,
-                "default": True,
             },
             {
                 "id": "edit_selected",
@@ -10398,7 +10509,6 @@ class App(QMainWindow):
                 "category": "Edit",
                 "description": "Open the current selected row or batch in the full editor.",
                 "action": self.edit_selected_action,
-                "default": True,
             },
             {
                 "id": "delete_entry",
@@ -10406,7 +10516,6 @@ class App(QMainWindow):
                 "category": "Edit",
                 "description": "Delete the current selected row or rows after confirmation.",
                 "action": self.delete_entry_action,
-                "default": True,
             },
             {
                 "id": "undo",
@@ -10414,7 +10523,6 @@ class App(QMainWindow):
                 "category": "Edit",
                 "description": "Undo the latest reversible action from session or profile history.",
                 "action": self.undo_action,
-                "default": True,
             },
             {
                 "id": "redo",
@@ -10422,7 +10530,6 @@ class App(QMainWindow):
                 "category": "Edit",
                 "description": "Redo the next available history action.",
                 "action": self.redo_action,
-                "default": True,
             },
             {
                 "id": "copy",
@@ -10442,7 +10549,7 @@ class App(QMainWindow):
                 "id": "reset_form",
                 "label": "Reset Form and Search",
                 "category": "Edit",
-                "description": "Clear the Add Data form and reset the current search filter.",
+                "description": "Clear the Add Track form and reset the current search filter.",
                 "action": self.reset_form_action,
             },
             {
@@ -10475,11 +10582,10 @@ class App(QMainWindow):
             },
             {
                 "id": "import_xml",
-                "label": "Import XML",
+                "label": "Import Catalog XML",
                 "category": "File",
                 "description": "Import catalog data from a supported XML file.",
                 "action": self.import_xml_action,
-                "default": True,
             },
             {
                 "id": "import_csv",
@@ -10515,7 +10621,6 @@ class App(QMainWindow):
                 "category": "File",
                 "description": "Export the current selected catalog rows to XML.",
                 "action": self.export_selected_action,
-                "default": True,
             },
             {
                 "id": "export_all",
@@ -10661,7 +10766,7 @@ class App(QMainWindow):
             {
                 "id": "convert_external_audio",
                 "label": "Convert External Audio Files",
-                "category": "File",
+                "category": "Catalog",
                 "description": "Convert one or more external audio files with the utility workflow only: no catalog metadata, no watermarking, and no derivative registration.",
                 "action": self.convert_external_audio_files_action,
             },
@@ -10712,9 +10817,9 @@ class App(QMainWindow):
             },
             {
                 "id": "show_add_data",
-                "label": "Show Add Data Panel",
+                "label": "Show Add Track Panel",
                 "category": "Catalog",
-                "description": "Toggle the Add Data dock panel.",
+                "description": "Toggle the Add Track dock panel.",
                 "action": self.add_data_action,
             },
             {
@@ -12412,7 +12517,7 @@ class App(QMainWindow):
         try:
             dlg = EditDialog(int(track_id), self, batch_track_ids=batch_track_ids)
         except ValueError as exc:
-            QMessageBox.warning(self, "Edit Entry", str(exc))
+            QMessageBox.warning(self, "Edit Track", str(exc))
             return
         dlg.exec()
         self.populate_all_comboboxes()
@@ -12425,7 +12530,7 @@ class App(QMainWindow):
             if not selected_ids:
                 QMessageBox.warning(
                     self,
-                    "Edit Entry",
+                    "Edit Track",
                     "Could not determine the selected track. Select one or more catalog rows and try again.",
                 )
                 return
@@ -12439,7 +12544,7 @@ class App(QMainWindow):
             if track_id <= 0:
                 QMessageBox.warning(
                     self,
-                    "Edit Entry",
+                    "Edit Track",
                     "Could not determine the selected track. Select one or more catalog rows and try again.",
                 )
                 return
@@ -12452,7 +12557,7 @@ class App(QMainWindow):
         row_idx = item.row()
         track_id = self._track_id_for_table_row(row_idx)
         if track_id is None:
-            QMessageBox.warning(self, "Edit Entry", "Could not determine the selected track.")
+            QMessageBox.warning(self, "Edit Track", "Could not determine the selected track.")
             return
         self.open_selected_editor(track_id)
 
@@ -13045,42 +13150,46 @@ class App(QMainWindow):
         if self.release_service is None:
             QMessageBox.warning(self, "Release Browser", "Open a profile first.")
             return
-        dock = self._ensure_release_browser_dock()
-        panel = dock.show_panel()
-        refresh_scope = getattr(panel, "refresh_selection_scope", None)
-        if callable(refresh_scope):
-            refresh_scope()
-        self.release_browser_dialog = panel
+        return self._show_workspace_panel(
+            self._ensure_release_browser_dock,
+            panel_attr="release_browser_panel",
+            legacy_attr="release_browser_dialog",
+            refresh_scope=True,
+        )
 
     def open_work_manager(self, linked_track_id: int | None = None):
         if self.work_service is None:
             QMessageBox.warning(self, "Work Manager", "Open a profile first.")
             return
-        dock = self._ensure_work_manager_dock()
-        panel = dock.show_panel()
-        panel.set_linked_track_id(linked_track_id)
-        refresh_scope = getattr(panel, "refresh_selection_scope", None)
-        if callable(refresh_scope):
-            refresh_scope()
-        self.work_browser_dialog = panel
+        return self._show_workspace_panel(
+            self._ensure_work_manager_dock,
+            panel_attr="work_manager_panel",
+            legacy_attr="work_browser_dialog",
+            configure=lambda panel: panel.set_linked_track_id(linked_track_id),
+            refresh_scope=True,
+        )
 
     def open_party_manager(self, party_id: int | None = None):
         if self.party_service is None:
             QMessageBox.warning(self, "Party Manager", "Open a profile first.")
             return
-        dock = self._ensure_party_manager_dock()
-        panel = dock.show_panel()
-        panel.focus_party(party_id)
-        self.party_manager_dialog = panel
+        return self._show_workspace_panel(
+            self._ensure_party_manager_dock,
+            panel_attr="party_manager_panel",
+            legacy_attr="party_manager_dialog",
+            configure=lambda panel: panel.focus_party(party_id),
+        )
 
     def open_contract_manager(self, contract_id: int | None = None):
         if self.contract_service is None:
             QMessageBox.warning(self, "Contract Manager", "Open a profile first.")
             return
-        dock = self._ensure_contract_manager_dock()
-        panel = dock.show_panel()
-        panel.focus_contract(contract_id)
-        self.contract_manager_dialog = panel
+        return self._show_workspace_panel(
+            self._ensure_contract_manager_dock,
+            panel_attr="contract_manager_panel",
+            legacy_attr="contract_manager_dialog",
+            configure=lambda panel: panel.focus_contract(contract_id),
+        )
 
     def open_rights_matrix(self, right_id: int | None = None):
         if (
@@ -13090,26 +13199,44 @@ class App(QMainWindow):
         ):
             QMessageBox.warning(self, "Rights Matrix", "Open a profile first.")
             return
-        dock = self._ensure_rights_matrix_dock()
-        panel = dock.show_panel()
-        panel.focus_right(right_id)
-        self.rights_browser_dialog = panel
+        return self._show_workspace_panel(
+            self._ensure_rights_matrix_dock,
+            panel_attr="rights_matrix_panel",
+            legacy_attr="rights_browser_dialog",
+            configure=lambda panel: panel.focus_right(right_id),
+        )
 
     def open_asset_registry(self, asset_id: int | None = None):
         if self.asset_service is None:
             QMessageBox.warning(self, "Asset Registry", "Open a profile first.")
             return
-        dock = self._ensure_asset_registry_dock()
-        panel = dock.show_panel()
-        panel.focus_asset(asset_id)
-        self.asset_browser_dialog = panel
+        return self._show_workspace_panel(
+            self._ensure_asset_registry_dock,
+            panel_attr="asset_registry_panel",
+            legacy_attr="asset_browser_dialog",
+            configure=lambda panel: panel.focus_asset(asset_id),
+        )
+
+    def open_derivative_ledger(self, batch_id: str | None = None):
+        if self.asset_service is None:
+            QMessageBox.warning(self, "Derivative Ledger", "Open a profile first.")
+            return
+        return self._show_workspace_panel(
+            self._ensure_asset_registry_dock,
+            panel_attr="asset_registry_panel",
+            legacy_attr="asset_browser_dialog",
+            configure=lambda panel: panel.focus_derivative_batch(batch_id),
+        )
 
     def open_global_search(self):
         if self.global_search_service is None or self.relationship_explorer_service is None:
             QMessageBox.warning(self, "Global Search", "Open a profile first.")
             return
-        dock = self._ensure_global_search_dock()
-        self.global_search_dialog = dock.show_panel()
+        return self._show_workspace_panel(
+            self._ensure_global_search_dock,
+            panel_attr="global_search_panel",
+            legacy_attr="global_search_dialog",
+        )
 
     def _open_entity_from_relationship_search(self, entity_type: str, entity_id: int):
         normalized = str(entity_type or "").strip().lower()
@@ -16020,7 +16147,7 @@ class App(QMainWindow):
         msg_box = QMessageBox(self)
         msg_box.setIcon(QMessageBox.Warning)
         msg_box.setText("Are you sure you want to delete this entry?")
-        msg_box.setWindowTitle("Delete Entry")
+        msg_box.setWindowTitle("Delete Track")
         msg_box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
         if msg_box.exec() == QMessageBox.Yes:
             try:
@@ -16585,7 +16712,7 @@ class App(QMainWindow):
             self.settings.sync()
 
         self._run_setting_bundle_history_action(
-            action_label="Toggle Add Data Panel",
+            action_label="Toggle Add Track Panel",
             setting_keys=["display/add_data_panel"],
             mutation=mutation,
             entity_id="display/add_data_panel",
@@ -17148,9 +17275,8 @@ class App(QMainWindow):
         track_id = self._track_id_for_table_row(row)
         selected_ids = self._selected_track_ids()
         bulk_count = len(selected_ids) if track_id is not None and track_id in selected_ids else 1
-        track_title = self._get_track_title(track_id) if track_id else ""
         edit_label = (
-            "Edit Entry" if bulk_count <= 1 else f"Bulk Edit {bulk_count} Selected Entries…"
+            "Edit Track" if bulk_count <= 1 else f"Bulk Edit {bulk_count} Selected Tracks…"
         )
         act_edit = QAction(edit_label, self)
         act_edit.triggered.connect(lambda: self.open_selected_editor(track_id))
@@ -17176,24 +17302,25 @@ class App(QMainWindow):
             act_link_work.triggered.connect(lambda: self.open_work_manager())
             menu.addAction(act_link_work)
 
-        act_delete = QAction("Delete Entry", self)
+        act_delete = QAction("Delete Track", self)
         act_delete.triggered.connect(self.delete_entry)
         menu.addAction(act_delete)
 
-        menu.addSeparator()
-        # Licenses actions
         if track_id:
+            menu.addSeparator()
+            licenses_menu = menu.addMenu("Licenses")
+
             act_add_license = QAction("Add License to this Track…", self)
             act_add_license.triggered.connect(
                 lambda: self.open_license_upload(preselect_track_id=track_id)
             )
-            menu.addAction(act_add_license)
+            licenses_menu.addAction(act_add_license)
 
             act_view_licenses = QAction("View Licenses for this Track…", self)
             act_view_licenses.triggered.connect(
                 lambda: self.open_licenses_browser(track_filter_id=track_id)
             )
-            menu.addAction(act_view_licenses)
+            licenses_menu.addAction(act_view_licenses)
 
             if self.track_has_media(track_id, "audio_file"):
                 export_track_ids = selected_ids if track_id in selected_ids else [track_id]
@@ -17263,6 +17390,7 @@ class App(QMainWindow):
                 act_verify_authenticity.triggered.connect(self.verify_audio_authenticity)
                 audio_menu.addAction(act_verify_authenticity)
 
+        menu.addSeparator()
         cell_item = self.table.item(row, col)
         cell_text = cell_item.text() if cell_item else ""
         act_filter = QAction(f"Set Filter: '{cell_text}'", self)
@@ -17274,29 +17402,45 @@ class App(QMainWindow):
         act_copy.triggered.connect(lambda: self._copy_selection_to_clipboard(False))
         menu.addAction(act_copy)
 
-        act_copy_hdrs = QAction("Copy with headers", self)
+        act_copy_hdrs = QAction("Copy with Headers", self)
         act_copy_hdrs.triggered.connect(lambda: self._copy_selection_to_clipboard(True))
         menu.addAction(act_copy_hdrs)
-
-        menu.addSeparator()
 
         header_item = self.table.horizontalHeaderItem(col)
         header_text = header_item.text() if header_item is not None else ""
         standard_media_key = self._standard_media_key_for_header(header_text)
+        file_menu = None
+        storage_menu = None
+
+        def ensure_file_menu():
+            nonlocal file_menu
+            if file_menu is None:
+                menu.addSeparator()
+                file_menu = menu.addMenu("File")
+            return file_menu
+
+        def ensure_storage_menu():
+            nonlocal storage_menu
+            if storage_menu is None:
+                if file_menu is None:
+                    menu.addSeparator()
+                storage_menu = menu.addMenu("Storage")
+            return storage_menu
+
         if track_id and standard_media_key:
+            standard_file_menu = ensure_file_menu()
             if self.track_has_media(track_id, standard_media_key):
                 act_prev = QAction("Preview File…", self)
                 act_prev.triggered.connect(
                     lambda: self._preview_standard_media_for_track(track_id, standard_media_key)
                 )
-                menu.addAction(act_prev)
+                standard_file_menu.addAction(act_prev)
 
-            menu.addSeparator()
             act_attach_standard = QAction("Attach/Replace File…", self)
             act_attach_standard.triggered.connect(
                 lambda: self._attach_standard_media_for_track(track_id, standard_media_key)
             )
-            menu.addAction(act_attach_standard)
+            standard_file_menu.addAction(act_attach_standard)
 
             if self.track_has_media(track_id, standard_media_key):
                 export_basename = self._media_export_basename_for_track(
@@ -17311,13 +17455,13 @@ class App(QMainWindow):
                         export_basename,
                     )
                 )
-                menu.addAction(act_export_standard)
+                standard_file_menu.addAction(act_export_standard)
 
                 act_delete_standard = QAction("Delete File…", self)
                 act_delete_standard.triggered.connect(
                     lambda: self._delete_standard_media_for_track(track_id, standard_media_key)
                 )
-                menu.addAction(act_delete_standard)
+                standard_file_menu.addAction(act_delete_standard)
 
                 current_mode = normalize_storage_mode(
                     str(
@@ -17333,7 +17477,7 @@ class App(QMainWindow):
                             tid, key, STORAGE_MODE_DATABASE
                         )
                     )
-                    menu.addAction(act_convert_standard_db)
+                    ensure_storage_menu().addAction(act_convert_standard_db)
                 if current_mode != STORAGE_MODE_MANAGED_FILE:
                     act_convert_standard_file = QAction("Store as Managed File", self)
                     act_convert_standard_file.triggered.connect(
@@ -17341,9 +17485,7 @@ class App(QMainWindow):
                             tid, key, STORAGE_MODE_MANAGED_FILE
                         )
                     )
-                    menu.addAction(act_convert_standard_file)
-
-            menu.addSeparator()
+                    ensure_storage_menu().addAction(act_convert_standard_file)
 
         # Preview file action for custom blob columns
         if col >= len(self.BASE_HEADERS):
@@ -17352,6 +17494,7 @@ class App(QMainWindow):
                 id_item = self.table.item(row, 0)
                 if id_item:
                     track_id = int(id_item.text())
+                    custom_file_menu = ensure_file_menu()
                     act_prev = QAction("Preview File…", self)
 
                     def _do_prev():
@@ -17379,7 +17522,7 @@ class App(QMainWindow):
                             )
 
                     act_prev.triggered.connect(_do_prev)
-                    menu.addAction(act_prev)
+                    custom_file_menu.addAction(act_prev)
 
         # Blob field actions for custom columns
         if col >= len(self.BASE_HEADERS):
@@ -17391,22 +17534,21 @@ class App(QMainWindow):
             if id_item and field.get("field_type") in ("blob_image", "blob_audio"):
                 track_id = int(id_item.text())
                 track_title = title_item.text() if title_item else f"track_{track_id}"
-
-                menu.addSeparator()
+                custom_file_menu = ensure_file_menu()
                 act_attach = QAction("Attach/Replace File…", self)
                 act_attach.triggered.connect(
                     lambda: self._attach_blob_for_cell(
                         track_id, field_id, field.get("field_type"), field.get("name")
                     )
                 )
-                menu.addAction(act_attach)
+                custom_file_menu.addAction(act_attach)
 
                 # Use track title for export action label
                 act_export = QAction(f"Export '{track_title}'…", self)
                 act_export.triggered.connect(
                     lambda: self.cf_export_blob(track_id, field_id, self, track_title)
                 )
-                menu.addAction(act_export)
+                custom_file_menu.addAction(act_export)
                 meta = self.cf_get_value_meta(
                     track_id,
                     field_id,
@@ -17422,7 +17564,7 @@ class App(QMainWindow):
                             STORAGE_MODE_DATABASE,
                         )
                     )
-                    menu.addAction(act_cf_db)
+                    ensure_storage_menu().addAction(act_cf_db)
                 if current_mode != STORAGE_MODE_MANAGED_FILE:
                     act_cf_file = QAction("Store as Managed File", self)
                     act_cf_file.triggered.connect(
@@ -17432,7 +17574,7 @@ class App(QMainWindow):
                             STORAGE_MODE_MANAGED_FILE,
                         )
                     )
-                    menu.addAction(act_cf_file)
+                    ensure_storage_menu().addAction(act_cf_file)
 
         # Delete blob action for custom blob columns
         if col >= len(self.BASE_HEADERS):
@@ -17442,6 +17584,7 @@ class App(QMainWindow):
                 if id_item:
                     track_id = int(id_item.text())
                     if self.cf_has_blob(track_id, field["id"]):
+                        custom_file_menu = ensure_file_menu()
                         act_del = QAction("Delete File…", self)
 
                         def _do_del():
@@ -17476,7 +17619,7 @@ class App(QMainWindow):
                                     )
 
                         act_del.triggered.connect(_do_del)
-                        menu.addAction(act_del)
+                        custom_file_menu.addAction(act_del)
 
         media_export_spec = self._focused_media_export_spec(col)
         if bulk_count > 1 and media_export_spec is not None:
@@ -19486,10 +19629,12 @@ class App(QMainWindow):
         if self.license_service is None:
             QMessageBox.warning(self, "License Browser", "Open a profile first.")
             return
-        dock = self._ensure_license_browser_dock()
-        panel = dock.show_panel()
-        panel.set_track_filter_id(track_filter_id)
-        self.licenses_browser_dialog = panel
+        return self._show_workspace_panel(
+            self._ensure_license_browser_dock,
+            panel_attr="license_browser_panel",
+            legacy_attr="licenses_browser_dialog",
+            configure=lambda panel: panel.set_track_filter_id(track_filter_id),
+        )
 
 
 class _AlbumTrackSection(QWidget):
@@ -20368,7 +20513,7 @@ class EditDialog(QDialog):
         self._clear_album_art = False
 
         self.setWindowTitle(
-            f"Bulk Edit {len(self.batch_track_ids)} Entries" if self._is_bulk_edit else "Edit Entry"
+            f"Bulk Edit {len(self.batch_track_ids)} Tracks" if self._is_bulk_edit else "Edit Track"
         )
         self.setModal(True)
         self.resize(760, 920 if self._is_bulk_edit else 860)
@@ -22231,10 +22376,12 @@ def open_licenses_browser(self, track_filter_id=None):
     if self.license_service is None:
         QMessageBox.warning(self, "License Browser", "Open a profile first.")
         return
-    dock = self._ensure_license_browser_dock()
-    panel = dock.show_panel()
-    panel.set_track_filter_id(track_filter_id)
-    self.licenses_browser_dialog = panel
+    return self._show_workspace_panel(
+        self._ensure_license_browser_dock,
+        panel_attr="license_browser_panel",
+        legacy_attr="licenses_browser_dialog",
+        configure=lambda panel: panel.set_track_filter_id(track_filter_id),
+    )
 
 
 class WaveformWidget(QWidget):

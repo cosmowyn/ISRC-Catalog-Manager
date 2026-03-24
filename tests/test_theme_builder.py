@@ -7,7 +7,7 @@ from unittest import mock
 from tests.qt_test_helpers import require_qapplication
 
 try:
-    from PySide6.QtWidgets import QMessageBox, QWidget
+    from PySide6.QtWidgets import QGridLayout, QLabel, QMessageBox, QWidget
 
     import ISRC_manager as app_module
     from isrc_manager.starter_themes import starter_theme_library, starter_theme_names
@@ -294,6 +294,69 @@ class ThemeBuilderTests(unittest.TestCase):
             self.assertEqual(values["blob_icon_settings"]["audio"]["emoji"], "🎧")
             self.assertEqual(values["blob_icon_settings"]["audio_lossy"]["emoji"], "📼")
             self.assertEqual(sorted(dialog._blob_icon_editors), ["audio", "audio_lossy", "image"])
+        finally:
+            dialog.close()
+            host.close()
+
+    def test_application_settings_dialog_uses_compact_size_and_optional_preview_pane(self):
+        host = _ThemePreviewHost()
+        dialog = app_module.ApplicationSettingsDialog(
+            window_title="Catalog",
+            icon_path="",
+            artist_code="00",
+            auto_snapshot_enabled=True,
+            auto_snapshot_interval_minutes=30,
+            isrc_prefix="NLABC",
+            sena_number="",
+            btw_number="",
+            buma_relatie_nummer="",
+            buma_ipi="",
+            gs1_template_asset=None,
+            gs1_contracts_csv_path="",
+            gs1_contract_entries=(),
+            gs1_active_contract_number="",
+            gs1_target_market="",
+            gs1_language="",
+            gs1_brand="",
+            gs1_subbrand="",
+            gs1_packaging_type="",
+            gs1_product_classification="",
+            theme_settings={},
+            stored_themes={},
+            current_profile_path="",
+            parent=host,
+        )
+        try:
+            host.show()
+            dialog.show()
+            self.app.processEvents()
+
+            self.assertEqual(dialog.minimumWidth(), 1040)
+            self.assertEqual(dialog.minimumHeight(), 720)
+            self.assertEqual(dialog.width(), 1180)
+            self.assertEqual(dialog.height(), 820)
+            self.assertFalse(dialog.theme_show_preview_check.isChecked())
+            self.assertTrue(dialog.theme_preview_host.isHidden())
+
+            dialog.theme_show_preview_check.setChecked(True)
+            self.app.processEvents()
+            self.assertFalse(dialog.theme_preview_host.isHidden())
+            self.assertGreater(dialog.theme_splitter.sizes()[1], 0)
+
+            general_grid = None
+            for grid in dialog.findChildren(QGridLayout):
+                label_item = grid.itemAtPosition(0, 0)
+                if label_item is None or not isinstance(label_item.widget(), QLabel):
+                    continue
+                if label_item.widget().text() == "Window Title":
+                    general_grid = grid
+                    break
+            self.assertIsNotNone(general_grid)
+            assert general_grid is not None
+            self.assertIsNone(general_grid.itemAtPosition(0, 2))
+            self.assertIsNone(general_grid.itemAtPosition(1, 2))
+            self.assertIsNone(general_grid.itemAtPosition(2, 2))
+            self.assertIsInstance(general_grid.itemAtPosition(0, 1).widget(), QWidget)
         finally:
             dialog.close()
             host.close()

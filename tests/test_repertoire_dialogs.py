@@ -1,4 +1,7 @@
 import unittest
+import sqlite3
+import tempfile
+from pathlib import Path
 
 from tests.qt_test_helpers import require_qapplication
 
@@ -6,16 +9,29 @@ try:
     from PySide6.QtWidgets import (
         QComboBox,
         QDialogButtonBox,
+        QGroupBox,
+        QLabel,
         QLineEdit,
         QPlainTextEdit,
         QScrollArea,
         QTabWidget,
+        QWidget,
     )
 
-    from isrc_manager.assets.dialogs import AssetEditorDialog
+    from isrc_manager.assets.dialogs import AssetBrowserPanel, AssetEditorDialog
+    from isrc_manager.media.derivatives import DerivativeLedgerService
     from isrc_manager.contracts.dialogs import ContractEditorDialog
     from isrc_manager.parties.dialogs import PartyEditorDialog
     from isrc_manager.releases.dialogs import ReleaseBrowserDialog, ReleaseEditorDialog
+    from isrc_manager.services import (
+        AssetService,
+        DatabaseSchemaService,
+        ReleasePayload,
+        ReleaseService,
+        ReleaseTrackPlacement,
+        TrackCreatePayload,
+        TrackService,
+    )
     from isrc_manager.rights.dialogs import RightEditorDialog
     from isrc_manager.search.dialogs import GlobalSearchDialog
     from isrc_manager.selection_scope import SelectionScopeBanner
@@ -60,6 +76,24 @@ class _EmptySearchService:
 class _EmptyRelationshipService:
     def describe_links(self, *_args, **_kwargs):
         return []
+
+
+class _DerivativeLedgerHost(QWidget):
+    def __init__(self, release_service):
+        super().__init__()
+        self.release_service = release_service
+        self.opened_track_ids: list[int] = []
+        self.opened_release_ids: list[int] = []
+        self.verified_paths: list[str] = []
+
+    def open_selected_editor(self, track_id: int):
+        self.opened_track_ids.append(int(track_id))
+
+    def open_release_editor(self, release_id: int):
+        self.opened_release_ids.append(int(release_id))
+
+    def verify_audio_authenticity(self, path: str):
+        self.verified_paths.append(str(path))
 
 
 class RepertoireDialogSmokeTests(unittest.TestCase):
@@ -184,6 +218,144 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
             self.assertIsInstance(dialog.territory_edit, QLineEdit)
         finally:
             dialog.close()
+
+    def test_release_editor_uses_compact_grouped_metadata_sections(self):
+        dialog = ReleaseEditorDialog(
+            release_service=object(),
+            track_title_resolver=lambda track_id: f"Track {track_id}",
+            selected_track_ids_provider=lambda: [],
+        )
+        try:
+            dialog.show()
+            self.app.processEvents()
+            self.assertEqual(dialog.objectName(), "releaseEditorDialog")
+            self.assertEqual(dialog.minimumWidth(), 880)
+            self.assertEqual(dialog.minimumHeight(), 640)
+            self.assertEqual(dialog.width(), 960)
+            self.assertEqual(dialog.height(), 720)
+            self.assertEqual(
+                dialog.artwork_storage_mode_combo.itemText(0),
+                "Stored in Database",
+            )
+            self.assertEqual(
+                dialog.artwork_storage_mode_combo.itemText(1),
+                "Managed File",
+            )
+            group_titles = {group.title() for group in dialog.findChildren(QGroupBox)}
+            self.assertTrue(
+                {
+                    "Identity & Credits",
+                    "Release Details",
+                    "Artwork & Notes",
+                }.issubset(group_titles)
+            )
+            self.assertTrue(
+                any(label.text() == dialog.windowTitle() for label in dialog.findChildren(QLabel))
+            )
+        finally:
+            dialog.close()
+
+    def test_asset_browser_exposes_derivative_ledger_drill_ins(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_root = Path(tmpdir)
+            conn = sqlite3.connect(":memory:")
+            try:
+                schema = DatabaseSchemaService(conn, data_root=data_root)
+                schema.init_db()
+                schema.migrate_schema()
+                track_service = TrackService(conn, data_root=data_root)
+                release_service = ReleaseService(conn, data_root=data_root)
+                asset_service = AssetService(conn, data_root=data_root)
+
+                track_id = track_service.create_track(
+                    TrackCreatePayload(
+                        isrc="NL-TST-26-09991",
+                        track_title="Ledger Drill In",
+                        artist_name="Cosmowyn",
+                        additional_artists=[],
+                        album_title="Ledger Release",
+                        release_date="2026-03-24",
+                        track_length_sec=245,
+                        iswc=None,
+                        upc=None,
+                        genre="Ambient",
+                        catalog_number=None,
+                    )
+                )
+                release_id = release_service.create_release(
+                    ReleasePayload(
+                        title="Ledger Release",
+                        primary_artist="Cosmowyn",
+                        release_date="2026-03-24",
+                        placements=[ReleaseTrackPlacement(track_id=track_id)],
+                    )
+                )
+                output_path = data_root / "exports" / "ledger-output.wav"
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                output_path.write_bytes(b"RIFFledger-output")
+
+                ledger_service = DerivativeLedgerService(conn)
+                batch_id = ledger_service.create_batch(
+                    batch_public_id="AEX-LEDGER-DRILLIN-01",
+                    track_count=1,
+                    output_format="wav",
+                    workflow_kind="managed_audio_derivative",
+                    derivative_kind="watermark_authentic",
+                    authenticity_basis="direct_watermark",
+                    profile_name="catalog.db",
+                )
+                ledger_service.create_derivative(
+                    source_track_id=track_id,
+                    export_batch_id=batch_id,
+                    workflow_kind="managed_audio_derivative",
+                    derivative_kind="watermark_authentic",
+                    authenticity_basis="direct_watermark",
+                    output_format="wav",
+                    watermark_applied=True,
+                    metadata_embedded=True,
+                    final_sha256="b" * 64,
+                    output_filename=output_path.name,
+                    source_lineage_ref="track-audio:ledger-source.wav",
+                    source_sha256="c" * 64,
+                    source_storage_mode="database",
+                    authenticity_manifest_id="manifest-ledger-001",
+                    output_size_bytes=output_path.stat().st_size,
+                    filename_hash_suffix="ledgerdrillin",
+                    managed_file_path=str(output_path),
+                )
+                conn.commit()
+
+                host = _DerivativeLedgerHost(release_service)
+                panel = AssetBrowserPanel(
+                    asset_service_provider=lambda: asset_service,
+                    drill_in_host_provider=lambda: host,
+                )
+                try:
+                    panel.focus_derivative_batch(batch_id)
+                    self.app.processEvents()
+
+                    ledger_tab = panel.derivative_ledger_tab
+                    self.assertEqual(
+                        [panel.workspace_tabs.tabText(index) for index in range(panel.workspace_tabs.count())],
+                        ["Asset Registry", "Derivative Ledger"],
+                    )
+                    self.assertTrue(ledger_tab.open_track_button.isEnabled())
+                    self.assertTrue(ledger_tab.open_release_button.isEnabled())
+                    self.assertTrue(ledger_tab.verify_authenticity_button.isEnabled())
+
+                    ledger_tab.open_track_button.click()
+                    ledger_tab.open_release_button.click()
+                    ledger_tab.verify_authenticity_button.click()
+
+                    self.assertEqual(host.opened_track_ids, [track_id])
+                    self.assertEqual(host.opened_release_ids, [release_id])
+                    self.assertEqual(host.verified_paths, [str(output_path)])
+                    self.assertIn(str(output_path), ledger_tab.details_edit.toPlainText())
+                finally:
+                    panel.close()
+                    host.close()
+            finally:
+                conn.close()
 
     def test_selection_scope_banner_wraps_action_buttons_more_compactly(self):
         banner = SelectionScopeBanner()

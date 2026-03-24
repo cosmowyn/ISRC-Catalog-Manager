@@ -22,23 +22,29 @@ from .models import TaskCancelledError, TaskFailure, TaskProgressUpdate
 
 
 def _configure_progress_dialog(dialog: QProgressDialog) -> None:
-    dialog.setMinimumWidth(360)
-    dialog.setMaximumWidth(500)
+    parent_widget = dialog.parentWidget()
+    max_width = 680
+    if parent_widget is not None and parent_widget.width() > 0:
+        max_width = min(680, max(520, int(parent_widget.width() * 0.6)))
+    label_max_width = max(420, max_width - 60)
+    progress_max_width = max(320, max_width - 120)
+    dialog.setMinimumWidth(420)
+    dialog.setMaximumWidth(max_width)
     dialog.setSizeGripEnabled(False)
     for label in dialog.findChildren(QLabel):
         label.setWordWrap(True)
         label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
-        label.setMaximumWidth(440)
+        label.setMaximumWidth(label_max_width)
     for progress_bar in dialog.findChildren(QProgressBar):
-        progress_bar.setMinimumWidth(200)
-        progress_bar.setMaximumWidth(380)
+        progress_bar.setMinimumWidth(260)
+        progress_bar.setMaximumWidth(progress_max_width)
         progress_bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
     for button in dialog.findChildren(QPushButton):
-        button.setMinimumWidth(96)
-        button.setMaximumWidth(132)
+        button.setMinimumWidth(112)
+        button.setMaximumWidth(148)
     dialog.adjustSize()
     hint = dialog.sizeHint()
-    width = min(max(int(hint.width()), 360), 500)
+    width = min(max(int(hint.width()), 420), max_width)
     dialog.resize(width, int(hint.height()))
 
 

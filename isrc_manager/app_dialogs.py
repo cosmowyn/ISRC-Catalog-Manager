@@ -37,8 +37,10 @@ from isrc_manager.help_content import HELP_CHAPTERS, HELP_CHAPTERS_BY_ID
 from isrc_manager.ui_common import (
     FocusWheelComboBox,
     _add_standard_dialog_header,
+    _apply_compact_dialog_control_heights,
     _apply_standard_dialog_chrome,
     _compose_widget_stylesheet,
+    _create_scrollable_dialog_content,
     _create_round_help_button,
     _create_standard_section,
 )
@@ -460,6 +462,7 @@ class ActionRibbonDialog(QDialog):
 
         self._populate_selected_list(selected_action_ids)
         self._refresh_available_list()
+        _apply_compact_dialog_control_heights(self)
 
     def _selected_action_ids(self) -> list[str]:
         return [
@@ -584,6 +587,7 @@ class ApplicationLogDialog(QDialog):
         self.setWindowTitle("Application Log")
         self.resize(860, 700)
         self.setMinimumSize(720, 560)
+        _apply_standard_dialog_chrome(self, "applicationLogDialog")
         self.setStyleSheet(
             _compose_widget_stylesheet(
                 self,
@@ -687,6 +691,7 @@ class ApplicationLogDialog(QDialog):
         )
 
         self.refresh()
+        _apply_compact_dialog_control_heights(self)
 
     def refresh(self):
         current_path = self.log_combo.currentData()
@@ -753,6 +758,7 @@ class DiagnosticsDialog(QDialog):
         self.setWindowTitle("Diagnostics")
         self.resize(1080, 780)
         self.setMinimumSize(980, 680)
+        _apply_standard_dialog_chrome(self, "diagnosticsDialog")
         self.setStyleSheet(
             _compose_widget_stylesheet(
                 self,
@@ -805,13 +811,62 @@ class DiagnosticsDialog(QDialog):
         self.loading_bar = QProgressBar(self)
         self.loading_bar.setRange(0, 0)
         self.loading_bar.setTextVisible(False)
-        self.loading_bar.setFixedWidth(180)
+        self.loading_bar.setMinimumWidth(220)
         self.loading_status_label = QLabel("Loading diagnostics...")
         self.loading_status_label.setWordWrap(True)
         loading_row.addWidget(self.loading_bar)
         loading_row.addWidget(self.loading_status_label, 1)
         self.loading_panel.hide()
         root.addWidget(self.loading_panel)
+
+        self.body_scroll, _, body_layout = _create_scrollable_dialog_content(self)
+        root.addWidget(self.body_scroll, 1)
+
+        self.history_storage_group = QGroupBox("History Storage")
+        storage_layout = QVBoxLayout(self.history_storage_group)
+        storage_layout.setContentsMargins(14, 18, 14, 14)
+        storage_layout.setSpacing(12)
+        self.history_storage_summary_label = QLabel(self.history_storage_group)
+        self.history_storage_summary_label.setWordWrap(True)
+        self.history_storage_summary_label.setProperty("role", "supportingText")
+        storage_layout.addWidget(self.history_storage_summary_label)
+
+        metrics_layout = QGridLayout()
+        metrics_layout.setHorizontalSpacing(18)
+        metrics_layout.setVerticalSpacing(8)
+        self.history_storage_metric_labels = {}
+        for row, (metric_key, title_text) in enumerate(
+            (
+                ("usage", "Current usage"),
+                ("budget", "Budget"),
+                ("over_budget", "Over budget"),
+                ("reclaimable", "Safe reclaimable"),
+                ("retention", "Retention level"),
+                ("auto_cleanup", "Automatic cleanup"),
+            )
+        ):
+            title_label = QLabel(title_text, self.history_storage_group)
+            title_label.setAlignment(Qt.AlignRight | Qt.AlignTop)
+            value_label = QLabel("Not available", self.history_storage_group)
+            value_label.setTextInteractionFlags(
+                Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard
+            )
+            value_label.setWordWrap(True)
+            metrics_layout.addWidget(title_label, row, 0, alignment=Qt.AlignRight | Qt.AlignTop)
+            metrics_layout.addWidget(value_label, row, 1)
+            self.history_storage_metric_labels[metric_key] = value_label
+        metrics_layout.setColumnStretch(1, 1)
+        storage_layout.addLayout(metrics_layout)
+
+        storage_actions = QHBoxLayout()
+        storage_actions.setContentsMargins(0, 0, 0, 0)
+        storage_actions.setSpacing(10)
+        self.open_cleanup_button = QPushButton("Open History Cleanup…", self.history_storage_group)
+        self.open_cleanup_button.clicked.connect(self._open_history_cleanup)
+        storage_actions.addWidget(self.open_cleanup_button)
+        storage_actions.addStretch(1)
+        storage_layout.addLayout(storage_actions)
+        body_layout.addWidget(self.history_storage_group)
 
         self.environment_group = QGroupBox("Environment")
         env_layout = QGridLayout(self.environment_group)
@@ -848,25 +903,26 @@ class DiagnosticsDialog(QDialog):
             self.environment_name_labels[key] = name_label
             self.environment_labels[key] = label
         env_layout.setColumnStretch(1, 1)
-        root.addWidget(self.environment_group)
+        body_layout.addWidget(self.environment_group)
 
         checks_group = QGroupBox("Checks")
         checks_layout = QVBoxLayout(checks_group)
         checks_layout.setContentsMargins(14, 18, 14, 14)
         checks_layout.setSpacing(12)
         self.checks_list = QListWidget(self)
-        self.checks_list.setMinimumHeight(220)
+        self.checks_list.setMinimumHeight(180)
         checks_layout.addWidget(self.checks_list, 1)
-        root.addWidget(checks_group, 1)
+        body_layout.addWidget(checks_group)
 
         details_group = QGroupBox("Details")
         details_layout = QVBoxLayout(details_group)
         details_layout.setContentsMargins(14, 18, 14, 14)
         self.details_edit = QPlainTextEdit(self)
         self.details_edit.setReadOnly(True)
-        self.details_edit.setMinimumHeight(190)
+        self.details_edit.setMinimumHeight(160)
         details_layout.addWidget(self.details_edit)
-        root.addWidget(details_group)
+        body_layout.addWidget(details_group)
+        body_layout.addStretch(1)
 
         button_row = QHBoxLayout()
         button_row.setSpacing(10)
@@ -907,6 +963,8 @@ class DiagnosticsDialog(QDialog):
         self.checks_list.currentRowChanged.connect(self._show_selected_check)
 
         self.refresh()
+        _apply_compact_dialog_control_heights(self)
+        self._sync_loading_panel_metrics()
 
     def refresh(self):
         if self._busy:
@@ -934,6 +992,7 @@ class DiagnosticsDialog(QDialog):
             label = self.environment_labels.get(key)
             if label is not None:
                 label.setText(value)
+        self._apply_history_storage_budget(report.get("history_storage_budget") or {})
         self._sync_environment_label_metrics()
 
         self._checks = list(report["checks"])
@@ -951,6 +1010,31 @@ class DiagnosticsDialog(QDialog):
             self.details_edit.setPlainText("No diagnostics are available for the current profile.")
             self._update_repair_buttons(None)
 
+    def _apply_history_storage_budget(self, payload: dict[str, object]) -> None:
+        available = bool(payload.get("available"))
+        summary = str(payload.get("summary") or "").strip()
+        self.history_storage_summary_label.setText(
+            summary
+            or (
+                "History storage information is not available for the current profile."
+                if not available
+                else ""
+            )
+        )
+        mapping = {
+            "usage": str(payload.get("usage_text") or "Not available"),
+            "budget": str(payload.get("budget_text") or "Not available"),
+            "over_budget": str(payload.get("over_budget_text") or "Not available"),
+            "reclaimable": str(payload.get("reclaimable_text") or "Not available"),
+            "retention": str(payload.get("retention_mode_label") or "Not available"),
+            "auto_cleanup": str(payload.get("auto_cleanup_text") or "Not available"),
+        }
+        for key, label in self.history_storage_metric_labels.items():
+            label.setText(mapping.get(key, "Not available"))
+        self.open_cleanup_button.setEnabled(
+            callable(getattr(self.app, "open_history_cleanup_dialog", None))
+        )
+
     def _set_busy(self, busy: bool, message: str | None = None) -> None:
         self._busy = bool(busy)
         if self._busy:
@@ -967,8 +1051,14 @@ class DiagnosticsDialog(QDialog):
             self.open_data_button,
             self.close_button,
             self.checks_list,
+            self.open_cleanup_button,
         ):
             widget.setEnabled(not self._busy)
+        if not self._busy:
+            self.open_cleanup_button.setEnabled(
+                callable(getattr(self.app, "open_history_cleanup_dialog", None))
+            )
+        self._sync_loading_panel_metrics()
         self._update_repair_buttons(self._selected_check())
 
     def _set_busy_message(self, message: str) -> None:
@@ -997,7 +1087,9 @@ class DiagnosticsDialog(QDialog):
         self._update_repair_buttons(check)
 
     def _sync_environment_label_metrics(self):
-        available_width = max(460, self.environment_group.width() - 280)
+        viewport = self.body_scroll.viewport()
+        viewport_width = viewport.width() if viewport is not None else self.environment_group.width()
+        available_width = max(420, viewport_width - 320)
         for key, label in self.environment_labels.items():
             label.setFixedWidth(available_width)
             label.adjustSize()
@@ -1005,6 +1097,22 @@ class DiagnosticsDialog(QDialog):
             name_label = self.environment_name_labels.get(key)
             if name_label is not None:
                 name_label.setMinimumHeight(label.minimumHeight())
+
+    def _sync_loading_panel_metrics(self):
+        available_width = max(560, self.width() - 72)
+        bar_width = max(220, min(320, int(available_width * 0.24)))
+        self.loading_bar.setFixedWidth(bar_width)
+        self.loading_status_label.setMinimumWidth(max(260, available_width - bar_width - 32))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._sync_loading_panel_metrics()
+        self._sync_environment_label_metrics()
+
+    def _open_history_cleanup(self) -> None:
+        opener = getattr(self.app, "open_history_cleanup_dialog", None)
+        if callable(opener):
+            opener()
 
     def _update_repair_buttons(self, check: dict | None):
         repairable = bool(check and check.get("repair_key")) and not self._busy
@@ -1095,6 +1203,7 @@ class AboutDialog(QDialog):
         self.setWindowTitle("About ISRC Catalog Manager")
         self.resize(680, 420)
         self.setMinimumSize(620, 380)
+        _apply_standard_dialog_chrome(self, "aboutDialog")
         self.setStyleSheet(
             _compose_widget_stylesheet(
                 self,

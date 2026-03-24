@@ -33,6 +33,18 @@ class AppShellEditorSurfaceTests(AppShellTestCase):
     test_authenticity_table_context_menu_exposes_export_actions = (
         AppShellTestCase.case_authenticity_table_context_menu_exposes_export_actions
     )
+    test_table_context_menu_keeps_multi_selection_when_right_clicking_selected_row = (
+        AppShellTestCase.case_table_context_menu_keeps_multi_selection_when_right_clicking_selected_row
+    )
+    test_audioless_row_context_menu_omits_audio_submenu = (
+        AppShellTestCase.case_audioless_row_context_menu_omits_audio_submenu
+    )
+    test_standard_media_context_menu_groups_file_and_storage_actions = (
+        AppShellTestCase.case_standard_media_context_menu_groups_file_and_storage_actions
+    )
+    test_custom_blob_context_menu_groups_file_and_storage_actions = (
+        AppShellTestCase.case_custom_blob_context_menu_groups_file_and_storage_actions
+    )
     test_verify_audio_authenticity_can_choose_external_file_when_track_is_selected = (
         AppShellTestCase.case_verify_audio_authenticity_can_choose_external_file_when_track_is_selected
     )

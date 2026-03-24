@@ -218,22 +218,23 @@ class BackgroundTaskManagerTests(unittest.TestCase):
         )
         pump_events(app=self.app)
 
-        self.assertEqual(dialog.minimumWidth(), 360)
-        self.assertEqual(dialog.maximumWidth(), 500)
-        self.assertLessEqual(dialog.width(), 500)
+        self.assertEqual(dialog.minimumWidth(), 420)
+        self.assertEqual(dialog.maximumWidth(), 680)
+        self.assertGreaterEqual(dialog.width(), 420)
+        self.assertLessEqual(dialog.width(), 680)
 
         labels = dialog.findChildren(QLabel)
         self.assertTrue(labels)
         self.assertTrue(all(label.wordWrap() for label in labels))
-        self.assertTrue(all(label.maximumWidth() <= 440 for label in labels))
+        self.assertTrue(all(label.maximumWidth() <= 620 for label in labels))
 
         progress_bars = dialog.findChildren(QProgressBar)
         self.assertTrue(progress_bars)
-        self.assertTrue(all(bar.maximumWidth() <= 380 for bar in progress_bars))
+        self.assertTrue(all(bar.maximumWidth() <= 560 for bar in progress_bars))
 
         buttons = dialog.findChildren(QPushButton)
         self.assertTrue(buttons)
-        self.assertTrue(all(button.maximumWidth() <= 132 for button in buttons))
+        self.assertTrue(all(button.maximumWidth() <= 148 for button in buttons))
 
         release.set()
         self._wait_for_task_completion(
