@@ -35,7 +35,7 @@ Several catalog tools are intentionally exposed as tabbed dock panels:
 - Party Manager
 - Contract Manager
 - Rights Matrix
-- Asset Registry
+- Deliverables and Asset Versions
 - License Browser
 - Global Search
 - Catalog Managers
@@ -60,7 +60,7 @@ The docked managers exist to support real catalog review, not just browsing.
 - `Party Manager` is for reusable people and organizations.
 - `Contract Manager` is for structured agreement data and managed documents.
 - `Rights Matrix` is for rights positions and scope.
-- `Asset Registry` is for deliverables and asset versions.
+- `Deliverables and Asset Versions` keeps `Asset Registry` and `Derivative Ledger` together for asset review, export-batch tracking, and derivative inspection.
 
 These panels help you answer questions like:
 
@@ -68,6 +68,35 @@ These panels help you answer questions like:
 - Which party appears in this contract or rights record?
 - Which asset version is approved or primary?
 - Which catalog items are connected to the selected record?
+
+## Deliverables And Derivative Review
+
+The `Deliverables and Asset Versions` workspace is designed as one connected deliverables surface instead of separate disconnected dialogs.
+
+- `Asset Registry` stays focused on the registered asset versions attached to tracks and releases.
+- `Derivative Ledger` tracks managed export batches and the derivative rows that were registered for each batch.
+- The deliverables workspace stays docked and tabbed like the other managers, so it remains part of the same workspace strip rather than drifting into a separate one-off window.
+
+The `Derivative Ledger` is intentionally layered for practical browsing:
+
+- a compact search and filter strip stays visible at the top
+- `Export Batches` remains visible as its own browsing pane
+- the selected batch opens a secondary workspace with `Derivatives`, `Details`, `Lineage`, and `Admin` tabs
+
+That layout matters because it keeps batch review usable while still exposing the deeper inspection surface:
+
+- `Derivatives` keeps the registered outputs visible and lets you open the linked track, open the linked release, or launch authenticity verification
+- `Details` turns batch and output metadata into structured fields instead of one long text dump
+- `Lineage` keeps hashes, manifests, package members, retained paths, and source lineage readable without crowding the day-to-day review tab
+- `Admin` isolates conservative cleanup actions away from normal browsing
+
+The cleanup semantics are intentionally explicit:
+
+- deleting a derivative ledger row removes the database record only
+- deleting a batch removes the related database rows only
+- deleting retained output files removes only the listed files and clears those retained-path references while keeping the ledger row itself
+
+That makes the deliverables workspace useful both for normal browsing and for cleaning up stale or test export history without implying broader filesystem changes than the app actually performs.
 
 ## Saved Layout
 
@@ -154,8 +183,9 @@ A common power-user loop looks like this:
 1. Open the Catalog Table and one or more docked managers.
 2. Filter or select the record you want to review.
 3. Inspect the related release, work, party, contract, rights, or asset surface.
-4. Use Global Search or the relationship explorer if you need wider context.
-5. Keep the layout open and continue to the next record.
+4. Keep the deliverables workspace open when you need to compare approved assets, managed export batches, lineage, or retained outputs against the selected catalog record.
+5. Use Global Search or the relationship explorer if you need wider context.
+6. Keep the layout open and continue to the next record.
 
 That pattern is why the docked workspace is a core product feature. It reduces context switching while keeping the catalog model visible.
 

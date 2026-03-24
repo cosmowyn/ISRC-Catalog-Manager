@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tempfile
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QUrl, Signal
@@ -45,8 +46,8 @@ from isrc_manager.ui_common import (
     _apply_standard_dialog_chrome,
     _apply_standard_widget_chrome,
     _configure_standard_form_layout,
+    _confirm_destructive_action,
     _create_action_button_cluster,
-    _create_action_button_grid,
     _create_scrollable_dialog_content,
     _create_standard_section,
 )
@@ -130,6 +131,78 @@ def _build_reference_completer(combo: QComboBox, values: list[str]) -> None:
     completer = QCompleter(values, combo)
     completer.setCaseSensitivity(Qt.CaseInsensitive)
     combo.setCompleter(completer)
+
+
+def _build_text_completer(line_edit: QLineEdit, values: list[str]) -> None:
+    completer = QCompleter(values, line_edit)
+    completer.setCaseSensitivity(Qt.CaseInsensitive)
+    line_edit.setCompleter(completer)
+
+
+_CONTRACT_PARTY_ROLE_PRESETS = (
+    "counterparty",
+    "licensor",
+    "licensee",
+    "label",
+    "publisher",
+    "distributor",
+    "manager",
+    "producer",
+    "rights holder",
+    "administrator",
+)
+
+
+def _primary_reference_label(label: str | None) -> str:
+    clean = str(label or "").strip()
+    primary, _separator, _remainder = clean.partition(" / ")
+    return primary or clean
+
+
+def _reference_choice_variants(choice: _ReferenceChoice) -> list[str]:
+    label = str(choice.label or "").strip()
+    variants: list[str] = []
+    seen: set[str] = set()
+    for candidate in [label, *[part.strip() for part in label.split(" / ") if part.strip()]]:
+        normalized = _normalize_reference_text(candidate)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        variants.append(candidate)
+    if not variants:
+        variants.append(f"Record #{choice.reference_id}")
+    return variants
+
+
+def _normalized_tokens(value: str | None) -> set[str]:
+    clean = _normalize_reference_text(value).replace("/", " ").replace("-", " ")
+    return {token for token in clean.split() if token}
+
+
+def _reference_choice_similarity(search_text: str | None, choice: _ReferenceChoice) -> float:
+    normalized_search = _normalize_reference_text(search_text)
+    if len(normalized_search) < 4:
+        return 0.0
+    search_tokens = _normalized_tokens(search_text)
+    best_score = 0.0
+    for variant in _reference_choice_variants(choice):
+        normalized_variant = _normalize_reference_text(variant)
+        if not normalized_variant:
+            continue
+        if normalized_search == normalized_variant:
+            return 1.0
+        score = SequenceMatcher(None, normalized_search, normalized_variant).ratio()
+        if normalized_search in normalized_variant or normalized_variant in normalized_search:
+            score = max(score, 0.92)
+        variant_tokens = _normalized_tokens(variant)
+        if search_tokens and variant_tokens:
+            shared_tokens = search_tokens & variant_tokens
+            if shared_tokens:
+                score = max(score, len(shared_tokens) / max(1, len(search_tokens | variant_tokens)))
+                if len(shared_tokens) >= min(len(search_tokens), len(variant_tokens), 2):
+                    score = max(score, 0.88)
+        best_score = max(best_score, score)
+    return best_score
 
 
 def _iter_reference_choice_matches(
@@ -266,7 +339,7 @@ class _ReferenceListEditor(QWidget):
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(8)
+        root.setSpacing(6)
 
         controls = QHBoxLayout()
         controls.setContentsMargins(0, 0, 0, 0)
@@ -283,11 +356,16 @@ class _ReferenceListEditor(QWidget):
         self.add_button = QPushButton("Add", self)
         self.add_button.clicked.connect(self.add_current_reference)
         controls.addWidget(self.add_button)
+        root.addLayout(controls)
 
+        table_actions = QHBoxLayout()
+        table_actions.setContentsMargins(0, 0, 0, 0)
+        table_actions.setSpacing(8)
+        table_actions.addStretch(1)
         self.remove_button = QPushButton("Remove Highlighted", self)
         self.remove_button.clicked.connect(self.remove_selected_references)
-        controls.addWidget(self.remove_button)
-        root.addLayout(controls)
+        table_actions.addWidget(self.remove_button)
+        root.addLayout(table_actions)
 
         self.table = QTableWidget(0, 2, self)
         self.table.setHorizontalHeaderLabels(["ID", "Reference"])
@@ -298,7 +376,7 @@ class _ReferenceListEditor(QWidget):
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.Stretch)
-        self.table.setMinimumHeight(118)
+        self.table.setMinimumHeight(104)
         root.addWidget(self.table, 1)
 
     def set_choices(self, choices: list[_ReferenceChoice]) -> None:
@@ -393,6 +471,484 @@ class _ReferenceListEditor(QWidget):
             self.table.setItem(row, 1, label_item)
 
 
+class _ContractPartyEditor(QWidget):
+    valueChanged = Signal()
+
+    def __init__(self, *, placeholder: str, parent=None):
+        super().__init__(parent)
+        self._choices: list[_ReferenceChoice] = []
+        self._choices_by_id: dict[int, _ReferenceChoice] = {}
+        self._entries: list[ContractPartyPayload] = []
+        self._suspend_updates = False
+        self._auto_revealed_row: int | None = None
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(6)
+
+        top_row = QHBoxLayout()
+        top_row.setContentsMargins(0, 0, 0, 0)
+        top_row.setSpacing(8)
+        self.party_combo = FocusWheelComboBox(self)
+        self.party_combo.setEditable(True)
+        self.party_combo.setInsertPolicy(QComboBox.NoInsert)
+        self.party_combo.addItem("", None)
+        self.party_combo.setMinimumWidth(220)
+        self.party_combo.setPlaceholderText(placeholder)
+        top_row.addWidget(self.party_combo, 1)
+
+        self.role_edit = QLineEdit(self)
+        self.role_edit.setPlaceholderText("Role (e.g. licensee, label)")
+        self.role_edit.setMinimumWidth(140)
+        _build_text_completer(self.role_edit, list(_CONTRACT_PARTY_ROLE_PRESETS))
+        top_row.addWidget(self.role_edit)
+
+        self.primary_checkbox = QCheckBox("Primary", self)
+        top_row.addWidget(self.primary_checkbox)
+
+        self.add_button = QPushButton("Add Party", self)
+        self.add_button.clicked.connect(self.add_current_party)
+        top_row.addWidget(self.add_button)
+        root.addLayout(top_row)
+
+        bottom_row = QHBoxLayout()
+        bottom_row.setContentsMargins(0, 0, 0, 0)
+        bottom_row.setSpacing(8)
+        self.notes_edit = QLineEdit(self)
+        self.notes_edit.setPlaceholderText("Notes (optional)")
+        bottom_row.addWidget(self.notes_edit, 1)
+
+        self.remove_button = QPushButton("Remove Highlighted", self)
+        self.remove_button.clicked.connect(self.remove_selected_parties)
+        bottom_row.addWidget(self.remove_button)
+        root.addLayout(bottom_row)
+
+        self.editor_hint_label = QLabel(self)
+        self.editor_hint_label.setProperty("role", "supportingText")
+        self.editor_hint_label.setWordWrap(True)
+        root.addWidget(self.editor_hint_label)
+
+        self.table = QTableWidget(0, 5, self)
+        self.table.setHorizontalHeaderLabels(["ID", "Party", "Role", "Primary", "Notes"])
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.verticalHeader().setVisible(False)
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(4, QHeaderView.Stretch)
+        self.table.setMinimumHeight(140)
+        self.table.itemSelectionChanged.connect(self._load_selected_party_into_controls)
+        root.addWidget(self.table, 1)
+
+        self.party_combo.currentTextChanged.connect(self._refresh_editor_state)
+        self.role_edit.textChanged.connect(self._refresh_editor_state)
+        self.primary_checkbox.stateChanged.connect(self._refresh_editor_state)
+        self.notes_edit.textChanged.connect(self._refresh_editor_state)
+        self._refresh_editor_state()
+
+    def set_choices(self, choices: list[_ReferenceChoice]) -> None:
+        self._choices = list(choices)
+        self._choices_by_id = {choice.reference_id: choice for choice in self._choices}
+        self._refresh_combo()
+        self._refresh_table()
+        self._refresh_editor_state()
+
+    def set_value(self, parties: list[object]) -> None:
+        entries: list[ContractPartyPayload] = []
+        for item in parties:
+            party_id = getattr(item, "party_id", None)
+            name = getattr(item, "name", None)
+            if not name:
+                name = getattr(item, "party_name", None)
+            entries.append(
+                ContractPartyPayload(
+                    party_id=int(party_id) if party_id not in (None, "") else None,
+                    name=str(name or "").strip() or None,
+                    role_label=str(getattr(item, "role_label", "") or "").strip() or "counterparty",
+                    is_primary=bool(getattr(item, "is_primary", False)),
+                    notes=str(getattr(item, "notes", "") or "").strip() or None,
+                )
+            )
+        self._entries = entries
+        self._refresh_table()
+        self._refresh_editor_state()
+
+    def value(self) -> list[ContractPartyPayload]:
+        return [
+            ContractPartyPayload(
+                party_id=entry.party_id,
+                name=entry.name,
+                role_label=entry.role_label,
+                is_primary=entry.is_primary,
+                notes=entry.notes,
+            )
+            for entry in self._entries
+        ]
+
+    def setPlainText(self, text: str) -> None:
+        entries: list[ContractPartyPayload] = []
+        for line in str(text or "").splitlines():
+            parts = [part.strip() for part in line.split("|")]
+            if not parts or not parts[0]:
+                continue
+            party_id = int(parts[0]) if parts[0].isdigit() else None
+            entries.append(
+                ContractPartyPayload(
+                    party_id=party_id,
+                    name=None if party_id is not None else parts[0],
+                    role_label=parts[1] if len(parts) > 1 and parts[1] else "counterparty",
+                    is_primary=_parse_bool_token(parts[2]) if len(parts) > 2 else False,
+                    notes=parts[3] if len(parts) > 3 and parts[3] else None,
+                )
+            )
+        self._entries = entries
+        self._refresh_table()
+        self._refresh_editor_state()
+
+    def toPlainText(self) -> str:
+        lines: list[str] = []
+        for entry in self._entries:
+            identity = str(entry.party_id) if entry.party_id is not None else str(entry.name or "")
+            if not identity.strip():
+                continue
+            parts = [
+                identity,
+                str(entry.role_label or "counterparty"),
+                "1" if entry.is_primary else "0",
+            ]
+            if entry.notes:
+                parts.append(str(entry.notes))
+            lines.append("|".join(parts))
+        return "\n".join(lines)
+
+    def add_current_party(self) -> None:
+        entry = self._draft_entry()
+        if entry is None:
+            return
+        replace_index = self._matching_entry_index(entry)
+        if replace_index is None:
+            self._entries.append(entry)
+        else:
+            self._entries[replace_index] = entry
+        self._refresh_table()
+        self.table.clearSelection()
+        self._clear_editor_controls()
+        self.valueChanged.emit()
+
+    def remove_selected_parties(self) -> None:
+        rows = sorted({index.row() for index in self.table.selectedIndexes()}, reverse=True)
+        if not rows:
+            return
+        for row in rows:
+            if 0 <= row < len(self._entries):
+                del self._entries[row]
+        self._refresh_table()
+        self._clear_editor_controls()
+        self.valueChanged.emit()
+
+    def _matching_entry_index(self, entry: ContractPartyPayload) -> int | None:
+        for index, current in enumerate(self._entries):
+            if entry.party_id is not None and current.party_id == entry.party_id:
+                return index
+            if entry.party_id is None and current.party_id is None:
+                if _normalize_reference_text(current.name) == _normalize_reference_text(entry.name):
+                    return index
+        return None
+
+    def _refresh_combo(self) -> None:
+        self.party_combo.clear()
+        self.party_combo.addItem("", None)
+        display_values: list[str] = []
+        for choice in self._choices:
+            display_text = _reference_choice_display_text(choice)
+            self.party_combo.addItem(display_text, choice.reference_id)
+            display_values.append(display_text)
+        _build_reference_completer(self.party_combo, display_values)
+
+    def _display_label(self, entry: ContractPartyPayload) -> str:
+        if entry.party_id is not None:
+            choice = self._choices_by_id.get(int(entry.party_id))
+            if choice is not None:
+                label = str(choice.label or "").strip()
+                primary_label = _primary_reference_label(label)
+                return primary_label or label or f"Party #{int(entry.party_id)}"
+            if entry.name:
+                return entry.name
+            return f"Unknown #{int(entry.party_id)}"
+        return str(entry.name or "").strip()
+
+    def _refresh_table(self) -> None:
+        self.table.setRowCount(len(self._entries))
+        for row, entry in enumerate(self._entries):
+            id_item = QTableWidgetItem(str(entry.party_id or ""))
+            id_item.setTextAlignment(Qt.AlignCenter)
+            party_item = QTableWidgetItem(self._display_label(entry))
+            role_item = QTableWidgetItem(str(entry.role_label or "counterparty"))
+            primary_item = QTableWidgetItem("Yes" if entry.is_primary else "No")
+            notes_item = QTableWidgetItem(str(entry.notes or ""))
+            self.table.setItem(row, 0, id_item)
+            self.table.setItem(row, 1, party_item)
+            self.table.setItem(row, 2, role_item)
+            self.table.setItem(row, 3, primary_item)
+            self.table.setItem(row, 4, notes_item)
+
+    def _resolve_party_selection(self) -> tuple[int | None, str | None] | None:
+        clean = str(self.party_combo.currentText() or "").strip()
+        if not clean:
+            return None
+        current_index = self.party_combo.currentIndex()
+        if current_index > 0 and _normalize_reference_text(clean) == _normalize_reference_text(
+            self.party_combo.itemText(current_index)
+        ):
+            data = self.party_combo.currentData()
+            if data not in (None, ""):
+                return int(data), None
+        extracted_id = _extract_reference_id(clean)
+        if extracted_id is not None:
+            choice = self._choices_by_id.get(extracted_id)
+            return extracted_id, None if choice is not None else None
+        normalized_text = _normalize_reference_text(clean)
+        for choice in self._choices:
+            if normalized_text in {
+                _normalize_reference_text(variant) for variant in _reference_choice_variants(choice)
+            }:
+                return choice.reference_id, None
+        matched = _iter_reference_choice_matches(self._choices, normalized_text)
+        if matched is not None:
+            return matched.reference_id, None
+        return None, clean
+
+    def _near_duplicate_choices(
+        self, text: str | None, *, limit: int = 2
+    ) -> list[_ReferenceChoice]:
+        normalized_text = _normalize_reference_text(text)
+        if len(normalized_text) < 4:
+            return []
+        matches: list[tuple[float, _ReferenceChoice]] = []
+        for choice in self._choices:
+            score = _reference_choice_similarity(text, choice)
+            if score < 0.74:
+                continue
+            matches.append((score, choice))
+        matches.sort(
+            key=lambda item: (
+                -item[0],
+                _normalize_reference_text(_primary_reference_label(item[1].label)),
+            )
+        )
+        return [choice for _score, choice in matches[: max(1, int(limit or 1))]]
+
+    def _linked_entry_for_party_id(self, party_id: int | None) -> ContractPartyPayload | None:
+        if party_id is None:
+            return None
+        for entry in self._entries:
+            if entry.party_id == int(party_id):
+                return entry
+        return None
+
+    def _linked_entry_row(self, party_id: int | None) -> int | None:
+        if party_id is None:
+            return None
+        for index, entry in enumerate(self._entries):
+            if entry.party_id == int(party_id):
+                return index
+        return None
+
+    def _suggestion_label(self, choice: _ReferenceChoice) -> str:
+        label = _primary_reference_label(choice.label) or f"Party #{choice.reference_id}"
+        linked_entry = self._linked_entry_for_party_id(choice.reference_id)
+        if linked_entry is None:
+            return label
+        role_label = str(linked_entry.role_label or "").strip()
+        if role_label:
+            return f"{label} (already linked as {role_label})"
+        return f"{label} (already linked)"
+
+    def _reveal_row(self, row: int | None) -> None:
+        selection_model = self.table.selectionModel()
+        target_row = int(row) if row is not None else None
+        if target_row is None or target_row < 0 or target_row >= self.table.rowCount():
+            if (
+                self._auto_revealed_row is not None
+                and selection_model is not None
+                and selection_model.hasSelection()
+            ):
+                selected_rows = selection_model.selectedRows()
+                if len(selected_rows) == 1 and selected_rows[0].row() == self._auto_revealed_row:
+                    self._suspend_updates = True
+                    try:
+                        self.table.clearSelection()
+                    finally:
+                        self._suspend_updates = False
+            self._auto_revealed_row = None
+            return
+        if (
+            selection_model is not None
+            and selection_model.hasSelection()
+            and len(selection_model.selectedRows()) == 1
+            and selection_model.selectedRows()[0].row() == target_row
+        ):
+            self._auto_revealed_row = target_row
+            item = self.table.item(target_row, 0) or self.table.item(target_row, 1)
+            if item is not None:
+                self.table.scrollToItem(item, QAbstractItemView.PositionAtCenter)
+            return
+        self._suspend_updates = True
+        try:
+            self.table.selectRow(target_row)
+            item = self.table.item(target_row, 0) or self.table.item(target_row, 1)
+            if item is not None:
+                self.table.scrollToItem(item, QAbstractItemView.PositionAtCenter)
+        finally:
+            self._suspend_updates = False
+        self._auto_revealed_row = target_row
+
+    def _draft_entry(self) -> ContractPartyPayload | None:
+        resolved = self._resolve_party_selection()
+        if resolved is None:
+            return None
+        party_id, party_name = resolved
+        return ContractPartyPayload(
+            party_id=party_id,
+            name=party_name,
+            role_label=self.role_edit.text().strip() or "counterparty",
+            is_primary=self.primary_checkbox.isChecked(),
+            notes=self.notes_edit.text().strip() or None,
+        )
+
+    def _clear_editor_controls(self) -> None:
+        self.party_combo.setCurrentIndex(0)
+        self.party_combo.setEditText("")
+        self.role_edit.clear()
+        self.primary_checkbox.setChecked(False)
+        self.notes_edit.clear()
+        self._refresh_editor_state()
+
+    def _entries_match(self, left: ContractPartyPayload, right: ContractPartyPayload) -> bool:
+        return (
+            left.party_id == right.party_id
+            and _normalize_reference_text(left.name) == _normalize_reference_text(right.name)
+            and _normalize_reference_text(left.role_label)
+            == _normalize_reference_text(right.role_label)
+            and bool(left.is_primary) == bool(right.is_primary)
+            and _normalize_reference_text(left.notes) == _normalize_reference_text(right.notes)
+        )
+
+    def _refresh_editor_state(self) -> None:
+        if self._suspend_updates:
+            return
+        draft = self._draft_entry()
+        if draft is None:
+            self._reveal_row(None)
+            self.add_button.setEnabled(False)
+            self.add_button.setText("Add Party")
+            self.add_button.setToolTip("Choose an existing party or type a new party name.")
+            self.editor_hint_label.setText(
+                "Choose an existing party or type a new counterparty name."
+            )
+            return
+        match_index = self._matching_entry_index(draft)
+        if match_index is None:
+            self.add_button.setEnabled(True)
+            self.add_button.setText("Add Party")
+            self.add_button.setToolTip("Add this party to the linked parties table.")
+            if draft.party_id is None and draft.name:
+                suggestions = self._near_duplicate_choices(draft.name)
+                if suggestions:
+                    linked_suggestion = next(
+                        (
+                            choice
+                            for choice in suggestions
+                            if self._linked_entry_for_party_id(choice.reference_id) is not None
+                        ),
+                        None,
+                    )
+                    self._reveal_row(
+                        None
+                        if linked_suggestion is None
+                        else self._linked_entry_row(linked_suggestion.reference_id)
+                    )
+                    suggestion_labels = ", ".join(
+                        self._suggestion_label(choice) for choice in suggestions
+                    )
+                    hint_suffix = (
+                        "Select an existing record first if this is the same counterparty."
+                    )
+                    if linked_suggestion is not None:
+                        hint_suffix = "The linked row is highlighted below so you can update it instead of adding a shadow entry."
+                    self.editor_hint_label.setText(
+                        f"Possible existing part{'y' if len(suggestions) == 1 else 'ies'}: {suggestion_labels}. {hint_suffix}"
+                    )
+                    if linked_suggestion is not None:
+                        self.add_button.setToolTip(
+                            "Add a new party entry, or select the already linked suggested record if you meant to update the current contract row."
+                        )
+                    else:
+                        self.add_button.setToolTip(
+                            "Add a new party entry, or select the suggested existing record if it is the same counterparty."
+                        )
+                else:
+                    self._reveal_row(None)
+                    self.editor_hint_label.setText(
+                        "This typed party name will be created when the contract is saved."
+                    )
+            else:
+                self._reveal_row(None)
+                self.editor_hint_label.setText(
+                    "This party will be added to the linked parties table."
+                )
+            return
+        current = self._entries[match_index]
+        self._reveal_row(match_index)
+        self.add_button.setEnabled(True)
+        self.add_button.setText("Update Existing")
+        self.add_button.setToolTip("Update the existing linked party entry.")
+        if self._entries_match(current, draft):
+            self.editor_hint_label.setText(
+                f"{self._display_label(current)} is already linked with the same values. The linked row is highlighted below."
+            )
+        else:
+            self.editor_hint_label.setText(
+                f"{self._display_label(current)} is already linked. The linked row is highlighted below, and Add / Update will refresh its role, primary flag, or notes."
+            )
+
+    def _load_selected_party_into_controls(self) -> None:
+        if self._suspend_updates:
+            return
+        selection_model = self.table.selectionModel()
+        if selection_model is None:
+            return
+        rows = selection_model.selectedRows()
+        if len(rows) != 1:
+            return
+        row = rows[0].row()
+        if row < 0 or row >= len(self._entries):
+            return
+        entry = self._entries[row]
+        self._suspend_updates = True
+        try:
+            if entry.party_id is not None and entry.party_id in self._choices_by_id:
+                for index in range(self.party_combo.count()):
+                    if self.party_combo.itemData(index) == entry.party_id:
+                        self.party_combo.setCurrentIndex(index)
+                        break
+            else:
+                self.party_combo.setCurrentIndex(0)
+                self.party_combo.setEditText(
+                    str(entry.name or (entry.party_id if entry.party_id is not None else ""))
+                )
+            self.role_edit.setText(str(entry.role_label or "counterparty"))
+            self.primary_checkbox.setChecked(bool(entry.is_primary))
+            self.notes_edit.setText(str(entry.notes or ""))
+        finally:
+            self._suspend_updates = False
+        self._refresh_editor_state()
+
+
 class ContractDocumentEditor(QWidget):
     """Structured editor for contract documents and storage metadata."""
 
@@ -406,7 +962,7 @@ class ContractDocumentEditor(QWidget):
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(12)
+        root.setSpacing(10)
 
         self.add_file_button = QPushButton("Add File…")
         self.add_file_button.clicked.connect(self._append_document_file)
@@ -424,29 +980,31 @@ class ContractDocumentEditor(QWidget):
         )
         self.remove_button = QPushButton("Remove Selected")
         self.remove_button.clicked.connect(self._remove_selected_document)
-        root.addWidget(
-            _create_action_button_grid(
-                self,
-                [
-                    self.add_file_button,
-                    self.open_button,
-                    self.export_button,
-                    self.database_button,
-                    self.managed_button,
-                    self.remove_button,
-                ],
-                columns=3,
-            )
+        self.actions_cluster = _create_action_button_cluster(
+            self,
+            [
+                self.add_file_button,
+                self.open_button,
+                self.export_button,
+                self.database_button,
+                self.managed_button,
+                self.remove_button,
+            ],
+            columns=2,
+            min_button_width=170,
         )
+        self.actions_cluster.setObjectName("contractDocumentActionsCluster")
+        root.addWidget(self.actions_cluster)
 
         splitter = QSplitter(Qt.Horizontal, self)
+        splitter.setObjectName("contractDocumentEditorSplitter")
         splitter.setChildrenCollapsible(False)
         root.addWidget(splitter, 1)
 
         table_box = QGroupBox("Documents", self)
         table_layout = QVBoxLayout(table_box)
-        table_layout.setContentsMargins(14, 18, 14, 14)
-        table_layout.setSpacing(10)
+        table_layout.setContentsMargins(12, 16, 12, 12)
+        table_layout.setSpacing(8)
         self.documents_table = QTableWidget(0, 9, table_box)
         self.documents_table.setHorizontalHeaderLabels(
             [
@@ -485,7 +1043,7 @@ class ContractDocumentEditor(QWidget):
         splitter.addWidget(table_box)
 
         detail_panel = QWidget(splitter)
-        detail_panel.setMinimumWidth(360)
+        detail_panel.setMinimumWidth(340)
         detail_panel_layout = QVBoxLayout(detail_panel)
         detail_panel_layout.setContentsMargins(0, 0, 0, 0)
         detail_panel_layout.setSpacing(0)
@@ -494,9 +1052,10 @@ class ContractDocumentEditor(QWidget):
         )
         self.detail_scroll_area.setObjectName("contractDocumentDetailScrollArea")
         detail_panel_layout.addWidget(self.detail_scroll_area, 1)
+        detail_content_layout.setSpacing(10)
 
         detail_intro = QLabel(
-            "Edit the selected document metadata here. Storage and file integrity fields stay intact unless you change them explicitly."
+            "Edit the selected document metadata here without losing its storage or integrity history."
         )
         detail_intro.setWordWrap(True)
         detail_content_layout.addWidget(detail_intro)
@@ -504,7 +1063,7 @@ class ContractDocumentEditor(QWidget):
         identity_box, identity_layout = _create_standard_section(
             self,
             "Document Identity",
-            "Core metadata for the selected contract file and its version history.",
+            "Core metadata for the selected contract file.",
         )
         identity_form = QFormLayout()
         _configure_standard_form_layout(identity_form)
@@ -549,7 +1108,7 @@ class ContractDocumentEditor(QWidget):
         lifecycle_box, lifecycle_layout = _create_standard_section(
             self,
             "Status and Relationships",
-            "Track signature state, active status, and which earlier version this document replaces.",
+            "Track signature state, active status, and linked version history.",
         )
         lifecycle_form = QFormLayout()
         _configure_standard_form_layout(lifecycle_form)
@@ -573,7 +1132,7 @@ class ContractDocumentEditor(QWidget):
         storage_box, storage_layout = _create_standard_section(
             self,
             "Storage and Integrity",
-            "Switch storage modes without losing the known filename, path, or checksum data.",
+            "Switch storage modes without losing the known filename, path, or checksum.",
         )
         storage_form = QFormLayout()
         _configure_standard_form_layout(storage_form)
@@ -589,7 +1148,6 @@ class ContractDocumentEditor(QWidget):
         detail_actions = QHBoxLayout()
         detail_actions.setContentsMargins(0, 0, 0, 0)
         detail_actions.setSpacing(8)
-        detail_actions.addStretch(1)
         self.switch_mode_button = QPushButton("Switch Storage Mode")
         self.switch_mode_button.clicked.connect(self._toggle_selected_storage_mode)
         detail_actions.addWidget(self.switch_mode_button)
@@ -599,18 +1157,18 @@ class ContractDocumentEditor(QWidget):
         notes_box, notes_layout = _create_standard_section(
             self,
             "Notes",
-            "Capture the signing context, delivery notes, or other detail that belongs with this specific document version.",
+            "Capture signing context, delivery notes, or other version-specific detail.",
         )
         self.notes_edit = QPlainTextEdit()
-        self.notes_edit.setMinimumHeight(88)
+        self.notes_edit.setMinimumHeight(72)
         notes_layout.addWidget(self.notes_edit)
         detail_content_layout.addWidget(notes_box)
         detail_content_layout.addStretch(1)
 
         splitter.addWidget(detail_panel)
-        splitter.setStretchFactor(0, 4)
-        splitter.setStretchFactor(1, 5)
-        splitter.setSizes([440, 560])
+        splitter.setStretchFactor(0, 5)
+        splitter.setStretchFactor(1, 4)
+        splitter.setSizes([520, 470])
 
         for widget in (
             self.title_edit,
@@ -1586,52 +2144,75 @@ class ContractEditorDialog(QDialog):
         overview_layout.addStretch(1)
         tabs.addTab(overview_scroll, "Overview")
 
-        links_scroll, _, links_layout = _create_scrollable_dialog_content(self)
+        links_page = QWidget(self)
+        links_page.setProperty("role", "workspaceCanvas")
+        links_layout = QVBoxLayout(links_page)
+        links_layout.setContentsMargins(0, 0, 0, 0)
+        links_layout.setSpacing(0)
+        links_splitter = QSplitter(Qt.Horizontal, links_page)
+        links_splitter.setObjectName("contractLinksPartiesSplitter")
+        links_splitter.setChildrenCollapsible(False)
+        links_layout.addWidget(links_splitter, 1)
+
+        repertoire_panel = QWidget(links_splitter)
+        repertoire_panel_layout = QVBoxLayout(repertoire_panel)
+        repertoire_panel_layout.setContentsMargins(0, 0, 0, 0)
+        repertoire_panel_layout.setSpacing(0)
         repertoire_box, repertoire_layout = _create_standard_section(
             self,
             "Linked Repertoire",
-            "Reference the related works, tracks, and releases so the contract stays connected to the assets it governs.",
+            "Reference the related works, tracks, and releases connected to this agreement.",
         )
-        repertoire_form = QFormLayout()
-        _configure_standard_form_layout(repertoire_form)
 
         self.work_ids_edit = _ReferenceListEditor(
             placeholder="Select a linked work or type an ID",
             parent=self,
         )
         self.work_ids_edit.setObjectName("contractWorkReferenceEditor")
-        repertoire_form.addRow("Linked Work IDs", self.work_ids_edit)
 
         self.track_ids_edit = _ReferenceListEditor(
             placeholder="Select a linked track or type an ID",
             parent=self,
         )
         self.track_ids_edit.setObjectName("contractTrackReferenceEditor")
-        repertoire_form.addRow("Linked Track IDs", self.track_ids_edit)
 
         self.release_ids_edit = _ReferenceListEditor(
             placeholder="Select a linked release or type an ID",
             parent=self,
         )
         self.release_ids_edit.setObjectName("contractReleaseReferenceEditor")
-        repertoire_form.addRow("Linked Release IDs", self.release_ids_edit)
-        repertoire_layout.addLayout(repertoire_form)
-        links_layout.addWidget(repertoire_box)
+        for title, editor in (
+            ("Linked Works", self.work_ids_edit),
+            ("Linked Tracks", self.track_ids_edit),
+            ("Linked Releases", self.release_ids_edit),
+        ):
+            label = QLabel(title, repertoire_box)
+            label.setProperty("role", "supportingText")
+            repertoire_layout.addWidget(label)
+            repertoire_layout.addWidget(editor)
+        repertoire_panel_layout.addWidget(repertoire_box, 1)
+        links_splitter.addWidget(repertoire_panel)
 
+        parties_panel = QWidget(links_splitter)
+        parties_panel_layout = QVBoxLayout(parties_panel)
+        parties_panel_layout.setContentsMargins(0, 0, 0, 0)
+        parties_panel_layout.setSpacing(0)
         parties_box, parties_layout = _create_standard_section(
             self,
             "Linked Parties",
-            "Use one line per party in the form `party_id|role_label|primary` or `party_name|role_label|primary`.",
+            "Keep parties structured with role, primary status, and notes while still allowing typed names for new counterparties.",
         )
-        self.parties_edit = QPlainTextEdit()
-        self.parties_edit.setPlaceholderText(
-            "One line per party: party_id|role_label|primary\nOr: party_name|role_label|primary"
+        self.parties_edit = _ContractPartyEditor(
+            placeholder="Search known party or type a new party name",
+            parent=self,
         )
-        self.parties_edit.setMinimumHeight(140)
         parties_layout.addWidget(self.parties_edit)
-        links_layout.addWidget(parties_box)
-        links_layout.addStretch(1)
-        tabs.addTab(links_scroll, "Links and Parties")
+        parties_panel_layout.addWidget(parties_box, 1)
+        links_splitter.addWidget(parties_panel)
+        links_splitter.setStretchFactor(0, 5)
+        links_splitter.setStretchFactor(1, 4)
+        links_splitter.setSizes([560, 420])
+        tabs.addTab(links_page, "Links and Parties")
 
         obligations_scroll, _, obligations_layout = _create_scrollable_dialog_content(self)
         obligations_box, obligations_box_layout = _create_standard_section(
@@ -1645,13 +2226,17 @@ class ContractEditorDialog(QDialog):
         obligations_layout.addStretch(1)
         tabs.addTab(obligations_scroll, "Obligations")
 
-        documents_scroll, _, documents_layout = _create_scrollable_dialog_content(self)
+        documents_page = QWidget(self)
+        documents_page.setProperty("role", "workspaceCanvas")
+        documents_layout = QVBoxLayout(documents_page)
+        documents_layout.setContentsMargins(0, 0, 0, 0)
+        documents_layout.setSpacing(0)
         self.documents_editor = ContractDocumentEditor(
             contract_service=self.contract_service,
             parent=self,
         )
-        documents_layout.addWidget(self.documents_editor)
-        tabs.addTab(documents_scroll, "Documents")
+        documents_layout.addWidget(self.documents_editor, 1)
+        tabs.addTab(documents_page, "Documents")
 
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel, self)
         buttons.accepted.connect(self.accept)
@@ -1684,12 +2269,7 @@ class ContractEditorDialog(QDialog):
             self.work_ids_edit.set_value_ids(detail.work_ids)
             self.track_ids_edit.set_value_ids(detail.track_ids)
             self.release_ids_edit.set_value_ids(detail.release_ids)
-            self.parties_edit.setPlainText(
-                "\n".join(
-                    f"{item.party_id}|{item.role_label}|{'1' if item.is_primary else '0'}"
-                    for item in detail.parties
-                )
-            )
+            self.parties_edit.set_value(detail.parties)
             self.obligations_editor.load_obligations(detail.obligations)
             self.documents_editor.load_documents(detail.documents)
         else:
@@ -1753,22 +2333,31 @@ class ContractEditorDialog(QDialog):
                 or f"Release #{int(row[0])}",
             )
         )
+        self.parties_edit.set_choices(
+            self._reference_choices_from_query(
+                """
+                SELECT
+                    id,
+                    legal_name,
+                    COALESCE(display_name, ''),
+                    COALESCE(email, '')
+                FROM Parties
+                ORDER BY COALESCE(display_name, legal_name), legal_name, id
+                """,
+                lambda row: " / ".join(
+                    part
+                    for part in (
+                        str(row[2] or "").strip(),
+                        str(row[1] or "").strip(),
+                        str(row[3] or "").strip(),
+                    )
+                    if part
+                )
+                or f"Party #{int(row[0])}",
+            )
+        )
 
     def payload(self) -> ContractPayload:
-        parties: list[ContractPartyPayload] = []
-        for line in self.parties_edit.toPlainText().splitlines():
-            parts = [part.strip() for part in line.split("|")]
-            if not parts or not parts[0]:
-                continue
-            party_id = int(parts[0]) if parts[0].isdigit() else None
-            parties.append(
-                ContractPartyPayload(
-                    party_id=party_id,
-                    name=None if party_id is not None else parts[0],
-                    role_label=parts[1] if len(parts) > 1 and parts[1] else "counterparty",
-                    is_primary=_parse_bool_token(parts[2]) if len(parts) > 2 else False,
-                )
-            )
         return ContractPayload(
             title=self.title_edit.text().strip(),
             contract_type=self.type_edit.text().strip() or None,
@@ -1785,7 +2374,7 @@ class ContractEditorDialog(QDialog):
             status=self.status_combo.currentText().strip().lower().replace(" ", "_"),
             summary=self.summary_edit.toPlainText().strip() or None,
             notes=self.notes_edit.toPlainText().strip() or None,
-            parties=parties,
+            parties=self.parties_edit.value(),
             obligations=self.obligations_editor.obligations(),
             documents=self.documents_editor.documents(),
             work_ids=self.work_ids_edit.value_ids(),
@@ -1992,9 +2581,10 @@ class ContractBrowserPanel(QWidget):
         if not contract_id:
             QMessageBox.information(self, "Contract Manager", "Select a contract first.")
             return
-        if (
-            QMessageBox.question(self, "Delete Contract", "Delete the selected contract?")
-            != QMessageBox.Yes
+        if not _confirm_destructive_action(
+            self,
+            title="Delete Contract",
+            prompt="Delete the selected contract?",
         ):
             return
         service.delete_contract(contract_id)

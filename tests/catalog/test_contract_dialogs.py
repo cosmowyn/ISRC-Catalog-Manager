@@ -17,6 +17,12 @@ class ContractDialogTests(ContractRightsAssetServiceTestCase):
     test_contract_editor_structured_obligations_round_trip_all_fields = (
         ContractRightsAssetServiceTestCase.case_contract_editor_structured_obligations_round_trip_all_fields
     )
+    test_contract_editor_structured_parties_round_trip_known_and_typed_entries = (
+        ContractRightsAssetServiceTestCase.case_contract_editor_structured_parties_round_trip_known_and_typed_entries
+    )
+    test_contract_editor_party_editor_guides_near_duplicates_without_extra_clutter = (
+        ContractRightsAssetServiceTestCase.case_contract_editor_party_editor_guides_near_duplicates_without_extra_clutter
+    )
 
 
 del ContractRightsAssetServiceTestCase

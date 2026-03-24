@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -210,6 +211,22 @@ def _configure_standard_form_layout(form: QFormLayout) -> None:
     form.setRowWrapPolicy(QFormLayout.WrapLongRows)
     form.setHorizontalSpacing(12)
     form.setVerticalSpacing(10)
+
+
+def _confirm_destructive_action(
+    owner: QWidget | None,
+    *,
+    title: str,
+    prompt: str,
+    consequences: list[str] | tuple[str, ...] | None = None,
+) -> bool:
+    sections = [str(prompt or "").strip()]
+    for consequence in consequences or ():
+        clean = str(consequence or "").strip()
+        if clean:
+            sections.append(clean)
+    message = "\n\n".join(section for section in sections if section)
+    return QMessageBox.question(owner, title, message) == QMessageBox.Yes
 
 
 def _create_scrollable_dialog_content(

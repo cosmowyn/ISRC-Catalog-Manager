@@ -677,11 +677,6 @@ class AppShellTestCase(unittest.TestCase):
         )
         import_exchange_menu = self._menu_snapshot_at_path(import_snapshot, "Catalog Exchange")
         contracts_menu = self._menu_snapshot_at_path(import_snapshot, "Contracts and Rights")
-        submenu_actions = [
-            action.text()
-            for action in self.window.import_xml_action.parent().findChildren(app_module.QAction)
-            if False
-        ]
         self.assertEqual(
             list(import_exchange_menu.get("texts") or []),
             [
@@ -866,13 +861,39 @@ class AppShellTestCase(unittest.TestCase):
             return _inner
 
         with (
-            mock.patch.object(app_module.App, "open_settings_dialog", autospec=True, side_effect=_record("settings")),
-            mock.patch.object(app_module.App, "open_history_dialog", autospec=True, side_effect=_record("history")),
-            mock.patch.object(app_module.App, "open_help_dialog", autospec=True, side_effect=_record("help")),
-            mock.patch.object(app_module.App, "open_diagnostics_dialog", autospec=True, side_effect=_record("diagnostics")),
-            mock.patch.object(app_module.App, "open_application_log_dialog", autospec=True, side_effect=_record("application_log")),
-            mock.patch.object(app_module.App, "open_quality_dashboard", autospec=True, side_effect=_record("quality")),
-            mock.patch.object(app_module.App, "open_gs1_dialog", autospec=True, side_effect=_record("gs1")),
+            mock.patch.object(
+                app_module.App,
+                "open_settings_dialog",
+                autospec=True,
+                side_effect=_record("settings"),
+            ),
+            mock.patch.object(
+                app_module.App, "open_history_dialog", autospec=True, side_effect=_record("history")
+            ),
+            mock.patch.object(
+                app_module.App, "open_help_dialog", autospec=True, side_effect=_record("help")
+            ),
+            mock.patch.object(
+                app_module.App,
+                "open_diagnostics_dialog",
+                autospec=True,
+                side_effect=_record("diagnostics"),
+            ),
+            mock.patch.object(
+                app_module.App,
+                "open_application_log_dialog",
+                autospec=True,
+                side_effect=_record("application_log"),
+            ),
+            mock.patch.object(
+                app_module.App,
+                "open_quality_dashboard",
+                autospec=True,
+                side_effect=_record("quality"),
+            ),
+            mock.patch.object(
+                app_module.App, "open_gs1_dialog", autospec=True, side_effect=_record("gs1")
+            ),
         ):
             self.window = app_module.App()
             self.window.show()
@@ -1771,7 +1792,9 @@ class AppShellTestCase(unittest.TestCase):
         self.assertTrue(panel.isVisible())
 
     def case_catalog_managers_dialog_uses_compact_size_and_consistent_tabs(self):
-        dialog = app_module.CatalogManagersDialog(self.window, initial_tab="licensees", parent=self.window)
+        dialog = app_module.CatalogManagersDialog(
+            self.window, initial_tab="licensees", parent=self.window
+        )
         try:
             dialog.show()
             self._drain_events()
@@ -1835,7 +1858,9 @@ class AppShellTestCase(unittest.TestCase):
             ],
         )
         catalog_quality_snapshot = self._menu_snapshot_at_path(catalog_snapshot, "Quality & Repair")
-        self.assertEqual(list(catalog_quality_snapshot.get("texts") or []), ["Data Quality Dashboard…"])
+        self.assertEqual(
+            list(catalog_quality_snapshot.get("texts") or []), ["Data Quality Dashboard…"]
+        )
         metadata_snapshot = self._menu_snapshot_at_path(catalog_snapshot, "Metadata & Standards")
         legacy_snapshot = self._menu_snapshot_at_path(catalog_snapshot, "Legacy")
         audio_snapshot = self._menu_snapshot_at_path(catalog_snapshot, "Audio")
@@ -2379,6 +2404,9 @@ class AppShellTestCase(unittest.TestCase):
             panel_name="partyManagerPanel",
         )
         self.assertEqual(party_panel._selected_party_ids(), [party_id])
+        self.assertEqual(
+            party_panel.manage_actions_cluster.objectName(), "partyManagerActionsCluster"
+        )
 
         self.window.open_contract_manager(contract_id)
         self.app.processEvents()
@@ -2397,6 +2425,9 @@ class AppShellTestCase(unittest.TestCase):
             panel_name="rightsBrowserPanel",
         )
         self.assertEqual(rights_panel._selected_right_id(), right_id)
+        self.assertEqual(
+            rights_panel.manage_actions_cluster.objectName(), "rightsMatrixActionsCluster"
+        )
 
         self.window.open_asset_registry(asset_id)
         self.app.processEvents()
@@ -2407,7 +2438,13 @@ class AppShellTestCase(unittest.TestCase):
         )
         self.assertEqual(asset_panel._selected_asset_id(), asset_id)
         self.assertEqual(
-            [asset_panel.workspace_tabs.tabText(index) for index in range(asset_panel.workspace_tabs.count())],
+            asset_panel.asset_actions_cluster.objectName(), "assetRegistryActionsCluster"
+        )
+        self.assertEqual(
+            [
+                asset_panel.workspace_tabs.tabText(index)
+                for index in range(asset_panel.workspace_tabs.count())
+            ],
             ["Asset Registry", "Derivative Ledger"],
         )
         self.assertIs(asset_panel.workspace_tabs.currentWidget(), asset_panel.asset_registry_tab)
@@ -2419,15 +2456,117 @@ class AppShellTestCase(unittest.TestCase):
             asset_panel.workspace_tabs.currentWidget(),
             asset_panel.derivative_ledger_tab,
         )
+        self.assertEqual(
+            asset_panel.derivative_ledger_tab.workspace_splitter.objectName(),
+            "derivativeLedgerWorkspaceSplitter",
+        )
+        self.assertEqual(
+            asset_panel.derivative_ledger_tab.workspace_splitter.orientation(),
+            app_module.Qt.Horizontal,
+        )
+        self.assertEqual(
+            [
+                asset_panel.derivative_ledger_tab.batch_workspace_tabs.tabText(index)
+                for index in range(asset_panel.derivative_ledger_tab.batch_workspace_tabs.count())
+            ],
+            ["Derivatives", "Details", "Lineage", "Admin"],
+        )
+        self.assertEqual(
+            asset_panel.derivative_ledger_tab.derivative_actions_cluster.objectName(),
+            "derivativeLedgerActionsCluster",
+        )
+        self.assertEqual(
+            asset_panel.derivative_ledger_tab.admin_actions_cluster.objectName(),
+            "derivativeLedgerAdminActionsCluster",
+        )
+        self.assertEqual(
+            asset_panel.derivative_ledger_tab.format_filter_combo.objectName(),
+            "derivativeLedgerFormatFilter",
+        )
+        self.assertEqual(
+            asset_panel.derivative_ledger_tab.kind_filter_combo.objectName(),
+            "derivativeLedgerKindFilter",
+        )
+        self.assertEqual(
+            asset_panel.derivative_ledger_tab.status_filter_combo.objectName(),
+            "derivativeLedgerStatusFilter",
+        )
+        self.assertEqual(
+            asset_panel.derivative_ledger_tab.details_scroll_area.objectName(),
+            "derivativeLedgerDetailsScrollArea",
+        )
+        self.assertEqual(
+            asset_panel.derivative_ledger_tab.lineage_scroll_area.objectName(),
+            "derivativeLedgerLineageScrollArea",
+        )
+        self.assertEqual(asset_panel.derivative_ledger_tab.batch_id_value.text(), batch_id)
+        self.assertIn(
+            batch_id,
+            asset_panel.derivative_ledger_tab.selected_batch_heading.text(),
+        )
+        self.assertIn(
+            "database",
+            asset_panel.derivative_ledger_tab.admin_summary_label.text().lower(),
+        )
+        self.assertIn(
+            "files on disk",
+            asset_panel.derivative_ledger_tab.admin_summary_label.text().lower(),
+        )
         self.assertGreaterEqual(asset_panel.derivative_ledger_tab.batch_table.rowCount(), 1)
         self.assertGreaterEqual(asset_panel.derivative_ledger_tab.derivative_table.rowCount(), 1)
-        self.assertIn("north-star-master--ledger.mp3", asset_panel.derivative_ledger_tab.details_edit.toPlainText())
 
         tabified = set(self.window.tabifiedDockWidgets(self.window.catalog_table_dock))
         self.assertIn(self.window.party_manager_dock, tabified)
         self.assertIn(self.window.contract_manager_dock, tabified)
         self.assertIn(self.window.rights_matrix_dock, tabified)
         self.assertIn(self.window.asset_registry_dock, tabified)
+
+    def case_asset_workspace_rejoins_tabbed_dock_strip_when_reopened(self):
+        track_id = self._create_track(index=142, title="Docked Deliverables Track")
+        asset_id = self.window.asset_service.create_asset(
+            AssetVersionPayload(
+                asset_type="main_master",
+                filename="deliverables-master.wav",
+                track_id=track_id,
+                approved_for_use=True,
+                primary_flag=True,
+                version_status="approved",
+            )
+        )
+
+        self.window.open_release_browser()
+        self.window.open_asset_registry(asset_id)
+        self.app.processEvents()
+
+        asset_panel = self.window.asset_registry_dock.widget()
+        self.assertIsNotNone(asset_panel)
+        self.assertIn(
+            self.window.asset_registry_dock,
+            set(self.window.tabifiedDockWidgets(self.window.catalog_table_dock)),
+        )
+
+        self.window.removeDockWidget(self.window.asset_registry_dock)
+        self.window.addDockWidget(
+            app_module.Qt.RightDockWidgetArea, self.window.asset_registry_dock
+        )
+        self.app.processEvents()
+        self.assertNotIn(
+            self.window.asset_registry_dock,
+            set(self.window.tabifiedDockWidgets(self.window.catalog_table_dock)),
+        )
+
+        self.window.asset_registry_dock.hide()
+        self.app.processEvents()
+
+        reopened_panel = self.window.open_asset_registry(asset_id)
+        self.app.processEvents()
+
+        self.assertIs(reopened_panel, asset_panel)
+        self.assertIn(
+            self.window.asset_registry_dock,
+            set(self.window.tabifiedDockWidgets(self.window.catalog_table_dock)),
+        )
+        self.assertEqual(reopened_panel._selected_asset_id(), asset_id)
 
     def case_add_data_panel_uses_tabbed_sections(self):
         tabs = self.window.findChild(app_module.QTabWidget, "addDataTabs")
@@ -3023,7 +3162,9 @@ class AppShellTestCase(unittest.TestCase):
 
         snapshot = self._table_context_menu_snapshot(first_row, 0)
         self.assertIn("Bulk Edit 2 Selected Tracks…", list(snapshot.get("texts") or []))
-        self.assertEqual(sorted(self.window._selected_track_ids()), [first_track_id, second_track_id])
+        self.assertEqual(
+            sorted(self.window._selected_track_ids()), [first_track_id, second_track_id]
+        )
 
     def case_audioless_row_context_menu_omits_audio_submenu(self):
         track_id = self._create_track(index=332, title="Metadata Only Track")
@@ -3075,7 +3216,9 @@ class AppShellTestCase(unittest.TestCase):
             )
         )
         field = next(
-            field for field in self.window.active_custom_fields if field.get("name") == "Session Artwork"
+            field
+            for field in self.window.active_custom_fields
+            if field.get("name") == "Session Artwork"
         )
         image_path = self._create_media_file("session-artwork.png", b"\x89PNG\r\n\x1a\ncustom")
         self.window.cf_save_value(

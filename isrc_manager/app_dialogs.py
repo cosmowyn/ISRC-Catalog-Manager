@@ -40,8 +40,8 @@ from isrc_manager.ui_common import (
     _apply_compact_dialog_control_heights,
     _apply_standard_dialog_chrome,
     _compose_widget_stylesheet,
-    _create_scrollable_dialog_content,
     _create_round_help_button,
+    _create_scrollable_dialog_content,
     _create_standard_section,
 )
 
@@ -1088,7 +1088,9 @@ class DiagnosticsDialog(QDialog):
 
     def _sync_environment_label_metrics(self):
         viewport = self.body_scroll.viewport()
-        viewport_width = viewport.width() if viewport is not None else self.environment_group.width()
+        viewport_width = (
+            viewport.width() if viewport is not None else self.environment_group.width()
+        )
         available_width = max(420, viewport_width - 320)
         for key, label in self.environment_labels.items():
             label.setFixedWidth(available_width)
@@ -1187,10 +1189,6 @@ class DiagnosticsDialog(QDialog):
         self._set_busy(False)
         QMessageBox.information(self, "Repair Complete", str(result_text or "Repair complete."))
         self.refresh()
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self._sync_environment_label_metrics()
 
 
 class AboutDialog(QDialog):

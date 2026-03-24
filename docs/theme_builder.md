@@ -14,6 +14,8 @@ In practice, it helps you:
 
 - adapt the app for long review sessions or accessibility needs
 - tune the action ribbon, dock chrome, tables, tabs, and other high-traffic surfaces
+- hide softer instructional hints when you want a denser editing workspace
+- keep a side-by-side preview visible while you edit, or temporarily hide it when you want more room
 - control media badge icons separately from reusable theme presets
 - finish the rare edge cases with selector-aware QSS tooling instead of guesswork
 
@@ -66,6 +68,16 @@ Control the overall tone and readability of the app through:
 - dialog title size
 - section heading size
 - supporting text size
+
+### Builder Controls
+
+The top of the Theme page also includes a few editing-surface controls that do not change the saved theme preset itself:
+
+- `Preview changes across the app while editing`
+- `Show field hints while editing`
+- `Show preview pane while editing`
+
+These controls are there to make the builder easier to use over long sessions. They shape the editing surface, not the saved preset payload.
 
 ### Surfaces
 
@@ -169,6 +181,8 @@ The builder includes a focused live preview system. Instead of showing every wid
 - data view previews show lists, tables, scrollbars, and progress surfaces
 
 This keeps the preview clear and makes it easier to judge the effect of each change.
+
+The preview pane can stay visible beside the builder or be hidden temporarily when you want a denser editing surface. The softer field-hint text can also be shown or hidden without changing the builder structure itself.
 
 An optional live mode can also apply the draft theme across the running application while you edit. Canceling the settings dialog restores the previous theme automatically.
 

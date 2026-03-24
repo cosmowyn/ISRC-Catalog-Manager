@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFormLayout,
     QHBoxLayout,
-    QLabel,
     QLineEdit,
     QMessageBox,
     QPlainTextEdit,
@@ -28,7 +27,8 @@ from isrc_manager.ui_common import (
     _apply_standard_dialog_chrome,
     _apply_standard_widget_chrome,
     _configure_standard_form_layout,
-    _create_action_button_grid,
+    _confirm_destructive_action,
+    _create_action_button_cluster,
     _create_scrollable_dialog_content,
     _create_standard_section,
 )
@@ -210,7 +210,7 @@ class PartyManagerPanel(QWidget):
         controls_box, controls_layout = _create_standard_section(
             self,
             "Find and Manage",
-            "Search the canonical party list, then add, edit, merge, delete, or refresh the selected records.",
+            "Search the canonical party list, then maintain the selected records.",
         )
         top_row = QHBoxLayout()
         top_row.setContentsMargins(0, 0, 0, 0)
@@ -231,13 +231,15 @@ class PartyManagerPanel(QWidget):
         delete_button.clicked.connect(self.delete_selected)
         refresh_button = QPushButton("Refresh")
         refresh_button.clicked.connect(self.refresh)
-        controls_layout.addWidget(
-            _create_action_button_grid(
-                self,
-                [add_button, edit_button, merge_button, delete_button, refresh_button],
-                columns=3,
-            )
+        self.manage_actions_cluster = _create_action_button_cluster(
+            self,
+            [add_button, edit_button, merge_button, delete_button, refresh_button],
+            columns=2,
+            min_button_width=160,
+            span_last_row=True,
         )
+        self.manage_actions_cluster.setObjectName("partyManagerActionsCluster")
+        controls_layout.addWidget(self.manage_actions_cluster)
         root.addWidget(controls_box)
 
         self.table = QTableWidget(0, 6, self)
@@ -380,13 +382,10 @@ class PartyManagerPanel(QWidget):
         if not selected_ids:
             QMessageBox.information(self, "Party Manager", "Select one or more parties first.")
             return
-        if (
-            QMessageBox.question(
-                self,
-                "Delete Parties",
-                f"Delete {len(selected_ids)} selected party record(s)?",
-            )
-            != QMessageBox.Yes
+        if not _confirm_destructive_action(
+            self,
+            title="Delete Parties",
+            prompt=f"Delete {len(selected_ids)} selected party record(s)?",
         ):
             return
         try:

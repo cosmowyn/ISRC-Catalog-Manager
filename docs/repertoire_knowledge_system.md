@@ -188,6 +188,11 @@ Each asset can store checksum, format, technical details, derivation links, appr
 
 Asset versions can also switch between database-backed and managed-file-backed storage without changing the surrounding workflow for approval, preview, export, or validation.
 
+Operationally, that work now lives in the docked `Deliverables and Asset Versions` workspace:
+
+- `Asset Registry` keeps approved masters, alternates, artwork variants, and primary-version control together
+- `Derivative Ledger` keeps managed export batches, registered derivative outputs, lineage, authenticity context, and explicit cleanup actions in the same review flow
+
 ## Attachment Storage Modes
 
 The richer repertoire model now uses one dual-storage rule for file-backed records across the application.
@@ -304,7 +309,7 @@ For an independent catalog owner, this means one application can now serve as:
 - the rights matrix
 - the party/contact registry
 - the document archive
-- the deliverables register
+- the deliverables register plus derivative-ledger review surface
 - the readiness dashboard
 
 That is the product direction behind the repertoire knowledge system.

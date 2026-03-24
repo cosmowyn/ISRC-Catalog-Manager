@@ -18,10 +18,12 @@ class CatalogWorkspaceDock(QDockWidget):
         dock_title: str,
         dock_object_name: str,
         panel_factory: Callable[[QDockWidget], QWidget],
+        retabify_when_shown: bool = False,
     ):
         super().__init__(dock_title, app)
         self.app = app
         self.panel_factory = panel_factory
+        self.retabify_when_shown = bool(retabify_when_shown)
         self._panel: QWidget | None = None
         self._default_placement_pending = True
         self._default_dock_area = Qt.RightDockWidgetArea
@@ -62,7 +64,15 @@ class CatalogWorkspaceDock(QDockWidget):
 
     def show_panel(self) -> QWidget:
         panel = self.panel()
-        apply_default_placement = bool(self._default_placement_pending)
+        apply_default_placement = bool(
+            self._default_placement_pending
+            or (
+                self.retabify_when_shown
+                and not self.isFloating()
+                and not self.app.tabifiedDockWidgets(self)
+                and _default_tab_anchor(self.app, self) is not None
+            )
+        )
         previous_suspend_state = getattr(self.app, "_suspend_dock_state_sync", False)
         setattr(self.app, "_suspend_dock_state_sync", True)
         try:
@@ -112,6 +122,7 @@ def ensure_catalog_workspace_dock(
     object_name: str,
     panel_factory: Callable[[QDockWidget], QWidget],
     default_area=Qt.RightDockWidgetArea,
+    retabify_when_shown: bool = False,
 ) -> CatalogWorkspaceDock:
     registry = getattr(app, "_catalog_workspace_docks", None)
     if registry is None:
@@ -127,6 +138,7 @@ def ensure_catalog_workspace_dock(
         dock_title=title,
         dock_object_name=object_name,
         panel_factory=panel_factory,
+        retabify_when_shown=retabify_when_shown,
     )
     dock._default_dock_area = default_area
     registry[key] = dock

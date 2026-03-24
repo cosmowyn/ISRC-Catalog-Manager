@@ -34,7 +34,8 @@ from isrc_manager.ui_common import (
     _apply_standard_dialog_chrome,
     _apply_standard_widget_chrome,
     _configure_standard_form_layout,
-    _create_action_button_grid,
+    _confirm_destructive_action,
+    _create_action_button_cluster,
     _create_scrollable_dialog_content,
     _create_standard_section,
 )
@@ -351,7 +352,7 @@ class RightsBrowserPanel(QWidget):
         controls_box, controls_layout = _create_standard_section(
             self,
             "Find and Manage",
-            "Search by right type, territory, contract, or party, then open the selected record or review conflicts.",
+            "Search by right type, territory, contract, or party, then work from the selected record.",
         )
         controls = QHBoxLayout()
         controls.setContentsMargins(0, 0, 0, 0)
@@ -367,14 +368,22 @@ class RightsBrowserPanel(QWidget):
         for label, handler in (
             ("Add", self.create_right),
             ("Edit", self.edit_selected),
-            ("Delete", self.delete_selected),
             ("Show Conflicts", self.show_conflicts),
+            ("Delete", self.delete_selected),
             ("Refresh", self.refresh),
         ):
             button = QPushButton(label)
             button.clicked.connect(handler)
             action_buttons.append(button)
-        controls_layout.addWidget(_create_action_button_grid(self, action_buttons, columns=3))
+        self.manage_actions_cluster = _create_action_button_cluster(
+            self,
+            action_buttons,
+            columns=2,
+            min_button_width=160,
+            span_last_row=True,
+        )
+        self.manage_actions_cluster.setObjectName("rightsMatrixActionsCluster")
+        controls_layout.addWidget(self.manage_actions_cluster)
         root.addWidget(controls_box)
 
         table_box, table_layout = _create_standard_section(
@@ -533,9 +542,10 @@ class RightsBrowserPanel(QWidget):
         if not right_id:
             QMessageBox.information(self, "Rights Matrix", "Select a rights record first.")
             return
-        if (
-            QMessageBox.question(self, "Delete Rights Record", "Delete the selected rights record?")
-            != QMessageBox.Yes
+        if not _confirm_destructive_action(
+            self,
+            title="Delete Rights Record",
+            prompt="Delete the selected rights record?",
         ):
             return
         service.delete_right(right_id)

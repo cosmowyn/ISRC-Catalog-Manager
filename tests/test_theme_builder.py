@@ -335,13 +335,39 @@ class ThemeBuilderTests(unittest.TestCase):
             self.assertEqual(dialog.minimumHeight(), 720)
             self.assertEqual(dialog.width(), 1180)
             self.assertEqual(dialog.height(), 820)
-            self.assertFalse(dialog.theme_show_preview_check.isChecked())
+            self.assertTrue(dialog.theme_show_hints_check.isChecked())
+            self.assertTrue(dialog.theme_show_preview_check.isChecked())
+            self.assertFalse(dialog.theme_preview_host.isHidden())
+            self.assertGreater(dialog.theme_splitter.sizes()[1], 0)
+
+            theme_tab_index = next(
+                index
+                for index in range(dialog.tabs.count())
+                if dialog.tabs.tabText(index) == "Theme"
+            )
+            dialog.tabs.setCurrentIndex(theme_tab_index)
+            self.app.processEvents()
+
+            hint_labels = [
+                label
+                for label in dialog.theme_page.findChildren(QLabel)
+                if label.property("role") == "hint"
+            ]
+            self.assertTrue(hint_labels)
+            self.assertTrue(any(label.isVisible() for label in hint_labels))
+
+            dialog.theme_show_hints_check.setChecked(False)
+            self.app.processEvents()
+            self.assertTrue(all(not label.isVisible() for label in hint_labels))
+
+            dialog.theme_show_hints_check.setChecked(True)
+            dialog.theme_show_preview_check.setChecked(False)
+            self.app.processEvents()
             self.assertTrue(dialog.theme_preview_host.isHidden())
 
             dialog.theme_show_preview_check.setChecked(True)
             self.app.processEvents()
             self.assertFalse(dialog.theme_preview_host.isHidden())
-            self.assertGreater(dialog.theme_splitter.sizes()[1], 0)
 
             general_grid = None
             for grid in dialog.findChildren(QGridLayout):

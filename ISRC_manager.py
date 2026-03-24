@@ -1268,6 +1268,7 @@ class ApplicationSettingsDialog(QDialog):
         self.tabs.addTab(self._wrap_tab_page(gs1_page), "GS1")
 
         theme_page = QWidget(self)
+        self.theme_page = theme_page
         theme_page.setProperty("role", "workspaceCanvas")
         theme_layout = QVBoxLayout(theme_page)
         theme_layout.setContentsMargins(10, 10, 10, 10)
@@ -1334,11 +1335,21 @@ class ApplicationSettingsDialog(QDialog):
             "When enabled, the current theme draft is applied to the running app in real time. Canceling the dialog restores the original theme.",
         )
 
-        self.theme_show_preview_check = QCheckBox("Show preview pane while editing")
-        self.theme_show_preview_check.setChecked(False)
+        self.theme_show_hints_check = QCheckBox("Show field hints while editing")
+        self.theme_show_hints_check.setChecked(True)
         self._add_row(
             theme_library_grid,
             2,
+            "Hint Text",
+            self.theme_show_hints_check,
+            "Show or hide the softer instructional hint text under theme controls without changing the overall builder layout.",
+        )
+
+        self.theme_show_preview_check = QCheckBox("Show preview pane while editing")
+        self.theme_show_preview_check.setChecked(True)
+        self._add_row(
+            theme_library_grid,
+            3,
             "Preview Pane",
             self.theme_show_preview_check,
             "Turn on the preview pane only when you want a side-by-side test surface while editing.",
@@ -1395,7 +1406,7 @@ class ApplicationSettingsDialog(QDialog):
         self.theme_splitter.setStretchFactor(1, 2)
         theme_layout.addWidget(self.theme_splitter, 1)
 
-        self.tabs.addTab(self._wrap_tab_page(theme_page), "Theme")
+        self.tabs.addTab(theme_page, "Theme")
 
         self.button_box = QDialogButtonBox(
             QDialogButtonBox.Save | QDialogButtonBox.Cancel,
@@ -1450,6 +1461,7 @@ class ApplicationSettingsDialog(QDialog):
         self._configure_gs1_default_option_combos()
         self._refresh_gs1_template_options(show_errors=False)
         self._refresh_qss_selector_reference()
+        self._set_theme_builder_hints_visible(self.theme_show_hints_check.isChecked())
         self._set_theme_preview_pane_visible(self.theme_show_preview_check.isChecked())
         _apply_compact_dialog_control_heights(self)
 
@@ -2580,6 +2592,15 @@ class ApplicationSettingsDialog(QDialog):
             else:
                 self.theme_splitter.setSizes([1, 0])
 
+    def _set_theme_builder_hints_visible(self, visible: bool) -> None:
+        visible = bool(visible)
+        theme_page = getattr(self, "theme_page", None)
+        if theme_page is None:
+            return
+        for label in theme_page.findChildren(QLabel):
+            if label.property("role") == "hint":
+                label.setVisible(visible)
+
     def _handle_theme_dialog_finished(self, result: int) -> None:
         self._theme_preview_timer.stop()
         if result != QDialog.Accepted:
@@ -2816,6 +2837,7 @@ class ApplicationSettingsDialog(QDialog):
         self.theme_font_family_combo.currentFontChanged.connect(self._mark_theme_selection_custom)
         self.theme_auto_contrast_check.toggled.connect(self._mark_theme_selection_custom)
         self.theme_live_preview_check.toggled.connect(self._handle_theme_live_preview_toggled)
+        self.theme_show_hints_check.toggled.connect(self._set_theme_builder_hints_visible)
         self.theme_show_preview_check.toggled.connect(self._set_theme_preview_pane_visible)
         self.theme_custom_qss_edit.textChanged.connect(self._mark_theme_selection_custom)
         for edit in self._theme_color_edits.values():
@@ -10389,6 +10411,7 @@ class App(QMainWindow):
             title="Deliverables and Asset Versions",
             object_name="assetRegistryDock",
             panel_factory=self._create_asset_registry_panel,
+            retabify_when_shown=True,
         )
         self.asset_registry_dock = dock
         return dock
@@ -17275,9 +17298,7 @@ class App(QMainWindow):
         track_id = self._track_id_for_table_row(row)
         selected_ids = self._selected_track_ids()
         bulk_count = len(selected_ids) if track_id is not None and track_id in selected_ids else 1
-        edit_label = (
-            "Edit Track" if bulk_count <= 1 else f"Bulk Edit {bulk_count} Selected Tracks…"
-        )
+        edit_label = "Edit Track" if bulk_count <= 1 else f"Bulk Edit {bulk_count} Selected Tracks…"
         act_edit = QAction(edit_label, self)
         act_edit.triggered.connect(lambda: self.open_selected_editor(track_id))
         menu.addAction(act_edit)

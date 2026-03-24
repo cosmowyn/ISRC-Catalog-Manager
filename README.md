@@ -99,6 +99,8 @@ Docked workspace panels include:
 
 These panels open as tabbed workspace surfaces alongside the main catalog table so you can keep browsing tracks, changing selections, filtering the table, opening related records, and moving between catalog tools without closing one window to use the next.
 
+Within `Deliverables and Asset Versions`, the `Asset Registry` and `Derivative Ledger` stay together as one operational surface so approved masters, export batches, derivatives, and post-export review stay in the same workspace loop.
+
 ### Works, rights, contracts, and parties
 
 The app models repertoire beyond recordings:
@@ -131,6 +133,13 @@ Tracks and releases can carry multiple managed asset versions, including:
 
 You can track approval state, mark the primary asset, preserve derivation relationships, validate broken or duplicate asset references, and choose whether the underlying asset file lives in the database or in app-managed local storage.
 
+The docked `Deliverables and Asset Versions` workspace keeps that practical:
+
+- `Asset Registry` stays focused on approved masters, alternates, artwork variants, and primary-version control
+- `Derivative Ledger` keeps managed export batches, registered derivative rows, authenticity context, retained output paths, and explicit cleanup actions together
+
+The ledger is intentionally layered for day-to-day use rather than as one long debug dump: keep the batch list visible, review derivatives in context, open the linked track or release, inspect lineage and hashes, and use conservative cleanup actions that state clearly whether they affect only database records or the retained files on disk.
+
 ### Audio authenticity and provenance
 
 The app can also produce authenticity-aware audio exports for practical ownership and provenance workflows.
@@ -146,6 +155,8 @@ The app can also produce authenticity-aware audio exports for practical ownershi
   - an external direct/provenance-supported file chosen through the file picker
 
 This feature is intentionally honest about scope. It is not DRM, does not claim zero waveform change, and does not treat watermarking alone as proof. The authenticity claim comes from the signed manifest; the watermark links direct master exports back to that signed record, while lossy derivatives are verified through signed lineage to a previously watermarked master.
+
+Those exports also remain reviewable after the export moment itself. The `Derivative Ledger` in the deliverables workspace keeps managed export batches searchable by batch ID, output file, format, derivative kind, and status, then layers the selected batch into `Derivatives`, `Details`, `Lineage`, and `Admin` tabs so the export history stays operational instead of archival.
 
 ### Quality control and operational readiness
 
@@ -238,6 +249,14 @@ It also includes a dedicated BLOB icon builder for stored media indicators:
 
 These media badge settings are intentionally kept separate from theme presets, so you can refine how stored files are represented in the catalog without changing the broader application theme.
 
+The builder also includes a practical editing surface around those theme controls:
+
+- optional softer hint text while editing
+- a side-by-side preview pane you can keep visible or hide temporarily
+- optional app-wide live preview while editing, with automatic theme restore on cancel
+
+These controls shape the editing experience without changing the saved preset payload itself.
+
 Advanced users can go further with a selector reference and syntax-aware QSS editor that supports safe autocomplete, rule templates, pseudo-states, subcontrols, and object-name targeting.
 
 ## Power Features Easy To Miss
@@ -245,6 +264,7 @@ Advanced users can go further with a selector reference and syntax-aware QSS edi
 Some of the strongest workflow features are easy to underestimate from a quick skim:
 
 - the docked workspace keeps Release Browser, Work Manager, Party Manager, Contract Manager, Rights Matrix, Asset Registry, License Browser, Global Search, and Catalog Managers open beside the table as tabbed panels
+- the deliverables workspace pairs the Asset Registry with a Derivative Ledger for managed export batches, lineage review, and safe cleanup
 - layout and dock state are remembered, so the app reopens as a real workstation instead of a fixed single screen
 - the action ribbon can be customized around your high-frequency commands
 - repeat imports can remember per-format choices, and unwanted incoming fields can be skipped explicitly instead of being mapped by accident
@@ -254,7 +274,7 @@ Some of the strongest workflow features are easy to underestimate from a quick s
 - audio tag workflows can preview conflicts before writing metadata back to exported copies
 - legacy license migration can move older PDF-based license records into the richer contract/document model with snapshot protection
 - history settings now include retention and safety presets, storage budgets, and cleanup prompts that keep manual restore points protected by default
-- theme tooling goes beyond colors into starter themes, BLOB badge icons, selector discovery, and QSS autocomplete
+- theme tooling goes beyond colors into starter themes, optional hint text, a live preview pane, app-wide preview, BLOB badge icons, selector discovery, and QSS autocomplete
 
 ## Who It Is For
 
@@ -294,7 +314,7 @@ Use the docked workspace panels to keep those managers open as tabbed companions
 
 ### 3. Review, clean up, and verify
 
-Run the quality dashboard, inspect findings, open the affected records, and use diagnostics when the issue may involve managed files, storage layout, history artifacts, legacy field collisions, or storage-budget pressure rather than catalog content alone.
+Run the quality dashboard, inspect findings, open the affected records, and use diagnostics when the issue may involve managed files, storage layout, history artifacts, legacy field collisions, or storage-budget pressure rather than catalog content alone. For deliverables work, keep the Derivative Ledger open beside the table so export batches, retained files, lineage, and authenticity review stay visible while you clean up or verify related catalog records.
 
 ### 4. Export, package, or archive safely
 

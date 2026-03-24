@@ -40,6 +40,7 @@ from isrc_manager.ui_common import (
     _apply_standard_dialog_chrome,
     _apply_standard_widget_chrome,
     _configure_standard_form_layout,
+    _confirm_destructive_action,
     _create_action_button_cluster,
     _create_scrollable_dialog_content,
     _create_standard_section,
@@ -749,9 +750,10 @@ class WorkBrowserPanel(QWidget):
         if not work_id:
             QMessageBox.information(self, "Work Manager", "Select a work first.")
             return
-        if (
-            QMessageBox.question(self, "Delete Work", "Delete the selected work?")
-            != QMessageBox.Yes
+        if not _confirm_destructive_action(
+            self,
+            title="Delete Work",
+            prompt="Delete the selected work?",
         ):
             return
         self.delete_requested.emit(work_id)

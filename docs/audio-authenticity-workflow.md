@@ -67,6 +67,28 @@ The export workflow:
 
 That means lossy derivatives are verified through signed lineage back to a previously watermarked master, not by pretending the same embedded watermark check works equally on every codec.
 
+## Deliverables Workspace And Derivative Ledger
+
+The day-to-day review surface for these exports lives in the docked `Deliverables and Asset Versions` workspace.
+
+- `Asset Registry` keeps the approved masters, alternates, artwork variants, and asset relationships visible.
+- `Derivative Ledger` tracks managed export batches plus the registered derivative rows created from those workflows.
+- The ledger can be narrowed by search, output format, derivative kind, and status so older export history stays workable as the catalog grows.
+
+The selected batch is intentionally layered instead of shown as one long raw dump:
+
+- `Derivatives` keeps the registered outputs visible and lets you open the linked track, open the linked release, or launch authenticity verification for the selected derivative
+- `Details` keeps batch and output metadata readable as structured fields
+- `Lineage` keeps manifests, hashes, retained paths, package members, and source lineage together
+- `Admin` keeps cleanup actions separate from normal review
+
+The cleanup wording is intentionally explicit:
+
+- deleting a derivative or batch removes database records only
+- deleting retained output files removes only the listed retained files and keeps the ledger row in place
+
+That makes the ledger useful for real operational cleanup without overstating what a delete action actually changes on disk.
+
 ## Verify Audio Authenticity
 
 Use `Catalog > Verify Audio Authenticity…`.
@@ -134,5 +156,5 @@ Keep these limits in mind:
 ## Where To Read More
 
 - Use the in-app `Help` chapter for `Audio Authenticity` for the quickest overview.
-- See [Catalog Workspace Workflows](catalog-workspace-workflows.md) for how the feature fits into daily catalog use.
+- See [Catalog Workspace Workflows](catalog-workspace-workflows.md) for how the feature fits into daily catalog use and the docked deliverables workspace.
 - See [Implementation Handoffs](implementation_handoffs/) for deeper internal technical notes.

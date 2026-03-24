@@ -788,6 +788,131 @@ class ContractRightsAssetServiceTestCase(unittest.TestCase):
         finally:
             dialog.close()
 
+    def case_contract_editor_structured_parties_round_trip_known_and_typed_entries(self):
+        if ContractEditorDialog is None:
+            self.skipTest("Contract editor dialog unavailable")
+        require_qapplication()
+
+        existing_party_id = self.party_service.create_party(
+            PartyPayload(
+                legal_name="North Shore Rights",
+                display_name="North Shore",
+                email="ops@northshore.test",
+            )
+        )
+
+        dialog = ContractEditorDialog(contract_service=self.contract_service)
+        try:
+            dialog.title_edit.setText("Structured Party Contract")
+            self.assertIsNotNone(dialog.parties_edit.role_edit.completer())
+
+            known_index = dialog.parties_edit.party_combo.findData(existing_party_id)
+            self.assertGreaterEqual(known_index, 0)
+            dialog.parties_edit.party_combo.setCurrentIndex(known_index)
+            dialog.parties_edit.role_edit.setText("label")
+            dialog.parties_edit.primary_checkbox.setChecked(True)
+            dialog.parties_edit.notes_edit.setText("Lead catalog party")
+            dialog.parties_edit.add_current_party()
+
+            dialog.parties_edit.party_combo.setCurrentIndex(0)
+            dialog.parties_edit.party_combo.setEditText("Fresh Counterparty")
+            dialog.parties_edit.role_edit.setText("licensee")
+            dialog.parties_edit.primary_checkbox.setChecked(False)
+            dialog.parties_edit.notes_edit.setText("Created by typed name")
+            dialog.parties_edit.add_current_party()
+
+            self.assertEqual(dialog.parties_edit.table.rowCount(), 2)
+            self.assertEqual(dialog.parties_edit.table.item(0, 1).text(), "North Shore")
+            self.assertEqual(dialog.parties_edit.table.item(1, 1).text(), "Fresh Counterparty")
+
+            dialog.parties_edit.party_combo.setCurrentIndex(known_index)
+            dialog.parties_edit.role_edit.setText("licensor")
+            dialog.parties_edit.primary_checkbox.setChecked(True)
+            dialog.parties_edit.notes_edit.setText("Updated role")
+            self.assertEqual(dialog.parties_edit.add_button.text(), "Update Existing")
+            self.assertIn("already linked", dialog.parties_edit.editor_hint_label.text())
+            dialog.parties_edit.add_current_party()
+
+            self.assertEqual(dialog.parties_edit.table.rowCount(), 2)
+            self.assertEqual(dialog.parties_edit.table.item(0, 2).text(), "licensor")
+            self.assertEqual(dialog.parties_edit.table.item(0, 4).text(), "Updated role")
+
+            serialized = dialog.parties_edit.toPlainText().splitlines()
+            self.assertIn(f"{existing_party_id}|licensor|1|Updated role", serialized)
+            self.assertIn(
+                "Fresh Counterparty|licensee|0|Created by typed name",
+                serialized,
+            )
+
+            payload = dialog.payload()
+            self.assertEqual(len(payload.parties), 2)
+            self.assertEqual(payload.parties[0].party_id, existing_party_id)
+            self.assertIsNone(payload.parties[0].name)
+            self.assertEqual(payload.parties[0].role_label, "licensor")
+            self.assertTrue(payload.parties[0].is_primary)
+            self.assertEqual(payload.parties[0].notes, "Updated role")
+            self.assertIsNone(payload.parties[1].party_id)
+            self.assertEqual(payload.parties[1].name, "Fresh Counterparty")
+            self.assertEqual(payload.parties[1].role_label, "licensee")
+            self.assertFalse(payload.parties[1].is_primary)
+            self.assertEqual(payload.parties[1].notes, "Created by typed name")
+        finally:
+            dialog.close()
+
+    def case_contract_editor_party_editor_guides_near_duplicates_without_extra_clutter(self):
+        if ContractEditorDialog is None:
+            self.skipTest("Contract editor dialog unavailable")
+        require_qapplication()
+
+        first_party_id = self.party_service.create_party(
+            PartyPayload(
+                legal_name="North Shore Rights",
+                display_name="North Shore",
+                email="ops@northshore.test",
+            )
+        )
+        self.party_service.create_party(
+            PartyPayload(
+                legal_name="North Shore Licensing",
+                display_name="North Shore Licensing",
+            )
+        )
+
+        dialog = ContractEditorDialog(contract_service=self.contract_service)
+        try:
+            dialog.parties_edit.party_combo.setCurrentIndex(0)
+            dialog.parties_edit.party_combo.setEditText("North Shore Rights BV")
+            dialog.parties_edit.role_edit.setText("licensee")
+            self.assertEqual(dialog.parties_edit.add_button.text(), "Add Party")
+            self.assertIn("Possible existing", dialog.parties_edit.editor_hint_label.text())
+            self.assertIn("North Shore", dialog.parties_edit.editor_hint_label.text())
+            self.assertNotIn("already linked", dialog.parties_edit.editor_hint_label.text())
+            self.assertFalse(dialog.parties_edit.table.selectionModel().hasSelection())
+
+            dialog.parties_edit.party_combo.setEditText("North Shore")
+            dialog.parties_edit.role_edit.setText("label")
+            dialog.parties_edit.primary_checkbox.setChecked(True)
+            dialog.parties_edit.add_current_party()
+
+            dialog.parties_edit.party_combo.setEditText("North Shore Rights BV")
+            dialog.parties_edit.role_edit.setText("licensee")
+            self.assertIn("already linked", dialog.parties_edit.editor_hint_label.text())
+            self.assertIn("already linked as label", dialog.parties_edit.editor_hint_label.text())
+            self.assertIn("highlighted below", dialog.parties_edit.editor_hint_label.text())
+            self.assertTrue(dialog.parties_edit.table.selectionModel().hasSelection())
+            self.assertEqual(dialog.parties_edit.table.currentRow(), 0)
+            self.assertEqual(dialog.parties_edit.table.item(0, 1).text(), "North Shore")
+            self.assertEqual(dialog.parties_edit.role_edit.text(), "licensee")
+
+            payload = dialog.payload()
+            self.assertEqual(len(payload.parties), 1)
+            self.assertEqual(payload.parties[0].party_id, first_party_id)
+            self.assertIsNone(payload.parties[0].name)
+            self.assertEqual(payload.parties[0].role_label, "label")
+            self.assertTrue(payload.parties[0].is_primary)
+        finally:
+            dialog.close()
+
     def case_contract_browser_uses_compact_action_cluster(self):
         if ContractBrowserPanel is None or QFrame is None:
             self.skipTest("Contract browser panel unavailable")

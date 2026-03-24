@@ -63,7 +63,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Assets</strong>: managed deliverables and artwork variants with approval and primary-version tracking.</li>
           <li><strong>Catalog Table</strong>: the central browser for searching, selecting, bulk editing, and reviewing recording data.</li>
           <li><strong>Global Search</strong>: a relationship-aware search surface across works, tracks, releases, contracts, rights, parties, documents, and assets.</li>
-          <li><strong>Docked catalog workspace</strong>: release, work, license, party, contract, rights, asset, and search panels can stay open as tabbed workspace surfaces beside the catalog table.</li>
+          <li><strong>Docked catalog workspace</strong>: release, work, license, party, contract, rights, deliverables, and search panels can stay open as tabbed workspace surfaces beside the catalog table.</li>
           <li><strong>Import and exchange</strong>: CSV, XLSX, JSON, XML, ZIP, audio-tag, bulk audio attach, and GS1 workflows for bringing data in, reconciling it, attaching media, exporting it, and archiving it safely.</li>
           <li><strong>Quality Dashboard</strong>: a practical readiness view for metadata gaps, identifier conflicts, broken media links, rights risks, and operational blockers.</li>
           <li><strong>Diagnostics and recovery</strong>: snapshots, backups, cleanup, trim, diagnostics, repair paths, and logs keep heavier workflows recoverable.</li>
@@ -98,7 +98,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Profiles toolbar</strong>: switch databases, create a new profile, browse to an external profile, reload the profile list, or remove the selected entry.</li>
           <li><strong>Profiles ribbon toggle</strong>: use <strong>View &gt; Show Profiles Ribbon</strong> when you want that toolbar visible or hidden, and the choice is remembered with the rest of the workspace.</li>
           <li><strong>Dockable panes</strong>: keep the window focused on your current task by showing only the panes you need.</li>
-          <li><strong>Tabbed catalog tools</strong>: Release Browser, Work Manager, Catalog Managers, License Browser, Party Manager, Contract Manager, Rights Matrix, Asset Registry, and Global Search open as docked tabs beside the table so you can keep using the track browser while those panels remain open.</li>
+          <li><strong>Tabbed catalog tools</strong>: Release Browser, Work Manager, Catalog Managers, License Browser, Party Manager, Contract Manager, Rights Matrix, Deliverables and Asset Versions, and Global Search open as docked tabs beside the table so you can keep using the track browser while those panels remain open.</li>
           <li><strong>Saved layout</strong>: column layout, dock placement, and visibility preferences are remembered so the app opens the way you work.</li>
         </ul>
         <p>Use the menus when you need the full surface of the product, or stay inside the docked views for everyday entry and review. The window title, branding, and appearance can be customized from <strong>Settings &gt; Application Settings</strong>. When you open multiple catalog tools, the app prefers tabbed docking so the workspace stays compact and easier to navigate while the table remains usable.</p>
@@ -392,8 +392,9 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Document intelligence</strong>: a contract can keep multiple managed documents such as drafts, signed agreements, amendments, appendices, exhibits, correspondence, and scans, with version labels and active/superseded relationships.</li>
           <li><strong>Rights matrix</strong>: rights records store the right type, exclusivity, territory, media/use scope, dates, source contract, and who granted, received, or retained the right.</li>
           <li><strong>Assets and deliverables</strong>: tracks and releases can keep primary masters, alternates, derivatives, artwork variants, and approval state in one registry.</li>
+          <li><strong>Derivative Ledger</strong>: managed export batches can be filtered by batch ID, track, output file, format, derivative kind, and status, then reviewed through layered Derivatives, Details, Lineage, and Admin tabs.</li>
           <li><strong>Global Search and Relationships…</strong>: search across the full model and inspect everything linked to the selected record from one panel.</li>
-          <li><strong>Docked managers</strong>: Work Manager, Party Manager, Contract Manager, Rights Matrix, Deliverables and Asset Versions, Derivative Ledger, and Global Search now stay available as tabbed workspace panels instead of blocking dialogs.</li>
+          <li><strong>Docked managers</strong>: Work Manager, Party Manager, Contract Manager, Rights Matrix, Deliverables and Asset Versions, and Global Search now stay available as tabbed workspace panels instead of blocking dialogs.</li>
         </ul>
         <p>This richer model is intentionally catalog-focused. It gives independent teams a practical way to understand what they own, what is linked, and what is ready, without turning the app into a royalty or distribution platform.</p>
         """,
@@ -612,6 +613,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Catalog &gt; Export Authenticity Watermarked Audio…</strong>: write WAV, FLAC, or AIFF master copies that keep the original canonical source unchanged, embed a compact keyed watermark token, write the catalog metadata tags that are already available for the track, and save a sibling <code>.authenticity.json</code> sidecar with the signed direct-authenticity manifest.</li>
           <li><strong>Catalog &gt; Export Authenticity Provenance Audio…</strong>: copy supported lossy derivatives as-is, write the available catalog tags, and save a signed provenance sidecar that binds the exported derivative back to a previously verified watermarked master.</li>
           <li><strong>Catalog &gt; Audio &gt; Authenticity &amp; Provenance &gt; Verify Audio Authenticity…</strong>: inspect either selected catalog audio or a chosen external file, then either verify the direct watermark path for WAV/FLAC/AIFF or verify a signed provenance lineage sidecar for supported derivatives.</li>
+          <li><strong>Deliverables and Asset Versions &gt; Derivative Ledger</strong>: review managed export batches after the export moment, filter by format/kind/status, inspect derivatives, details, and lineage, and launch authenticity verification directly from the selected derivative.</li>
         </ul>
         <p>This feature is <strong>not DRM</strong> and does not promise forensic certainty. A watermark always changes the waveform slightly, so the goal is perceptual transparency rather than mathematical identity. The strongest in-app verification happens when the open profile still contains the original reference audio, because the app can compare the inspected export against that stored source directly.</p>
         <p>Direct embedded authenticity verification is intentionally limited to WAV, FLAC, and AIFF. Lossy formats such as MP3, OGG/OGA, Opus, and M4A/MP4/AAC are not treated as direct authenticity masters in this workflow; use provenance lineage sidecars or the separate forensic export workflow when you need lossy delivery copies.</p>
@@ -637,9 +639,9 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         <ul>
           <li><strong>General</strong>: current profile context, window title, app icon, core registration details, automatic snapshots, retention and safety level, automatic cleanup, and history storage budget controls.</li>
           <li><strong>GS1</strong>: template storage mode plus profile defaults for GS1 export workflows.</li>
-          <li><strong>Theme</strong>: the full visual theme builder, starter themes, live preview, and advanced QSS.</li>
+          <li><strong>Theme</strong>: the full visual theme builder, starter themes, hint-text and preview-pane controls, live preview, and advanced QSS.</li>
         </ul>
-        <p>Saving settings updates the current app state immediately, while supported settings changes are also recorded in history so major appearance and configuration changes remain recoverable. On first launch, the app can offer to open this dialog so you can configure registration and recovery posture early. Media badge icon choices for stored audio and image BLOBs are managed from the Theme workspace but are kept separate from reusable theme presets.</p>
+        <p>Saving settings updates the current app state immediately, while supported settings changes are also recorded in history so major appearance and configuration changes remain recoverable. On first launch, the app can offer to open this dialog so you can configure registration and recovery posture early. Media badge icon choices for stored audio and image BLOBs are managed from the Theme workspace but are kept separate from reusable theme presets, and the Theme page also includes builder-only controls for hint visibility and preview-surface visibility while you edit.</p>
         """,
     ),
     HelpChapter(
@@ -659,12 +661,14 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Data Views</strong>: theme tables, lists, row hover states, selections, scrollbars, progress bars, progress text, and progress borders.</li>
           <li><strong>Navigation</strong>: theme menu bars, popup menus, toolbars, status bars, dock titles, headers, tab strips, tab panes, and tabs with separate normal, hover, and selected states.</li>
           <li><strong>Blob Icons</strong>: choose separate global icons for stored audio and image BLOBs using platform icons, emoji, or compressed custom images stored in the profile database.</li>
+          <li><strong>Hint Text</strong>: show or hide the softer instructional hint labels while keeping the builder layout itself intact.</li>
+          <li><strong>Preview Pane</strong>: keep the side-by-side preview visible while editing or hide it temporarily when you want more room for the builder tabs.</li>
           <li><strong>Live Preview</strong>: preview the current draft inside the settings dialog with a focused preview that follows the active theme section, or enable real-time app-wide preview while editing and revert automatically on cancel.</li>
           <li><strong>Advanced QSS</strong>: append custom Qt stylesheet rules only for the remaining edge cases that are not already covered by the GUI builder.</li>
           <li><strong>Selector Reference</strong>: browse a searchable catalog of selectors harvested from the currently open windows and dialogs, then copy or insert them into the QSS editor.</li>
           <li><strong>Autocomplete</strong>: press <strong>Ctrl+Space</strong> inside the advanced QSS editor for context-aware selector, pseudo-state, subcontrol, property, value, and full-template completion.</li>
         </ul>
-        <p>Most users should begin with the visual controls and only use Advanced QSS for the last few selectors that truly need custom rules. The selector reference and autocomplete tools exist to make that final layer safe and efficient rather than mysterious. Media badge icons are intentionally stored outside the reusable theme library so you can refine catalog file indicators without overwriting a saved theme preset.</p>
+        <p>Most users should begin with the visual controls and only use Advanced QSS for the last few selectors that truly need custom rules. The selector reference and autocomplete tools exist to make that final layer safe and efficient rather than mysterious. Media badge icons are intentionally stored outside the reusable theme library so you can refine catalog file indicators without overwriting a saved theme preset, and the hint/preview controls stay builder-only so they do not change the saved preset payload.</p>
         """,
     ),
     HelpChapter(
@@ -829,8 +833,12 @@ def render_help_html(
     table_header_fg = str(palette.get("header_fg") or heading_fg)
     link_fg = str(palette.get("link_color") or "#0f62fe")
     app = QApplication.instance() if QApplication is not None else None
-    fallback_body_font = app.font().family().replace('"', '\\"').strip() if app is not None else "Arial"
-    body_font = str(palette.get("font_family") or "").replace('"', '\\"').strip() or fallback_body_font
+    fallback_body_font = (
+        app.font().family().replace('"', '\\"').strip() if app is not None else "Arial"
+    )
+    body_font = (
+        str(palette.get("font_family") or "").replace('"', '\\"').strip() or fallback_body_font
+    )
     font_family_css = f'"{body_font}", sans-serif'
     return f"""<!DOCTYPE html>
 <html lang="en">

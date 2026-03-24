@@ -23,12 +23,12 @@ from isrc_manager.file_storage import (
     infer_storage_mode,
     normalize_storage_mode,
 )
+from isrc_manager.media.audio_formats import classify_audio_format
 from isrc_manager.media.blob_files import (
     _is_valid_audio_path,
     _is_valid_image_path,
     _read_blob_from_path,
 )
-from isrc_manager.media.audio_formats import classify_audio_format
 
 
 def _build_media_fields() -> dict[str, dict[str, object]]:

@@ -302,19 +302,26 @@ class DerivativeLedgerService:
         self.conn.execute("DELETE FROM TrackAudioDerivatives WHERE batch_id=?", (str(batch_id),))
         self.conn.execute("DELETE FROM DerivativeExportBatches WHERE batch_id=?", (str(batch_id),))
 
+    def delete_derivative(self, export_id: str) -> None:
+        self.conn.execute("DELETE FROM TrackAudioDerivatives WHERE export_id=?", (str(export_id),))
+
     def list_batches(
         self,
         *,
         search_text: str = "",
+        output_format: str | None = None,
+        derivative_kind: str | None = None,
+        status: str | None = None,
         limit: int = 250,
     ) -> list[DerivativeBatchRecord]:
         params: list[object] = []
-        where_clause = ""
+        where_parts: list[str] = []
         search = str(search_text or "").strip().lower()
         if search:
             like_value = f"%{search}%"
-            where_clause = """
-                WHERE (
+            where_parts.append(
+                """
+                (
                     lower(b.batch_id) LIKE ?
                     OR lower(coalesce(b.output_format, '')) LIKE ?
                     OR lower(coalesce(b.derivative_kind, '')) LIKE ?
@@ -332,8 +339,22 @@ class DerivativeLedgerService:
                           )
                     )
                 )
-            """
+                """
+            )
             params.extend([like_value] * 8)
+        clean_output_format = str(output_format or "").strip().lower()
+        if clean_output_format:
+            where_parts.append("lower(coalesce(b.output_format, '')) = ?")
+            params.append(clean_output_format)
+        clean_derivative_kind = str(derivative_kind or "").strip().lower()
+        if clean_derivative_kind:
+            where_parts.append("lower(coalesce(b.derivative_kind, '')) = ?")
+            params.append(clean_derivative_kind)
+        clean_status = str(status or "").strip().lower()
+        if clean_status:
+            where_parts.append("lower(coalesce(b.status, '')) = ?")
+            params.append(clean_status)
+        where_clause = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
         params.append(max(1, int(limit or 250)))
         rows = self.conn.execute(
             f"""
@@ -384,6 +405,9 @@ class DerivativeLedgerService:
         *,
         batch_id: str | None = None,
         search_text: str = "",
+        output_format: str | None = None,
+        derivative_kind: str | None = None,
+        status: str | None = None,
         limit: int = 1000,
     ) -> list[DerivativeLedgerRecord]:
         params: list[object] = []
@@ -409,6 +433,18 @@ class DerivativeLedgerService:
                 """
             )
             params.extend([like_value] * 7)
+        clean_output_format = str(output_format or "").strip().lower()
+        if clean_output_format:
+            where_parts.append("lower(coalesce(d.output_format, '')) = ?")
+            params.append(clean_output_format)
+        clean_derivative_kind = str(derivative_kind or "").strip().lower()
+        if clean_derivative_kind:
+            where_parts.append("lower(coalesce(d.derivative_kind, '')) = ?")
+            params.append(clean_derivative_kind)
+        clean_status = str(status or "").strip().lower()
+        if clean_status:
+            where_parts.append("lower(coalesce(d.status, '')) = ?")
+            params.append(clean_status)
         where_clause = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
         params.append(max(1, int(limit or 1000)))
         rows = self.conn.execute(
