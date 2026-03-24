@@ -630,6 +630,39 @@ class TrackService:
             return self._fetch_album_art_blob(int(owner_id), cursor=cursor)
         return self._fetch_track_row_media_blob(int(owner_id), media_key, cursor=cursor)
 
+    def _read_media_bytes_for_meta(
+        self,
+        media_key: str,
+        meta: dict[str, str | int | bool | object],
+        *,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> bytes | None:
+        storage_mode = str(meta.get("storage_mode") or "")
+        if storage_mode == STORAGE_MODE_DATABASE:
+            return self._fetch_media_blob_for_meta(media_key, meta, cursor=cursor)
+        resolved = self.resolve_media_path(str(meta.get("path") or ""))
+        if resolved is None or not resolved.exists():
+            return None
+        return resolved.read_bytes()
+
+    def _source_matches_media_meta(
+        self,
+        media_key: str,
+        source_path: str | Path,
+        meta: dict[str, str | int | bool | object],
+        *,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> bool:
+        if not bool(meta.get("has_media")):
+            return False
+        source = Path(source_path)
+        if not source.exists():
+            return False
+        current_bytes = self._read_media_bytes_for_meta(media_key, meta, cursor=cursor)
+        if current_bytes is None:
+            return False
+        return current_bytes == source.read_bytes()
+
     def _build_media_storage_payload_from_source(
         self,
         media_key: str,
@@ -972,23 +1005,20 @@ class TrackService:
         cur = cursor or self.conn.cursor()
 
         if media_key == "album_art":
-            self._require_direct_album_art_edit(track_id, cursor=cur)
             album_id, album_title = self._fetch_album_context(track_id, cursor=cur)
             if self._album_supports_shared_art(album_id, album_title):
+                effective_meta = self.get_media_meta(track_id, media_key, cursor=cur)
+                if self._source_matches_media_meta(
+                    media_key,
+                    source_path,
+                    effective_meta,
+                    cursor=cur,
+                ):
+                    if str(effective_meta.get("owner_scope") or "") == "album":
+                        self._clear_album_track_art_references(int(album_id), cursor=cur)
+                    return effective_meta
+                self._require_direct_album_art_edit(track_id, cursor=cur)
                 current_shared_meta = self._get_album_art_meta(int(album_id), cursor=cur)
-                source = Path(source_path)
-                if bool(current_shared_meta.get("has_media")):
-                    try:
-                        current_bytes, _ = self.fetch_media_bytes(
-                            track_id,
-                            media_key,
-                            cursor=cur,
-                        )
-                        if current_bytes == source.read_bytes():
-                            self._clear_album_track_art_references(int(album_id), cursor=cur)
-                            return current_shared_meta
-                    except Exception:
-                        pass
                 rel_path, filename, blob_data, mime_type, size_bytes = (
                     self._build_media_storage_payload_from_source(
                         media_key,

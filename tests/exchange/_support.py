@@ -439,6 +439,200 @@ class ExchangeServiceTestCase(unittest.TestCase):
         finally:
             new_conn.close()
 
+    def case_package_import_round_trip_restores_shared_album_art_without_child_rewrite(self):
+        artwork_path = self.data_root / "shared-roundtrip.png"
+        artwork_path.write_bytes(
+            bytes.fromhex(
+                "89504E470D0A1A0A"
+                "0000000D49484452000000010000000108060000001F15C489"
+                "0000000D49444154789C63F8FFFF3F0005FE02FEA7D6059F"
+                "0000000049454E44AE426082"
+            )
+        )
+        track_a = self.track_service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00027",
+                track_title="Shared Import A",
+                artist_name="Cosmowyn",
+                additional_artists=[],
+                album_title="Shared Import Release",
+                release_date="2026-03-15",
+                track_length_sec=180,
+                iswc=None,
+                upc="036000291452",
+                genre="Ambient",
+                catalog_number="CAT-006",
+                album_art_source_path=str(artwork_path),
+            )
+        )
+        track_b = self.track_service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00028",
+                track_title="Shared Import B",
+                artist_name="Cosmowyn",
+                additional_artists=[],
+                album_title="Shared Import Release",
+                release_date="2026-03-15",
+                track_length_sec=180,
+                iswc=None,
+                upc="036000291452",
+                genre="Ambient",
+                catalog_number="CAT-006",
+            )
+        )
+        self.release_service.create_release(
+            ReleasePayload(
+                title="Shared Import Release",
+                primary_artist="Cosmowyn",
+                album_artist="Cosmowyn",
+                release_type="album",
+                release_date="2026-03-15",
+                upc="036000291452",
+                placements=[
+                    ReleaseTrackPlacement(
+                        track_id=track_a, disc_number=1, track_number=1, sequence_number=1
+                    ),
+                    ReleaseTrackPlacement(
+                        track_id=track_b, disc_number=1, track_number=2, sequence_number=2
+                    ),
+                ],
+            )
+        )
+
+        package_path = self.data_root / "shared-roundtrip-package.zip"
+        self.service.export_package(package_path)
+
+        new_root = self.data_root / "shared-imported"
+        new_root.mkdir(parents=True, exist_ok=True)
+        new_conn = sqlite3.connect(":memory:")
+        try:
+            DatabaseSchemaService(new_conn, data_root=new_root).init_db()
+            DatabaseSchemaService(new_conn, data_root=new_root).migrate_schema()
+            new_service = ExchangeService(
+                new_conn,
+                TrackService(new_conn, new_root),
+                ReleaseService(new_conn, new_root),
+                CustomFieldDefinitionService(new_conn),
+                new_root,
+            )
+
+            report = new_service.import_package(
+                package_path, options=ExchangeImportOptions(mode="create")
+            )
+
+            self.assertEqual(report.failed, 0)
+            self.assertEqual(new_conn.execute("SELECT COUNT(*) FROM Tracks").fetchone()[0], 2)
+            self.assertEqual(
+                new_conn.execute("SELECT album_art_path FROM Tracks ORDER BY id").fetchall(),
+                [(None,), (None,)],
+            )
+            album_art_path = new_conn.execute("SELECT album_art_path FROM Albums").fetchone()[0]
+            self.assertTrue(str(album_art_path or "").strip())
+            lead_bytes, _ = new_service.track_service.fetch_media_bytes(1, "album_art")
+            peer_bytes, _ = new_service.track_service.fetch_media_bytes(2, "album_art")
+            self.assertEqual(lead_bytes, artwork_path.read_bytes())
+            self.assertEqual(peer_bytes, artwork_path.read_bytes())
+        finally:
+            new_conn.close()
+
+    def case_package_import_reuses_duplicate_track_rows_and_preserves_source_release_ids(self):
+        track_id = self.track_service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00029",
+                track_title="Shared Across Releases",
+                artist_name="Cosmowyn",
+                additional_artists=[],
+                album_title="Shared Source Album",
+                release_date="2026-03-15",
+                track_length_sec=180,
+                iswc=None,
+                upc="036000291452",
+                genre="Ambient",
+                catalog_number="CAT-007",
+            )
+        )
+        self.release_service.create_release(
+            ReleasePayload(
+                title="Same Identity Release",
+                primary_artist="Cosmowyn",
+                album_artist="Cosmowyn",
+                release_type="album",
+                release_date="2026-03-15",
+                upc="036000291452",
+                placements=[
+                    ReleaseTrackPlacement(
+                        track_id=track_id, disc_number=1, track_number=1, sequence_number=1
+                    )
+                ],
+            )
+        )
+        self.release_service.create_release(
+            ReleasePayload(
+                title="Same Identity Release",
+                primary_artist="Cosmowyn",
+                album_artist="Cosmowyn",
+                release_type="album",
+                release_date="2026-03-16",
+                upc="036000291452",
+                placements=[
+                    ReleaseTrackPlacement(
+                        track_id=track_id, disc_number=1, track_number=1, sequence_number=1
+                    )
+                ],
+            )
+        )
+
+        package_path = self.data_root / "duplicate-track-release-package.zip"
+        self.service.export_package(package_path)
+
+        with ZipFile(package_path, "r") as archive:
+            manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+        self.assertEqual(len(manifest["rows"]), 2)
+        self.assertEqual(
+            len({str(row.get("release_id") or "").strip() for row in manifest["rows"] if row}),
+            2,
+        )
+
+        new_root = self.data_root / "duplicate-track-release-imported"
+        new_root.mkdir(parents=True, exist_ok=True)
+        new_conn = sqlite3.connect(":memory:")
+        try:
+            DatabaseSchemaService(new_conn, data_root=new_root).init_db()
+            DatabaseSchemaService(new_conn, data_root=new_root).migrate_schema()
+            new_service = ExchangeService(
+                new_conn,
+                TrackService(new_conn, new_root),
+                ReleaseService(new_conn, new_root),
+                CustomFieldDefinitionService(new_conn),
+                new_root,
+            )
+
+            report = new_service.import_package(
+                package_path, options=ExchangeImportOptions(mode="create")
+            )
+
+            self.assertEqual(report.failed, 0)
+            self.assertEqual(report.passed, 2)
+            self.assertEqual(len(report.created_tracks), 1)
+            self.assertEqual(report.updated_tracks, [])
+            self.assertEqual(new_conn.execute("SELECT COUNT(*) FROM Tracks").fetchone()[0], 1)
+            self.assertEqual(new_conn.execute("SELECT COUNT(*) FROM Releases").fetchone()[0], 2)
+            self.assertEqual(
+                new_conn.execute("SELECT COUNT(*) FROM ReleaseTracks").fetchone()[0], 2
+            )
+            self.assertEqual(
+                new_conn.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM Releases
+                    WHERE title='Same Identity Release' AND upc='036000291452'
+                    """
+                ).fetchone()[0],
+                2,
+            )
+        finally:
+            new_conn.close()
+
     def case_package_round_trip_preserves_database_backed_media_modes(self):
         audio_path = self.data_root / "blob-track.wav"
         audio_path.write_bytes(b"RIFFblobtrack")

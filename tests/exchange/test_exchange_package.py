@@ -14,6 +14,12 @@ class ExchangePackageTests(ExchangeServiceTestCase):
     test_package_import_round_trip_restores_media_and_release_artwork = (
         ExchangeServiceTestCase.case_package_import_round_trip_restores_media_and_release_artwork
     )
+    test_package_import_round_trip_restores_shared_album_art_without_child_rewrite = (
+        ExchangeServiceTestCase.case_package_import_round_trip_restores_shared_album_art_without_child_rewrite
+    )
+    test_package_import_reuses_duplicate_track_rows_and_preserves_source_release_ids = (
+        ExchangeServiceTestCase.case_package_import_reuses_duplicate_track_rows_and_preserves_source_release_ids
+    )
     test_package_round_trip_preserves_database_backed_media_modes = (
         ExchangeServiceTestCase.case_package_round_trip_preserves_database_backed_media_modes
     )

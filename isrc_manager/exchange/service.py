@@ -1108,19 +1108,26 @@ class ExchangeService:
         return None
 
     def _upsert_release_from_row(
-        self, row: dict[str, object], track_id: int, *, source_dir: Path
+        self,
+        row: dict[str, object],
+        track_id: int,
+        *,
+        source_dir: Path,
+        source_release_map: dict[str, int] | None = None,
+        preserve_source_release_identity: bool = False,
     ) -> None:
         release_title = str(row.get("release_title") or "").strip()
         if not release_title:
             return
-        release_id = (
-            int(row.get("release_id") or 0) if str(row.get("release_id") or "").strip() else 0
-        )
+        source_release_key = str(row.get("release_id") or "").strip()
         existing_id = None
-        if release_id > 0:
+        if source_release_map is not None and source_release_key:
+            existing_id = source_release_map.get(source_release_key)
+        elif source_release_key:
+            release_id = int(source_release_key)
             release = self.release_service.fetch_release(release_id)
             existing_id = release.id if release is not None else None
-        if existing_id is None:
+        if existing_id is None and not (preserve_source_release_identity and source_release_key):
             release_upc = str(row.get("release_upc") or "").strip()
             release_catalog = str(row.get("release_catalog_number") or "").strip()
             if release_upc:
@@ -1183,7 +1190,9 @@ class ExchangeService:
             placements=[placement],
         )
         if existing_id is None:
-            self.release_service.create_release(payload)
+            created_release_id = self.release_service.create_release(payload)
+            if source_release_map is not None and source_release_key:
+                source_release_map[source_release_key] = created_release_id
         else:
             summary = self.release_service.fetch_release_summary(existing_id)
             placements = list(summary.tracks) if summary is not None else []
@@ -1191,6 +1200,8 @@ class ExchangeService:
                 placements.append(placement)
             payload.placements = placements
             self.release_service.update_release(existing_id, payload)
+            if source_release_map is not None and source_release_key:
+                source_release_map[source_release_key] = existing_id
 
     def _import_rows(
         self,
@@ -1223,6 +1234,9 @@ class ExchangeService:
         skipped = 0
         created_tracks: list[int] = []
         updated_tracks: list[int] = []
+        package_create_mode = format_name == "package" and opts.mode == "create"
+        source_track_map: dict[str, int] = {}
+        source_release_map: dict[str, int] = {}
 
         custom_defs = {
             field["name"]: field["id"]
@@ -1254,9 +1268,16 @@ class ExchangeService:
                 failed += 1
                 warnings.append(f"Row {index}: Track Title and Artist are required.")
                 continue
-            existing_track_id = (
-                None if opts.mode == "create" else self._find_existing_track_id(row, options=opts)
-            )
+            source_track_key = str(row.get("track_id") or "").strip() if package_create_mode else ""
+            reused_package_track = bool(source_track_key) and source_track_key in source_track_map
+            if package_create_mode and reused_package_track:
+                existing_track_id = source_track_map[source_track_key]
+            else:
+                existing_track_id = (
+                    None
+                    if opts.mode == "create"
+                    else self._find_existing_track_id(row, options=opts)
+                )
             if opts.mode == "dry_run":
                 passed += 1
                 continue
@@ -1322,7 +1343,12 @@ class ExchangeService:
                         )
                         continue
                     track_id = self.track_service.create_track(TrackCreatePayload(**payload_kwargs))
+                    if source_track_key:
+                        source_track_map[source_track_key] = track_id
                     created_tracks.append(track_id)
+                    passed += 1
+                elif package_create_mode and reused_package_track:
+                    track_id = existing_track_id
                     passed += 1
                 else:
                     if opts.mode == "insert_new":
@@ -1385,7 +1411,13 @@ class ExchangeService:
                     track_id = existing_track_id
 
                 _apply_custom_fields(track_id, row)
-                self._upsert_release_from_row(row, track_id, source_dir=source_dir)
+                self._upsert_release_from_row(
+                    row,
+                    track_id,
+                    source_dir=source_dir,
+                    source_release_map=(source_release_map if package_create_mode else None),
+                    preserve_source_release_identity=package_create_mode,
+                )
             except Exception as exc:
                 failed += 1
                 warnings.append(f"Row {index}: {exc}")
