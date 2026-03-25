@@ -194,8 +194,10 @@ class ContractTemplateWorkspacePanelTests(unittest.TestCase):
 
         selector = self.panel.selector_widgets["{{db.track.track_title}}"]
         date_widget = self.panel.manual_widgets["{{manual.license_date}}"]
+        draft_date = QDate.currentDate().addDays(1)
+        updated_date = draft_date.addDays(6)
         selector.setCurrentIndex(1)
-        date_widget.setDate(QDate(2026, 3, 26))
+        date_widget.setDate(draft_date)
         self.panel.fill_draft_name_edit.setText("Managed Resume Draft")
         self.panel.fill_draft_storage_combo.setCurrentIndex(1)
         pump_events(app=self.app, cycles=2)
@@ -217,7 +219,7 @@ class ContractTemplateWorkspacePanelTests(unittest.TestCase):
             {
                 "revision_id": self.revision.revision_id,
                 "db_selections": {"{{db.track.track_title}}": "1"},
-                "manual_values": {"{{manual.license_date}}": "2026-03-26"},
+                "manual_values": {"{{manual.license_date}}": draft_date.toString("yyyy-MM-dd")},
                 "type_overrides": {},
             },
         )
@@ -247,7 +249,7 @@ class ContractTemplateWorkspacePanelTests(unittest.TestCase):
             {
                 "revision_id": self.revision.revision_id,
                 "db_selections": {"{{db.track.track_title}}": "1"},
-                "manual_values": {"{{manual.license_date}}": "2026-03-26"},
+                "manual_values": {"{{manual.license_date}}": draft_date.toString("yyyy-MM-dd")},
                 "type_overrides": {},
             },
         )
@@ -256,7 +258,7 @@ class ContractTemplateWorkspacePanelTests(unittest.TestCase):
         self.assertIn("Loaded draft", self.panel.fill_draft_status_label.text())
 
         restored_date_widget = self.panel.manual_widgets["{{manual.license_date}}"]
-        restored_date_widget.setDate(QDate(2026, 4, 1))
+        restored_date_widget.setDate(updated_date)
         self.panel.fill_draft_storage_combo.setCurrentIndex(0)
         pump_events(app=self.app, cycles=2)
 
@@ -278,7 +280,7 @@ class ContractTemplateWorkspacePanelTests(unittest.TestCase):
             {
                 "revision_id": self.revision.revision_id,
                 "db_selections": {"{{db.track.track_title}}": "1"},
-                "manual_values": {"{{manual.license_date}}": "2026-04-01"},
+                "manual_values": {"{{manual.license_date}}": updated_date.toString("yyyy-MM-dd")},
                 "type_overrides": {},
             },
         )
@@ -289,8 +291,9 @@ class ContractTemplateWorkspacePanelTests(unittest.TestCase):
 
         selector = self.panel.selector_widgets["{{db.track.track_title}}"]
         date_widget = self.panel.manual_widgets["{{manual.license_date}}"]
+        export_date = QDate.currentDate().addDays(4)
         selector.setCurrentIndex(1)
-        date_widget.setDate(QDate(2026, 3, 30))
+        date_widget.setDate(export_date)
         self.panel.fill_draft_name_edit.setText("Export From Fill Tab")
         pump_events(app=self.app, cycles=2)
 
@@ -338,8 +341,9 @@ class ContractTemplateWorkspacePanelTests(unittest.TestCase):
         pump_events(app=self.app, cycles=2)
         selector = self.panel.selector_widgets["{{db.track.track_title}}"]
         date_widget = self.panel.manual_widgets["{{manual.license_date}}"]
+        admin_export_date = QDate.currentDate().addDays(7)
         selector.setCurrentIndex(1)
-        date_widget.setDate(QDate(2026, 4, 2))
+        date_widget.setDate(admin_export_date)
         self.panel.fill_draft_name_edit.setText("Admin Export Draft")
         self.panel.save_new_draft()
         pump_events(app=self.app, cycles=2)

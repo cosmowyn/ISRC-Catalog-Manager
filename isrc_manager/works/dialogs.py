@@ -421,9 +421,7 @@ class WorkEditorDialog(QDialog):
         row = self._selected_contributor_row()
         combo = self._contributor_party_combo(row) if row is not None else None
         _name, selected_party_id = (
-            self._resolve_contributor_party_choice(combo)
-            if combo is not None
-            else ("", None)
+            self._resolve_contributor_party_choice(combo) if combo is not None else ("", None)
         )
         self.edit_contributor_party_button.setEnabled(
             has_party_service and combo is not None and selected_party_id is not None
@@ -459,9 +457,7 @@ class WorkEditorDialog(QDialog):
         row = self._selected_contributor_row()
         combo = self._contributor_party_combo(row) if row is not None else None
         _name, selected_party_id = (
-            self._resolve_contributor_party_choice(combo)
-            if combo is not None
-            else ("", None)
+            self._resolve_contributor_party_choice(combo) if combo is not None else ("", None)
         )
         if selected_party_id is None:
             QMessageBox.information(

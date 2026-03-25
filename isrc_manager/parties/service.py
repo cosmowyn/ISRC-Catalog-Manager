@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sqlite3
-from dataclasses import asdict
 
 from isrc_manager.domain.repertoire import clean_text, normalized_name
 
@@ -31,7 +30,9 @@ class PartyService:
         return clean
 
     @staticmethod
-    def _normalized_artist_alias_rows(alias_values: list[str] | tuple[str, ...]) -> list[tuple[str, str]]:
+    def _normalized_artist_alias_rows(
+        alias_values: list[str] | tuple[str, ...],
+    ) -> list[tuple[str, str]]:
         rows: list[tuple[str, str]] = []
         seen: set[str] = set()
         for raw_value in alias_values:
@@ -179,8 +180,7 @@ class PartyService:
         ).fetchall()
         alias_map = self._artist_aliases_by_party_ids([int(row[0]) for row in rows])
         return [
-            self._row_to_record(row, artist_aliases=alias_map.get(int(row[0]), ()))
-            for row in rows
+            self._row_to_record(row, artist_aliases=alias_map.get(int(row[0]), ())) for row in rows
         ]
 
     def _normalize_and_validate_artist_aliases(
@@ -234,7 +234,9 @@ class PartyService:
                 (clean_alias, party_id, party_id),
             ).fetchone()
             if artist_conflict:
-                errors.append(f"Artist alias '{clean_alias}' is already the artist name of another party.")
+                errors.append(
+                    f"Artist alias '{clean_alias}' is already the artist name of another party."
+                )
                 continue
             alias_conflict = cursor.execute(
                 """
@@ -883,7 +885,9 @@ class PartyService:
                 if duplicate_artist_name:
                     if merged_artist_name is None:
                         merged_artist_name = duplicate_artist_name
-                    elif normalized_name(duplicate_artist_name) != normalized_name(merged_artist_name):
+                    elif normalized_name(duplicate_artist_name) != normalized_name(
+                        merged_artist_name
+                    ):
                         merged_alias_values.append(str(duplicate_artist_name))
                 merged_alias_values.extend(list(duplicate_record.artist_aliases))
                 cur.execute(
@@ -924,7 +928,7 @@ class PartyService:
                     "granted_by_party_id",
                     "granted_to_party_id",
                     "retained_by_party_id",
-                    ):
+                ):
                     cur.execute(
                         f"UPDATE RightsRecords SET {column_name}=? WHERE {column_name}=?",
                         (primary_party_id, duplicate_id),

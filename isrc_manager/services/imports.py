@@ -121,7 +121,8 @@ class XMLImportService:
             suggested_mapping={
                 header: header
                 for header in headers
-                if header in self._exchange_supported_targets_hint() or header.startswith("custom::")
+                if header in self._exchange_supported_targets_hint()
+                or header.startswith("custom::")
             },
             warnings=warnings,
         )

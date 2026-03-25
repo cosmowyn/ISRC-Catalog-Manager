@@ -386,6 +386,7 @@ class DialogControllerBehaviorTests(unittest.TestCase):
         created_payloads = []
         dialog.create_requested.connect(lambda payload: created_payloads.append(payload))
         try:
+
             class _AcceptedDialog:
                 def exec(self):
                     return QDialog.Accepted
@@ -401,7 +402,9 @@ class DialogControllerBehaviorTests(unittest.TestCase):
                         ],
                     )
 
-            with mock.patch.object(dialog.panel, "_edit_dialog_for", return_value=_AcceptedDialog()):
+            with mock.patch.object(
+                dialog.panel, "_edit_dialog_for", return_value=_AcceptedDialog()
+            ):
                 dialog.create_work()
 
             self.assertEqual(len(created_payloads), 1)

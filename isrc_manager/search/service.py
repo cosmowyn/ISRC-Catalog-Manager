@@ -551,14 +551,12 @@ class RelationshipExplorerService:
             (int(track_id),),
         ).fetchall()
         return [
-            (int(row[0]), str(row[1] or ""), str(row[2] or ""), str(row[3] or ""))
-            for row in rows
+            (int(row[0]), str(row[1] or ""), str(row[2] or ""), str(row[3] or "")) for row in rows
         ]
 
     def _for_work(self, work_id: int) -> list[RelationshipSection]:
         tracks = [
-            self._result("track", row[0], row[1], row[2])
-            for row in self._work_track_rows(work_id)
+            self._result("track", row[0], row[1], row[2]) for row in self._work_track_rows(work_id)
         ]
         parties = [
             self._result("party", row[0], row[1], row[2])

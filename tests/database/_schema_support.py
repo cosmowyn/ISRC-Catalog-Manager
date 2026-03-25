@@ -56,9 +56,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
         }
         contract_template_revision_columns = {
             row[1]
-            for row in self.conn.execute(
-                "PRAGMA table_info(ContractTemplateRevisions)"
-            ).fetchall()
+            for row in self.conn.execute("PRAGMA table_info(ContractTemplateRevisions)").fetchall()
         }
         contract_template_placeholder_columns = {
             row[1]
@@ -73,7 +71,8 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
             ).fetchall()
         }
         contract_template_draft_columns = {
-            row[1] for row in self.conn.execute("PRAGMA table_info(ContractTemplateDrafts)").fetchall()
+            row[1]
+            for row in self.conn.execute("PRAGMA table_info(ContractTemplateDrafts)").fetchall()
         }
         contract_template_snapshot_columns = {
             row[1]
@@ -121,7 +120,9 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
         }
         contract_template_placeholder_indexes = {
             row[1]
-            for row in self.conn.execute("PRAGMA index_list(ContractTemplatePlaceholders)").fetchall()
+            for row in self.conn.execute(
+                "PRAGMA index_list(ContractTemplatePlaceholders)"
+            ).fetchall()
         }
         contract_template_binding_indexes = {
             row[1]
@@ -130,7 +131,8 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
             ).fetchall()
         }
         contract_template_draft_indexes = {
-            row[1] for row in self.conn.execute("PRAGMA index_list(ContractTemplateDrafts)").fetchall()
+            row[1]
+            for row in self.conn.execute("PRAGMA index_list(ContractTemplateDrafts)").fetchall()
         }
         contract_template_snapshot_indexes = {
             row[1]
@@ -148,8 +150,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
             row[1] for row in self.conn.execute("PRAGMA index_list(Parties)").fetchall()
         }
         party_artist_alias_indexes = {
-            row[1]
-            for row in self.conn.execute("PRAGMA index_list(PartyArtistAliases)").fetchall()
+            row[1] for row in self.conn.execute("PRAGMA index_list(PartyArtistAliases)").fetchall()
         }
         track_audio_derivative_indexes = {
             row[1]
@@ -850,7 +851,8 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                 for row in conn.execute("PRAGMA table_info(ContractTemplateRevisions)").fetchall()
             }
             draft_columns = {
-                row[1] for row in conn.execute("PRAGMA table_info(ContractTemplateDrafts)").fetchall()
+                row[1]
+                for row in conn.execute("PRAGMA table_info(ContractTemplateDrafts)").fetchall()
             }
             triggers = {
                 row[0]
@@ -1058,8 +1060,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                 ).fetchall()
             }
             alias_indexes = {
-                row[1]
-                for row in conn.execute("PRAGMA index_list(PartyArtistAliases)").fetchall()
+                row[1] for row in conn.execute("PRAGMA index_list(PartyArtistAliases)").fetchall()
             }
             party_row = conn.execute(
                 """
@@ -1298,9 +1299,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
 
             service.migrate_schema()
 
-            track_columns = {
-                row[1] for row in conn.execute("PRAGMA table_info(Tracks)").fetchall()
-            }
+            track_columns = {row[1] for row in conn.execute("PRAGMA table_info(Tracks)").fetchall()}
             tables = {
                 row[0]
                 for row in conn.execute(

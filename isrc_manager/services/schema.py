@@ -1164,12 +1164,24 @@ class DatabaseSchemaService:
         filename_column: str | None = None,
         blob_column: str | None = None,
     ) -> None:
+        table_columns = self._table_columns(table_name)
+        required_columns = {*id_columns, path_column, storage_mode_column}
+        if not required_columns.issubset(table_columns):
+            return
+        available_filename_column = (
+            filename_column
+            if filename_column is not None and filename_column in table_columns
+            else None
+        )
+        available_blob_column = (
+            blob_column if blob_column is not None and blob_column in table_columns else None
+        )
         select_parts = [*id_columns, path_column, storage_mode_column]
-        if filename_column:
-            select_parts.append(filename_column)
-        if blob_column:
+        if available_filename_column:
+            select_parts.append(available_filename_column)
+        if available_blob_column:
             select_parts.append(
-                f"CASE WHEN {blob_column} IS NOT NULL THEN 1 ELSE 0 END AS has_blob"
+                f"CASE WHEN {available_blob_column} IS NOT NULL THEN 1 ELSE 0 END AS has_blob"
             )
         rows = self.cursor.execute(f"SELECT {', '.join(select_parts)} FROM {table_name}").fetchall()
         for row in rows:
@@ -1178,16 +1190,20 @@ class DatabaseSchemaService:
             offset = len(id_columns)
             stored_path = str(values[offset] or "").strip()
             storage_mode = str(values[offset + 1] or "").strip()
-            filename = str(values[offset + 2] or "").strip() if filename_column is not None else ""
-            blob_present = bool(values[-1]) if blob_column is not None else False
+            filename = (
+                str(values[offset + 2] or "").strip()
+                if available_filename_column is not None
+                else ""
+            )
+            blob_present = bool(values[-1]) if available_blob_column is not None else False
             updates: dict[str, object] = {}
             if not storage_mode:
                 if stored_path:
                     updates[storage_mode_column] = STORAGE_MODE_MANAGED_FILE
                 elif blob_present:
                     updates[storage_mode_column] = STORAGE_MODE_DATABASE
-            if filename_column and not filename and stored_path:
-                updates[filename_column] = Path(stored_path).name
+            if available_filename_column and not filename and stored_path:
+                updates[available_filename_column] = Path(stored_path).name
             if not updates:
                 continue
             set_sql = ", ".join(f"{column}=?" for column in updates)
@@ -1756,13 +1772,13 @@ class DatabaseSchemaService:
         self.cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_parties_display_name ON Parties(display_name)"
         )
-        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_parties_artist_name ON Parties(artist_name)")
+        self.cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_parties_artist_name ON Parties(artist_name)"
+        )
         self.cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_parties_company_name ON Parties(company_name)"
         )
-        self.cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_parties_email ON Parties(email)"
-        )
+        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_parties_email ON Parties(email)")
         self.cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_parties_alternative_email ON Parties(alternative_email)"
         )
@@ -2287,9 +2303,7 @@ class DatabaseSchemaService:
         )
         for column_name, column_sql in additions:
             if column_name not in cols:
-                self.cursor.execute(
-                    f"ALTER TABLE Parties ADD COLUMN {column_name} {column_sql}"
-                )
+                self.cursor.execute(f"ALTER TABLE Parties ADD COLUMN {column_name} {column_sql}")
 
     def _ensure_party_artist_alias_tables(self) -> None:
         self.cursor.execute(

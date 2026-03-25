@@ -1732,7 +1732,9 @@ class AppShellTestCase(unittest.TestCase):
 
         works = [
             record
-            for record in self.window.work_service.list_works(search_text="Immediate First Track Work")
+            for record in self.window.work_service.list_works(
+                search_text="Immediate First Track Work"
+            )
             if record.title == "Immediate First Track Work"
         ]
         self.assertEqual(len(works), 1)
@@ -1741,7 +1743,9 @@ class AppShellTestCase(unittest.TestCase):
         self.assertFalse(self.window.add_data_dock.isHidden())
         self.assertTrue(self.window.add_data_work_context_group.isVisible())
         self.assertEqual(self.window.add_data_title.text(), "Add Track")
-        self.assertIn("Immediate First Track Work", self.window.add_data_work_context_summary.text())
+        self.assertIn(
+            "Immediate First Track Work", self.window.add_data_work_context_summary.text()
+        )
         self.assertEqual(self.window.track_title_field.text(), "Immediate First Track Work")
         self.assertEqual(self.window.iswc_field.text(), "T-123.456.789-0")
         context = self.window._current_work_track_context()
@@ -1768,7 +1772,9 @@ class AppShellTestCase(unittest.TestCase):
             self.assertEqual(second_section.selected_governance_mode(), "link_existing_work")
             self.assertEqual(second_section.selected_work_id(), work_id)
             first_relationship_index = first_section.relationship_type.findData("alternate_master")
-            second_relationship_index = second_section.relationship_type.findData("alternate_master")
+            second_relationship_index = second_section.relationship_type.findData(
+                "alternate_master"
+            )
             first_section.relationship_type.setCurrentIndex(first_relationship_index)
             second_section.relationship_type.setCurrentIndex(second_relationship_index)
             first_section.track_title.setText("Unified Governed Mix")
@@ -2098,9 +2104,7 @@ class AppShellTestCase(unittest.TestCase):
         self.window.open_work_manager()
         self.app.processEvents()
         work_panel = self.window.work_manager_dock.widget()
-        create_button = self._button_by_text(
-            work_panel.manage_actions_cluster, "Create Work"
-        )
+        create_button = self._button_by_text(work_panel.manage_actions_cluster, "Create Work")
         add_track_button = self._button_by_text(
             work_panel.manage_actions_cluster, "Add Track to Work"
         )
@@ -2109,7 +2113,9 @@ class AppShellTestCase(unittest.TestCase):
         )
         edit_button = self._button_by_text(work_panel.manage_actions_cluster, "Edit")
         duplicate_button = self._button_by_text(work_panel.manage_actions_cluster, "Duplicate")
-        link_button = self._button_by_text(work_panel.manage_actions_cluster, "Link Selected Tracks")
+        link_button = self._button_by_text(
+            work_panel.manage_actions_cluster, "Link Selected Tracks"
+        )
         delete_button = self._button_by_text(work_panel.manage_actions_cluster, "Delete")
 
         self.assertGreater(edit_button.geometry().left() - create_button.geometry().right(), 0)
@@ -3600,7 +3606,9 @@ class AppShellTestCase(unittest.TestCase):
             self.assertEqual(second_section.selected_governance_mode(), "link_existing_work")
             self.assertEqual(second_section.selected_work_id(), work_id)
             first_relationship_index = first_section.relationship_type.findData("alternate_master")
-            second_relationship_index = second_section.relationship_type.findData("alternate_master")
+            second_relationship_index = second_section.relationship_type.findData(
+                "alternate_master"
+            )
             first_section.relationship_type.setCurrentIndex(first_relationship_index)
             second_section.relationship_type.setCurrentIndex(second_relationship_index)
             first_section.track_title.setText("Governed Album Mix")

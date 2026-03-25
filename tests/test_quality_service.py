@@ -13,10 +13,10 @@ from isrc_manager.rights import RightPayload, RightsService
 from isrc_manager.services import (
     CustomFieldDefinitionService,
     DatabaseSchemaService,
+    LicenseService,
     TrackCreatePayload,
     TrackService,
 )
-from isrc_manager.services import LicenseService
 from isrc_manager.works import WorkContributorPayload, WorkPayload, WorkService
 
 

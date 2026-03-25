@@ -24,9 +24,9 @@ from isrc_manager.domain.timecode import hms_to_seconds, parse_hms_text, seconds
 from isrc_manager.file_storage import coalesce_filename, infer_storage_mode
 from isrc_manager.parties import PartyService
 from isrc_manager.releases import ReleasePayload, ReleaseService, ReleaseTrackPlacement
+from isrc_manager.services.custom_fields import CustomFieldDefinitionService
 from isrc_manager.services.import_governance import GovernedImportCoordinator
 from isrc_manager.services.imports import XMLImportService
-from isrc_manager.services.custom_fields import CustomFieldDefinitionService
 from isrc_manager.services.tracks import TrackCreatePayload, TrackService, TrackUpdatePayload
 from isrc_manager.works import WorkService
 
@@ -261,9 +261,9 @@ class ExchangeService:
 
         overrides: dict[int, dict[str, str]] = {}
         for track_id, work_id in track_to_work.items():
-            resolved_publishers = publisher_names.get(work_id) or fallback_publisher_names.get(
-                work_id
-            ) or []
+            resolved_publishers = (
+                publisher_names.get(work_id) or fallback_publisher_names.get(work_id) or []
+            )
             overrides[track_id] = {
                 "iswc": work_iswc_by_track.get(track_id, ""),
                 "buma_work_number": work_registration_by_track.get(track_id, ""),
@@ -1508,7 +1508,9 @@ class ExchangeService:
                     if is_blank(str(track_length_value or "")):
                         track_length_hms = row.get("track_length_hms")
                         if isinstance(track_length_hms, (dt_time, timedelta)):
-                            track_length_value = self._normalize_track_length_target(track_length_hms)
+                            track_length_value = self._normalize_track_length_target(
+                                track_length_hms
+                            )
                         else:
                             track_length_value = parse_hms_text(str(track_length_hms or ""))
                     track_length_sec = int(track_length_value or 0)
@@ -1536,7 +1538,9 @@ class ExchangeService:
                         audio_file_source_path=self._resolve_media_path(
                             source_dir, row.get("audio_file_path")
                         ),
-                        audio_file_storage_mode=str(row.get("audio_file_storage_mode") or "").strip()
+                        audio_file_storage_mode=str(
+                            row.get("audio_file_storage_mode") or ""
+                        ).strip()
                         or None,
                         album_art_source_path=self._resolve_media_path(
                             source_dir, row.get("album_art_path")
@@ -1544,18 +1548,26 @@ class ExchangeService:
                         album_art_storage_mode=str(row.get("album_art_storage_mode") or "").strip()
                         or None,
                     )
-                    if row.get("audio_file_path") and payload_kwargs["audio_file_source_path"] is None:
+                    if (
+                        row.get("audio_file_path")
+                        and payload_kwargs["audio_file_source_path"] is None
+                    ):
                         warnings.append(
                             f"Row {index}: Audio reference not found: {row.get('audio_file_path')}"
                         )
-                    if row.get("album_art_path") and payload_kwargs["album_art_source_path"] is None:
+                    if (
+                        row.get("album_art_path")
+                        and payload_kwargs["album_art_source_path"] is None
+                    ):
                         warnings.append(
                             f"Row {index}: Artwork reference not found: {row.get('album_art_path')}"
                         )
 
-                    payload_kwargs["artist_name"] = self.governed_imports.resolve_party_backed_artist_name(
-                        payload_kwargs["artist_name"],
-                        cursor=cur,
+                    payload_kwargs["artist_name"] = (
+                        self.governed_imports.resolve_party_backed_artist_name(
+                            payload_kwargs["artist_name"],
+                            cursor=cur,
+                        )
                     )
                     payload_kwargs["additional_artists"] = (
                         self.governed_imports.resolve_party_backed_additional_artist_names(

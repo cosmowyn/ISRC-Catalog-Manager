@@ -34,12 +34,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from isrc_manager.parties.dialogs import PartyEditorDialog
 from isrc_manager.file_storage import (
     STORAGE_MODE_DATABASE,
     STORAGE_MODE_MANAGED_FILE,
     normalize_storage_mode,
 )
+from isrc_manager.parties.dialogs import PartyEditorDialog
 from isrc_manager.ui_common import (
     FocusWheelComboBox,
     _add_standard_dialog_header,
@@ -955,7 +955,9 @@ class _ContractPartyEditor(QWidget):
                 "Choose an existing Party first. Typed counterparty names remain a transitional fallback."
             )
             return
-        self.edit_party_button.setEnabled(self.party_service is not None and draft.party_id is not None)
+        self.edit_party_button.setEnabled(
+            self.party_service is not None and draft.party_id is not None
+        )
         match_index = self._matching_entry_index(draft)
         if match_index is None:
             self.add_button.setEnabled(True)

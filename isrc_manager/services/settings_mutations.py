@@ -21,6 +21,7 @@ from isrc_manager.constants import (
     MIN_HISTORY_PRUNE_PRE_RESTORE_COPIES_AFTER_DAYS,
     MIN_HISTORY_STORAGE_BUDGET_MB,
 )
+
 from .settings_reads import OwnerPartySettings
 
 
@@ -56,11 +57,14 @@ class SettingsMutationService:
 
     @staticmethod
     def _clean_party_id(value: object | None) -> int | None:
-        if value in (None, ""):
+        if value is None:
+            return None
+        text = str(value).strip()
+        if text == "":
             return None
         try:
-            clean_value = int(value)
-        except Exception:
+            clean_value = int(text)
+        except ValueError:
             return None
         return clean_value if clean_value > 0 else None
 

@@ -121,6 +121,7 @@ class ContractRightsAssetServiceTestCase(unittest.TestCase):
         )
 
     def case_contract_deadlines_and_document_validation(self):
+        today = date.today()
         party_id = self.party_service.create_party(PartyPayload(legal_name="North Label"))
         document_path = self.data_root / "agreement.txt"
         document_path.write_text("signed agreement", encoding="utf-8")
@@ -130,8 +131,8 @@ class ContractRightsAssetServiceTestCase(unittest.TestCase):
                 title="North Label License",
                 contract_type="license",
                 status="active",
-                signature_date="2026-03-10",
-                notice_deadline="2026-03-20",
+                signature_date=(today - timedelta(days=16)).isoformat(),
+                notice_deadline=(today + timedelta(days=4)).isoformat(),
                 parties=[
                     ContractPartyPayload(party_id=party_id, role_label="licensee", is_primary=True)
                 ],
@@ -139,7 +140,7 @@ class ContractRightsAssetServiceTestCase(unittest.TestCase):
                     ContractObligationPayload(
                         obligation_type="delivery",
                         title="Deliver final WAV",
-                        due_date="2026-03-25",
+                        due_date=(today + timedelta(days=5)).isoformat(),
                     )
                 ],
                 documents=[
@@ -1087,7 +1088,9 @@ class ContractRightsAssetServiceTestCase(unittest.TestCase):
             self.assertGreaterEqual(refreshed_index, 0)
             dialog.granted_by_combo.setCurrentIndex(refreshed_index)
             self.assertEqual(dialog.granted_by_combo.currentData(), created_party_id)
-            self.assertIn("Signal Grantor Updated", dialog.granted_by_combo.itemText(refreshed_index))
+            self.assertIn(
+                "Signal Grantor Updated", dialog.granted_by_combo.itemText(refreshed_index)
+            )
 
             payload = dialog.payload()
             self.assertEqual(payload.granted_by_party_id, created_party_id)

@@ -411,10 +411,7 @@ class RightsService:
             """,
             (int(entity_id),),
         ).fetchall()
-        return [
-            self._row_to_ownership_record(row, entity_type=entity_type)
-            for row in rows
-        ]
+        return [self._row_to_ownership_record(row, entity_type=entity_type) for row in rows]
 
     def list_work_ownership_interests(self, work_id: int) -> list[OwnershipInterestRecord]:
         return self.list_ownership_interests(entity_type="work", entity_id=int(work_id))
@@ -459,9 +456,11 @@ class RightsService:
                         self._clean_ownership_role(payload.role, entity_type=entity_type),
                         self._clean_share(payload.share_percent),
                         clean_text(payload.territory),
-                        int(payload.source_contract_id)
-                        if payload.source_contract_id is not None
-                        else None,
+                        (
+                            int(payload.source_contract_id)
+                            if payload.source_contract_id is not None
+                            else None
+                        ),
                         clean_text(payload.notes),
                     ),
                 )
@@ -513,9 +512,7 @@ class RightsService:
         master_control = self._dedupe_names(
             item.party_name or item.display_name
             for item in (
-                self.list_recording_ownership_interests(entity_id)
-                if entity_type == "track"
-                else []
+                self.list_recording_ownership_interests(entity_id) if entity_type == "track" else []
             )
         )
         publishing_control = self._dedupe_names(
@@ -540,10 +537,7 @@ class RightsService:
             )
             if item.right_type == "master" and controller not in master_control:
                 master_control.append(controller)
-            if (
-                item.right_type == "composition_publishing"
-                and controller not in publishing_control
-            ):
+            if item.right_type == "composition_publishing" and controller not in publishing_control:
                 publishing_control.append(controller)
             if item.exclusive_flag:
                 territory = item.territory or "Worldwide / unspecified"

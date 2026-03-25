@@ -255,7 +255,9 @@ class CatalogWorkflowIntegrationTests(unittest.TestCase):
         self.assertEqual([item.entity_id for item in work_section.results], [ids["work_id"]])
 
         work_sections = self.relationship_service.describe_links("work", ids["work_id"])
-        track_section = next(section for section in work_sections if section.section_title == "Tracks")
+        track_section = next(
+            section for section in work_sections if section.section_title == "Tracks"
+        )
         self.assertEqual([item.entity_id for item in track_section.results], [ids["track_id"]])
 
         scan = self.quality_service.scan()

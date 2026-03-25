@@ -258,7 +258,9 @@ class ExchangeServiceTestCase(unittest.TestCase):
         )
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Works").fetchone()[0], 1)
         self.assertEqual(
-            self.conn.execute("SELECT work_id FROM Tracks WHERE id=?", (report.created_tracks[0],)).fetchone()[0],
+            self.conn.execute(
+                "SELECT work_id FROM Tracks WHERE id=?", (report.created_tracks[0],)
+            ).fetchone()[0],
             1,
         )
         self.assertEqual(

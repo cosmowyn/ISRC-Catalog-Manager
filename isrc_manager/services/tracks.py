@@ -1146,7 +1146,6 @@ class TrackService:
                         self._clear_album_track_art_references(int(album_id), cursor=cur)
                     return effective_meta
                 self._require_direct_album_art_edit(track_id, cursor=cur)
-                current_shared_meta = self._get_album_art_meta(int(album_id), cursor=cur)
                 rel_path, filename, blob_data, mime_type, size_bytes = (
                     self._build_media_storage_payload_from_source(
                         media_key,
@@ -1962,10 +1961,16 @@ class TrackService:
             payload.track_title.strip(),
             payload.catalog_number,
             None if shared_album_art else (str(current_track_art.get("path") or "") or None),
-            None if shared_album_art else (str(current_track_art.get("storage_mode") or "") or None),
-            None
-            if shared_album_art or current_track_art_blob is None
-            else sqlite3.Binary(current_track_art_blob),
+            (
+                None
+                if shared_album_art
+                else (str(current_track_art.get("storage_mode") or "") or None)
+            ),
+            (
+                None
+                if shared_album_art or current_track_art_blob is None
+                else sqlite3.Binary(current_track_art_blob)
+            ),
             None if shared_album_art else (str(current_track_art.get("filename") or "") or None),
             None if shared_album_art else (str(current_track_art.get("mime_type") or "") or None),
             0 if shared_album_art else int(current_track_art.get("size_bytes") or 0),

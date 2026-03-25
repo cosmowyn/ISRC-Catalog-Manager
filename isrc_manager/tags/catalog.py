@@ -13,6 +13,7 @@ from .models import ArtworkPayload, AudioTagData
 if TYPE_CHECKING:
     from isrc_manager.releases import ReleaseService
     from isrc_manager.services.tracks import TrackService, TrackSnapshot
+
     from .service import AudioTagService
 
 

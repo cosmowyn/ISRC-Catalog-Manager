@@ -10,7 +10,6 @@ from isrc_manager.services import (
     ContractTemplateService,
     DatabaseSchemaService,
 )
-
 from tests.contract_templates._support import FakePagesAdapter, make_docx_bytes
 
 
@@ -113,7 +112,9 @@ class ContractTemplateRevisionImportTests(unittest.TestCase):
 
         self.assertEqual(self.service.list_revisions(template.template_id), [])
 
-    def test_import_pages_revision_from_bytes_uses_adapter_and_ready_rescan_preserves_bindings(self):
+    def test_import_pages_revision_from_bytes_uses_adapter_and_ready_rescan_preserves_bindings(
+        self,
+    ):
         template = self._create_template()
         pages_adapter = FakePagesAdapter(
             docx_bytes=make_docx_bytes(

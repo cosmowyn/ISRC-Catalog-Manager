@@ -99,11 +99,8 @@ class OwnerPartySettings:
             field_name: str(getattr(self, field_name, "") or "").strip()
             for field_name in self.PROFILE_FIELD_NAMES
         }
-        payload["party_id"] = (
-            str(int(self.party_id))
-            if self.party_id not in (None, "")
-            else ""
-        )
+        party_id = self.party_id
+        payload["party_id"] = str(party_id) if party_id is not None else ""
         return payload
 
 

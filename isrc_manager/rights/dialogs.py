@@ -300,10 +300,7 @@ class RightEditorDialog(QDialog):
         *,
         overrides: dict[QComboBox, int | None] | None = None,
     ) -> None:
-        selected_ids = {
-            combo: self._current_combo_id(combo)
-            for combo in self._party_combos()
-        }
+        selected_ids = {combo: self._current_combo_id(combo) for combo in self._party_combos()}
         if overrides:
             selected_ids.update(overrides)
         labels: list[str] = []
