@@ -187,7 +187,7 @@ The import layer is designed as a rule-driven workbench rather than a generic fi
 
 For structured exchange import, the app can:
 
-- inspect incoming `CSV`, `XLSX`, `JSON`, and `ZIP package` sources before import
+- inspect incoming `XML`, `CSV`, `XLSX`, `JSON`, and `ZIP package` sources before import
 - preview incoming rows and choose the CSV delimiter when needed
 - map source columns to supported catalog fields or active `custom::<name>` text fields
 - save and reload mapping presets for repeat imports
@@ -203,7 +203,7 @@ That makes the app useful for bringing in structured exports from labels, catalo
 
 The app also includes:
 
-- a separate XML import path for supported XML catalog files
+- XML import routed through the same reviewed exchange setup surface as the other catalog import formats
 - audio tag import plus catalog-backed audio exports that embed trustworthy catalog metadata automatically
 - a separate repertoire exchange workflow for works, parties, contracts, rights, assets, and their relationships
 

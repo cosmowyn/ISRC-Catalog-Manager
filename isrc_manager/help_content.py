@@ -456,7 +456,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         <ul>
           <li><strong>Export formats</strong>: CSV, XLSX, JSON, XML, and ZIP packages containing a JSON manifest plus materialized attachment copies.</li>
           <li><strong>Import formats</strong>: CSV, XLSX, JSON, ZIP packages, and XML.</li>
-          <li><strong>Import setup</strong>: CSV, XLSX, JSON, and ZIP package imports all open the exchange setup surface so you can review preview rows, match rules, and field targets before running the job.</li>
+          <li><strong>Import setup</strong>: CSV, XLSX, JSON, ZIP package, and XML imports all open the same exchange setup surface so you can review preview rows, match rules, and field targets before running the job.</li>
           <li><strong>Saved mapping presets</strong>: frequently used column mappings can be saved per format and reused later.</li>
           <li><strong>Saved choices</strong>: per-format import choices can be remembered and later cleared from <strong>File &gt; Import &amp; Exchange &gt; Catalog Exchange &gt; Reset Saved Import Choices…</strong>.</li>
           <li><strong>Skip targets</strong>: any incoming field can be marked as <strong>Skip this field</strong> when you want it inspected but not applied.</li>
@@ -465,7 +465,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>JSON schema versioning</strong>: exported JSON includes an explicit schema version so future migrations stay manageable.</li>
           <li><strong>Repertoire Exchange</strong>: a separate import/export workflow now covers parties, works, contracts, rights, asset versions, and their relationship references as JSON, XLSX, CSV bundles, or ZIP packages with managed files.</li>
         </ul>
-        <p>Binary media is referenced in plain tabular exports, while ZIP packages materialize both database-backed and managed-file-backed records into portable files and preserve the recorded storage mode on import. Import preview, packaging, export, and extraction all run in the background so larger exchange jobs stay practical. For the matching, merge, delimiter, and XML specifics, see <strong>Import and Merge Workflows</strong> in this manual.</p>
+        <p>Binary media is referenced in plain tabular exports, while ZIP packages materialize both database-backed and managed-file-backed records into portable files and preserve the recorded storage mode on import. Import preview, mapping, packaging, export, and extraction all run in the background so larger exchange jobs stay practical. For the matching, merge, delimiter, and XML specifics, see <strong>Import and Merge Workflows</strong> in this manual.</p>
         """,
     ),
     HelpChapter(
@@ -486,15 +486,15 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "custom::",
         ),
         content_html="""
-        <p>The app has three separate ingest surfaces: exchange import for structured rows and packages, XML import for supported XML shapes, and audio-tag import for embedded file metadata. They overlap in the fields they can touch, but they are not the same workflow.</p>
+        <p>The app has two catalog ingest surfaces plus audio-tag import: exchange import for structured rows, packages, and supported XML shapes; and audio-tag import for embedded file metadata. They overlap in the fields they can touch, but they are not the same workflow.</p>
         <ul>
-          <li><strong>Exchange import</strong>: supports <code>CSV</code>, <code>XLSX</code>, <code>JSON</code>, and <code>ZIP package</code>. CSV import can auto-detect comma, semicolon, tab, or pipe delimiters, and the exchange setup surface can map or skip supported fields across the structured import formats.</li>
+          <li><strong>Exchange import</strong>: supports <code>XML</code>, <code>CSV</code>, <code>XLSX</code>, <code>JSON</code>, and <code>ZIP package</code>. CSV import can auto-detect comma, semicolon, tab, or pipe delimiters, while the shared exchange setup surface can map or skip supported fields across all supported catalog import formats.</li>
           <li><strong>Mapping presets</strong>: reusable CSV/XLSX mappings can be saved and loaded again for recurring imports.</li>
           <li><strong>Saved import choices</strong>: each exchange format can remember its preferred mode, match rules, custom-field creation behavior, and CSV delimiter choice until you reset those saved choices.</li>
           <li><strong>Exchange modes</strong>: <code>dry_run</code> checks setup without writing, <code>create</code> creates new tracks, <code>update</code> updates matched tracks only, <code>merge</code> updates matched tracks while preserving many existing populated values, and <code>insert_new</code> creates only unmatched rows and skips duplicates.</li>
           <li><strong>Exchange matching</strong>: matching can use internal ID, ISRC, UPC plus title, and optional title/artist heuristics. The importer is deterministic and does not provide a row-by-row manual assignment queue.</li>
           <li><strong>Release upsert and package restore</strong>: exchange import can update or create linked releases from supplied release fields, while ZIP package import restores packaged files and their recorded storage mode.</li>
-          <li><strong>XML import</strong>: accepts supported catalog XML shapes, performs a stronger inspection and dry-run style preflight, reports duplicate ISRCs and custom-field conflicts, can create missing custom fields when allowed, and then imports valid new rows. XML import is insert-oriented rather than merge-oriented.</li>
+          <li><strong>XML import</strong>: supported catalog XML shapes now flow through the same exchange setup surface as the tabular formats. The XML parser still performs schema-aware inspection first, surfaces duplicate ISRCs and custom-field conflicts, and can create missing custom fields when allowed before the mapped import runs.</li>
           <li><strong>Bulk audio attach</strong>: <strong>Catalog &gt; Bulk Attach Audio Files…</strong> is the better fit when track rows already exist and you need to match local files onto them in one reviewed batch.</li>
           <li><strong>Audio tags</strong>: read embedded tags from supported audio files and preview conflicts before writing to the catalog. Catalog-backed audio export workflows embed metadata automatically, while the plain external conversion workflow stays metadata-free.</li>
         </ul>

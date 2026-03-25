@@ -138,15 +138,13 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
 
     import_menu = file_menu.addMenu("Import & Exchange")
 
+    import_exchange_menu = import_menu.addMenu("Catalog Exchange")
     app.import_xml_action = app._create_action(
-        "Import Catalog XML…",
+        "Import XML…",
         slot=app.import_from_xml,
         shortcuts=("Ctrl+Shift+I", "Meta+Shift+I"),
     )
-    import_menu.addAction(app.import_xml_action)
-    import_menu.addSeparator()
-
-    import_exchange_menu = import_menu.addMenu("Catalog Exchange")
+    import_exchange_menu.addAction(app.import_xml_action)
     app.import_csv_action = app._create_action(
         "Import CSV…",
         slot=lambda: app.import_exchange_file("csv"),

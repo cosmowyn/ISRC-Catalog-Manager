@@ -22,9 +22,13 @@ from openpyxl import Workbook, load_workbook
 from isrc_manager.domain.codes import is_blank, to_compact_isrc, to_iso_isrc
 from isrc_manager.domain.timecode import hms_to_seconds, parse_hms_text, seconds_to_hms
 from isrc_manager.file_storage import coalesce_filename, infer_storage_mode
+from isrc_manager.parties import PartyService
 from isrc_manager.releases import ReleasePayload, ReleaseService, ReleaseTrackPlacement
+from isrc_manager.services.import_governance import GovernedImportCoordinator
+from isrc_manager.services.imports import XMLImportService
 from isrc_manager.services.custom_fields import CustomFieldDefinitionService
 from isrc_manager.services.tracks import TrackCreatePayload, TrackService, TrackUpdatePayload
+from isrc_manager.works import WorkService
 
 from .models import ExchangeImportOptions, ExchangeImportReport, ExchangeInspection
 
@@ -125,12 +129,22 @@ class ExchangeService:
         release_service: ReleaseService,
         custom_fields: CustomFieldDefinitionService,
         data_root: str | Path | None = None,
+        *,
+        party_service: PartyService | None = None,
+        work_service: WorkService | None = None,
+        profile_name: str | None = None,
     ):
         self.conn = conn
         self.track_service = track_service
         self.release_service = release_service
         self.custom_fields = custom_fields
         self.data_root = Path(data_root) if data_root is not None else None
+        self.governed_imports = GovernedImportCoordinator(
+            conn,
+            party_service=party_service,
+            work_service=work_service,
+            profile_name=profile_name,
+        )
 
     @staticmethod
     def _normalize_header_name(name: str) -> str:
@@ -894,6 +908,11 @@ class ExchangeService:
             warnings=warnings,
         )
 
+    def inspect_xml(self, path: str | Path) -> ExchangeInspection:
+        xml_service = XMLImportService(self.conn, self.track_service, self.custom_fields)
+        _inspection, exchange_inspection = xml_service.build_exchange_inspection(str(path))
+        return exchange_inspection
+
     def _suggest_mapping(self, headers: list[str]) -> dict[str, str]:
         supported = {self._normalize_header_name(name): name for name in self.BASE_EXPORT_COLUMNS}
         mapping: dict[str, str] = {}
@@ -990,6 +1009,55 @@ class ExchangeService:
                 format_name="package",
                 source_dir=extracted_root,
             )
+
+    def import_xml(
+        self,
+        path: str | Path,
+        *,
+        mapping: dict[str, str] | None = None,
+        options: ExchangeImportOptions | None = None,
+    ) -> ExchangeImportReport:
+        xml_service = XMLImportService(self.conn, self.track_service, self.custom_fields)
+        inspection = xml_service.inspect_file(str(path))
+        rows = xml_service.exchange_rows_from_inspection(inspection)
+        if inspection.conflicting_custom_fields:
+            raise ValueError(
+                "Custom field type conflicts were detected in the XML source: "
+                + ", ".join(
+                    f"{name} (xml={import_type}, profile={existing_type})"
+                    for name, import_type, existing_type in inspection.conflicting_custom_fields
+                )
+            )
+        opts = options or ExchangeImportOptions()
+        if inspection.missing_custom_fields:
+            if opts.create_missing_custom_fields:
+                xml_service.ensure_missing_custom_fields(inspection)
+            else:
+                active_mapping = mapping or {
+                    str(header): str(header)
+                    for row in rows
+                    for header in row
+                    if str(header).startswith("custom::")
+                }
+                unresolved_targets = [
+                    f"custom::{field_name}"
+                    for field_name, _field_type in inspection.missing_custom_fields
+                    if str(active_mapping.get(f"custom::{field_name}") or "").strip()
+                    == f"custom::{field_name}"
+                ]
+                if unresolved_targets:
+                    raise ValueError(
+                        "This XML source references custom fields that are not in the current profile. "
+                        "Enable 'Create missing custom fields' or skip those targets in the mapping first: "
+                        + ", ".join(unresolved_targets)
+                    )
+        return self._import_rows(
+            rows,
+            mapping=mapping,
+            options=opts,
+            format_name="xml",
+            source_dir=Path(path).parent,
+        )
 
     def _apply_mapping(
         self, row: dict[str, object], mapping: dict[str, str] | None
@@ -1255,6 +1323,7 @@ class ExchangeService:
         source_dir: Path,
         source_release_map: dict[str, int] | None = None,
         preserve_source_release_identity: bool = False,
+        cursor: sqlite3.Cursor | None = None,
     ) -> None:
         release_title = str(row.get("release_title") or "").strip()
         if not release_title:
@@ -1330,7 +1399,7 @@ class ExchangeService:
             placements=[placement],
         )
         if existing_id is None:
-            created_release_id = self.release_service.create_release(payload)
+            created_release_id = self.release_service.create_release(payload, cursor=cursor)
             if source_release_map is not None and source_release_key:
                 source_release_map[source_release_key] = created_release_id
         else:
@@ -1339,7 +1408,7 @@ class ExchangeService:
             if all(existing.track_id != track_id for existing in placements):
                 placements.append(placement)
             payload.placements = placements
-            self.release_service.update_release(existing_id, payload)
+            self.release_service.update_release(existing_id, payload, cursor=cursor)
             if source_release_map is not None and source_release_key:
                 source_release_map[source_release_key] = existing_id
 
@@ -1377,6 +1446,7 @@ class ExchangeService:
         package_create_mode = format_name == "package" and opts.mode == "create"
         source_track_map: dict[str, int] = {}
         source_release_map: dict[str, int] = {}
+        work_batch_cache: dict[str, int] = {}
         work_override_cache: dict[int, dict[str, str]] = {}
 
         custom_defs = {
@@ -1385,7 +1455,12 @@ class ExchangeService:
             if str(field.get("field_type") or "text") not in {"blob_audio", "blob_image"}
         }
 
-        def _apply_custom_fields(track_id: int, row: dict[str, object]) -> None:
+        def _apply_custom_fields(
+            track_id: int,
+            row: dict[str, object],
+            *,
+            cursor: sqlite3.Cursor,
+        ) -> None:
             for key, value in row.items():
                 if not str(key).startswith("custom::"):
                     continue
@@ -1393,7 +1468,7 @@ class ExchangeService:
                 field_id = custom_defs.get(field_name)
                 if field_id is None:
                     continue
-                self.conn.execute(
+                cursor.execute(
                     """
                     INSERT INTO CustomFieldValues(track_id, field_def_id, value)
                     VALUES (?, ?, ?)
@@ -1424,147 +1499,189 @@ class ExchangeService:
                 continue
 
             try:
-                release_date = str(row.get("release_date") or "").strip() or None
-                track_length_value = self._normalize_track_length_target(
-                    row.get("track_length_sec")
-                )
-                if is_blank(str(track_length_value or "")):
-                    track_length_hms = row.get("track_length_hms")
-                    if isinstance(track_length_hms, (dt_time, timedelta)):
-                        track_length_value = self._normalize_track_length_target(track_length_hms)
-                    else:
-                        track_length_value = parse_hms_text(str(track_length_hms or ""))
-                track_length_sec = int(track_length_value or 0)
-                payload_kwargs = dict(
-                    isrc=to_iso_isrc(str(row.get("isrc") or "")) or "",
-                    track_title=track_title,
-                    artist_name=artist_name,
-                    additional_artists=[
-                        part.strip()
-                        for part in str(row.get("additional_artists") or "").split(",")
-                        if part.strip()
-                    ],
-                    album_title=str(row.get("album_title") or "").strip() or None,
-                    release_date=release_date,
-                    track_length_sec=track_length_sec,
-                    iswc=str(row.get("iswc") or "").strip() or None,
-                    upc=str(row.get("upc") or "").strip() or None,
-                    genre=str(row.get("genre") or "").strip() or None,
-                    catalog_number=str(row.get("catalog_number") or "").strip() or None,
-                    buma_work_number=str(row.get("buma_work_number") or "").strip() or None,
-                    composer=str(row.get("composer") or "").strip() or None,
-                    publisher=str(row.get("publisher") or "").strip() or None,
-                    comments=str(row.get("comments") or "").strip() or None,
-                    lyrics=str(row.get("lyrics") or "").strip() or None,
-                    audio_file_source_path=self._resolve_media_path(
-                        source_dir, row.get("audio_file_path")
-                    ),
-                    audio_file_storage_mode=str(row.get("audio_file_storage_mode") or "").strip()
-                    or None,
-                    album_art_source_path=self._resolve_media_path(
-                        source_dir, row.get("album_art_path")
-                    ),
-                    album_art_storage_mode=str(row.get("album_art_storage_mode") or "").strip()
-                    or None,
-                )
-                if row.get("audio_file_path") and payload_kwargs["audio_file_source_path"] is None:
-                    warnings.append(
-                        f"Row {index}: Audio reference not found: {row.get('audio_file_path')}"
+                with self.conn:
+                    cur = self.conn.cursor()
+                    release_date = str(row.get("release_date") or "").strip() or None
+                    track_length_value = self._normalize_track_length_target(
+                        row.get("track_length_sec")
                     )
-                if row.get("album_art_path") and payload_kwargs["album_art_source_path"] is None:
-                    warnings.append(
-                        f"Row {index}: Artwork reference not found: {row.get('album_art_path')}"
+                    if is_blank(str(track_length_value or "")):
+                        track_length_hms = row.get("track_length_hms")
+                        if isinstance(track_length_hms, (dt_time, timedelta)):
+                            track_length_value = self._normalize_track_length_target(track_length_hms)
+                        else:
+                            track_length_value = parse_hms_text(str(track_length_hms or ""))
+                    track_length_sec = int(track_length_value or 0)
+                    payload_kwargs = dict(
+                        isrc=to_iso_isrc(str(row.get("isrc") or "")) or "",
+                        track_title=track_title,
+                        artist_name=artist_name,
+                        additional_artists=[
+                            part.strip()
+                            for part in str(row.get("additional_artists") or "").split(",")
+                            if part.strip()
+                        ],
+                        album_title=str(row.get("album_title") or "").strip() or None,
+                        release_date=release_date,
+                        track_length_sec=track_length_sec,
+                        iswc=str(row.get("iswc") or "").strip() or None,
+                        upc=str(row.get("upc") or "").strip() or None,
+                        genre=str(row.get("genre") or "").strip() or None,
+                        catalog_number=str(row.get("catalog_number") or "").strip() or None,
+                        buma_work_number=str(row.get("buma_work_number") or "").strip() or None,
+                        composer=str(row.get("composer") or "").strip() or None,
+                        publisher=str(row.get("publisher") or "").strip() or None,
+                        comments=str(row.get("comments") or "").strip() or None,
+                        lyrics=str(row.get("lyrics") or "").strip() or None,
+                        audio_file_source_path=self._resolve_media_path(
+                            source_dir, row.get("audio_file_path")
+                        ),
+                        audio_file_storage_mode=str(row.get("audio_file_storage_mode") or "").strip()
+                        or None,
+                        album_art_source_path=self._resolve_media_path(
+                            source_dir, row.get("album_art_path")
+                        ),
+                        album_art_storage_mode=str(row.get("album_art_storage_mode") or "").strip()
+                        or None,
                     )
-
-                if existing_track_id is None:
-                    if opts.mode == "update":
-                        skipped += 1
+                    if row.get("audio_file_path") and payload_kwargs["audio_file_source_path"] is None:
                         warnings.append(
-                            f"Row {index}: no existing match was found for update mode."
+                            f"Row {index}: Audio reference not found: {row.get('audio_file_path')}"
                         )
-                        continue
-                    track_id = self.track_service.create_track(TrackCreatePayload(**payload_kwargs))
-                    if source_track_key:
-                        source_track_map[source_track_key] = track_id
-                    created_tracks.append(track_id)
-                    passed += 1
-                elif package_create_mode and reused_package_track:
-                    track_id = existing_track_id
-                    passed += 1
-                else:
-                    if opts.mode == "insert_new":
-                        skipped += 1
-                        duplicates.append(
-                            f"Row {index}: matched existing track {existing_track_id}"
-                        )
-                        continue
-                    snapshot = self.track_service.fetch_track_snapshot(existing_track_id)
-                    if snapshot is None:
-                        raise ValueError(f"Track {existing_track_id} not found")
-                    if opts.mode == "merge":
-                        payload_kwargs["track_title"] = (
-                            snapshot.track_title or payload_kwargs["track_title"]
-                        )
-                        payload_kwargs["artist_name"] = (
-                            snapshot.artist_name or payload_kwargs["artist_name"]
-                        )
-                        payload_kwargs["album_title"] = (
-                            snapshot.album_title or payload_kwargs["album_title"]
-                        )
-                        payload_kwargs["release_date"] = (
-                            snapshot.release_date or payload_kwargs["release_date"]
-                        )
-                        payload_kwargs["track_length_sec"] = (
-                            snapshot.track_length_sec or payload_kwargs["track_length_sec"]
-                        )
-                        payload_kwargs["iswc"] = snapshot.iswc or payload_kwargs["iswc"]
-                        payload_kwargs["upc"] = snapshot.upc or payload_kwargs["upc"]
-                        payload_kwargs["genre"] = snapshot.genre or payload_kwargs["genre"]
-                        payload_kwargs["catalog_number"] = (
-                            snapshot.catalog_number or payload_kwargs["catalog_number"]
-                        )
-                        payload_kwargs["buma_work_number"] = (
-                            snapshot.buma_work_number or payload_kwargs["buma_work_number"]
-                        )
-                        payload_kwargs["composer"] = snapshot.composer or payload_kwargs["composer"]
-                        payload_kwargs["publisher"] = (
-                            snapshot.publisher or payload_kwargs["publisher"]
-                        )
-                        payload_kwargs["comments"] = snapshot.comments or payload_kwargs["comments"]
-                        payload_kwargs["lyrics"] = snapshot.lyrics or payload_kwargs["lyrics"]
-                        payload_kwargs["audio_file_source_path"] = (
-                            payload_kwargs["audio_file_source_path"] or None
-                        )
-                        payload_kwargs["album_art_source_path"] = (
-                            payload_kwargs["album_art_source_path"] or None
+                    if row.get("album_art_path") and payload_kwargs["album_art_source_path"] is None:
+                        warnings.append(
+                            f"Row {index}: Artwork reference not found: {row.get('album_art_path')}"
                         )
 
-                    self._apply_governed_work_import_override(
-                        payload_kwargs,
-                        track_id=existing_track_id,
-                        cache=work_override_cache,
+                    payload_kwargs["artist_name"] = self.governed_imports.resolve_party_backed_artist_name(
+                        payload_kwargs["artist_name"],
+                        cursor=cur,
+                    )
+                    payload_kwargs["additional_artists"] = (
+                        self.governed_imports.resolve_party_backed_additional_artist_names(
+                            list(payload_kwargs["additional_artists"]),
+                            cursor=cur,
+                        )
                     )
 
-                    self.track_service.update_track(
-                        TrackUpdatePayload(
+                    if existing_track_id is None:
+                        if opts.mode == "update":
+                            skipped += 1
+                            warnings.append(
+                                f"Row {index}: no existing match was found for update mode."
+                            )
+                            continue
+                        payload_kwargs["work_id"] = self.governed_imports.ensure_governed_work_id(
+                            track_title=payload_kwargs["track_title"],
+                            iswc=payload_kwargs["iswc"],
+                            registration_number=payload_kwargs["buma_work_number"],
+                            composer=payload_kwargs["composer"],
+                            publisher=payload_kwargs["publisher"],
+                            cursor=cur,
+                            batch_cache=work_batch_cache,
+                        )
+                        track_id = self.track_service.create_track(
+                            TrackCreatePayload(**payload_kwargs),
+                            cursor=cur,
+                        )
+                        if source_track_key:
+                            source_track_map[source_track_key] = track_id
+                        created_tracks.append(track_id)
+                        passed += 1
+                    elif package_create_mode and reused_package_track:
+                        track_id = existing_track_id
+                        passed += 1
+                    else:
+                        if opts.mode == "insert_new":
+                            skipped += 1
+                            duplicates.append(
+                                f"Row {index}: matched existing track {existing_track_id}"
+                            )
+                            continue
+                        snapshot = self.track_service.fetch_track_snapshot(existing_track_id)
+                        if snapshot is None:
+                            raise ValueError(f"Track {existing_track_id} not found")
+                        if opts.mode == "merge":
+                            payload_kwargs["track_title"] = (
+                                snapshot.track_title or payload_kwargs["track_title"]
+                            )
+                            payload_kwargs["artist_name"] = (
+                                snapshot.artist_name or payload_kwargs["artist_name"]
+                            )
+                            payload_kwargs["album_title"] = (
+                                snapshot.album_title or payload_kwargs["album_title"]
+                            )
+                            payload_kwargs["release_date"] = (
+                                snapshot.release_date or payload_kwargs["release_date"]
+                            )
+                            payload_kwargs["track_length_sec"] = (
+                                snapshot.track_length_sec or payload_kwargs["track_length_sec"]
+                            )
+                            payload_kwargs["iswc"] = snapshot.iswc or payload_kwargs["iswc"]
+                            payload_kwargs["upc"] = snapshot.upc or payload_kwargs["upc"]
+                            payload_kwargs["genre"] = snapshot.genre or payload_kwargs["genre"]
+                            payload_kwargs["catalog_number"] = (
+                                snapshot.catalog_number or payload_kwargs["catalog_number"]
+                            )
+                            payload_kwargs["buma_work_number"] = (
+                                snapshot.buma_work_number or payload_kwargs["buma_work_number"]
+                            )
+                            payload_kwargs["composer"] = (
+                                snapshot.composer or payload_kwargs["composer"]
+                            )
+                            payload_kwargs["publisher"] = (
+                                snapshot.publisher or payload_kwargs["publisher"]
+                            )
+                            payload_kwargs["comments"] = (
+                                snapshot.comments or payload_kwargs["comments"]
+                            )
+                            payload_kwargs["lyrics"] = snapshot.lyrics or payload_kwargs["lyrics"]
+                            payload_kwargs["audio_file_source_path"] = (
+                                payload_kwargs["audio_file_source_path"] or None
+                            )
+                            payload_kwargs["album_art_source_path"] = (
+                                payload_kwargs["album_art_source_path"] or None
+                            )
+
+                        payload_kwargs["work_id"] = self.governed_imports.ensure_governed_work_id(
+                            track_title=payload_kwargs["track_title"],
+                            iswc=payload_kwargs["iswc"],
+                            registration_number=payload_kwargs["buma_work_number"],
+                            composer=payload_kwargs["composer"],
+                            publisher=payload_kwargs["publisher"],
+                            cursor=cur,
+                            batch_cache=work_batch_cache,
+                            existing_work_id=snapshot.work_id,
+                        )
+
+                        self._apply_governed_work_import_override(
+                            payload_kwargs,
                             track_id=existing_track_id,
-                            clear_audio_file=False,
-                            clear_album_art=False,
-                            **payload_kwargs,
+                            cache=work_override_cache,
                         )
-                    )
-                    updated_tracks.append(existing_track_id)
-                    passed += 1
-                    track_id = existing_track_id
 
-                _apply_custom_fields(track_id, row)
-                self._upsert_release_from_row(
-                    row,
-                    track_id,
-                    source_dir=source_dir,
-                    source_release_map=(source_release_map if package_create_mode else None),
-                    preserve_source_release_identity=package_create_mode,
-                )
+                        self.track_service.update_track(
+                            TrackUpdatePayload(
+                                track_id=existing_track_id,
+                                clear_audio_file=False,
+                                clear_album_art=False,
+                                **payload_kwargs,
+                            ),
+                            cursor=cur,
+                        )
+                        updated_tracks.append(existing_track_id)
+                        passed += 1
+                        track_id = existing_track_id
+
+                    _apply_custom_fields(track_id, row, cursor=cur)
+                    self._upsert_release_from_row(
+                        row,
+                        track_id,
+                        source_dir=source_dir,
+                        source_release_map=(source_release_map if package_create_mode else None),
+                        preserve_source_release_identity=package_create_mode,
+                        cursor=cur,
+                    )
             except Exception as exc:
                 failed += 1
                 warnings.append(f"Row {index}: {exc}")

@@ -17,7 +17,7 @@ from isrc_manager.domain.codes import (
     to_iso_iswc,
 )
 from isrc_manager.domain.standard_fields import promoted_text_value_columns_by_label_lower
-from isrc_manager.domain.timecode import parse_hms_text
+from isrc_manager.domain.timecode import parse_hms_text, seconds_to_hms
 
 from .custom_fields import CustomFieldDefinitionService
 from .tracks import TrackService
@@ -93,6 +93,37 @@ class XMLImportService:
             invalid_count=invalid_count,
             missing_custom_fields=[(field["name"], field["field_type"]) for field in missing_specs],
             conflicting_custom_fields=conflicting,
+        )
+
+    def build_exchange_inspection(self, file_path: str) -> tuple[ImportInspection, object]:
+        from isrc_manager.exchange.models import ExchangeInspection
+
+        inspection = self.inspect_file(file_path)
+        rows = self.exchange_rows_from_inspection(inspection)
+        headers = self._exchange_headers_from_rows(rows)
+        warnings: list[str] = [
+            f"Detected XML schema: {inspection.schema}.",
+            (
+                f"Rows ready after XML validation: {inspection.would_insert} "
+                f"(duplicates skipped: {inspection.duplicate_count}, invalid skipped: {inspection.invalid_count})."
+            ),
+        ]
+        if inspection.missing_custom_fields:
+            warnings.append(
+                "This XML references custom fields that are not in the current profile yet. "
+                "Enable 'Create missing custom fields' or skip those targets in the mapping."
+            )
+        return inspection, ExchangeInspection(
+            file_path=file_path,
+            format_name="xml",
+            headers=headers,
+            preview_rows=[dict(row) for row in rows[:5]],
+            suggested_mapping={
+                header: header
+                for header in headers
+                if header in self._exchange_supported_targets_hint() or header.startswith("custom::")
+            },
+            warnings=warnings,
         )
 
     def execute_import(
@@ -204,6 +235,51 @@ class XMLImportService:
             invalid_count=inspection.invalid_count,
             error_count=error_count,
         )
+
+    @classmethod
+    def exchange_rows_from_inspection(
+        cls,
+        inspection_or_records: ImportInspection | list[ImportRecord],
+    ) -> list[dict[str, object]]:
+        records = (
+            inspection_or_records.records
+            if isinstance(inspection_or_records, ImportInspection)
+            else inspection_or_records
+        )
+        rows: list[dict[str, object]] = []
+        for record in records:
+            row: dict[str, object] = {
+                "isrc": record.iso_isrc,
+                "track_title": record.title,
+                "artist_name": record.artist,
+            }
+            if record.additional_artists:
+                row["additional_artists"] = record.additional_artists
+            if record.album:
+                row["album_title"] = record.album
+            if record.release_date:
+                row["release_date"] = record.release_date
+            if record.track_length_sec is not None:
+                row["track_length_sec"] = int(record.track_length_sec)
+                row["track_length_hms"] = seconds_to_hms(int(record.track_length_sec))
+            if record.iso_iswc:
+                row["iswc"] = record.iso_iswc
+            if record.upc:
+                row["upc"] = record.upc
+            if record.genre:
+                row["genre"] = record.genre
+            if record.catalog_number:
+                row["catalog_number"] = record.catalog_number
+            if record.buma_work_number:
+                row["buma_work_number"] = record.buma_work_number
+            for custom in record.custom_fields:
+                name = str(custom.get("name") or "").strip()
+                field_type = str(custom.get("type") or "").strip()
+                if not name or field_type in {"blob_audio", "blob_image"}:
+                    continue
+                row[f"custom::{name}"] = str(custom.get("value") or "")
+            rows.append(row)
+        return rows
 
     @staticmethod
     def _xml_local(tag: str) -> str:
@@ -445,3 +521,47 @@ class XMLImportService:
             if value is not None and value != "":
                 return value
         return ""
+
+    @staticmethod
+    def _exchange_supported_targets_hint() -> tuple[str, ...]:
+        return (
+            "isrc",
+            "track_title",
+            "artist_name",
+            "additional_artists",
+            "album_title",
+            "release_date",
+            "track_length_sec",
+            "track_length_hms",
+            "iswc",
+            "upc",
+            "genre",
+            "catalog_number",
+            "buma_work_number",
+        )
+
+    @classmethod
+    def _exchange_headers_from_rows(cls, rows: list[dict[str, object]]) -> list[str]:
+        seen: set[str] = set()
+        headers: list[str] = []
+        for key in cls._exchange_supported_targets_hint():
+            if any(key in row for row in rows):
+                headers.append(key)
+                seen.add(key)
+        custom_headers = sorted(
+            {
+                str(key)
+                for row in rows
+                for key in row
+                if str(key).startswith("custom::") and str(key) not in seen
+            }
+        )
+        headers.extend(custom_headers)
+        for row in rows:
+            for key in row:
+                clean_key = str(key)
+                if clean_key in seen or clean_key in custom_headers:
+                    continue
+                seen.add(clean_key)
+                headers.append(clean_key)
+        return headers

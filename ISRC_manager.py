@@ -11456,9 +11456,9 @@ class App(QMainWindow):
             },
             {
                 "id": "import_xml",
-                "label": "Import Catalog XML",
+                "label": "Import XML",
                 "category": "File",
-                "description": "Import catalog data from a supported XML file.",
+                "description": "Open the exchange import setup surface for supported XML catalog files.",
                 "action": self.import_xml_action,
             },
             {
@@ -17470,6 +17470,7 @@ class App(QMainWindow):
             "xlsx": "Excel Workbook (*.xlsx)",
             "json": "JSON Files (*.json)",
             "package": "ZIP Packages (*.zip)",
+            "xml": "XML Files (*.xml)",
         }
         path, _ = QFileDialog.getOpenFileName(
             self,
@@ -17490,10 +17491,40 @@ class App(QMainWindow):
                 return bundle.exchange_service.inspect_json(path)
             if normalized_format == "package":
                 return bundle.exchange_service.inspect_package(path)
+            if normalized_format == "xml":
+                xml_inspection, exchange_inspection = (
+                    bundle.xml_import_service.build_exchange_inspection(path)
+                )
+                return {
+                    "xml_inspection": xml_inspection,
+                    "exchange_inspection": exchange_inspection,
+                }
             raise ValueError(f"Unsupported exchange format: {normalized_format}")
 
         def _inspection_success(inspection):
             supported_headers = self.exchange_service.supported_import_targets()
+            inspection_payload = inspection
+            if normalized_format == "xml":
+                inspection_payload = (
+                    inspection if isinstance(inspection, dict) else {}
+                )
+                xml_inspection = inspection_payload.get("xml_inspection")
+                if xml_inspection is None:
+                    raise ValueError("XML inspection did not return the expected preflight data.")
+                if xml_inspection.conflicting_custom_fields:
+                    msg = "Custom columns already exist with a different type:\n" + "\n".join(
+                        f"- {name} : XML={import_type}, profile={existing_type}"
+                        for name, import_type, existing_type in xml_inspection.conflicting_custom_fields
+                    )
+                    QMessageBox.critical(self, "Import XML", msg + "\n\nNo changes were made.")
+                    return
+                for field_name, _field_type in xml_inspection.missing_custom_fields:
+                    target_name = f"custom::{field_name}"
+                    if target_name not in supported_headers:
+                        supported_headers.append(target_name)
+                inspection = inspection_payload.get("exchange_inspection")
+                if inspection is None:
+                    raise ValueError("XML exchange inspection did not return preview data.")
 
             def _csv_reinspect(delimiter: str | None) -> ExchangeInspection:
                 return self.exchange_service.inspect_csv(path, delimiter=delimiter)
@@ -17530,6 +17561,12 @@ class App(QMainWindow):
                         )
                     if normalized_format == "package":
                         return bundle.exchange_service.import_package(
+                            path,
+                            mapping=mapping,
+                            options=options,
+                        )
+                    if normalized_format == "xml":
+                        return bundle.exchange_service.import_xml(
                             path,
                             mapping=mapping,
                             options=options,
@@ -17631,7 +17668,7 @@ class App(QMainWindow):
             QMessageBox.question(
                 self,
                 "Reset Saved Import Choices",
-                "Clear the remembered import choices for CSV, XLSX, JSON, and ZIP package imports?",
+                "Clear the remembered import choices for XML, CSV, XLSX, JSON, and ZIP package imports?",
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No,
             )
@@ -18078,218 +18115,7 @@ class App(QMainWindow):
         )
 
     def import_from_xml(self):
-        """
-        Robust import:
-        - Accepts both schemas:
-            1) DeclarationOfSoundRecordingRightsClaimMessage/SoundRecording (full export)
-            2) ISRCExport/Tracks/Track (selected export)
-        - Imports TrackLength (hh:mm:ss) -> track_length_sec
-        - Imports custom columns (non-blob). If any required custom column is missing or type mismatched,
-        inform user + log and abort gracefully (no changes).
-        - Namespace-/case-robust tag handling
-        - Normalize ISRC/ISWC to ISO; skip invalid; skip dupes
-        - Per-row savepoints
-        - Dry-run with optional "Proceed with import?" to commit without re-picking file
-        """
-        file_path, _ = QFileDialog.getOpenFileName(self, "Import from XML", "", "XML Files (*.xml)")
-        if not file_path:
-            return
-
-        dry = (
-            QMessageBox.question(
-                self,
-                "Dry Run?",
-                "Run a dry-run first (no changes will be written) to see the summary?",
-                QMessageBox.Yes | QMessageBox.No,
-            )
-            == QMessageBox.Yes
-        )
-
-        def _inspection_worker(bundle, ctx):
-            ctx.set_status("Inspecting the selected XML file...")
-            return bundle.xml_import_service.inspect_file(file_path)
-
-        def _inspection_success(inspection):
-            create_missing_custom_fields = False
-            if inspection.conflicting_custom_fields:
-                msg = "Custom columns already exist with a different type:\n" + "\n".join(
-                    f"- {name} : XML={import_type}, profile={existing_type}"
-                    for name, import_type, existing_type in inspection.conflicting_custom_fields
-                )
-                self.logger.warning(
-                    "Import aborted due to custom column type conflicts: %s",
-                    inspection.conflicting_custom_fields,
-                )
-                self._log_trace(
-                    "import.xml.custom_field_conflicts",
-                    message="Import aborted due to custom column type conflicts",
-                    path=file_path,
-                    details=inspection.conflicting_custom_fields,
-                )
-                QMessageBox.critical(self, "Import Error", msg + "\n\nNo changes were made.")
-                return
-
-            if inspection.missing_custom_fields:
-                msg = (
-                    "This XML uses custom columns that do not exist in the current profile:\n\n"
-                    + "\n".join(
-                        f"- {name} : {field_type}"
-                        for name, field_type in inspection.missing_custom_fields
-                    )
-                )
-                create_missing_custom_fields = (
-                    QMessageBox.question(
-                        self,
-                        "Create Missing Custom Columns?",
-                        msg + "\n\nCreate these custom columns now and continue with the import?",
-                        QMessageBox.Yes | QMessageBox.No,
-                        QMessageBox.Yes,
-                    )
-                    == QMessageBox.Yes
-                )
-                if not create_missing_custom_fields:
-                    self.logger.info(
-                        "Import canceled because custom columns were not created: %s",
-                        inspection.missing_custom_fields,
-                    )
-                    self._log_trace(
-                        "import.xml.missing_custom_fields_aborted",
-                        message="Import canceled because missing custom columns were not created",
-                        path=file_path,
-                        details=inspection.missing_custom_fields,
-                    )
-                    return
-
-            if dry:
-                self._log_event(
-                    "import.xml.dry_run",
-                    "XML import dry-run completed",
-                    path=file_path,
-                    would_insert=inspection.would_insert,
-                    duplicates=inspection.duplicate_count,
-                    invalid=inspection.invalid_count,
-                )
-                proceed = (
-                    QMessageBox.question(
-                        self,
-                        "Dry-run finished",
-                        f"Would insert: {inspection.would_insert}\n"
-                        f"Skipped (duplicates): {inspection.duplicate_count}\n"
-                        f"Skipped (invalid): {inspection.invalid_count}\n"
-                        f"Errors: 0\n"
-                        + (
-                            f"Will create custom columns: {len(inspection.missing_custom_fields)}\n"
-                            if create_missing_custom_fields
-                            else ""
-                        )
-                        + "\n"
-                        "Proceed with import now?",
-                        QMessageBox.Yes | QMessageBox.No,
-                    )
-                    == QMessageBox.Yes
-                )
-                if not proceed:
-                    self._audit(
-                        "IMPORT",
-                        "Tracks",
-                        ref_id=file_path,
-                        details=(
-                            f"mode=dry_only, would_ins={inspection.would_insert}, "
-                            f"dup={inspection.duplicate_count}, inv={inspection.invalid_count}, err=0"
-                        ),
-                    )
-                    self._audit_commit()
-                    return
-
-            def _import_worker(bundle, ctx):
-                ctx.set_status("Importing XML data into the catalog...")
-                return run_snapshot_history_action(
-                    history_manager=bundle.history_manager,
-                    action_label=f"Import XML: {Path(file_path).name}",
-                    action_type="import.xml",
-                    entity_type="Import",
-                    entity_id=file_path,
-                    payload={"path": file_path},
-                    mutation=lambda: bundle.xml_import_service.execute_import(
-                        file_path,
-                        create_missing_custom_fields=create_missing_custom_fields,
-                    ),
-                    logger=self.logger,
-                )
-
-            def _import_success(result):
-                try:
-                    self.conn.commit()
-                except Exception:
-                    pass
-                self.active_custom_fields = self.load_active_custom_fields()
-                self._rebuild_table_headers()
-                try:
-                    self._load_header_state()
-                except Exception:
-                    pass
-                self.refresh_table_preserve_view()
-                self.populate_all_comboboxes()
-                self._refresh_history_actions()
-
-                mode = "Import finished" if not dry else "Import finished (after dry-run)"
-                self._log_event(
-                    "import.xml.commit",
-                    mode,
-                    path=file_path,
-                    inserted=result.inserted,
-                    duplicates=result.duplicate_count,
-                    invalid=result.invalid_count,
-                    errors=result.error_count,
-                )
-                self._audit(
-                    "IMPORT",
-                    "Tracks",
-                    ref_id=file_path,
-                    details=(
-                        f"mode={'commit_after_dry' if dry else 'commit'}, "
-                        f"ins={result.inserted}, dup={result.duplicate_count}, "
-                        f"inv={result.invalid_count}, err={result.error_count}"
-                    ),
-                )
-                self._audit_commit()
-
-                QMessageBox.information(
-                    self,
-                    mode,
-                    f"Inserted: {result.inserted}\n"
-                    f"Skipped (duplicates): {result.duplicate_count}\n"
-                    f"Skipped (invalid): {result.invalid_count}\n"
-                    f"Errors: {result.error_count}",
-                )
-
-            self._submit_background_bundle_task(
-                title="Import XML",
-                description="Importing XML data into the current profile...",
-                task_fn=_import_worker,
-                kind="write",
-                unique_key="import.xml",
-                on_success=_import_success,
-                on_error=lambda failure: self._show_background_task_error(
-                    "Import Error",
-                    failure,
-                    user_message="Could not complete the XML import:",
-                ),
-            )
-
-        self._submit_background_bundle_task(
-            title="Inspect XML",
-            description="Inspecting the selected XML file...",
-            task_fn=_inspection_worker,
-            kind="read",
-            unique_key="inspect.xml",
-            on_success=_inspection_success,
-            on_error=lambda failure: self._show_background_task_error(
-                "Import Error",
-                failure,
-                user_message="Could not inspect the selected XML file:",
-            ),
-        )
+        self.import_exchange_file("xml")
 
     # =============================================================================
     # Settings (prefix / numbers) + summary dialog

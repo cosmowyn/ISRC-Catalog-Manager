@@ -687,7 +687,6 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(
             list(import_snapshot.get("texts") or []),
             [
-                "Import Catalog XML…",
                 "Catalog Exchange",
                 "Contracts and Rights",
             ],
@@ -697,6 +696,7 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(
             list(import_exchange_menu.get("texts") or []),
             [
+                "Import XML…",
                 "Import CSV…",
                 "Import XLSX…",
                 "Import JSON…",
@@ -727,7 +727,7 @@ class AppShellTestCase(unittest.TestCase):
 
         get_open_file_name.assert_called_once_with(
             self.window,
-            "Import from XML",
+            "Import XML",
             "",
             "XML Files (*.xml)",
         )

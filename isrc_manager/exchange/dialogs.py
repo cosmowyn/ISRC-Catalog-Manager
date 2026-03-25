@@ -168,7 +168,10 @@ class ExchangeImportDialog(QDialog):
         option_row.addWidget(self.match_upc_title_checkbox)
         self.heuristic_checkbox = QCheckBox("Enable title/artist heuristics")
         option_row.addWidget(self.heuristic_checkbox)
-        self.create_custom_checkbox = QCheckBox("Create missing text custom fields")
+        create_custom_label = "Create missing text custom fields"
+        if self.inspection.format_name == "xml":
+            create_custom_label = "Create missing custom fields"
+        self.create_custom_checkbox = QCheckBox(create_custom_label)
         self.create_custom_checkbox.setChecked(True)
         option_row.addWidget(self.create_custom_checkbox)
         setup_layout.addLayout(option_row)

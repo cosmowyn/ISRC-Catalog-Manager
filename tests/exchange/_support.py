@@ -1,6 +1,7 @@
 import json
 import sqlite3
 import tempfile
+import textwrap
 import unittest
 from datetime import time, timedelta
 from pathlib import Path
@@ -74,6 +75,11 @@ class ExchangeServiceTestCase(unittest.TestCase):
                 album_art_source_path=None,
             )
         )
+
+    def _write_xml(self, name: str, contents: str) -> Path:
+        path = self.data_root / name
+        path.write_text(textwrap.dedent(contents).strip(), encoding="utf-8")
+        return path
 
     def _create_release(self, track_id: int) -> int:
         return self.release_service.create_release(
@@ -250,6 +256,93 @@ class ExchangeServiceTestCase(unittest.TestCase):
             ).fetchone(),
             ("Orbit", "Moonwake", "NL-ABC-26-00031", "Demo import"),
         )
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Works").fetchone()[0], 1)
+        self.assertEqual(
+            self.conn.execute("SELECT work_id FROM Tracks WHERE id=?", (report.created_tracks[0],)).fetchone()[0],
+            1,
+        )
+        self.assertEqual(
+            self.conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM Parties
+                WHERE lower(coalesce(display_name, legal_name, ''))=lower(?)
+                """,
+                ("Moonwake",),
+            ).fetchone()[0],
+            1,
+        )
+
+    def case_import_xml_uses_governed_workflow_and_creates_missing_custom_fields(self):
+        xml_path = self._write_xml(
+            "exchange-import.xml",
+            """
+            <ISRCExport>
+              <Tracks>
+                <Track>
+                  <ISRC>NL-ABC-26-00077</ISRC>
+                  <Title>XML Orbit</Title>
+                  <MainArtist>Starline</MainArtist>
+                  <AdditionalArtists>Guest One</AdditionalArtists>
+                  <Album>XML Release</Album>
+                  <ReleaseDate>2026-03-20</ReleaseDate>
+                  <TrackLength>00:03:33</TrackLength>
+                  <ISWC>T-987.654.321-0</ISWC>
+                  <BUMAWorkNumber>BUMA-XML-77</BUMAWorkNumber>
+                  <CustomFields>
+                    <Field name="Energy" type="text">
+                      <Value>High</Value>
+                    </Field>
+                  </CustomFields>
+                </Track>
+              </Tracks>
+            </ISRCExport>
+            """,
+        )
+
+        inspection = self.service.inspect_xml(xml_path)
+        self.assertEqual(inspection.format_name, "xml")
+        self.assertIn("track_title", inspection.headers)
+        self.assertIn("custom::Energy", inspection.headers)
+
+        report = self.service.import_xml(
+            xml_path,
+            options=ExchangeImportOptions(mode="create", create_missing_custom_fields=True),
+        )
+
+        self.assertEqual(report.failed, 0)
+        self.assertEqual(report.passed, 1)
+        self.assertEqual(len(report.created_tracks), 1)
+        track_id = report.created_tracks[0]
+        self.assertEqual(
+            self.conn.execute(
+                """
+                SELECT track_title, work_id, iswc, buma_work_number
+                FROM Tracks
+                WHERE id=?
+                """,
+                (track_id,),
+            ).fetchone(),
+            ("XML Orbit", 1, "T-987.654.321-0", "BUMA-XML-77"),
+        )
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT title, iswc, registration_number FROM Works WHERE id=1"
+            ).fetchone(),
+            ("XML Orbit", "T-987.654.321-0", "BUMA-XML-77"),
+        )
+        self.assertEqual(
+            self.conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM Parties
+                WHERE lower(coalesce(display_name, legal_name, '')) IN (lower(?), lower(?))
+                """,
+                ("Starline", "Guest One"),
+            ).fetchone()[0],
+            2,
+        )
+        self.assertEqual(self._fetch_custom_value(track_id, "Energy"), "High")
 
     def case_import_csv_detects_semicolon_delimiter(self):
         csv_path = self.data_root / "semicolon-import.csv"

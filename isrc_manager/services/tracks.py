@@ -1763,112 +1763,124 @@ class TrackService:
             )
             self._delete_unreferenced_media_files(stale_paths, cursor=cur)
 
-    def create_track(self, payload: TrackCreatePayload) -> int:
+    def _create_track_row(self, payload: TrackCreatePayload, *, cursor: sqlite3.Cursor) -> int:
+        cur = cursor
+        track_columns = self._track_columns()
+        main_artist_id = self.get_or_create_artist(payload.artist_name, cursor=cur)
+        album_id = self.get_or_create_album(payload.album_title, cursor=cur)
+        clean_isrc = str(payload.isrc or "").strip()
+        compact_isrc = to_compact_isrc(clean_isrc)
+        insert_columns = [
+            "isrc",
+            "isrc_compact",
+            "audio_file_path",
+            "audio_file_storage_mode",
+            "audio_file_blob",
+            "audio_file_filename",
+            "audio_file_mime_type",
+            "audio_file_size_bytes",
+            "track_title",
+            "catalog_number",
+            "album_art_path",
+            "album_art_storage_mode",
+            "album_art_blob",
+            "album_art_filename",
+            "album_art_mime_type",
+            "album_art_size_bytes",
+            "main_artist_id",
+            "buma_work_number",
+            "album_id",
+            "release_date",
+            "track_length_sec",
+            "iswc",
+            "upc",
+            "genre",
+            "composer",
+            "publisher",
+            "comments",
+            "lyrics",
+        ]
+        insert_values: list[object] = [
+            clean_isrc,
+            compact_isrc,
+            None,
+            None,
+            None,
+            None,
+            None,
+            0,
+            payload.track_title.strip(),
+            payload.catalog_number,
+            None,
+            None,
+            None,
+            None,
+            None,
+            0,
+            main_artist_id,
+            payload.buma_work_number,
+            album_id,
+            payload.release_date,
+            int(payload.track_length_sec or 0),
+            payload.iswc,
+            payload.upc,
+            payload.genre,
+            payload.composer,
+            payload.publisher,
+            payload.comments,
+            payload.lyrics,
+        ]
+        if "work_id" in track_columns:
+            insert_columns.append("work_id")
+            insert_values.append(int(payload.work_id) if payload.work_id is not None else None)
+        if "parent_track_id" in track_columns:
+            insert_columns.append("parent_track_id")
+            insert_values.append(
+                int(payload.parent_track_id) if payload.parent_track_id is not None else None
+            )
+        if "relationship_type" in track_columns:
+            insert_columns.append("relationship_type")
+            insert_values.append(self._normalize_relationship_type(payload.relationship_type))
+        cur.execute(
+            f"""
+            INSERT INTO Tracks ({", ".join(insert_columns)})
+            VALUES ({", ".join("?" for _ in insert_columns)})
+            """,
+            insert_values,
+        )
+        track_id = int(cur.lastrowid)
+        self._sync_shadow_work_link(track_id, payload.work_id, cursor=cur)
+        if payload.audio_file_source_path:
+            self.set_media_path(
+                track_id,
+                "audio_file",
+                payload.audio_file_source_path,
+                storage_mode=payload.audio_file_storage_mode,
+                cursor=cur,
+            )
+        if payload.album_art_source_path:
+            self.set_media_path(
+                track_id,
+                "album_art",
+                payload.album_art_source_path,
+                storage_mode=payload.album_art_storage_mode,
+                cursor=cur,
+            )
+        self.replace_additional_artists(track_id, payload.additional_artists, cursor=cur)
+        return track_id
+
+    def create_track(
+        self,
+        payload: TrackCreatePayload,
+        *,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> int:
+        if cursor is not None:
+            return self._create_track_row(payload, cursor=cursor)
+
         with self.conn:
             cur = self.conn.cursor()
-            track_columns = self._track_columns()
-            main_artist_id = self.get_or_create_artist(payload.artist_name, cursor=cur)
-            album_id = self.get_or_create_album(payload.album_title, cursor=cur)
-            clean_isrc = str(payload.isrc or "").strip()
-            compact_isrc = to_compact_isrc(clean_isrc)
-            insert_columns = [
-                "isrc",
-                "isrc_compact",
-                "audio_file_path",
-                "audio_file_storage_mode",
-                "audio_file_blob",
-                "audio_file_filename",
-                "audio_file_mime_type",
-                "audio_file_size_bytes",
-                "track_title",
-                "catalog_number",
-                "album_art_path",
-                "album_art_storage_mode",
-                "album_art_blob",
-                "album_art_filename",
-                "album_art_mime_type",
-                "album_art_size_bytes",
-                "main_artist_id",
-                "buma_work_number",
-                "album_id",
-                "release_date",
-                "track_length_sec",
-                "iswc",
-                "upc",
-                "genre",
-                "composer",
-                "publisher",
-                "comments",
-                "lyrics",
-            ]
-            insert_values: list[object] = [
-                clean_isrc,
-                compact_isrc,
-                None,
-                None,
-                None,
-                None,
-                None,
-                0,
-                payload.track_title.strip(),
-                payload.catalog_number,
-                None,
-                None,
-                None,
-                None,
-                None,
-                0,
-                main_artist_id,
-                payload.buma_work_number,
-                album_id,
-                payload.release_date,
-                int(payload.track_length_sec or 0),
-                payload.iswc,
-                payload.upc,
-                payload.genre,
-                payload.composer,
-                payload.publisher,
-                payload.comments,
-                payload.lyrics,
-            ]
-            if "work_id" in track_columns:
-                insert_columns.append("work_id")
-                insert_values.append(int(payload.work_id) if payload.work_id is not None else None)
-            if "parent_track_id" in track_columns:
-                insert_columns.append("parent_track_id")
-                insert_values.append(
-                    int(payload.parent_track_id) if payload.parent_track_id is not None else None
-                )
-            if "relationship_type" in track_columns:
-                insert_columns.append("relationship_type")
-                insert_values.append(self._normalize_relationship_type(payload.relationship_type))
-            cur.execute(
-                f"""
-                INSERT INTO Tracks ({", ".join(insert_columns)})
-                VALUES ({", ".join("?" for _ in insert_columns)})
-                """,
-                insert_values,
-            )
-            track_id = int(cur.lastrowid)
-            self._sync_shadow_work_link(track_id, payload.work_id, cursor=cur)
-            if payload.audio_file_source_path:
-                self.set_media_path(
-                    track_id,
-                    "audio_file",
-                    payload.audio_file_source_path,
-                    storage_mode=payload.audio_file_storage_mode,
-                    cursor=cur,
-                )
-            if payload.album_art_source_path:
-                self.set_media_path(
-                    track_id,
-                    "album_art",
-                    payload.album_art_source_path,
-                    storage_mode=payload.album_art_storage_mode,
-                    cursor=cur,
-                )
-            self.replace_additional_artists(track_id, payload.additional_artists, cursor=cur)
-            return track_id
+            return self._create_track_row(payload, cursor=cur)
 
     def _update_track_row(self, payload: TrackUpdatePayload, *, cursor: sqlite3.Cursor) -> None:
         track_columns = self._track_columns()

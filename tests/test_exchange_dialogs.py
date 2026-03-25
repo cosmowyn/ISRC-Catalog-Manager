@@ -1,9 +1,10 @@
 import unittest
 
 try:
-    from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QLineEdit, QTabWidget
+    from PySide6.QtWidgets import QApplication, QCheckBox, QComboBox, QLabel, QLineEdit, QTabWidget
 except ImportError as exc:  # pragma: no cover - environment-specific fallback
     QApplication = None
+    QCheckBox = None
     QComboBox = None
     QLabel = None
     QLineEdit = None
@@ -271,6 +272,37 @@ class ExchangeImportDialogTests(unittest.TestCase):
             self.assertEqual(remembered.resolved_csv_delimiter(), ";")
         finally:
             remembered.close()
+
+    def test_xml_dialog_uses_generic_missing_custom_field_label(self):
+        dlg = ExchangeImportDialog(
+            inspection=ExchangeInspection(
+                file_path="/tmp/catalog.xml",
+                format_name="xml",
+                headers=["track_title", "artist_name", "custom::Energy"],
+                preview_rows=[
+                    {
+                        "track_title": "Orbit",
+                        "artist_name": "Moonwake",
+                        "custom::Energy": "High",
+                    }
+                ],
+                suggested_mapping={
+                    "track_title": "track_title",
+                    "artist_name": "artist_name",
+                    "custom::Energy": "custom::Energy",
+                },
+                warnings=["Detected XML schema: selected."],
+            ),
+            supported_headers=["track_title", "artist_name", "custom::Energy"],
+            settings=_FakeSettings(),
+            initial_mode="dry_run",
+        )
+        try:
+            checkbox_texts = [box.text() for box in dlg.findChildren(QCheckBox)]
+            self.assertIn("Create missing custom fields", checkbox_texts)
+            self.assertNotIn("Create missing text custom fields", checkbox_texts)
+        finally:
+            dlg.close()
 
     def test_mapping_can_explicitly_skip_a_source_field(self):
         inspection = ExchangeInspection(
