@@ -10,12 +10,14 @@ from types import SimpleNamespace
 from unittest import mock
 
 from isrc_manager.constants import APP_NAME
-from isrc_manager.file_storage import STORAGE_MODE_DATABASE
+from isrc_manager.file_storage import STORAGE_MODE_DATABASE, STORAGE_MODE_MANAGED_FILE
 from isrc_manager.media.derivatives import DerivativeLedgerService
 from isrc_manager.paths import AppStorageLayout
 from isrc_manager.services import (
     AssetVersionPayload,
     ContractPayload,
+    ContractTemplatePayload,
+    ContractTemplateRevisionPayload,
     DatabaseSchemaService,
     DatabaseSessionService,
     PartyPayload,
@@ -24,9 +26,11 @@ from isrc_manager.services import (
 )
 from isrc_manager.starter_themes import starter_theme_names
 from isrc_manager.startup_progress import StartupPhase, startup_phase_label
+from tests.contract_templates._support import make_docx_bytes
 from tests.qt_test_helpers import pump_events, require_qapplication, wait_for
 
 try:
+    from PySide6.QtCore import QDate
     from PySide6.QtWidgets import QScrollArea, QTabBar
 
     import ISRC_manager as app_module
@@ -2553,6 +2557,30 @@ class AppShellTestCase(unittest.TestCase):
         self.assertIn(self.window.contract_template_workspace_dock, tabified)
 
     def case_contract_template_workspace_opens_fill_tab_as_tabified_dock(self):
+        track_id = self._create_track(index=151, title="Fill Draft Track")
+        template = self.window.contract_template_service.create_template(
+            ContractTemplatePayload(
+                name="Shell Fill Template",
+                description="App shell draft workflow coverage",
+                template_family="contract",
+                source_format="docx",
+            )
+        )
+        source_path = self.root / "shell-fill-template.docx"
+        source_path.write_bytes(
+            make_docx_bytes(
+                document_paragraphs=(
+                    ("Track ", "{{db.track.track_title}}"),
+                    ("Date ", "{{manual.license_date}}"),
+                )
+            )
+        )
+        self.window.contract_template_service.import_revision_from_path(
+            template.template_id,
+            source_path,
+            payload=ContractTemplateRevisionPayload(source_filename=source_path.name),
+        )
+
         self.window.open_contract_template_workspace(initial_tab="fill")
         self.app.processEvents()
 
@@ -2571,6 +2599,103 @@ class AppShellTestCase(unittest.TestCase):
         self.assertGreaterEqual(panel.workspace_tabs.count(), 2)
         self.assertEqual(panel.workspace_tabs.currentIndex(), fill_index)
         self.assertIn("fill", panel.workspace_tabs.tabText(fill_index).lower())
+        self.assertGreaterEqual(panel.fill_template_combo.count(), 2)
+        self.assertGreaterEqual(panel.fill_revision_combo.count(), 2)
+        self.assertGreaterEqual(panel.fill_draft_storage_combo.count(), 2)
+        self.assertEqual(
+            panel.fill_draft_actions_cluster.objectName(),
+            "contractTemplateDraftActionsCluster",
+        )
+        self.assertIn(
+            self.window.contract_template_workspace_dock,
+            self.window.tabifiedDockWidgets(self.window.catalog_table_dock),
+        )
+
+    def case_contract_template_workspace_fill_tab_can_save_and_resume_drafts(self):
+        self._create_track(index=152, title="Fill Resume Track")
+        template = self.window.contract_template_service.create_template(
+            ContractTemplatePayload(
+                name="Shell Resume Template",
+                description="App shell save and resume coverage",
+                template_family="contract",
+                source_format="docx",
+            )
+        )
+        source_path = self.root / "shell-resume-template.docx"
+        source_path.write_bytes(
+            make_docx_bytes(
+                document_paragraphs=(
+                    ("Track ", "{{db.track.track_title}}"),
+                    ("Date ", "{{manual.license_date}}"),
+                )
+            )
+        )
+        revision = self.window.contract_template_service.import_revision_from_path(
+            template.template_id,
+            source_path,
+            payload=ContractTemplateRevisionPayload(source_filename=source_path.name),
+        ).revision
+
+        self.window.open_contract_template_workspace(initial_tab="fill")
+        self.app.processEvents()
+        panel = self._assert_tabified_workspace_dock(
+            self.window.contract_template_workspace_dock,
+            dock_name="contractTemplateWorkspaceDock",
+            panel_name="contractTemplateWorkspacePanel",
+        )
+
+        selector = panel.selector_widgets["{{db.track.track_title}}"]
+        date_widget = panel.manual_widgets["{{manual.license_date}}"]
+        selector.setCurrentIndex(1)
+        selected_track_value = selector.currentData()
+        date_widget.setDate(QDate(2026, 3, 29))
+        panel.fill_draft_name_edit.setText("Shell Resume Draft")
+        panel.fill_draft_storage_combo.setCurrentIndex(1)
+        self.app.processEvents()
+
+        panel.save_new_draft()
+        self.app.processEvents()
+
+        drafts = self.window.contract_template_service.list_drafts(
+            revision_id=revision.revision_id
+        )
+        self.assertEqual(len(drafts), 1)
+        self.assertEqual(panel.fill_draft_combo.count(), 2)
+        self.assertEqual(panel.fill_draft_combo.currentData(), drafts[0].draft_id)
+        self.assertEqual(panel.fill_draft_name_edit.text(), "Shell Resume Draft")
+        self.assertEqual(panel.fill_draft_storage_combo.currentData(), STORAGE_MODE_MANAGED_FILE)
+
+        panel.reset_fill_form()
+        self.app.processEvents()
+        self.assertEqual(
+            panel.current_fill_state(),
+            {
+                "revision_id": revision.revision_id,
+                "db_selections": {},
+                "manual_values": {},
+                "type_overrides": {},
+            },
+        )
+
+        for index in range(panel.fill_draft_combo.count()):
+            if panel.fill_draft_combo.itemData(index) == drafts[0].draft_id:
+                panel.fill_draft_combo.setCurrentIndex(index)
+                break
+        self.app.processEvents()
+
+        panel.load_selected_draft()
+        self.app.processEvents()
+        self.assertEqual(
+            panel.current_fill_state(),
+            {
+                "revision_id": revision.revision_id,
+                "db_selections": {"{{db.track.track_title}}": selected_track_value},
+                "manual_values": {"{{manual.license_date}}": "2026-03-29"},
+                "type_overrides": {},
+            },
+        )
+        self.assertEqual(panel.fill_draft_name_edit.text(), "Shell Resume Draft")
+        self.assertEqual(panel.fill_draft_storage_combo.currentData(), STORAGE_MODE_MANAGED_FILE)
         self.assertIn(
             self.window.contract_template_workspace_dock,
             self.window.tabifiedDockWidgets(self.window.catalog_table_dock),

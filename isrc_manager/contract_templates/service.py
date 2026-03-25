@@ -1433,15 +1433,28 @@ class ContractTemplateService:
             stored_in_database=(mode == STORAGE_MODE_DATABASE),
         )
 
-    def list_drafts(self, *, include_archived: bool = False) -> list[ContractTemplateDraftRecord]:
-        where_sql = "" if include_archived else "WHERE status != 'archived'"
+    def list_drafts(
+        self,
+        *,
+        revision_id: int | None = None,
+        include_archived: bool = False,
+    ) -> list[ContractTemplateDraftRecord]:
+        clauses: list[str] = []
+        params: list[object] = []
+        if not include_archived:
+            clauses.append("status != 'archived'")
+        if revision_id is not None:
+            clauses.append("revision_id=?")
+            params.append(int(revision_id))
+        where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = self.conn.execute(
             f"""
             SELECT id
             FROM ContractTemplateDrafts
             {where_sql}
             ORDER BY updated_at DESC, id DESC
-            """
+            """,
+            params,
         ).fetchall()
         records: list[ContractTemplateDraftRecord] = []
         for row in rows:

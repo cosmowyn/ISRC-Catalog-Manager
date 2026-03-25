@@ -4,6 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from PySide6.QtCore import QDate
+
 from isrc_manager.contract_templates.catalog import ContractTemplateCatalogService
 from isrc_manager.contract_templates.form_service import ContractTemplateFormService
 from isrc_manager.contract_templates.dialogs import ContractTemplateWorkspacePanel
@@ -165,3 +167,185 @@ class ContractTemplateWorkspacePanelTests(unittest.TestCase):
 
         self.assertEqual(self.panel.workspace_tabs.currentIndex(), fill_index)
         self.assertIn("fill", self.panel.workspace_tabs.tabText(self.panel.workspace_tabs.currentIndex()).lower())
+
+    def test_fill_tab_can_save_and_resume_drafts_across_storage_modes(self):
+        self.panel.focus_tab("fill")
+        pump_events(app=self.app, cycles=2)
+
+        selector = self.panel.selector_widgets["{{db.track.track_title}}"]
+        date_widget = self.panel.manual_widgets["{{manual.license_date}}"]
+        selector.setCurrentIndex(1)
+        date_widget.setDate(QDate(2026, 3, 26))
+        self.panel.fill_draft_name_edit.setText("Managed Resume Draft")
+        self.panel.fill_draft_storage_combo.setCurrentIndex(1)
+        pump_events(app=self.app, cycles=2)
+
+        self.panel.save_new_draft()
+        pump_events(app=self.app, cycles=2)
+
+        drafts = self.template_service.list_drafts(revision_id=self.revision.revision_id)
+        self.assertEqual(len(drafts), 1)
+        self.assertEqual(self.panel.fill_draft_combo.count(), 2)
+        self.assertEqual(self.panel.fill_draft_combo.currentData(), drafts[0].draft_id)
+        self.assertEqual(self.panel.fill_draft_name_edit.text(), "Managed Resume Draft")
+        self.assertEqual(self.panel.fill_draft_storage_combo.currentData(), "managed_file")
+        self.assertIn("Saved draft", self.panel.fill_draft_status_label.text())
+        self.assertEqual(drafts[0].storage_mode, "managed_file")
+        self.assertFalse(drafts[0].stored_in_database)
+        self.assertEqual(
+            self.template_service.fetch_draft_payload(drafts[0].draft_id),
+            {
+                "revision_id": self.revision.revision_id,
+                "db_selections": {"{{db.track.track_title}}": "1"},
+                "manual_values": {"{{manual.license_date}}": "2026-03-26"},
+                "type_overrides": {},
+            },
+        )
+
+        self.panel.reset_fill_form()
+        pump_events(app=self.app, cycles=2)
+        self.assertEqual(
+            self.panel.current_fill_state(),
+            {
+                "revision_id": self.revision.revision_id,
+                "db_selections": {},
+                "manual_values": {},
+                "type_overrides": {},
+            },
+        )
+
+        for index in range(self.panel.fill_draft_combo.count()):
+            if self.panel.fill_draft_combo.itemData(index) == drafts[0].draft_id:
+                self.panel.fill_draft_combo.setCurrentIndex(index)
+                break
+        pump_events(app=self.app, cycles=2)
+
+        self.panel.load_selected_draft()
+        pump_events(app=self.app, cycles=2)
+        self.assertEqual(
+            self.panel.current_fill_state(),
+            {
+                "revision_id": self.revision.revision_id,
+                "db_selections": {"{{db.track.track_title}}": "1"},
+                "manual_values": {"{{manual.license_date}}": "2026-03-26"},
+                "type_overrides": {},
+            },
+        )
+        self.assertEqual(self.panel.fill_draft_name_edit.text(), "Managed Resume Draft")
+        self.assertEqual(self.panel.fill_draft_storage_combo.currentData(), "managed_file")
+        self.assertIn("Loaded draft", self.panel.fill_draft_status_label.text())
+
+        restored_date_widget = self.panel.manual_widgets["{{manual.license_date}}"]
+        restored_date_widget.setDate(QDate(2026, 4, 1))
+        self.panel.fill_draft_storage_combo.setCurrentIndex(0)
+        pump_events(app=self.app, cycles=2)
+
+        self.panel.save_selected_draft()
+        pump_events(app=self.app, cycles=2)
+
+        updated = self.template_service.fetch_draft(drafts[0].draft_id)
+        self.assertEqual(len(self.template_service.list_drafts(revision_id=self.revision.revision_id)), 1)
+        self.assertEqual(updated.draft_id, drafts[0].draft_id)
+        self.assertEqual(updated.storage_mode, "database")
+        self.assertTrue(updated.stored_in_database)
+        self.assertEqual(self.panel.fill_draft_combo.currentData(), drafts[0].draft_id)
+        self.assertEqual(self.panel.fill_draft_storage_combo.currentData(), "database")
+        self.assertIn("Saved draft", self.panel.fill_draft_status_label.text())
+        self.assertEqual(
+            self.template_service.fetch_draft_payload(drafts[0].draft_id),
+            {
+                "revision_id": self.revision.revision_id,
+                "db_selections": {"{{db.track.track_title}}": "1"},
+                "manual_values": {"{{manual.license_date}}": "2026-04-01"},
+                "type_overrides": {},
+            },
+        )
+
+    def test_fill_tab_restores_explicit_false_and_zero_values_from_draft(self):
+        source_path = self.root / "dialog-template-bool-number.docx"
+        source_path.write_bytes(
+            make_docx_bytes(
+                document_paragraphs=(
+                    ("Track ", "{{db.track.track_title}}"),
+                    ("Exclusive ", "{{manual.is_exclusive}}"),
+                    ("Royalty Share ", "{{manual.royalty_share}}"),
+                )
+            )
+        )
+        revision = self.template_service.import_revision_from_path(
+            self.revision.template_id,
+            source_path,
+            payload=ContractTemplateRevisionPayload(source_filename=source_path.name),
+        ).revision
+        self.panel.refresh()
+        self.panel.focus_tab("fill")
+        pump_events(app=self.app, cycles=3)
+
+        for index in range(self.panel.fill_revision_combo.count()):
+            if self.panel.fill_revision_combo.itemData(index) == revision.revision_id:
+                self.panel.fill_revision_combo.setCurrentIndex(index)
+                break
+        pump_events(app=self.app, cycles=3)
+
+        selector = self.panel.selector_widgets["{{db.track.track_title}}"]
+        is_exclusive = self.panel.manual_widgets["{{manual.is_exclusive}}"]
+        royalty_share = self.panel.manual_widgets["{{manual.royalty_share}}"]
+
+        selector.setCurrentIndex(1)
+        is_exclusive.setChecked(True)
+        is_exclusive.setChecked(False)
+        royalty_share.setValue(5.0)
+        royalty_share.setValue(0.0)
+        self.panel.fill_draft_name_edit.setText("Explicit False Zero")
+        pump_events(app=self.app, cycles=2)
+
+        self.panel.save_new_draft()
+        pump_events(app=self.app, cycles=2)
+
+        drafts = self.template_service.list_drafts(revision_id=revision.revision_id)
+        self.assertEqual(len(drafts), 1)
+        self.assertEqual(
+            self.template_service.fetch_draft_payload(drafts[0].draft_id),
+            {
+                "revision_id": revision.revision_id,
+                "db_selections": {"{{db.track.track_title}}": "1"},
+                "manual_values": {
+                    "{{manual.is_exclusive}}": False,
+                    "{{manual.royalty_share}}": 0,
+                },
+                "type_overrides": {},
+            },
+        )
+
+        self.panel.reset_fill_form()
+        pump_events(app=self.app, cycles=2)
+        self.assertEqual(is_exclusive.property("has_user_value"), False)
+        self.assertEqual(royalty_share.property("has_user_value"), False)
+
+        for index in range(self.panel.fill_draft_combo.count()):
+            if self.panel.fill_draft_combo.itemData(index) == drafts[0].draft_id:
+                self.panel.fill_draft_combo.setCurrentIndex(index)
+                break
+        pump_events(app=self.app, cycles=2)
+
+        self.panel.load_selected_draft()
+        pump_events(app=self.app, cycles=2)
+
+        restored_exclusive = self.panel.manual_widgets["{{manual.is_exclusive}}"]
+        restored_share = self.panel.manual_widgets["{{manual.royalty_share}}"]
+        self.assertEqual(
+            self.panel.current_fill_state(),
+            {
+                "revision_id": revision.revision_id,
+                "db_selections": {"{{db.track.track_title}}": "1"},
+                "manual_values": {
+                    "{{manual.is_exclusive}}": False,
+                    "{{manual.royalty_share}}": 0,
+                },
+                "type_overrides": {},
+            },
+        )
+        self.assertFalse(restored_exclusive.isChecked())
+        self.assertTrue(bool(restored_exclusive.property("has_user_value")))
+        self.assertEqual(restored_share.value(), 0.0)
+        self.assertTrue(bool(restored_share.property("has_user_value")))

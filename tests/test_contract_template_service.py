@@ -178,6 +178,52 @@ class ContractTemplateServiceTests(unittest.TestCase):
             {"selection": {"track_id": 7}},
         )
 
+    def test_list_drafts_can_filter_by_revision(self):
+        template = self._create_template()
+        revision_one = self.service.add_revision_from_bytes(
+            template.template_id,
+            b"revision-one",
+            payload=ContractTemplateRevisionPayload(
+                source_filename="artist-agreement-v1.docx",
+                source_format="docx",
+                storage_mode="database",
+            ),
+        )
+        revision_two = self.service.add_revision_from_bytes(
+            template.template_id,
+            b"revision-two",
+            payload=ContractTemplateRevisionPayload(
+                source_filename="artist-agreement-v2.docx",
+                source_format="docx",
+                storage_mode="database",
+            ),
+        )
+        draft_one = self.service.create_draft(
+            ContractTemplateDraftPayload(
+                revision_id=revision_one.revision_id,
+                name="Revision One Draft",
+                editable_payload={"manual_values": {"license_date": "2026-03-25"}},
+                storage_mode="database",
+            )
+        )
+        draft_two = self.service.create_draft(
+            ContractTemplateDraftPayload(
+                revision_id=revision_two.revision_id,
+                name="Revision Two Draft",
+                editable_payload={"manual_values": {"license_date": "2026-03-26"}},
+                storage_mode="managed_file",
+            )
+        )
+
+        self.assertEqual(
+            [item.draft_id for item in self.service.list_drafts(revision_id=revision_one.revision_id)],
+            [draft_one.draft_id],
+        )
+        self.assertEqual(
+            [item.draft_id for item in self.service.list_drafts(revision_id=revision_two.revision_id)],
+            [draft_two.draft_id],
+        )
+
     def test_revision_storage_mode_conversion_preserves_bytes_and_metadata(self):
         _, revision = self._create_revision(storage_mode="database")
 
@@ -216,6 +262,63 @@ class ContractTemplateServiceTests(unittest.TestCase):
         )
         self.assertEqual(reverted.storage_mode, "database")
         self.assertEqual(reverted.name, "Convertible Draft")
+
+    def test_update_draft_reuses_existing_row_across_storage_modes(self):
+        _, revision = self._create_revision(storage_mode="database")
+        original = self.service.create_draft(
+            ContractTemplateDraftPayload(
+                revision_id=revision.revision_id,
+                name="Reusable Draft",
+                editable_payload={"manual_values": {"license_date": "2026-03-25"}},
+                storage_mode="database",
+            )
+        )
+
+        updated_managed = self.service.update_draft(
+            original.draft_id,
+            ContractTemplateDraftPayload(
+                revision_id=revision.revision_id,
+                name="Reusable Draft",
+                editable_payload={"manual_values": {"license_date": "2026-03-26"}},
+                storage_mode="managed_file",
+            ),
+        )
+        self.assertEqual(updated_managed.draft_id, original.draft_id)
+        self.assertEqual(
+            [item.draft_id for item in self.service.list_drafts(revision_id=revision.revision_id)],
+            [original.draft_id],
+        )
+        self.assertEqual(updated_managed.storage_mode, "managed_file")
+        self.assertFalse(updated_managed.stored_in_database)
+        self.assertTrue(
+            str(updated_managed.managed_file_path).startswith("contract_template_drafts/")
+        )
+        self.assertEqual(
+            self.service.fetch_draft_payload(original.draft_id),
+            {"manual_values": {"license_date": "2026-03-26"}},
+        )
+
+        updated_database = self.service.update_draft(
+            original.draft_id,
+            ContractTemplateDraftPayload(
+                revision_id=revision.revision_id,
+                name="Reusable Draft",
+                editable_payload={"manual_values": {"license_date": "2026-03-27"}},
+                storage_mode="database",
+            ),
+        )
+        self.assertEqual(updated_database.draft_id, original.draft_id)
+        self.assertEqual(
+            [item.draft_id for item in self.service.list_drafts(revision_id=revision.revision_id)],
+            [original.draft_id],
+        )
+        self.assertEqual(updated_database.storage_mode, "database")
+        self.assertTrue(updated_database.stored_in_database)
+        self.assertFalse(updated_database.managed_file_path)
+        self.assertEqual(
+            self.service.fetch_draft_payload(original.draft_id),
+            {"manual_values": {"license_date": "2026-03-27"}},
+        )
 
     def test_snapshot_and_artifact_rows_can_be_created_and_listed_without_export_logic(self):
         _, revision = self._create_revision(storage_mode="database")

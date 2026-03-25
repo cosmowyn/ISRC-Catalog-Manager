@@ -44,6 +44,9 @@ class AppShellWorkspaceDockTests(AppShellTestCase):
     test_contract_template_workspace_opens_fill_tab_as_tabified_dock = (
         AppShellTestCase.case_contract_template_workspace_opens_fill_tab_as_tabified_dock
     )
+    test_contract_template_workspace_fill_tab_can_save_and_resume_drafts = (
+        AppShellTestCase.case_contract_template_workspace_fill_tab_can_save_and_resume_drafts
+    )
     test_asset_workspace_rejoins_tabbed_dock_strip_when_reopened = (
         AppShellTestCase.case_asset_workspace_rejoins_tabbed_dock_strip_when_reopened
     )
