@@ -1168,6 +1168,125 @@ class ExchangeServiceTestCase(unittest.TestCase):
             0,
         )
 
+    def case_update_mode_prefers_authoritative_governed_work_metadata(self):
+        track_id = self._create_track(isrc="NL-ABC-26-00039", title="Governed Update")
+        work_id = self._govern_track_with_work(
+            track_id,
+            work_title="Governed Update",
+            work_iswc="T-909.808.707-6",
+            registration_number="BUMA-WORK-390",
+            writer_name="Governed Update Writer",
+            publisher_name="Governed Update Publishing",
+        )
+        self.conn.execute(
+            "DELETE FROM WorkTrackLinks WHERE work_id=? AND track_id=?",
+            (work_id, track_id),
+        )
+
+        csv_path = self.data_root / "governed-update-import.csv"
+        csv_path.write_text(
+            "track_title,artist_name,isrc,iswc,buma_work_number,composer,publisher,comments\n"
+            "Governed Update,Moonwake,NL-ABC-26-00039,T-000.000.000-0,BUMA-TRACK-OLD,Imported Composer,Imported Publisher,Imported note\n",
+            encoding="utf-8",
+        )
+
+        report = self.service.import_csv(
+            csv_path,
+            mapping={
+                "track_title": "track_title",
+                "artist_name": "artist_name",
+                "isrc": "isrc",
+                "iswc": "iswc",
+                "buma_work_number": "buma_work_number",
+                "composer": "composer",
+                "publisher": "publisher",
+                "comments": "comments",
+            },
+            options=ExchangeImportOptions(mode="update"),
+        )
+
+        self.assertEqual(report.updated_tracks, [track_id])
+        self.assertEqual(
+            self.conn.execute(
+                """
+                SELECT iswc, buma_work_number, composer, publisher, comments, work_id
+                FROM Tracks
+                WHERE id=?
+                """,
+                (track_id,),
+            ).fetchone(),
+            (
+                "T-909.808.707-6",
+                "BUMA-WORK-390",
+                "Governed Update Writer",
+                "Governed Update Publishing",
+                "Imported note",
+                work_id,
+            ),
+        )
+
+    def case_merge_mode_prefers_authoritative_governed_work_metadata(self):
+        track_id = self._create_track(isrc="NL-ABC-26-00040", title="Governed Merge")
+        work_id = self._govern_track_with_work(
+            track_id,
+            work_title="Governed Merge",
+            work_iswc="T-606.505.404-3",
+            registration_number="BUMA-WORK-400",
+            writer_name="Governed Merge Writer",
+            publisher_name="Governed Merge Publishing",
+        )
+        self.conn.execute(
+            "DELETE FROM WorkTrackLinks WHERE work_id=? AND track_id=?",
+            (work_id, track_id),
+        )
+
+        csv_path = self.data_root / "governed-merge-import.csv"
+        csv_path.write_text(
+            "track_title,artist_name,iswc,buma_work_number,composer,publisher,comments\n"
+            "GOVERNED MERGE,MOONWAKE,T-111.111.111-1,BUMA-TRACK-111,Merge Composer,Merge Publisher,Merge note\n",
+            encoding="utf-8",
+        )
+
+        report = self.service.import_csv(
+            csv_path,
+            mapping={
+                "track_title": "track_title",
+                "artist_name": "artist_name",
+                "iswc": "iswc",
+                "buma_work_number": "buma_work_number",
+                "composer": "composer",
+                "publisher": "publisher",
+                "comments": "comments",
+            },
+            options=ExchangeImportOptions(
+                mode="merge",
+                match_by_internal_id=False,
+                match_by_isrc=False,
+                match_by_upc_title=False,
+                heuristic_match=False,
+            ),
+        )
+
+        self.assertEqual(report.updated_tracks, [track_id])
+        self.assertEqual(
+            self.conn.execute(
+                """
+                SELECT iswc, buma_work_number, composer, publisher, comments, work_id
+                FROM Tracks
+                WHERE id=?
+                """,
+                (track_id,),
+            ).fetchone(),
+            (
+                "T-606.505.404-3",
+                "BUMA-WORK-400",
+                "Governed Merge Writer",
+                "Governed Merge Publishing",
+                "Comment",
+                work_id,
+            ),
+        )
+
     def case_import_xlsx_normalizes_track_length_target_values(self):
         xlsx_path = self.data_root / "duration-import.xlsx"
         workbook = Workbook()

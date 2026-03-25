@@ -15,6 +15,7 @@ The current Phase 4 work now covers two connected read-side slices:
 - operational inventory and diagnostics started trusting the v3 governing `Tracks.work_id` relationship
 - search relationships, Work Manager read-side track membership, workflow readiness, and XML export now also move toward the same authority path
 - generic exchange JSON/package exports now also prefer governed work metadata over stale track-side composition shadow fields
+- exchange import/update now preserves governed work composition authority for already-linked tracks instead of reintroducing stale track-shadow `iswc` / registration / composer / publisher data during operational updates
 
 The corrected creation-flow source of truth is now documented at [`v3-track-first-governed-creation-correction.md`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/docs/implementation_handoffs/v3-track-first-governed-creation-correction.md).
 
@@ -42,6 +43,10 @@ Keep `Catalog` strong as the operational inventory while reducing duplicated gov
   - composition-side names now resolve from work governance first:
     - author roles come from `WorkContributors`
     - publisher names come from `WorkOwnershipInterests` first, then work-level publisher contributors as a fallback
+- `ExchangeService.import_rows()` now preserves that authority on matched operational updates:
+  - when an imported row matches an existing governed track, authoritative `Work` composition metadata wins over stale row-level `iswc`, `buma_work_number`, `composer`, and `publisher`
+  - this still works when the old `WorkTrackLinks` shadow row is gone, as long as `Tracks.work_id` remains correct
+  - non-composition operational fields still follow the existing update and merge mode contracts
 - This keeps catalog, search, work navigation, workflow readiness, and XML export aligned with the parent-governance model without turning the catalog itself into a second authoring surface.
 
 ## Source Of Truth Files And Surfaces
@@ -59,6 +64,7 @@ Keep `Catalog` strong as the operational inventory while reducing duplicated gov
 - `tests/test_catalog_workflow_integration.py`
 - `tests/exchange/_repertoire_exchange_support.py`
 - `tests/exchange/_support.py`
+- `tests/exchange/test_exchange_csv_import.py`
 - `tests/exchange/test_exchange_json.py`
 - `tests/exchange/test_exchange_package.py`
 - `tests/test_work_and_party_services.py`
@@ -76,6 +82,7 @@ Keep `Catalog` strong as the operational inventory while reducing duplicated gov
 - `isrc_manager/exchange/service.py`
 - `tests/exchange/_repertoire_exchange_support.py`
 - `tests/exchange/_support.py`
+- `tests/exchange/test_exchange_csv_import.py`
 - `tests/test_catalog_read_service.py`
 - `tests/test_quality_service.py`
 - `tests/test_catalog_workflow_integration.py`
@@ -97,12 +104,15 @@ Keep `Catalog` strong as the operational inventory while reducing duplicated gov
 - Added XML export coverage proving authoritative work metadata overrides stale track-side composition shadow fields when `Tracks.work_id` is present.
 - Added exchange JSON export coverage proving exported row payloads prefer authoritative work `iswc`, work registration, and governed work-side creator/publisher names over stale track shadow fields.
 - Added exchange ZIP-package coverage proving the package manifest applies the same governed metadata authority.
+- Added exchange CSV update coverage proving matched governed tracks keep authoritative work `iswc`, registration, composer, and publisher values even when incoming rows carry stale track-shadow metadata.
+- Added exchange merge-mode coverage proving the same governed-work authority applies during merge matching while non-composition fields still follow merge semantics.
 - Validation run:
   - `python3 -m unittest tests.test_work_and_party_services tests.test_repertoire_status_service`
   - `python3 -m unittest tests.test_catalog_workflow_integration tests.integration.test_global_search_relationships`
   - `python3 -m unittest tests.test_xml_export_service`
   - `python3 -m unittest tests.test_catalog_read_service tests.test_quality_service`
   - `python3 -m unittest tests.exchange.test_exchange_json tests.exchange.test_exchange_package`
+  - `python3 -m unittest tests.exchange.test_exchange_csv_import tests.exchange.test_exchange_merge_mode`
 
 ## What Was Intentionally Deferred
 
@@ -110,7 +120,6 @@ Keep `Catalog` strong as the operational inventory while reducing duplicated gov
 - broader Phase 4 read-side work in this specific turn while the creation-flow correction was being completed and validated
 - broader catalog workspace projection changes
 - bulk-edit and track-edit operational cleanup
-- broader exchange import/update normalization around governed work metadata
 - final legacy license deletion
 - final shell cleanup
 
@@ -120,7 +129,7 @@ Keep `Catalog` strong as the operational inventory while reducing duplicated gov
 - catalog changes should consume the Phase 2 and Phase 3 model instead of inventing transitional duplicate fields
 - `WorkTrackLinks` still exists as shadow compatibility in other services; this slice narrows read authority in catalog, quality, search, work navigation, workflow readiness, and XML export first, but does not delete that table or fully remove legacy read paths elsewhere
 - `CatalogReadService` still projects track-side `buma_work_number` because the catalog table does not yet have a dedicated first-class work registration field in its row model
-- exchange import/update flows still accept and persist track-side composition fields because this slice only changed outward-facing export authority
+- create-mode exchange imports still create track rows from incoming track-side composition fields because this slice tightened matched update/merge authority first, not the full import governance model
 - album-related follow-up must respect the corrected track-first creation handoff:
   - the album dialog stays a release/batch-entry surface
   - each populated row resolves governance individually
@@ -153,7 +162,8 @@ Central Oversight check:
 - good: no new creation surface was added to Catalog
 - good: Work Manager and Global Search now agree with the governing work link even when the shadow table is stale
 - good: the corrected track-first governed creation model can now remain stable while Phase 4 continues on the read side
-- next: continue with the remaining import/update and operational read paths that still treat track-side composition shadow fields as authoritative before attempting final legacy deletion
+- good: matched exchange updates no longer push stale composition metadata back onto governed tracks
+- next: continue with the remaining operational surfaces that still expose or persist track-side composition shadow fields too directly before attempting final legacy deletion
 
 ## Exact Safe Pickup Instructions
 
@@ -162,6 +172,6 @@ Next safe Phase 4 continuation:
 1. read the masterplan and [`v3-track-first-governed-creation-correction.md`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/docs/implementation_handoffs/v3-track-first-governed-creation-correction.md) first
 2. treat the track-first correction handoff as the active creation-flow guardrail, not as optional background context
 3. continue from `catalog_reads.py` and other read-only catalog/search/export surfaces before reshaping edit forms
-4. continue with the remaining import/update and operational exchange paths that still privilege track-side composition shadow fields over authoritative work data
+4. continue with the remaining operational surfaces that still privilege track-side composition shadow fields over authoritative work data, especially create-mode/import repair paths and catalog-facing projections
 5. keep adding integration tests as authority moves from shadow structures to v3 authoritative data
 6. defer final legacy-license deletion until the replacement read and operational paths are fully stable

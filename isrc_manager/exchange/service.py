@@ -258,6 +258,22 @@ class ExchangeService:
             }
         return overrides
 
+    def _apply_governed_work_import_override(
+        self,
+        payload_kwargs: dict[str, object],
+        *,
+        track_id: int,
+        cache: dict[int, dict[str, str]],
+    ) -> None:
+        override = cache.get(int(track_id))
+        if override is None:
+            override = self._work_export_overrides([int(track_id)]).get(int(track_id), {})
+            cache[int(track_id)] = override
+        for field_name in ("iswc", "buma_work_number", "composer", "publisher"):
+            clean_value = str(override.get(field_name) or "").strip()
+            if clean_value:
+                payload_kwargs[field_name] = clean_value
+
     def _release_columns_for_track_rows(self) -> dict[int, dict[str, object]]:
         release_rows = self.conn.execute(
             """
@@ -1361,6 +1377,7 @@ class ExchangeService:
         package_create_mode = format_name == "package" and opts.mode == "create"
         source_track_map: dict[str, int] = {}
         source_release_map: dict[str, int] = {}
+        work_override_cache: dict[int, dict[str, str]] = {}
 
         custom_defs = {
             field["name"]: field["id"]
@@ -1521,6 +1538,12 @@ class ExchangeService:
                         payload_kwargs["album_art_source_path"] = (
                             payload_kwargs["album_art_source_path"] or None
                         )
+
+                    self._apply_governed_work_import_override(
+                        payload_kwargs,
+                        track_id=existing_track_id,
+                        cache=work_override_cache,
+                    )
 
                     self.track_service.update_track(
                         TrackUpdatePayload(

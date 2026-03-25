@@ -26,6 +26,12 @@ class ExchangeCsvImportTests(ExchangeServiceTestCase):
     test_import_csv_invalid_track_length_text_still_fails_row = (
         ExchangeServiceTestCase.case_import_csv_invalid_track_length_text_still_fails_row
     )
+    test_update_mode_prefers_authoritative_governed_work_metadata = (
+        ExchangeServiceTestCase.case_update_mode_prefers_authoritative_governed_work_metadata
+    )
+    test_merge_mode_prefers_authoritative_governed_work_metadata = (
+        ExchangeServiceTestCase.case_merge_mode_prefers_authoritative_governed_work_metadata
+    )
 
 
 del ExchangeServiceTestCase
