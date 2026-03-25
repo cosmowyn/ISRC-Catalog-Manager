@@ -191,7 +191,7 @@ class AudioAuthenticityVerificationServiceTests(AuthenticityWorkflowTestCase):
         exported_tags = self.audio_tag_service.read_tags(result.written_audio_paths[0])
 
         self.assertEqual(exported_tags.title, "Authenticity Track")
-        self.assertEqual(exported_tags.artist, "Cosmowyn")
+        self.assertEqual(exported_tags.artist, "Moonwake")
         self.assertEqual(exported_tags.album, "Authenticity Tests")
         self.assertEqual(exported_tags.isrc, "NL-TST-26-00001")
 
@@ -303,7 +303,7 @@ class AudioAuthenticityVerificationServiceTests(AuthenticityWorkflowTestCase):
     def test_export_watermarked_audio_writes_catalog_metadata_tags_to_exported_copy(self):
         track_id, _audio_path = self.create_track_with_audio(
             title="Lost in a Sea of Emotions",
-            artist_name="Cosmowyn",
+            artist_name="Moonwake",
             album_title="Tides of Memory",
             duration_seconds=30,
             seed=7,
@@ -312,15 +312,15 @@ class AudioAuthenticityVerificationServiceTests(AuthenticityWorkflowTestCase):
             upc="987654321098",
             genre="Ambient",
             composer="M. van de Kleut",
-            publisher="Cosmowyn Records",
+            publisher="Moonwake Records",
             comments="Watermarked authenticity export",
             lyrics="instrumental",
         )
         self.release_service.create_release(
             ReleasePayload(
                 title="Tides of Memory",
-                primary_artist="Cosmowyn",
-                album_artist="Cosmowyn",
+                primary_artist="Moonwake",
+                album_artist="Moonwake",
                 release_date="2026-03-21",
                 label="Northern Current",
                 upc="4006381333931",
@@ -344,9 +344,9 @@ class AudioAuthenticityVerificationServiceTests(AuthenticityWorkflowTestCase):
         exported_tags = self.audio_tag_service.read_tags(result.written_audio_paths[0])
 
         self.assertEqual(exported_tags.title, "Lost in a Sea of Emotions")
-        self.assertEqual(exported_tags.artist, "Cosmowyn")
+        self.assertEqual(exported_tags.artist, "Moonwake")
         self.assertEqual(exported_tags.album, "Tides of Memory")
-        self.assertEqual(exported_tags.album_artist, "Cosmowyn")
+        self.assertEqual(exported_tags.album_artist, "Moonwake")
         self.assertEqual(exported_tags.track_number, 4)
         self.assertEqual(exported_tags.disc_number, 2)
         self.assertEqual(exported_tags.genre, "Ambient")
@@ -361,7 +361,7 @@ class AudioAuthenticityVerificationServiceTests(AuthenticityWorkflowTestCase):
     def test_export_watermarked_audio_blob_backed_source_writes_catalog_metadata_tags(self):
         track_id, _audio_path = self.create_track_with_audio(
             title="Blob Authentic Export",
-            artist_name="Cosmowyn",
+            artist_name="Moonwake",
             album_title="Blob Authentic Album",
             duration_seconds=30,
             seed=41,
@@ -371,8 +371,8 @@ class AudioAuthenticityVerificationServiceTests(AuthenticityWorkflowTestCase):
         self.release_service.create_release(
             ReleasePayload(
                 title="Blob Authentic Album",
-                primary_artist="Cosmowyn",
-                album_artist="Cosmowyn",
+                primary_artist="Moonwake",
+                album_artist="Moonwake",
                 release_date="2026-03-24",
                 placements=[
                     ReleaseTrackPlacement(
@@ -396,7 +396,7 @@ class AudioAuthenticityVerificationServiceTests(AuthenticityWorkflowTestCase):
 
         self.assertEqual(exported_tags.title, "Blob Authentic Export")
         self.assertEqual(exported_tags.album, "Blob Authentic Album")
-        self.assertEqual(exported_tags.album_artist, "Cosmowyn")
+        self.assertEqual(exported_tags.album_artist, "Moonwake")
         self.assertEqual(exported_tags.track_number, 6)
         self.assertEqual(exported_tags.comments, "Blob-backed authenticity export")
 

@@ -35,6 +35,72 @@ class RegistrationSettings:
 
 
 @dataclass(slots=True)
+class OwnerPartySettings:
+    legal_name: str = ""
+    display_name: str = ""
+    artist_name: str = ""
+    company_name: str = ""
+    first_name: str = ""
+    middle_name: str = ""
+    last_name: str = ""
+    contact_person: str = ""
+    email: str = ""
+    alternative_email: str = ""
+    phone: str = ""
+    website: str = ""
+    street_name: str = ""
+    street_number: str = ""
+    address_line1: str = ""
+    address_line2: str = ""
+    city: str = ""
+    region: str = ""
+    postal_code: str = ""
+    country: str = ""
+    bank_account_number: str = ""
+    chamber_of_commerce_number: str = ""
+    tax_id: str = ""
+    vat_number: str = ""
+    pro_affiliation: str = ""
+    pro_number: str = ""
+    ipi_cae: str = ""
+    notes: str = ""
+
+    PROFILE_FIELD_NAMES = (
+        "legal_name",
+        "display_name",
+        "artist_name",
+        "company_name",
+        "first_name",
+        "middle_name",
+        "last_name",
+        "contact_person",
+        "email",
+        "alternative_email",
+        "phone",
+        "website",
+        "street_name",
+        "street_number",
+        "address_line1",
+        "address_line2",
+        "city",
+        "region",
+        "postal_code",
+        "country",
+        "bank_account_number",
+        "chamber_of_commerce_number",
+        "tax_id",
+        "pro_affiliation",
+        "notes",
+    )
+
+    def to_profile_payload(self) -> dict[str, str]:
+        return {
+            field_name: str(getattr(self, field_name, "") or "").strip()
+            for field_name in self.PROFILE_FIELD_NAMES
+        }
+
+
+@dataclass(slots=True)
 class AutoSnapshotSettings:
     enabled: bool = DEFAULT_AUTO_SNAPSHOT_ENABLED
     interval_minutes: int = DEFAULT_AUTO_SNAPSHOT_INTERVAL_MINUTES
@@ -95,6 +161,39 @@ class SettingsReadService:
             btw_number=self.load_btw_number(),
             buma_relatie_nummer=str(row[0]).strip() if row and row[0] is not None else "",
             buma_ipi=str(row[1]).strip() if row and row[1] is not None else "",
+        )
+
+    def load_owner_party_settings(self) -> OwnerPartySettings:
+        registration = self.load_registration_settings()
+        return OwnerPartySettings(
+            legal_name=self._read_profile_value("owner_legal_name"),
+            display_name=self._read_profile_value("owner_display_name"),
+            artist_name=self._read_profile_value("owner_artist_name"),
+            company_name=self._read_profile_value("owner_company_name"),
+            first_name=self._read_profile_value("owner_first_name"),
+            middle_name=self._read_profile_value("owner_middle_name"),
+            last_name=self._read_profile_value("owner_last_name"),
+            contact_person=self._read_profile_value("owner_contact_person"),
+            email=self._read_profile_value("owner_email"),
+            alternative_email=self._read_profile_value("owner_alternative_email"),
+            phone=self._read_profile_value("owner_phone"),
+            website=self._read_profile_value("owner_website"),
+            street_name=self._read_profile_value("owner_street_name"),
+            street_number=self._read_profile_value("owner_street_number"),
+            address_line1=self._read_profile_value("owner_address_line1"),
+            address_line2=self._read_profile_value("owner_address_line2"),
+            city=self._read_profile_value("owner_city"),
+            region=self._read_profile_value("owner_region"),
+            postal_code=self._read_profile_value("owner_postal_code"),
+            country=self._read_profile_value("owner_country"),
+            bank_account_number=self._read_profile_value("owner_bank_account_number"),
+            chamber_of_commerce_number=self._read_profile_value("owner_chamber_of_commerce_number"),
+            tax_id=self._read_profile_value("owner_tax_id"),
+            vat_number=registration.btw_number,
+            pro_affiliation=self._read_profile_value("owner_pro_affiliation"),
+            pro_number=registration.buma_relatie_nummer,
+            ipi_cae=registration.buma_ipi,
+            notes=self._read_profile_value("owner_notes"),
         )
 
     def load_auto_snapshot_enabled(self) -> bool:

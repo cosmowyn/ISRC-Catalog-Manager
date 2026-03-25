@@ -138,7 +138,7 @@ class _WorkService:
                     id=1,
                     work_id=1,
                     party_id=None,
-                    display_name="Aeon Cosmowyn",
+                    display_name="Lyra Moonwake",
                     role="composer",
                     share_percent=100.0,
                     role_share_percent=100.0,
@@ -223,7 +223,7 @@ class DialogControllerBehaviorTests(unittest.TestCase):
                 dialog.save_current_search()
             info.assert_called_once()
 
-            dialog.search_edit.setText("aeon")
+            dialog.search_edit.setText("moon")
             self.app.processEvents()
             with mock.patch.object(QMessageBox, "critical", return_value=None) as critical:
                 dialog.save_current_search()

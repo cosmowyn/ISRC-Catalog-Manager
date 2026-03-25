@@ -66,7 +66,7 @@ class ForensicWatermarkServiceTests(AuthenticityWorkflowTestCase):
         self._require_mp3_forensic_support()
         track_id, source_path = self.create_track_with_audio(
             title="Forensic Source",
-            artist_name="Cosmowyn",
+            artist_name="Moonwake",
             album_title="Forensic Album",
             duration_seconds=30,
             seed=21,
@@ -74,13 +74,13 @@ class ForensicWatermarkServiceTests(AuthenticityWorkflowTestCase):
             release_date="2026-03-23",
             genre="Ambient",
             composer="M. van de Kleut",
-            publisher="Cosmowyn Records",
+            publisher="Moonwake Records",
         )
         self.release_service.create_release(
             ReleasePayload(
                 title="Forensic Album",
-                primary_artist="Cosmowyn",
-                album_artist="Cosmowyn",
+                primary_artist="Moonwake",
+                album_artist="Moonwake",
                 release_date="2026-03-24",
                 label="Northern Current",
                 upc="4006381333931",
@@ -215,7 +215,7 @@ class ForensicWatermarkServiceTests(AuthenticityWorkflowTestCase):
         self._require_mp3_forensic_support()
         track_id, _ = self.create_track_with_audio(
             title="Blob Forensic Source",
-            artist_name="Cosmowyn",
+            artist_name="Moonwake",
             album_title="Blob Forensic Album",
             duration_seconds=30,
             seed=42,
@@ -225,8 +225,8 @@ class ForensicWatermarkServiceTests(AuthenticityWorkflowTestCase):
         self.release_service.create_release(
             ReleasePayload(
                 title="Blob Forensic Album",
-                primary_artist="Cosmowyn",
-                album_artist="Cosmowyn",
+                primary_artist="Moonwake",
+                album_artist="Moonwake",
                 release_date="2026-03-24",
                 placements=[
                     ReleaseTrackPlacement(
@@ -255,7 +255,7 @@ class ForensicWatermarkServiceTests(AuthenticityWorkflowTestCase):
 
         self.assertEqual(exported_tags.title, "Blob Forensic Source")
         self.assertEqual(exported_tags.album, "Blob Forensic Album")
-        self.assertEqual(exported_tags.album_artist, "Cosmowyn")
+        self.assertEqual(exported_tags.album_artist, "Moonwake")
         self.assertEqual(exported_tags.track_number, 7)
         self.assertEqual(exported_tags.publisher, "Northern Current")
 

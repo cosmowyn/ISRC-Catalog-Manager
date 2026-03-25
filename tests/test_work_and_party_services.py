@@ -282,6 +282,152 @@ class WorkAndPartyServiceTests(unittest.TestCase):
             ).fetchone()[0],
             primary_id,
         )
+        self.assertEqual(merged.artist_aliases, ())
+
+    def test_party_service_round_trips_expanded_fields_aliases_and_alias_lookup(self):
+        party_id = self.party_service.create_party(
+            PartyPayload(
+                legal_name="Aeonium Holdings B.V.",
+                display_name="Aeonium",
+                artist_name="Aeonium Official",
+                company_name="Aeonium Holdings",
+                first_name="Lyra",
+                middle_name="Van",
+                last_name="Moonwake",
+                party_type="licensee",
+                contact_person="Lyra Moonwake",
+                email="hello@moonium.test",
+                alternative_email="legal@moonium.test",
+                phone="+31 20 555 0101",
+                website="https://moonium.test",
+                street_name="Main Street",
+                street_number="12A",
+                address_line1="Suite 4",
+                address_line2="Attn Legal",
+                city="Amsterdam",
+                region="Noord-Holland",
+                postal_code="1012AB",
+                country="NL",
+                bank_account_number="NL91TEST0123456789",
+                chamber_of_commerce_number="CoC-778899",
+                tax_id="TAX-778899",
+                vat_number="NL001122334B01",
+                pro_affiliation="BUMA/STEMRA",
+                pro_number="PRO-778899",
+                ipi_cae="IPI-778899",
+                notes="Primary counterparty profile.",
+                profile_name="AeoniumProfile",
+                artist_aliases=["Aeonium", "Lyra C."],
+            )
+        )
+
+        record = self.party_service.fetch_party(party_id)
+        self.assertIsNotNone(record)
+        assert record is not None
+        self.assertEqual(record.artist_name, "Aeonium Official")
+        self.assertEqual(record.company_name, "Aeonium Holdings")
+        self.assertEqual(record.first_name, "Lyra")
+        self.assertEqual(record.middle_name, "Van")
+        self.assertEqual(record.last_name, "Moonwake")
+        self.assertEqual(record.alternative_email, "legal@moonium.test")
+        self.assertEqual(record.street_name, "Main Street")
+        self.assertEqual(record.street_number, "12A")
+        self.assertEqual(record.bank_account_number, "NL91TEST0123456789")
+        self.assertEqual(record.chamber_of_commerce_number, "CoC-778899")
+        self.assertEqual(record.pro_number, "PRO-778899")
+        self.assertEqual(record.artist_aliases, ("Aeonium", "Lyra C."))
+
+        alias_rows = self.party_service.list_artist_aliases(party_id)
+        self.assertEqual([item.alias_name for item in alias_rows], ["Aeonium", "Lyra C."])
+        self.assertEqual(self.party_service.find_party_id_by_name("Aeonium"), party_id)
+        self.assertEqual(self.party_service.find_party_id_by_name("Lyra C."), party_id)
+        self.assertEqual(self.party_service.ensure_party_by_name("Aeonium"), party_id)
+
+        search_hits = self.party_service.list_parties(search_text="CoC-778899")
+        self.assertEqual([item.id for item in search_hits], [party_id])
+        search_hits = self.party_service.list_parties(search_text="Lyra C.")
+        self.assertEqual([item.id for item in search_hits], [party_id])
+
+        self.party_service.update_party(
+            party_id,
+            PartyPayload(
+                legal_name="Aeonium Holdings B.V.",
+                display_name="Aeonium Licensing",
+                artist_name="Aeonium Official",
+                company_name="Aeonium Holdings",
+                first_name="Lyra",
+                middle_name="Van",
+                last_name="Moonwake",
+                party_type="licensee",
+                contact_person="Lyra Moonwake",
+                email="hello@moonium.test",
+                alternative_email="contracts@moonium.test",
+                phone="+31 20 555 0101",
+                website="https://moonium.test",
+                street_name="Main Street",
+                street_number="12A",
+                address_line1="Suite 4",
+                address_line2="Attn Legal",
+                city="Amsterdam",
+                region="Noord-Holland",
+                postal_code="1012AB",
+                country="NL",
+                bank_account_number="NL91TEST0123456789",
+                chamber_of_commerce_number="CoC-778899",
+                tax_id="TAX-778899",
+                vat_number="NL001122334B01",
+                pro_affiliation="BUMA/STEMRA",
+                pro_number="PRO-778899",
+                ipi_cae="IPI-778899",
+                notes="Updated counterparty profile.",
+                profile_name="AeoniumProfile",
+                artist_aliases=["Aeonium", "Lyra Cosmos"],
+            ),
+        )
+
+        updated = self.party_service.fetch_party(party_id)
+        assert updated is not None
+        self.assertEqual(updated.display_name, "Aeonium Licensing")
+        self.assertEqual(updated.alternative_email, "contracts@moonium.test")
+        self.assertEqual(updated.artist_aliases, ("Aeonium", "Lyra Cosmos"))
+
+        exported = self.party_service.export_rows()
+        exported_row = next(row for row in exported if row["id"] == party_id)
+        self.assertEqual(exported_row["artist_name"], "Aeonium Official")
+        self.assertEqual(exported_row["company_name"], "Aeonium Holdings")
+        self.assertEqual(exported_row["first_name"], "Lyra")
+        self.assertEqual(exported_row["alternative_email"], "contracts@moonium.test")
+        self.assertEqual(exported_row["chamber_of_commerce_number"], "CoC-778899")
+        self.assertEqual(exported_row["pro_number"], "PRO-778899")
+        self.assertEqual(exported_row["artist_aliases"], ("Aeonium", "Lyra Cosmos"))
+
+    def test_party_merge_promotes_missing_artist_name_and_preserves_aliases(self):
+        primary_id = self.party_service.create_party(
+            PartyPayload(
+                legal_name="Signal Holdings B.V.",
+                display_name="Signal Holdings",
+                party_type="organization",
+                artist_aliases=["Signal Legacy"],
+            )
+        )
+        duplicate_id = self.party_service.create_party(
+            PartyPayload(
+                legal_name="Signal Artist Entity",
+                artist_name="Signal Artist",
+                party_type="artist",
+                artist_aliases=["Signal Artist Duo"],
+            )
+        )
+
+        merged = self.party_service.merge_parties(primary_id, [duplicate_id])
+
+        self.assertEqual(merged.artist_name, "Signal Artist")
+        self.assertEqual(
+            merged.artist_aliases,
+            ("Signal Legacy", "Signal Artist Duo"),
+        )
+        self.assertEqual(self.party_service.find_party_id_by_name("Signal Artist Duo"), primary_id)
+        self.assertEqual(self.party_service.find_party_id_by_name("Signal Artist"), primary_id)
 
 
 if __name__ == "__main__":

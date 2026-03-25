@@ -17,6 +17,7 @@ from isrc_manager.contract_templates import (
     ContractTemplateExportError,
     ContractTemplateExportResult,
     ContractTemplateExportService,
+    ContractTemplateFormAutoField,
     ContractTemplateFormChoice,
     ContractTemplateFormDefinition,
     ContractTemplateFormManualField,
@@ -167,6 +168,7 @@ from .settings_mutations import SettingsMutationService
 from .settings_reads import (
     AutoSnapshotSettings,
     HistoryRetentionSettings,
+    OwnerPartySettings,
     RegistrationSettings,
     SettingsReadService,
 )
@@ -221,6 +223,7 @@ __all__ = [
     "GS1ValidationResult",
     "GS1ValidationService",
     "HistoryRetentionSettings",
+    "OwnerPartySettings",
     "XMLExportService",
     "ImportExecutionResult",
     "ImportInspection",
@@ -305,6 +308,7 @@ __all__ = [
     "ContractTemplateExportError",
     "ContractTemplateExportResult",
     "ContractTemplateExportService",
+    "ContractTemplateFormAutoField",
     "ContractTemplateFormChoice",
     "ContractTemplateFormDefinition",
     "ContractTemplateFormManualField",

@@ -115,7 +115,7 @@ class AudioConversionPipelineTests(AuthenticityWorkflowTestCase):
     def test_managed_export_from_managed_file_writes_tags_hash_and_ledger(self):
         track_id, source_path = self.create_track_with_audio(
             title="Lost in a Sea of Emotions",
-            artist_name="Cosmowyn",
+            artist_name="Moonwake",
             album_title="Tides of Memory",
             duration_seconds=30,
             seed=7,
@@ -124,15 +124,15 @@ class AudioConversionPipelineTests(AuthenticityWorkflowTestCase):
             upc="987654321098",
             genre="Ambient",
             composer="M. van de Kleut",
-            publisher="Cosmowyn Records",
+            publisher="Moonwake Records",
             comments="Managed derivative export",
             lyrics="instrumental",
         )
         self.release_service.create_release(
             ReleasePayload(
                 title="Tides of Memory",
-                primary_artist="Cosmowyn",
-                album_artist="Cosmowyn",
+                primary_artist="Moonwake",
+                album_artist="Moonwake",
                 release_date="2026-03-21",
                 label="Northern Current",
                 upc="4006381333931",
@@ -196,7 +196,7 @@ class AudioConversionPipelineTests(AuthenticityWorkflowTestCase):
         self.assertEqual(source_path.read_bytes(), source_bytes_before)
         self.assertEqual(exported_tags.title, "Lost in a Sea of Emotions")
         self.assertEqual(exported_tags.album, "Tides of Memory")
-        self.assertEqual(exported_tags.album_artist, "Cosmowyn")
+        self.assertEqual(exported_tags.album_artist, "Moonwake")
         self.assertEqual(exported_tags.track_number, 4)
         self.assertEqual(exported_tags.disc_number, 2)
         self.assertEqual(exported_tags.publisher, "Northern Current")
@@ -232,7 +232,7 @@ class AudioConversionPipelineTests(AuthenticityWorkflowTestCase):
     def test_managed_export_supports_blob_backed_source_without_mutating_source_bytes(self):
         track_id, _source_path = self.create_track_with_audio(
             title="Blob Master",
-            artist_name="Cosmowyn",
+            artist_name="Moonwake",
             album_title="Blob Album",
             duration_seconds=30,
             seed=9,
@@ -241,8 +241,8 @@ class AudioConversionPipelineTests(AuthenticityWorkflowTestCase):
         self.release_service.create_release(
             ReleasePayload(
                 title="Blob Album",
-                primary_artist="Cosmowyn",
-                album_artist="Cosmowyn",
+                primary_artist="Moonwake",
+                album_artist="Moonwake",
                 release_date="2026-03-24",
                 placements=[
                     ReleaseTrackPlacement(
@@ -276,7 +276,7 @@ class AudioConversionPipelineTests(AuthenticityWorkflowTestCase):
         self.assertEqual(output_path.suffix.lower(), ".aiff")
         self.assertEqual(exported_tags.title, "Blob Master")
         self.assertEqual(exported_tags.album, "Blob Album")
-        self.assertEqual(exported_tags.album_artist, "Cosmowyn")
+        self.assertEqual(exported_tags.album_artist, "Moonwake")
         self.assertEqual(exported_tags.track_number, 1)
         self.assertEqual(
             self.conn.execute("SELECT COUNT(*) FROM TrackAudioDerivatives").fetchone()[0],
@@ -286,7 +286,7 @@ class AudioConversionPipelineTests(AuthenticityWorkflowTestCase):
     def test_managed_lossy_export_from_managed_file_writes_tags_hash_and_directory_batch(self):
         track_id, source_path = self.create_track_with_audio(
             title="Lossy Export Source",
-            artist_name="Cosmowyn",
+            artist_name="Moonwake",
             album_title="Lossy Export Album",
             duration_seconds=30,
             seed=16,
@@ -302,8 +302,8 @@ class AudioConversionPipelineTests(AuthenticityWorkflowTestCase):
         self.release_service.create_release(
             ReleasePayload(
                 title="Lossy Export Album",
-                primary_artist="Cosmowyn",
-                album_artist="Cosmowyn",
+                primary_artist="Moonwake",
+                album_artist="Moonwake",
                 release_date="2026-03-23",
                 label="Northern Current",
                 upc="9780201379624",
@@ -373,7 +373,7 @@ class AudioConversionPipelineTests(AuthenticityWorkflowTestCase):
         self.assertRegex(output_path.name, r"--[0-9a-f]{12}\.mp3$")
         self.assertEqual(exported_tags.title, "Lossy Export Source")
         self.assertEqual(exported_tags.album, "Lossy Export Album")
-        self.assertEqual(exported_tags.album_artist, "Cosmowyn")
+        self.assertEqual(exported_tags.album_artist, "Moonwake")
         self.assertEqual(exported_tags.track_number, 3)
         self.assertEqual(exported_tags.disc_number, 1)
         self.assertEqual(exported_tags.publisher, "Northern Current")
@@ -516,7 +516,7 @@ class AudioConversionPipelineTests(AuthenticityWorkflowTestCase):
     ):
         track_id, _source_path = self.create_track_with_audio(
             title="Blob Lossy Export",
-            artist_name="Cosmowyn",
+            artist_name="Moonwake",
             album_title="Blob Lossy Album",
             duration_seconds=30,
             seed=19,
@@ -525,8 +525,8 @@ class AudioConversionPipelineTests(AuthenticityWorkflowTestCase):
         self.release_service.create_release(
             ReleasePayload(
                 title="Blob Lossy Album",
-                primary_artist="Cosmowyn",
-                album_artist="Cosmowyn",
+                primary_artist="Moonwake",
+                album_artist="Moonwake",
                 release_date="2026-03-24",
                 placements=[
                     ReleaseTrackPlacement(

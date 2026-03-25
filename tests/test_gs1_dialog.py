@@ -28,8 +28,8 @@ def _sample_group() -> GS1MetadataGroup:
         target_market="Global Market",
         language="English",
         product_description="Tales of the Subconscious",
-        brand="Cosmowyn Records",
-        subbrand="Aeon Cosmowyn",
+        brand="Moonwake Records",
+        subbrand="Lyra Moonwake",
         quantity="1",
         unit="Each",
         export_enabled=True,
@@ -38,7 +38,7 @@ def _sample_group() -> GS1MetadataGroup:
         track_id=7,
         track_title="Tales of the Subconscious",
         album_title="Tales of the Subconscious",
-        artist_name="Aeon Cosmowyn",
+        artist_name="Lyra Moonwake",
         upc="8720892724649",
     )
     return GS1MetadataGroup(

@@ -109,7 +109,24 @@ class SearchAndRepertoireExchangeTestCase(unittest.TestCase):
             )
         )
         label_party_id = self.party_service.create_party(
-            PartyPayload(legal_name="Nova Music", email="hello@nova.test")
+            PartyPayload(
+                legal_name="Nova Music",
+                display_name="Nova",
+                artist_name="Nova Official",
+                company_name="Nova Music Group",
+                first_name="Nova",
+                last_name="Artist",
+                email="hello@nova.test",
+                alternative_email="legal@nova.test",
+                street_name="Canal Street",
+                street_number="24",
+                city="Amsterdam",
+                postal_code="1017AA",
+                country="NL",
+                chamber_of_commerce_number="CoC-990011",
+                pro_number="PRO-990011",
+                artist_aliases=["Nova Alias", "Nova Stage Name"],
+            )
         )
         control_party_id = self.party_service.create_party(PartyPayload(legal_name="Nova Holdings"))
         work_id = self.work_service.create_work(
@@ -332,6 +349,37 @@ class SearchAndRepertoireExchangeTestCase(unittest.TestCase):
             )
             self.assertEqual(
                 new_conn.execute("SELECT COUNT(*) FROM AssetVersions").fetchone()[0], 1
+            )
+        finally:
+            new_conn.close()
+
+    def case_repertoire_exchange_json_round_trip_preserves_expanded_party_metadata(self):
+        ids = self._seed_repertoire()
+        export_path = self.data_root / "repertoire-expanded-party.json"
+        self.exchange_service.export_json(export_path)
+
+        new_conn, new_services, imported_track_id, imported_release_id = (
+            self._prepare_import_target(self.data_root)
+        )
+        try:
+            self.assertEqual(imported_track_id, 1)
+            self.assertEqual(imported_release_id, 1)
+            new_services["exchange_service"].import_json(export_path)
+
+            imported_party = new_services["party_service"].fetch_party(ids["label_party_id"])
+            self.assertIsNotNone(imported_party)
+            assert imported_party is not None
+            self.assertEqual(imported_party.display_name, "Nova")
+            self.assertEqual(imported_party.artist_name, "Nova Official")
+            self.assertEqual(imported_party.company_name, "Nova Music Group")
+            self.assertEqual(imported_party.alternative_email, "legal@nova.test")
+            self.assertEqual(imported_party.street_name, "Canal Street")
+            self.assertEqual(imported_party.street_number, "24")
+            self.assertEqual(imported_party.chamber_of_commerce_number, "CoC-990011")
+            self.assertEqual(imported_party.pro_number, "PRO-990011")
+            self.assertEqual(
+                imported_party.artist_aliases,
+                ("Nova Alias", "Nova Stage Name"),
             )
         finally:
             new_conn.close()

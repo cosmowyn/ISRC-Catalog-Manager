@@ -25,7 +25,8 @@ try:
     from isrc_manager.assets.dialogs import AssetBrowserPanel, AssetEditorDialog
     from isrc_manager.contracts.dialogs import ContractEditorDialog
     from isrc_manager.media.derivatives import DerivativeLedgerService
-    from isrc_manager.parties.dialogs import PartyEditorDialog
+    from isrc_manager.parties import PartyPayload, PartyService
+    from isrc_manager.parties.dialogs import PartyEditorDialog, PartyManagerPanel
     from isrc_manager.releases.dialogs import ReleaseBrowserDialog, ReleaseEditorDialog
     from isrc_manager.rights.dialogs import RightEditorDialog
     from isrc_manager.search.dialogs import GlobalSearchDialog
@@ -203,7 +204,7 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
         finally:
             dialog.close()
 
-    def test_party_editor_uses_identity_contact_and_notes_tabs(self):
+    def test_party_editor_uses_structured_tabs_and_alias_editor(self):
         dialog = PartyEditorDialog(party_service=object())
         try:
             tabs = dialog.findChild(QTabWidget, "partyEditorTabs")
@@ -212,7 +213,10 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
                 [tabs.tabText(index) for index in range(tabs.count())],
                 [
                     "Identity",
+                    "Artist Aliases",
+                    "Address",
                     "Contact",
+                    "Business / Legal",
                     "Notes",
                 ],
             )
@@ -220,8 +224,123 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
             self.assertIsNotNone(buttons)
             scroll_areas = dialog.findChildren(QScrollArea)
             self.assertTrue(scroll_areas)
+            self.assertIsInstance(dialog.artist_name_edit, QLineEdit)
+            self.assertIsInstance(dialog.company_name_edit, QLineEdit)
+            self.assertIsInstance(dialog.alternative_email_edit, QLineEdit)
+            self.assertIsInstance(dialog.bank_account_edit, QLineEdit)
+            self.assertEqual(dialog.alias_table.columnCount(), 1)
         finally:
             dialog.close()
+
+    def test_party_editor_round_trips_expanded_fields_and_aliases(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = sqlite3.connect(":memory:")
+            try:
+                schema = DatabaseSchemaService(conn, data_root=Path(tmpdir))
+                schema.init_db()
+                schema.migrate_schema()
+                party_service = PartyService(conn)
+                party_id = party_service.create_party(
+                    PartyPayload(
+                        legal_name="Aeonium Holdings B.V.",
+                        display_name="Aeonium",
+                        artist_name="Aeonium Official",
+                        company_name="Aeonium Holdings",
+                        first_name="Lyra",
+                        middle_name="Van",
+                        last_name="Moonwake",
+                        party_type="licensee",
+                        contact_person="Lyra Moonwake",
+                        email="hello@moonium.test",
+                        alternative_email="legal@moonium.test",
+                        phone="+31 20 555 0101",
+                        street_name="Main Street",
+                        street_number="12A",
+                        city="Amsterdam",
+                        postal_code="1012AB",
+                        country="NL",
+                        bank_account_number="NL91TEST0123456789",
+                        chamber_of_commerce_number="CoC-778899",
+                        vat_number="NL001122334B01",
+                        pro_affiliation="BUMA/STEMRA",
+                        pro_number="PRO-778899",
+                        ipi_cae="IPI-778899",
+                        artist_aliases=["Aeonium", "Lyra C."],
+                    )
+                )
+                party = party_service.fetch_party(party_id)
+                assert party is not None
+
+                dialog = PartyEditorDialog(party_service=party_service, party=party)
+                try:
+                    self.assertEqual(dialog.artist_name_edit.text(), "Aeonium Official")
+                    self.assertEqual(dialog.company_name_edit.text(), "Aeonium Holdings")
+                    self.assertEqual(dialog.alternative_email_edit.text(), "legal@moonium.test")
+                    self.assertEqual(dialog.bank_account_edit.text(), "NL91TEST0123456789")
+                    self.assertEqual(dialog.alias_table.rowCount(), 2)
+
+                    dialog.alias_edit.setText("Lyra Cosmos")
+                    dialog._add_alias()
+                    payload = dialog.payload()
+
+                    self.assertEqual(payload.artist_name, "Aeonium Official")
+                    self.assertEqual(payload.company_name, "Aeonium Holdings")
+                    self.assertEqual(payload.alternative_email, "legal@moonium.test")
+                    self.assertEqual(payload.chamber_of_commerce_number, "CoC-778899")
+                    self.assertEqual(
+                        payload.artist_aliases,
+                        ["Aeonium", "Lyra C.", "Lyra Cosmos"],
+                    )
+                finally:
+                    dialog.close()
+            finally:
+                conn.close()
+
+    def test_party_manager_panel_filters_by_type_and_alias_search(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = sqlite3.connect(":memory:")
+            try:
+                schema = DatabaseSchemaService(conn, data_root=Path(tmpdir))
+                schema.init_db()
+                schema.migrate_schema()
+                party_service = PartyService(conn)
+                party_service.create_party(
+                    PartyPayload(
+                        legal_name="Aeonium Holdings B.V.",
+                        artist_name="Aeonium Official",
+                        party_type="licensee",
+                        email="licensing@moonium.test",
+                        artist_aliases=["Aeonium"],
+                    )
+                )
+                party_service.create_party(
+                    PartyPayload(
+                        legal_name="North Star Music B.V.",
+                        display_name="North Star",
+                        party_type="label",
+                        email="hello@northstar.test",
+                    )
+                )
+
+                panel = PartyManagerPanel(party_service_provider=lambda: party_service)
+                try:
+                    self.assertEqual(panel.table.rowCount(), 2)
+                    panel.search_edit.setText("Aeonium")
+                    self.app.processEvents()
+                    self.assertEqual(panel.table.rowCount(), 1)
+                    self.assertEqual(panel.table.item(0, 1).text(), "Aeonium Official")
+
+                    panel.search_edit.clear()
+                    label_index = panel.party_type_filter_combo.findData("label")
+                    self.assertGreaterEqual(label_index, 0)
+                    panel.party_type_filter_combo.setCurrentIndex(label_index)
+                    self.app.processEvents()
+                    self.assertEqual(panel.table.rowCount(), 1)
+                    self.assertEqual(panel.table.item(0, 1).text(), "North Star")
+                finally:
+                    panel.close()
+            finally:
+                conn.close()
 
     def test_release_editor_uses_editable_combos_for_safe_metadata_fields(self):
         dialog = ReleaseEditorDialog(
@@ -298,7 +417,7 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
                     TrackCreatePayload(
                         isrc="NL-TST-26-09991",
                         track_title="Ledger Drill In",
-                        artist_name="Cosmowyn",
+                        artist_name="Moonwake",
                         additional_artists=[],
                         album_title="Ledger Release",
                         release_date="2026-03-24",
@@ -312,7 +431,7 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
                 release_id = release_service.create_release(
                     ReleasePayload(
                         title="Ledger Release",
-                        primary_artist="Cosmowyn",
+                        primary_artist="Moonwake",
                         release_date="2026-03-24",
                         placements=[ReleaseTrackPlacement(track_id=track_id)],
                     )
@@ -440,7 +559,7 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
                     TrackCreatePayload(
                         isrc="NL-TST-26-09993",
                         track_title="Authentic WAV",
-                        artist_name="Cosmowyn",
+                        artist_name="Moonwake",
                         additional_artists=[],
                         album_title="Ledger Filters",
                         release_date="2026-03-24",
@@ -455,7 +574,7 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
                     TrackCreatePayload(
                         isrc="NL-TST-26-09994",
                         track_title="Lossy MP3",
-                        artist_name="Cosmowyn",
+                        artist_name="Moonwake",
                         additional_artists=[],
                         album_title="Ledger Filters",
                         release_date="2026-03-24",
@@ -602,7 +721,7 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
                     TrackCreatePayload(
                         isrc="NL-TST-26-09992",
                         track_title="Ledger Cleanup",
-                        artist_name="Cosmowyn",
+                        artist_name="Moonwake",
                         additional_artists=[],
                         album_title="Ledger Cleanup Release",
                         release_date="2026-03-24",
@@ -616,7 +735,7 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
                 release_service.create_release(
                     ReleasePayload(
                         title="Ledger Cleanup Release",
-                        primary_artist="Cosmowyn",
+                        primary_artist="Moonwake",
                         release_date="2026-03-24",
                         placements=[ReleaseTrackPlacement(track_id=track_id)],
                     )
@@ -750,7 +869,7 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
                     TrackCreatePayload(
                         isrc="NL-TST-26-09995",
                         track_title="Retained File Cleanup",
-                        artist_name="Cosmowyn",
+                        artist_name="Moonwake",
                         additional_artists=[],
                         album_title="Ledger Cleanup",
                         release_date="2026-03-24",

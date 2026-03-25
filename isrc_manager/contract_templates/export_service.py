@@ -36,6 +36,7 @@ _DEFAULT_SCOPE_ENTITY_BY_NAMESPACE = {
     "release": "release",
     "work": "work",
     "contract": "contract",
+    "owner": "owner",
     "party": "party",
     "right": "right",
     "asset": "asset",
@@ -46,6 +47,7 @@ _DEFAULT_SCOPE_POLICY_BY_NAMESPACE = {
     "release": "release_selection_required",
     "work": "work_selection_required",
     "contract": "contract_selection_required",
+    "owner": "owner_settings_context",
     "party": "party_selection_required",
     "right": "right_selection_required",
     "asset": "asset_selection_required",
@@ -142,6 +144,7 @@ class ContractTemplateExportService:
         *,
         template_service,
         catalog_service,
+        settings_reads=None,
         track_service=None,
         release_service=None,
         work_service=None,
@@ -156,6 +159,7 @@ class ContractTemplateExportService:
     ):
         self.template_service = template_service
         self.catalog_service = catalog_service
+        self.settings_reads = settings_reads
         self.track_service = track_service
         self.release_service = release_service
         self.work_service = work_service
@@ -280,6 +284,7 @@ class ContractTemplateExportService:
         db_selections = dict(editable_payload.get("db_selections") or {})
         manual_values = dict(editable_payload.get("manual_values") or {})
         resolved: dict[str, str] = {}
+        missing_required: list[str] = []
         group_selections, warnings = self._normalized_group_db_selections(
             placeholders=placeholders,
             bindings=bindings,
@@ -301,6 +306,25 @@ class ContractTemplateExportService:
                 raise ContractTemplateExportError(
                     f"Database-backed placeholder {canonical} is not present in the symbol catalog."
                 )
+            if str(catalog_entry.namespace or "").strip().lower() == "owner":
+                resolved_value = self._resolve_catalog_value(
+                    catalog_entry=catalog_entry,
+                    selection_value=None,
+                )
+                rendered = self._render_output_value(resolved_value)
+                if not rendered and placeholder.required:
+                    if str(catalog_entry.namespace or "").strip().lower() == "owner":
+                        missing_required.append(
+                            self._missing_required_value_message(
+                                placeholder=placeholder,
+                                catalog_entry=catalog_entry,
+                                selection_value=None,
+                            )
+                        )
+                    else:
+                        warnings.append(f"{canonical} resolved to an empty value.")
+                resolved[canonical] = rendered
+                continue
             selection_value = group_selections.get(
                 self._selector_scope_key(
                     placeholder=placeholder,
@@ -319,8 +343,23 @@ class ContractTemplateExportService:
             )
             rendered = self._render_output_value(resolved_value)
             if not rendered and placeholder.required:
-                warnings.append(f"{canonical} resolved to an empty value.")
+                if str(catalog_entry.namespace or "").strip().lower() == "owner":
+                    missing_required.append(
+                        self._missing_required_value_message(
+                            placeholder=placeholder,
+                            catalog_entry=catalog_entry,
+                            selection_value=selection_value,
+                        )
+                    )
+                else:
+                    warnings.append(f"{canonical} resolved to an empty value.")
             resolved[canonical] = rendered
+        if missing_required:
+            detail = "\n".join(f"- {message}" for message in missing_required)
+            raise ContractTemplateExportError(
+                "Required placeholder values are missing in the selected authoritative source:\n"
+                f"{detail}"
+            )
         return resolved, tuple(warnings)
 
     def _normalized_group_db_selections(
@@ -399,16 +438,23 @@ class ContractTemplateExportService:
         self,
         *,
         catalog_entry,
-        selection_value: object,
+        selection_value: object | None,
     ) -> Any:
+        namespace = str(catalog_entry.namespace or "").strip().lower()
+        key = str(catalog_entry.key or "").strip()
+        if namespace == "owner":
+            if self.settings_reads is None:
+                raise ContractTemplateExportError(
+                    "Owner placeholder resolution is unavailable because settings reads are missing."
+                )
+            owner_settings = self.settings_reads.load_owner_party_settings()
+            return getattr(owner_settings, key, None)
         clean_selection = _clean_text(selection_value)
         if clean_selection is None:
             raise ContractTemplateExportError(
                 f"{catalog_entry.canonical_symbol} is missing a selected record."
             )
         record_id = int(clean_selection)
-        namespace = str(catalog_entry.namespace or "").strip().lower()
-        key = str(catalog_entry.key or "").strip()
         if namespace == "track":
             if self.track_service is None:
                 raise ContractTemplateExportError("Track service is unavailable for export.")
@@ -469,6 +515,100 @@ class ContractTemplateExportService:
             f"Unsupported placeholder namespace for export: {namespace}"
         )
 
+    def _missing_required_value_message(
+        self,
+        *,
+        placeholder,
+        catalog_entry,
+        selection_value: object | None,
+    ) -> str:
+        label = (
+            _clean_text(getattr(catalog_entry, "display_label", None))
+            or _clean_text(getattr(placeholder, "display_label", None))
+            or placeholder.canonical_symbol
+        )
+        canonical_symbol = str(placeholder.canonical_symbol or "").strip()
+        namespace = str(getattr(catalog_entry, "namespace", "") or "").strip().lower()
+        if namespace == "owner":
+            return (
+                f"{label} is blank in Application Settings > Owner Party "
+                f"for {canonical_symbol}."
+            )
+        selected_label = self._selected_record_label(
+            namespace=namespace, selection_value=selection_value
+        )
+        if selected_label:
+            return (
+                f"{label} is blank for the selected {namespace} record "
+                f'"{selected_label}" ({canonical_symbol}).'
+            )
+        if selection_value is not None:
+            return (
+                f"{label} is blank for the selected {namespace} record "
+                f"#{selection_value} ({canonical_symbol})."
+            )
+        return f"{label} is blank for {canonical_symbol}."
+
+    def _selected_record_label(
+        self,
+        *,
+        namespace: str,
+        selection_value: object | None,
+    ) -> str | None:
+        clean_selection = _clean_text(selection_value)
+        if clean_selection is None:
+            return None
+        record_id = int(clean_selection)
+        if namespace == "track" and self.track_service is not None:
+            record = self.track_service.fetch_track_snapshot(record_id)
+            if record is not None:
+                return _clean_text(getattr(record, "track_title", None)) or _clean_text(
+                    getattr(record, "artist_name", None)
+                )
+            return None
+        if namespace == "release" and self.release_service is not None:
+            record = self.release_service.fetch_release(record_id)
+            if record is not None:
+                return _clean_text(getattr(record, "title", None))
+            return None
+        if namespace == "work" and self.work_service is not None:
+            record = self.work_service.fetch_work(record_id)
+            if record is not None:
+                return _clean_text(getattr(record, "title", None))
+            return None
+        if namespace == "contract" and self.contract_service is not None:
+            record = self.contract_service.fetch_contract(record_id)
+            if record is not None:
+                return _clean_text(getattr(record, "title", None))
+            return None
+        if namespace == "party" and self.party_service is not None:
+            record = self.party_service.fetch_party(record_id)
+            if record is not None:
+                return (
+                    _clean_text(getattr(record, "display_name", None))
+                    or _clean_text(getattr(record, "artist_name", None))
+                    or _clean_text(getattr(record, "company_name", None))
+                    or _clean_text(getattr(record, "legal_name", None))
+                )
+            return None
+        if namespace == "right" and self.rights_service is not None:
+            record = self.rights_service.fetch_right(record_id)
+            if record is not None:
+                return _clean_text(getattr(record, "title", None)) or _clean_text(
+                    getattr(record, "name", None)
+                )
+            return None
+        if namespace == "asset" and self.asset_service is not None:
+            record = self.asset_service.fetch_asset(record_id)
+            if record is not None:
+                return (
+                    _clean_text(getattr(record, "title", None))
+                    or _clean_text(getattr(record, "name", None))
+                    or _clean_text(getattr(record, "filename", None))
+                )
+            return None
+        return None
+
     def _export_source_as_docx(
         self,
         *,
@@ -523,6 +663,20 @@ class ContractTemplateExportService:
                     rewritten_parts[part_name] = part_bytes
                     warnings.append(f"Skipped unparsable DOCX part during export: {part_name}.")
                     continue
+                for element in root.iter():
+                    if not element.attrib:
+                        continue
+                    for attribute_name, attribute_value in list(element.attrib.items()):
+                        if not attribute_value:
+                            continue
+                        element.set(
+                            attribute_name,
+                            self._replace_tokens_in_text(
+                                str(attribute_value),
+                                replacements,
+                                ordered_tokens,
+                            ),
+                        )
                 for paragraph_index, paragraph in enumerate(
                     root.findall(".//w:p", _DOCX_NS), start=1
                 ):

@@ -47,6 +47,7 @@ from .models import (
     ContractTemplateCatalogEntry,
     ContractTemplateDraftPayload,
     ContractTemplateDraftRecord,
+    ContractTemplateFormAutoField,
     ContractTemplateFormDefinition,
     ContractTemplateFormManualField,
     ContractTemplateFormSelectorField,
@@ -461,6 +462,24 @@ class ContractTemplateWorkspacePanel(QWidget):
         export_layout.addWidget(self.fill_export_status_label)
         scroll_layout.addWidget(export_box)
 
+        auto_box, auto_layout = _create_standard_section(
+            self.fill_form_tab,
+            "Automatic Fields",
+            "Settings-backed placeholders resolve automatically from authoritative "
+            "application settings and do not require a draft-time selector.",
+        )
+        self.fill_auto_empty_label = QLabel(
+            "No automatic settings-backed placeholders are available for this revision.",
+            auto_box,
+        )
+        self.fill_auto_empty_label.setWordWrap(True)
+        self.fill_auto_empty_label.setProperty("role", "secondary")
+        auto_layout.addWidget(self.fill_auto_empty_label)
+        self.fill_auto_form = QFormLayout()
+        _configure_standard_form_layout(self.fill_auto_form)
+        auto_layout.addLayout(self.fill_auto_form)
+        scroll_layout.addWidget(auto_box)
+
         selector_box, selector_layout = _create_standard_section(
             self.fill_form_tab,
             "Database-Linked Fields",
@@ -505,9 +524,8 @@ class ContractTemplateWorkspacePanel(QWidget):
         )
         self.fill_guidance_label = QLabel(
             "Database-backed placeholders are grouped into one authoritative record "
-            "selector per entity scope, so related fields resolve from the same "
-            "chosen record. Manual entries stay isolated from database-backed "
-            "fields.",
+            "selector per entity scope, settings-backed owner placeholders resolve "
+            "automatically, and manual entries stay isolated from both.",
             guidance_box,
         )
         self.fill_guidance_label.setWordWrap(True)
@@ -953,6 +971,8 @@ class ContractTemplateWorkspacePanel(QWidget):
             self._fill_dirty = False
         self.refresh_fill_drafts(selected_draft_id=selected_draft_id)
         status_bits = [
+            f"{len(form_definition.auto_fields)} automatic field"
+            f"{'s' if len(form_definition.auto_fields) != 1 else ''}",
             f"{len(form_definition.selector_fields)} selector"
             f"{'s' if len(form_definition.selector_fields) != 1 else ''}",
             f"{len(form_definition.manual_fields)} manual field"
@@ -2625,6 +2645,9 @@ class ContractTemplateWorkspacePanel(QWidget):
 
     def _rebuild_fill_fields(self, form_definition: ContractTemplateFormDefinition) -> None:
         self._clear_fill_fields()
+        for field in form_definition.auto_fields:
+            widget = self._build_auto_field_widget(field)
+            self.fill_auto_form.addRow(field.display_label, widget)
         for field in form_definition.selector_fields:
             widget = self._build_selector_widget(field)
             for placeholder_symbol in field.placeholder_symbols:
@@ -2634,14 +2657,17 @@ class ContractTemplateWorkspacePanel(QWidget):
             widget = self._build_manual_widget(field)
             self.manual_widgets[field.canonical_symbol] = widget
             self.fill_manual_form.addRow(field.display_label, widget)
+        self.fill_auto_empty_label.setVisible(not bool(form_definition.auto_fields))
         self.fill_selector_empty_label.setVisible(not bool(form_definition.selector_fields))
         self.fill_manual_empty_label.setVisible(not bool(form_definition.manual_fields))
 
     def _clear_fill_fields(self) -> None:
+        self._clear_form_layout(self.fill_auto_form)
         self._clear_form_layout(self.fill_selector_form)
         self._clear_form_layout(self.fill_manual_form)
         self.selector_widgets = {}
         self.manual_widgets = {}
+        self.fill_auto_empty_label.setVisible(True)
         self.fill_selector_empty_label.setVisible(True)
         self.fill_manual_empty_label.setVisible(True)
 
@@ -2666,6 +2692,16 @@ class ContractTemplateWorkspacePanel(QWidget):
                 combo.setItemData(combo.count() - 1, choice.description, Qt.ToolTipRole)
         combo.currentIndexChanged.connect(self._mark_fill_dirty)
         return combo
+
+    def _build_auto_field_widget(self, field: ContractTemplateFormAutoField) -> QLabel:
+        label = QLabel(field.source_label, self.fill_form_tab)
+        label.setWordWrap(True)
+        label.setProperty("role", "secondary")
+        tooltip_parts = [field.canonical_symbol]
+        if field.description:
+            tooltip_parts.append(field.description)
+        label.setToolTip("\n".join(part for part in tooltip_parts if part))
+        return label
 
     def _build_manual_widget(self, field: ContractTemplateFormManualField) -> QWidget:
         if field.field_type == "boolean":
@@ -2748,6 +2784,7 @@ class ContractTemplateWorkspacePanel(QWidget):
     def _scope_label(entry: ContractTemplateCatalogEntry) -> str:
         mapping = {
             "track_context": "Track context",
+            "owner_settings_context": "Application owner settings",
             "release_selection_required": "Needs release selection",
             "work_selection_required": "Needs work selection",
             "contract_selection_required": "Needs contract selection",

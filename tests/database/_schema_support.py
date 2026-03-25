@@ -87,6 +87,12 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                 "PRAGMA table_info(ContractTemplateOutputArtifacts)"
             ).fetchall()
         }
+        party_columns = {
+            row[1] for row in self.conn.execute("PRAGMA table_info(Parties)").fetchall()
+        }
+        party_artist_alias_columns = {
+            row[1] for row in self.conn.execute("PRAGMA table_info(PartyArtistAliases)").fetchall()
+        }
         track_audio_derivative_columns = {
             row[1]
             for row in self.conn.execute("PRAGMA table_info(TrackAudioDerivatives)").fetchall()
@@ -138,6 +144,13 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                 "PRAGMA index_list(ContractTemplateOutputArtifacts)"
             ).fetchall()
         }
+        party_indexes = {
+            row[1] for row in self.conn.execute("PRAGMA index_list(Parties)").fetchall()
+        }
+        party_artist_alias_indexes = {
+            row[1]
+            for row in self.conn.execute("PRAGMA index_list(PartyArtistAliases)").fetchall()
+        }
         track_audio_derivative_indexes = {
             row[1]
             for row in self.conn.execute("PRAGMA index_list(TrackAudioDerivatives)").fetchall()
@@ -164,6 +177,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
         self.assertIn("Releases", tables)
         self.assertIn("ReleaseTracks", tables)
         self.assertIn("Parties", tables)
+        self.assertIn("PartyArtistAliases", tables)
         self.assertIn("Works", tables)
         self.assertIn("WorkContributors", tables)
         self.assertIn("WorkTrackLinks", tables)
@@ -188,6 +202,33 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
         self.assertIn("ForensicWatermarkExports", tables)
         self.assertIn("vw_Licenses", tables)
         self.assertIn("contract_number", gs1_columns)
+        self.assertTrue(
+            {
+                "artist_name",
+                "company_name",
+                "first_name",
+                "middle_name",
+                "last_name",
+                "alternative_email",
+                "street_name",
+                "street_number",
+                "bank_account_number",
+                "chamber_of_commerce_number",
+                "pro_number",
+            }
+            <= party_columns
+        )
+        self.assertTrue(
+            {
+                "party_id",
+                "alias_name",
+                "normalized_alias",
+                "sort_order",
+                "created_at",
+                "updated_at",
+            }
+            <= party_artist_alias_columns
+        )
         self.assertIn("visible_in_history", history_entry_columns)
         self.assertIn("blob_icon_payload", custom_field_columns)
         self.assertTrue(
@@ -283,6 +324,23 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                 "last_verification_confidence",
             }
             <= forensic_export_columns
+        )
+        self.assertTrue(
+            {
+                "idx_parties_artist_name",
+                "idx_parties_company_name",
+                "idx_parties_alternative_email",
+                "idx_parties_chamber_of_commerce_number",
+                "idx_parties_pro_number",
+            }
+            <= party_indexes
+        )
+        self.assertTrue(
+            {
+                "idx_party_artist_aliases_normalized_alias",
+                "idx_party_artist_aliases_party_id",
+            }
+            <= party_artist_alias_indexes
         )
         self.assertTrue(
             {
@@ -886,6 +944,163 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
 
             self.assertTrue({"scan_adapter", "scan_diagnostics_json"} <= revision_columns)
             self.assertEqual(service.get_db_version(), SCHEMA_TARGET)
+        finally:
+            conn.close()
+
+    def case_migrate_31_to_32_adds_party_expansion_and_alias_table(self):
+        conn = sqlite3.connect(":memory:")
+        try:
+            service = DatabaseSchemaService(conn)
+            service.init_db()
+            conn.execute("PRAGMA foreign_keys = OFF")
+            conn.execute("PRAGMA user_version = 31")
+            conn.execute("DROP INDEX IF EXISTS idx_party_artist_aliases_party_id")
+            conn.execute("DROP INDEX IF EXISTS idx_party_artist_aliases_normalized_alias")
+            conn.execute("DROP TABLE IF EXISTS PartyArtistAliases")
+            conn.execute("DROP INDEX IF EXISTS idx_parties_pro_number")
+            conn.execute("DROP INDEX IF EXISTS idx_parties_chamber_of_commerce_number")
+            conn.execute("DROP INDEX IF EXISTS idx_parties_alternative_email")
+            conn.execute("DROP INDEX IF EXISTS idx_parties_company_name")
+            conn.execute("DROP INDEX IF EXISTS idx_parties_artist_name")
+            conn.execute("DROP TABLE IF EXISTS Parties")
+            conn.executescript(
+                """
+                CREATE TABLE Parties (
+                    id INTEGER PRIMARY KEY,
+                    legal_name TEXT NOT NULL,
+                    display_name TEXT,
+                    party_type TEXT NOT NULL DEFAULT 'organization',
+                    contact_person TEXT,
+                    email TEXT,
+                    phone TEXT,
+                    website TEXT,
+                    address_line1 TEXT,
+                    address_line2 TEXT,
+                    city TEXT,
+                    region TEXT,
+                    postal_code TEXT,
+                    country TEXT,
+                    tax_id TEXT,
+                    vat_number TEXT,
+                    pro_affiliation TEXT,
+                    ipi_cae TEXT,
+                    notes TEXT,
+                    profile_name TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                INSERT INTO Parties(
+                    id,
+                    legal_name,
+                    display_name,
+                    party_type,
+                    contact_person,
+                    email,
+                    phone,
+                    website,
+                    address_line1,
+                    city,
+                    country,
+                    tax_id,
+                    vat_number,
+                    pro_affiliation,
+                    ipi_cae,
+                    notes,
+                    profile_name
+                )
+                VALUES (
+                    1,
+                    'Aeonium Holdings B.V.',
+                    'Aeonium',
+                    'licensee',
+                    'Lyra Contact',
+                    'hello@moonium.test',
+                    '+31 20 555 0101',
+                    'https://moonium.test',
+                    'Main Street 12',
+                    'Amsterdam',
+                    'NL',
+                    'TAX-001',
+                    'VAT-001',
+                    'BUMA',
+                    'IPI-001',
+                    'Existing note',
+                    'default'
+                );
+                """
+            )
+            conn.commit()
+            conn.execute("PRAGMA foreign_keys = ON")
+
+            service.migrate_schema()
+
+            party_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(Parties)").fetchall()
+            }
+            alias_tables = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            alias_indexes = {
+                row[1]
+                for row in conn.execute("PRAGMA index_list(PartyArtistAliases)").fetchall()
+            }
+            party_row = conn.execute(
+                """
+                SELECT
+                    legal_name,
+                    display_name,
+                    email,
+                    artist_name,
+                    company_name,
+                    alternative_email,
+                    chamber_of_commerce_number,
+                    pro_number
+                FROM Parties
+                WHERE id=1
+                """
+            ).fetchone()
+
+            self.assertEqual(service.get_db_version(), SCHEMA_TARGET)
+            self.assertTrue(
+                {
+                    "artist_name",
+                    "company_name",
+                    "first_name",
+                    "middle_name",
+                    "last_name",
+                    "alternative_email",
+                    "street_name",
+                    "street_number",
+                    "bank_account_number",
+                    "chamber_of_commerce_number",
+                    "pro_number",
+                }
+                <= party_columns
+            )
+            self.assertIn("PartyArtistAliases", alias_tables)
+            self.assertTrue(
+                {
+                    "idx_party_artist_aliases_normalized_alias",
+                    "idx_party_artist_aliases_party_id",
+                }
+                <= alias_indexes
+            )
+            self.assertEqual(
+                party_row,
+                (
+                    "Aeonium Holdings B.V.",
+                    "Aeonium",
+                    "hello@moonium.test",
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
+            )
         finally:
             conn.close()
 

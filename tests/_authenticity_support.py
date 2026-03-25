@@ -91,7 +91,7 @@ class AuthenticityWorkflowTestCase(unittest.TestCase):
         self,
         *,
         title: str = "Authenticity Track",
-        artist_name: str = "Cosmowyn",
+        artist_name: str = "Moonwake",
         album_title: str = "Authenticity Tests",
         duration_seconds: int = 30,
         seed: int = 1,

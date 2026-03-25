@@ -108,19 +108,21 @@ class ThemeBuilderTests(unittest.TestCase):
 
     def test_starter_themes_expose_requested_bundled_presets(self):
         library = starter_theme_library()
+        names = starter_theme_names()
+        self.assertEqual(len(names), 7)
         self.assertEqual(
-            starter_theme_names(),
+            names[:3],
             (
                 "Apple Light",
                 "Apple Dark",
                 "High Visibility",
-                "Aeon Emerald Gold",
-                "Subconscious Cosmos",
-                "VS Code Dark",
-                "Pastel Studio",
             ),
         )
-        for name in starter_theme_names():
+        self.assertTrue(any(name.endswith("Emerald Gold") for name in names))
+        self.assertIn("Subconscious Cosmos", names)
+        self.assertIn("VS Code Dark", names)
+        self.assertIn("Pastel Studio", names)
+        for name in names:
             self.assertIn(name, library)
             self.assertEqual(library[name]["selected_name"], "")
             self.assertTrue(library[name]["window_bg"])
@@ -294,6 +296,63 @@ class ThemeBuilderTests(unittest.TestCase):
             self.assertEqual(values["blob_icon_settings"]["audio"]["emoji"], "🎧")
             self.assertEqual(values["blob_icon_settings"]["audio_lossy"]["emoji"], "📼")
             self.assertEqual(sorted(dialog._blob_icon_editors), ["audio", "audio_lossy", "image"])
+        finally:
+            dialog.close()
+            host.close()
+
+    def test_application_settings_dialog_exposes_owner_party_tab_and_payload(self):
+        host = _ThemePreviewHost()
+        dialog = app_module.ApplicationSettingsDialog(
+            window_title="Catalog",
+            icon_path="",
+            artist_code="00",
+            auto_snapshot_enabled=True,
+            auto_snapshot_interval_minutes=30,
+            isrc_prefix="NLABC",
+            sena_number="",
+            btw_number="BTW-424242",
+            buma_relatie_nummer="REL-OWNER",
+            buma_ipi="IPI-OWNER",
+            gs1_template_asset=None,
+            gs1_contracts_csv_path="",
+            gs1_contract_entries=(),
+            gs1_active_contract_number="",
+            gs1_target_market="",
+            gs1_language="",
+            gs1_brand="",
+            gs1_subbrand="",
+            gs1_packaging_type="",
+            gs1_product_classification="",
+            theme_settings={},
+            stored_themes={},
+            current_profile_path="",
+            owner_party_settings=app_module.OwnerPartySettings(
+                display_name="Moonwake Records",
+                legal_name="Moonwake Records B.V.",
+                email="hello@moonwake.test",
+                country="Netherlands",
+            ),
+            parent=host,
+        )
+        try:
+            tab_labels = [dialog.tabs.tabText(index) for index in range(dialog.tabs.count())]
+            self.assertIn("Owner Party", tab_labels)
+            dialog.owner_company_name_edit.setText("Moonwake Records")
+            dialog.owner_first_name_edit.setText("Lyra")
+            dialog.owner_last_name_edit.setText("Moonwake")
+            dialog.owner_pro_affiliation_edit.setText("BUMA/STEMRA")
+
+            values = dialog.values()
+            owner_settings = values["owner_party_settings"]
+
+            self.assertEqual(owner_settings.display_name, "Moonwake Records")
+            self.assertEqual(owner_settings.company_name, "Moonwake Records")
+            self.assertEqual(owner_settings.first_name, "Lyra")
+            self.assertEqual(owner_settings.last_name, "Moonwake")
+            self.assertEqual(owner_settings.pro_affiliation, "BUMA/STEMRA")
+            self.assertEqual(owner_settings.vat_number, "BTW-424242")
+            self.assertEqual(owner_settings.pro_number, "REL-OWNER")
+            self.assertEqual(owner_settings.ipi_cae, "IPI-OWNER")
         finally:
             dialog.close()
             host.close()

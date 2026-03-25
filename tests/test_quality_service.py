@@ -55,7 +55,7 @@ class QualityDashboardServiceTests(unittest.TestCase):
             TrackCreatePayload(
                 isrc=isrc,
                 track_title=title,
-                artist_name="Cosmowyn",
+                artist_name="Moonwake",
                 additional_artists=[],
                 album_title=album,
                 release_date="2026-03-15",
@@ -79,7 +79,7 @@ class QualityDashboardServiceTests(unittest.TestCase):
         release_id = self.release_service.create_release(
             ReleasePayload(
                 title="Orbit Release",
-                primary_artist="Cosmowyn",
+                primary_artist="Moonwake",
                 release_type="album",
                 release_date="2026-03-15",
                 upc=None,
@@ -120,7 +120,7 @@ class QualityDashboardServiceTests(unittest.TestCase):
         release_id = self.release_service.create_release(
             ReleasePayload(
                 title="Orbit Release",
-                primary_artist="Cosmowyn",
+                primary_artist="Moonwake",
                 release_type="album",
                 release_date="15-03-2026",
                 placements=[
@@ -161,7 +161,7 @@ class QualityDashboardServiceTests(unittest.TestCase):
         release_id = self.release_service.create_release(
             ReleasePayload(
                 title="Orbit Release",
-                primary_artist="Cosmowyn",
+                primary_artist="Moonwake",
                 release_type="album",
                 release_date="2026-03-15",
                 catalog_number="CAT-777",
@@ -203,7 +203,7 @@ class QualityDashboardServiceTests(unittest.TestCase):
         self.release_service.create_release(
             ReleasePayload(
                 title="First Orbit Release",
-                primary_artist="Cosmowyn",
+                primary_artist="Moonwake",
                 release_type="album",
                 release_date="2026-03-15",
                 catalog_number="CAT-101",
@@ -221,7 +221,7 @@ class QualityDashboardServiceTests(unittest.TestCase):
         self.release_service.create_release(
             ReleasePayload(
                 title="Second Orbit Release",
-                primary_artist="Cosmowyn",
+                primary_artist="Moonwake",
                 release_type="album",
                 release_date="2026-03-16",
                 catalog_number="CAT-202",

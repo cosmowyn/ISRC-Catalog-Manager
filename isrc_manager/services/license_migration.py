@@ -433,17 +433,7 @@ class LegacyLicenseMigrationService:
         return [(int(row[0]), str(row[1] or "")) for row in rows]
 
     def _find_party_id(self, licensee_name: str, *, cursor: sqlite3.Cursor) -> int | None:
-        row = cursor.execute(
-            """
-            SELECT id
-            FROM Parties
-            WHERE lower(legal_name)=lower(?) OR lower(COALESCE(display_name, ''))=lower(?)
-            ORDER BY id
-            LIMIT 1
-            """,
-            (licensee_name, licensee_name),
-        ).fetchone()
-        return int(row[0]) if row else None
+        return self.party_service.find_party_id_by_name(licensee_name, cursor=cursor)
 
     @staticmethod
     def _hash_file(path: Path) -> str:

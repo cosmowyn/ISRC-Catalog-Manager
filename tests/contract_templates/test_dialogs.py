@@ -52,7 +52,7 @@ class ContractTemplateWorkspacePanelTests(unittest.TestCase):
             TrackCreatePayload(
                 isrc="NL-TST-26-00420",
                 track_title="Dialog Orbit",
-                artist_name="Cosmowyn",
+                artist_name="Moonwake",
                 additional_artists=[],
                 album_title="Workspace Tests",
                 release_date="2026-03-17",

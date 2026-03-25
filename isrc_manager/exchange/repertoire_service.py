@@ -89,7 +89,7 @@ class RepertoireExchangeService:
                 values = []
                 for header in headers:
                     value = row.get(header)
-                    if isinstance(value, (dict, list)):
+                    if isinstance(value, (dict, list, tuple)):
                         values.append(json.dumps(value, ensure_ascii=True))
                     else:
                         values.append(value)
@@ -113,7 +113,7 @@ class RepertoireExchangeService:
                         {
                             key: (
                                 json.dumps(value, ensure_ascii=True)
-                                if isinstance(value, (dict, list))
+                                if isinstance(value, (dict, list, tuple))
                                 else value
                             )
                             for key, value in row.items()
@@ -312,23 +312,39 @@ class RepertoireExchangeService:
                     PartyPayload(
                         legal_name=legal_name,
                         display_name=source.get("display_name"),
+                        artist_name=source.get("artist_name"),
+                        company_name=source.get("company_name"),
+                        first_name=source.get("first_name"),
+                        middle_name=source.get("middle_name"),
+                        last_name=source.get("last_name"),
                         party_type=source.get("party_type") or "organization",
                         contact_person=source.get("contact_person"),
                         email=source.get("email"),
+                        alternative_email=source.get("alternative_email"),
                         phone=source.get("phone"),
                         website=source.get("website"),
+                        street_name=source.get("street_name"),
+                        street_number=source.get("street_number"),
                         address_line1=source.get("address_line1"),
                         address_line2=source.get("address_line2"),
                         city=source.get("city"),
                         region=source.get("region"),
                         postal_code=source.get("postal_code"),
                         country=source.get("country"),
+                        bank_account_number=source.get("bank_account_number"),
+                        chamber_of_commerce_number=source.get("chamber_of_commerce_number"),
                         tax_id=source.get("tax_id"),
                         vat_number=source.get("vat_number"),
                         pro_affiliation=source.get("pro_affiliation"),
+                        pro_number=source.get("pro_number"),
                         ipi_cae=source.get("ipi_cae"),
                         notes=source.get("notes"),
                         profile_name=source.get("profile_name"),
+                        artist_aliases=[
+                            str(item).strip()
+                            for item in list(source.get("artist_aliases", []) or [])
+                            if str(item).strip()
+                        ],
                     ),
                     cursor=self.conn.cursor(),
                 )

@@ -6,6 +6,7 @@ import re
 
 from .models import (
     ContractTemplateCatalogEntry,
+    ContractTemplateFormAutoField,
     ContractTemplateFormChoice,
     ContractTemplateFormDefinition,
     ContractTemplateFormManualField,
@@ -51,12 +52,14 @@ class ContractTemplateFormService:
         "right": "Right Selection",
         "asset": "Asset Selection",
     }
+    _AUTO_SCOPE_POLICIES = frozenset({"owner_settings_context"})
 
     def __init__(
         self,
         *,
         template_service,
         catalog_service,
+        settings_reads=None,
         release_service=None,
         work_service=None,
         contract_service=None,
@@ -66,6 +69,7 @@ class ContractTemplateFormService:
     ):
         self.template_service = template_service
         self.catalog_service = catalog_service
+        self.settings_reads = settings_reads
         self.release_service = release_service
         self.work_service = work_service
         self.contract_service = contract_service
@@ -109,6 +113,7 @@ class ContractTemplateFormService:
         }
 
         selector_fields: list[ContractTemplateFormSelectorField] = []
+        auto_fields: list[ContractTemplateFormAutoField] = []
         manual_fields: list[ContractTemplateFormManualField] = []
         unresolved: list[str] = []
         warnings: list[str] = []
@@ -128,6 +133,26 @@ class ContractTemplateFormService:
             binding = bindings.get(placeholder.canonical_symbol)
             if token.binding_kind == "db":
                 catalog_entry = catalog.get(placeholder.canonical_symbol)
+                if self._is_auto_resolved_scope(
+                    placeholder,
+                    binding=binding,
+                    catalog_entry=catalog_entry,
+                ):
+                    auto_fields.append(
+                        self._auto_field(
+                            placeholder,
+                            binding=binding,
+                            catalog_entry=catalog_entry,
+                        )
+                    )
+                    owner_warning = self._auto_field_warning(
+                        placeholder,
+                        binding=binding,
+                        catalog_entry=catalog_entry,
+                    )
+                    if owner_warning:
+                        warnings.append(owner_warning)
+                    continue
                 selector_scope = self._selector_scope(
                     placeholder,
                     binding=binding,
@@ -165,10 +190,11 @@ class ContractTemplateFormService:
             template_name=template.name,
             revision_label=revision.revision_label,
             scan_status=revision.scan_status,
+            auto_fields=tuple(auto_fields),
             selector_fields=tuple(selector_fields),
             manual_fields=tuple(manual_fields),
             unresolved_placeholders=tuple(sorted(unresolved)),
-            warnings=tuple(warnings),
+            warnings=tuple(dict.fromkeys(warnings)),
         )
 
     def build_editable_payload(
@@ -305,6 +331,77 @@ class ContractTemplateFormService:
             scope_entity_type,
             scope_policy,
         )
+
+    def _is_auto_resolved_scope(
+        self,
+        placeholder: ContractTemplatePlaceholderRecord,
+        *,
+        binding: ContractTemplatePlaceholderBindingRecord | None,
+        catalog_entry: ContractTemplateCatalogEntry | None,
+    ) -> bool:
+        token = parse_placeholder(placeholder.canonical_symbol)
+        scope_policy = (
+            (_clean_text(binding.scope_policy) if binding is not None else None)
+            or (_clean_text(catalog_entry.scope_policy) if catalog_entry is not None else None)
+            or self._default_scope_policy(token.namespace)
+        )
+        return str(scope_policy or "").strip().lower() in self._AUTO_SCOPE_POLICIES
+
+    def _auto_field(
+        self,
+        placeholder: ContractTemplatePlaceholderRecord,
+        *,
+        binding: ContractTemplatePlaceholderBindingRecord | None,
+        catalog_entry: ContractTemplateCatalogEntry | None,
+    ) -> ContractTemplateFormAutoField:
+        display_label = (
+            placeholder.display_label
+            or (catalog_entry.display_label if catalog_entry is not None else None)
+            or _display_label_from_key(placeholder.placeholder_key)
+        )
+        description = (
+            f"{display_label} resolves automatically from Application Settings > Owner Party."
+        )
+        if binding is not None and isinstance(binding.metadata, dict):
+            override = _clean_text(binding.metadata.get("catalog_label"))
+            if override:
+                description = (
+                    f"{override} resolves automatically from Application Settings > Owner Party."
+                )
+        return ContractTemplateFormAutoField(
+            canonical_symbol=placeholder.canonical_symbol,
+            display_label=display_label,
+            source_label="Application Settings > Owner Party",
+            required=placeholder.required,
+            placeholder_count=placeholder.source_occurrence_count,
+            description=description,
+        )
+
+    def _auto_field_warning(
+        self,
+        placeholder: ContractTemplatePlaceholderRecord,
+        *,
+        binding: ContractTemplatePlaceholderBindingRecord | None,
+        catalog_entry: ContractTemplateCatalogEntry | None,
+    ) -> str | None:
+        if self.settings_reads is None:
+            return (
+                "Owner placeholders are present, but Application Settings reads are unavailable "
+                "for preview validation."
+            )
+        token = parse_placeholder(placeholder.canonical_symbol)
+        if str(token.namespace or "").strip().lower() != "owner":
+            return None
+        owner_settings = self.settings_reads.load_owner_party_settings()
+        value = getattr(owner_settings, placeholder.placeholder_key, None)
+        if _clean_text(value):
+            return None
+        label = (
+            placeholder.display_label
+            or (catalog_entry.display_label if catalog_entry is not None else None)
+            or placeholder.canonical_symbol
+        )
+        return f"{label} is currently blank in Application Settings > Owner Party."
 
     def _selector_field(
         self,
@@ -447,6 +544,7 @@ class ContractTemplateFormService:
             "release": "release",
             "work": "work",
             "contract": "contract",
+            "owner": "owner",
             "party": "party",
             "right": "right",
             "asset": "asset",
@@ -461,6 +559,7 @@ class ContractTemplateFormService:
             "release": "release_selection_required",
             "work": "work_selection_required",
             "contract": "contract_selection_required",
+            "owner": "owner_settings_context",
             "party": "party_selection_required",
             "right": "right_selection_required",
             "asset": "asset_selection_required",
@@ -593,8 +692,11 @@ class ContractTemplateFormService:
 
     @staticmethod
     def _party_label(item) -> str:
-        name = _clean_text(getattr(item, "display_name", None)) or _clean_text(
-            getattr(item, "legal_name", None)
+        name = (
+            _clean_text(getattr(item, "display_name", None))
+            or _clean_text(getattr(item, "artist_name", None))
+            or _clean_text(getattr(item, "company_name", None))
+            or _clean_text(getattr(item, "legal_name", None))
         )
         party_type = _clean_text(getattr(item, "party_type", None))
         if party_type and name:

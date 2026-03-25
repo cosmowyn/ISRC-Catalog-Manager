@@ -51,7 +51,7 @@ class ExchangeServiceTestCase(unittest.TestCase):
             TrackCreatePayload(
                 isrc=isrc,
                 track_title=title,
-                artist_name="Cosmowyn",
+                artist_name="Moonwake",
                 additional_artists=["Guest"],
                 album_title="Orbit Release",
                 release_date="2026-03-15",
@@ -62,7 +62,7 @@ class ExchangeServiceTestCase(unittest.TestCase):
                 catalog_number="CAT-001",
                 buma_work_number="BUMA-001",
                 composer="Composer",
-                publisher="Cosmowyn Records",
+                publisher="Moonwake Records",
                 comments="Comment",
                 lyrics="Lyrics",
                 audio_file_source_path=str(audio_path) if audio_path else None,
@@ -74,8 +74,8 @@ class ExchangeServiceTestCase(unittest.TestCase):
         return self.release_service.create_release(
             ReleasePayload(
                 title="Orbit Release",
-                primary_artist="Cosmowyn",
-                album_artist="Cosmowyn",
+                primary_artist="Moonwake",
+                album_artist="Moonwake",
                 release_type="album",
                 release_date="2026-03-15",
                 catalog_number="CAT-001",
@@ -169,7 +169,7 @@ class ExchangeServiceTestCase(unittest.TestCase):
     def case_update_mode_skips_unmatched_rows(self):
         csv_path = self.data_root / "import.csv"
         csv_path.write_text(
-            "track_title,artist_name,isrc\nUnmatched,Cosmowyn,NL-ABC-26-99999\n",
+            "track_title,artist_name,isrc\nUnmatched,Moonwake,NL-ABC-26-99999\n",
             encoding="utf-8",
         )
 
@@ -187,7 +187,7 @@ class ExchangeServiceTestCase(unittest.TestCase):
         csv_path = self.data_root / "create-import.csv"
         csv_path.write_text(
             "track_title,artist_name,isrc,comments\n"
-            "Orbit,Cosmowyn,NL-ABC-26-00031,Demo import\n",
+            "Orbit,Moonwake,NL-ABC-26-00031,Demo import\n",
             encoding="utf-8",
         )
 
@@ -213,14 +213,14 @@ class ExchangeServiceTestCase(unittest.TestCase):
                 LEFT JOIN Artists a ON a.id = t.main_artist_id
                 """
             ).fetchone(),
-            ("Orbit", "Cosmowyn", "NL-ABC-26-00031", "Demo import"),
+            ("Orbit", "Moonwake", "NL-ABC-26-00031", "Demo import"),
         )
 
     def case_import_csv_detects_semicolon_delimiter(self):
         csv_path = self.data_root / "semicolon-import.csv"
         csv_path.write_text(
             "track_title;artist_name;isrc;comments\n"
-            "Orbit;Cosmowyn;NL-ABC-26-00032;Semicolon import\n",
+            "Orbit;Moonwake;NL-ABC-26-00032;Semicolon import\n",
             encoding="utf-8",
         )
 
@@ -248,7 +248,7 @@ class ExchangeServiceTestCase(unittest.TestCase):
                 """,
                 (report.created_tracks[0],),
             ).fetchone(),
-            ("Orbit", "Cosmowyn", "NL-ABC-26-00032", "Semicolon import"),
+            ("Orbit", "Moonwake", "NL-ABC-26-00032", "Semicolon import"),
         )
 
     def case_package_export_writes_manifest_and_media(self):
@@ -286,7 +286,7 @@ class ExchangeServiceTestCase(unittest.TestCase):
             TrackCreatePayload(
                 isrc="NL-ABC-26-00021",
                 track_title="Remix A",
-                artist_name="Cosmowyn",
+                artist_name="Moonwake",
                 additional_artists=[],
                 album_title="Shared Release",
                 release_date="2026-03-15",
@@ -302,7 +302,7 @@ class ExchangeServiceTestCase(unittest.TestCase):
             TrackCreatePayload(
                 isrc="NL-ABC-26-00022",
                 track_title="Remix B",
-                artist_name="Cosmowyn",
+                artist_name="Moonwake",
                 additional_artists=[],
                 album_title="Shared Release",
                 release_date="2026-03-15",
@@ -316,8 +316,8 @@ class ExchangeServiceTestCase(unittest.TestCase):
         self.release_service.create_release(
             ReleasePayload(
                 title="Shared Release",
-                primary_artist="Cosmowyn",
-                album_artist="Cosmowyn",
+                primary_artist="Moonwake",
+                album_artist="Moonwake",
                 release_type="album",
                 release_date="2026-03-15",
                 upc="036000291452",
@@ -376,7 +376,7 @@ class ExchangeServiceTestCase(unittest.TestCase):
             TrackCreatePayload(
                 isrc="NL-ABC-26-00024",
                 track_title="Pulse",
-                artist_name="Cosmowyn",
+                artist_name="Moonwake",
                 additional_artists=[],
                 album_title="Pulse Release",
                 release_date="2026-03-15",
@@ -392,8 +392,8 @@ class ExchangeServiceTestCase(unittest.TestCase):
         self.release_service.create_release(
             ReleasePayload(
                 title="Pulse Release",
-                primary_artist="Cosmowyn",
-                album_artist="Cosmowyn",
+                primary_artist="Moonwake",
+                album_artist="Moonwake",
                 release_type="album",
                 release_date="2026-03-15",
                 upc="036000291452",
@@ -453,7 +453,7 @@ class ExchangeServiceTestCase(unittest.TestCase):
             TrackCreatePayload(
                 isrc="NL-ABC-26-00027",
                 track_title="Shared Import A",
-                artist_name="Cosmowyn",
+                artist_name="Moonwake",
                 additional_artists=[],
                 album_title="Shared Import Release",
                 release_date="2026-03-15",
@@ -469,7 +469,7 @@ class ExchangeServiceTestCase(unittest.TestCase):
             TrackCreatePayload(
                 isrc="NL-ABC-26-00028",
                 track_title="Shared Import B",
-                artist_name="Cosmowyn",
+                artist_name="Moonwake",
                 additional_artists=[],
                 album_title="Shared Import Release",
                 release_date="2026-03-15",
@@ -483,8 +483,8 @@ class ExchangeServiceTestCase(unittest.TestCase):
         self.release_service.create_release(
             ReleasePayload(
                 title="Shared Import Release",
-                primary_artist="Cosmowyn",
-                album_artist="Cosmowyn",
+                primary_artist="Moonwake",
+                album_artist="Moonwake",
                 release_type="album",
                 release_date="2026-03-15",
                 upc="036000291452",
@@ -540,7 +540,7 @@ class ExchangeServiceTestCase(unittest.TestCase):
             TrackCreatePayload(
                 isrc="NL-ABC-26-00029",
                 track_title="Shared Across Releases",
-                artist_name="Cosmowyn",
+                artist_name="Moonwake",
                 additional_artists=[],
                 album_title="Shared Source Album",
                 release_date="2026-03-15",
@@ -554,8 +554,8 @@ class ExchangeServiceTestCase(unittest.TestCase):
         self.release_service.create_release(
             ReleasePayload(
                 title="Same Identity Release",
-                primary_artist="Cosmowyn",
-                album_artist="Cosmowyn",
+                primary_artist="Moonwake",
+                album_artist="Moonwake",
                 release_type="album",
                 release_date="2026-03-15",
                 upc="036000291452",
@@ -569,8 +569,8 @@ class ExchangeServiceTestCase(unittest.TestCase):
         self.release_service.create_release(
             ReleasePayload(
                 title="Same Identity Release",
-                primary_artist="Cosmowyn",
-                album_artist="Cosmowyn",
+                primary_artist="Moonwake",
+                album_artist="Moonwake",
                 release_type="album",
                 release_date="2026-03-16",
                 upc="036000291452",
@@ -649,7 +649,7 @@ class ExchangeServiceTestCase(unittest.TestCase):
             TrackCreatePayload(
                 isrc="NL-ABC-26-00026",
                 track_title="Blob Orbit",
-                artist_name="Cosmowyn",
+                artist_name="Moonwake",
                 additional_artists=[],
                 album_title="Blob Release",
                 release_date="2026-03-15",
@@ -665,8 +665,8 @@ class ExchangeServiceTestCase(unittest.TestCase):
         self.release_service.create_release(
             ReleasePayload(
                 title="Blob Release",
-                primary_artist="Cosmowyn",
-                album_artist="Cosmowyn",
+                primary_artist="Moonwake",
+                album_artist="Moonwake",
                 release_type="album",
                 release_date="2026-03-15",
                 upc="036000291452",
@@ -740,7 +740,7 @@ class ExchangeServiceTestCase(unittest.TestCase):
                 "track_id": 1,
                 "isrc": "NL-ABC-26-00025",
                 "track_title": "Legacy Track",
-                "artist_name": "Cosmowyn",
+                "artist_name": "Moonwake",
                 "additional_artists": "",
                 "album_title": "Legacy Release",
                 "release_date": "2026-03-15",
@@ -760,8 +760,8 @@ class ExchangeServiceTestCase(unittest.TestCase):
                 "release_id": "",
                 "release_title": "Legacy Release",
                 "release_version_subtitle": "",
-                "release_primary_artist": "Cosmowyn",
-                "release_album_artist": "Cosmowyn",
+                "release_primary_artist": "Moonwake",
+                "release_album_artist": "Moonwake",
                 "release_type": "album",
                 "release_date_release": "2026-03-15",
                 "release_original_release_date": "",
@@ -837,7 +837,7 @@ class ExchangeServiceTestCase(unittest.TestCase):
     def case_inspect_csv_suggests_known_headers(self):
         csv_path = self.data_root / "headers.csv"
         csv_path.write_text(
-            "track_title,artist_name,custom::Mood\nOrbit,Cosmowyn,Dreamy\n", encoding="utf-8"
+            "track_title,artist_name,custom::Mood\nOrbit,Moonwake,Dreamy\n", encoding="utf-8"
         )
 
         inspection = self.service.inspect_csv(csv_path)
@@ -845,7 +845,7 @@ class ExchangeServiceTestCase(unittest.TestCase):
         self.assertEqual(inspection.headers, ["track_title", "artist_name", "custom::Mood"])
         self.assertEqual(
             inspection.preview_rows,
-            [{"track_title": "Orbit", "artist_name": "Cosmowyn", "custom::Mood": "Dreamy"}],
+            [{"track_title": "Orbit", "artist_name": "Moonwake", "custom::Mood": "Dreamy"}],
         )
         self.assertEqual(inspection.suggested_mapping["track_title"], "track_title")
         self.assertEqual(inspection.suggested_mapping["artist_name"], "artist_name")
@@ -854,7 +854,7 @@ class ExchangeServiceTestCase(unittest.TestCase):
     def case_inspect_csv_preserves_quoted_commas(self):
         csv_path = self.data_root / "quoted-commas.csv"
         csv_path.write_text(
-            "track_title,artist_name,comments\n" '"Orbit, Pt. 1",Cosmowyn,"Dreamy, wide mix"\n',
+            "track_title,artist_name,comments\n" '"Orbit, Pt. 1",Moonwake,"Dreamy, wide mix"\n',
             encoding="utf-8",
         )
 
@@ -866,7 +866,7 @@ class ExchangeServiceTestCase(unittest.TestCase):
             [
                 {
                     "track_title": "Orbit, Pt. 1",
-                    "artist_name": "Cosmowyn",
+                    "artist_name": "Moonwake",
                     "comments": "Dreamy, wide mix",
                 }
             ],
@@ -875,7 +875,7 @@ class ExchangeServiceTestCase(unittest.TestCase):
     def case_inspect_csv_detects_semicolon_delimiter(self):
         csv_path = self.data_root / "semicolon-headers.csv"
         csv_path.write_text(
-            "track_title;artist_name;isrc\nOrbit;Cosmowyn;NL-ABC-26-00033\n",
+            "track_title;artist_name;isrc\nOrbit;Moonwake;NL-ABC-26-00033\n",
             encoding="utf-8",
         )
 
@@ -884,14 +884,14 @@ class ExchangeServiceTestCase(unittest.TestCase):
         self.assertEqual(inspection.headers, ["track_title", "artist_name", "isrc"])
         self.assertEqual(
             inspection.preview_rows,
-            [{"track_title": "Orbit", "artist_name": "Cosmowyn", "isrc": "NL-ABC-26-00033"}],
+            [{"track_title": "Orbit", "artist_name": "Moonwake", "isrc": "NL-ABC-26-00033"}],
         )
         self.assertEqual(inspection.resolved_delimiter, ";")
 
     def case_inspect_csv_detects_tab_delimiter(self):
         csv_path = self.data_root / "tab-headers.csv"
         csv_path.write_text(
-            "track_title\tartist_name\tcomments\nOrbit\tCosmowyn\tTabbed import\n",
+            "track_title\tartist_name\tcomments\nOrbit\tMoonwake\tTabbed import\n",
             encoding="utf-8",
         )
 
@@ -903,7 +903,7 @@ class ExchangeServiceTestCase(unittest.TestCase):
             [
                 {
                     "track_title": "Orbit",
-                    "artist_name": "Cosmowyn",
+                    "artist_name": "Moonwake",
                     "comments": "Tabbed import",
                 }
             ],
@@ -914,7 +914,7 @@ class ExchangeServiceTestCase(unittest.TestCase):
         csv_path = self.data_root / "pipe-import.csv"
         csv_path.write_text(
             "track_title|artist_name|isrc|comments\n"
-            "Orbit|Cosmowyn|NL-ABC-26-00034|Pipe import\n",
+            "Orbit|Moonwake|NL-ABC-26-00034|Pipe import\n",
             encoding="utf-8",
         )
 
@@ -940,13 +940,13 @@ class ExchangeServiceTestCase(unittest.TestCase):
                 """,
                 (report.created_tracks[0],),
             ).fetchone(),
-            ("Orbit", "Cosmowyn", "Pipe import"),
+            ("Orbit", "Moonwake", "Pipe import"),
         )
 
     def case_custom_csv_delimiter_refresh_and_import_preserve_quoted_values(self):
         csv_path = self.data_root / "caret-import.csv"
         csv_path.write_text(
-            "track_title^artist_name^comments\n" '"Orbit^Pt. 1"^Cosmowyn^"Dreamy^wide mix"\n',
+            "track_title^artist_name^comments\n" '"Orbit^Pt. 1"^Moonwake^"Dreamy^wide mix"\n',
             encoding="utf-8",
         )
 
@@ -968,7 +968,7 @@ class ExchangeServiceTestCase(unittest.TestCase):
             [
                 {
                     "track_title": "Orbit^Pt. 1",
-                    "artist_name": "Cosmowyn",
+                    "artist_name": "Moonwake",
                     "comments": "Dreamy^wide mix",
                 }
             ],
@@ -984,7 +984,7 @@ class ExchangeServiceTestCase(unittest.TestCase):
 
     def case_import_csv_rejects_invalid_explicit_delimiter(self):
         csv_path = self.data_root / "invalid-delimiter.csv"
-        csv_path.write_text("track_title,artist_name\nOrbit,Cosmowyn\n", encoding="utf-8")
+        csv_path.write_text("track_title,artist_name\nOrbit,Moonwake\n", encoding="utf-8")
 
         with self.assertRaisesRegex(ValueError, "single non-newline"):
             self.service.inspect_csv(csv_path, delimiter="||")
@@ -1000,8 +1000,8 @@ class ExchangeServiceTestCase(unittest.TestCase):
         csv_path = self.data_root / "duration-import.csv"
         csv_path.write_text(
             "track_title,artist_name,track_length_sec\n"
-            "Orbit,Cosmowyn,12:34:56\n"
-            "Pulse,Cosmowyn,180\n",
+            "Orbit,Moonwake,12:34:56\n"
+            "Pulse,Moonwake,180\n",
             encoding="utf-8",
         )
 
@@ -1026,7 +1026,7 @@ class ExchangeServiceTestCase(unittest.TestCase):
     def case_import_csv_invalid_track_length_text_still_fails_row(self):
         csv_path = self.data_root / "invalid-duration-import.csv"
         csv_path.write_text(
-            "track_title,artist_name,track_length_sec\nOrbit,Cosmowyn,not-a-duration\n",
+            "track_title,artist_name,track_length_sec\nOrbit,Moonwake,not-a-duration\n",
             encoding="utf-8",
         )
 
@@ -1051,10 +1051,10 @@ class ExchangeServiceTestCase(unittest.TestCase):
         workbook = Workbook()
         sheet = workbook.active
         sheet.append(["track_title", "artist_name", "track_length_sec"])
-        sheet.append(["Orbit", "Cosmowyn", "12:34:56"])
-        sheet.append(["Pulse", "Cosmowyn", time(1, 2, 3)])
-        sheet.append(["Drift", "Cosmowyn", timedelta(hours=2, minutes=3, seconds=4)])
-        sheet.append(["Signal", "Cosmowyn", 180])
+        sheet.append(["Orbit", "Moonwake", "12:34:56"])
+        sheet.append(["Pulse", "Moonwake", time(1, 2, 3)])
+        sheet.append(["Drift", "Moonwake", timedelta(hours=2, minutes=3, seconds=4)])
+        sheet.append(["Signal", "Moonwake", 180])
         workbook.save(xlsx_path)
 
         report = self.service.import_xlsx(
@@ -1351,7 +1351,7 @@ class ExchangeServiceTestCase(unittest.TestCase):
             TrackCreatePayload(
                 isrc="NL-ABC-26-00035",
                 track_title="Orbit",
-                artist_name="Cosmowyn",
+                artist_name="Moonwake",
                 additional_artists=[],
                 album_title=None,
                 release_date=None,
@@ -1364,7 +1364,7 @@ class ExchangeServiceTestCase(unittest.TestCase):
         )
         csv_path = self.data_root / "merge-case-import.csv"
         csv_path.write_text(
-            "track_title,artist_name,comments\nORBIT,COSMOWYN,Imported note\n",
+            "track_title,artist_name,comments\nORBIT,MOONWAKE,Imported note\n",
             encoding="utf-8",
         )
 
@@ -1397,7 +1397,7 @@ class ExchangeServiceTestCase(unittest.TestCase):
                 """,
                 (track_id,),
             ).fetchone(),
-            ("Orbit", "Cosmowyn", "Imported note"),
+            ("Orbit", "Moonwake", "Imported note"),
         )
 
     def case_merge_mode_matches_case_only_upc_title_lookup(self):
@@ -1405,7 +1405,7 @@ class ExchangeServiceTestCase(unittest.TestCase):
             TrackCreatePayload(
                 isrc="NL-ABC-26-00036",
                 track_title="Orbit",
-                artist_name="Cosmowyn",
+                artist_name="Moonwake",
                 additional_artists=[],
                 album_title=None,
                 release_date=None,
@@ -1451,7 +1451,7 @@ class ExchangeServiceTestCase(unittest.TestCase):
                 """,
                 (track_id,),
             ).fetchone(),
-            ("Orbit", "Cosmowyn", "UPC title match"),
+            ("Orbit", "Moonwake", "UPC title match"),
         )
 
     def case_merge_mode_does_not_auto_merge_ambiguous_case_normalized_match(self):
@@ -1460,7 +1460,7 @@ class ExchangeServiceTestCase(unittest.TestCase):
                 TrackCreatePayload(
                     isrc=f"NL-ABC-26-000{suffix}",
                     track_title="Orbit",
-                    artist_name="Cosmowyn",
+                    artist_name="Moonwake",
                     additional_artists=[],
                     album_title=None,
                     release_date=None,
@@ -1514,7 +1514,7 @@ class ExchangeServiceTestCase(unittest.TestCase):
         self.custom_defs.ensure_fields([{"name": "Mood", "field_type": "text"}])
         csv_path = self.data_root / "custom-mapping-import.csv"
         csv_path.write_text(
-            "Title,Artist,Energy\nOrbit,Cosmowyn,Dreamy\n",
+            "Title,Artist,Energy\nOrbit,Moonwake,Dreamy\n",
             encoding="utf-8",
         )
 
@@ -1552,7 +1552,7 @@ class ExchangeServiceTestCase(unittest.TestCase):
         )
         csv_path = self.data_root / "distribution-status-import.csv"
         csv_path.write_text(
-            "track_title,artist_name,custom::Distribution Status\n" "Orbit,Cosmowyn,Approved\n",
+            "track_title,artist_name,custom::Distribution Status\n" "Orbit,Moonwake,Approved\n",
             encoding="utf-8",
         )
 
@@ -1601,7 +1601,7 @@ class ExchangeServiceTestCase(unittest.TestCase):
                     "rows": [
                         {
                             "track_title": "Orbit",
-                            "artist_name": "Cosmowyn",
+                            "artist_name": "Moonwake",
                             "custom::Mood": "Dreamy",
                         }
                     ],
@@ -1634,7 +1634,7 @@ class ExchangeServiceTestCase(unittest.TestCase):
             "rows": [
                 {
                     "track_title": "Orbit",
-                    "artist_name": "Cosmowyn",
+                    "artist_name": "Moonwake",
                     "custom::Mood": "Dreamy",
                 }
             ],

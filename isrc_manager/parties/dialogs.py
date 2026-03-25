@@ -9,7 +9,9 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QHeaderView,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QMessageBox,
     QPlainTextEdit,
@@ -46,9 +48,10 @@ class PartyEditorDialog(QDialog):
         super().__init__(parent)
         self.party_service = party_service
         self.party = party
+        self._artist_aliases: list[str] = []
         self.setWindowTitle("Edit Party" if party is not None else "Create Party")
-        self.resize(760, 620)
-        self.setMinimumSize(620, 500)
+        self.resize(840, 700)
+        self.setMinimumSize(700, 560)
         _apply_standard_dialog_chrome(self, "partyEditorDialog")
 
         root = QVBoxLayout(self)
@@ -89,12 +92,37 @@ class PartyEditorDialog(QDialog):
         identity_form = create_form_tab(
             "Identity",
             "Party Identity",
-            "The core name and classification fields used when linking this record across the catalog.",
+            "Capture the canonical legal, public, and artist-facing identity used across contracts, rights, and template resolution.",
+        )
+        aliases_page = QWidget(self.tabs)
+        aliases_layout = QVBoxLayout(aliases_page)
+        aliases_layout.setContentsMargins(0, 0, 0, 0)
+        aliases_layout.setSpacing(0)
+        aliases_scroll, _, aliases_content = _create_scrollable_dialog_content(aliases_page)
+        aliases_layout.addWidget(aliases_scroll, 1)
+        aliases_box, aliases_box_layout = _create_standard_section(
+            aliases_page,
+            "Artist Aliases",
+            "Attach multiple artist-facing names to one canonical party. These aliases stay tied to the same party for reuse and template resolution.",
+        )
+        aliases_content.addWidget(aliases_box)
+        aliases_content.addStretch(1)
+        self.tabs.addTab(aliases_page, "Artist Aliases")
+
+        address_form = create_form_tab(
+            "Address",
+            "Address",
+            "Store the structured address values used in agreements, invoices, and partner correspondence.",
         )
         contact_form = create_form_tab(
             "Contact",
-            "Contact & Registration",
-            "Store the main contact details and registry identifiers that help keep this party unique.",
+            "Contact",
+            "Store the main communication channels and contact person details used when reaching this party.",
+        )
+        business_form = create_form_tab(
+            "Business / Legal",
+            "Business / Legal",
+            "Keep registration and financial identifiers in one place so templates can resolve from a single authoritative source.",
         )
         notes_page = QWidget(self.tabs)
         notes_layout = QVBoxLayout(notes_page)
@@ -117,32 +145,126 @@ class PartyEditorDialog(QDialog):
         self.display_name_edit = QLineEdit()
         identity_form.addRow("Display Name", self.display_name_edit)
 
+        self.artist_name_edit = QLineEdit()
+        identity_form.addRow("Artist Name", self.artist_name_edit)
+
+        self.company_name_edit = QLineEdit()
+        identity_form.addRow("Company Name", self.company_name_edit)
+
+        self.first_name_edit = QLineEdit()
+        identity_form.addRow("First Name", self.first_name_edit)
+
+        self.middle_name_edit = QLineEdit()
+        identity_form.addRow("Middle Name", self.middle_name_edit)
+
+        self.last_name_edit = QLineEdit()
+        identity_form.addRow("Last Name", self.last_name_edit)
+
         self.party_type_combo = QComboBox()
-        self.party_type_combo.addItems(
-            [item.replace("_", " ").title() for item in PARTY_TYPE_CHOICES]
-        )
+        for item in PARTY_TYPE_CHOICES:
+            self.party_type_combo.addItem(item.replace("_", " ").title(), item)
         identity_form.addRow("Party Type", self.party_type_combo)
 
-        self.country_edit = QLineEdit()
-        identity_form.addRow("Country", self.country_edit)
+        alias_entry_row = QHBoxLayout()
+        alias_entry_row.setContentsMargins(0, 0, 0, 0)
+        alias_entry_row.setSpacing(8)
+        self.alias_edit = QLineEdit(self)
+        self.alias_edit.setPlaceholderText("Add one alias at a time")
+        self.alias_edit.returnPressed.connect(self._add_alias)
+        alias_entry_row.addWidget(self.alias_edit, 1)
+        self.add_alias_button = QPushButton("Add Alias", self)
+        self.add_alias_button.clicked.connect(self._add_alias)
+        alias_entry_row.addWidget(self.add_alias_button)
+        aliases_box_layout.addLayout(alias_entry_row)
+
+        alias_actions_row = QHBoxLayout()
+        alias_actions_row.setContentsMargins(0, 0, 0, 0)
+        alias_actions_row.setSpacing(8)
+        self.remove_alias_button = QPushButton("Remove Highlighted", self)
+        self.remove_alias_button.clicked.connect(self._remove_selected_aliases)
+        alias_actions_row.addWidget(self.remove_alias_button)
+        alias_actions_row.addStretch(1)
+        aliases_box_layout.addLayout(alias_actions_row)
+
+        self.alias_hint_label = QLabel(
+            "Use aliases for alternate artist-facing names only. Keep the canonical party identity on the Identity tab.",
+            self,
+        )
+        self.alias_hint_label.setProperty("role", "supportingText")
+        self.alias_hint_label.setWordWrap(True)
+        aliases_box_layout.addWidget(self.alias_hint_label)
+
+        self.alias_table = QTableWidget(0, 1, self)
+        self.alias_table.setObjectName("partyArtistAliasTable")
+        self.alias_table.setHorizontalHeaderLabels(["Artist Alias"])
+        self.alias_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.alias_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.alias_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.alias_table.verticalHeader().setVisible(False)
+        alias_header = self.alias_table.horizontalHeader()
+        alias_header.setSectionResizeMode(0, QHeaderView.Stretch)
+        self.alias_table.setMinimumHeight(180)
+        aliases_box_layout.addWidget(self.alias_table, 1)
 
         self.contact_edit = QLineEdit()
         contact_form.addRow("Contact Person", self.contact_edit)
 
         self.email_edit = QLineEdit()
-        contact_form.addRow("Email", self.email_edit)
+        contact_form.addRow("Email Address", self.email_edit)
+
+        self.alternative_email_edit = QLineEdit()
+        contact_form.addRow("Alternative Email Address", self.alternative_email_edit)
 
         self.phone_edit = QLineEdit()
-        contact_form.addRow("Phone", self.phone_edit)
+        contact_form.addRow("Phone Number", self.phone_edit)
 
         self.website_edit = QLineEdit()
         contact_form.addRow("Website", self.website_edit)
 
+        self.street_name_edit = QLineEdit()
+        address_form.addRow("Street Name", self.street_name_edit)
+
+        self.street_number_edit = QLineEdit()
+        address_form.addRow("Street Number", self.street_number_edit)
+
+        self.address_line1_edit = QLineEdit()
+        address_form.addRow("Address Line 1", self.address_line1_edit)
+
+        self.address_line2_edit = QLineEdit()
+        address_form.addRow("Address Line 2", self.address_line2_edit)
+
+        self.city_edit = QLineEdit()
+        address_form.addRow("City", self.city_edit)
+
+        self.region_edit = QLineEdit()
+        address_form.addRow("Region / State", self.region_edit)
+
+        self.postal_code_edit = QLineEdit()
+        address_form.addRow("Postal Code", self.postal_code_edit)
+
+        self.country_edit = QLineEdit()
+        address_form.addRow("Country", self.country_edit)
+
+        self.bank_account_edit = QLineEdit()
+        business_form.addRow("Bank Account Number", self.bank_account_edit)
+
+        self.vat_number_edit = QLineEdit()
+        business_form.addRow("VAT Number", self.vat_number_edit)
+
+        self.chamber_number_edit = QLineEdit()
+        business_form.addRow("Chamber of Commerce Number", self.chamber_number_edit)
+
+        self.tax_id_edit = QLineEdit()
+        business_form.addRow("Tax ID", self.tax_id_edit)
+
         self.pro_edit = QLineEdit()
-        contact_form.addRow("PRO", self.pro_edit)
+        business_form.addRow("PRO Affiliation", self.pro_edit)
+
+        self.pro_number_edit = QLineEdit()
+        business_form.addRow("PRO Number", self.pro_number_edit)
 
         self.ipi_edit = QLineEdit()
-        contact_form.addRow("IPI / CAE", self.ipi_edit)
+        business_form.addRow("IPI / CAE", self.ipi_edit)
 
         self.notes_edit = QPlainTextEdit()
         self.notes_edit.setMinimumHeight(120)
@@ -154,34 +276,108 @@ class PartyEditorDialog(QDialog):
         root.addWidget(buttons)
         _apply_compact_dialog_control_heights(self)
 
+        self._set_party_type_value("organization")
         if party is not None:
             self.legal_name_edit.setText(party.legal_name)
             self.display_name_edit.setText(party.display_name or "")
-            self.party_type_combo.setCurrentText(
-                (party.party_type or "organization").replace("_", " ").title()
-            )
+            self.artist_name_edit.setText(party.artist_name or "")
+            self.company_name_edit.setText(party.company_name or "")
+            self.first_name_edit.setText(party.first_name or "")
+            self.middle_name_edit.setText(party.middle_name or "")
+            self.last_name_edit.setText(party.last_name or "")
+            self._set_party_type_value(party.party_type or "organization")
             self.contact_edit.setText(party.contact_person or "")
             self.email_edit.setText(party.email or "")
+            self.alternative_email_edit.setText(party.alternative_email or "")
             self.phone_edit.setText(party.phone or "")
             self.website_edit.setText(party.website or "")
+            self.street_name_edit.setText(party.street_name or "")
+            self.street_number_edit.setText(party.street_number or "")
+            self.address_line1_edit.setText(party.address_line1 or "")
+            self.address_line2_edit.setText(party.address_line2 or "")
+            self.city_edit.setText(party.city or "")
+            self.region_edit.setText(party.region or "")
+            self.postal_code_edit.setText(party.postal_code or "")
             self.country_edit.setText(party.country or "")
+            self.bank_account_edit.setText(party.bank_account_number or "")
+            self.vat_number_edit.setText(party.vat_number or "")
+            self.chamber_number_edit.setText(party.chamber_of_commerce_number or "")
+            self.tax_id_edit.setText(party.tax_id or "")
             self.pro_edit.setText(party.pro_affiliation or "")
+            self.pro_number_edit.setText(party.pro_number or "")
             self.ipi_edit.setText(party.ipi_cae or "")
             self.notes_edit.setPlainText(party.notes or "")
+            self._artist_aliases = list(party.artist_aliases)
+            self._refresh_alias_table()
+
+    def _set_party_type_value(self, value: str) -> None:
+        clean_value = str(value or "organization").strip().lower().replace(" ", "_")
+        index = self.party_type_combo.findData(clean_value)
+        if index >= 0:
+            self.party_type_combo.setCurrentIndex(index)
+            return
+        fallback_index = self.party_type_combo.findData("other")
+        if fallback_index >= 0:
+            self.party_type_combo.setCurrentIndex(fallback_index)
+
+    def _refresh_alias_table(self) -> None:
+        self.alias_table.setRowCount(len(self._artist_aliases))
+        for row, alias_name in enumerate(self._artist_aliases):
+            self.alias_table.setItem(row, 0, QTableWidgetItem(alias_name))
+
+    def _add_alias(self) -> None:
+        alias_name = self.alias_edit.text().strip()
+        if not alias_name:
+            return
+        if alias_name.casefold() not in {item.casefold() for item in self._artist_aliases}:
+            self._artist_aliases.append(alias_name)
+            self._refresh_alias_table()
+        self.alias_edit.clear()
+
+    def _remove_selected_aliases(self) -> None:
+        selection_model = self.alias_table.selectionModel()
+        if selection_model is None:
+            return
+        rows = sorted({index.row() for index in selection_model.selectedRows()})
+        if not rows:
+            return
+        for row in reversed(rows):
+            if 0 <= row < len(self._artist_aliases):
+                del self._artist_aliases[row]
+        self._refresh_alias_table()
 
     def payload(self) -> PartyPayload:
         return PartyPayload(
             legal_name=self.legal_name_edit.text().strip(),
             display_name=self.display_name_edit.text().strip() or None,
-            party_type=self.party_type_combo.currentText().strip().lower().replace(" ", "_"),
+            artist_name=self.artist_name_edit.text().strip() or None,
+            company_name=self.company_name_edit.text().strip() or None,
+            first_name=self.first_name_edit.text().strip() or None,
+            middle_name=self.middle_name_edit.text().strip() or None,
+            last_name=self.last_name_edit.text().strip() or None,
+            party_type=str(self.party_type_combo.currentData() or "organization"),
             contact_person=self.contact_edit.text().strip() or None,
             email=self.email_edit.text().strip() or None,
+            alternative_email=self.alternative_email_edit.text().strip() or None,
             phone=self.phone_edit.text().strip() or None,
             website=self.website_edit.text().strip() or None,
+            street_name=self.street_name_edit.text().strip() or None,
+            street_number=self.street_number_edit.text().strip() or None,
+            address_line1=self.address_line1_edit.text().strip() or None,
+            address_line2=self.address_line2_edit.text().strip() or None,
+            city=self.city_edit.text().strip() or None,
+            region=self.region_edit.text().strip() or None,
+            postal_code=self.postal_code_edit.text().strip() or None,
             country=self.country_edit.text().strip() or None,
+            bank_account_number=self.bank_account_edit.text().strip() or None,
+            chamber_of_commerce_number=self.chamber_number_edit.text().strip() or None,
+            tax_id=self.tax_id_edit.text().strip() or None,
+            vat_number=self.vat_number_edit.text().strip() or None,
             pro_affiliation=self.pro_edit.text().strip() or None,
+            pro_number=self.pro_number_edit.text().strip() or None,
             ipi_cae=self.ipi_edit.text().strip() or None,
             notes=self.notes_edit.toPlainText().strip() or None,
+            artist_aliases=list(self._artist_aliases),
         )
 
 
@@ -216,9 +412,18 @@ class PartyManagerPanel(QWidget):
         top_row.setContentsMargins(0, 0, 0, 0)
         top_row.setSpacing(10)
         self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText("Search parties by name, email, or IPI/CAE...")
+        self.search_edit.setPlaceholderText(
+            "Search parties by legal name, display name, artist name, alias, company, email, PRO, or Chamber number..."
+        )
         self.search_edit.textChanged.connect(self.refresh)
         top_row.addWidget(self.search_edit, 1)
+        self.party_type_filter_combo = QComboBox(self)
+        self.party_type_filter_combo.setObjectName("partyManagerTypeFilter")
+        self.party_type_filter_combo.addItem("All Types", "")
+        for item in PARTY_TYPE_CHOICES:
+            self.party_type_filter_combo.addItem(item.replace("_", " ").title(), item)
+        self.party_type_filter_combo.currentIndexChanged.connect(self.refresh)
+        top_row.addWidget(self.party_type_filter_combo)
         controls_layout.addLayout(top_row)
 
         add_button = QPushButton("Add")
@@ -242,9 +447,17 @@ class PartyManagerPanel(QWidget):
         controls_layout.addWidget(self.manage_actions_cluster)
         root.addWidget(controls_box)
 
-        self.table = QTableWidget(0, 6, self)
+        self.table = QTableWidget(0, 7, self)
         self.table.setHorizontalHeaderLabels(
-            ["ID", "Legal Name", "Display Name", "Type", "Email", "Linked Records"]
+            [
+                "ID",
+                "Primary Name",
+                "Legal / Company",
+                "Type",
+                "Email",
+                "Aliases",
+                "Linked Records",
+            ]
         )
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
@@ -307,23 +520,38 @@ class PartyManagerPanel(QWidget):
         return ids
 
     def refresh(self) -> None:
+        if not hasattr(self, "table"):
+            return
         selected_ids = self._selected_party_ids()
         service = self._party_service()
         if service is None:
             self.table.setRowCount(0)
             return
-        records = service.list_parties(search_text=self.search_edit.text())
+        records = service.list_parties(
+            search_text=self.search_edit.text(),
+            party_type=str(self.party_type_filter_combo.currentData() or "") or None,
+        )
         self.table.setRowCount(0)
         for record in records:
             usage = service.usage_summary(record.id)
             row = self.table.rowCount()
             self.table.insertRow(row)
+            primary_name = (
+                record.display_name
+                or record.artist_name
+                or record.company_name
+                or record.legal_name
+            )
+            legal_or_company = record.company_name or record.legal_name
+            preferred_email = record.email or record.alternative_email or ""
+            aliases_preview = ", ".join(record.artist_aliases)
             values = [
                 str(record.id),
-                record.legal_name,
-                record.display_name or "",
+                primary_name,
+                legal_or_company,
                 record.party_type.replace("_", " ").title(),
-                record.email or "",
+                preferred_email,
+                aliases_preview,
                 str(usage.work_count + usage.contract_count + usage.rights_count),
             ]
             for column, value in enumerate(values):

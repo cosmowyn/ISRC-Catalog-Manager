@@ -288,6 +288,7 @@ from isrc_manager.services import (
     LegacyLicenseMigrationService,
     LegacyPromotedFieldRepairService,
     LicenseService,
+    OwnerPartySettings,
     ProfileKVService,
     ProfileStoreService,
     ProfileWorkflowService,
@@ -641,6 +642,7 @@ class ApplicationSettingsDialog(QDialog):
         history_prune_pre_restore_copies_after_days: int = (
             DEFAULT_HISTORY_PRUNE_PRE_RESTORE_COPIES_AFTER_DAYS
         ),
+        owner_party_settings: OwnerPartySettings | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -689,6 +691,7 @@ class ApplicationSettingsDialog(QDialog):
         self.gs1_integration_service = getattr(parent, "gs1_integration_service", None)
         self._gs1_template_profile = None
         self._gs1_template_asset = gs1_template_asset
+        self._owner_party_settings = owner_party_settings or OwnerPartySettings()
         self._pending_gs1_template_path = ""
         self._gs1_default_option_combos: dict[str, QComboBox] = {}
         self._gs1_contract_entries = tuple(gs1_contract_entries or ())
@@ -1088,7 +1091,235 @@ class ApplicationSettingsDialog(QDialog):
         )
 
         general_layout.addStretch(1)
-        self.tabs.addTab(self._wrap_tab_page(general_page), "General")
+        self._general_tab_index = self.tabs.addTab(self._wrap_tab_page(general_page), "General")
+
+        owner_page = QWidget(self)
+        owner_page.setProperty("role", "workspaceCanvas")
+        owner_layout = QVBoxLayout(owner_page)
+        owner_layout.setContentsMargins(10, 10, 10, 10)
+        owner_layout.setSpacing(14)
+
+        owner_intro_box = QGroupBox("Owner Party")
+        owner_intro_layout = QVBoxLayout(owner_intro_box)
+        owner_intro_layout.setContentsMargins(12, 12, 12, 12)
+        owner_intro_layout.setSpacing(8)
+        owner_intro_label = QLabel(
+            "These fields define the application owner as an authoritative licensor / rights-holder "
+            "party for contract template placeholders. VAT / BTW Number, BUMA/STEMRA Relation Number, "
+            "and BUMA/STEMRA IPI stay managed in General > Registration & Codes and are reused automatically."
+        )
+        owner_intro_label.setWordWrap(True)
+        owner_intro_layout.addWidget(owner_intro_label)
+        owner_layout.addWidget(owner_intro_box)
+
+        owner_identity_box = QGroupBox("Identity")
+        owner_identity_grid = QGridLayout(owner_identity_box)
+        self._configure_grid(owner_identity_grid)
+        owner_layout.addWidget(owner_identity_box)
+
+        self.owner_display_name_edit = QLineEdit(self._owner_party_settings.display_name)
+        self.owner_display_name_edit.setClearButtonEnabled(True)
+        self._add_row(
+            owner_identity_grid,
+            0,
+            "Display Name",
+            self.owner_display_name_edit,
+            "Friendly public name used when the owner acts as the licensor or rights-holder.",
+        )
+
+        self.owner_legal_name_edit = QLineEdit(self._owner_party_settings.legal_name)
+        self.owner_legal_name_edit.setClearButtonEnabled(True)
+        self._add_row(
+            owner_identity_grid,
+            1,
+            "Legal Name",
+            self.owner_legal_name_edit,
+            "Formal legal or contracting name for the application owner.",
+        )
+
+        self.owner_artist_name_edit = QLineEdit(self._owner_party_settings.artist_name)
+        self.owner_artist_name_edit.setClearButtonEnabled(True)
+        self._add_row(
+            owner_identity_grid,
+            2,
+            "Artist Name",
+            self.owner_artist_name_edit,
+            "Artist-facing owner name when the owner is also the credited artist identity.",
+        )
+
+        self.owner_company_name_edit = QLineEdit(self._owner_party_settings.company_name)
+        self.owner_company_name_edit.setClearButtonEnabled(True)
+        self._add_row(owner_identity_grid, 3, "Company Name", self.owner_company_name_edit)
+
+        self.owner_first_name_edit = QLineEdit(self._owner_party_settings.first_name)
+        self.owner_first_name_edit.setClearButtonEnabled(True)
+        self._add_row(owner_identity_grid, 4, "First Name", self.owner_first_name_edit)
+
+        self.owner_middle_name_edit = QLineEdit(self._owner_party_settings.middle_name)
+        self.owner_middle_name_edit.setClearButtonEnabled(True)
+        self._add_row(owner_identity_grid, 5, "Middle Name", self.owner_middle_name_edit)
+
+        self.owner_last_name_edit = QLineEdit(self._owner_party_settings.last_name)
+        self.owner_last_name_edit.setClearButtonEnabled(True)
+        self._add_row(owner_identity_grid, 6, "Last Name", self.owner_last_name_edit)
+
+        self.owner_contact_person_edit = QLineEdit(self._owner_party_settings.contact_person)
+        self.owner_contact_person_edit.setClearButtonEnabled(True)
+        self._add_row(owner_identity_grid, 7, "Contact Person", self.owner_contact_person_edit)
+
+        owner_address_box = QGroupBox("Address")
+        owner_address_grid = QGridLayout(owner_address_box)
+        self._configure_grid(owner_address_grid)
+        owner_layout.addWidget(owner_address_box)
+
+        self.owner_street_name_edit = QLineEdit(self._owner_party_settings.street_name)
+        self.owner_street_name_edit.setClearButtonEnabled(True)
+        self._add_row(owner_address_grid, 0, "Street Name", self.owner_street_name_edit)
+
+        self.owner_street_number_edit = QLineEdit(self._owner_party_settings.street_number)
+        self.owner_street_number_edit.setClearButtonEnabled(True)
+        self._add_row(owner_address_grid, 1, "Street Number", self.owner_street_number_edit)
+
+        self.owner_address_line1_edit = QLineEdit(self._owner_party_settings.address_line1)
+        self.owner_address_line1_edit.setClearButtonEnabled(True)
+        self._add_row(owner_address_grid, 2, "Address Line 1", self.owner_address_line1_edit)
+
+        self.owner_address_line2_edit = QLineEdit(self._owner_party_settings.address_line2)
+        self.owner_address_line2_edit.setClearButtonEnabled(True)
+        self._add_row(owner_address_grid, 3, "Address Line 2", self.owner_address_line2_edit)
+
+        self.owner_city_edit = QLineEdit(self._owner_party_settings.city)
+        self.owner_city_edit.setClearButtonEnabled(True)
+        self._add_row(owner_address_grid, 4, "City", self.owner_city_edit)
+
+        self.owner_region_edit = QLineEdit(self._owner_party_settings.region)
+        self.owner_region_edit.setClearButtonEnabled(True)
+        self._add_row(owner_address_grid, 5, "Region / State", self.owner_region_edit)
+
+        self.owner_postal_code_edit = QLineEdit(self._owner_party_settings.postal_code)
+        self.owner_postal_code_edit.setClearButtonEnabled(True)
+        self._add_row(owner_address_grid, 6, "Postal Code", self.owner_postal_code_edit)
+
+        self.owner_country_edit = QLineEdit(self._owner_party_settings.country)
+        self.owner_country_edit.setClearButtonEnabled(True)
+        self._add_row(owner_address_grid, 7, "Country", self.owner_country_edit)
+
+        owner_contact_box = QGroupBox("Contact")
+        owner_contact_grid = QGridLayout(owner_contact_box)
+        self._configure_grid(owner_contact_grid)
+        owner_layout.addWidget(owner_contact_box)
+
+        self.owner_email_edit = QLineEdit(self._owner_party_settings.email)
+        self.owner_email_edit.setClearButtonEnabled(True)
+        self._add_row(owner_contact_grid, 0, "Email Address", self.owner_email_edit)
+
+        self.owner_alternative_email_edit = QLineEdit(self._owner_party_settings.alternative_email)
+        self.owner_alternative_email_edit.setClearButtonEnabled(True)
+        self._add_row(
+            owner_contact_grid,
+            1,
+            "Alternative Email",
+            self.owner_alternative_email_edit,
+        )
+
+        self.owner_phone_edit = QLineEdit(self._owner_party_settings.phone)
+        self.owner_phone_edit.setClearButtonEnabled(True)
+        self._add_row(owner_contact_grid, 2, "Phone Number", self.owner_phone_edit)
+
+        self.owner_website_edit = QLineEdit(self._owner_party_settings.website)
+        self.owner_website_edit.setClearButtonEnabled(True)
+        self._add_row(owner_contact_grid, 3, "Website", self.owner_website_edit)
+
+        owner_business_box = QGroupBox("Business / Legal")
+        owner_business_grid = QGridLayout(owner_business_box)
+        self._configure_grid(owner_business_grid)
+        owner_layout.addWidget(owner_business_box)
+
+        self.owner_bank_account_number_edit = QLineEdit(
+            self._owner_party_settings.bank_account_number
+        )
+        self.owner_bank_account_number_edit.setClearButtonEnabled(True)
+        self._add_row(
+            owner_business_grid,
+            0,
+            "Bank Account Number",
+            self.owner_bank_account_number_edit,
+        )
+
+        self.owner_chamber_of_commerce_number_edit = QLineEdit(
+            self._owner_party_settings.chamber_of_commerce_number
+        )
+        self.owner_chamber_of_commerce_number_edit.setClearButtonEnabled(True)
+        self._add_row(
+            owner_business_grid,
+            1,
+            "Chamber Of Commerce Number",
+            self.owner_chamber_of_commerce_number_edit,
+        )
+
+        self.owner_tax_id_edit = QLineEdit(self._owner_party_settings.tax_id)
+        self.owner_tax_id_edit.setClearButtonEnabled(True)
+        self._add_row(
+            owner_business_grid,
+            2,
+            "Tax ID",
+            self.owner_tax_id_edit,
+            "Optional if different from the VAT / BTW number already managed in Registration & Codes.",
+        )
+
+        self.owner_pro_affiliation_edit = QLineEdit(self._owner_party_settings.pro_affiliation)
+        self.owner_pro_affiliation_edit.setClearButtonEnabled(True)
+        self._add_row(
+            owner_business_grid,
+            3,
+            "PRO Affiliation",
+            self.owner_pro_affiliation_edit,
+        )
+
+        self.owner_vat_number_display = QLineEdit(self._owner_party_settings.vat_number)
+        self.owner_vat_number_display.setReadOnly(True)
+        self._add_row(
+            owner_business_grid,
+            4,
+            "VAT / BTW Number",
+            self.owner_vat_number_display,
+            "Managed in General > Registration & Codes.",
+        )
+
+        self.owner_pro_number_display = QLineEdit(self._owner_party_settings.pro_number)
+        self.owner_pro_number_display.setReadOnly(True)
+        self._add_row(
+            owner_business_grid,
+            5,
+            "PRO Number",
+            self.owner_pro_number_display,
+            "Reused from the BUMA/STEMRA Relation Number in General > Registration & Codes.",
+        )
+
+        self.owner_ipi_cae_display = QLineEdit(self._owner_party_settings.ipi_cae)
+        self.owner_ipi_cae_display.setReadOnly(True)
+        self._add_row(
+            owner_business_grid,
+            6,
+            "IPI / CAE",
+            self.owner_ipi_cae_display,
+            "Reused from the BUMA/STEMRA IPI Number in General > Registration & Codes.",
+        )
+
+        self.owner_notes_edit = QLineEdit(self._owner_party_settings.notes)
+        self.owner_notes_edit.setClearButtonEnabled(True)
+        self._add_row(
+            owner_business_grid,
+            7,
+            "Notes",
+            self.owner_notes_edit,
+        )
+        self.btw_number_edit.textChanged.connect(self.owner_vat_number_display.setText)
+        self.buma_relatie_edit.textChanged.connect(self.owner_pro_number_display.setText)
+        self.buma_ipi_edit.textChanged.connect(self.owner_ipi_cae_display.setText)
+
+        owner_layout.addStretch(1)
+        self._owner_tab_index = self.tabs.addTab(self._wrap_tab_page(owner_page), "Owner Party")
 
         gs1_page = QWidget(self)
         gs1_page.setProperty("role", "workspaceCanvas")
@@ -1276,7 +1507,7 @@ class ApplicationSettingsDialog(QDialog):
 
         gs1_layout.addWidget(gs1_defaults_box)
         gs1_layout.addStretch(1)
-        self.tabs.addTab(self._wrap_tab_page(gs1_page), "GS1")
+        self._gs1_tab_index = self.tabs.addTab(self._wrap_tab_page(gs1_page), "GS1")
 
         theme_page = QWidget(self)
         self.theme_page = theme_page
@@ -1417,7 +1648,7 @@ class ApplicationSettingsDialog(QDialog):
         self.theme_splitter.setStretchFactor(1, 2)
         theme_layout.addWidget(self.theme_splitter, 1)
 
-        self.tabs.addTab(theme_page, "Theme")
+        self._theme_tab_index = self.tabs.addTab(theme_page, "Theme")
 
         self.button_box = QDialogButtonBox(
             QDialogButtonBox.Save | QDialogButtonBox.Cancel,
@@ -1430,37 +1661,71 @@ class ApplicationSettingsDialog(QDialog):
         self.finished.connect(self._handle_theme_dialog_finished)
 
         self._focus_map = {
-            "window_title": (0, self.window_title_edit),
-            "icon_path": (0, self.icon_path_edit),
-            "isrc_prefix": (0, self.isrc_prefix_edit),
-            "artist_code": (0, self.artist_code_edit),
-            "auto_snapshot_enabled": (0, self.auto_snapshot_enabled_check),
-            "auto_snapshot_interval_minutes": (0, self.auto_snapshot_interval_spin),
-            "history_retention_mode": (0, self.history_retention_mode_combo),
-            "history_auto_cleanup_enabled": (0, self.history_auto_cleanup_enabled_check),
-            "history_storage_budget_mb": (0, self.history_storage_budget_spin),
-            "history_auto_snapshot_keep_latest": (0, self.history_auto_snapshot_keep_latest_spin),
+            "window_title": (self._general_tab_index, self.window_title_edit),
+            "icon_path": (self._general_tab_index, self.icon_path_edit),
+            "isrc_prefix": (self._general_tab_index, self.isrc_prefix_edit),
+            "artist_code": (self._general_tab_index, self.artist_code_edit),
+            "auto_snapshot_enabled": (self._general_tab_index, self.auto_snapshot_enabled_check),
+            "auto_snapshot_interval_minutes": (
+                self._general_tab_index,
+                self.auto_snapshot_interval_spin,
+            ),
+            "history_retention_mode": (self._general_tab_index, self.history_retention_mode_combo),
+            "history_auto_cleanup_enabled": (
+                self._general_tab_index,
+                self.history_auto_cleanup_enabled_check,
+            ),
+            "history_storage_budget_mb": (
+                self._general_tab_index,
+                self.history_storage_budget_spin,
+            ),
+            "history_auto_snapshot_keep_latest": (
+                self._general_tab_index,
+                self.history_auto_snapshot_keep_latest_spin,
+            ),
             "history_prune_pre_restore_copies_after_days": (
-                0,
+                self._general_tab_index,
                 self.history_prune_pre_restore_copies_after_days_spin,
             ),
-            "sena_number": (0, self.sena_number_edit),
-            "btw_number": (0, self.btw_number_edit),
-            "buma_relatie_nummer": (0, self.buma_relatie_edit),
-            "buma_ipi": (0, self.buma_ipi_edit),
-            "gs1_template_path": (1, self.gs1_template_path_edit),
-            "gs1_contracts_csv_path": (1, self.gs1_contracts_csv_edit),
-            "gs1_active_contract_number": (1, self.gs1_active_contract_edit),
-            "gs1_target_market": (1, self.gs1_target_market_edit),
-            "gs1_language": (1, self.gs1_language_edit),
-            "gs1_brand": (1, self.gs1_brand_edit),
-            "gs1_subbrand": (1, self.gs1_subbrand_edit),
-            "gs1_packaging_type": (1, self.gs1_packaging_type_edit),
-            "gs1_product_classification": (1, self.gs1_product_classification_edit),
-            "theme_font_family": (2, self.theme_font_family_combo),
-            "theme_font_size": (2, self.theme_font_size_spin),
-            "theme_custom_qss": (2, self.theme_custom_qss_edit),
-            "theme_preset": (2, self.theme_preset_combo),
+            "sena_number": (self._general_tab_index, self.sena_number_edit),
+            "btw_number": (self._general_tab_index, self.btw_number_edit),
+            "buma_relatie_nummer": (self._general_tab_index, self.buma_relatie_edit),
+            "buma_ipi": (self._general_tab_index, self.buma_ipi_edit),
+            "owner_display_name": (self._owner_tab_index, self.owner_display_name_edit),
+            "owner_legal_name": (self._owner_tab_index, self.owner_legal_name_edit),
+            "owner_artist_name": (self._owner_tab_index, self.owner_artist_name_edit),
+            "owner_company_name": (self._owner_tab_index, self.owner_company_name_edit),
+            "owner_email": (self._owner_tab_index, self.owner_email_edit),
+            "owner_first_name": (self._owner_tab_index, self.owner_first_name_edit),
+            "owner_last_name": (self._owner_tab_index, self.owner_last_name_edit),
+            "owner_street_name": (self._owner_tab_index, self.owner_street_name_edit),
+            "owner_postal_code": (self._owner_tab_index, self.owner_postal_code_edit),
+            "owner_country": (self._owner_tab_index, self.owner_country_edit),
+            "owner_bank_account_number": (
+                self._owner_tab_index,
+                self.owner_bank_account_number_edit,
+            ),
+            "owner_chamber_of_commerce_number": (
+                self._owner_tab_index,
+                self.owner_chamber_of_commerce_number_edit,
+            ),
+            "owner_pro_affiliation": (self._owner_tab_index, self.owner_pro_affiliation_edit),
+            "gs1_template_path": (self._gs1_tab_index, self.gs1_template_path_edit),
+            "gs1_contracts_csv_path": (self._gs1_tab_index, self.gs1_contracts_csv_edit),
+            "gs1_active_contract_number": (self._gs1_tab_index, self.gs1_active_contract_edit),
+            "gs1_target_market": (self._gs1_tab_index, self.gs1_target_market_edit),
+            "gs1_language": (self._gs1_tab_index, self.gs1_language_edit),
+            "gs1_brand": (self._gs1_tab_index, self.gs1_brand_edit),
+            "gs1_subbrand": (self._gs1_tab_index, self.gs1_subbrand_edit),
+            "gs1_packaging_type": (self._gs1_tab_index, self.gs1_packaging_type_edit),
+            "gs1_product_classification": (
+                self._gs1_tab_index,
+                self.gs1_product_classification_edit,
+            ),
+            "theme_font_family": (self._theme_tab_index, self.theme_font_family_combo),
+            "theme_font_size": (self._theme_tab_index, self.theme_font_size_spin),
+            "theme_custom_qss": (self._theme_tab_index, self.theme_custom_qss_edit),
+            "theme_preset": (self._theme_tab_index, self.theme_preset_combo),
         }
 
         self._bind_theme_field_change_tracking()
@@ -3426,6 +3691,38 @@ class ApplicationSettingsDialog(QDialog):
             if line_edit is not None:
                 line_edit.selectAll()
 
+    def _owner_party_settings_payload(self) -> OwnerPartySettings:
+        return OwnerPartySettings(
+            legal_name=self.owner_legal_name_edit.text().strip(),
+            display_name=self.owner_display_name_edit.text().strip(),
+            artist_name=self.owner_artist_name_edit.text().strip(),
+            company_name=self.owner_company_name_edit.text().strip(),
+            first_name=self.owner_first_name_edit.text().strip(),
+            middle_name=self.owner_middle_name_edit.text().strip(),
+            last_name=self.owner_last_name_edit.text().strip(),
+            contact_person=self.owner_contact_person_edit.text().strip(),
+            email=self.owner_email_edit.text().strip(),
+            alternative_email=self.owner_alternative_email_edit.text().strip(),
+            phone=self.owner_phone_edit.text().strip(),
+            website=self.owner_website_edit.text().strip(),
+            street_name=self.owner_street_name_edit.text().strip(),
+            street_number=self.owner_street_number_edit.text().strip(),
+            address_line1=self.owner_address_line1_edit.text().strip(),
+            address_line2=self.owner_address_line2_edit.text().strip(),
+            city=self.owner_city_edit.text().strip(),
+            region=self.owner_region_edit.text().strip(),
+            postal_code=self.owner_postal_code_edit.text().strip(),
+            country=self.owner_country_edit.text().strip(),
+            bank_account_number=self.owner_bank_account_number_edit.text().strip(),
+            chamber_of_commerce_number=self.owner_chamber_of_commerce_number_edit.text().strip(),
+            tax_id=self.owner_tax_id_edit.text().strip(),
+            vat_number=self.btw_number_edit.text().strip(),
+            pro_affiliation=self.owner_pro_affiliation_edit.text().strip(),
+            pro_number=self.buma_relatie_edit.text().strip(),
+            ipi_cae=self.buma_ipi_edit.text().strip(),
+            notes=self.owner_notes_edit.text().strip(),
+        )
+
     def values(self) -> dict[str, object]:
         theme_values = self._theme_value_payload()
         blob_icon_values = self._blob_icon_value_payload()
@@ -3451,6 +3748,7 @@ class ApplicationSettingsDialog(QDialog):
             "btw_number": self.btw_number_edit.text().strip(),
             "buma_relatie_nummer": self.buma_relatie_edit.text().strip(),
             "buma_ipi": self.buma_ipi_edit.text().strip(),
+            "owner_party_settings": self._owner_party_settings_payload(),
             "gs1_template_asset": self._gs1_template_asset,
             "gs1_template_import_path": self._pending_gs1_template_path.strip(),
             "gs1_template_storage_mode": self.gs1_template_storage_combo.currentData(),
@@ -3515,7 +3813,7 @@ class ApplicationSettingsDialog(QDialog):
                     "Blob Icon Required",
                     f"Choose or type an emoji for the {kind} blob icon.",
                 )
-                self.tabs.setCurrentIndex(2)
+                self.tabs.setCurrentIndex(self._theme_tab_index)
                 return
             if mode == "image" and not (
                 str(spec.get("image_path") or "").strip()
@@ -3526,7 +3824,7 @@ class ApplicationSettingsDialog(QDialog):
                     "Blob Icon Required",
                     f"Choose a custom image for the {kind} blob icon.",
                 )
-                self.tabs.setCurrentIndex(2)
+                self.tabs.setCurrentIndex(self._theme_tab_index)
                 return
         for key, edit in self._theme_color_edits.items():
             color_text = edit.text().strip()
@@ -3536,7 +3834,7 @@ class ApplicationSettingsDialog(QDialog):
                     "Invalid Theme Color",
                     f"{key.replace('_', ' ').title()} must be a valid color value like #112233, #abc, or a named Qt color.",
                 )
-                self.tabs.setCurrentIndex(2)
+                self.tabs.setCurrentIndex(self._theme_tab_index)
                 edit.setFocus(Qt.OtherFocusReason)
                 edit.selectAll()
                 return
@@ -7787,6 +8085,7 @@ class App(QMainWindow):
             ContractTemplateFormService(
                 template_service=self.contract_template_service,
                 catalog_service=self.contract_template_catalog_service,
+                settings_reads=self.settings_reads,
                 release_service=self.release_service,
                 work_service=self.work_service,
                 contract_service=self.contract_service,
@@ -7802,6 +8101,7 @@ class App(QMainWindow):
             ContractTemplateExportService(
                 template_service=self.contract_template_service,
                 catalog_service=self.contract_template_catalog_service,
+                settings_reads=self.settings_reads,
                 track_service=self.track_service,
                 release_service=self.release_service,
                 work_service=self.work_service,
@@ -8757,6 +9057,7 @@ class App(QMainWindow):
             "btw_number": registration.btw_number,
             "buma_relatie_nummer": registration.buma_relatie_nummer,
             "buma_ipi": registration.buma_ipi,
+            "owner_party_settings": self.settings_reads.load_owner_party_settings(),
             "gs1_template_asset": (
                 self.gs1_settings_service.load_template_asset()
                 if self.gs1_settings_service is not None
@@ -9155,6 +9456,26 @@ class App(QMainWindow):
                     )
                 changed_count += 1
 
+            before_owner_settings = (
+                before_values.get("owner_party_settings") or OwnerPartySettings()
+            )
+            after_owner_settings = after_values.get("owner_party_settings") or OwnerPartySettings()
+            before_owner_payload = before_owner_settings.to_profile_payload()
+            after_owner_payload = after_owner_settings.to_profile_payload()
+            if after_owner_payload != before_owner_payload:
+                saved_owner_settings = self.settings_mutations.set_owner_party_settings(
+                    after_owner_settings
+                )
+                self.logger.info("Owner party settings updated")
+                if self.history_manager is not None:
+                    self.history_manager.record_setting_change(
+                        key="owner_party_settings",
+                        label="Update Owner Party Settings",
+                        before_value=before_owner_payload,
+                        after_value=saved_owner_settings.to_profile_payload(),
+                    )
+                changed_count += 1
+
             if self.gs1_settings_service is not None:
                 pending_template_path = str(
                     after_values.get("gs1_template_import_path") or ""
@@ -9297,6 +9618,7 @@ class App(QMainWindow):
             btw_number=before_values["btw_number"],
             buma_relatie_nummer=before_values["buma_relatie_nummer"],
             buma_ipi=before_values["buma_ipi"],
+            owner_party_settings=before_values["owner_party_settings"],
             gs1_template_asset=before_values["gs1_template_asset"],
             gs1_contracts_csv_path=before_values["gs1_contracts_csv_path"],
             gs1_contract_entries=before_values["gs1_contract_entries"],
@@ -15440,9 +15762,7 @@ class App(QMainWindow):
                     "embed trustworthy catalog metadata when it is available."
                     f"\n\nSkipped: {result.skipped}"
                     + (
-                        "\n\nWarnings:\n- " + "\n- ".join(all_warnings[:12])
-                        if all_warnings
-                        else ""
+                        "\n\nWarnings:\n- " + "\n- ".join(all_warnings[:12]) if all_warnings else ""
                     ),
                 )
 

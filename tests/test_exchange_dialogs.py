@@ -42,7 +42,7 @@ class ExchangeImportDialogTests(unittest.TestCase):
                 file_path="/tmp/catalog.zip",
                 format_name="package",
                 headers=["track_title", "artist_name"],
-                preview_rows=[{"track_title": "Orbit", "artist_name": "Cosmowyn"}],
+                preview_rows=[{"track_title": "Orbit", "artist_name": "Moonwake"}],
                 suggested_mapping={"track_title": "track_title", "artist_name": "artist_name"},
             ),
             supported_headers=["track_title", "artist_name"],
@@ -107,7 +107,7 @@ class ExchangeImportDialogTests(unittest.TestCase):
                 file_path="/tmp/catalog.csv",
                 format_name="csv",
                 headers=["source_name", "artist_name"],
-                preview_rows=[{"source_name": "Dreamy", "artist_name": "Cosmowyn"}],
+                preview_rows=[{"source_name": "Dreamy", "artist_name": "Moonwake"}],
                 suggested_mapping={
                     "source_name": "custom::Mood",
                     "artist_name": "artist_name",
@@ -146,7 +146,7 @@ class ExchangeImportDialogTests(unittest.TestCase):
             file_path="/tmp/catalog.csv",
             format_name="csv",
             headers=["track_title", "artist_name"],
-            preview_rows=[{"track_title": "Orbit", "artist_name": "Cosmowyn"}],
+            preview_rows=[{"track_title": "Orbit", "artist_name": "Moonwake"}],
             suggested_mapping={"track_title": "track_title", "artist_name": "artist_name"},
             resolved_delimiter=",",
         )
@@ -215,7 +215,7 @@ class ExchangeImportDialogTests(unittest.TestCase):
             file_path="/tmp/catalog.csv",
             format_name="csv",
             headers=["track_title", "artist_name"],
-            preview_rows=[{"track_title": "Orbit", "artist_name": "Cosmowyn"}],
+            preview_rows=[{"track_title": "Orbit", "artist_name": "Moonwake"}],
             suggested_mapping={"track_title": "track_title", "artist_name": "artist_name"},
             resolved_delimiter=",",
         )
@@ -225,7 +225,7 @@ class ExchangeImportDialogTests(unittest.TestCase):
                 file_path="/tmp/catalog.csv",
                 format_name="csv",
                 headers=["track_title", "artist_name"],
-                preview_rows=[{"track_title": "Orbit", "artist_name": "Cosmowyn"}],
+                preview_rows=[{"track_title": "Orbit", "artist_name": "Moonwake"}],
                 suggested_mapping={
                     "track_title": "track_title",
                     "artist_name": "artist_name",
@@ -280,7 +280,7 @@ class ExchangeImportDialogTests(unittest.TestCase):
             preview_rows=[
                 {
                     "track_title": "Orbit",
-                    "artist_name": "Cosmowyn",
+                    "artist_name": "Moonwake",
                     "Mood Source": "Dreamy",
                 }
             ],

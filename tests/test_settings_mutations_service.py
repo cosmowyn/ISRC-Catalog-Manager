@@ -5,7 +5,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QSettings
 
-from isrc_manager.services import SettingsMutationService
+from isrc_manager.services import OwnerPartySettings, SettingsMutationService
 
 
 def make_settings_conn():
@@ -130,6 +130,47 @@ class SettingsMutationServiceTests(unittest.TestCase):
         self.assertEqual(
             self.conn.execute("SELECT relatie_nummer, ipi FROM BUMA_STEMRA WHERE id=1").fetchone(),
             ("REL-3", "IPI-4"),
+        )
+
+    def test_set_owner_party_settings_persists_profile_fields_without_touching_registration(self):
+        saved = self.service.set_owner_party_settings(
+            OwnerPartySettings(
+                legal_name="Moonwake Records B.V.",
+                display_name="Moonwake Records",
+                artist_name="Lyra Moonwake",
+                company_name="Moonwake Records",
+                first_name="Lyra",
+                last_name="Moonwake",
+                email="hello@moonwake.test",
+                alternative_email="legal@moonwake.test",
+                street_name="Forest Lane",
+                street_number="42A",
+                city="Amsterdam",
+                postal_code="1234AB",
+                country="Netherlands",
+                bank_account_number="NL91TEST0123456789",
+                chamber_of_commerce_number="CoC-556677",
+                tax_id="TAX-778899",
+                vat_number="BTW-2",
+                pro_affiliation="BUMA/STEMRA",
+                pro_number="REL-3",
+                ipi_cae="IPI-4",
+                notes="Primary owner identity",
+            )
+        )
+
+        self.assertEqual(saved.display_name, "Moonwake Records")
+        self.assertEqual(
+            self.conn.execute("SELECT value FROM app_kv WHERE key='owner_display_name'").fetchone(),
+            ("Moonwake Records",),
+        )
+        self.assertEqual(
+            self.conn.execute("SELECT value FROM app_kv WHERE key='owner_tax_id'").fetchone(),
+            ("TAX-778899",),
+        )
+        self.assertIsNone(self.conn.execute("SELECT nr FROM BTW WHERE id=1").fetchone())
+        self.assertIsNone(
+            self.conn.execute("SELECT relatie_nummer, ipi FROM BUMA_STEMRA WHERE id=1").fetchone()
         )
 
 

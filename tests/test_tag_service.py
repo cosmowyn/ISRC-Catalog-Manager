@@ -87,14 +87,14 @@ class AudioTagServiceTests(unittest.TestCase):
         self.service = AudioTagService()
         self.tag_data = AudioTagData(
             title="Orbit",
-            artist="Cosmowyn",
+            artist="Moonwake",
             album="Orbit Release",
-            album_artist="Cosmowyn",
+            album_artist="Moonwake",
             track_number=2,
             disc_number=1,
             genre="Ambient",
             composer="M. van de Kleut",
-            publisher="Cosmowyn Records",
+            publisher="Moonwake Records",
             release_date="2026-03-15",
             isrc="NL-ABC-26-00002",
             upc="036000291452",
@@ -117,7 +117,7 @@ class AudioTagServiceTests(unittest.TestCase):
         result = catalog_metadata_to_tags(
             track_values={
                 "track_title": "Orbit",
-                "artist_name": "Cosmowyn",
+                "artist_name": "Moonwake",
                 "album_title": "Legacy Album",
                 "release_date": "2026-03-15",
                 "genre": "Ambient",
@@ -130,8 +130,8 @@ class AudioTagServiceTests(unittest.TestCase):
             },
             release_values={
                 "title": "Orbit Release",
-                "primary_artist": "Cosmowyn",
-                "album_artist": "Cosmowyn Album Artist",
+                "primary_artist": "Moonwake",
+                "album_artist": "Moonwake Album Artist",
                 "release_date": "2026-03-20",
                 "label": "Release Label",
                 "upc": "036000291452",
@@ -140,7 +140,7 @@ class AudioTagServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(result.album, "Orbit Release")
-        self.assertEqual(result.album_artist, "Cosmowyn Album Artist")
+        self.assertEqual(result.album_artist, "Moonwake Album Artist")
         self.assertEqual(result.release_date, "2026-03-20")
         self.assertEqual(result.publisher, "Release Label")
         self.assertEqual(result.track_number, 7)

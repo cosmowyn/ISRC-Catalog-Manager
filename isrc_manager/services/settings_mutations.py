@@ -21,6 +21,7 @@ from isrc_manager.constants import (
     MIN_HISTORY_PRUNE_PRE_RESTORE_COPIES_AFTER_DAYS,
     MIN_HISTORY_STORAGE_BUDGET_MB,
 )
+from .settings_reads import OwnerPartySettings
 
 
 class SettingsMutationService:
@@ -48,6 +49,10 @@ class SettingsMutationService:
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (key, str(value)),
             )
+
+    @staticmethod
+    def _clean_text(value: object | None) -> str:
+        return str(value or "").strip()
 
     def set_identity(self, *, window_title: str, icon_path: str) -> dict[str, str]:
         identity = {
@@ -153,3 +158,23 @@ class SettingsMutationService:
                 """,
                 (value,),
             )
+
+    def set_owner_party_settings(self, settings: OwnerPartySettings) -> OwnerPartySettings:
+        clean_settings = OwnerPartySettings(
+            **{
+                field_name: self._clean_text(getattr(settings, field_name, ""))
+                for field_name in OwnerPartySettings.PROFILE_FIELD_NAMES
+            },
+            vat_number=self._clean_text(getattr(settings, "vat_number", "")),
+            pro_number=self._clean_text(getattr(settings, "pro_number", "")),
+            ipi_cae=self._clean_text(getattr(settings, "ipi_cae", "")),
+        )
+        with self.conn:
+            self._ensure_profile_store()
+            for field_name, value in clean_settings.to_profile_payload().items():
+                self.conn.execute(
+                    "INSERT INTO app_kv(key, value) VALUES(?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    (f"owner_{field_name}", value),
+                )
+        return clean_settings

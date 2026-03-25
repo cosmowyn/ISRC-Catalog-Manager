@@ -490,6 +490,9 @@ class DatabaseSchemaService:
             elif version == 30:
                 self._apply_migration(30, self._mig_30_to_31)
                 version = 31
+            elif version == 31:
+                self._apply_migration(31, self._mig_31_to_32)
+                version = 32
             else:
                 self.logger.warning("Unknown migration path from version %s", version)
                 break
@@ -907,6 +910,9 @@ class DatabaseSchemaService:
 
     def _mig_30_to_31(self) -> None:
         self._ensure_contract_template_tables()
+
+    def _mig_31_to_32(self) -> None:
+        self._ensure_repertoire_tables()
 
     def _ensure_current_custom_field_value_schema(self) -> None:
         cols = self._table_columns("CustomFieldValues")
@@ -1673,20 +1679,31 @@ class DatabaseSchemaService:
                 id INTEGER PRIMARY KEY,
                 legal_name TEXT NOT NULL,
                 display_name TEXT,
+                artist_name TEXT,
+                company_name TEXT,
+                first_name TEXT,
+                middle_name TEXT,
+                last_name TEXT,
                 party_type TEXT NOT NULL DEFAULT 'organization',
                 contact_person TEXT,
                 email TEXT,
+                alternative_email TEXT,
                 phone TEXT,
                 website TEXT,
+                street_name TEXT,
+                street_number TEXT,
                 address_line1 TEXT,
                 address_line2 TEXT,
                 city TEXT,
                 region TEXT,
                 postal_code TEXT,
                 country TEXT,
+                bank_account_number TEXT,
+                chamber_of_commerce_number TEXT,
                 tax_id TEXT,
                 vat_number TEXT,
                 pro_affiliation TEXT,
+                pro_number TEXT,
                 ipi_cae TEXT,
                 notes TEXT,
                 profile_name TEXT,
@@ -1695,11 +1712,34 @@ class DatabaseSchemaService:
             )
             """
         )
+        self._ensure_current_party_schema()
+        self._ensure_party_artist_alias_tables()
         self.cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_parties_legal_name ON Parties(legal_name)"
         )
-        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_parties_email ON Parties(email)")
+        self.cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_parties_display_name ON Parties(display_name)"
+        )
+        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_parties_artist_name ON Parties(artist_name)")
+        self.cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_parties_company_name ON Parties(company_name)"
+        )
+        self.cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_parties_email ON Parties(email)"
+        )
+        self.cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_parties_alternative_email ON Parties(alternative_email)"
+        )
         self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_parties_ipi_cae ON Parties(ipi_cae)")
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_parties_chamber_of_commerce_number
+            ON Parties(chamber_of_commerce_number)
+            """
+        )
+        self.cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_parties_pro_number ON Parties(pro_number)"
+        )
 
         self.cursor.execute(
             """
@@ -1922,6 +1962,55 @@ class DatabaseSchemaService:
                 FOREIGN KEY (contract_id) REFERENCES Contracts(id) ON DELETE CASCADE,
                 FOREIGN KEY (release_id) REFERENCES Releases(id) ON DELETE CASCADE
             )
+            """
+        )
+
+    def _ensure_current_party_schema(self) -> None:
+        cols = self._table_columns("Parties")
+        additions = (
+            ("artist_name", "TEXT"),
+            ("company_name", "TEXT"),
+            ("first_name", "TEXT"),
+            ("middle_name", "TEXT"),
+            ("last_name", "TEXT"),
+            ("alternative_email", "TEXT"),
+            ("street_name", "TEXT"),
+            ("street_number", "TEXT"),
+            ("bank_account_number", "TEXT"),
+            ("chamber_of_commerce_number", "TEXT"),
+            ("pro_number", "TEXT"),
+        )
+        for column_name, column_sql in additions:
+            if column_name not in cols:
+                self.cursor.execute(
+                    f"ALTER TABLE Parties ADD COLUMN {column_name} {column_sql}"
+                )
+
+    def _ensure_party_artist_alias_tables(self) -> None:
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS PartyArtistAliases (
+                id INTEGER PRIMARY KEY,
+                party_id INTEGER NOT NULL,
+                alias_name TEXT NOT NULL,
+                normalized_alias TEXT NOT NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (party_id) REFERENCES Parties(id) ON DELETE CASCADE
+            )
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_party_artist_aliases_normalized_alias
+            ON PartyArtistAliases(normalized_alias)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_party_artist_aliases_party_id
+            ON PartyArtistAliases(party_id, sort_order, id)
             """
         )
 

@@ -13,6 +13,7 @@ from isrc_manager.constants import (
 from isrc_manager.services import (
     AutoSnapshotSettings,
     HistoryRetentionSettings,
+    OwnerPartySettings,
     RegistrationSettings,
     SettingsReadService,
 )
@@ -103,6 +104,69 @@ class SettingsReadServiceTests(unittest.TestCase):
         self.assertEqual(
             self.service.load_auto_snapshot_settings(),
             AutoSnapshotSettings(enabled=False, interval_minutes=45),
+        )
+
+    def test_load_owner_party_settings_merges_profile_fields_with_registration_values(self):
+        with self.conn:
+            self.conn.execute("INSERT INTO BTW (id, nr) VALUES (1, ?)", (" BTW-2 ",))
+            self.conn.execute(
+                "INSERT INTO BUMA_STEMRA (id, relatie_nummer, ipi) VALUES (1, ?, ?)",
+                (" REL-3 ", " IPI-4 "),
+            )
+            self.conn.executemany(
+                "INSERT INTO app_kv(key, value) VALUES(?, ?)",
+                [
+                    ("owner_display_name", " Moonwake Records "),
+                    ("owner_legal_name", " Moonwake Records B.V. "),
+                    ("owner_artist_name", " Lyra Moonwake "),
+                    ("owner_company_name", " Moonwake Records "),
+                    ("owner_first_name", " Lyra "),
+                    ("owner_last_name", " Moonwake "),
+                    ("owner_email", " hello@moonwake.test "),
+                    ("owner_alternative_email", " legal@moonwake.test "),
+                    ("owner_street_name", " Forest Lane "),
+                    ("owner_street_number", " 42A "),
+                    ("owner_city", " Amsterdam "),
+                    ("owner_postal_code", " 1234AB "),
+                    ("owner_country", " Netherlands "),
+                    ("owner_bank_account_number", " NL91TEST0123456789 "),
+                    ("owner_chamber_of_commerce_number", " CoC-556677 "),
+                    ("owner_pro_affiliation", " BUMA/STEMRA "),
+                ],
+            )
+
+        self.assertEqual(
+            self.service.load_owner_party_settings(),
+            OwnerPartySettings(
+                legal_name="Moonwake Records B.V.",
+                display_name="Moonwake Records",
+                artist_name="Lyra Moonwake",
+                company_name="Moonwake Records",
+                first_name="Lyra",
+                middle_name="",
+                last_name="Moonwake",
+                contact_person="",
+                email="hello@moonwake.test",
+                alternative_email="legal@moonwake.test",
+                phone="",
+                website="",
+                street_name="Forest Lane",
+                street_number="42A",
+                address_line1="",
+                address_line2="",
+                city="Amsterdam",
+                region="",
+                postal_code="1234AB",
+                country="Netherlands",
+                bank_account_number="NL91TEST0123456789",
+                chamber_of_commerce_number="CoC-556677",
+                tax_id="",
+                vat_number="BTW-2",
+                pro_affiliation="BUMA/STEMRA",
+                pro_number="REL-3",
+                ipi_cae="IPI-4",
+                notes="",
+            ),
         )
 
     def test_load_history_retention_settings_returns_defaults(self):

@@ -14,6 +14,7 @@ from isrc_manager.services import (
     DatabaseSchemaService,
     PartyPayload,
     PartyService,
+    SettingsReadService,
     TrackCreatePayload,
     TrackService,
 )
@@ -28,13 +29,21 @@ class ContractTemplateFormGenerationTests(unittest.TestCase):
         self.schema = DatabaseSchemaService(self.conn, data_root=self.root)
         self.schema.init_db()
         self.schema.migrate_schema()
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS app_kv (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+            """
+        )
 
         self.track_service = TrackService(self.conn, self.root)
         self.track_service.create_track(
             TrackCreatePayload(
                 isrc="NL-TST-26-00042",
                 track_title="Orbit Signal",
-                artist_name="Cosmowyn",
+                artist_name="Moonwake",
                 additional_artists=[],
                 album_title="Workspace Tests",
                 release_date="2026-03-17",
@@ -49,9 +58,14 @@ class ContractTemplateFormGenerationTests(unittest.TestCase):
         self.party_service.create_party(
             PartyPayload(
                 legal_name="Aeonium Recordings B.V.",
-                display_name="Aeonium",
+                artist_name="Aeonium",
+                company_name="Aeonium Recordings",
                 party_type="licensee",
-                email="licensing@aeonium.test",
+                email="licensing@moonium.test",
+                alternative_email="contracts@moonium.test",
+                chamber_of_commerce_number="CoC-556677",
+                pro_number="PRO-556677",
+                artist_aliases=["Aeonium Official", "Aeonium Alias"],
             )
         )
         self.contract_service = ContractService(
@@ -69,9 +83,29 @@ class ContractTemplateFormGenerationTests(unittest.TestCase):
         )
         self.catalog_service = ContractTemplateCatalogService(self.conn)
         self.template_service = ContractTemplateService(self.conn, data_root=self.root)
+        with self.conn:
+            self.conn.execute("INSERT INTO BTW (id, nr) VALUES (1, ?)", ("BTW-424242",))
+            self.conn.execute(
+                "INSERT INTO BUMA_STEMRA (id, relatie_nummer, ipi) VALUES (1, ?, ?)",
+                ("REL-OWNER", "IPI-OWNER"),
+            )
+            self.conn.executemany(
+                "INSERT INTO app_kv(key, value) VALUES(?, ?)",
+                [
+                    ("owner_display_name", "Moonwake Records"),
+                    ("owner_legal_name", "Moonwake Records B.V."),
+                    ("owner_artist_name", "Lyra Moonwake"),
+                    ("owner_email", "hello@moonwake.test"),
+                    ("owner_street_name", "Forest Lane"),
+                    ("owner_postal_code", "1234AB"),
+                    ("owner_country", "Netherlands"),
+                ],
+            )
+        self.settings_reads = SettingsReadService(self.conn)
         self.form_service = ContractTemplateFormService(
             template_service=self.template_service,
             catalog_service=self.catalog_service,
+            settings_reads=self.settings_reads,
             contract_service=self.contract_service,
             party_service=self.party_service,
         )
@@ -217,3 +251,78 @@ class ContractTemplateFormGenerationTests(unittest.TestCase):
         self.assertEqual(binding.scope_entity_type, "track")
         self.assertEqual(binding.scope_policy, "track_context")
         self.assertEqual(binding.widget_hint, "track_selector")
+
+    def test_party_scope_fields_use_one_selector_and_fallback_party_labels(self):
+        template = self._create_template()
+        source_path = self.root / "party-form-generation.docx"
+        source_path.write_bytes(
+            make_docx_bytes(
+                document_paragraphs=(
+                    ("Artist ", "{{db.party.artist_name}}"),
+                    ("Aliases ", "{{db.party.artist_aliases}}"),
+                    ("Company ", "{{db.party.company_name}}"),
+                    ("Alt Email ", "{{db.party.alternative_email}}"),
+                    ("CoC ", "{{db.party.chamber_of_commerce_number}}"),
+                    ("PRO ", "{{db.party.pro_number}}"),
+                ),
+            )
+        )
+
+        revision = self.template_service.import_revision_from_path(
+            template.template_id,
+            source_path,
+            payload=ContractTemplateRevisionPayload(source_filename=source_path.name),
+        ).revision
+        definition = self.form_service.build_form_definition(revision.revision_id)
+
+        self.assertEqual(len(definition.selector_fields), 1)
+        party_selector = definition.selector_fields[0]
+        self.assertEqual(party_selector.scope_entity_type, "party")
+        self.assertEqual(party_selector.widget_kind, "party_selector")
+        self.assertEqual(
+            party_selector.placeholder_symbols,
+            (
+                "{{db.party.alternative_email}}",
+                "{{db.party.artist_aliases}}",
+                "{{db.party.artist_name}}",
+                "{{db.party.chamber_of_commerce_number}}",
+                "{{db.party.company_name}}",
+                "{{db.party.pro_number}}",
+            ),
+        )
+        self.assertGreaterEqual(len(party_selector.choices), 1)
+        self.assertIn("Aeonium", party_selector.choices[0].label)
+
+    def test_owner_scope_fields_resolve_as_automatic_settings_backed_fields(self):
+        template = self._create_template()
+        source_path = self.root / "owner-form-generation.docx"
+        source_path.write_bytes(
+            make_docx_bytes(
+                document_paragraphs=(
+                    ("Owner ", "{{db.owner.legal_name}}"),
+                    ("Owner Email ", "{{db.owner.email}}"),
+                    ("Owner VAT ", "{{db.owner.vat_number}}"),
+                ),
+            )
+        )
+
+        revision = self.template_service.import_revision_from_path(
+            template.template_id,
+            source_path,
+            payload=ContractTemplateRevisionPayload(source_filename=source_path.name),
+        ).revision
+        definition = self.form_service.build_form_definition(revision.revision_id)
+
+        self.assertEqual(len(definition.auto_fields), 3)
+        self.assertEqual(len(definition.selector_fields), 0)
+        self.assertEqual(len(definition.manual_fields), 0)
+        self.assertEqual(
+            tuple(item.canonical_symbol for item in definition.auto_fields),
+            (
+                "{{db.owner.email}}",
+                "{{db.owner.legal_name}}",
+                "{{db.owner.vat_number}}",
+            ),
+        )
+        self.assertFalse(definition.unresolved_placeholders)
+        self.assertFalse(definition.warnings)

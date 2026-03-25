@@ -306,7 +306,7 @@ class AppShellTestCase(unittest.TestCase):
             TrackCreatePayload(
                 isrc=f"NL-TST-26-{index:05d}",
                 track_title=title,
-                artist_name="Cosmowyn",
+                artist_name="Moonwake",
                 additional_artists=[],
                 album_title=album_title,
                 release_date="2026-03-17",
@@ -1328,7 +1328,7 @@ class AppShellTestCase(unittest.TestCase):
                 TrackCreatePayload(
                     isrc=f"NL-TST-26-{index:05d}",
                     track_title=title,
-                    artist_name="Cosmowyn",
+                    artist_name="Moonwake",
                     additional_artists=[],
                     album_title="Selection Test",
                     release_date="2026-03-17",
@@ -1435,7 +1435,7 @@ class AppShellTestCase(unittest.TestCase):
         self.window.release_service.create_release(
             app_module.ReleasePayload(
                 title="Release Dock Test",
-                primary_artist="Cosmowyn",
+                primary_artist="Moonwake",
                 release_type="single",
                 release_date="2026-03-17",
                 placements=[
@@ -1481,7 +1481,7 @@ class AppShellTestCase(unittest.TestCase):
         self.window.release_service.create_release(
             app_module.ReleasePayload(
                 title="Filter Release",
-                primary_artist="Cosmowyn",
+                primary_artist="Moonwake",
                 release_type="album",
                 release_date="2026-03-17",
                 placements=[
@@ -1620,7 +1620,7 @@ class AppShellTestCase(unittest.TestCase):
         self.window.release_service.create_release(
             app_module.ReleasePayload(
                 title="Dock Tab Visibility Release",
-                primary_artist="Cosmowyn",
+                primary_artist="Moonwake",
                 release_type="single",
                 release_date="2026-03-17",
                 placements=[
@@ -1687,7 +1687,7 @@ class AppShellTestCase(unittest.TestCase):
         self.window.release_service.create_release(
             app_module.ReleasePayload(
                 title="Boundary Validation Release",
-                primary_artist="Cosmowyn",
+                primary_artist="Moonwake",
                 release_type="single",
                 release_date="2026-03-17",
                 placements=[
@@ -1741,7 +1741,7 @@ class AppShellTestCase(unittest.TestCase):
         self.window.release_service.create_release(
             app_module.ReleasePayload(
                 title="Reachable Action Release",
-                primary_artist="Cosmowyn",
+                primary_artist="Moonwake",
                 release_type="single",
                 release_date="2026-03-17",
                 placements=[
@@ -2835,7 +2835,7 @@ class AppShellTestCase(unittest.TestCase):
             TrackCreatePayload(
                 isrc="NL-TST-26-09001",
                 track_title="Tabbed Editor",
-                artist_name="Cosmowyn",
+                artist_name="Moonwake",
                 additional_artists=[],
                 album_title="Editor Layout",
                 release_date="2026-03-17",
@@ -3252,7 +3252,7 @@ class AppShellTestCase(unittest.TestCase):
             TrackCreatePayload(
                 isrc="NL-TST-26-09002",
                 track_title="GS1 Layout",
-                artist_name="Cosmowyn",
+                artist_name="Moonwake",
                 additional_artists=[],
                 album_title="GS1 Layout",
                 release_date="2026-03-17",

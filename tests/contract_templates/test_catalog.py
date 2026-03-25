@@ -39,13 +39,20 @@ class ContractTemplateCatalogServiceTests(unittest.TestCase):
 
         self.assertEqual(
             namespaces,
-            ["track", "release", "work", "contract", "party", "right", "asset", "custom"],
+            ["track", "release", "work", "contract", "owner", "party", "right", "asset", "custom"],
         )
         self.assertIn("{{db.track.track_title}}", symbols)
         self.assertIn("{{db.release.title}}", symbols)
         self.assertIn("{{db.contract.signature_date}}", symbols)
+        self.assertIn("{{db.owner.legal_name}}", symbols)
         self.assertTrue(any(symbol.startswith("{{db.custom.cf_") for symbol in symbols))
-        self.assertFalse(any("Waveform Preview" == entry.label for section in sections for entry in section.entries))
+        self.assertFalse(
+            any(
+                "Waveform Preview" == entry.label
+                for section in sections
+                for entry in section.entries
+            )
+        )
 
     def test_entries_are_filterable_by_namespace_and_search_text(self):
         contract_entries = self.service.list_entries(namespace="contract", search_text="signature")
@@ -65,6 +72,61 @@ class ContractTemplateCatalogServiceTests(unittest.TestCase):
         self.assertEqual(track_entries[0].scope_entity_type, "track")
         self.assertEqual(track_entries[0].scope_policy, "track_context")
         self.assertEqual(track_entries[0].field_type, "text")
+
+    def test_party_namespace_exposes_expanded_authoritative_identity_fields(self):
+        party_entries = {entry.key: entry for entry in self.service.list_entries(namespace="party")}
+
+        expected_keys = {
+            "artist_name",
+            "artist_aliases",
+            "company_name",
+            "first_name",
+            "middle_name",
+            "last_name",
+            "alternative_email",
+            "street_name",
+            "street_number",
+            "bank_account_number",
+            "chamber_of_commerce_number",
+            "pro_number",
+        }
+        self.assertTrue(expected_keys <= set(party_entries))
+        self.assertEqual(
+            party_entries["artist_aliases"].canonical_symbol,
+            "{{db.party.artist_aliases}}",
+        )
+        self.assertEqual(party_entries["artist_aliases"].scope_entity_type, "party")
+        self.assertEqual(party_entries["artist_aliases"].scope_policy, "party_selection_required")
+        self.assertEqual(party_entries["bank_account_number"].field_type, "text")
+
+    def test_owner_namespace_exposes_settings_backed_owner_party_symbols(self):
+        owner_entries = {entry.key: entry for entry in self.service.list_entries(namespace="owner")}
+
+        expected_keys = {
+            "display_name",
+            "legal_name",
+            "artist_name",
+            "company_name",
+            "first_name",
+            "last_name",
+            "email",
+            "alternative_email",
+            "street_name",
+            "postal_code",
+            "country",
+            "bank_account_number",
+            "vat_number",
+            "pro_number",
+            "ipi_cae",
+        }
+        self.assertTrue(expected_keys <= set(owner_entries))
+        self.assertEqual(
+            owner_entries["legal_name"].canonical_symbol,
+            "{{db.owner.legal_name}}",
+        )
+        self.assertEqual(owner_entries["legal_name"].scope_entity_type, "owner")
+        self.assertEqual(owner_entries["legal_name"].scope_policy, "owner_settings_context")
+        self.assertEqual(owner_entries["legal_name"].source_kind, "Application Settings")
 
     def test_all_generated_symbols_round_trip_through_canonical_parser(self):
         for entry in self.service.list_entries():
