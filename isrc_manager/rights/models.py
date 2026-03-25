@@ -17,6 +17,17 @@ RIGHT_TYPE_CHOICES = (
     "other",
 )
 
+OWNERSHIP_ROLE_CHOICES = (
+    "publisher",
+    "subpublisher",
+    "administrator",
+    "writer_control",
+    "master_owner",
+    "label_owner",
+    "distributor",
+    "other",
+)
+
 
 @dataclass(slots=True)
 class RightPayload:
@@ -86,3 +97,35 @@ class OwnershipSummary:
     master_control: list[str]
     publishing_control: list[str]
     exclusive_territories: list[str]
+
+
+@dataclass(slots=True)
+class OwnershipInterestPayload:
+    role: str
+    name: str | None = None
+    party_id: int | None = None
+    share_percent: float | None = None
+    territory: str | None = None
+    source_contract_id: int | None = None
+    notes: str | None = None
+
+
+@dataclass(slots=True)
+class OwnershipInterestRecord:
+    id: int
+    entity_type: str
+    entity_id: int
+    party_id: int | None
+    party_name: str | None
+    display_name: str | None
+    ownership_role: str
+    share_percent: float | None
+    territory: str | None
+    source_contract_id: int | None
+    source_contract_title: str | None
+    notes: str | None
+    created_at: str | None
+    updated_at: str | None
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)

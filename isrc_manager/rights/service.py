@@ -4,10 +4,20 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import asdict
+from typing import Iterable
 
 from isrc_manager.domain.repertoire import clean_text, normalized_territory, ranges_overlap
 
-from .models import RIGHT_TYPE_CHOICES, OwnershipSummary, RightPayload, RightRecord, RightsConflict
+from .models import (
+    OWNERSHIP_ROLE_CHOICES,
+    RIGHT_TYPE_CHOICES,
+    OwnershipInterestPayload,
+    OwnershipInterestRecord,
+    OwnershipSummary,
+    RightPayload,
+    RightRecord,
+    RightsConflict,
+)
 
 
 class RightsService:
@@ -22,6 +32,47 @@ class RightsService:
         if clean not in RIGHT_TYPE_CHOICES:
             return "other"
         return clean
+
+    @staticmethod
+    def _clean_share(value: float | int | str | None) -> float | None:
+        if value in (None, ""):
+            return None
+        try:
+            return round(float(value), 4)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _clean_ownership_role(value: str | None, *, entity_type: str) -> str:
+        clean = str(value or "").strip().lower().replace(" ", "_")
+        if clean in OWNERSHIP_ROLE_CHOICES:
+            return clean
+        return "publisher" if entity_type == "work" else "master_owner"
+
+    @staticmethod
+    def _ownership_table_spec(entity_type: str) -> tuple[str, str]:
+        clean = str(entity_type or "").strip().lower()
+        if clean == "work":
+            return ("WorkOwnershipInterests", "work_id")
+        if clean == "track":
+            return ("RecordingOwnershipInterests", "track_id")
+        raise ValueError("Ownership interests only support work or track entities.")
+
+    @staticmethod
+    def _dedupe_names(values: Iterable[str | None]) -> list[str]:
+        names: list[str] = []
+        for value in values:
+            clean_value = clean_text(value)
+            if clean_value and clean_value not in names:
+                names.append(clean_value)
+        return names
+
+    def _track_columns(self) -> set[str]:
+        return {
+            str(row[1])
+            for row in self.conn.execute("PRAGMA table_info(Tracks)").fetchall()
+            if row and row[1]
+        }
 
     @staticmethod
     def _row_to_record(row) -> RightRecord:
@@ -50,6 +101,25 @@ class RightsService:
             profile_name=clean_text(row[21]),
             created_at=clean_text(row[22]),
             updated_at=clean_text(row[23]),
+        )
+
+    @staticmethod
+    def _row_to_ownership_record(row, *, entity_type: str) -> OwnershipInterestRecord:
+        return OwnershipInterestRecord(
+            id=int(row[0]),
+            entity_type=entity_type,
+            entity_id=int(row[1]),
+            party_id=int(row[2]) if row[2] is not None else None,
+            party_name=clean_text(row[3]),
+            display_name=clean_text(row[4]),
+            ownership_role=str(row[5] or "other"),
+            share_percent=float(row[6]) if row[6] is not None else None,
+            territory=clean_text(row[7]),
+            source_contract_id=int(row[8]) if row[8] is not None else None,
+            source_contract_title=clean_text(row[9]),
+            notes=clean_text(row[10]),
+            created_at=clean_text(row[11]),
+            updated_at=clean_text(row[12]),
         )
 
     def validate_right(self, payload: RightPayload) -> list[str]:
@@ -310,10 +380,156 @@ class RightsService:
             and item.right_type != "promotional"
         ]
 
+    def list_ownership_interests(
+        self,
+        *,
+        entity_type: str,
+        entity_id: int,
+    ) -> list[OwnershipInterestRecord]:
+        table_name, entity_column = self._ownership_table_spec(entity_type)
+        rows = self.conn.execute(
+            f"""
+            SELECT
+                o.id,
+                o.{entity_column},
+                o.party_id,
+                COALESCE(p.display_name, p.legal_name, o.display_name),
+                o.display_name,
+                o.ownership_role,
+                o.share_percent,
+                o.territory,
+                o.source_contract_id,
+                c.title,
+                o.notes,
+                o.created_at,
+                o.updated_at
+            FROM {table_name} o
+            LEFT JOIN Parties p ON p.id = o.party_id
+            LEFT JOIN Contracts c ON c.id = o.source_contract_id
+            WHERE o.{entity_column}=?
+            ORDER BY o.id
+            """,
+            (int(entity_id),),
+        ).fetchall()
+        return [
+            self._row_to_ownership_record(row, entity_type=entity_type)
+            for row in rows
+        ]
+
+    def list_work_ownership_interests(self, work_id: int) -> list[OwnershipInterestRecord]:
+        return self.list_ownership_interests(entity_type="work", entity_id=int(work_id))
+
+    def list_recording_ownership_interests(self, track_id: int) -> list[OwnershipInterestRecord]:
+        return self.list_ownership_interests(entity_type="track", entity_id=int(track_id))
+
+    def replace_ownership_interests(
+        self,
+        *,
+        entity_type: str,
+        entity_id: int,
+        payloads: Iterable[OwnershipInterestPayload],
+    ) -> None:
+        table_name, entity_column = self._ownership_table_spec(entity_type)
+        with self.conn:
+            cur = self.conn.cursor()
+            cur.execute(f"DELETE FROM {table_name} WHERE {entity_column}=?", (int(entity_id),))
+            for payload in payloads:
+                display_name = clean_text(payload.name)
+                party_id = int(payload.party_id) if payload.party_id is not None else None
+                if party_id is None and not display_name:
+                    continue
+                cur.execute(
+                    f"""
+                    INSERT INTO {table_name}(
+                        {entity_column},
+                        party_id,
+                        display_name,
+                        ownership_role,
+                        share_percent,
+                        territory,
+                        source_contract_id,
+                        notes
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        int(entity_id),
+                        party_id,
+                        display_name,
+                        self._clean_ownership_role(payload.role, entity_type=entity_type),
+                        self._clean_share(payload.share_percent),
+                        clean_text(payload.territory),
+                        int(payload.source_contract_id)
+                        if payload.source_contract_id is not None
+                        else None,
+                        clean_text(payload.notes),
+                    ),
+                )
+
+    def replace_work_ownership_interests(
+        self, work_id: int, payloads: Iterable[OwnershipInterestPayload]
+    ) -> None:
+        self.replace_ownership_interests(
+            entity_type="work",
+            entity_id=int(work_id),
+            payloads=payloads,
+        )
+
+    def replace_recording_ownership_interests(
+        self, track_id: int, payloads: Iterable[OwnershipInterestPayload]
+    ) -> None:
+        self.replace_ownership_interests(
+            entity_type="track",
+            entity_id=int(track_id),
+            payloads=payloads,
+        )
+
+    def _linked_work_id_for_track(self, track_id: int) -> int | None:
+        track_columns = self._track_columns()
+        if "work_id" in track_columns:
+            row = self.conn.execute(
+                "SELECT work_id FROM Tracks WHERE id=?",
+                (int(track_id),),
+            ).fetchone()
+            if row and row[0] is not None:
+                return int(row[0])
+        row = self.conn.execute(
+            """
+            SELECT work_id
+            FROM WorkTrackLinks
+            WHERE track_id=?
+            ORDER BY is_primary DESC, work_id
+            LIMIT 1
+            """,
+            (int(track_id),),
+        ).fetchone()
+        return int(row[0]) if row and row[0] is not None else None
+
     def ownership_summary(self, *, entity_type: str, entity_id: int) -> OwnershipSummary:
         rights = self.list_rights(entity_type=entity_type, entity_id=entity_id)
-        master_control: list[str] = []
-        publishing_control: list[str] = []
+        linked_work_id = (
+            self._linked_work_id_for_track(entity_id) if entity_type == "track" else None
+        )
+        master_control = self._dedupe_names(
+            item.party_name or item.display_name
+            for item in (
+                self.list_recording_ownership_interests(entity_id)
+                if entity_type == "track"
+                else []
+            )
+        )
+        publishing_control = self._dedupe_names(
+            item.party_name or item.display_name
+            for item in (
+                self.list_work_ownership_interests(entity_id)
+                if entity_type == "work"
+                else (
+                    self.list_work_ownership_interests(linked_work_id)
+                    if entity_type == "track" and linked_work_id is not None
+                    else []
+                )
+            )
+        )
         exclusive_territories: list[str] = []
         for item in rights:
             controller = (
@@ -324,7 +540,10 @@ class RightsService:
             )
             if item.right_type == "master" and controller not in master_control:
                 master_control.append(controller)
-            if item.right_type == "composition_publishing" and controller not in publishing_control:
+            if (
+                item.right_type == "composition_publishing"
+                and controller not in publishing_control
+            ):
                 publishing_control.append(controller)
             if item.exclusive_flag:
                 territory = item.territory or "Worldwide / unspecified"

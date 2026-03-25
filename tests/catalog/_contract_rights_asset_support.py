@@ -18,7 +18,7 @@ from isrc_manager.contracts import (
 )
 from isrc_manager.parties import PartyPayload, PartyService
 from isrc_manager.releases import ReleasePayload, ReleaseService, ReleaseTrackPlacement
-from isrc_manager.rights import RightPayload, RightsService
+from isrc_manager.rights import OwnershipInterestPayload, RightPayload, RightsService
 from isrc_manager.services import DatabaseSchemaService, TrackCreatePayload, TrackService
 from isrc_manager.works import WorkPayload, WorkService
 from tests.qt_test_helpers import require_qapplication
@@ -1222,6 +1222,80 @@ class ContractRightsAssetServiceTestCase(unittest.TestCase):
 
         self.rights_service.delete_right(promo_id)
         self.assertIsNone(self.rights_service.fetch_right(promo_id))
+
+    def case_explicit_ownership_ledgers_override_inferred_control(self):
+        master_owner = self.party_service.create_party(PartyPayload(legal_name="Master Label"))
+        publisher = self.party_service.create_party(PartyPayload(legal_name="Writer Control"))
+        track_id, _release_id = self._create_track_and_release()
+        work_id = self.work_service.create_work(
+            WorkPayload(
+                title="Contract Song",
+                contributors=[],
+                track_ids=[track_id],
+            )
+        )
+        contract_id = self.contract_service.create_contract(
+            ContractPayload(title="Ownership Contract", status="draft")
+        )
+
+        self.rights_service.replace_recording_ownership_interests(
+            track_id,
+            [
+                OwnershipInterestPayload(
+                    role="master_owner",
+                    party_id=master_owner,
+                    name="Master Label",
+                    share_percent=100,
+                    source_contract_id=contract_id,
+                )
+            ],
+        )
+        self.rights_service.replace_work_ownership_interests(
+            work_id,
+            [
+                OwnershipInterestPayload(
+                    role="publisher",
+                    party_id=publisher,
+                    name="Writer Control",
+                    share_percent=100,
+                    territory="Worldwide",
+                    source_contract_id=contract_id,
+                )
+            ],
+        )
+
+        recording_rows = self.rights_service.list_recording_ownership_interests(track_id)
+        work_rows = self.rights_service.list_work_ownership_interests(work_id)
+        summary = self.rights_service.ownership_summary(entity_type="track", entity_id=track_id)
+
+        self.assertEqual(
+            [
+                (
+                    item.party_id,
+                    item.party_name,
+                    item.ownership_role,
+                    item.share_percent,
+                    item.source_contract_id,
+                )
+                for item in recording_rows
+            ],
+            [(master_owner, "Master Label", "master_owner", 100.0, contract_id)],
+        )
+        self.assertEqual(
+            [
+                (
+                    item.party_id,
+                    item.party_name,
+                    item.ownership_role,
+                    item.share_percent,
+                    item.territory,
+                )
+                for item in work_rows
+            ],
+            [(publisher, "Writer Control", "publisher", 100.0, "Worldwide")],
+        )
+        self.assertEqual(summary.master_control, ["Master Label"])
+        self.assertEqual(summary.publishing_control, ["Writer Control"])
 
     def case_asset_validation_catches_missing_approved_master(self):
         track_id, _release_id = self._create_track_and_release()

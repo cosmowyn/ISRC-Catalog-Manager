@@ -5,7 +5,7 @@ from pathlib import Path
 
 from isrc_manager.contracts import ContractPartyPayload, ContractPayload, ContractService
 from isrc_manager.parties import PartyPayload, PartyService
-from isrc_manager.rights import RightPayload, RightsService
+from isrc_manager.rights import OwnershipInterestPayload, RightPayload, RightsService
 from isrc_manager.services import DatabaseSchemaService, TrackCreatePayload, TrackService
 from isrc_manager.works import WorkContributorPayload, WorkPayload, WorkService
 
@@ -342,6 +342,28 @@ class WorkAndPartyServiceTests(unittest.TestCase):
                 track_id=self._create_track("NL-ABC-26-00013", "Signal Rights"),
             )
         )
+        self.rights_service.replace_work_ownership_interests(
+            work_id,
+            [
+                OwnershipInterestPayload(
+                    role="publisher",
+                    party_id=duplicate_id,
+                    name="Signal Music BV",
+                    share_percent=100,
+                )
+            ],
+        )
+        self.rights_service.replace_recording_ownership_interests(
+            self._create_track("NL-ABC-26-00014", "Signal Master Owner"),
+            [
+                OwnershipInterestPayload(
+                    role="master_owner",
+                    party_id=duplicate_id,
+                    name="Signal Music BV",
+                    share_percent=100,
+                )
+            ],
+        )
         self.assertGreater(contract_id, 0)
         self.assertGreater(right_id, 0)
 
@@ -390,6 +412,20 @@ class WorkAndPartyServiceTests(unittest.TestCase):
                 (right_id,),
             ).fetchone()[0],
             primary_id,
+        )
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT party_id FROM WorkOwnershipInterests WHERE work_id=?",
+                (work_id,),
+            ).fetchone()[0],
+            primary_id,
+        )
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT COUNT(*) FROM RecordingOwnershipInterests WHERE party_id=?",
+                (primary_id,),
+            ).fetchone()[0],
+            1,
         )
         self.assertEqual(merged.artist_aliases, ())
 
