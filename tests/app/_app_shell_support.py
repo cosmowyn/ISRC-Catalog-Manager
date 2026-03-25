@@ -1585,6 +1585,100 @@ class AppShellTestCase(unittest.TestCase):
         self.assertTrue(panel.selection_scope_state().override_active)
         self.assertFalse(dock.isHidden())
 
+    def case_work_manager_creates_governed_child_track_in_add_panel(self):
+        work_id = self.window.work_service.create_work(
+            app_module.WorkPayload(
+                title="Docked Parent Work",
+                iswc="T-123.456.789-0",
+            )
+        )
+
+        panel = self.window.open_work_manager()
+        self.app.processEvents()
+        panel.focus_work(work_id)
+        self.app.processEvents()
+
+        panel.create_child_track()
+        self.app.processEvents()
+
+        self.assertFalse(self.window.add_data_dock.isHidden())
+        self.assertTrue(self.window.add_data_work_context_group.isVisible())
+        self.assertEqual(self.window.add_data_title.text(), "Add Track to Work")
+        self.assertEqual(self.window.save_button.text(), "Save Child Track")
+        self.assertIn("Docked Parent Work", self.window.add_data_work_context_summary.text())
+        self.assertEqual(self.window.track_title_field.text(), "Docked Parent Work")
+        self.assertEqual(self.window.iswc_field.text(), "T-123.456.789-0")
+        self.assertFalse(self.window.add_data_work_parent_combo.isEnabled())
+
+        self.window.artist_field.setCurrentText("Moonwake")
+        self.window.track_title_field.setText("Docked Parent Work Master")
+        with mock.patch.object(
+            app_module.QMessageBox,
+            "information",
+            return_value=app_module.QMessageBox.Ok,
+        ):
+            self.window.save()
+        self.app.processEvents()
+
+        row = self.window.conn.execute(
+            """
+            SELECT id, work_id, parent_track_id, relationship_type
+            FROM Tracks
+            WHERE track_title=?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            ("Docked Parent Work Master",),
+        ).fetchone()
+        self.assertIsNotNone(row)
+        assert row is not None
+        track_id, linked_work_id, parent_track_id, relationship_type = row
+        self.assertEqual(linked_work_id, work_id)
+        self.assertIsNone(parent_track_id)
+        self.assertEqual(relationship_type, "original")
+        detail = self.window.work_service.fetch_work_detail(work_id)
+        self.assertIsNotNone(detail)
+        assert detail is not None
+        self.assertIn(int(track_id), detail.track_ids)
+        self.assertTrue(self.window.add_data_work_parent_combo.isEnabled())
+        self.assertGreaterEqual(self.window.add_data_work_parent_combo.count(), 2)
+
+    def case_create_work_offers_first_track_creation_context(self):
+        panel = self.window.open_work_manager()
+        self.app.processEvents()
+
+        with mock.patch.object(
+            app_module.QMessageBox,
+            "question",
+            return_value=app_module.QMessageBox.Yes,
+        ):
+            self.window.create_work(
+                app_module.WorkPayload(
+                    title="Immediate First Track Work",
+                    iswc="T-123.456.789-0",
+                )
+            )
+        self.app.processEvents()
+
+        works = [
+            record
+            for record in self.window.work_service.list_works(search_text="Immediate First Track Work")
+            if record.title == "Immediate First Track Work"
+        ]
+        self.assertEqual(len(works), 1)
+        work_id = works[0].id
+        self.assertEqual(panel._selected_work_id(), work_id)
+        self.assertFalse(self.window.add_data_dock.isHidden())
+        self.assertTrue(self.window.add_data_work_context_group.isVisible())
+        self.assertEqual(self.window.add_data_title.text(), "Add Track to Work")
+        self.assertIn("Immediate First Track Work", self.window.add_data_work_context_summary.text())
+        self.assertEqual(self.window.track_title_field.text(), "Immediate First Track Work")
+        self.assertEqual(self.window.iswc_field.text(), "T-123.456.789-0")
+        context = self.window._current_work_track_context()
+        self.assertIsNotNone(context)
+        assert context is not None
+        self.assertEqual(context["work_id"], work_id)
+
     def case_global_search_opens_as_dock_and_keeps_entity_navigation_live(self):
         track_id = self._create_track(index=121, title="Searchable Dock Track")
         self.window.refresh_table()
@@ -1784,12 +1878,14 @@ class AppShellTestCase(unittest.TestCase):
         self.app.processEvents()
         work_panel = self.window.work_manager_dock.widget()
         add_button = self._button_by_text(work_panel.manage_actions_cluster, "Add")
+        add_track_button = self._button_by_text(work_panel.manage_actions_cluster, "Add Track to Work")
         edit_button = self._button_by_text(work_panel.manage_actions_cluster, "Edit")
         duplicate_button = self._button_by_text(work_panel.manage_actions_cluster, "Duplicate")
 
-        self.assertGreater(edit_button.geometry().left() - add_button.geometry().right(), 0)
-        self.assertGreater(duplicate_button.geometry().top() - add_button.geometry().bottom(), 0)
-        for button in (add_button, edit_button, duplicate_button):
+        self.assertGreater(add_track_button.geometry().left() - add_button.geometry().right(), 0)
+        self.assertGreater(edit_button.geometry().top() - add_button.geometry().bottom(), 0)
+        self.assertGreater(duplicate_button.geometry().left() - edit_button.geometry().right(), 0)
+        for button in (add_button, add_track_button, edit_button, duplicate_button):
             self.assertGreaterEqual(button.width(), button.minimumSizeHint().width())
 
     def case_catalog_managers_open_as_tabified_dock_and_focus_requested_tab(self):

@@ -37,6 +37,7 @@ from PySide6.QtCore import (
     QRegularExpression,
     QSettings,
     QSortFilterProxyModel,
+    QStandardPaths,
     Qt,
     QTimer,
     QtMsgType,
@@ -312,6 +313,7 @@ from isrc_manager.services.gs1_mapping import (
     COMMON_PACKAGING_CHOICES,
 )
 from isrc_manager.services.sqlite_utils import safe_wal_checkpoint
+from isrc_manager.services.tracks import TRACK_RELATIONSHIP_TYPES
 from isrc_manager.settings import enforce_single_instance, init_settings
 from isrc_manager.starter_themes import (
     STARTER_THEME_SPECS,
@@ -6270,6 +6272,7 @@ class App(QMainWindow):
         self.quality_service = None
         self.release_browser_dialog = None
         self._explicit_row_filter_track_ids = None
+        self._pending_work_track_context: dict[str, object] | None = None
         self._background_write_lock = None
         self._report_startup_phase(StartupPhase.OPENING_PROFILE_DB)
         self.open_database(last_db)
@@ -10231,6 +10234,7 @@ class App(QMainWindow):
         self.exchange_service = None
         self.repertoire_exchange_service = None
         self.quality_service = None
+        self._pending_work_track_context = None
         if hasattr(self, "background_service_factory"):
             self.background_service_factory.db_path = None
         self._background_write_lock = None
@@ -10903,6 +10907,7 @@ class App(QMainWindow):
             lambda track_ids: self._replace_catalog_track_filter(track_ids, source_label="work")
         )
         panel.create_requested.connect(self.create_work)
+        panel.create_child_track_requested.connect(self._begin_work_child_track_creation)
         panel.update_requested.connect(self.update_work)
         panel.duplicate_requested.connect(self.duplicate_work)
         panel.link_tracks_requested.connect(self.link_tracks_to_work)
@@ -12489,6 +12494,230 @@ class App(QMainWindow):
         comp.setCaseSensitivity(Qt.CaseInsensitive)
         combo.setCompleter(comp)
 
+    @staticmethod
+    def _work_track_relationship_choices() -> list[str]:
+        ordered = [
+            "original",
+            "version",
+            "alternate_master",
+            "remix",
+            "edit",
+            "live",
+            "instrumental",
+            "derivative",
+            "other",
+        ]
+        return [value for value in ordered if value in TRACK_RELATIONSHIP_TYPES]
+
+    @staticmethod
+    def _work_track_relationship_label(value: str) -> str:
+        return str(value or "original").strip().replace("_", " ").title()
+
+    def _normalize_work_track_relationship(self, value: str | None) -> str:
+        clean = str(value or "").strip().lower().replace(" ", "_")
+        return clean if clean in TRACK_RELATIONSHIP_TYPES else "original"
+
+    def _current_work_track_context(self) -> dict[str, object] | None:
+        context = getattr(self, "_pending_work_track_context", None)
+        if not isinstance(context, dict):
+            return None
+        try:
+            work_id = int(context.get("work_id"))
+        except (TypeError, ValueError):
+            return None
+        parent_track_id = context.get("parent_track_id")
+        try:
+            normalized_parent_track_id = (
+                int(parent_track_id) if parent_track_id not in (None, "") else None
+            )
+        except (TypeError, ValueError):
+            normalized_parent_track_id = None
+        normalized = {
+            "work_id": work_id,
+            "relationship_type": self._normalize_work_track_relationship(
+                str(context.get("relationship_type") or "original")
+            ),
+            "parent_track_id": normalized_parent_track_id,
+        }
+        self._pending_work_track_context = normalized
+        return normalized
+
+    def _focus_work_in_manager(self, work_id: int | None) -> None:
+        if not work_id:
+            return
+        panel = getattr(self, "work_browser_dialog", None)
+        if panel is None:
+            return
+        focus_work = getattr(panel, "focus_work", None)
+        if callable(focus_work):
+            focus_work(int(work_id))
+
+    def _reset_add_track_heading(self) -> None:
+        self.add_data_title.setText("Add Track")
+        self.add_data_subtitle.setText(
+            "Create a new track with all core metadata, release details, and managed media in one place."
+        )
+        self.save_button.setText("Save Track")
+
+    def _refresh_work_track_creation_context_ui(self) -> None:
+        context_group = getattr(self, "add_data_work_context_group", None)
+        relationship_combo = getattr(self, "add_data_work_relationship_combo", None)
+        parent_combo = getattr(self, "add_data_work_parent_combo", None)
+        if context_group is None or relationship_combo is None or parent_combo is None:
+            return
+
+        context = self._current_work_track_context()
+        if context is None or self.work_service is None:
+            self._pending_work_track_context = None
+            context_group.setVisible(False)
+            self._reset_add_track_heading()
+            for combo in (relationship_combo, parent_combo):
+                previous_state = combo.blockSignals(True)
+                try:
+                    combo.clear()
+                    combo.setEnabled(False)
+                finally:
+                    combo.blockSignals(previous_state)
+            return
+
+        detail = self.work_service.fetch_work_detail(int(context["work_id"]))
+        if detail is None:
+            self._pending_work_track_context = None
+            context_group.setVisible(False)
+            self._reset_add_track_heading()
+            return
+
+        relationship_type = self._normalize_work_track_relationship(
+            str(context.get("relationship_type") or "original")
+        )
+        track_choices: list[tuple[int, str]] = []
+        for track_id in detail.track_ids:
+            title = str(self._get_track_title(int(track_id)) or "").strip()
+            track_choices.append((int(track_id), title or f"Track #{int(track_id)}"))
+        valid_parent_track_ids = {track_id for track_id, _title in track_choices}
+        parent_track_id = context.get("parent_track_id")
+        if parent_track_id not in valid_parent_track_ids:
+            parent_track_id = None
+        self._pending_work_track_context = {
+            "work_id": int(context["work_id"]),
+            "relationship_type": relationship_type,
+            "parent_track_id": parent_track_id,
+        }
+
+        self.add_data_title.setText("Add Track to Work")
+        self.add_data_subtitle.setText(
+            "Create a governed child track under the selected work. Composition metadata stays on the parent work."
+        )
+        self.save_button.setText("Save Child Track")
+        context_group.setVisible(True)
+
+        work_title = str(detail.work.title or "").strip() or f"Work #{int(detail.work.id)}"
+        self.add_data_work_context_summary.setText(
+            f"Creating a child track under Work #{int(detail.work.id)}: {work_title}"
+        )
+        if track_choices:
+            self.add_data_work_context_hint.setText(
+                f"{len(track_choices)} linked track{'s' if len(track_choices) != 1 else ''} already sit under this work. "
+                "Choose a parent track when this new recording is a version, remix, or alternate master."
+            )
+        else:
+            self.add_data_work_context_hint.setText(
+                "This work does not have any governed tracks yet. The next save will create the first child track under the work."
+            )
+
+        previous_relationship_state = relationship_combo.blockSignals(True)
+        try:
+            relationship_combo.clear()
+            for value in self._work_track_relationship_choices():
+                relationship_combo.addItem(self._work_track_relationship_label(value), value)
+            selected_relationship_index = relationship_combo.findData(relationship_type)
+            relationship_combo.setCurrentIndex(
+                selected_relationship_index if selected_relationship_index >= 0 else 0
+            )
+            relationship_combo.setEnabled(relationship_combo.count() > 0)
+        finally:
+            relationship_combo.blockSignals(previous_relationship_state)
+
+        previous_parent_state = parent_combo.blockSignals(True)
+        try:
+            parent_combo.clear()
+            parent_combo.addItem("No direct parent track", None)
+            for track_id, title in track_choices:
+                parent_combo.addItem(title, int(track_id))
+            selected_parent_index = (
+                parent_combo.findData(int(parent_track_id))
+                if parent_track_id is not None
+                else 0
+            )
+            parent_combo.setCurrentIndex(selected_parent_index if selected_parent_index >= 0 else 0)
+            parent_combo.setEnabled(bool(track_choices))
+        finally:
+            parent_combo.blockSignals(previous_parent_state)
+
+    def _on_add_track_relationship_changed(self, _index: int) -> None:
+        context = self._current_work_track_context()
+        if context is None:
+            return
+        relationship_type = self._normalize_work_track_relationship(
+            self.add_data_work_relationship_combo.currentData()
+        )
+        context["relationship_type"] = relationship_type
+        self._pending_work_track_context = context
+
+    def _on_add_track_parent_track_changed(self, _index: int) -> None:
+        context = self._current_work_track_context()
+        if context is None:
+            return
+        parent_track_id = self.add_data_work_parent_combo.currentData()
+        try:
+            context["parent_track_id"] = (
+                int(parent_track_id) if parent_track_id not in (None, "") else None
+            )
+        except (TypeError, ValueError):
+            context["parent_track_id"] = None
+        self._pending_work_track_context = context
+
+    def _clear_work_track_creation_context(self) -> None:
+        self._pending_work_track_context = None
+        self._refresh_work_track_creation_context_ui()
+
+    def _begin_work_child_track_creation(self, work_id: int, *, seed_from_work: bool = True) -> bool:
+        if self.work_service is None:
+            QMessageBox.warning(self, "Work Manager", "Open a profile first.")
+            return False
+        detail = self.work_service.fetch_work_detail(int(work_id))
+        if detail is None:
+            QMessageBox.warning(self, "Work Manager", "The selected work could not be loaded.")
+            return False
+        current_context = self._current_work_track_context()
+        relationship_type = (
+            str(current_context.get("relationship_type") or "original")
+            if current_context is not None and int(current_context["work_id"]) == int(work_id)
+            else "original"
+        )
+        parent_track_id = (
+            current_context.get("parent_track_id")
+            if current_context is not None and int(current_context["work_id"]) == int(work_id)
+            else None
+        )
+        self._pending_work_track_context = {
+            "work_id": int(work_id),
+            "relationship_type": self._normalize_work_track_relationship(relationship_type),
+            "parent_track_id": parent_track_id,
+        }
+        self._apply_add_data_panel_state(True)
+        self.clear_form_fields()
+        if seed_from_work:
+            if str(detail.work.title or "").strip():
+                self.track_title_field.setText(str(detail.work.title or "").strip())
+                self.track_title_field.selectAll()
+            if str(detail.work.iswc or "").strip():
+                self.iswc_field.setText(str(detail.work.iswc or "").strip())
+        self._refresh_work_track_creation_context_ui()
+        self._focus_work_in_manager(int(work_id))
+        self.track_title_field.setFocus()
+        return True
+
     def clear_form_fields(self):
         self.artist_field.setCurrentText("")
         self.additional_artist_field.setCurrentText("")
@@ -13137,6 +13366,17 @@ class App(QMainWindow):
                 audio_file_source_path=(self.audio_file_field.text().strip() or None),
                 album_art_source_path=(self.album_art_field.text().strip() or None),
             )
+            work_track_context = self._current_work_track_context()
+            if work_track_context is not None:
+                payload.work_id = int(work_track_context["work_id"])
+                payload.parent_track_id = (
+                    int(work_track_context["parent_track_id"])
+                    if work_track_context.get("parent_track_id") is not None
+                    else None
+                )
+                payload.relationship_type = str(
+                    work_track_context.get("relationship_type") or "original"
+                )
             if payload.audio_file_source_path and not self._confirm_lossy_primary_audio_selection(
                 [payload.audio_file_source_path],
                 title="Save Track Media",
@@ -13183,6 +13423,10 @@ class App(QMainWindow):
             self.refresh_table_preserve_view(focus_id=track_id)
             self.populate_all_comboboxes()
             self.clear_form_fields()
+            self._refresh_work_track_creation_context_ui()
+            if work_track_context is not None:
+                self._refresh_work_manager_panel()
+                self._focus_work_in_manager(int(work_track_context["work_id"]))
             self._refresh_history_actions()
             QMessageBox.information(self, "Success", "Track info saved successfully!")
         except sqlite3.IntegrityError as e:
@@ -14288,6 +14532,17 @@ class App(QMainWindow):
             return
         self._refresh_history_actions()
         self._refresh_work_manager_panel()
+        self._focus_work_in_manager(work_id)
+        if not list(payload.track_ids):
+            response = QMessageBox.question(
+                self,
+                "Work Manager",
+                "Work created. Do you want to create the first track under this work now?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if response == QMessageBox.Yes:
+                self._begin_work_child_track_creation(work_id)
 
     def update_work(self, work_id: int, payload: WorkPayload):
         if self.work_service is None:
@@ -16920,6 +17175,7 @@ class App(QMainWindow):
     def init_form(self):
         self.refresh_table_preserve_view()
         self.populate_all_comboboxes()
+        self._clear_work_track_creation_context()
         self.clear_form_fields()
 
     # =============================================================================

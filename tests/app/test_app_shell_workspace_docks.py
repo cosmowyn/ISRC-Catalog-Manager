@@ -14,6 +14,12 @@ class AppShellWorkspaceDockTests(AppShellTestCase):
     test_work_manager_dock_uses_live_track_selection = (
         AppShellTestCase.case_work_manager_dock_uses_live_track_selection
     )
+    test_work_manager_creates_governed_child_track_in_add_panel = (
+        AppShellTestCase.case_work_manager_creates_governed_child_track_in_add_panel
+    )
+    test_create_work_offers_first_track_creation_context = (
+        AppShellTestCase.case_create_work_offers_first_track_creation_context
+    )
     test_global_search_opens_as_dock_and_keeps_entity_navigation_live = (
         AppShellTestCase.case_global_search_opens_as_dock_and_keeps_entity_navigation_live
     )

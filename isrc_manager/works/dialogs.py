@@ -631,6 +631,7 @@ class WorkBrowserPanel(QWidget):
 
     filter_requested = Signal(list)
     create_requested = Signal(object)
+    create_child_track_requested = Signal(int)
     update_requested = Signal(int, object)
     duplicate_requested = Signal(int)
     link_tracks_requested = Signal(int, list)
@@ -686,6 +687,8 @@ class WorkBrowserPanel(QWidget):
 
         add_button = QPushButton("Add")
         add_button.clicked.connect(self.create_work)
+        self.create_child_track_button = QPushButton("Add Track to Work")
+        self.create_child_track_button.clicked.connect(self.create_child_track)
         edit_button = QPushButton("Edit")
         edit_button.clicked.connect(self.edit_selected)
         duplicate_button = QPushButton("Duplicate")
@@ -701,6 +704,7 @@ class WorkBrowserPanel(QWidget):
             self,
             [
                 add_button,
+                self.create_child_track_button,
                 edit_button,
                 duplicate_button,
                 link_button,
@@ -780,6 +784,11 @@ class WorkBrowserPanel(QWidget):
                 continue
             self.table.selectRow(row)
             return
+
+    def focus_work(self, work_id: int | None) -> None:
+        if not work_id:
+            return
+        self._restore_selection(int(work_id))
 
     def refresh(self) -> None:
         selected_work_id = self._selected_work_id()
@@ -927,6 +936,17 @@ class WorkBrowserPanel(QWidget):
             return
         self.create_requested.emit(dialog.payload())
 
+    def create_child_track(self) -> None:
+        service = self._work_service()
+        if service is None:
+            QMessageBox.warning(self, "Work Manager", "Open a profile first.")
+            return
+        work_id = self._selected_work_id()
+        if not work_id:
+            QMessageBox.information(self, "Work Manager", "Select a work first.")
+            return
+        self.create_child_track_requested.emit(work_id)
+
     def edit_selected(self) -> None:
         service = self._work_service()
         if service is None:
@@ -1006,6 +1026,7 @@ class WorkBrowserDialog(QDialog):
 
     filter_requested = Signal(list)
     create_requested = Signal(object)
+    create_child_track_requested = Signal(int)
     update_requested = Signal(int, object)
     duplicate_requested = Signal(int)
     link_tracks_requested = Signal(int, list)
@@ -1040,6 +1061,7 @@ class WorkBrowserDialog(QDialog):
         )
         self.panel.filter_requested.connect(self.filter_requested.emit)
         self.panel.create_requested.connect(self.create_requested.emit)
+        self.panel.create_child_track_requested.connect(self.create_child_track_requested.emit)
         self.panel.update_requested.connect(self.update_requested.emit)
         self.panel.duplicate_requested.connect(self.duplicate_requested.emit)
         self.panel.link_tracks_requested.connect(self.link_tracks_requested.emit)

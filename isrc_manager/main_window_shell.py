@@ -782,6 +782,55 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.add_data_header_layout.addWidget(app.add_data_subtitle)
     app.left_panel.addWidget(app.add_data_header)
 
+    app.add_data_work_context_group, add_data_work_context_layout = app._create_add_data_group(
+        "Work Context"
+    )
+    app.add_data_work_context_summary = QLabel("")
+    app.add_data_work_context_summary.setWordWrap(True)
+    app.add_data_work_context_summary.setProperty("role", "sectionTitle")
+    add_data_work_context_layout.addWidget(app.add_data_work_context_summary)
+    app.add_data_work_context_hint = QLabel(
+        "Choose the child relationship and optionally point to an existing track version under the same work."
+    )
+    app.add_data_work_context_hint.setWordWrap(True)
+    app.add_data_work_context_hint.setProperty("role", "secondary")
+    add_data_work_context_layout.addWidget(app.add_data_work_context_hint)
+    app.add_data_work_relationship_label = QLabel("Child Type")
+    app.add_data_work_relationship_combo = FocusWheelComboBox()
+    app.add_data_work_relationship_combo.setEditable(False)
+    app.add_data_work_relationship_combo.currentIndexChanged.connect(
+        app._on_add_track_relationship_changed
+    )
+    add_data_work_context_layout.addWidget(
+        app._create_add_data_row(
+            app.add_data_work_relationship_label,
+            app.add_data_work_relationship_combo,
+        )
+    )
+    app.add_data_work_parent_label = QLabel("Parent Track")
+    app.add_data_work_parent_combo = FocusWheelComboBox()
+    app.add_data_work_parent_combo.setEditable(False)
+    app.add_data_work_parent_combo.currentIndexChanged.connect(
+        app._on_add_track_parent_track_changed
+    )
+    add_data_work_context_layout.addWidget(
+        app._create_add_data_row(
+            app.add_data_work_parent_label,
+            app.add_data_work_parent_combo,
+        )
+    )
+    app.add_data_work_context_actions = QWidget()
+    app.add_data_work_context_actions_layout = QHBoxLayout(app.add_data_work_context_actions)
+    app.add_data_work_context_actions_layout.setContentsMargins(0, 0, 0, 0)
+    app.add_data_work_context_actions_layout.setSpacing(8)
+    app.add_data_clear_work_context_button = QPushButton("Clear Work Context")
+    app.add_data_clear_work_context_button.clicked.connect(app._clear_work_track_creation_context)
+    app.add_data_work_context_actions_layout.addStretch(1)
+    app.add_data_work_context_actions_layout.addWidget(app.add_data_clear_work_context_button)
+    add_data_work_context_layout.addWidget(app.add_data_work_context_actions)
+    app.add_data_work_context_group.setVisible(False)
+    app.left_panel.addWidget(app.add_data_work_context_group)
+
     app.add_data_tabs = QTabWidget()
     app.add_data_tabs.setObjectName("addDataTabs")
     app.add_data_tabs.setDocumentMode(True)

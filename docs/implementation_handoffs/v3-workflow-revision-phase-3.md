@@ -8,9 +8,9 @@ Date: 2026-03-25
 
 ## Status And Scope
 
-Phase 3 is planned and not started.
+Phase 3 is `in_progress`.
 
-This placeholder handoff was created during Phase 0 so the Work Manager and creation-workflow rewrite has a reserved continuation path.
+This first Phase 3 slice rewires real shell behavior so `Work Manager` can launch governed child-track creation through the existing `Add Track` dock instead of keeping track creation entirely floating and track-first.
 
 ## Phase Goal
 
@@ -18,65 +18,86 @@ Make `Work Manager` the primary creation and governance surface for parent works
 
 ## What Changed
 
-None yet.
-
-This file was created during Phase 0 to reserve the handoff path and record the intended scope boundary.
+- `Work Manager` now exposes an explicit `Add Track to Work` action in the reusable panel and dialog wrapper.
+- The main window now supports a visible work-governance creation context inside the existing `Add Track` dock:
+  - active work summary
+  - child relationship selector
+  - optional parent-track selector
+  - clear-context action
+- Creating a track from that context now passes `work_id`, `parent_track_id`, and `relationship_type` into `TrackCreatePayload` before save.
+- Creating a new work now offers immediate first-track creation when the work was created without linked tracks.
+- The existing `Add Track` dock remains the recording editor for this slice, but it is no longer purely blind to work governance when launched from `Work Manager`.
 
 ## Source Of Truth Files And Surfaces
 
-Expected initial Phase 3 surfaces:
-
 - `ISRC_manager.py`
 - `isrc_manager/main_window_shell.py`
-- `isrc_manager/catalog_workspace.py`
-- `isrc_manager/works/*`
-- `isrc_manager/services/tracks.py`
-- `tests/test_catalog_workflow_integration.py`
+- `isrc_manager/works/dialogs.py`
 - `tests/app/_app_shell_support.py`
+- `tests/app/test_app_shell_workspace_docks.py`
+- `tests/test_dialog_controller_behaviors.py`
 
 ## Files Changed
 
-None yet.
+- `ISRC_manager.py`
+- `isrc_manager/main_window_shell.py`
+- `isrc_manager/works/dialogs.py`
+- `tests/app/_app_shell_support.py`
+- `tests/app/test_app_shell_workspace_docks.py`
+- `tests/test_dialog_controller_behaviors.py`
 
 ## Tests Added Or Updated
 
-None yet.
-
-Expected early test focus:
-
-- create work plus first-track flow
-- add child-track flows from work context
-- Work Manager tab and action coverage
-- work-linked issue routing from quality/search surfaces
+- Added controller coverage for the new `Work Manager` child-track action and its empty-selection behavior.
+- Added shell coverage for:
+  - launching governed child-track creation from `Work Manager`
+  - saving a child track with `work_id` / lineage fields populated
+  - prompting for first-track creation immediately after a new work is created
+- Updated workspace-dock layout coverage to reflect the new `Add Track to Work` control in the `Work Manager` action cluster.
+- Validation run:
+  - `python3 -m unittest tests.test_dialog_controller_behaviors tests.test_repertoire_dialogs`
+  - `python3 -m unittest tests.app.test_app_shell_editor_surfaces tests.app.test_app_shell_workspace_docks`
 
 ## What Was Intentionally Deferred
 
-- catalog operational cleanup
-- final legacy license deletion
+- de-emphasizing the global floating `Add Track` menu/ribbon/help copy
+- `Add Album...` bulk creation rewrite so it also respects work-governed creation
+- Catalog operational cleanup and work-linked issue routing from quality/search
+- final legacy license deletion and shell cleanup
 
 ## Risks And Caveats
 
-- Phase 3 must not leave both floating-track creation and work-context creation as equally prominent default paths
-- work seeding into first-track creation should not silently overwrite later work metadata
+- The work-context path is now real, but the app still advertises floating `Add Track` creation in menus, ribbon defaults, and help copy. That still needs to be demoted in a later Phase 3 slice.
+- `Add Album...` still bypasses work-governed creation and remains a parallel track-first route.
+- Work seeding currently pre-fills the track title and ISWC on context launch only. Later track edits still remain independent and do not overwrite work metadata.
 
 ## Workers Used And Workers Closed
 
-None yet.
-
-Workers should be recorded here when Phase 3 actually starts.
+- Workers used:
+  - `Pasteur`
+  - `Ptolemy`
+  - `Dirac`
+- Workers closed:
+  - `Pasteur`
+  - `Ptolemy`
+  - `Dirac`
 
 ## QA/QC Summary From Central Oversight
 
-Phase 0 central-oversight instruction:
+The first Phase 3 landing is coherent with the v3 product direction:
 
-- treat `Add Track` as a work-context child creation flow, not as the conceptual first stop for governed products
+- `Work Manager` now has a genuine child-track creation route instead of only post-hoc linking.
+- The existing `Add Track` dock is being repurposed as a recording editor that can operate under explicit work governance.
+- The shell now supports “create work, then create first track immediately” without inventing a second recording editor.
+
+The phase is not ready to close yet because floating track-first affordances still remain prominent elsewhere in the product shell.
 
 ## Exact Safe Pickup Instructions
 
-Before starting Phase 3:
+Next safe Phase 3 continuation:
 
-1. read the masterplan and the completed Phase 2 handoff
-2. confirm the parent-child domain model is stable enough for UI work
-3. define the smallest coherent Work Manager rewrite slice
-4. add workflow tests before shell and dialog expansion
-5. keep Catalog in operational scope rather than turning it into a second governance entry point
+1. read this handoff and the Phase 2 handoff first
+2. continue from the new work-context helpers in `ISRC_manager.py` rather than inventing a second track editor
+3. demote floating `Add Track` copy and affordances so `Work Manager` becomes the clear conceptual entry point
+4. rewrite `Add Album...` so bulk/album creation does not remain an unmanaged track-first bypass
+5. then move into Catalog/quality/search routing work without turning Catalog into a second governance entry point

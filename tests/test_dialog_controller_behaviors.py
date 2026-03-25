@@ -304,13 +304,21 @@ class DialogControllerBehaviorTests(unittest.TestCase):
         )
         emitted_filters = []
         emitted_links = []
+        emitted_child_creations = []
         emitted_deletes = []
         dialog.filter_requested.connect(lambda track_ids: emitted_filters.append(track_ids))
+        dialog.create_child_track_requested.connect(
+            lambda work_id: emitted_child_creations.append(work_id)
+        )
         dialog.link_tracks_requested.connect(
             lambda work_id, track_ids: emitted_links.append((work_id, track_ids))
         )
         dialog.delete_requested.connect(lambda work_id: emitted_deletes.append(work_id))
         try:
+            with mock.patch.object(QMessageBox, "information", return_value=None) as info:
+                dialog.create_child_track()
+            info.assert_called_once()
+
             with mock.patch.object(QMessageBox, "information", return_value=None) as info:
                 dialog.link_selected_tracks()
             info.assert_called_once()
@@ -322,6 +330,9 @@ class DialogControllerBehaviorTests(unittest.TestCase):
 
             dialog.table.selectRow(0)
             self.app.processEvents()
+
+            dialog.create_child_track()
+            self.assertEqual(emitted_child_creations, [1])
 
             dialog.link_selected_tracks()
             self.assertEqual(emitted_links, [(1, [11, 12])])
