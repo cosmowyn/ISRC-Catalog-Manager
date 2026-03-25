@@ -26,6 +26,9 @@ class ContractDialogTests(ContractRightsAssetServiceTestCase):
     test_contract_editor_party_editor_guides_near_duplicates_without_extra_clutter = (
         ContractRightsAssetServiceTestCase.case_contract_editor_party_editor_guides_near_duplicates_without_extra_clutter
     )
+    test_contract_editor_party_editor_supports_quick_create_and_edit = (
+        ContractRightsAssetServiceTestCase.case_contract_editor_party_editor_supports_quick_create_and_edit
+    )
 
 
 del ContractRightsAssetServiceTestCase

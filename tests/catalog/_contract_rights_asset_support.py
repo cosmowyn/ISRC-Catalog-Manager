@@ -960,6 +960,69 @@ class ContractRightsAssetServiceTestCase(unittest.TestCase):
         finally:
             dialog.close()
 
+    def case_contract_editor_party_editor_supports_quick_create_and_edit(self):
+        if ContractEditorDialog is None:
+            self.skipTest("Contract editor dialog unavailable")
+        require_qapplication()
+
+        dialog = ContractEditorDialog(contract_service=self.contract_service)
+        try:
+            with mock.patch("isrc_manager.contracts.dialogs.PartyEditorDialog") as party_dialog_cls:
+                party_dialog = party_dialog_cls.return_value
+                party_dialog.exec.return_value = True
+                party_dialog.payload.return_value = PartyPayload(
+                    legal_name="Signal Rights B.V.",
+                    display_name="Signal Rights",
+                    email="ops@signal.test",
+                    party_type="organization",
+                )
+                dialog.parties_edit.new_party_button.click()
+
+            created_parties = self.party_service.list_parties()
+            self.assertEqual(len(created_parties), 1)
+            created_party_id = created_parties[0].id
+            created_index = dialog.parties_edit.party_combo.findData(created_party_id)
+            self.assertGreaterEqual(created_index, 0)
+            dialog.parties_edit.party_combo.setCurrentIndex(created_index)
+            self.assertEqual(dialog.parties_edit.party_combo.currentData(), created_party_id)
+
+            dialog.parties_edit.role_edit.setText("licensee")
+            dialog.parties_edit.primary_checkbox.setChecked(True)
+            dialog.parties_edit.add_current_party()
+            self.assertEqual(dialog.parties_edit.table.rowCount(), 1)
+            self.assertEqual(dialog.parties_edit.table.item(0, 1).text(), "Signal Rights")
+            dialog.parties_edit.table.selectRow(0)
+
+            with mock.patch("isrc_manager.contracts.dialogs.PartyEditorDialog") as party_dialog_cls:
+                party_dialog = party_dialog_cls.return_value
+                party_dialog.exec.return_value = True
+                party_dialog.payload.return_value = PartyPayload(
+                    legal_name="Signal Rights B.V.",
+                    display_name="Signal Rights Updated",
+                    email="ops@signal.test",
+                    party_type="organization",
+                )
+                dialog.parties_edit.edit_party_button.click()
+
+            refreshed_index = dialog.parties_edit.party_combo.findData(created_party_id)
+            self.assertGreaterEqual(refreshed_index, 0)
+            dialog.parties_edit.party_combo.setCurrentIndex(refreshed_index)
+            self.assertEqual(dialog.parties_edit.party_combo.currentData(), created_party_id)
+            self.assertIn(
+                "Signal Rights Updated",
+                dialog.parties_edit.party_combo.itemText(refreshed_index),
+            )
+            self.assertEqual(dialog.parties_edit.table.item(0, 1).text(), "Signal Rights Updated")
+
+            payload = dialog.payload()
+            self.assertEqual(len(payload.parties), 1)
+            self.assertEqual(payload.parties[0].party_id, created_party_id)
+            self.assertIsNone(payload.parties[0].name)
+            self.assertEqual(payload.parties[0].role_label, "licensee")
+            self.assertTrue(payload.parties[0].is_primary)
+        finally:
+            dialog.close()
+
     def case_contract_browser_uses_compact_action_cluster(self):
         if ContractBrowserPanel is None or QFrame is None:
             self.skipTest("Contract browser panel unavailable")

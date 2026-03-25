@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from isrc_manager.parties.dialogs import PartyEditorDialog
 from isrc_manager.file_storage import (
     STORAGE_MODE_DATABASE,
     STORAGE_MODE_MANAGED_FILE,
@@ -474,8 +475,9 @@ class _ReferenceListEditor(QWidget):
 class _ContractPartyEditor(QWidget):
     valueChanged = Signal()
 
-    def __init__(self, *, placeholder: str, parent=None):
+    def __init__(self, *, placeholder: str, party_service=None, parent=None):
         super().__init__(parent)
+        self.party_service = party_service
         self._choices: list[_ReferenceChoice] = []
         self._choices_by_id: dict[int, _ReferenceChoice] = {}
         self._entries: list[ContractPartyPayload] = []
@@ -518,6 +520,14 @@ class _ContractPartyEditor(QWidget):
         self.notes_edit.setPlaceholderText("Notes (optional)")
         bottom_row.addWidget(self.notes_edit, 1)
 
+        self.new_party_button = QPushButton("New Party...", self)
+        self.new_party_button.clicked.connect(self._create_party)
+        bottom_row.addWidget(self.new_party_button)
+
+        self.edit_party_button = QPushButton("Edit Linked Party...", self)
+        self.edit_party_button.clicked.connect(self._edit_selected_party)
+        bottom_row.addWidget(self.edit_party_button)
+
         self.remove_button = QPushButton("Remove Highlighted", self)
         self.remove_button.clicked.connect(self.remove_selected_parties)
         bottom_row.addWidget(self.remove_button)
@@ -549,6 +559,22 @@ class _ContractPartyEditor(QWidget):
         self.primary_checkbox.stateChanged.connect(self._refresh_editor_state)
         self.notes_edit.textChanged.connect(self._refresh_editor_state)
         self._refresh_editor_state()
+
+    @staticmethod
+    def _reference_choice_from_party_record(record) -> _ReferenceChoice:
+        label = (
+            " / ".join(
+                part
+                for part in (
+                    str(getattr(record, "display_name", "") or "").strip(),
+                    str(getattr(record, "legal_name", "") or "").strip(),
+                    str(getattr(record, "email", "") or "").strip(),
+                )
+                if part
+            )
+            or f"Party #{int(record.id)}"
+        )
+        return _ReferenceChoice(reference_id=int(record.id), label=label)
 
     def set_choices(self, choices: list[_ReferenceChoice]) -> None:
         self._choices = list(choices)
@@ -820,6 +846,82 @@ class _ContractPartyEditor(QWidget):
             notes=self.notes_edit.text().strip() or None,
         )
 
+    def _refresh_choices_from_party_service(self) -> None:
+        if self.party_service is None:
+            return
+        current_text = str(self.party_combo.currentText() or "").strip()
+        resolved = self._resolve_party_selection()
+        selected_party_id = resolved[0] if resolved is not None else None
+        self.set_choices(
+            [
+                self._reference_choice_from_party_record(record)
+                for record in self.party_service.list_parties()
+            ]
+        )
+        if selected_party_id is not None:
+            for index in range(self.party_combo.count()):
+                if self.party_combo.itemData(index) == int(selected_party_id):
+                    self.party_combo.setCurrentIndex(index)
+                    break
+        elif current_text:
+            self.party_combo.setCurrentIndex(0)
+            self.party_combo.setEditText(current_text)
+
+    def _create_party(self) -> None:
+        if self.party_service is None:
+            return
+        dialog = PartyEditorDialog(party_service=self.party_service, parent=self)
+        if not dialog.exec():
+            return
+        try:
+            party_id = int(self.party_service.create_party(dialog.payload()))
+        except Exception as exc:
+            QMessageBox.warning(self, "Contract Parties", str(exc))
+            return
+        self._refresh_choices_from_party_service()
+        for index in range(self.party_combo.count()):
+            if self.party_combo.itemData(index) == party_id:
+                self.party_combo.setCurrentIndex(index)
+                self.party_combo.setEditText(self.party_combo.itemText(index))
+                break
+        self._refresh_editor_state()
+
+    def _edit_selected_party(self) -> None:
+        if self.party_service is None:
+            return
+        resolved = self._resolve_party_selection()
+        party_id = resolved[0] if resolved is not None else None
+        if party_id is None:
+            QMessageBox.information(
+                self,
+                "Contract Parties",
+                "Select or search for a linked Party first.",
+            )
+            return
+        record = self.party_service.fetch_party(int(party_id))
+        if record is None:
+            QMessageBox.warning(
+                self,
+                "Contract Parties",
+                f"Party #{int(party_id)} could not be loaded.",
+            )
+            return
+        dialog = PartyEditorDialog(party_service=self.party_service, party=record, parent=self)
+        if not dialog.exec():
+            return
+        try:
+            self.party_service.update_party(int(record.id), dialog.payload())
+        except Exception as exc:
+            QMessageBox.warning(self, "Contract Parties", str(exc))
+            return
+        self._refresh_choices_from_party_service()
+        for index in range(self.party_combo.count()):
+            if self.party_combo.itemData(index) == int(record.id):
+                self.party_combo.setCurrentIndex(index)
+                self.party_combo.setEditText(self.party_combo.itemText(index))
+                break
+        self._refresh_editor_state()
+
     def _clear_editor_controls(self) -> None:
         self.party_combo.setCurrentIndex(0)
         self.party_combo.setEditText("")
@@ -841,16 +943,19 @@ class _ContractPartyEditor(QWidget):
     def _refresh_editor_state(self) -> None:
         if self._suspend_updates:
             return
+        self.new_party_button.setEnabled(self.party_service is not None)
         draft = self._draft_entry()
         if draft is None:
             self._reveal_row(None)
             self.add_button.setEnabled(False)
             self.add_button.setText("Add Party")
             self.add_button.setToolTip("Choose an existing party or type a new party name.")
+            self.edit_party_button.setEnabled(False)
             self.editor_hint_label.setText(
-                "Choose an existing party or type a new counterparty name."
+                "Choose an existing Party first. Typed counterparty names remain a transitional fallback."
             )
             return
+        self.edit_party_button.setEnabled(self.party_service is not None and draft.party_id is not None)
         match_index = self._matching_entry_index(draft)
         if match_index is None:
             self.add_button.setEnabled(True)
@@ -894,12 +999,12 @@ class _ContractPartyEditor(QWidget):
                 else:
                     self._reveal_row(None)
                     self.editor_hint_label.setText(
-                        "This typed party name will be created when the contract is saved."
+                        "This typed party name is using the transitional fallback path and will create a Party when the contract is saved."
                     )
             else:
                 self._reveal_row(None)
                 self.editor_hint_label.setText(
-                    "This party will be added to the linked parties table."
+                    "This canonical Party will be added to the linked parties table."
                 )
             return
         current = self._entries[match_index]
@@ -2202,10 +2307,11 @@ class ContractEditorDialog(QDialog):
         parties_box, parties_layout = _create_standard_section(
             self,
             "Linked Parties",
-            "Keep parties structured with role, primary status, and notes while still allowing typed names for new counterparties.",
+            "Resolve contract parties from canonical Party records first, then keep role, primary status, and notes structured in one place.",
         )
         self.parties_edit = _ContractPartyEditor(
-            placeholder="Search known party or type a new party name",
+            placeholder="Search existing Party first or type a transitional fallback name",
+            party_service=getattr(contract_service, "party_service", None),
             parent=self,
         )
         parties_layout.addWidget(self.parties_edit)
