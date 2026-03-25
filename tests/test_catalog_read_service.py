@@ -171,6 +171,44 @@ class CatalogReadServiceTests(unittest.TestCase):
         )
         self.assertIsNone(self.service.find_album_metadata("Missing Album"))
 
+    def test_catalog_reads_prefer_current_tracks_and_albums_tables(self):
+        self.conn.executescript(
+            """
+            CREATE TABLE Tracks_legacy (
+                id INTEGER PRIMARY KEY,
+                album_id INTEGER,
+                track_title TEXT,
+                release_date TEXT,
+                upc TEXT,
+                genre TEXT
+            );
+            CREATE TABLE Albums_legacy (
+                id INTEGER PRIMARY KEY,
+                title TEXT NOT NULL
+            );
+            """
+        )
+        self.conn.execute(
+            "INSERT INTO Albums_legacy(id, title) VALUES (?, ?)",
+            (1, "Album One"),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO Tracks_legacy(id, album_id, track_title, release_date, upc, genre)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (1, 1, "Legacy Song", "1999-12-31", "000000000000", "Legacy"),
+        )
+
+        rows, _ = self.service.fetch_rows_with_customs([])
+
+        self.assertEqual(rows[0][2], "First Song")
+        self.assertEqual(rows[0][4], "Album One")
+        self.assertEqual(
+            self.service.find_album_metadata("Album One"),
+            ("2026-03-14", "123456789012", "Pop"),
+        )
+
     def test_list_tracks_returns_title_sorted_choices(self):
         self.assertEqual(
             self.service.list_tracks(),

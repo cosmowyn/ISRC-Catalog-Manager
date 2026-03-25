@@ -139,6 +139,37 @@ class TrackServiceTests(unittest.TestCase):
         self.assertEqual([name for (name,) in additional], ["Guest One", "Guest Two"])
         self.assertEqual(self.service.fetch_track_title(track_id), "First Song")
 
+    def test_create_track_does_not_require_works_table_or_rows(self):
+        track_id = self.service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00003",
+                track_title="Track First",
+                artist_name="Main Artist",
+                additional_artists=[],
+                album_title="Track First Album",
+                release_date=None,
+                track_length_sec=0,
+                iswc=None,
+                upc=None,
+                genre=None,
+                buma_work_number="BUMA-TRACK-FIRST",
+            )
+        )
+
+        self.assertGreater(track_id, 0)
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT track_title, buma_work_number FROM Tracks WHERE id=?",
+                (track_id,),
+            ).fetchone(),
+            ("Track First", "BUMA-TRACK-FIRST"),
+        )
+        self.assertIsNone(
+            self.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='Works'"
+            ).fetchone()
+        )
+
     def test_update_track_replaces_track_and_additional_artist_data(self):
         track_id = self.service.create_track(
             TrackCreatePayload(

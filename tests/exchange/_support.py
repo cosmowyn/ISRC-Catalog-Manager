@@ -14,6 +14,7 @@ from isrc_manager.services import (
     CustomFieldDefinitionService,
     CustomFieldValueService,
     DatabaseSchemaService,
+    LicenseService,
     TrackCreatePayload,
     TrackService,
 )
@@ -271,6 +272,27 @@ class ExchangeServiceTestCase(unittest.TestCase):
         )
         self.assertTrue(isinstance(manifest.get("packaged_media_index"), dict))
         self.assertTrue(manifest["packaged_media_index"])
+
+    def case_package_export_includes_legacy_license_files_column(self):
+        track_id = self._create_track(isrc="NL-ABC-26-00033", title="License Trail")
+        self._create_release(track_id)
+        license_service = LicenseService(self.conn, self.data_root)
+        license_pdf = self.data_root / "track-license.pdf"
+        license_pdf.write_bytes(b"%PDF-1.4\nlicense export test\n")
+        license_service.add_license(
+            track_id=track_id,
+            licensee_name="Moonwake Rights",
+            source_pdf_path=license_pdf,
+        )
+
+        package_path = self.data_root / "license-package.zip"
+        self.service.export_package(package_path)
+
+        with ZipFile(package_path, "r") as archive:
+            manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+
+        self.assertIn("license_files", manifest["columns"])
+        self.assertEqual(manifest["rows"][0]["license_files"], "track-license.pdf")
 
     def case_package_export_includes_shared_album_art_once(self):
         artwork_path = self.data_root / "cover.png"

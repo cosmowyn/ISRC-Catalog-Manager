@@ -5,6 +5,9 @@ class ExchangePackageTests(ExchangeServiceTestCase):
     test_package_export_writes_manifest_and_media = (
         ExchangeServiceTestCase.case_package_export_writes_manifest_and_media
     )
+    test_package_export_includes_legacy_license_files_column = (
+        ExchangeServiceTestCase.case_package_export_includes_legacy_license_files_column
+    )
     test_package_export_includes_shared_album_art_once = (
         ExchangeServiceTestCase.case_package_export_includes_shared_album_art_once
     )

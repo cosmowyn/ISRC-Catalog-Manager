@@ -16,6 +16,7 @@ from isrc_manager.services import (
     TrackCreatePayload,
     TrackService,
 )
+from isrc_manager.services import LicenseService
 from isrc_manager.works import WorkContributorPayload, WorkPayload, WorkService
 
 
@@ -73,6 +74,33 @@ class QualityDashboardServiceTests(unittest.TestCase):
                 album_art_source_path=None,
             )
         )
+
+    def test_scan_reports_orphaned_license_when_track_reference_is_broken(self):
+        track_id = self._create_track(isrc="NL-ABC-26-00090")
+        license_service = LicenseService(self.conn, self.data_root)
+        license_pdf = self.data_root / "orphaned-license.pdf"
+        license_pdf.write_bytes(b"%PDF-1.4\norphaned license test\n")
+        license_id = license_service.add_license(
+            track_id=track_id,
+            licensee_name="Broken Label",
+            source_pdf_path=license_pdf,
+        )
+
+        self.conn.execute("PRAGMA foreign_keys = OFF")
+        self.conn.execute(
+            "UPDATE Licenses SET track_id=? WHERE id=?",
+            (track_id + 999, license_id),
+        )
+        self.conn.execute("PRAGMA foreign_keys = ON")
+
+        result = self.service.scan()
+        orphaned_license_issues = [
+            issue for issue in result.issues if issue.issue_type == "orphaned_license"
+        ]
+
+        self.assertEqual(len(orphaned_license_issues), 1)
+        self.assertEqual(orphaned_license_issues[0].severity, "warning")
+        self.assertEqual(result.counts_by_type["orphaned_license"], 1)
 
     def test_scan_reports_expected_issues(self):
         track_id = self._create_track(isrc="")
