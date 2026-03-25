@@ -41,6 +41,7 @@ try:
         TrackService,
     )
     from isrc_manager.ui_common import _confirm_destructive_action
+    from isrc_manager.works import WorkContributorPayload, WorkService
     from isrc_manager.works.dialogs import WorkBrowserDialog, WorkEditorDialog
 except Exception as exc:  # pragma: no cover - environment-specific fallback
     REPERTOIRE_IMPORT_ERROR = exc
@@ -121,6 +122,83 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
             tabs = dialog.findChild(QTabWidget)
             self.assertIsNotNone(tabs)
             self.assertEqual(tabs.count(), 2)
+        finally:
+            dialog.close()
+
+    def test_work_editor_round_trips_party_linked_contributor_rows(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = sqlite3.connect(":memory:")
+            try:
+                schema = DatabaseSchemaService(conn, data_root=Path(tmpdir))
+                schema.init_db()
+                schema.migrate_schema()
+                party_service = PartyService(conn)
+                work_service = WorkService(conn, party_service=party_service)
+                party_id = party_service.create_party(
+                    PartyPayload(
+                        legal_name="North Star Music Publishing B.V.",
+                        display_name="North Star Publishing",
+                        party_type="publisher",
+                    )
+                )
+
+                dialog = WorkEditorDialog(
+                    work_service=work_service,
+                    track_title_resolver=lambda track_id: f"Track {track_id}",
+                    selected_track_ids_provider=lambda: [],
+                    contributors=[
+                        WorkContributorPayload(
+                            role="publisher",
+                            name="North Star Publishing",
+                            share_percent=100,
+                            role_share_percent=100,
+                            party_id=party_id,
+                        )
+                    ],
+                )
+                try:
+                    contributor_combo = dialog.contributors_table.cellWidget(0, 0)
+                    self.assertIsInstance(contributor_combo, QComboBox)
+                    self.assertTrue(contributor_combo.isEditable())
+                    self.assertEqual(contributor_combo.currentData(), party_id)
+
+                    payload = dialog.payload()
+                    self.assertEqual(len(payload.contributors), 1)
+                    self.assertEqual(payload.contributors[0].party_id, party_id)
+                    self.assertEqual(payload.contributors[0].name, "North Star Publishing")
+                    self.assertEqual(payload.contributors[0].role, "publisher")
+                    self.assertEqual(payload.contributors[0].share_percent, 100.0)
+                    self.assertEqual(payload.contributors[0].role_share_percent, 100.0)
+                finally:
+                    dialog.close()
+            finally:
+                conn.close()
+
+    def test_work_editor_preserves_typed_contributor_name_without_party_selection(self):
+        dialog = WorkEditorDialog(
+            work_service=object(),
+            track_title_resolver=lambda track_id: f"Track {track_id}",
+            selected_track_ids_provider=lambda: [],
+        )
+        try:
+            dialog._add_contributor_row()
+            contributor_combo = dialog.contributors_table.cellWidget(0, 0)
+            self.assertIsInstance(contributor_combo, QComboBox)
+            contributor_combo.setEditText("Unregistered Writer")
+            share_item = dialog.contributors_table.item(0, 2)
+            role_share_item = dialog.contributors_table.item(0, 3)
+            assert share_item is not None
+            assert role_share_item is not None
+            share_item.setText("50")
+            role_share_item.setText("100")
+
+            payload = dialog.payload()
+            self.assertEqual(len(payload.contributors), 1)
+            self.assertIsNone(payload.contributors[0].party_id)
+            self.assertEqual(payload.contributors[0].name, "Unregistered Writer")
+            self.assertEqual(payload.contributors[0].role, "songwriter")
+            self.assertEqual(payload.contributors[0].share_percent, 50.0)
+            self.assertEqual(payload.contributors[0].role_share_percent, 100.0)
         finally:
             dialog.close()
 

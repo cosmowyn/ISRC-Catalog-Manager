@@ -82,6 +82,41 @@ class WorkAndPartyServiceTests(unittest.TestCase):
             1,
         )
 
+    def test_work_creation_reuses_existing_party_when_contributor_party_id_is_supplied(self):
+        publisher_id = self.party_service.create_party(
+            PartyPayload(
+                legal_name="North Star Music Publishing B.V.",
+                display_name="North Star Publishing",
+                party_type="publisher",
+            )
+        )
+
+        work_id = self.work_service.create_work(
+            WorkPayload(
+                title="North Star Anthem",
+                contributors=[
+                    WorkContributorPayload(
+                        role="publisher",
+                        name="North Star Publishing",
+                        party_id=publisher_id,
+                    )
+                ],
+            )
+        )
+
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Parties").fetchone()[0], 1)
+        contributor_row = self.conn.execute(
+            """
+            SELECT party_id, display_name
+            FROM WorkContributors
+            WHERE work_id=?
+            """,
+            (work_id,),
+        ).fetchone()
+        assert contributor_row is not None
+        self.assertEqual(contributor_row[0], publisher_id)
+        self.assertEqual(contributor_row[1], "North Star Publishing")
+
     def test_work_validation_flags_invalid_split_totals_and_duplicate_iswc(self):
         self.work_service.create_work(
             WorkPayload(

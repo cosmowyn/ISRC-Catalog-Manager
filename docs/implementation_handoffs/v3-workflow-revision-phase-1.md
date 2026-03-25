@@ -15,6 +15,7 @@ This pass landed the first bounded Party-authority slice only:
 - owner settings now support a canonical linked `Party`
 - owner template/export resolution can hydrate from that linked `Party`
 - the Application Settings owner tab now exposes Party-first linking and quick-create/edit actions
+- Work Manager contributor rows now use Party-first selectors with quick-create/edit support and payload round-tripping of `party_id`
 
 This pass did not complete the full Phase 1 Party cutover across all remaining identity-bearing surfaces.
 
@@ -29,6 +30,10 @@ Make identity-bearing workflow paths Party-first across the targeted v3 governan
 - extended `ApplicationSettingsDialog` so the `Owner Party` tab can link to an existing Party, quick-create a new Party, edit the linked Party, or clear the link
 - locked owner identity fields to the linked Party when a canonical Party is selected
 - preserved the public `{{db.owner.*}}` placeholder surface so contract-template exports and form generation continue to resolve through `OwnerPartySettings`
+- replaced Work contributor name-only entry with a Party-backed editable selector that preserves `party_id` through `WorkEditorDialog.payload()`
+- added in-dialog Party quick-create and edit actions for contributor rows so canonical identities can be created without leaving the Work flow
+- kept typed contributor names as an explicit fallback when no Party is selected, so the Phase 1 cutover stays bounded while moving the default path to Party-first
+- tightened contributor payload resolution so the UI can show disambiguating legal-name labels without storing those helper labels as the credited display name
 
 ## Source Of Truth Files And Surfaces
 
@@ -46,16 +51,22 @@ Primary Phase 1 surfaces for this slice:
 - `tests/contract_templates/test_export_service.py`
 - `tests/contract_templates/test_form_generation.py`
 - `tests/test_theme_builder.py`
+- `isrc_manager/works/dialogs.py`
+- `tests/test_repertoire_dialogs.py`
+- `tests/test_work_and_party_services.py`
 
 ## Files Changed
 
 - `ISRC_manager.py`
 - `isrc_manager/services/settings_reads.py`
 - `isrc_manager/services/settings_mutations.py`
+- `isrc_manager/works/dialogs.py`
 - `tests/test_settings_read_service.py`
 - `tests/test_settings_mutations_service.py`
 - `tests/contract_templates/test_export_service.py`
+- `tests/test_repertoire_dialogs.py`
 - `tests/test_theme_builder.py`
+- `tests/test_work_and_party_services.py`
 
 ## Tests Added Or Updated
 
@@ -67,6 +78,10 @@ Primary Phase 1 surfaces for this slice:
   - added owner-placeholder export coverage for linked owner Party resolution
 - `tests/test_theme_builder.py`
   - added Application Settings owner-tab coverage for a linked Party selector
+- `tests/test_repertoire_dialogs.py`
+  - added Work editor coverage for Party-linked contributor round-tripping and typed-name fallback
+- `tests/test_work_and_party_services.py`
+  - added coverage proving `WorkService` reuses a supplied canonical `party_id` instead of creating duplicate Party rows
 
 Validation also reran:
 
@@ -77,14 +92,14 @@ Validation also reran:
 Commands run during this slice:
 
 - `python3 -m unittest tests.test_settings_read_service tests.test_settings_mutations_service tests.contract_templates.test_export_service tests.contract_templates.test_form_generation tests.test_theme_builder`
+- `python3 -m unittest tests.test_repertoire_dialogs tests.test_work_and_party_services`
 
 Result:
 
-- the targeted Phase 1 owner-settings Party-bridge suite passed
+- the targeted owner-settings and Work contributor Party-bridge suites passed
 
 ## What Was Intentionally Deferred
 
-- Work contributor rows still need a Party-first selector path in `Work Manager`
 - contract-party free-text fallback cleanup was not revisited in this slice
 - broader rights/work/contract identity-surface cleanup remains for the rest of Phase 1
 - work-parent and track-child schema revision remains deferred to Phase 2
@@ -96,7 +111,8 @@ Result:
 - this is a lazy in-place migration: older profiles without `owner_party_id` still resolve through legacy `owner_*` settings until the user links a Party
 - owner registration numbers (`vat_number`, `pro_number`, `ipi_cae`) still come from `General > Registration & Codes`, not from Party rows
 - the `{{db.owner.*}}` contract-template surface still reads as “Application Settings > Owner Party” even though the backing source can now be a canonical Party
-- Work Manager contributor rows are still the clearest remaining Party-first gap in the current repo
+- Work contributor rows now default to Party-first selection, but they still allow typed fallback because the broader v3 contribution ledger redesign is deferred
+- contract-party entry is still the clearest remaining place where free-text fallback should be narrowed before Phase 1 can be closed confidently
 
 ## Workers Used And Workers Closed
 
@@ -111,6 +127,12 @@ Phase 1 helpers used under central oversight:
 - `Planck`
   - inspected downstream contract-template owner resolution and compatibility pressure
   - closed after reconciliation
+- `McClintock`
+  - confirmed the Work editor UI was the Phase 1 gap and scoped the safest test seam
+  - closed after reconciliation
+- `Nietzsche`
+  - confirmed `WorkService` was already Party-first at the persistence layer and pointed implementation at the dialog layer
+  - closed after reconciliation
 
 ## QA/QC Summary From Central Oversight
 
@@ -118,22 +140,22 @@ Central-oversight conclusions for this slice:
 
 - owner settings were the safest first Phase 1 cutover because they are identity-bearing, app-wide, and already feed template/export surfaces
 - the new linked-owner flow establishes a real Party-first path without breaking the current `{{db.owner.*}}` namespace
-- the repo still has remaining Phase 1 identity debt, especially in Work contributor entry flows, so Phase 1 should remain open until that gap is addressed or explicitly deferred
+- Work contributor entry is now Party-first in the Work editor, which removes the largest remaining Work-side identity mismatch between UI and persistence
+- the repo still has remaining Phase 1 identity debt in contract-party fallback behavior and any remaining free-text identity seams, so Phase 1 should remain open until those are either reduced or explicitly deferred
 
 ## Exact Safe Pickup Instructions
 
-Continue Phase 1 with Work contributor Party-first entry next.
+Continue Phase 1 with contract-party fallback tightening next.
 
 Do this next:
 
-1. inspect `isrc_manager/works/dialogs.py` and `isrc_manager/works/service.py`
-2. replace contributor name-only entry with Party-first selection plus quick-create where practical
-3. preserve contributor-role and split validation behavior while making `party_id` the default identity path
+1. inspect `isrc_manager/contracts/dialogs.py` and the related contract-party tests
+2. narrow free-text contract-party entry so Party selection is the default path and typed fallback is explicitly transitional
+3. preserve current contract editing behavior while reducing duplicate identity paths
 4. add tests before changing other governance surfaces:
-   - work dialog contributor entry
-   - work service payload persistence
-   - integration coverage where linked works already feed quality/search
-5. reassess whether contract-party free-text fallback should be narrowed before closing Phase 1
+   - contract party editor selection and fallback behavior
+   - any downstream template or rights integration that depends on contract parties
+5. reassess whether the remaining Phase 1 identity seams are small enough to close the phase or should be documented as deferred
 
 Do not do this yet:
 

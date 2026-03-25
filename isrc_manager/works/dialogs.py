@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,
+    QCompleter,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -27,6 +28,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from isrc_manager.parties import PartyRecord
+from isrc_manager.parties.dialogs import PartyEditorDialog
 from isrc_manager.selection_scope import (
     SelectionScopeBanner,
     SelectionScopeState,
@@ -72,6 +75,7 @@ class WorkEditorDialog(QDialog):
     ):
         super().__init__(parent)
         self.work_service = work_service
+        self.party_service = getattr(work_service, "party_service", None)
         self.track_title_resolver = track_title_resolver
         self.selected_track_ids_provider = selected_track_ids_provider
         self.work = work
@@ -190,22 +194,29 @@ class WorkEditorDialog(QDialog):
         contributors_layout.setSpacing(10)
         contributors_layout.addWidget(
             QLabel(
-                "Add one row per credited party. Keep split columns populated when the work needs share validation."
+                "Choose a canonical Party for each credited contributor when available. "
+                "Typed credit names remain available as a transitional fallback."
             )
         )
         contributors_actions = QHBoxLayout()
-        add_contributor_button = QPushButton("Add Contributor")
-        add_contributor_button.clicked.connect(self._add_contributor_row)
-        remove_contributor_button = QPushButton("Remove Highlighted")
-        remove_contributor_button.clicked.connect(self._remove_contributor_rows)
-        contributors_actions.addWidget(add_contributor_button)
-        contributors_actions.addWidget(remove_contributor_button)
+        self.add_contributor_button = QPushButton("Add Contributor")
+        self.add_contributor_button.clicked.connect(self._add_contributor_row)
+        self.remove_contributor_button = QPushButton("Remove Highlighted")
+        self.remove_contributor_button.clicked.connect(self._remove_contributor_rows)
+        self.new_contributor_party_button = QPushButton("New Party...")
+        self.new_contributor_party_button.clicked.connect(self._create_contributor_party)
+        self.edit_contributor_party_button = QPushButton("Edit Linked Party...")
+        self.edit_contributor_party_button.clicked.connect(self._edit_contributor_party)
+        contributors_actions.addWidget(self.add_contributor_button)
+        contributors_actions.addWidget(self.remove_contributor_button)
+        contributors_actions.addWidget(self.new_contributor_party_button)
+        contributors_actions.addWidget(self.edit_contributor_party_button)
         contributors_actions.addStretch(1)
         contributors_layout.addLayout(contributors_actions)
 
         self.contributors_table = QTableWidget(0, 4, contributors_box)
         self.contributors_table.setHorizontalHeaderLabels(
-            ["Name", "Role", "Share %", "Role Share %"]
+            ["Party / Credit", "Role", "Share %", "Role Share %"]
         )
         self.contributors_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.contributors_table.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -219,6 +230,9 @@ class WorkEditorDialog(QDialog):
         )
         self.contributors_table.horizontalHeader().setSectionResizeMode(
             3, QHeaderView.ResizeToContents
+        )
+        self.contributors_table.itemSelectionChanged.connect(
+            self._refresh_contributor_party_action_state
         )
         contributors_layout.addWidget(self.contributors_table, 1)
         splitter.addWidget(contributors_box)
@@ -285,12 +299,217 @@ class WorkEditorDialog(QDialog):
             self._add_contributor_row(contributor)
         for track_id in track_ids or []:
             self._append_track_row(int(track_id))
+        self._refresh_contributor_party_action_state()
+
+    @staticmethod
+    def _contributor_party_primary_label(record: PartyRecord) -> str:
+        return (
+            str(record.display_name or "").strip()
+            or str(record.artist_name or "").strip()
+            or str(record.company_name or "").strip()
+            or str(record.legal_name or "").strip()
+            or f"Party #{int(record.id)}"
+        )
+
+    @classmethod
+    def _contributor_party_choice_label(cls, record: PartyRecord) -> str:
+        primary = cls._contributor_party_primary_label(record)
+        legal_name = str(record.legal_name or "").strip()
+        if legal_name and legal_name.casefold() != primary.casefold():
+            return f"{primary} ({legal_name})"
+        return primary
+
+    def _contributor_party_records(self) -> list[PartyRecord]:
+        if self.party_service is None:
+            return []
+        try:
+            return list(self.party_service.list_parties() or [])
+        except Exception:
+            return []
+
+    def _configure_contributor_party_combo(
+        self,
+        combo: QComboBox,
+        *,
+        selected_party_id: int | None = None,
+        current_text: str | None = None,
+    ) -> None:
+        clean_text = str(current_text or "").strip()
+        labels: list[str] = []
+        previous_state = combo.blockSignals(True)
+        try:
+            combo.clear()
+            combo.setEditable(True)
+            combo.setInsertPolicy(QComboBox.NoInsert)
+            combo.addItem("", None)
+            for record in self._contributor_party_records():
+                primary_label = self._contributor_party_primary_label(record)
+                label = self._contributor_party_choice_label(record)
+                combo.addItem(label, int(record.id))
+                combo.setItemData(combo.count() - 1, primary_label, Qt.UserRole + 1)
+                labels.append(label)
+            if selected_party_id is not None and combo.findData(int(selected_party_id)) < 0:
+                fallback_label = clean_text or f"Party #{int(selected_party_id)}"
+                combo.addItem(fallback_label, int(selected_party_id))
+                combo.setItemData(combo.count() - 1, fallback_label, Qt.UserRole + 1)
+                labels.append(fallback_label)
+            completer = QCompleter(labels, combo)
+            completer.setCaseSensitivity(Qt.CaseInsensitive)
+            combo.setCompleter(completer)
+            if selected_party_id is not None:
+                index = combo.findData(int(selected_party_id))
+                combo.setCurrentIndex(index if index >= 0 else 0)
+            elif clean_text:
+                combo.setCurrentIndex(-1)
+                combo.setEditText(clean_text)
+            else:
+                combo.setCurrentIndex(0)
+        finally:
+            combo.blockSignals(previous_state)
+
+    @staticmethod
+    def _resolve_contributor_party_choice(combo: QComboBox) -> tuple[str, int | None]:
+        clean = str(combo.currentText() or "").strip()
+        if not clean:
+            return "", None
+        current_index = combo.currentIndex()
+        if current_index > 0:
+            data = combo.itemData(current_index)
+            label = str(combo.itemText(current_index) or "").strip()
+            if data not in (None, "") and clean.casefold() == label.casefold():
+                primary_label = str(combo.itemData(current_index, Qt.UserRole + 1) or label).strip()
+                return primary_label or label, int(data)
+        for index in range(1, combo.count()):
+            label = str(combo.itemText(index) or "").strip()
+            if clean.casefold() != label.casefold():
+                continue
+            data = combo.itemData(index)
+            if data not in (None, ""):
+                primary_label = str(combo.itemData(index, Qt.UserRole + 1) or label).strip()
+                return primary_label or label, int(data)
+        return clean, None
+
+    def _contributor_party_combo(self, row: int) -> QComboBox | None:
+        if row < 0:
+            return None
+        widget = self.contributors_table.cellWidget(row, 0)
+        return widget if isinstance(widget, QComboBox) else None
+
+    def _selected_contributor_row(self) -> int | None:
+        current_row = self.contributors_table.currentRow()
+        if current_row >= 0:
+            return int(current_row)
+        selected_rows = sorted({index.row() for index in self.contributors_table.selectedIndexes()})
+        return int(selected_rows[0]) if selected_rows else None
+
+    def _refresh_all_contributor_party_combos(self) -> None:
+        for row in range(self.contributors_table.rowCount()):
+            combo = self._contributor_party_combo(row)
+            if combo is None:
+                continue
+            current_text, selected_party_id = self._resolve_contributor_party_choice(combo)
+            self._configure_contributor_party_combo(
+                combo,
+                selected_party_id=selected_party_id,
+                current_text=current_text,
+            )
+        self._refresh_contributor_party_action_state()
+
+    def _refresh_contributor_party_action_state(self) -> None:
+        has_party_service = self.party_service is not None
+        self.new_contributor_party_button.setEnabled(has_party_service)
+        row = self._selected_contributor_row()
+        combo = self._contributor_party_combo(row) if row is not None else None
+        _name, selected_party_id = (
+            self._resolve_contributor_party_choice(combo)
+            if combo is not None
+            else ("", None)
+        )
+        self.edit_contributor_party_button.setEnabled(
+            has_party_service and combo is not None and selected_party_id is not None
+        )
+
+    def _create_contributor_party(self) -> None:
+        if self.party_service is None:
+            return
+        dialog = PartyEditorDialog(party_service=self.party_service, parent=self)
+        if not dialog.exec():
+            return
+        try:
+            party_id = int(self.party_service.create_party(dialog.payload()))
+        except Exception as exc:
+            QMessageBox.warning(self, "Work Contributor", str(exc))
+            return
+        row = self._selected_contributor_row()
+        if row is None:
+            self._add_contributor_row()
+            row = self.contributors_table.rowCount() - 1
+            self.contributors_table.selectRow(row)
+        self._refresh_all_contributor_party_combos()
+        combo = self._contributor_party_combo(int(row))
+        if combo is not None:
+            index = combo.findData(int(party_id))
+            if index >= 0:
+                combo.setCurrentIndex(index)
+        self._refresh_contributor_party_action_state()
+
+    def _edit_contributor_party(self) -> None:
+        if self.party_service is None:
+            return
+        row = self._selected_contributor_row()
+        combo = self._contributor_party_combo(row) if row is not None else None
+        _name, selected_party_id = (
+            self._resolve_contributor_party_choice(combo)
+            if combo is not None
+            else ("", None)
+        )
+        if selected_party_id is None:
+            QMessageBox.information(
+                self,
+                "Work Contributor",
+                "Select a contributor row linked to a Party first.",
+            )
+            return
+        record = self.party_service.fetch_party(int(selected_party_id))
+        if record is None:
+            QMessageBox.warning(
+                self,
+                "Work Contributor",
+                f"Party #{int(selected_party_id)} could not be loaded.",
+            )
+            return
+        dialog = PartyEditorDialog(party_service=self.party_service, party=record, parent=self)
+        if not dialog.exec():
+            return
+        try:
+            self.party_service.update_party(int(record.id), dialog.payload())
+        except Exception as exc:
+            QMessageBox.warning(self, "Work Contributor", str(exc))
+            return
+        self._refresh_all_contributor_party_combos()
+        refreshed_combo = self._contributor_party_combo(int(row)) if row is not None else None
+        if refreshed_combo is not None:
+            index = refreshed_combo.findData(int(record.id))
+            if index >= 0:
+                refreshed_combo.setCurrentIndex(index)
+        self._refresh_contributor_party_action_state()
 
     def _add_contributor_row(self, contributor: WorkContributorPayload | None = None) -> None:
         row = self.contributors_table.rowCount()
         self.contributors_table.insertRow(row)
-        name_item = QTableWidgetItem(contributor.name if contributor is not None else "")
-        self.contributors_table.setItem(row, 0, name_item)
+        party_combo = QComboBox(self.contributors_table)
+        self._configure_contributor_party_combo(
+            party_combo,
+            selected_party_id=contributor.party_id if contributor is not None else None,
+            current_text=contributor.name if contributor is not None else None,
+        )
+        party_combo.currentIndexChanged.connect(
+            lambda _index, self=self: self._refresh_contributor_party_action_state()
+        )
+        party_combo.editTextChanged.connect(
+            lambda _text, self=self: self._refresh_contributor_party_action_state()
+        )
+        self.contributors_table.setCellWidget(row, 0, party_combo)
 
         role_combo = QComboBox(self.contributors_table)
         role_combo.addItems([item.replace("_", " ").title() for item in WORK_CREATOR_ROLE_CHOICES])
@@ -313,12 +532,15 @@ class WorkEditorDialog(QDialog):
         )
         self.contributors_table.setItem(row, 2, share_item)
         self.contributors_table.setItem(row, 3, role_share_item)
+        self.contributors_table.setCurrentCell(row, 0)
+        self._refresh_contributor_party_action_state()
 
     def _remove_contributor_rows(self) -> None:
         for row in sorted(
             {index.row() for index in self.contributors_table.selectedIndexes()}, reverse=True
         ):
             self.contributors_table.removeRow(row)
+        self._refresh_contributor_party_action_state()
 
     def _append_track_row(self, track_id: int) -> None:
         existing = {
@@ -346,11 +568,16 @@ class WorkEditorDialog(QDialog):
     def payload(self) -> WorkPayload:
         contributors: list[WorkContributorPayload] = []
         for row in range(self.contributors_table.rowCount()):
-            name_item = self.contributors_table.item(row, 0)
+            identity_widget = self.contributors_table.cellWidget(row, 0)
             role_widget = self.contributors_table.cellWidget(row, 1)
             share_item = self.contributors_table.item(row, 2)
             role_share_item = self.contributors_table.item(row, 3)
-            name = name_item.text().strip() if name_item is not None else ""
+            if isinstance(identity_widget, QComboBox):
+                name, party_id = self._resolve_contributor_party_choice(identity_widget)
+            else:
+                name_item = self.contributors_table.item(row, 0)
+                name = name_item.text().strip() if name_item is not None else ""
+                party_id = None
             if not name:
                 continue
             role = (
@@ -366,6 +593,7 @@ class WorkEditorDialog(QDialog):
                     name=name,
                     share_percent=float(share_text) if share_text else None,
                     role_share_percent=float(role_share_text) if role_share_text else None,
+                    party_id=party_id,
                 )
             )
         track_ids = []
