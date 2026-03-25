@@ -16,6 +16,11 @@ def make_catalog_read_conn():
             id INTEGER PRIMARY KEY,
             title TEXT NOT NULL
         );
+        CREATE TABLE Works (
+            id INTEGER PRIMARY KEY,
+            title TEXT NOT NULL,
+            iswc TEXT
+        );
         CREATE TABLE Tracks (
             id INTEGER PRIMARY KEY,
             isrc TEXT NOT NULL,
@@ -30,6 +35,7 @@ def make_catalog_read_conn():
             album_art_size_bytes INTEGER NOT NULL DEFAULT 0,
             main_artist_id INTEGER NOT NULL,
             buma_work_number TEXT,
+            work_id INTEGER,
             album_id INTEGER,
             release_date TEXT,
             track_length_sec INTEGER NOT NULL DEFAULT 0,
@@ -59,15 +65,19 @@ def make_catalog_read_conn():
         [(1, "Album One"), (2, "Album Two")],
     )
     conn.executemany(
+        "INSERT INTO Works(id, title, iswc) VALUES (?, ?, ?)",
+        [(1, "Catalog Parent Work", "T-999.999.999-9")],
+    )
+    conn.executemany(
         """
         INSERT INTO Tracks(
             id, isrc, db_entry_date,
             audio_file_path, audio_file_mime_type, audio_file_size_bytes,
             track_title, catalog_number,
             album_art_path, album_art_mime_type, album_art_size_bytes,
-            main_artist_id, buma_work_number, album_id, release_date, track_length_sec, iswc, upc, genre
+            main_artist_id, buma_work_number, work_id, album_id, release_date, track_length_sec, iswc, upc, genre
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             (
@@ -84,6 +94,7 @@ def make_catalog_read_conn():
                 42,
                 1,
                 "BUMA-101",
+                1,
                 1,
                 "2026-03-14",
                 195,
@@ -105,6 +116,7 @@ def make_catalog_read_conn():
                 0,
                 3,
                 "",
+                None,
                 2,
                 "2026-03-15",
                 60,
@@ -153,7 +165,7 @@ class CatalogReadServiceTests(unittest.TestCase):
                 "Guest Artist",
                 "NL-ABC-26-00001",
                 "BUMA-101",
-                "T-123.456.789-0",
+                "T-999.999.999-9",
                 "123456789012",
                 "CAT-001",
                 "2026-03-13",
@@ -163,6 +175,12 @@ class CatalogReadServiceTests(unittest.TestCase):
         )
         self.assertEqual(custom_map[(1, 10)], "Calm")
         self.assertEqual(custom_map[(2, 11)], "Loud")
+
+    def test_fetch_rows_with_customs_prefers_authoritative_work_iswc(self):
+        rows, _ = self.service.fetch_rows_with_customs([])
+
+        self.assertEqual(rows[0][10], "T-999.999.999-9")
+        self.assertEqual(rows[1][10], "")
 
     def test_find_album_metadata_returns_first_track_values(self):
         self.assertEqual(

@@ -8,9 +8,9 @@ Date: 2026-03-25
 
 ## Status And Scope
 
-Phase 4 is planned and not started.
+Phase 4 is `in_progress`.
 
-This placeholder handoff was created during Phase 0 so the Catalog integration cleanup has a reserved continuation path.
+This first Phase 4 slice starts the read-side authority cleanup so operational inventory and diagnostics consume the v3 work model instead of older shadow assumptions.
 
 ## Phase Goal
 
@@ -18,39 +18,43 @@ Keep `Catalog` strong as the operational inventory while reducing duplicated gov
 
 ## What Changed
 
-None yet.
-
-This file was created during Phase 0 to reserve the handoff path and record the intended scope boundary.
+- `CatalogReadService` now joins `Tracks.work_id` to `Works` and prefers the linked work ISWC in catalog row projections before falling back to track-level shadow ISWC.
+- `QualityDashboardService` now evaluates work-link authority from the v3 governing field on `Tracks` instead of relying on `WorkTrackLinks` as the source of truth:
+  - `track_missing_linked_work` now checks whether `Tracks.work_id` resolves to a real work row
+  - `orphaned_work_recording_link` now checks whether any tracks point directly at the work through `Tracks.work_id`
+- This keeps `Catalog` and quality diagnostics aligned with the parent-governance model without turning the catalog itself into a second authoring surface.
 
 ## Source Of Truth Files And Surfaces
-
-Expected initial Phase 4 surfaces:
 
 - `isrc_manager/catalog_workspace.py`
 - `isrc_manager/services/catalog_reads.py`
 - `isrc_manager/quality/service.py`
-- `isrc_manager/exchange/service.py`
 - `tests/test_catalog_read_service.py`
+- `tests/test_quality_service.py`
 - `tests/test_catalog_workflow_integration.py`
-- `tests/integration/test_global_search_relationships.py`
 
 ## Files Changed
 
-None yet.
+- `isrc_manager/services/catalog_reads.py`
+- `isrc_manager/quality/service.py`
+- `tests/test_catalog_read_service.py`
+- `tests/test_quality_service.py`
 
 ## Tests Added Or Updated
 
-None yet.
-
-Expected early test focus:
-
-- catalog read projections from authoritative work and Party data
-- bulk-edit and track-edit operational behavior
-- search and quality integration after governance-model cleanup
-- exchange/export integration against the new authoritative sources
+- Added catalog-read coverage proving the table projection prefers authoritative `Works.iswc` over a stale track-level copy when `Tracks.work_id` is present.
+- Added quality coverage proving direct `Tracks.work_id` authority is enough even if `WorkTrackLinks` is missing, so quality does not falsely report:
+  - `track_missing_linked_work`
+  - `orphaned_work_recording_link`
+- Validation run:
+  - `python3 -m unittest tests.test_catalog_read_service tests.test_quality_service tests.test_catalog_workflow_integration`
+  - `python3 -m unittest tests.app.test_app_shell_workspace_docks tests.app.test_app_shell_startup_core tests.test_quality_dialogs`
 
 ## What Was Intentionally Deferred
 
+- broader catalog workspace projection changes
+- bulk-edit and track-edit operational cleanup
+- search/export authority cleanup beyond the Phase 3 governance-routing closeout
 - final legacy license deletion
 - final shell cleanup
 
@@ -58,25 +62,33 @@ Expected early test focus:
 
 - Phase 4 must not recreate a second governance surface inside Catalog while cleaning up operational views
 - catalog changes should consume the Phase 2 and Phase 3 model instead of inventing transitional duplicate fields
+- `WorkTrackLinks` still exists as shadow compatibility in other services; this slice narrows read authority in catalog/quality first, but does not delete that table or fully remove legacy read paths elsewhere
+- catalog rows still surface some track-side composition shadow fields such as `buma_work_number`; richer work-summary projection remains a later Phase 4 slice
 
 ## Workers Used And Workers Closed
 
-None yet.
-
-Workers should be recorded here when Phase 4 actually starts.
+None in this slice.
 
 ## QA/QC Summary From Central Oversight
 
-Phase 0 central-oversight instruction:
+This is a valid Phase 4 start because it changes authority, not concept:
 
-- Catalog stays the operational inventory and execution layer, not the primary product-creation concept
+- `Catalog` still behaves as inventory and operational read surface
+- `Work Manager` still owns governance and creation
+- read-side catalog and quality logic now trust the direct governing `Tracks.work_id` relationship first, which matches the v3 architecture
+
+Central Oversight check:
+
+- good: inventory and diagnostics are starting to consume the parent-governance model
+- good: no new creation surface was added to Catalog
+- next: continue replacing shadow/workaround read paths in catalog/search/export before attempting final legacy deletion
 
 ## Exact Safe Pickup Instructions
 
-Before starting Phase 4:
+Next safe Phase 4 continuation:
 
-1. read the masterplan and the completed Phase 3 handoff
-2. confirm the work-context creation flow is stable
-3. identify catalog reads and actions that still depend on old governance or identity duplication
-4. add integration tests before broad workspace cleanup
-5. keep final legacy-license deletion out of this phase unless the replacement pathways are already complete
+1. read the masterplan plus the completed Phase 3 handoff first
+2. continue from `catalog_reads.py` and other read-only catalog/search/export surfaces before reshaping edit forms
+3. replace remaining read paths that still privilege track-side composition shadow fields or `WorkTrackLinks` over direct `Tracks.work_id`
+4. keep adding integration tests as authority moves from shadow structures to v3 authoritative data
+5. defer final legacy-license deletion until the replacement read and operational paths are fully stable

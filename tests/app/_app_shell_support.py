@@ -1708,6 +1708,52 @@ class AppShellTestCase(unittest.TestCase):
         self.assertTrue(captured.get("lock_work"))
         self.assertEqual(captured.get("relationship_type"), "original")
 
+    def case_relationship_search_work_entity_focuses_requested_work_manager_row(self):
+        first_work_id = self.window.work_service.create_work(
+            app_module.WorkPayload(title="Search Focus Work One")
+        )
+        second_work_id = self.window.work_service.create_work(
+            app_module.WorkPayload(title="Search Focus Work Two")
+        )
+        self.assertGreater(first_work_id, 0)
+
+        panel = self.window.open_work_manager()
+        self.app.processEvents()
+        panel.search_edit.setText("No Matching Work")
+        self.app.processEvents()
+        self.assertEqual(panel.table.rowCount(), 0)
+
+        self.window._open_entity_from_relationship_search("work", second_work_id)
+        self.app.processEvents()
+
+        panel = self.window.work_manager_dock.widget()
+        self.assertEqual(panel.search_edit.text(), "")
+        self.assertEqual(panel._selected_work_id(), second_work_id)
+
+    def case_quality_governance_issue_routes_track_scope_to_work_manager(self):
+        self.window.work_service.create_work(app_module.WorkPayload(title="Quality Routing Work"))
+        track_id = self._create_track(index=171, title="Quality Routed Track")
+
+        issue = app_module.QualityIssue(
+            issue_type="track_missing_linked_work",
+            severity="warning",
+            title="Track Missing Linked Work",
+            details="Track should be assigned to a parent work.",
+            entity_type="track",
+            entity_id=track_id,
+            track_id=track_id,
+        )
+        self.window._open_issue_from_dashboard(issue)
+        self.app.processEvents()
+
+        panel = self.window.work_manager_dock.widget()
+        state = panel.selection_scope_state()
+        self.assertEqual(state.track_ids, (track_id,))
+        self.assertTrue(state.override_active)
+        self.assertEqual(panel.selection_banner.scope_label.text(), "Pinned chooser override")
+        self.assertIsNone(panel.linked_track_id)
+        self.assertFalse(self.window.work_manager_dock.isHidden())
+
     def case_global_search_opens_as_dock_and_keeps_entity_navigation_live(self):
         track_id = self._create_track(index=121, title="Searchable Dock Track")
         self.window.refresh_table()

@@ -340,6 +340,45 @@ class QualityDashboardServiceTests(unittest.TestCase):
             any(issue.issue_type == "duplicate_release_upc" for issue in result.issues)
         )
 
+    def test_work_quality_rules_prefer_direct_track_work_link_over_shadow_link_table(self):
+        work_id = self.work_service.create_work(
+            WorkPayload(title="Governed Work", iswc="T-123.456.789-0"),
+        )
+        track_id = self.track_service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00150",
+                track_title="Governed Recording",
+                artist_name="Moonwake",
+                additional_artists=[],
+                album_title="Governed Release",
+                release_date="2026-03-15",
+                track_length_sec=180,
+                iswc="T-111.111.111-1",
+                upc=None,
+                genre="Ambient",
+                catalog_number=None,
+                buma_work_number="BUMA-150",
+                composer="Moonwake",
+                publisher="Orbit Editions",
+                comments=None,
+                lyrics=None,
+                audio_file_source_path=None,
+                album_art_source_path=None,
+                work_id=work_id,
+            )
+        )
+        self.assertGreater(track_id, 0)
+        self.conn.execute(
+            "DELETE FROM WorkTrackLinks WHERE work_id=? AND track_id=?",
+            (work_id, track_id),
+        )
+
+        issues = self.service.scan().issues
+        issue_pairs = {(issue.issue_type, int(issue.entity_id or 0)) for issue in issues}
+
+        self.assertNotIn(("track_missing_linked_work", track_id), issue_pairs)
+        self.assertNotIn(("orphaned_work_recording_link", work_id), issue_pairs)
+
     def test_different_title_duplicate_upc_remains_error(self):
         self.release_service.create_release(
             ReleasePayload(

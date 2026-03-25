@@ -23,6 +23,12 @@ class AppShellWorkspaceDockTests(AppShellTestCase):
     test_work_manager_opens_album_dialog_for_selected_work = (
         AppShellTestCase.case_work_manager_opens_album_dialog_for_selected_work
     )
+    test_relationship_search_work_entity_focuses_requested_work_manager_row = (
+        AppShellTestCase.case_relationship_search_work_entity_focuses_requested_work_manager_row
+    )
+    test_quality_governance_issue_routes_track_scope_to_work_manager = (
+        AppShellTestCase.case_quality_governance_issue_routes_track_scope_to_work_manager
+    )
     test_global_search_opens_as_dock_and_keeps_entity_navigation_live = (
         AppShellTestCase.case_global_search_opens_as_dock_and_keeps_entity_navigation_live
     )

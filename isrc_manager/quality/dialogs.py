@@ -115,7 +115,6 @@ class QualityDashboardDialog(QDialog):
         filter_row.addWidget(self.issue_type_combo)
         self.entity_combo = _create_filter_combo(self, minimum_contents_length=11)
         self.entity_combo.addItem("All entities", "")
-        self.entity_combo.addItems(["track", "release", "license"])
         self.entity_combo.currentIndexChanged.connect(self._populate_issue_table)
         filter_row.addWidget(self.entity_combo)
         self.release_combo = _create_filter_combo(self, minimum_contents_length=13)
@@ -148,7 +147,7 @@ class QualityDashboardDialog(QDialog):
         actions = QHBoxLayout()
         actions.setContentsMargins(0, 0, 0, 0)
         actions.setSpacing(8)
-        self.open_button = QPushButton("Open Record")
+        self.open_button = QPushButton("Open Related Surface")
         self.open_button.clicked.connect(self._open_selected_issue)
         self.open_button.setEnabled(False)
         actions.addWidget(self.open_button)
@@ -223,6 +222,22 @@ class QualityDashboardDialog(QDialog):
         restore_index = self.issue_type_combo.findData(current_type)
         self.issue_type_combo.setCurrentIndex(restore_index if restore_index >= 0 else 0)
         self.issue_type_combo.blockSignals(False)
+
+        self.entity_combo.blockSignals(True)
+        current_entity = self.entity_combo.currentData()
+        self.entity_combo.clear()
+        self.entity_combo.addItem("All entities", "")
+        for entity_type in sorted(
+            {
+                str(issue.entity_type or "").strip()
+                for issue in result.issues
+                if str(issue.entity_type or "").strip()
+            }
+        ):
+            self.entity_combo.addItem(entity_type, entity_type)
+        restore_entity = self.entity_combo.findData(current_entity)
+        self.entity_combo.setCurrentIndex(restore_entity if restore_entity >= 0 else 0)
+        self.entity_combo.blockSignals(False)
 
         self.release_combo.blockSignals(True)
         current_release = self.release_combo.currentData()

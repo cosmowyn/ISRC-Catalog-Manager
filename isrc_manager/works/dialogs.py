@@ -766,6 +766,21 @@ class WorkBrowserPanel(QWidget):
         self.linked_track_id = int(linked_track_id) if linked_track_id is not None else None
         self.refresh()
 
+    def set_selection_override_track_ids(self, track_ids: list[int] | None) -> None:
+        normalized: list[int] = []
+        seen: set[int] = set()
+        for track_id in track_ids or []:
+            try:
+                value = int(track_id)
+            except (TypeError, ValueError):
+                continue
+            if value <= 0 or value in seen:
+                continue
+            seen.add(value)
+            normalized.append(value)
+        self._selection_override_track_ids = normalized
+        self.refresh_selection_scope()
+
     def _selected_work_id(self) -> int | None:
         rows = self.table.selectionModel().selectedRows()
         if not rows:
@@ -850,12 +865,10 @@ class WorkBrowserPanel(QWidget):
         self.selection_banner.set_state(self.selection_scope_state())
 
     def _use_current_selection(self) -> None:
-        self._selection_override_track_ids = []
-        self.refresh_selection_scope()
+        self.set_selection_override_track_ids([])
 
     def _clear_selection_override(self) -> None:
-        self._selection_override_track_ids = []
-        self.refresh_selection_scope()
+        self.set_selection_override_track_ids([])
 
     def _available_track_choices(self) -> list[TrackChoice]:
         try:
@@ -897,8 +910,7 @@ class WorkBrowserPanel(QWidget):
         )
         if dialog.exec() != QDialog.Accepted:
             return
-        self._selection_override_track_ids = dialog.selected_track_ids()
-        self.refresh_selection_scope()
+        self.set_selection_override_track_ids(dialog.selected_track_ids())
 
     def _edit_dialog_for(self, work_id: int | None = None) -> WorkEditorDialog:
         service = self._work_service()

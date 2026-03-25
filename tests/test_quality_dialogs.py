@@ -109,6 +109,54 @@ class QualityDialogTests(unittest.TestCase):
         self.assertEqual(combo.minimumContentsLength(), 12)
         self.assertEqual(combo.maxVisibleItems(), 18)
 
+    def test_quality_dashboard_dialog_populates_entity_filter_from_scan_result(self):
+        result = QualityScanResult(
+            issues=[
+                QualityIssue(
+                    issue_type="work_missing_creators",
+                    severity="warning",
+                    title="Work Missing Creators",
+                    details="Work needs credited writers.",
+                    entity_type="work",
+                    entity_id=12,
+                ),
+                QualityIssue(
+                    issue_type="missing_isrc",
+                    severity="warning",
+                    title="Missing ISRC",
+                    details="Track is missing an ISRC.",
+                    entity_type="track",
+                    entity_id=1,
+                    track_id=1,
+                ),
+            ],
+            counts_by_severity={"warning": 2},
+            counts_by_type={"work_missing_creators": 1, "missing_isrc": 1},
+        )
+        dialog = QualityDashboardDialog(
+            service=_DummyQualityService(result),
+            scan_callback=None,
+            task_manager=None,
+            release_choices_provider=lambda: [],
+            apply_fix_callback=lambda _issue: "",
+            open_issue_callback=lambda _issue: None,
+        )
+        try:
+            entity_values = [
+                dialog.entity_combo.itemData(index) for index in range(dialog.entity_combo.count())
+            ]
+            self.assertEqual(entity_values[0], "")
+            self.assertIn("work", entity_values)
+            self.assertIn("track", entity_values)
+
+            dialog.entity_combo.setCurrentIndex(dialog.entity_combo.findData("work"))
+            self.app.processEvents()
+            self.assertEqual(dialog.issue_table.rowCount(), 1)
+            self.assertIn("work missing creators", dialog.details.toPlainText().lower())
+            self.assertEqual(dialog.open_button.text(), "Open Related Surface")
+        finally:
+            dialog.close()
+
 
 if __name__ == "__main__":
     unittest.main()

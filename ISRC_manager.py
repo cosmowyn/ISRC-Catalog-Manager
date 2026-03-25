@@ -14148,7 +14148,40 @@ class App(QMainWindow):
             refresh_scope=True,
         )
 
-    def open_work_manager(self, linked_track_id: int | None = None):
+    def _configure_work_manager_panel(
+        self,
+        panel,
+        *,
+        linked_track_id: int | None = None,
+        work_id: int | None = None,
+        scope_track_ids: list[int] | None = None,
+    ) -> None:
+        current_linked_track_id = getattr(panel, "linked_track_id", None)
+        if (
+            linked_track_id is not None
+            or current_linked_track_id is not None
+            or work_id is not None
+        ):
+            panel.set_linked_track_id(linked_track_id)
+        if scope_track_ids is not None:
+            panel.set_selection_override_track_ids(scope_track_ids)
+        if work_id is not None:
+            if str(panel.search_edit.text() or "").strip():
+                previous_state = panel.search_edit.blockSignals(True)
+                try:
+                    panel.search_edit.clear()
+                finally:
+                    panel.search_edit.blockSignals(previous_state)
+                panel.refresh()
+            panel.focus_work(int(work_id))
+
+    def open_work_manager(
+        self,
+        linked_track_id: int | None = None,
+        *,
+        work_id: int | None = None,
+        scope_track_ids: list[int] | None = None,
+    ):
         if self.work_service is None:
             QMessageBox.warning(self, "Work Manager", "Open a profile first.")
             return
@@ -14156,7 +14189,12 @@ class App(QMainWindow):
             self._ensure_work_manager_dock,
             panel_attr="work_manager_panel",
             legacy_attr="work_browser_dialog",
-            configure=lambda panel: panel.set_linked_track_id(linked_track_id),
+            configure=lambda panel: self._configure_work_manager_panel(
+                panel,
+                linked_track_id=linked_track_id,
+                work_id=work_id,
+                scope_track_ids=scope_track_ids,
+            ),
             refresh_scope=True,
         )
 
@@ -14253,7 +14291,7 @@ class App(QMainWindow):
             self.open_release_editor(int(entity_id))
             return
         if normalized == "work":
-            self.open_work_manager(linked_track_id=None)
+            self.open_work_manager(work_id=int(entity_id))
             return
         if normalized == "contract":
             self.open_contract_manager(int(entity_id))
@@ -17154,6 +17192,12 @@ class App(QMainWindow):
         return str(message)
 
     def _open_issue_from_dashboard(self, issue: QualityIssue) -> None:
+        if issue.entity_type == "work" and issue.entity_id:
+            self.open_work_manager(work_id=int(issue.entity_id))
+            return
+        if issue.issue_type == "track_missing_linked_work" and issue.track_id:
+            self.open_work_manager(scope_track_ids=[int(issue.track_id)])
+            return
         if issue.entity_type == "track" and issue.track_id:
             self.open_selected_editor(issue.track_id)
             return

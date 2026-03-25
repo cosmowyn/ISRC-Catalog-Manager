@@ -8,12 +8,13 @@ Date: 2026-03-25
 
 ## Status And Scope
 
-Phase 3 is `in_progress`.
+Phase 3 is `completed`.
 
-This Phase 3 checkpoint now covers two connected runtime slices:
+This completed Phase 3 handoff covers three connected runtime slices:
 
 - `Work Manager` can launch governed child-track creation through the existing `Track Entry` dock instead of keeping track creation entirely floating and track-first.
 - `Work Manager` can also launch governed album batches, and the album dialog now writes work-governed child tracks instead of leaving album creation as an unmanaged bypass.
+- quality/search governance follow-up now routes back into `Work Manager` instead of dropping the user into unrelated record editors when the real task is work assignment or work-level governance.
 
 ## Phase Goal
 
@@ -39,28 +40,39 @@ Make `Work Manager` the primary creation and governance surface for parent works
   - if a parent work is selected, every created track inherits that `work_id` plus the chosen relationship type
   - if no parent work is selected, the dialog creates one new parent work per saved track so the batch still lands in the governed v3 model
 - The shell now promotes `Work Manager` in the workspace menu and action-ribbon defaults, while the track-entry toggle is explicitly labeled `Show Track Entry Panel`.
+- `Work Manager` can now be opened with:
+  - a focused work row for work-level navigation from search/results surfaces
+  - a pinned track-scope override for governance triage when a track needs to be assigned to a work
+- Relationship search now opens a specific work result inside `Work Manager` instead of opening the manager generically with no focused target.
+- Quality dashboard triage now routes governance issues back into `Work Manager`:
+  - work-entity issues open the focused work row
+  - `track_missing_linked_work` opens `Work Manager` with the affected track pinned as the scope to resolve
 
 ## Source Of Truth Files And Surfaces
 
 - `ISRC_manager.py`
 - `isrc_manager/main_window_shell.py`
+- `isrc_manager/quality/dialogs.py`
 - `isrc_manager/works/dialogs.py`
 - `isrc_manager/help_content.py`
 - `tests/app/_app_shell_support.py`
 - `tests/app/test_app_shell_editor_surfaces.py`
 - `tests/app/test_app_shell_workspace_docks.py`
 - `tests/test_dialog_controller_behaviors.py`
+- `tests/test_quality_dialogs.py`
 
 ## Files Changed
 
 - `ISRC_manager.py`
 - `isrc_manager/main_window_shell.py`
+- `isrc_manager/quality/dialogs.py`
 - `isrc_manager/works/dialogs.py`
 - `isrc_manager/help_content.py`
 - `tests/app/_app_shell_support.py`
 - `tests/app/test_app_shell_editor_surfaces.py`
 - `tests/app/test_app_shell_workspace_docks.py`
 - `tests/test_dialog_controller_behaviors.py`
+- `tests/test_quality_dialogs.py`
 
 ## Tests Added Or Updated
 
@@ -74,16 +86,21 @@ Make `Work Manager` the primary creation and governance surface for parent works
   - launching `Add Album to Work` from a selected work
   - saving an album batch under a selected work with a chosen child relationship type
   - saving an album batch without a selected work and automatically creating one parent work per track
+- Added shell coverage for:
+  - opening a specific work result from relationship search and focusing the requested work inside `Work Manager`
+  - routing `track_missing_linked_work` triage into `Work Manager` with a pinned track scope override
+- Updated quality-dialog coverage so entity filtering is driven by real scan result entities and the open action is phrased generically enough for manager/workspace routing.
 - Updated workspace-dock layout coverage to reflect the new `Add Album to Work` control in the `Work Manager` action cluster.
 - Updated startup and menu coverage to reflect the `Track Entry` rename and the promoted `Work Manager` ribbon default.
 - Validation run:
   - `python3 -m unittest tests.test_dialog_controller_behaviors tests.test_repertoire_dialogs`
   - `python3 -m unittest tests.app.test_app_shell_editor_surfaces tests.app.test_app_shell_workspace_docks`
   - `python3 -m unittest tests.app.test_app_shell_startup_core`
+  - `python3 -m unittest tests.test_quality_dialogs`
 
 ## What Was Intentionally Deferred
 
-- Catalog operational cleanup and work-linked issue routing from quality/search
+- Catalog operational cleanup beyond the routing closeout
 - final legacy license deletion and shell cleanup
 - any deeper modeling for multi-work albums where one release batch intentionally spans multiple unrelated works
 - any additional shell pruning beyond the current `Track Entry` demotion and `Work Manager` promotion
@@ -112,22 +129,26 @@ Make `Work Manager` the primary creation and governance surface for parent works
 
 ## QA/QC Summary From Central Oversight
 
-The first Phase 3 landing is coherent with the v3 product direction:
+Phase 3 is coherent and ready to close against the v3 product direction:
 
 - `Work Manager` now has a genuine child-track creation route instead of only post-hoc linking.
 - The existing `Add Track` dock is being repurposed as a recording editor that can operate under explicit work governance.
 - The shell now supports “create work, then create first track immediately” without inventing a second recording editor.
 - Album-batch creation no longer remains outside the governed model; it now either links under a selected work or creates parent works automatically so new album tracks are not orphaned from work governance.
 - Work Manager is becoming the clear conceptual entry point while `Track Entry` remains available for operational exceptions and direct recording maintenance.
+- Governance triage no longer dead-ends in the wrong places: search and quality now send work-related follow-up back into `Work Manager`, which is the right parent-governance surface for assignment and repair.
 
-The phase is not ready to close yet because quality/search issue routing and the remaining work-governance follow-through still need to be aligned before Catalog-facing cleanup begins.
+Central Oversight sign-off:
+
+- Phase 3 can close because the main creation path, batch path, and governance triage path now all converge on `Work Manager` as the parent surface.
+- The next work should move into Phase 4 read-side cleanup rather than adding more shell reshaping to Phase 3.
 
 ## Exact Safe Pickup Instructions
 
-Next safe Phase 3 continuation:
+Next safe continuation:
 
 1. read this handoff and the Phase 2 handoff first
-2. continue from the new work-context helpers in `ISRC_manager.py` rather than inventing a second track editor
-3. continue from the governed album path rather than creating a second batch-entry surface
-4. route quality/search/work-linkage follow-up back into `Work Manager` so governance issues resolve at the parent layer
-5. only after that, move into Catalog/quality/search cleanup without turning Catalog into a second governance entry point
+2. treat Phase 3 as closed unless a concrete bug is found in the governed creation or governance-routing paths
+3. begin Phase 4 from the read-side authority cleanup in catalog and quality surfaces
+4. keep Catalog as the operational inventory, not a second governance entry point
+5. keep final legacy-license deletion out of Phase 4 unless the authoritative replacements are already fully landed

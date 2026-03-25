@@ -32,7 +32,7 @@ class CatalogReadService:
                 ), '') AS additional_artists,
                 t.isrc,
                 COALESCE(t.buma_work_number, '') AS buma_work_number,
-                COALESCE(t.iswc, '') AS iswc,
+                COALESCE(w.iswc, t.iswc, '') AS iswc,
                 COALESCE(t.upc, '') AS upc,
                 COALESCE(t.catalog_number, '') AS catalog_number,
                 COALESCE(t.db_entry_date, '') AS db_entry_date,
@@ -41,6 +41,7 @@ class CatalogReadService:
             FROM Tracks t
             LEFT JOIN Artists a ON a.id = t.main_artist_id
             LEFT JOIN Albums al ON al.id = t.album_id
+            LEFT JOIN Works w ON w.id = t.work_id
             ORDER BY t.id
             """
         ).fetchall()

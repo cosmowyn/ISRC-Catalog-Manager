@@ -816,7 +816,14 @@ class QualityDashboardService:
                         work.id,
                     )
                 )
-            if work.track_count == 0:
+            linked_track_count = int(
+                self.conn.execute(
+                    "SELECT COUNT(*) FROM Tracks WHERE work_id=?",
+                    (int(work.id),),
+                ).fetchone()[0]
+                or 0
+            )
+            if linked_track_count == 0:
                 issues.append(
                     QualityIssue(
                         "orphaned_work_recording_link",
@@ -860,7 +867,7 @@ class QualityDashboardService:
                 OR COALESCE(buma_work_number, '') != ''
             )
               AND NOT EXISTS (
-                  SELECT 1 FROM WorkTrackLinks wt WHERE wt.track_id = Tracks.id
+                  SELECT 1 FROM Works w WHERE w.id = Tracks.work_id
               )
             ORDER BY id
             """
