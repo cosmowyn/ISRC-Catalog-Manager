@@ -1,0 +1,1 @@
+"""Contract template workflow tests."""

@@ -39,6 +39,8 @@ class ContractTemplateRevisionPayload:
     storage_mode: str | None = None
     scan_status: str = "scan_pending"
     scan_error: str | None = None
+    scan_adapter: str | None = None
+    scan_diagnostics: object | None = None
 
 
 @dataclass(slots=True)
@@ -56,6 +58,8 @@ class ContractTemplateRevisionRecord:
     size_bytes: int
     scan_status: str
     scan_error: str | None
+    scan_adapter: str | None
+    scan_diagnostics: object | None
     placeholder_inventory_hash: str | None
     placeholder_count: int
     created_at: str | None
@@ -64,6 +68,83 @@ class ContractTemplateRevisionRecord:
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
+
+
+@dataclass(slots=True)
+class ContractTemplateScanDiagnostic:
+    severity: str
+    code: str
+    message: str
+    source_part: str | None = None
+    location_hint: str | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class ContractTemplateScanOccurrence:
+    source_part: str
+    container_kind: str
+    container_index: int
+    start_index: int
+    end_index: int
+    raw_text: str
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class ContractTemplateScanEntry:
+    canonical_symbol: str
+    binding_kind: str
+    namespace: str | None
+    key: str
+    occurrence_count: int
+    occurrences: tuple[ContractTemplateScanOccurrence, ...]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "canonical_symbol": self.canonical_symbol,
+            "binding_kind": self.binding_kind,
+            "namespace": self.namespace,
+            "key": self.key,
+            "occurrence_count": self.occurrence_count,
+            "occurrences": [item.to_dict() for item in self.occurrences],
+        }
+
+
+@dataclass(slots=True)
+class ContractTemplateScanResult:
+    source_format: str
+    scan_format: str
+    scan_status: str
+    scan_adapter: str | None
+    placeholders: tuple[ContractTemplateScanEntry, ...]
+    diagnostics: tuple[ContractTemplateScanDiagnostic, ...]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "source_format": self.source_format,
+            "scan_format": self.scan_format,
+            "scan_status": self.scan_status,
+            "scan_adapter": self.scan_adapter,
+            "placeholders": [item.to_dict() for item in self.placeholders],
+            "diagnostics": [item.to_dict() for item in self.diagnostics],
+        }
+
+
+@dataclass(slots=True)
+class ContractTemplateImportResult:
+    revision: ContractTemplateRevisionRecord
+    scan_result: ContractTemplateScanResult
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "revision": self.revision.to_dict(),
+            "scan_result": self.scan_result.to_dict(),
+        }
 
 
 @dataclass(slots=True)

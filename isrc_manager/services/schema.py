@@ -487,6 +487,9 @@ class DatabaseSchemaService:
             elif version == 29:
                 self._apply_migration(29, self._mig_29_to_30)
                 version = 30
+            elif version == 30:
+                self._apply_migration(30, self._mig_30_to_31)
+                version = 31
             else:
                 self.logger.warning("Unknown migration path from version %s", version)
                 break
@@ -900,6 +903,9 @@ class DatabaseSchemaService:
         self._ensure_forensic_watermark_tables()
 
     def _mig_29_to_30(self) -> None:
+        self._ensure_contract_template_tables()
+
+    def _mig_30_to_31(self) -> None:
         self._ensure_contract_template_tables()
 
     def _ensure_current_custom_field_value_schema(self) -> None:
@@ -2078,6 +2084,8 @@ class DatabaseSchemaService:
                 size_bytes INTEGER NOT NULL DEFAULT 0,
                 scan_status TEXT NOT NULL DEFAULT 'scan_pending',
                 scan_error TEXT,
+                scan_adapter TEXT,
+                scan_diagnostics_json TEXT,
                 placeholder_inventory_hash TEXT,
                 placeholder_count INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -2086,6 +2094,15 @@ class DatabaseSchemaService:
             )
             """
         )
+        revision_columns = self._table_columns("ContractTemplateRevisions")
+        for column_name, column_sql in (
+            ("scan_adapter", "TEXT"),
+            ("scan_diagnostics_json", "TEXT"),
+        ):
+            if column_name not in revision_columns:
+                self.cursor.execute(
+                    f"ALTER TABLE ContractTemplateRevisions ADD COLUMN {column_name} {column_sql}"
+                )
         self.cursor.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_contract_template_revisions_template_id

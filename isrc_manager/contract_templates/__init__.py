@@ -1,6 +1,14 @@
 """Contract template placeholder workflow package."""
 
+from .ingestion import (
+    ContractTemplateIngestionError,
+    DOCXTemplateScanner,
+    PagesTemplateAdapter,
+    SUPPORTED_TEMPLATE_SOURCE_FORMATS,
+    detect_template_source_format,
+)
 from .models import (
+    ContractTemplateImportResult,
     ContractTemplateDraftPayload,
     ContractTemplateDraftRecord,
     ContractTemplateOutputArtifactPayload,
@@ -15,6 +23,10 @@ from .models import (
     ContractTemplateRevisionPayload,
     ContractTemplateRevisionRecord,
     ContractTemplateRecord,
+    ContractTemplateScanDiagnostic,
+    ContractTemplateScanEntry,
+    ContractTemplateScanOccurrence,
+    ContractTemplateScanResult,
 )
 from .parser import (
     InvalidPlaceholderError,
@@ -29,6 +41,8 @@ from .service import ContractTemplateService
 __all__ = [
     "ContractTemplateDraftPayload",
     "ContractTemplateDraftRecord",
+    "ContractTemplateImportResult",
+    "ContractTemplateIngestionError",
     "ContractTemplateOutputArtifactPayload",
     "ContractTemplateOutputArtifactRecord",
     "ContractTemplatePayload",
@@ -41,11 +55,19 @@ __all__ = [
     "ContractTemplateRevisionPayload",
     "ContractTemplateRevisionRecord",
     "ContractTemplateRecord",
+    "ContractTemplateScanDiagnostic",
+    "ContractTemplateScanEntry",
+    "ContractTemplateScanOccurrence",
+    "ContractTemplateScanResult",
     "ContractTemplateService",
+    "DOCXTemplateScanner",
     "InvalidPlaceholderError",
+    "PagesTemplateAdapter",
     "PlaceholderOccurrence",
     "PlaceholderToken",
+    "SUPPORTED_TEMPLATE_SOURCE_FORMATS",
     "dedupe_placeholders",
+    "detect_template_source_format",
     "extract_placeholders",
     "parse_placeholder",
 ]

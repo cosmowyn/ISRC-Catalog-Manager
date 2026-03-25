@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import tempfile
 from pathlib import Path
 from typing import Iterable
 
@@ -19,9 +20,16 @@ from isrc_manager.file_storage import (
     sha256_digest,
 )
 
+from .ingestion import (
+    ContractTemplateIngestionError,
+    DOCXTemplateScanner,
+    PagesTemplateAdapter,
+    detect_template_source_format,
+)
 from .models import (
     ContractTemplateDraftPayload,
     ContractTemplateDraftRecord,
+    ContractTemplateImportResult,
     ContractTemplateOutputArtifactPayload,
     ContractTemplateOutputArtifactRecord,
     ContractTemplatePayload,
@@ -34,6 +42,8 @@ from .models import (
     ContractTemplateRevisionPayload,
     ContractTemplateRevisionRecord,
     ContractTemplateRecord,
+    ContractTemplateScanDiagnostic,
+    ContractTemplateScanResult,
 )
 from .parser import parse_placeholder
 
@@ -66,13 +76,22 @@ class ContractTemplateService:
     TEMPLATE_SOURCE_ROOT = "contract_template_sources"
     DRAFT_ROOT = "contract_template_drafts"
 
-    def __init__(self, conn: sqlite3.Connection, data_root: str | Path | None = None):
+    def __init__(
+        self,
+        conn: sqlite3.Connection,
+        data_root: str | Path | None = None,
+        *,
+        docx_scanner: DOCXTemplateScanner | None = None,
+        pages_adapter: PagesTemplateAdapter | None = None,
+    ):
         self.conn = conn
         self.data_root = Path(data_root).resolve() if data_root is not None else None
         self.source_store = ManagedFileStorage(
             data_root=self.data_root, relative_root=self.TEMPLATE_SOURCE_ROOT
         )
         self.draft_store = ManagedFileStorage(data_root=self.data_root, relative_root=self.DRAFT_ROOT)
+        self.docx_scanner = docx_scanner if docx_scanner is not None else DOCXTemplateScanner()
+        self.pages_adapter = pages_adapter if pages_adapter is not None else PagesTemplateAdapter()
 
     def create_template(self, payload: ContractTemplatePayload) -> ContractTemplateRecord:
         with self.conn:
@@ -194,6 +213,7 @@ class ContractTemplateService:
         payload: ContractTemplateRevisionPayload | None = None,
         placeholders: Iterable[ContractTemplatePlaceholderPayload] = (),
         bindings: Iterable[ContractTemplatePlaceholderBindingPayload] = (),
+        activate_template: bool = True,
     ) -> ContractTemplateRevisionRecord:
         source = Path(str(source_path or "").strip())
         if not source.exists():
@@ -208,6 +228,8 @@ class ContractTemplateService:
             storage_mode=revision_payload.storage_mode,
             scan_status=revision_payload.scan_status,
             scan_error=revision_payload.scan_error,
+            scan_adapter=revision_payload.scan_adapter,
+            scan_diagnostics=revision_payload.scan_diagnostics,
         )
         return self.add_revision_from_bytes(
             template_id,
@@ -215,6 +237,7 @@ class ContractTemplateService:
             payload=effective_payload,
             placeholders=placeholders,
             bindings=bindings,
+            activate_template=activate_template,
         )
 
     def add_revision_from_bytes(
@@ -225,6 +248,7 @@ class ContractTemplateService:
         payload: ContractTemplateRevisionPayload | None = None,
         placeholders: Iterable[ContractTemplatePlaceholderPayload] = (),
         bindings: Iterable[ContractTemplatePlaceholderBindingPayload] = (),
+        activate_template: bool = True,
     ) -> ContractTemplateRevisionRecord:
         template = self.fetch_template(template_id)
         if template is None:
@@ -262,9 +286,11 @@ class ContractTemplateService:
                     source_checksum_sha256,
                     size_bytes,
                     scan_status,
-                    scan_error
+                    scan_error,
+                    scan_adapter,
+                    scan_diagnostics_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     int(template_id),
@@ -280,10 +306,12 @@ class ContractTemplateService:
                     len(source_bytes),
                     str(revision_payload.scan_status or "scan_pending").strip() or "scan_pending",
                     _clean_text(revision_payload.scan_error),
+                    _clean_text(revision_payload.scan_adapter),
+                    _json_dumps(revision_payload.scan_diagnostics),
                 ),
             )
             revision_id = int(cur.lastrowid)
-            inventory_count, inventory_hash, effective_scan_status = (
+            inventory_count, inventory_hash, effective_scan_status, effective_scan_error = (
                 self._replace_revision_placeholder_inventory(
                     revision_id,
                     placeholders=placeholders,
@@ -300,6 +328,8 @@ class ContractTemplateService:
                     placeholder_inventory_hash=?,
                     scan_status=?,
                     scan_error=?,
+                    scan_adapter=?,
+                    scan_diagnostics_json=?,
                     updated_at=datetime('now')
                 WHERE id=?
                 """,
@@ -307,24 +337,32 @@ class ContractTemplateService:
                     inventory_count,
                     inventory_hash,
                     effective_scan_status,
-                    _clean_text(revision_payload.scan_error),
+                    effective_scan_error,
+                    _clean_text(revision_payload.scan_adapter),
+                    _json_dumps(revision_payload.scan_diagnostics),
                     revision_id,
                 ),
             )
-            cur.execute(
-                """
-                UPDATE ContractTemplates
-                SET active_revision_id=?,
-                    source_format=?,
-                    updated_at=datetime('now')
-                WHERE id=?
-                """,
-                (
+            if activate_template:
+                self._set_template_active_revision(
+                    int(template_id),
                     revision_id,
                     str(revision_payload.source_format or "docx").strip() or "docx",
-                    int(template_id),
-                ),
-            )
+                    cursor=cur,
+                )
+            else:
+                cur.execute(
+                    """
+                    UPDATE ContractTemplates
+                    SET source_format=?,
+                        updated_at=datetime('now')
+                    WHERE id=?
+                    """,
+                    (
+                        str(revision_payload.source_format or "docx").strip() or "docx",
+                        int(template_id),
+                    ),
+                )
         record = self.fetch_revision(revision_id)
         if record is None:
             raise RuntimeError(f"Contract template revision {revision_id} was not created")
@@ -347,6 +385,8 @@ class ContractTemplateService:
                 size_bytes,
                 scan_status,
                 scan_error,
+                scan_adapter,
+                scan_diagnostics_json,
                 placeholder_inventory_hash,
                 placeholder_count,
                 created_at,
@@ -363,7 +403,7 @@ class ContractTemplateService:
         mode = infer_storage_mode(
             explicit_mode=row[8],
             stored_path=row[7],
-            blob_value=b"x" if row[17] else None,
+            blob_value=b"x" if row[19] else None,
             default=STORAGE_MODE_DATABASE,
         )
         return ContractTemplateRevisionRecord(
@@ -380,10 +420,12 @@ class ContractTemplateService:
             size_bytes=int(row[10] or 0),
             scan_status=str(row[11] or "scan_pending"),
             scan_error=_clean_text(row[12]),
-            placeholder_inventory_hash=_clean_text(row[13]),
-            placeholder_count=int(row[14] or 0),
-            created_at=_clean_text(row[15]),
-            updated_at=_clean_text(row[16]),
+            scan_adapter=_clean_text(row[13]),
+            scan_diagnostics=_json_loads(row[14]),
+            placeholder_inventory_hash=_clean_text(row[15]),
+            placeholder_count=int(row[16] or 0),
+            created_at=_clean_text(row[17]),
+            updated_at=_clean_text(row[18]),
             stored_in_database=(mode == STORAGE_MODE_DATABASE),
         )
 
@@ -403,6 +445,378 @@ class ContractTemplateService:
             if record is not None:
                 records.append(record)
         return records
+
+    def set_active_revision(self, revision_id: int) -> ContractTemplateRecord:
+        record = self.fetch_revision(revision_id)
+        if record is None:
+            raise ValueError(f"Contract template revision {revision_id} not found")
+        with self.conn:
+            self._set_template_active_revision(
+                record.template_id,
+                record.revision_id,
+                record.source_format,
+                cursor=self.conn.cursor(),
+            )
+        template = self.fetch_template(record.template_id)
+        if template is None:
+            raise RuntimeError(f"Contract template {record.template_id} disappeared after activation")
+        return template
+
+    def scan_source_bytes(
+        self,
+        source_bytes: bytes,
+        *,
+        source_filename: str | None = None,
+        source_format: str | None = None,
+    ) -> ContractTemplateScanResult:
+        resolved_format = detect_template_source_format(
+            source_filename=source_filename,
+            explicit_format=source_format,
+        )
+        return self._scan_source_bytes(
+            source_bytes,
+            source_filename=source_filename,
+            source_format=resolved_format,
+        )
+
+    def scan_source_path(
+        self,
+        source_path: str | Path,
+        *,
+        source_filename: str | None = None,
+        source_format: str | None = None,
+    ) -> ContractTemplateScanResult:
+        source = Path(str(source_path or "").strip())
+        if not source.exists():
+            raise FileNotFoundError(source)
+        effective_filename = source_filename or source.name
+        resolved_format = detect_template_source_format(
+            source_filename=effective_filename,
+            explicit_format=source_format,
+        )
+        return self._scan_source_bytes(
+            source.read_bytes(),
+            source_filename=effective_filename,
+            source_format=resolved_format,
+        )
+
+    def import_revision_from_path(
+        self,
+        template_id: int,
+        source_path: str | Path,
+        *,
+        payload: ContractTemplateRevisionPayload | None = None,
+        bindings: Iterable[ContractTemplatePlaceholderBindingPayload] = (),
+        activate_if_ready: bool = True,
+    ) -> ContractTemplateImportResult:
+        source = Path(str(source_path or "").strip())
+        if not source.exists():
+            raise FileNotFoundError(source)
+        scan_result = self.scan_source_path(
+            source,
+            source_filename=source.name,
+            source_format=(payload.source_format if payload is not None else None),
+        )
+        revision_payload = self._revision_payload_for_import(
+            source_filename=source.name,
+            source_format=detect_template_source_format(
+                source_filename=source.name,
+                explicit_format=(payload.source_format if payload is not None else None),
+            ),
+            payload=payload,
+            scan_result=scan_result,
+            source_path=source,
+        )
+        revision = self.add_revision_from_path(
+            template_id,
+            source,
+            payload=revision_payload,
+            placeholders=self._placeholder_payloads_from_scan_result(scan_result),
+            bindings=bindings,
+            activate_template=False,
+        )
+        if activate_if_ready and scan_result.scan_status == "scan_ready":
+            self.set_active_revision(revision.revision_id)
+            revision = self.fetch_revision(revision.revision_id) or revision
+        return ContractTemplateImportResult(revision=revision, scan_result=scan_result)
+
+    def import_revision_from_bytes(
+        self,
+        template_id: int,
+        source_bytes: bytes,
+        *,
+        payload: ContractTemplateRevisionPayload | None = None,
+        bindings: Iterable[ContractTemplatePlaceholderBindingPayload] = (),
+        activate_if_ready: bool = True,
+    ) -> ContractTemplateImportResult:
+        explicit_source_format = payload.source_format if payload is not None else None
+        source_filename = (
+            payload.source_filename if payload is not None else None
+        ) or (
+            "contract-template.pages"
+            if explicit_source_format == "pages"
+            else "contract-template.docx"
+        )
+        scan_result = self.scan_source_bytes(
+            source_bytes,
+            source_filename=source_filename,
+            source_format=explicit_source_format,
+        )
+        revision_payload = self._revision_payload_for_import(
+            source_filename=source_filename,
+            source_format=detect_template_source_format(
+                source_filename=source_filename,
+                explicit_format=explicit_source_format,
+            ),
+            payload=payload,
+            scan_result=scan_result,
+            source_path=Path(str(payload.source_path).strip()) if payload and payload.source_path else None,
+        )
+        revision = self.add_revision_from_bytes(
+            template_id,
+            source_bytes,
+            payload=revision_payload,
+            placeholders=self._placeholder_payloads_from_scan_result(scan_result),
+            bindings=bindings,
+            activate_template=False,
+        )
+        if activate_if_ready and scan_result.scan_status == "scan_ready":
+            self.set_active_revision(revision.revision_id)
+            revision = self.fetch_revision(revision.revision_id) or revision
+        return ContractTemplateImportResult(revision=revision, scan_result=scan_result)
+
+    def rescan_revision(
+        self,
+        revision_id: int,
+        *,
+        preserve_bindings: bool = True,
+        activate_if_ready: bool = False,
+    ) -> ContractTemplateScanResult:
+        record = self.fetch_revision(revision_id)
+        if record is None:
+            raise ValueError(f"Contract template revision {revision_id} not found")
+        scan_result = self.scan_source_bytes(
+            self.load_revision_source_bytes(revision_id),
+            source_filename=record.source_filename,
+            source_format=record.source_format,
+        )
+        if scan_result.scan_status == "scan_ready":
+            bindings = (
+                self._preserved_binding_payloads(revision_id, scan_result)
+                if preserve_bindings
+                else ()
+            )
+            self.replace_revision_placeholder_inventory(
+                revision_id,
+                placeholders=self._placeholder_payloads_from_scan_result(scan_result),
+                bindings=bindings,
+                scan_status=scan_result.scan_status,
+                scan_error=self._scan_error_summary(scan_result),
+                scan_adapter=scan_result.scan_adapter,
+                scan_diagnostics=[item.to_dict() for item in scan_result.diagnostics],
+            )
+            if activate_if_ready:
+                self.set_active_revision(revision_id)
+        else:
+            self._update_revision_scan_state(
+                revision_id,
+                scan_status=scan_result.scan_status,
+                scan_error=self._scan_error_summary(scan_result),
+                scan_adapter=scan_result.scan_adapter,
+                scan_diagnostics=[item.to_dict() for item in scan_result.diagnostics],
+            )
+        return scan_result
+
+    def _set_template_active_revision(
+        self,
+        template_id: int,
+        revision_id: int,
+        source_format: str,
+        *,
+        cursor: sqlite3.Cursor,
+    ) -> None:
+        cursor.execute(
+            """
+            UPDATE ContractTemplates
+            SET active_revision_id=?,
+                source_format=?,
+                updated_at=datetime('now')
+            WHERE id=?
+            """,
+            (
+                int(revision_id),
+                str(source_format or "docx").strip() or "docx",
+                int(template_id),
+            ),
+        )
+
+    def _revision_payload_for_import(
+        self,
+        *,
+        source_filename: str,
+        source_format: str,
+        payload: ContractTemplateRevisionPayload | None,
+        scan_result: ContractTemplateScanResult,
+        source_path: Path | None,
+    ) -> ContractTemplateRevisionPayload:
+        base = payload or ContractTemplateRevisionPayload()
+        return ContractTemplateRevisionPayload(
+            revision_label=base.revision_label,
+            source_filename=base.source_filename or source_filename,
+            source_mime_type=base.source_mime_type,
+            source_format=source_format,
+            source_path=str(source_path) if source_path is not None else base.source_path,
+            storage_mode=base.storage_mode,
+            scan_status=scan_result.scan_status,
+            scan_error=self._scan_error_summary(scan_result),
+            scan_adapter=scan_result.scan_adapter,
+            scan_diagnostics=[item.to_dict() for item in scan_result.diagnostics],
+        )
+
+    def _scan_source_bytes(
+        self,
+        source_bytes: bytes,
+        *,
+        source_filename: str | None,
+        source_format: str,
+    ) -> ContractTemplateScanResult:
+        if source_format == "docx":
+            return self.docx_scanner.scan_bytes(source_bytes)
+        if source_format == "pages":
+            return self._scan_pages_bytes(source_bytes, source_filename=source_filename)
+        raise ContractTemplateIngestionError(
+            f"Unsupported template source format: {source_format}"
+        )
+
+    def _scan_pages_bytes(
+        self,
+        source_bytes: bytes,
+        *,
+        source_filename: str | None,
+    ) -> ContractTemplateScanResult:
+        if not self.pages_adapter.is_available():
+            return ContractTemplateScanResult(
+                source_format="pages",
+                scan_format="docx",
+                scan_status="scan_blocked",
+                scan_adapter=self.pages_adapter.adapter_name,
+                placeholders=(),
+                diagnostics=(
+                    ContractTemplateScanDiagnostic(
+                        severity="error",
+                        code="pages_bridge_unavailable",
+                        message=self.pages_adapter.availability_message()
+                        or "Pages conversion is unavailable on this machine.",
+                    ),
+                ),
+            )
+        with tempfile.TemporaryDirectory(prefix="contract-template-pages-") as tmpdir:
+            workdir = Path(tmpdir)
+            staged_name = coalesce_filename(
+                source_filename,
+                default_stem="contract-template",
+                default_suffix=".pages",
+            )
+            source_path = workdir / staged_name
+            if source_path.suffix.lower() != ".pages":
+                source_path = source_path.with_suffix(".pages")
+            source_path.write_bytes(source_bytes)
+            converted_path = workdir / f"{source_path.stem}.docx"
+            try:
+                self.pages_adapter.convert_to_docx(source_path, converted_path)
+            except ContractTemplateIngestionError as exc:
+                return ContractTemplateScanResult(
+                    source_format="pages",
+                    scan_format="docx",
+                    scan_status="scan_blocked",
+                    scan_adapter=self.pages_adapter.adapter_name,
+                    placeholders=(),
+                    diagnostics=(
+                        ContractTemplateScanDiagnostic(
+                            severity="error",
+                            code="pages_conversion_failed",
+                            message=str(exc),
+                            source_part=source_path.name,
+                        ),
+                    ),
+                )
+            docx_result = self.docx_scanner.scan_bytes(converted_path.read_bytes())
+        return ContractTemplateScanResult(
+            source_format="pages",
+            scan_format=docx_result.scan_format,
+            scan_status=docx_result.scan_status,
+            scan_adapter=self.pages_adapter.adapter_name,
+            placeholders=docx_result.placeholders,
+            diagnostics=docx_result.diagnostics,
+        )
+
+    def _scan_error_summary(self, scan_result: ContractTemplateScanResult) -> str | None:
+        for item in scan_result.diagnostics:
+            if str(item.severity or "").strip().lower() == "error":
+                return _clean_text(item.message)
+        return None
+
+    def _placeholder_payloads_from_scan_result(
+        self, scan_result: ContractTemplateScanResult
+    ) -> tuple[ContractTemplatePlaceholderPayload, ...]:
+        return tuple(
+            ContractTemplatePlaceholderPayload(
+                canonical_symbol=item.canonical_symbol,
+                source_occurrence_count=max(1, int(item.occurrence_count or 1)),
+                metadata={
+                    "occurrences": [occurrence.to_dict() for occurrence in item.occurrences]
+                },
+            )
+            for item in scan_result.placeholders
+        )
+
+    def _preserved_binding_payloads(
+        self, revision_id: int, scan_result: ContractTemplateScanResult
+    ) -> tuple[ContractTemplatePlaceholderBindingPayload, ...]:
+        allowed_symbols = {item.canonical_symbol for item in scan_result.placeholders}
+        return tuple(
+            ContractTemplatePlaceholderBindingPayload(
+                canonical_symbol=item.canonical_symbol,
+                resolver_kind=item.resolver_kind,
+                resolver_target=item.resolver_target,
+                scope_entity_type=item.scope_entity_type,
+                scope_policy=item.scope_policy,
+                widget_hint=item.widget_hint,
+                validation=item.validation,
+                metadata=item.metadata,
+            )
+            for item in self.list_placeholder_bindings(revision_id)
+            if item.canonical_symbol in allowed_symbols
+        )
+
+    def _update_revision_scan_state(
+        self,
+        revision_id: int,
+        *,
+        scan_status: str,
+        scan_error: str | None,
+        scan_adapter: str | None,
+        scan_diagnostics: object | None,
+    ) -> None:
+        with self.conn:
+            self.conn.execute(
+                """
+                UPDATE ContractTemplateRevisions
+                SET scan_status=?,
+                    scan_error=?,
+                    scan_adapter=?,
+                    scan_diagnostics_json=?,
+                    updated_at=datetime('now')
+                WHERE id=?
+                """,
+                (
+                    str(scan_status or "scan_pending").strip() or "scan_pending",
+                    _clean_text(scan_error),
+                    _clean_text(scan_adapter),
+                    _json_dumps(scan_diagnostics),
+                    int(revision_id),
+                ),
+            )
 
     def load_revision_source_bytes(self, revision_id: int) -> bytes:
         row = self.conn.execute(
@@ -519,10 +933,15 @@ class ContractTemplateService:
         bindings: Iterable[ContractTemplatePlaceholderBindingPayload] = (),
         scan_status: str | None = None,
         scan_error: str | None = None,
+        scan_adapter: str | None = None,
+        scan_diagnostics: object | None = None,
     ) -> ContractTemplateRevisionRecord:
+        current = self.fetch_revision(revision_id)
+        if current is None:
+            raise ValueError(f"Contract template revision {revision_id} not found")
         with self.conn:
             cur = self.conn.cursor()
-            inventory_count, inventory_hash, effective_scan_status = (
+            inventory_count, inventory_hash, effective_scan_status, effective_scan_error = (
                 self._replace_revision_placeholder_inventory(
                     revision_id,
                     placeholders=placeholders,
@@ -539,6 +958,8 @@ class ContractTemplateService:
                     placeholder_inventory_hash=?,
                     scan_status=?,
                     scan_error=?,
+                    scan_adapter=?,
+                    scan_diagnostics_json=?,
                     updated_at=datetime('now')
                 WHERE id=?
                 """,
@@ -546,7 +967,9 @@ class ContractTemplateService:
                     inventory_count,
                     inventory_hash,
                     effective_scan_status,
-                    _clean_text(scan_error),
+                    effective_scan_error,
+                    current.scan_adapter if scan_adapter is None else _clean_text(scan_adapter),
+                    _json_dumps(current.scan_diagnostics if scan_diagnostics is None else scan_diagnostics),
                     int(revision_id),
                 ),
             )
@@ -564,7 +987,7 @@ class ContractTemplateService:
         cursor: sqlite3.Cursor,
         scan_status: str | None,
         scan_error: str | None,
-    ) -> tuple[int, str | None, str]:
+    ) -> tuple[int, str | None, str, str | None]:
         placeholder_rows = self._normalize_placeholder_payloads(placeholders)
         binding_rows = self._normalize_binding_payloads(bindings)
         missing_binding_symbols = set(binding_rows) - set(placeholder_rows)
@@ -668,9 +1091,10 @@ class ContractTemplateService:
         effective_scan_status = str(scan_status or "").strip() or (
             "scan_ready" if placeholder_rows else "scan_pending"
         )
-        if _clean_text(scan_error):
+        effective_scan_error = _clean_text(scan_error)
+        if effective_scan_error:
             effective_scan_status = "scan_blocked"
-        return len(placeholder_rows), inventory_hash, effective_scan_status
+        return len(placeholder_rows), inventory_hash, effective_scan_status, effective_scan_error
 
     def _normalize_placeholder_payloads(
         self, placeholders: Iterable[ContractTemplatePlaceholderPayload]

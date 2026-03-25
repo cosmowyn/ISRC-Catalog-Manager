@@ -292,6 +292,8 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                 "storage_mode",
                 "source_blob",
                 "scan_status",
+                "scan_adapter",
+                "scan_diagnostics_json",
                 "placeholder_inventory_hash",
                 "placeholder_count",
             }
@@ -818,6 +820,71 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
             )
             self.assertIn("trg_contract_template_revisions_storage_ins", triggers)
             self.assertIn("trg_contract_template_drafts_storage_ins", triggers)
+            self.assertEqual(service.get_db_version(), SCHEMA_TARGET)
+        finally:
+            conn.close()
+
+    def case_migrate_30_to_31_adds_contract_template_scan_columns(self):
+        conn = sqlite3.connect(":memory:")
+        try:
+            service = DatabaseSchemaService(conn)
+            service.init_db()
+            conn.execute("PRAGMA user_version = 30")
+            conn.execute("DROP TRIGGER IF EXISTS trg_contract_template_revisions_storage_ins")
+            conn.execute("DROP TRIGGER IF EXISTS trg_contract_template_revisions_storage_upd")
+            conn.execute("DROP TABLE IF EXISTS ContractTemplateOutputArtifacts")
+            conn.execute("DROP TABLE IF EXISTS ContractTemplateResolvedSnapshots")
+            conn.execute("DROP TABLE IF EXISTS ContractTemplateDrafts")
+            conn.execute("DROP TABLE IF EXISTS ContractTemplatePlaceholderBindings")
+            conn.execute("DROP TABLE IF EXISTS ContractTemplatePlaceholders")
+            conn.execute("DROP TABLE IF EXISTS ContractTemplateRevisions")
+            conn.execute("DROP TABLE IF EXISTS ContractTemplates")
+            conn.executescript(
+                """
+                CREATE TABLE ContractTemplates (
+                    id INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    template_family TEXT NOT NULL DEFAULT 'contract',
+                    source_format TEXT,
+                    active_revision_id INTEGER,
+                    archived INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                CREATE TABLE ContractTemplateRevisions (
+                    id INTEGER PRIMARY KEY,
+                    template_id INTEGER NOT NULL,
+                    revision_label TEXT,
+                    source_filename TEXT NOT NULL,
+                    source_mime_type TEXT,
+                    source_format TEXT NOT NULL DEFAULT 'docx',
+                    source_path TEXT,
+                    managed_file_path TEXT,
+                    storage_mode TEXT,
+                    source_blob BLOB,
+                    source_checksum_sha256 TEXT,
+                    size_bytes INTEGER NOT NULL DEFAULT 0,
+                    scan_status TEXT NOT NULL DEFAULT 'scan_pending',
+                    scan_error TEXT,
+                    placeholder_inventory_hash TEXT,
+                    placeholder_count INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    FOREIGN KEY (template_id) REFERENCES ContractTemplates(id) ON DELETE CASCADE
+                );
+                """
+            )
+            conn.commit()
+
+            service.migrate_schema()
+
+            revision_columns = {
+                row[1]
+                for row in conn.execute("PRAGMA table_info(ContractTemplateRevisions)").fetchall()
+            }
+
+            self.assertTrue({"scan_adapter", "scan_diagnostics_json"} <= revision_columns)
             self.assertEqual(service.get_db_version(), SCHEMA_TARGET)
         finally:
             conn.close()
