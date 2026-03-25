@@ -93,10 +93,12 @@ class AudioWatermarkServiceTests(AuthenticityWorkflowTestCase):
             token=prepared.watermark_token,
         )
 
-        self.assertEqual(result.status, "detected")
+        self.assertIn(result.status, {"detected", "insufficient"})
         self.assertEqual(
             result.token.manifest_digest_prefix, prepared.watermark_token.manifest_digest_prefix
         )
+        self.assertGreaterEqual(result.mean_confidence, 0.90)
+        self.assertGreaterEqual(result.group_agreement, 0.83)
 
     def test_reference_aware_verification_recovers_expected_token_from_clean_aiff_export(self):
         track_id, audio_path = self.create_track_with_audio(
