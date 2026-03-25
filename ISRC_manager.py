@@ -309,6 +309,8 @@ from isrc_manager.services import (
     CatalogReadService,
     ContractPayload,
     ContractTemplateCatalogService,
+    ContractTemplateFormService,
+    ContractTemplateService,
     CustomFieldDefinitionService,
     CustomFieldValueService,
     DatabaseMaintenanceService,
@@ -5692,6 +5694,8 @@ class App(QMainWindow):
         self.profile_kv = None
         self.custom_field_definitions = None
         self.contract_template_catalog_service = None
+        self.contract_template_service = None
+        self.contract_template_form_service = None
         self.custom_field_values = None
         self.xml_export_service = None
         self.xml_import_service = None
@@ -7725,6 +7729,9 @@ class App(QMainWindow):
             if self.conn is not None
             else None
         )
+        self.contract_template_service = (
+            ContractTemplateService(self.conn, self.data_root) if self.conn is not None else None
+        )
         self.custom_field_values = (
             CustomFieldValueService(self.conn, self.custom_field_definitions, self.data_root)
             if self.conn is not None
@@ -7768,6 +7775,21 @@ class App(QMainWindow):
         self.rights_service = RightsService(self.conn) if self.conn is not None else None
         self.asset_service = (
             AssetService(self.conn, self.data_root) if self.conn is not None else None
+        )
+        self.contract_template_form_service = (
+            ContractTemplateFormService(
+                template_service=self.contract_template_service,
+                catalog_service=self.contract_template_catalog_service,
+                release_service=self.release_service,
+                work_service=self.work_service,
+                contract_service=self.contract_service,
+                party_service=self.party_service,
+                rights_service=self.rights_service,
+                asset_service=self.asset_service,
+            )
+            if self.contract_template_service is not None
+            and self.contract_template_catalog_service is not None
+            else None
         )
         self.authenticity_key_service = (
             AuthenticityKeyService(
@@ -9575,6 +9597,8 @@ class App(QMainWindow):
         self.settings_mutations = None
         self.blob_icon_settings_service = None
         self.contract_template_catalog_service = None
+        self.contract_template_service = None
+        self.contract_template_form_service = None
         self.gs1_settings_service = None
         self.gs1_integration_service = None
         self.catalog_service = None
@@ -10319,6 +10343,8 @@ class App(QMainWindow):
     ) -> ContractTemplateWorkspacePanel:
         return ContractTemplateWorkspacePanel(
             catalog_service_provider=lambda: self.contract_template_catalog_service,
+            template_service_provider=lambda: self.contract_template_service,
+            form_service_provider=lambda: self.contract_template_form_service,
             parent=parent,
         )
 
@@ -13265,7 +13291,11 @@ class App(QMainWindow):
         )
 
     def open_contract_template_workspace(self, *, initial_tab: str = "symbols"):
-        if self.contract_template_catalog_service is None:
+        if (
+            self.contract_template_catalog_service is None
+            or self.contract_template_service is None
+            or self.contract_template_form_service is None
+        ):
             QMessageBox.warning(self, "Contract Template Workspace", "Open a profile first.")
             return
         return self._show_workspace_panel(

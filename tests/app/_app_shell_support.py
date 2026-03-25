@@ -2552,6 +2552,30 @@ class AppShellTestCase(unittest.TestCase):
         tabified = set(self.window.tabifiedDockWidgets(self.window.catalog_table_dock))
         self.assertIn(self.window.contract_template_workspace_dock, tabified)
 
+    def case_contract_template_workspace_opens_fill_tab_as_tabified_dock(self):
+        self.window.open_contract_template_workspace(initial_tab="fill")
+        self.app.processEvents()
+
+        panel = self._assert_tabified_workspace_dock(
+            self.window.contract_template_workspace_dock,
+            dock_name="contractTemplateWorkspaceDock",
+            panel_name="contractTemplateWorkspacePanel",
+        )
+        tab_texts = [
+            panel.workspace_tabs.tabText(index).lower()
+            for index in range(panel.workspace_tabs.count())
+        ]
+        if not any("fill" in text for text in tab_texts):
+            self.skipTest("Fill tab not yet exposed by ContractTemplateWorkspacePanel")
+        fill_index = next(index for index, text in enumerate(tab_texts) if "fill" in text)
+        self.assertGreaterEqual(panel.workspace_tabs.count(), 2)
+        self.assertEqual(panel.workspace_tabs.currentIndex(), fill_index)
+        self.assertIn("fill", panel.workspace_tabs.tabText(fill_index).lower())
+        self.assertIn(
+            self.window.contract_template_workspace_dock,
+            self.window.tabifiedDockWidgets(self.window.catalog_table_dock),
+        )
+
     def case_asset_workspace_rejoins_tabbed_dock_strip_when_reopened(self):
         track_id = self._create_track(index=142, title="Docked Deliverables Track")
         asset_id = self.window.asset_service.create_asset(

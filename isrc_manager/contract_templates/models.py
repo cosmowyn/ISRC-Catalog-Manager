@@ -192,6 +192,92 @@ class ContractTemplateCatalogEntry:
 
 
 @dataclass(slots=True)
+class ContractTemplateFormChoice:
+    value: str
+    label: str
+    description: str | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class ContractTemplateFormSelectorField:
+    selector_key: str
+    display_label: str
+    scope_entity_type: str
+    scope_policy: str | None
+    widget_kind: str
+    required: bool
+    placeholder_symbols: tuple[str, ...]
+    choices: tuple[ContractTemplateFormChoice, ...] = ()
+    description: str | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "selector_key": self.selector_key,
+            "display_label": self.display_label,
+            "scope_entity_type": self.scope_entity_type,
+            "scope_policy": self.scope_policy,
+            "widget_kind": self.widget_kind,
+            "required": self.required,
+            "placeholder_symbols": list(self.placeholder_symbols),
+            "choices": [item.to_dict() for item in self.choices],
+            "description": self.description,
+        }
+
+
+@dataclass(slots=True)
+class ContractTemplateFormManualField:
+    canonical_symbol: str
+    display_label: str
+    field_type: str
+    widget_kind: str
+    required: bool
+    placeholder_count: int
+    description: str | None = None
+    options: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "canonical_symbol": self.canonical_symbol,
+            "display_label": self.display_label,
+            "field_type": self.field_type,
+            "widget_kind": self.widget_kind,
+            "required": self.required,
+            "placeholder_count": self.placeholder_count,
+            "description": self.description,
+            "options": list(self.options),
+        }
+
+
+@dataclass(slots=True)
+class ContractTemplateFormDefinition:
+    template_id: int
+    revision_id: int
+    template_name: str
+    revision_label: str | None
+    scan_status: str
+    selector_fields: tuple[ContractTemplateFormSelectorField, ...]
+    manual_fields: tuple[ContractTemplateFormManualField, ...]
+    unresolved_placeholders: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "template_id": self.template_id,
+            "revision_id": self.revision_id,
+            "template_name": self.template_name,
+            "revision_label": self.revision_label,
+            "scan_status": self.scan_status,
+            "selector_fields": [item.to_dict() for item in self.selector_fields],
+            "manual_fields": [item.to_dict() for item in self.manual_fields],
+            "unresolved_placeholders": list(self.unresolved_placeholders),
+            "warnings": list(self.warnings),
+        }
+
+
+@dataclass(slots=True)
 class ContractTemplatePlaceholderPayload:
     canonical_symbol: str
     display_label: str | None = None

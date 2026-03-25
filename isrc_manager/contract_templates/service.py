@@ -1229,6 +1229,30 @@ class ContractTemplateService:
             for row in rows
         ]
 
+    def replace_placeholder_bindings(
+        self,
+        revision_id: int,
+        *,
+        bindings: Iterable[ContractTemplatePlaceholderBindingPayload],
+    ) -> list[ContractTemplatePlaceholderBindingRecord]:
+        revision = self.fetch_revision(revision_id)
+        if revision is None:
+            raise ValueError(f"Contract template revision {revision_id} not found")
+        placeholders = [
+            self._placeholder_payload_from_record(item)
+            for item in self.list_placeholders(revision_id)
+        ]
+        self.replace_revision_placeholder_inventory(
+            revision_id,
+            placeholders=placeholders,
+            bindings=bindings,
+            scan_status=revision.scan_status,
+            scan_error=revision.scan_error,
+            scan_adapter=revision.scan_adapter,
+            scan_diagnostics=revision.scan_diagnostics,
+        )
+        return self.list_placeholder_bindings(revision_id)
+
     def create_draft(self, payload: ContractTemplateDraftPayload) -> ContractTemplateDraftRecord:
         clean_mode = normalize_storage_mode(payload.storage_mode, default=STORAGE_MODE_DATABASE)
         clean_filename = coalesce_filename(
@@ -1694,6 +1718,19 @@ class ContractTemplateService:
         if text is None:
             text = "{}"
         return text.encode("utf-8")
+
+    @staticmethod
+    def _placeholder_payload_from_record(
+        record: ContractTemplatePlaceholderRecord,
+    ) -> ContractTemplatePlaceholderPayload:
+        return ContractTemplatePlaceholderPayload(
+            canonical_symbol=record.canonical_symbol,
+            display_label=record.display_label,
+            inferred_field_type=record.inferred_field_type,
+            required=record.required,
+            source_occurrence_count=record.source_occurrence_count,
+            metadata=record.metadata,
+        )
 
     @staticmethod
     def _delete_unreferenced_managed_file(

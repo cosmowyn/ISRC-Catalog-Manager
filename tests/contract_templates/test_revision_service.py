@@ -68,6 +68,41 @@ class ContractTemplateRevisionImportTests(unittest.TestCase):
         self.assertIsNotNone(placeholders[0].metadata)
         self.assertEqual(template_after.active_revision_id, result.revision.revision_id)
 
+    def test_import_revision_dedupes_repeated_symbols_and_preserves_occurrence_counts(self):
+        template = self._create_template()
+        source_path = self.root / "repeat-heavy.docx"
+        source_path.write_bytes(
+            make_docx_bytes(
+                document_paragraphs=(
+                    (
+                        "Track ",
+                        "{{db.track.track_title}}",
+                        " and again ",
+                        "{{db.track.track_title}}",
+                    ),
+                    ("Signed on ", "{{manual.license_date}}"),
+                ),
+                header_paragraphs=(("Signed on ", "{{manual.license_date}}"),),
+                footer_paragraphs=(("Track fallback ", "{{db.track.track_title}}"),),
+            )
+        )
+
+        result = self.service.import_revision_from_path(
+            template.template_id,
+            source_path,
+            payload=ContractTemplateRevisionPayload(storage_mode="managed_file"),
+        )
+        placeholders = self.service.list_placeholders(result.revision.revision_id)
+
+        self.assertEqual(result.revision.placeholder_count, 2)
+        self.assertEqual(
+            [item.canonical_symbol for item in placeholders],
+            ["{{db.track.track_title}}", "{{manual.license_date}}"],
+        )
+        self.assertEqual(placeholders[0].source_occurrence_count, 3)
+        self.assertEqual(placeholders[1].source_occurrence_count, 2)
+        self.assertEqual(result.scan_result.scan_status, "scan_ready")
+
     def test_import_revision_rejects_unsupported_source_format_before_storing(self):
         template = self._create_template()
         source_path = self.root / "artist-agreement.txt"

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QDate, Qt
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
+    QCheckBox,
     QComboBox,
+    QDateEdit,
+    QDoubleSpinBox,
     QFormLayout,
     QHBoxLayout,
     QHeaderView,
@@ -14,9 +17,9 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QSplitter,
+    QTabWidget,
     QTableWidget,
     QTableWidgetItem,
-    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -25,22 +28,46 @@ from isrc_manager.ui_common import (
     _add_standard_dialog_header,
     _apply_compact_dialog_control_heights,
     _apply_standard_widget_chrome,
+    _configure_standard_form_layout,
     _create_action_button_cluster,
+    _create_scrollable_dialog_content,
     _create_standard_section,
 )
 
-from .models import ContractTemplateCatalogEntry
+from .models import (
+    ContractTemplateCatalogEntry,
+    ContractTemplateFormDefinition,
+    ContractTemplateFormManualField,
+    ContractTemplateFormSelectorField,
+)
+
+
+def _clean_text(value: object | None) -> str | None:
+    clean = str(value or "").strip()
+    return clean or None
 
 
 class ContractTemplateWorkspacePanel(QWidget):
-    """Docked workspace for symbol generation and placeholder dictionary browsing."""
+    """Docked workspace for placeholder generation and dynamic fill forms."""
 
-    TAB_ORDER = ("symbols",)
+    TAB_ORDER = ("symbols", "fill")
 
-    def __init__(self, *, catalog_service_provider, parent=None):
+    def __init__(
+        self,
+        *,
+        catalog_service_provider,
+        template_service_provider=None,
+        form_service_provider=None,
+        parent=None,
+    ):
         super().__init__(parent)
         self.catalog_service_provider = catalog_service_provider
+        self.template_service_provider = template_service_provider or (lambda: None)
+        self.form_service_provider = form_service_provider or (lambda: None)
         self._visible_entries: list[ContractTemplateCatalogEntry] = []
+        self._fill_definition: ContractTemplateFormDefinition | None = None
+        self.selector_widgets: dict[str, QWidget] = {}
+        self.manual_widgets: dict[str, QWidget] = {}
         self.setObjectName("contractTemplateWorkspacePanel")
         _apply_standard_widget_chrome(self, "contractTemplateWorkspacePanel")
 
@@ -53,7 +80,8 @@ class ContractTemplateWorkspacePanel(QWidget):
             title="Contract Templates",
             subtitle=(
                 "Generate copy-ready placeholder symbols from authoritative app data, "
-                "then use the manual helper when a template needs user-supplied fields."
+                "import scanned template revisions, and fill detected placeholders "
+                "through one coherent workspace."
             ),
         )
 
@@ -62,6 +90,16 @@ class ContractTemplateWorkspacePanel(QWidget):
         self.workspace_tabs.setDocumentMode(True)
         root.addWidget(self.workspace_tabs, 1)
 
+        self._build_symbol_generator_tab()
+        self._build_fill_form_tab()
+
+        _apply_compact_dialog_control_heights(self)
+        self._populate_namespace_combo(())
+        self._refresh_manual_symbol_preview()
+        self.refresh()
+        self.focus_tab("symbols")
+
+    def _build_symbol_generator_tab(self) -> None:
         self.symbol_generator_tab = QWidget(self.workspace_tabs)
         self.symbol_generator_tab.setObjectName("contractTemplateSymbolGeneratorTab")
         self.workspace_tabs.addTab(self.symbol_generator_tab, "Symbol Generator")
@@ -164,10 +202,7 @@ class ContractTemplateWorkspacePanel(QWidget):
             "before copying it into your template.",
         )
         selected_form = QFormLayout()
-        selected_form.setLabelAlignment(Qt.AlignLeft | Qt.AlignTop)
-        selected_form.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)
-        selected_form.setHorizontalSpacing(12)
-        selected_form.setVerticalSpacing(10)
+        _configure_standard_form_layout(selected_form)
         self.selected_label_value = QLabel("No symbol selected.", selected_box)
         self.selected_label_value.setWordWrap(True)
         self.selected_namespace_value = QLabel("-", selected_box)
@@ -206,10 +241,7 @@ class ContractTemplateWorkspacePanel(QWidget):
             "database. The helper keeps the token parser-safe and copy-ready.",
         )
         manual_form = QFormLayout()
-        manual_form.setLabelAlignment(Qt.AlignLeft | Qt.AlignTop)
-        manual_form.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)
-        manual_form.setHorizontalSpacing(12)
-        manual_form.setVerticalSpacing(10)
+        _configure_standard_form_layout(manual_form)
         self.manual_key_edit = QLineEdit(manual_box)
         self.manual_key_edit.setObjectName("contractTemplateManualKeyEdit")
         self.manual_key_edit.setPlaceholderText("Example: License Date")
@@ -238,7 +270,8 @@ class ContractTemplateWorkspacePanel(QWidget):
             self.symbol_generator_tab,
             "Generator Notes",
             "These symbols are for template authoring only. Layout still lives in "
-            "Word or Pages, while later phases will handle fill forms, drafts, and export.",
+            "Word or Pages, while this workspace now also builds fill controls from "
+            "scanned placeholder inventories.",
         )
         guidance = QLabel(
             "Use db symbols for authoritative catalog values. Use manual symbols only "
@@ -256,17 +289,122 @@ class ContractTemplateWorkspacePanel(QWidget):
         splitter.setStretchFactor(0, 5)
         splitter.setStretchFactor(1, 4)
 
-        _apply_compact_dialog_control_heights(self)
-        self._populate_namespace_combo(())
-        self._refresh_manual_symbol_preview()
-        self.refresh()
-        self.focus_tab("symbols")
+    def _build_fill_form_tab(self) -> None:
+        self.fill_form_tab = QWidget(self.workspace_tabs)
+        self.fill_form_tab.setObjectName("contractTemplateFillFormTab")
+        self.workspace_tabs.addTab(self.fill_form_tab, "Fill Form")
+
+        scroll_area, _scroll_content, scroll_layout = _create_scrollable_dialog_content(
+            self.fill_form_tab,
+            page=self.fill_form_tab,
+        )
+        scroll_area.setObjectName("contractTemplateFillFormScrollArea")
+
+        selection_box, selection_layout = _create_standard_section(
+            self.fill_form_tab,
+            "Template Revision",
+            "Choose a scanned template revision, then let the app synthesize one "
+            "editable control per detected placeholder.",
+        )
+        selection_form = QFormLayout()
+        _configure_standard_form_layout(selection_form)
+        self.fill_template_combo = QComboBox(selection_box)
+        self.fill_template_combo.setObjectName("contractTemplateFillTemplateCombo")
+        self.fill_template_combo.currentIndexChanged.connect(self._on_fill_template_changed)
+        self.fill_revision_combo = QComboBox(selection_box)
+        self.fill_revision_combo.setObjectName("contractTemplateFillRevisionCombo")
+        self.fill_revision_combo.currentIndexChanged.connect(self.refresh_fill_form)
+        selection_form.addRow("Template", self.fill_template_combo)
+        selection_form.addRow("Revision", self.fill_revision_combo)
+        selection_layout.addLayout(selection_form)
+
+        refresh_fill_button = QPushButton("Refresh Fill Form", selection_box)
+        refresh_fill_button.setObjectName("contractTemplateFillRefreshButton")
+        refresh_fill_button.clicked.connect(self.refresh_fill_form)
+        selection_layout.addWidget(refresh_fill_button)
+
+        self.fill_status_label = QLabel(
+            "Open a profile to browse imported template revisions."
+        )
+        self.fill_status_label.setWordWrap(True)
+        self.fill_status_label.setObjectName("contractTemplateFillStatusLabel")
+        self.fill_warning_label = QLabel("")
+        self.fill_warning_label.setWordWrap(True)
+        self.fill_warning_label.setProperty("role", "secondary")
+        self.fill_warning_label.setObjectName("contractTemplateFillWarningLabel")
+        selection_layout.addWidget(self.fill_status_label)
+        selection_layout.addWidget(self.fill_warning_label)
+        scroll_layout.addWidget(selection_box)
+
+        selector_box, selector_layout = _create_standard_section(
+            self.fill_form_tab,
+            "Database-Linked Fields",
+            "Known placeholders become selector-driven controls so users choose "
+            "authoritative records instead of typing catalog data by hand.",
+        )
+        self.fill_selector_empty_label = QLabel(
+            "No database-linked placeholders are available for this revision.",
+            selector_box,
+        )
+        self.fill_selector_empty_label.setWordWrap(True)
+        self.fill_selector_empty_label.setProperty("role", "secondary")
+        selector_layout.addWidget(self.fill_selector_empty_label)
+        self.fill_selector_form = QFormLayout()
+        _configure_standard_form_layout(self.fill_selector_form)
+        selector_layout.addLayout(self.fill_selector_form)
+        scroll_layout.addWidget(selector_box)
+
+        manual_box, manual_layout = _create_standard_section(
+            self.fill_form_tab,
+            "Manual Fields",
+            "Unknown or intentionally manual placeholders become typed inputs such "
+            "as text, date, number, boolean, or option lists.",
+        )
+        self.fill_manual_empty_label = QLabel(
+            "No manual placeholders are available for this revision.",
+            manual_box,
+        )
+        self.fill_manual_empty_label.setWordWrap(True)
+        self.fill_manual_empty_label.setProperty("role", "secondary")
+        manual_layout.addWidget(self.fill_manual_empty_label)
+        self.fill_manual_form = QFormLayout()
+        _configure_standard_form_layout(self.fill_manual_form)
+        manual_layout.addLayout(self.fill_manual_form)
+        scroll_layout.addWidget(manual_box)
+
+        guidance_box, guidance_layout = _create_standard_section(
+            self.fill_form_tab,
+            "Phase 4 Notes",
+            "These inputs now build an editable placeholder payload, while draft "
+            "save and resume remains reserved for Phase 5.",
+        )
+        self.fill_guidance_label = QLabel(
+            "Repeated placeholders are deduplicated into one control per canonical "
+            "symbol. Selector values stay tied to authoritative records, and manual "
+            "entries stay isolated from database-backed fields.",
+            guidance_box,
+        )
+        self.fill_guidance_label.setWordWrap(True)
+        self.fill_guidance_label.setProperty("role", "secondary")
+        guidance_layout.addWidget(self.fill_guidance_label)
+        scroll_layout.addWidget(guidance_box)
+        scroll_layout.addStretch(1)
 
     def _catalog_service(self):
         return self.catalog_service_provider()
 
+    def _template_service(self):
+        return self.template_service_provider()
+
+    def _form_service(self):
+        return self.form_service_provider()
+
     def focus_tab(self, tab_name: str = "symbols") -> None:
-        del tab_name
+        clean_name = str(tab_name or "symbols").strip().lower()
+        if clean_name == "fill":
+            self.workspace_tabs.setCurrentWidget(self.fill_form_tab)
+            self.refresh_fill_form()
+            return
         self.workspace_tabs.setCurrentWidget(self.symbol_generator_tab)
 
     def focus_namespace(self, namespace: str | None = None) -> None:
@@ -277,9 +415,13 @@ class ContractTemplateWorkspacePanel(QWidget):
                 target_index = index
                 break
         self.namespace_combo.setCurrentIndex(target_index)
-        self.refresh()
+        self.refresh_symbol_generator()
 
     def refresh(self) -> None:
+        self.refresh_symbol_generator()
+        self.refresh_fill_form()
+
+    def refresh_symbol_generator(self) -> None:
         selected_symbol = self._selected_symbol()
         service = self._catalog_service()
         if service is None:
@@ -325,6 +467,122 @@ class ContractTemplateWorkspacePanel(QWidget):
         self._restore_selection(selected_symbol)
         self._update_selected_details()
 
+    def refresh_fill_form(self) -> None:
+        template_service = self._template_service()
+        form_service = self._form_service()
+        selected_template_id = self._selected_fill_template_id()
+        selected_revision_id = self._selected_fill_revision_id()
+
+        if template_service is None or form_service is None:
+            self._fill_definition = None
+            self._populate_fill_template_combo(())
+            self._populate_fill_revision_combo(())
+            self._clear_fill_fields()
+            self.fill_status_label.setText(
+                "Open a profile to browse imported template revisions."
+            )
+            self.fill_warning_label.setText("")
+            return
+
+        templates = tuple(template_service.list_templates())
+        self._populate_fill_template_combo(templates, selected_template_id=selected_template_id)
+        template_id = self._selected_fill_template_id()
+        if template_id is None:
+            self._fill_definition = None
+            self._populate_fill_revision_combo(())
+            self._clear_fill_fields()
+            self.fill_status_label.setText(
+                "No contract template records exist yet. Import a scanned revision in "
+                "Phase 2 tooling or seed one through the service layer."
+            )
+            self.fill_warning_label.setText("")
+            return
+
+        active_revision_id = None
+        template_record = template_service.fetch_template(template_id)
+        if template_record is not None:
+            active_revision_id = template_record.active_revision_id
+        revisions = tuple(template_service.list_revisions(template_id))
+        self._populate_fill_revision_combo(
+            revisions,
+            selected_revision_id=selected_revision_id,
+            active_revision_id=active_revision_id,
+        )
+        revision_id = self._selected_fill_revision_id()
+        if revision_id is None:
+            self._fill_definition = None
+            self._clear_fill_fields()
+            self.fill_status_label.setText(
+                "The selected template does not have any stored revisions yet."
+            )
+            self.fill_warning_label.setText("")
+            return
+
+        try:
+            form_definition = form_service.build_form_definition(revision_id)
+        except Exception as exc:
+            self._fill_definition = None
+            self._clear_fill_fields()
+            self.fill_status_label.setText(
+                f"Unable to build a fill form for revision #{int(revision_id)}."
+            )
+            self.fill_warning_label.setText(str(exc))
+            return
+
+        self._fill_definition = form_definition
+        self._rebuild_fill_fields(form_definition)
+        status_bits = [
+            f"{len(form_definition.selector_fields)} selector"
+            f"{'s' if len(form_definition.selector_fields) != 1 else ''}",
+            f"{len(form_definition.manual_fields)} manual field"
+            f"{'s' if len(form_definition.manual_fields) != 1 else ''}",
+        ]
+        revision_label = _clean_text(form_definition.revision_label) or f"Revision #{revision_id}"
+        self.fill_status_label.setText(
+            f"{form_definition.template_name} / {revision_label} is {form_definition.scan_status}. "
+            f"Generated {', '.join(status_bits)}."
+        )
+        warning_lines = list(form_definition.warnings)
+        if form_definition.unresolved_placeholders:
+            warning_lines.append(
+                "Unresolved placeholders: "
+                + ", ".join(form_definition.unresolved_placeholders)
+            )
+        if form_definition.scan_status != "scan_ready":
+            warning_lines.insert(
+                0,
+                "This revision is not fully scan-ready, so the editable form may be incomplete.",
+            )
+        self.fill_warning_label.setText("\n".join(line for line in warning_lines if line))
+
+    def current_fill_state(self) -> dict[str, object]:
+        revision_id = self._selected_fill_revision_id()
+        form_service = self._form_service()
+        if revision_id is None or form_service is None:
+            return {
+                "revision_id": None,
+                "db_selections": {},
+                "manual_values": {},
+                "type_overrides": {},
+            }
+        db_selections = {
+            key: value
+            for key, widget in self.selector_widgets.items()
+            for value in [self._read_widget_value(widget)]
+            if value is not None
+        }
+        manual_values = {
+            key: value
+            for key, widget in self.manual_widgets.items()
+            for value in [self._read_widget_value(widget)]
+            if value is not None
+        }
+        return form_service.build_editable_payload(
+            revision_id,
+            db_selections=db_selections,
+            manual_values=manual_values,
+        )
+
     def copy_selected_symbol(self) -> None:
         entry = self._selected_entry()
         if entry is None:
@@ -363,6 +621,66 @@ class ContractTemplateWorkspacePanel(QWidget):
         self.namespace_combo.setCurrentIndex(selected_index)
         self.namespace_combo.blockSignals(False)
 
+    def _populate_fill_template_combo(
+        self,
+        templates: tuple[object, ...],
+        *,
+        selected_template_id: int | None = None,
+    ) -> None:
+        self.fill_template_combo.blockSignals(True)
+        self.fill_template_combo.clear()
+        self.fill_template_combo.addItem("Choose Template", None)
+        selected_index = 0
+        for index, template in enumerate(templates, start=1):
+            label = str(getattr(template, "name", "") or f"Template #{index}")
+            if getattr(template, "active_revision_id", None) is not None:
+                label = f"{label} (active revision)"
+            self.fill_template_combo.addItem(label, int(template.template_id))
+            if selected_template_id is not None and int(template.template_id) == int(
+                selected_template_id
+            ):
+                selected_index = index
+        if selected_index == 0 and len(templates) == 1:
+            selected_index = 1
+        self.fill_template_combo.setCurrentIndex(selected_index)
+        self.fill_template_combo.blockSignals(False)
+
+    def _populate_fill_revision_combo(
+        self,
+        revisions: tuple[object, ...],
+        *,
+        selected_revision_id: int | None = None,
+        active_revision_id: int | None = None,
+    ) -> None:
+        self.fill_revision_combo.blockSignals(True)
+        self.fill_revision_combo.clear()
+        self.fill_revision_combo.addItem("Choose Revision", None)
+        selected_index = 0
+        for index, revision in enumerate(revisions, start=1):
+            label_bits = [
+                _clean_text(getattr(revision, "revision_label", None))
+                or str(getattr(revision, "source_filename", "") or f"Revision #{index}"),
+                str(getattr(revision, "scan_status", "") or "scan_pending"),
+            ]
+            if active_revision_id is not None and int(revision.revision_id) == int(
+                active_revision_id
+            ):
+                label_bits.append("active")
+            label = " | ".join(bit for bit in label_bits if bit)
+            self.fill_revision_combo.addItem(label, int(revision.revision_id))
+            if selected_revision_id is not None and int(revision.revision_id) == int(
+                selected_revision_id
+            ):
+                selected_index = index
+            elif selected_index == 0 and active_revision_id is not None and int(
+                revision.revision_id
+            ) == int(active_revision_id):
+                selected_index = index
+        if selected_index == 0 and len(revisions) == 1:
+            selected_index = 1
+        self.fill_revision_combo.setCurrentIndex(selected_index)
+        self.fill_revision_combo.blockSignals(False)
+
     def _selected_symbol(self) -> str | None:
         selection_model = self.table.selectionModel()
         if selection_model is None:
@@ -374,6 +692,20 @@ class ContractTemplateWorkspacePanel(QWidget):
         if item is None:
             return None
         return str(item.data(Qt.UserRole) or item.text() or "").strip() or None
+
+    def _selected_fill_template_id(self) -> int | None:
+        value = self.fill_template_combo.currentData()
+        try:
+            return int(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    def _selected_fill_revision_id(self) -> int | None:
+        value = self.fill_revision_combo.currentData()
+        try:
+            return int(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
 
     def _restore_selection(self, canonical_symbol: str | None) -> None:
         if canonical_symbol:
@@ -475,6 +807,130 @@ class ContractTemplateWorkspacePanel(QWidget):
             "DB-backed catalog."
         )
 
+    def _on_fill_template_changed(self) -> None:
+        self.refresh_fill_form()
+
+    def _rebuild_fill_fields(self, form_definition: ContractTemplateFormDefinition) -> None:
+        self._clear_fill_fields()
+        for field in form_definition.selector_fields:
+            widget = self._build_selector_widget(field)
+            self.selector_widgets[field.selector_key] = widget
+            self.fill_selector_form.addRow(field.display_label, widget)
+        for field in form_definition.manual_fields:
+            widget = self._build_manual_widget(field)
+            self.manual_widgets[field.canonical_symbol] = widget
+            self.fill_manual_form.addRow(field.display_label, widget)
+        self.fill_selector_empty_label.setVisible(not bool(form_definition.selector_fields))
+        self.fill_manual_empty_label.setVisible(not bool(form_definition.manual_fields))
+
+    def _clear_fill_fields(self) -> None:
+        self._clear_form_layout(self.fill_selector_form)
+        self._clear_form_layout(self.fill_manual_form)
+        self.selector_widgets = {}
+        self.manual_widgets = {}
+        self.fill_selector_empty_label.setVisible(True)
+        self.fill_manual_empty_label.setVisible(True)
+
+    def _clear_form_layout(self, layout: QFormLayout) -> None:
+        while layout.rowCount() > 0:
+            layout.removeRow(0)
+
+    def _build_selector_widget(self, field: ContractTemplateFormSelectorField) -> QComboBox:
+        combo = QComboBox(self.fill_form_tab)
+        combo.setObjectName("contractTemplateSelectorWidget")
+        combo.setProperty("selector_key", field.selector_key)
+        combo.setProperty("scope_entity_type", field.scope_entity_type)
+        combo.setProperty("scope_policy", field.scope_policy)
+        combo.setProperty("widget_kind", field.widget_kind)
+        combo.addItem(f"Choose {field.display_label}", None)
+        for choice in field.choices:
+            combo.addItem(choice.label, choice.value)
+            if choice.description:
+                combo.setItemData(combo.count() - 1, choice.description, Qt.ToolTipRole)
+        return combo
+
+    def _build_manual_widget(self, field: ContractTemplateFormManualField) -> QWidget:
+        if field.options:
+            combo = QComboBox(self.fill_form_tab)
+            combo.setObjectName("contractTemplateManualOptionsWidget")
+            combo.setProperty("canonical_symbol", field.canonical_symbol)
+            combo.setProperty("field_type", field.field_type)
+            combo.setProperty("widget_kind", field.widget_kind)
+            combo.addItem(f"Choose {field.display_label}", None)
+            for option in field.options:
+                combo.addItem(option, option)
+            return combo
+
+        if field.field_type == "boolean":
+            checkbox = QCheckBox("Yes", self.fill_form_tab)
+            checkbox.setObjectName("contractTemplateManualBooleanWidget")
+            checkbox.setProperty("canonical_symbol", field.canonical_symbol)
+            checkbox.setProperty("field_type", field.field_type)
+            checkbox.setProperty("widget_kind", field.widget_kind)
+            checkbox.setProperty("has_user_value", False)
+            checkbox.toggled.connect(lambda _checked, widget=checkbox: widget.setProperty("has_user_value", True))
+            return checkbox
+
+        if field.field_type == "number":
+            spin = QDoubleSpinBox(self.fill_form_tab)
+            spin.setObjectName("contractTemplateManualNumberWidget")
+            spin.setProperty("canonical_symbol", field.canonical_symbol)
+            spin.setProperty("field_type", field.field_type)
+            spin.setProperty("widget_kind", field.widget_kind)
+            spin.setProperty("has_user_value", False)
+            spin.setRange(-999999999.0, 999999999.0)
+            spin.setDecimals(6)
+            spin.valueChanged.connect(lambda _value, widget=spin: widget.setProperty("has_user_value", True))
+            return spin
+
+        if field.field_type == "date":
+            edit = QDateEdit(self.fill_form_tab)
+            edit.setObjectName("contractTemplateManualDateWidget")
+            edit.setProperty("canonical_symbol", field.canonical_symbol)
+            edit.setProperty("field_type", field.field_type)
+            edit.setProperty("widget_kind", field.widget_kind)
+            edit.setProperty("has_user_value", False)
+            edit.setCalendarPopup(True)
+            edit.setDisplayFormat("yyyy-MM-dd")
+            edit.setDate(QDate.currentDate())
+            edit.dateChanged.connect(lambda _date, widget=edit: widget.setProperty("has_user_value", True))
+            return edit
+
+        line_edit = QLineEdit(self.fill_form_tab)
+        line_edit.setObjectName("contractTemplateManualTextWidget")
+        line_edit.setProperty("canonical_symbol", field.canonical_symbol)
+        line_edit.setProperty("field_type", field.field_type)
+        line_edit.setProperty("widget_kind", field.widget_kind)
+        if field.field_type == "date":
+            line_edit.setPlaceholderText("YYYY-MM-DD")
+        elif field.field_type == "number":
+            line_edit.setPlaceholderText("Enter a numeric value")
+        else:
+            line_edit.setPlaceholderText(f"Enter {field.display_label}")
+        return line_edit
+
+    @staticmethod
+    def _read_widget_value(widget: QWidget) -> object | None:
+        if isinstance(widget, QComboBox):
+            value = widget.currentData()
+            return value if value is not None else None
+        if isinstance(widget, QCheckBox):
+            if not bool(widget.property("has_user_value")):
+                return None
+            return bool(widget.isChecked())
+        if isinstance(widget, QDoubleSpinBox):
+            if not bool(widget.property("has_user_value")):
+                return None
+            value = float(widget.value())
+            return int(value) if value.is_integer() else value
+        if isinstance(widget, QDateEdit):
+            if not bool(widget.property("has_user_value")):
+                return None
+            return widget.date().toString("yyyy-MM-dd")
+        if isinstance(widget, QLineEdit):
+            return _clean_text(widget.text())
+        return None
+
     @staticmethod
     def _scope_label(entry: ContractTemplateCatalogEntry) -> str:
         mapping = {
@@ -485,6 +941,7 @@ class ContractTemplateWorkspacePanel(QWidget):
             "party_selection_required": "Needs party selection",
             "right_selection_required": "Needs right selection",
             "asset_selection_required": "Needs asset selection",
+            "manual_entry": "Manual entry",
         }
         return mapping.get(str(entry.scope_policy or ""), str(entry.scope_policy or "-"))
 

@@ -50,6 +50,7 @@ class ContractTemplateCatalogServiceTests(unittest.TestCase):
     def test_entries_are_filterable_by_namespace_and_search_text(self):
         contract_entries = self.service.list_entries(namespace="contract", search_text="signature")
         custom_entries = self.service.list_entries(namespace="custom", search_text="mood")
+        track_entries = self.service.list_entries(namespace="track", search_text="track title")
 
         self.assertEqual(
             [entry.canonical_symbol for entry in contract_entries],
@@ -59,6 +60,11 @@ class ContractTemplateCatalogServiceTests(unittest.TestCase):
         self.assertEqual(custom_entries[0].label, "Mood")
         self.assertEqual(custom_entries[0].field_type, "dropdown")
         self.assertEqual(custom_entries[0].options, ("Dark", "Bright"))
+        self.assertEqual(len(track_entries), 1)
+        self.assertEqual(track_entries[0].canonical_symbol, "{{db.track.track_title}}")
+        self.assertEqual(track_entries[0].scope_entity_type, "track")
+        self.assertEqual(track_entries[0].scope_policy, "track_context")
+        self.assertEqual(track_entries[0].field_type, "text")
 
     def test_all_generated_symbols_round_trip_through_canonical_parser(self):
         for entry in self.service.list_entries():

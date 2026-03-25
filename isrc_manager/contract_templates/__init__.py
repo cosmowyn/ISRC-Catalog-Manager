@@ -16,6 +16,10 @@ from .models import (
     ContractTemplateImportResult,
     ContractTemplateDraftPayload,
     ContractTemplateDraftRecord,
+    ContractTemplateFormChoice,
+    ContractTemplateFormDefinition,
+    ContractTemplateFormManualField,
+    ContractTemplateFormSelectorField,
     ContractTemplateOutputArtifactPayload,
     ContractTemplateOutputArtifactRecord,
     ContractTemplatePayload,
@@ -41,6 +45,7 @@ from .parser import (
     extract_placeholders,
     parse_placeholder,
 )
+from .form_service import ContractTemplateFormService
 from .service import ContractTemplateService
 
 __all__ = [
@@ -49,6 +54,11 @@ __all__ = [
     "ContractTemplateCatalogService",
     "ContractTemplateDraftPayload",
     "ContractTemplateDraftRecord",
+    "ContractTemplateFormChoice",
+    "ContractTemplateFormDefinition",
+    "ContractTemplateFormManualField",
+    "ContractTemplateFormSelectorField",
+    "ContractTemplateFormService",
     "ContractTemplateImportResult",
     "ContractTemplateIngestionError",
     "ContractTemplateOutputArtifactPayload",
