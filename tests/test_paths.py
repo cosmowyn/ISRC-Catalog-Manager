@@ -24,6 +24,21 @@ class PathLayoutTests(unittest.TestCase):
         self.assertEqual(layout.settings_root, path_helpers.BIN_DIR())
         self.assertEqual(layout.settings_path, path_helpers.BIN_DIR() / SETTINGS_BASENAME)
 
+    def test_managed_storage_roots_include_contract_template_directories(self):
+        layout = path_helpers.resolve_app_storage_layout(portable=True)
+
+        managed_dirs = {path.name for path in layout.iter_standard_dirs()}
+        self.assertIn("contract_template_sources", managed_dirs)
+        self.assertIn("contract_template_drafts", managed_dirs)
+        self.assertEqual(
+            layout.managed_storage_dir("contract_template_sources"),
+            layout.active_data_root / "contract_template_sources",
+        )
+        self.assertEqual(
+            layout.managed_storage_dir("contract_template_drafts"),
+            layout.active_data_root / "contract_template_drafts",
+        )
+
     def test_resolve_layout_uses_qt_roots_and_stored_active_data_root(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

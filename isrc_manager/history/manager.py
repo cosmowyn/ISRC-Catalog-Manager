@@ -48,6 +48,8 @@ class HistoryManager:
         "asset_registry",
         "custom_field_media",
         "gs1_templates",
+        "contract_template_sources",
+        "contract_template_drafts",
     )
     FILE_COMPANION_SUFFIXES = (".wal", ".shm")
     SETTINGS_COALESCE_WINDOW_SECONDS = 2.0

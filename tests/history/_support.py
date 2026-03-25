@@ -454,6 +454,35 @@ class HistoryManagerTestCase(unittest.TestCase):
         self.assertTrue(gs1_file.exists())
         self.assertEqual(gs1_file.read_bytes(), b"%PDF-gs1-template")
 
+    def case_snapshot_actions_restore_contract_template_roots(self):
+        sources_dir = self.data_root / "contract_template_sources"
+        drafts_dir = self.data_root / "contract_template_drafts"
+        sources_dir.mkdir(parents=True, exist_ok=True)
+        drafts_dir.mkdir(parents=True, exist_ok=True)
+        source_template = sources_dir / "template-source.txt"
+        draft_template = drafts_dir / "template-draft.txt"
+        source_template.write_text("source-template-v1", encoding="utf-8")
+        draft_template.write_text("draft-template-v1", encoding="utf-8")
+
+        snapshot = self.history.capture_snapshot(
+            kind="managed_roots",
+            label="Before Contract Template Restore",
+        )
+        managed_directories = snapshot.manifest.get("managed_directories", {})
+        self.assertTrue(managed_directories["contract_template_sources"]["exists"])
+        self.assertTrue(managed_directories["contract_template_drafts"]["exists"])
+
+        source_template.unlink()
+        draft_template.unlink()
+        self.assertFalse(source_template.exists())
+        self.assertFalse(draft_template.exists())
+
+        self.history.restore_snapshot(snapshot.snapshot_id)
+        self.assertTrue(source_template.exists())
+        self.assertEqual(source_template.read_text(encoding="utf-8"), "source-template-v1")
+        self.assertTrue(draft_template.exists())
+        self.assertEqual(draft_template.read_text(encoding="utf-8"), "draft-template-v1")
+
     def case_registered_snapshot_can_be_restored(self):
         snapshot = self.history.create_manual_snapshot("Initial State")
         registered = self.history.register_snapshot(

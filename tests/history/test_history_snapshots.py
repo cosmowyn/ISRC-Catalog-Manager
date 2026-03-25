@@ -8,6 +8,9 @@ class HistorySnapshotTests(HistoryManagerTestCase):
     test_snapshot_actions_restore_custom_field_media_and_gs1_templates = (
         HistoryManagerTestCase.case_snapshot_actions_restore_custom_field_media_and_gs1_templates
     )
+    test_snapshot_actions_restore_contract_template_roots = (
+        HistoryManagerTestCase.case_snapshot_actions_restore_contract_template_roots
+    )
     test_registered_snapshot_can_be_restored = (
         HistoryManagerTestCase.case_registered_snapshot_can_be_restored
     )

@@ -321,6 +321,7 @@ class DatabaseSchemaService:
         self._ensure_gs1_template_storage_table()
         self._ensure_release_tables()
         self._ensure_repertoire_tables()
+        self._ensure_contract_template_tables()
         self._ensure_authenticity_tables()
         self._ensure_derivative_export_tables()
         self._ensure_forensic_watermark_tables()
@@ -483,6 +484,9 @@ class DatabaseSchemaService:
             elif version == 28:
                 self._apply_migration(28, self._mig_28_to_29)
                 version = 29
+            elif version == 29:
+                self._apply_migration(29, self._mig_29_to_30)
+                version = 30
             else:
                 self.logger.warning("Unknown migration path from version %s", version)
                 break
@@ -895,6 +899,9 @@ class DatabaseSchemaService:
     def _mig_28_to_29(self) -> None:
         self._ensure_forensic_watermark_tables()
 
+    def _mig_29_to_30(self) -> None:
+        self._ensure_contract_template_tables()
+
     def _ensure_current_custom_field_value_schema(self) -> None:
         cols = self._table_columns("CustomFieldValues")
         additions = (
@@ -1227,6 +1234,22 @@ class DatabaseSchemaService:
             storage_mode_column="storage_mode",
             filename_column="filename",
             blob_column="file_blob",
+        )
+        self._backfill_storage_fields(
+            table_name="ContractTemplateRevisions",
+            id_columns=("id",),
+            path_column="managed_file_path",
+            storage_mode_column="storage_mode",
+            filename_column="source_filename",
+            blob_column="source_blob",
+        )
+        self._backfill_storage_fields(
+            table_name="ContractTemplateDrafts",
+            id_columns=("id",),
+            path_column="managed_file_path",
+            storage_mode_column="storage_mode",
+            filename_column="filename",
+            blob_column="payload_blob",
         )
         self._backfill_storage_fields(
             table_name="AssetVersions",
@@ -2007,6 +2030,327 @@ class DatabaseSchemaService:
         )
         self.cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_saved_searches_name ON SavedSearches(name)"
+        )
+
+    def _ensure_contract_template_tables(self) -> None:
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ContractTemplates (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT,
+                template_family TEXT NOT NULL DEFAULT 'contract',
+                source_format TEXT,
+                active_revision_id INTEGER,
+                archived INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_contract_templates_family
+            ON ContractTemplates(template_family)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_contract_templates_archived
+            ON ContractTemplates(archived)
+            """
+        )
+
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ContractTemplateRevisions (
+                id INTEGER PRIMARY KEY,
+                template_id INTEGER NOT NULL,
+                revision_label TEXT,
+                source_filename TEXT NOT NULL,
+                source_mime_type TEXT,
+                source_format TEXT NOT NULL DEFAULT 'docx',
+                source_path TEXT,
+                managed_file_path TEXT,
+                storage_mode TEXT,
+                source_blob BLOB,
+                source_checksum_sha256 TEXT,
+                size_bytes INTEGER NOT NULL DEFAULT 0,
+                scan_status TEXT NOT NULL DEFAULT 'scan_pending',
+                scan_error TEXT,
+                placeholder_inventory_hash TEXT,
+                placeholder_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (template_id) REFERENCES ContractTemplates(id) ON DELETE CASCADE
+            )
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_contract_template_revisions_template_id
+            ON ContractTemplateRevisions(template_id)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_contract_template_revisions_scan_status
+            ON ContractTemplateRevisions(scan_status)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_contract_template_revisions_template_created_at
+            ON ContractTemplateRevisions(template_id, created_at)
+            """
+        )
+
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ContractTemplatePlaceholders (
+                id INTEGER PRIMARY KEY,
+                revision_id INTEGER NOT NULL,
+                canonical_symbol TEXT NOT NULL,
+                binding_kind TEXT NOT NULL,
+                namespace TEXT,
+                placeholder_key TEXT NOT NULL,
+                display_label TEXT,
+                inferred_field_type TEXT,
+                required INTEGER NOT NULL DEFAULT 1,
+                source_occurrence_count INTEGER NOT NULL DEFAULT 1,
+                metadata_json TEXT,
+                UNIQUE(revision_id, canonical_symbol),
+                FOREIGN KEY (revision_id) REFERENCES ContractTemplateRevisions(id) ON DELETE CASCADE
+            )
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_contract_template_placeholders_revision_id
+            ON ContractTemplatePlaceholders(revision_id)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_contract_template_placeholders_binding_kind
+            ON ContractTemplatePlaceholders(binding_kind)
+            """
+        )
+
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ContractTemplatePlaceholderBindings (
+                id INTEGER PRIMARY KEY,
+                revision_id INTEGER NOT NULL,
+                placeholder_id INTEGER NOT NULL,
+                canonical_symbol TEXT NOT NULL,
+                resolver_kind TEXT NOT NULL,
+                resolver_target TEXT,
+                scope_entity_type TEXT,
+                scope_policy TEXT,
+                widget_hint TEXT,
+                validation_json TEXT,
+                metadata_json TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(revision_id, canonical_symbol),
+                UNIQUE(placeholder_id),
+                FOREIGN KEY (revision_id) REFERENCES ContractTemplateRevisions(id) ON DELETE CASCADE,
+                FOREIGN KEY (placeholder_id) REFERENCES ContractTemplatePlaceholders(id) ON DELETE CASCADE
+            )
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_contract_template_bindings_revision_id
+            ON ContractTemplatePlaceholderBindings(revision_id)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_contract_template_bindings_resolver_kind
+            ON ContractTemplatePlaceholderBindings(resolver_kind)
+            """
+        )
+
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ContractTemplateDrafts (
+                id INTEGER PRIMARY KEY,
+                revision_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'draft',
+                scope_entity_type TEXT,
+                scope_entity_id TEXT,
+                managed_file_path TEXT,
+                storage_mode TEXT,
+                payload_blob BLOB,
+                filename TEXT,
+                mime_type TEXT,
+                size_bytes INTEGER NOT NULL DEFAULT 0,
+                last_resolved_snapshot_id INTEGER,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (revision_id) REFERENCES ContractTemplateRevisions(id) ON DELETE CASCADE
+            )
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_contract_template_drafts_revision_id
+            ON ContractTemplateDrafts(revision_id)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_contract_template_drafts_status
+            ON ContractTemplateDrafts(status)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_contract_template_drafts_updated_at
+            ON ContractTemplateDrafts(updated_at)
+            """
+        )
+
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ContractTemplateResolvedSnapshots (
+                id INTEGER PRIMARY KEY,
+                draft_id INTEGER NOT NULL,
+                revision_id INTEGER NOT NULL,
+                scope_entity_type TEXT,
+                scope_entity_id TEXT,
+                resolved_values_json TEXT NOT NULL,
+                resolution_warnings_json TEXT,
+                preview_payload_json TEXT,
+                resolved_checksum_sha256 TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (draft_id) REFERENCES ContractTemplateDrafts(id) ON DELETE CASCADE,
+                FOREIGN KEY (revision_id) REFERENCES ContractTemplateRevisions(id) ON DELETE CASCADE
+            )
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_contract_template_snapshots_draft_id
+            ON ContractTemplateResolvedSnapshots(draft_id)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_contract_template_snapshots_revision_id
+            ON ContractTemplateResolvedSnapshots(revision_id)
+            """
+        )
+
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ContractTemplateOutputArtifacts (
+                id INTEGER PRIMARY KEY,
+                snapshot_id INTEGER NOT NULL,
+                artifact_type TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'generated',
+                output_path TEXT NOT NULL,
+                output_filename TEXT NOT NULL,
+                mime_type TEXT,
+                size_bytes INTEGER NOT NULL DEFAULT 0,
+                checksum_sha256 TEXT,
+                retained INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (snapshot_id) REFERENCES ContractTemplateResolvedSnapshots(id) ON DELETE CASCADE
+            )
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_contract_template_artifacts_snapshot_id
+            ON ContractTemplateOutputArtifacts(snapshot_id)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_contract_template_artifacts_artifact_type
+            ON ContractTemplateOutputArtifacts(artifact_type)
+            """
+        )
+
+        self.cursor.execute("DROP TRIGGER IF EXISTS trg_contract_template_revisions_storage_ins")
+        self.cursor.execute("DROP TRIGGER IF EXISTS trg_contract_template_revisions_storage_upd")
+        self.cursor.execute("DROP TRIGGER IF EXISTS trg_contract_template_drafts_storage_ins")
+        self.cursor.execute("DROP TRIGGER IF EXISTS trg_contract_template_drafts_storage_upd")
+
+        revision_guard = f"""
+            CREATE TRIGGER IF NOT EXISTS {{name}}
+            BEFORE {{verb}} ON ContractTemplateRevisions
+            FOR EACH ROW
+            WHEN (
+                NEW.size_bytes < 0
+                OR COALESCE(trim(NEW.storage_mode), '') NOT IN (
+                    '',
+                    '{STORAGE_MODE_DATABASE}',
+                    '{STORAGE_MODE_MANAGED_FILE}'
+                )
+                OR (
+                    COALESCE(trim(NEW.storage_mode), '') = '{STORAGE_MODE_DATABASE}'
+                    AND NEW.source_blob IS NULL
+                )
+                OR (
+                    COALESCE(trim(NEW.storage_mode), '') = '{STORAGE_MODE_MANAGED_FILE}'
+                    AND COALESCE(trim(NEW.managed_file_path), '') = ''
+                )
+                OR (
+                    COALESCE(trim(NEW.storage_mode), '') = ''
+                    AND NEW.source_blob IS NULL
+                    AND COALESCE(trim(NEW.managed_file_path), '') = ''
+                )
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'Contract template revision requires either source_blob or managed_file_path; size_bytes must be >= 0');
+            END
+        """
+        self.cursor.execute(
+            revision_guard.format(name="trg_contract_template_revisions_storage_ins", verb="INSERT")
+        )
+        self.cursor.execute(
+            revision_guard.format(name="trg_contract_template_revisions_storage_upd", verb="UPDATE")
+        )
+
+        draft_guard = f"""
+            CREATE TRIGGER IF NOT EXISTS {{name}}
+            BEFORE {{verb}} ON ContractTemplateDrafts
+            FOR EACH ROW
+            WHEN (
+                NEW.size_bytes < 0
+                OR COALESCE(trim(NEW.storage_mode), '') NOT IN (
+                    '',
+                    '{STORAGE_MODE_DATABASE}',
+                    '{STORAGE_MODE_MANAGED_FILE}'
+                )
+                OR (
+                    COALESCE(trim(NEW.storage_mode), '') = '{STORAGE_MODE_DATABASE}'
+                    AND NEW.payload_blob IS NULL
+                )
+                OR (
+                    COALESCE(trim(NEW.storage_mode), '') = '{STORAGE_MODE_MANAGED_FILE}'
+                    AND COALESCE(trim(NEW.managed_file_path), '') = ''
+                )
+                OR (
+                    COALESCE(trim(NEW.storage_mode), '') = ''
+                    AND NEW.payload_blob IS NULL
+                    AND COALESCE(trim(NEW.managed_file_path), '') = ''
+                )
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'Contract template draft requires either payload_blob or managed_file_path; size_bytes must be >= 0');
+            END
+        """
+        self.cursor.execute(
+            draft_guard.format(name="trg_contract_template_drafts_storage_ins", verb="INSERT")
+        )
+        self.cursor.execute(
+            draft_guard.format(name="trg_contract_template_drafts_storage_upd", verb="UPDATE")
         )
 
     def _ensure_authenticity_tables(self) -> None:

@@ -39,6 +39,8 @@ MANAGED_STORAGE_SUBDIRS = (
     "asset_registry",
     "custom_field_media",
     "gs1_templates",
+    "contract_template_sources",
+    "contract_template_drafts",
 )
 
 

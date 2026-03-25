@@ -54,6 +54,39 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
             row[1]
             for row in self.conn.execute("PRAGMA table_info(DerivativeExportBatches)").fetchall()
         }
+        contract_template_revision_columns = {
+            row[1]
+            for row in self.conn.execute(
+                "PRAGMA table_info(ContractTemplateRevisions)"
+            ).fetchall()
+        }
+        contract_template_placeholder_columns = {
+            row[1]
+            for row in self.conn.execute(
+                "PRAGMA table_info(ContractTemplatePlaceholders)"
+            ).fetchall()
+        }
+        contract_template_binding_columns = {
+            row[1]
+            for row in self.conn.execute(
+                "PRAGMA table_info(ContractTemplatePlaceholderBindings)"
+            ).fetchall()
+        }
+        contract_template_draft_columns = {
+            row[1] for row in self.conn.execute("PRAGMA table_info(ContractTemplateDrafts)").fetchall()
+        }
+        contract_template_snapshot_columns = {
+            row[1]
+            for row in self.conn.execute(
+                "PRAGMA table_info(ContractTemplateResolvedSnapshots)"
+            ).fetchall()
+        }
+        contract_template_artifact_columns = {
+            row[1]
+            for row in self.conn.execute(
+                "PRAGMA table_info(ContractTemplateOutputArtifacts)"
+            ).fetchall()
+        }
         track_audio_derivative_columns = {
             row[1]
             for row in self.conn.execute("PRAGMA table_info(TrackAudioDerivatives)").fetchall()
@@ -75,6 +108,35 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
         derivative_batch_indexes = {
             row[1]
             for row in self.conn.execute("PRAGMA index_list(DerivativeExportBatches)").fetchall()
+        }
+        contract_template_revision_indexes = {
+            row[1]
+            for row in self.conn.execute("PRAGMA index_list(ContractTemplateRevisions)").fetchall()
+        }
+        contract_template_placeholder_indexes = {
+            row[1]
+            for row in self.conn.execute("PRAGMA index_list(ContractTemplatePlaceholders)").fetchall()
+        }
+        contract_template_binding_indexes = {
+            row[1]
+            for row in self.conn.execute(
+                "PRAGMA index_list(ContractTemplatePlaceholderBindings)"
+            ).fetchall()
+        }
+        contract_template_draft_indexes = {
+            row[1] for row in self.conn.execute("PRAGMA index_list(ContractTemplateDrafts)").fetchall()
+        }
+        contract_template_snapshot_indexes = {
+            row[1]
+            for row in self.conn.execute(
+                "PRAGMA index_list(ContractTemplateResolvedSnapshots)"
+            ).fetchall()
+        }
+        contract_template_artifact_indexes = {
+            row[1]
+            for row in self.conn.execute(
+                "PRAGMA index_list(ContractTemplateOutputArtifacts)"
+            ).fetchall()
         }
         track_audio_derivative_indexes = {
             row[1]
@@ -109,6 +171,13 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
         self.assertIn("ContractParties", tables)
         self.assertIn("ContractObligations", tables)
         self.assertIn("ContractDocuments", tables)
+        self.assertIn("ContractTemplates", tables)
+        self.assertIn("ContractTemplateRevisions", tables)
+        self.assertIn("ContractTemplatePlaceholders", tables)
+        self.assertIn("ContractTemplatePlaceholderBindings", tables)
+        self.assertIn("ContractTemplateDrafts", tables)
+        self.assertIn("ContractTemplateResolvedSnapshots", tables)
+        self.assertIn("ContractTemplateOutputArtifacts", tables)
         self.assertIn("RightsRecords", tables)
         self.assertIn("AssetVersions", tables)
         self.assertIn("SavedSearches", tables)
@@ -215,6 +284,74 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
             }
             <= forensic_export_columns
         )
+        self.assertTrue(
+            {
+                "template_id",
+                "source_filename",
+                "managed_file_path",
+                "storage_mode",
+                "source_blob",
+                "scan_status",
+                "placeholder_inventory_hash",
+                "placeholder_count",
+            }
+            <= contract_template_revision_columns
+        )
+        self.assertTrue(
+            {
+                "revision_id",
+                "canonical_symbol",
+                "binding_kind",
+                "namespace",
+                "placeholder_key",
+                "source_occurrence_count",
+            }
+            <= contract_template_placeholder_columns
+        )
+        self.assertTrue(
+            {
+                "revision_id",
+                "placeholder_id",
+                "canonical_symbol",
+                "resolver_kind",
+                "validation_json",
+                "metadata_json",
+            }
+            <= contract_template_binding_columns
+        )
+        self.assertTrue(
+            {
+                "revision_id",
+                "managed_file_path",
+                "storage_mode",
+                "payload_blob",
+                "filename",
+                "last_resolved_snapshot_id",
+            }
+            <= contract_template_draft_columns
+        )
+        self.assertTrue(
+            {
+                "draft_id",
+                "revision_id",
+                "resolved_values_json",
+                "resolution_warnings_json",
+                "preview_payload_json",
+                "resolved_checksum_sha256",
+            }
+            <= contract_template_snapshot_columns
+        )
+        self.assertTrue(
+            {
+                "snapshot_id",
+                "artifact_type",
+                "status",
+                "output_path",
+                "output_filename",
+                "retained",
+            }
+            <= contract_template_artifact_columns
+        )
         self.assertTrue({"blob_value", "mime_type", "size_bytes"} <= value_columns)
         self.assertTrue(
             {
@@ -250,6 +387,27 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
         self.assertIn("idx_tracks_buma_work_number", track_indexes)
         self.assertIn("idx_gs1_metadata_export_enabled", gs1_indexes)
         self.assertIn("idx_gs1_metadata_contract_number", gs1_indexes)
+        self.assertIn(
+            "idx_contract_template_revisions_template_id",
+            contract_template_revision_indexes,
+        )
+        self.assertIn(
+            "idx_contract_template_placeholders_revision_id",
+            contract_template_placeholder_indexes,
+        )
+        self.assertIn(
+            "idx_contract_template_bindings_revision_id",
+            contract_template_binding_indexes,
+        )
+        self.assertIn("idx_contract_template_drafts_status", contract_template_draft_indexes)
+        self.assertIn(
+            "idx_contract_template_snapshots_draft_id",
+            contract_template_snapshot_indexes,
+        )
+        self.assertIn(
+            "idx_contract_template_artifacts_snapshot_id",
+            contract_template_artifact_indexes,
+        )
         self.assertIn("idx_authenticity_manifests_manifest_id", authenticity_manifest_indexes)
         self.assertIn("idx_authenticity_manifests_track_id", authenticity_manifest_indexes)
         self.assertIn("idx_authenticity_manifests_watermark_id", authenticity_manifest_indexes)
@@ -296,6 +454,10 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
         self.assertIn("idx_forensic_watermark_exports_track_id", forensic_export_indexes)
         self.assertIn("idx_forensic_watermark_exports_output_sha256", forensic_export_indexes)
         self.assertIn("idx_forensic_watermark_exports_created_at", forensic_export_indexes)
+        self.assertIn("trg_contract_template_revisions_storage_ins", triggers)
+        self.assertIn("trg_contract_template_revisions_storage_upd", triggers)
+        self.assertIn("trg_contract_template_drafts_storage_ins", triggers)
+        self.assertIn("trg_contract_template_drafts_storage_upd", triggers)
         self.assertIn("trg_auditlog_no_update", triggers)
 
     def case_migrate_20_to_21_adds_repertoire_tables(self):
@@ -578,6 +740,84 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                 "idx_forensic_watermark_exports_token_binding",
                 forensic_export_indexes,
             )
+            self.assertEqual(service.get_db_version(), SCHEMA_TARGET)
+        finally:
+            conn.close()
+
+    def case_migrate_29_to_30_adds_contract_template_tables(self):
+        conn = sqlite3.connect(":memory:")
+        try:
+            service = DatabaseSchemaService(conn)
+            service.init_db()
+            conn.execute("PRAGMA user_version = 29")
+            conn.execute("DROP TABLE IF EXISTS ContractTemplateOutputArtifacts")
+            conn.execute("DROP TABLE IF EXISTS ContractTemplateResolvedSnapshots")
+            conn.execute("DROP TABLE IF EXISTS ContractTemplateDrafts")
+            conn.execute("DROP TABLE IF EXISTS ContractTemplatePlaceholderBindings")
+            conn.execute("DROP TABLE IF EXISTS ContractTemplatePlaceholders")
+            conn.execute("DROP TABLE IF EXISTS ContractTemplateRevisions")
+            conn.execute("DROP TABLE IF EXISTS ContractTemplates")
+            conn.execute("DROP TRIGGER IF EXISTS trg_contract_template_revisions_storage_ins")
+            conn.execute("DROP TRIGGER IF EXISTS trg_contract_template_revisions_storage_upd")
+            conn.execute("DROP TRIGGER IF EXISTS trg_contract_template_drafts_storage_ins")
+            conn.execute("DROP TRIGGER IF EXISTS trg_contract_template_drafts_storage_upd")
+            conn.commit()
+
+            service.migrate_schema()
+
+            tables = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            revision_columns = {
+                row[1]
+                for row in conn.execute("PRAGMA table_info(ContractTemplateRevisions)").fetchall()
+            }
+            draft_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(ContractTemplateDrafts)").fetchall()
+            }
+            triggers = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='trigger'"
+                ).fetchall()
+            }
+
+            self.assertTrue(
+                {
+                    "ContractTemplates",
+                    "ContractTemplateRevisions",
+                    "ContractTemplatePlaceholders",
+                    "ContractTemplatePlaceholderBindings",
+                    "ContractTemplateDrafts",
+                    "ContractTemplateResolvedSnapshots",
+                    "ContractTemplateOutputArtifacts",
+                }
+                <= tables
+            )
+            self.assertTrue(
+                {
+                    "managed_file_path",
+                    "storage_mode",
+                    "source_blob",
+                    "placeholder_inventory_hash",
+                    "placeholder_count",
+                }
+                <= revision_columns
+            )
+            self.assertTrue(
+                {
+                    "managed_file_path",
+                    "storage_mode",
+                    "payload_blob",
+                    "last_resolved_snapshot_id",
+                }
+                <= draft_columns
+            )
+            self.assertIn("trg_contract_template_revisions_storage_ins", triggers)
+            self.assertIn("trg_contract_template_drafts_storage_ins", triggers)
             self.assertEqual(service.get_db_version(), SCHEMA_TARGET)
         finally:
             conn.close()
