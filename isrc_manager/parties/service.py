@@ -728,9 +728,24 @@ class PartyService:
         )
 
     def usage_summary(self, party_id: int) -> PartyUsageSummary:
+        table_names = {
+            str(row[0])
+            for row in self.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+            if row and row[0]
+        }
+        work_queries = ["SELECT work_id FROM WorkContributors WHERE party_id=?"]
+        work_params: list[object] = [int(party_id)]
+        if "WorkContributionEntries" in table_names:
+            work_queries.append("SELECT work_id FROM WorkContributionEntries WHERE party_id=?")
+            work_params.append(int(party_id))
+        if "WorkOwnershipInterests" in table_names:
+            work_queries.append("SELECT work_id FROM WorkOwnershipInterests WHERE party_id=?")
+            work_params.append(int(party_id))
         work_count = self.conn.execute(
-            "SELECT COUNT(*) FROM WorkContributors WHERE party_id=?",
-            (int(party_id),),
+            f"SELECT COUNT(DISTINCT work_id) FROM ({' UNION '.join(work_queries)})",
+            work_params,
         ).fetchone()
         contract_count = self.conn.execute(
             "SELECT COUNT(*) FROM ContractParties WHERE party_id=?",
@@ -853,6 +868,13 @@ class PartyService:
 
         with self.conn:
             cur = self.conn.cursor()
+            table_names = {
+                str(row[0])
+                for row in cur.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+                if row and row[0]
+            }
             for duplicate_id in duplicates:
                 duplicate_record = self.fetch_party(duplicate_id)
                 if duplicate_record is None:
@@ -868,6 +890,26 @@ class PartyService:
                     "UPDATE WorkContributors SET party_id=? WHERE party_id=?",
                     (primary_party_id, duplicate_id),
                 )
+                if "WorkContributionEntries" in table_names:
+                    cur.execute(
+                        "UPDATE WorkContributionEntries SET party_id=? WHERE party_id=?",
+                        (primary_party_id, duplicate_id),
+                    )
+                if "WorkOwnershipInterests" in table_names:
+                    cur.execute(
+                        "UPDATE WorkOwnershipInterests SET party_id=? WHERE party_id=?",
+                        (primary_party_id, duplicate_id),
+                    )
+                if "RecordingContributionEntries" in table_names:
+                    cur.execute(
+                        "UPDATE RecordingContributionEntries SET party_id=? WHERE party_id=?",
+                        (primary_party_id, duplicate_id),
+                    )
+                if "RecordingOwnershipInterests" in table_names:
+                    cur.execute(
+                        "UPDATE RecordingOwnershipInterests SET party_id=? WHERE party_id=?",
+                        (primary_party_id, duplicate_id),
+                    )
                 cur.execute(
                     """
                     INSERT OR IGNORE INTO ContractParties(contract_id, party_id, role_label, is_primary, notes)

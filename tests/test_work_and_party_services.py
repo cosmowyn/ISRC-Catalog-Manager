@@ -81,6 +81,17 @@ class WorkAndPartyServiceTests(unittest.TestCase):
             ).fetchone()[0],
             1,
         )
+        self.assertEqual(
+            self.conn.execute("SELECT work_id FROM Tracks WHERE id=?", (track_id,)).fetchone()[0],
+            work_id,
+        )
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT COUNT(*) FROM WorkContributionEntries WHERE work_id=?",
+                (work_id,),
+            ).fetchone()[0],
+            3,
+        )
 
     def test_work_creation_reuses_existing_party_when_contributor_party_id_is_supplied(self):
         publisher_id = self.party_service.create_party(
@@ -215,11 +226,67 @@ class WorkAndPartyServiceTests(unittest.TestCase):
             (work_id,),
         ).fetchall()
         self.assertEqual(remaining_links, [(second_track_id, 1)])
+        self.assertIsNone(
+            self.conn.execute(
+                "SELECT work_id FROM Tracks WHERE id=?",
+                (first_track_id,),
+            ).fetchone()[0]
+        )
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT work_id FROM Tracks WHERE id=?",
+                (second_track_id,),
+            ).fetchone()[0],
+            work_id,
+        )
 
         exported = self.work_service.export_rows()
         exported_work = next(row for row in exported if row["id"] == work_id)
         self.assertEqual(exported_work["track_ids"], [second_track_id])
         self.assertEqual(len(exported_work["contributors"]), 2)
+
+    def test_creating_a_second_work_reassigns_track_governance_to_the_new_parent(self):
+        track_id = self._create_track("NL-ABC-26-00021", "One Parent Only")
+        first_work_id = self.work_service.create_work(
+            WorkPayload(
+                title="First Parent",
+                contributors=[
+                    WorkContributorPayload(
+                        role="songwriter",
+                        name="Primary Writer",
+                        share_percent=100,
+                    )
+                ],
+                track_ids=[track_id],
+            )
+        )
+
+        second_work_id = self.work_service.create_work(
+            WorkPayload(
+                title="Second Parent",
+                contributors=[
+                    WorkContributorPayload(
+                        role="songwriter",
+                        name="Replacement Writer",
+                        share_percent=100,
+                    )
+                ],
+                track_ids=[track_id],
+            )
+        )
+
+        self.assertEqual(
+            self.conn.execute("SELECT work_id FROM Tracks WHERE id=?", (track_id,)).fetchone()[0],
+            second_work_id,
+        )
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT work_id, track_id, is_primary FROM WorkTrackLinks ORDER BY work_id, track_id"
+            ).fetchall(),
+            [(second_work_id, track_id, 1)],
+        )
+        self.assertEqual(self.work_service.fetch_work_detail(first_work_id).track_ids, [])
+        self.assertEqual(self.work_service.fetch_work_detail(second_work_id).track_ids, [track_id])
 
     def test_party_duplicate_detection_merge_usage_summary_and_filters(self):
         primary_id = self.party_service.create_party(
@@ -299,6 +366,13 @@ class WorkAndPartyServiceTests(unittest.TestCase):
         self.assertEqual(
             self.conn.execute(
                 "SELECT party_id FROM WorkContributors WHERE work_id=?",
+                (work_id,),
+            ).fetchone()[0],
+            primary_id,
+        )
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT party_id FROM WorkContributionEntries WHERE work_id=?",
                 (work_id,),
             ).fetchone()[0],
             primary_id,

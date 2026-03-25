@@ -116,6 +116,71 @@ class WorkService:
             clean_name, party_type=party_type, cursor=cursor
         )
 
+    def _table_names(self, *, cursor: sqlite3.Cursor) -> set[str]:
+        return {
+            str(row[0])
+            for row in cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+            if row and row[0]
+        }
+
+    def _track_columns(self, *, cursor: sqlite3.Cursor) -> set[str]:
+        if "Tracks" not in self._table_names(cursor=cursor):
+            return set()
+        return {
+            str(row[1])
+            for row in cursor.execute("PRAGMA table_info(Tracks)").fetchall()
+            if row and row[1]
+        }
+
+    def _normalize_primary_track(self, work_id: int, *, cursor: sqlite3.Cursor) -> None:
+        primary_row = cursor.execute(
+            """
+            SELECT track_id
+            FROM WorkTrackLinks
+            WHERE work_id=?
+            ORDER BY is_primary DESC, track_id
+            LIMIT 1
+            """,
+            (int(work_id),),
+        ).fetchone()
+        cursor.execute("UPDATE WorkTrackLinks SET is_primary=0 WHERE work_id=?", (int(work_id),))
+        if primary_row is not None:
+            cursor.execute(
+                """
+                UPDATE WorkTrackLinks
+                SET is_primary=1
+                WHERE work_id=? AND track_id=?
+                """,
+                (int(work_id), int(primary_row[0])),
+            )
+
+    def _set_track_governing_work(
+        self,
+        track_id: int,
+        work_id: int | None,
+        *,
+        cursor: sqlite3.Cursor,
+    ) -> None:
+        track_columns = self._track_columns(cursor=cursor)
+        if "work_id" not in track_columns:
+            return
+        assignments = ["work_id=?"]
+        params: list[object] = [int(work_id) if work_id is not None else None]
+        if "relationship_type" in track_columns:
+            assignments.append(
+                "relationship_type=COALESCE(NULLIF(trim(relationship_type), ''), 'original')"
+            )
+        cursor.execute(
+            f"""
+            UPDATE Tracks
+            SET {", ".join(assignments)}
+            WHERE id=?
+            """,
+            (*params, int(track_id)),
+        )
+
     def validate_work(
         self,
         payload: WorkPayload,
@@ -369,12 +434,19 @@ class WorkService:
         *,
         cursor: sqlite3.Cursor,
     ) -> None:
+        table_names = self._table_names(cursor=cursor)
         cursor.execute("DELETE FROM WorkContributors WHERE work_id=?", (int(work_id),))
+        if "WorkContributionEntries" in table_names:
+            cursor.execute("DELETE FROM WorkContributionEntries WHERE work_id=?", (int(work_id),))
         for contributor in contributors:
             name = clean_text(contributor.name)
             if not name:
                 continue
             party_id = self._resolve_party_id(contributor, cursor=cursor)
+            clean_role = self._clean_role(contributor.role)
+            clean_share = self._clean_share(contributor.share_percent)
+            clean_role_share = self._clean_share(contributor.role_share_percent)
+            clean_notes = clean_text(contributor.notes)
             cursor.execute(
                 """
                 INSERT INTO WorkContributors(
@@ -392,12 +464,36 @@ class WorkService:
                     int(work_id),
                     party_id,
                     name,
-                    self._clean_role(contributor.role),
-                    self._clean_share(contributor.share_percent),
-                    self._clean_share(contributor.role_share_percent),
-                    clean_text(contributor.notes),
+                    clean_role,
+                    clean_share,
+                    clean_role_share,
+                    clean_notes,
                 ),
             )
+            if "WorkContributionEntries" in table_names:
+                cursor.execute(
+                    """
+                    INSERT INTO WorkContributionEntries(
+                        work_id,
+                        party_id,
+                        display_name,
+                        role,
+                        share_percent,
+                        role_share_percent,
+                        notes
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        int(work_id),
+                        party_id,
+                        name,
+                        clean_role,
+                        clean_share,
+                        clean_role_share,
+                        clean_notes,
+                    ),
+                )
 
     def _replace_track_links(
         self,
@@ -406,7 +502,6 @@ class WorkService:
         *,
         cursor: sqlite3.Cursor,
     ) -> None:
-        cursor.execute("DELETE FROM WorkTrackLinks WHERE work_id=?", (int(work_id),))
         clean_track_ids: list[int] = []
         for raw_track_id in track_ids:
             try:
@@ -415,14 +510,39 @@ class WorkService:
                 continue
             if track_id > 0 and track_id not in clean_track_ids:
                 clean_track_ids.append(track_id)
+        existing_rows = cursor.execute(
+            "SELECT track_id FROM WorkTrackLinks WHERE work_id=? ORDER BY is_primary DESC, track_id",
+            (int(work_id),),
+        ).fetchall()
+        existing_track_ids = {int(row[0]) for row in existing_rows if row and row[0] is not None}
+        for track_id in sorted(existing_track_ids - set(clean_track_ids)):
+            self._set_track_governing_work(track_id, None, cursor=cursor)
+        affected_work_ids = {int(work_id)}
+        for track_id in clean_track_ids:
+            previous_work_rows = cursor.execute(
+                "SELECT work_id FROM WorkTrackLinks WHERE track_id=?",
+                (int(track_id),),
+            ).fetchall()
+            affected_work_ids.update(
+                int(row[0]) for row in previous_work_rows if row and row[0] is not None
+            )
+            self._set_track_governing_work(track_id, int(work_id), cursor=cursor)
+        cursor.execute("DELETE FROM WorkTrackLinks WHERE work_id=?", (int(work_id),))
+        if clean_track_ids:
+            cursor.executemany(
+                "DELETE FROM WorkTrackLinks WHERE track_id=? AND work_id!=?",
+                [(int(track_id), int(work_id)) for track_id in clean_track_ids],
+            )
         for position, track_id in enumerate(clean_track_ids):
             cursor.execute(
                 """
-                INSERT OR IGNORE INTO WorkTrackLinks(work_id, track_id, is_primary)
+                INSERT INTO WorkTrackLinks(work_id, track_id, is_primary)
                 VALUES (?, ?, ?)
                 """,
                 (int(work_id), track_id, 1 if position == 0 else 0),
             )
+        for affected_work_id in sorted(affected_work_ids):
+            self._normalize_primary_track(affected_work_id, cursor=cursor)
 
     def fetch_work(self, work_id: int) -> WorkRecord | None:
         row = self.conn.execute(
@@ -568,13 +688,15 @@ class WorkService:
 
     def link_tracks_to_work(self, work_id: int, track_ids: Iterable[int]) -> None:
         with self.conn:
+            cur = self.conn.cursor()
             existing = {
                 int(row[0])
-                for row in self.conn.execute(
+                for row in cur.execute(
                     "SELECT track_id FROM WorkTrackLinks WHERE work_id=?",
                     (int(work_id),),
                 ).fetchall()
             }
+            affected_work_ids = {int(work_id)}
             is_first = not existing
             for raw_track_id in track_ids:
                 try:
@@ -583,41 +705,39 @@ class WorkService:
                     continue
                 if track_id <= 0 or track_id in existing:
                     continue
-                self.conn.execute(
+                previous_work_rows = cur.execute(
+                    "SELECT work_id FROM WorkTrackLinks WHERE track_id=?",
+                    (track_id,),
+                ).fetchall()
+                affected_work_ids.update(
+                    int(row[0]) for row in previous_work_rows if row and row[0] is not None
+                )
+                self._set_track_governing_work(track_id, int(work_id), cursor=cur)
+                cur.execute(
+                    "DELETE FROM WorkTrackLinks WHERE track_id=? AND work_id!=?",
+                    (track_id, int(work_id)),
+                )
+                cur.execute(
                     """
-                    INSERT OR IGNORE INTO WorkTrackLinks(work_id, track_id, is_primary)
+                    INSERT INTO WorkTrackLinks(work_id, track_id, is_primary)
                     VALUES (?, ?, ?)
                     """,
                     (int(work_id), track_id, 1 if is_first else 0),
                 )
                 existing.add(track_id)
                 is_first = False
+            for affected_work_id in sorted(affected_work_ids):
+                self._normalize_primary_track(affected_work_id, cursor=cur)
 
     def unlink_track(self, work_id: int, track_id: int) -> None:
         with self.conn:
-            self.conn.execute(
+            cur = self.conn.cursor()
+            cur.execute(
                 "DELETE FROM WorkTrackLinks WHERE work_id=? AND track_id=?",
                 (int(work_id), int(track_id)),
             )
-            primary_row = self.conn.execute(
-                """
-                SELECT track_id
-                FROM WorkTrackLinks
-                WHERE work_id=?
-                ORDER BY track_id
-                LIMIT 1
-                """,
-                (int(work_id),),
-            ).fetchone()
-            self.conn.execute(
-                "UPDATE WorkTrackLinks SET is_primary=0 WHERE work_id=?",
-                (int(work_id),),
-            )
-            if primary_row:
-                self.conn.execute(
-                    "UPDATE WorkTrackLinks SET is_primary=1 WHERE work_id=? AND track_id=?",
-                    (int(work_id), int(primary_row[0])),
-                )
+            self._set_track_governing_work(int(track_id), None, cursor=cur)
+            self._normalize_primary_track(int(work_id), cursor=cur)
 
     def export_rows(self) -> list[dict[str, object]]:
         rows: list[dict[str, object]] = []

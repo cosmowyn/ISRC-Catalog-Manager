@@ -64,6 +64,27 @@ def make_track_conn():
     return conn
 
 
+def enable_governance_schema(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE Works (
+            id INTEGER PRIMARY KEY,
+            title TEXT NOT NULL
+        );
+        CREATE TABLE WorkTrackLinks (
+            work_id INTEGER NOT NULL,
+            track_id INTEGER NOT NULL,
+            is_primary INTEGER NOT NULL DEFAULT 1,
+            notes TEXT,
+            PRIMARY KEY (work_id, track_id)
+        );
+        ALTER TABLE Tracks ADD COLUMN work_id INTEGER;
+        ALTER TABLE Tracks ADD COLUMN parent_track_id INTEGER;
+        ALTER TABLE Tracks ADD COLUMN relationship_type TEXT NOT NULL DEFAULT 'original';
+        """
+    )
+
+
 class TrackServiceTests(unittest.TestCase):
     def setUp(self):
         self.conn = make_track_conn()
@@ -245,6 +266,119 @@ class TrackServiceTests(unittest.TestCase):
         self.assertEqual([name for (name,) in additional], ["New Guest"])
         self.assertTrue(self.service.is_isrc_taken_normalized("nlabc2600002"))
         self.assertFalse(self.service.is_isrc_taken_normalized("NL-ABC-26-99999"))
+
+    def test_create_track_persists_governance_fields_when_schema_supports_it(self):
+        enable_governance_schema(self.conn)
+        self.conn.execute("INSERT INTO Works(id, title) VALUES (?, ?)", (1, "Signal Song"))
+
+        parent_track_id = self.service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-01001",
+                track_title="Signal Song",
+                artist_name="Main Artist",
+                additional_artists=[],
+                album_title="Signal Era",
+                release_date="2026-03-15",
+                track_length_sec=200,
+                iswc=None,
+                upc=None,
+                genre="Alt",
+                work_id=1,
+            )
+        )
+        remix_track_id = self.service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-01002",
+                track_title="Signal Song Remix",
+                artist_name="Main Artist",
+                additional_artists=["Guest Remixer"],
+                album_title="Signal Era",
+                release_date="2026-03-16",
+                track_length_sec=220,
+                iswc=None,
+                upc=None,
+                genre="Alt",
+                work_id=1,
+                parent_track_id=parent_track_id,
+                relationship_type="remix",
+            )
+        )
+
+        self.assertEqual(
+            self.conn.execute(
+                """
+                SELECT work_id, parent_track_id, relationship_type
+                FROM Tracks
+                WHERE id=?
+                """,
+                (remix_track_id,),
+            ).fetchone(),
+            (1, parent_track_id, "remix"),
+        )
+        self.assertEqual(
+            self.conn.execute(
+                """
+                SELECT work_id, track_id, is_primary
+                FROM WorkTrackLinks
+                ORDER BY track_id
+                """
+            ).fetchall(),
+            [(1, parent_track_id, 1), (1, remix_track_id, 0)],
+        )
+
+    def test_update_track_preserves_governance_fields_when_callers_do_not_pass_them(self):
+        enable_governance_schema(self.conn)
+        self.conn.execute("INSERT INTO Works(id, title) VALUES (?, ?)", (1, "Governed Work"))
+        track_id = self.service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-01003",
+                track_title="Governed Track",
+                artist_name="Main Artist",
+                additional_artists=[],
+                album_title="Governed Album",
+                release_date="2026-03-17",
+                track_length_sec=201,
+                iswc=None,
+                upc=None,
+                genre="Alt",
+                work_id=1,
+                relationship_type="alternate master",
+            )
+        )
+
+        self.service.update_track(
+            TrackUpdatePayload(
+                track_id=track_id,
+                isrc="NL-ABC-26-01003",
+                track_title="Governed Track Updated",
+                artist_name="Main Artist",
+                additional_artists=[],
+                album_title="Governed Album",
+                release_date="2026-03-18",
+                track_length_sec=203,
+                iswc=None,
+                upc=None,
+                genre="Alt",
+            )
+        )
+
+        self.assertEqual(
+            self.conn.execute(
+                """
+                SELECT work_id, parent_track_id, relationship_type
+                FROM Tracks
+                WHERE id=?
+                """,
+                (track_id,),
+            ).fetchone(),
+            (1, None, "alternate_master"),
+        )
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT work_id, track_id, is_primary FROM WorkTrackLinks"
+            ).fetchall(),
+            [(1, track_id, 1)],
+        )
 
     def test_create_track_allows_blank_isrc(self):
         first_track = self.service.create_track(

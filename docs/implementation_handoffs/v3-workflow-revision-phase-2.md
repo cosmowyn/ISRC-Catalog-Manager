@@ -8,11 +8,15 @@ Date: 2026-03-25
 
 ## Status And Scope
 
-Phase 2 is ready to start.
+Phase 2 is `in_progress`.
 
-Phase 1 is now completed, so Phase 2 is the active next implementation phase.
+This first runtime slice lands the domain-model foundation only:
 
-No runtime Phase 2 changes have landed yet in this handoff. This document now serves as the direct pickup point for the domain-model revision.
+- `Track` now has direct governing fields for `work_id`, `parent_track_id`, and `relationship_type`
+- `WorkTrackLinks` is still present, but only as a synchronized compatibility shadow for current read-side consumers
+- explicit ownership and contribution ledger tables now exist in schema, even though only work-contribution mirroring is wired into services so far
+
+Phase 2 is not complete yet. UI restructuring, creation-flow rewrite, and read-side authority cutovers remain deferred to later slices.
 
 ## Phase Goal
 
@@ -20,69 +24,128 @@ Revise the domain model toward a parent `Work`, child `Track`, and explicitly se
 
 ## What Changed
 
-No runtime changes yet.
+The first Phase 2 runtime landing is now in place.
 
-This handoff now reflects the post-Phase-1 starting boundary for the schema and service revision.
+- bumped schema target from `32` to `33`
+- added `Tracks.work_id`, `Tracks.parent_track_id`, and `Tracks.relationship_type`
+- added schema tables:
+  - `WorkOwnershipInterests`
+  - `RecordingOwnershipInterests`
+  - `WorkContributionEntries`
+  - `RecordingContributionEntries`
+- added migration `32 -> 33`
+- migration backfills `Tracks.work_id` from legacy `WorkTrackLinks`
+- migration normalizes `relationship_type` to `original` when blank
+- migration mirrors legacy `WorkContributors` rows into `WorkContributionEntries`
+- migration deduplicates `WorkTrackLinks` down to one governing work per track and adds a unique index on `track_id`
+- `TrackService` now persists and snapshots governance fields when the schema supports them
+- `TrackService.update_track()` preserves existing governance values when older callers do not pass any governance fields
+- `TrackService` keeps `WorkTrackLinks` synchronized as a shadow bridge when `work_id` changes
+- `WorkService` now writes governing `Tracks.work_id` state when linking or unlinking tracks to a work
+- `WorkService` mirrors work contributors into `WorkContributionEntries`
+- `PartyService.merge_parties()` now updates the new ownership and contribution tables so Party authority does not drift
 
 ## Source Of Truth Files And Surfaces
 
-Expected initial Phase 2 surfaces:
+Active Phase 2 source-of-truth surfaces for this slice:
 
+- `isrc_manager/constants.py`
 - `isrc_manager/services/schema.py`
 - `isrc_manager/services/tracks.py`
-- `isrc_manager/works/*`
-- `isrc_manager/rights/*`
-- `tests/database/*`
+- `isrc_manager/works/service.py`
+- `isrc_manager/parties/service.py`
+- `tests/database/_schema_support.py`
+- `tests/database/test_schema_migrations_32_33.py`
+- `tests/test_track_service.py`
 - `tests/test_work_and_party_services.py`
-- `tests/test_catalog_workflow_integration.py`
 
 ## Files Changed
 
-None yet.
+- `isrc_manager/constants.py`
+- `isrc_manager/services/schema.py`
+- `isrc_manager/services/tracks.py`
+- `isrc_manager/works/service.py`
+- `isrc_manager/parties/service.py`
+- `tests/database/_schema_support.py`
+- `tests/database/test_schema_migrations_32_33.py`
+- `tests/test_track_service.py`
+- `tests/test_work_and_party_services.py`
+- `docs/implementation_handoffs/v3-workflow-revision-phase-2.md`
 
 ## Tests Added Or Updated
 
-None yet.
+Added or updated coverage in this slice:
 
-Expected early test focus:
+- current-target schema assertions now require the new governance columns and explicit interest/ledger tables
+- new migration coverage for `32 -> 33`
+- track-service coverage for:
+  - governance persistence when schema support exists
+  - preservation of governance values when legacy update callers omit them
+- work-service coverage for:
+  - `Tracks.work_id` assignment on work creation and unlink
+  - work-contribution mirroring into `WorkContributionEntries`
+  - reassignment to a new governing parent work
+- party-merge coverage for mirrored work-contribution updates
 
-- schema current-target coverage
-- work-parent and track-child linkage
-- ownership and contribution table coverage
-- Party-first identity invariants on the new relations
+Validation run:
+
+- `python3 -m unittest tests.database.test_schema_current_target tests.database.test_schema_migrations_31_32 tests.database.test_schema_migrations_32_33`
+- `python3 -m unittest tests.test_track_service tests.test_work_and_party_services tests.test_repertoire_status_service tests.test_catalog_workflow_integration tests.test_quality_service`
 
 ## What Was Intentionally Deferred
 
-- Work Manager UI expansion
-- creation workflow rewrite
-- catalog operational cleanup
+- CRUD/service surfaces for `WorkOwnershipInterests` and `RecordingOwnershipInterests`
+- recording-side contribution service flows for `RecordingContributionEntries`
+- narrowing `RightsRecords` to one scope per row
+- work-manager UI expansion
+- work-first creation flow and child-track creation UX
+- catalog read-side authority cutover from `WorkTrackLinks` toward direct `Tracks.work_id`
 - legacy license deletion
 
 ## Risks And Caveats
 
-- Phase 2 is the first phase allowed to break older database compatibility deliberately
-- governance-model cleanup must avoid keeping `WorkTrackLinks` as an accidental long-term authority if the cleaner v3 model replaces it
+- `WorkTrackLinks` is still live for read-side consumers like quality, repertoire status, search, and some catalog paths; it is now a shadow bridge, not the intended final authority
+- `TrackService.update_track()` currently treats omitted governance fields as “preserve current value”; explicit clearing from generic track-edit paths is intentionally deferred until governance-specific UI exists
+- the new ownership tables exist in schema but do not yet have dedicated services or UI, so Phase 2 is only partially through the ownership separation goal
+- migration `32 -> 33` intentionally collapses multiple work links down to one governing work per track by keeping the primary or first link
 
 ## Workers Used And Workers Closed
 
-None yet.
+Workers used for the Phase 2 planning kickoff before implementation:
 
-Workers should be recorded here when Phase 2 implementation begins.
+- `Laplace`
+- `Turing`
+- `Hume`
+
+Workers closed:
+
+- `Laplace`
+- `Turing`
+- `Hume`
+
+No new workers were required for this implementation slice.
 
 ## QA/QC Summary From Central Oversight
 
-Central-oversight instruction for the Phase 2 kickoff:
+This slice is coherent with the v3 product direction.
 
-- separate work ownership, recording ownership, and contribution roles explicitly instead of hiding them behind generic rights rows
-- treat the completed Phase 1 Party cutover as a prerequisite that is now satisfied
-- keep the first Phase 2 landing at the schema/service layer; do not mix in Work Manager expansion or track-creation UX yet
+- `Work` is now materially closer to being the governing parent because `Track` rows can store that governance directly
+- the app no longer depends exclusively on a many-to-many join to know a track’s parent work
+- the explicit ownership/contribution schema has started without prematurely dragging UI into the same pass
+- current read-side consumers remain stable because `WorkTrackLinks` is still synchronized for now
+
+This is the correct boundary for the first Phase 2 landing. The next slices should build on this foundation rather than reopening the schema.
 
 ## Exact Safe Pickup Instructions
 
-When starting Phase 2:
+Next safe pickup for Phase 2:
 
-1. read the masterplan and the completed Phase 1 handoff
-2. confirm the Party authority cutover needed by this model is in place
-3. define the new parent-child and ownership tables or equivalents
-4. add schema and service tests before UI changes
-5. keep catalog cleanup out of this phase
+1. read this handoff and confirm schema target `33` is the new baseline
+2. keep Phase 2 at schema/service level until explicit ownership and contribution services are in place
+3. add service models and CRUD flows for:
+   - `WorkOwnershipInterests`
+   - `RecordingOwnershipInterests`
+   - `RecordingContributionEntries`
+4. update `RightsService` and related tests so ownership is no longer inferred only from generic rights rows
+5. only after those service seams are stable, begin moving read-side consumers from `WorkTrackLinks` toward direct `Tracks.work_id`
+6. do not start Work Manager UI expansion or work-first creation UX in the same pickup unless the ownership service layer is already stable

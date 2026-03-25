@@ -155,6 +155,9 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
             row[1]
             for row in self.conn.execute("PRAGMA index_list(TrackAudioDerivatives)").fetchall()
         }
+        work_track_link_indexes = {
+            row[1] for row in self.conn.execute("PRAGMA index_list(WorkTrackLinks)").fetchall()
+        }
         forensic_export_indexes = {
             row[1]
             for row in self.conn.execute("PRAGMA index_list(ForensicWatermarkExports)").fetchall()
@@ -180,7 +183,11 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
         self.assertIn("PartyArtistAliases", tables)
         self.assertIn("Works", tables)
         self.assertIn("WorkContributors", tables)
+        self.assertIn("WorkContributionEntries", tables)
         self.assertIn("WorkTrackLinks", tables)
+        self.assertIn("WorkOwnershipInterests", tables)
+        self.assertIn("RecordingContributionEntries", tables)
+        self.assertIn("RecordingOwnershipInterests", tables)
         self.assertIn("Contracts", tables)
         self.assertIn("ContractParties", tables)
         self.assertIn("ContractObligations", tables)
@@ -431,6 +438,9 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                 "album_art_mime_type",
                 "album_art_size_bytes",
                 "buma_work_number",
+                "work_id",
+                "parent_track_id",
+                "relationship_type",
                 "composer",
                 "publisher",
                 "comments",
@@ -445,6 +455,10 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
         self.assertIn("idx_tracks_isrc_compact_unique", track_indexes)
         self.assertIn("idx_tracks_catalog_number", track_indexes)
         self.assertIn("idx_tracks_buma_work_number", track_indexes)
+        self.assertIn("idx_tracks_work_id", track_indexes)
+        self.assertIn("idx_tracks_parent_track_id", track_indexes)
+        self.assertIn("idx_tracks_relationship_type", track_indexes)
+        self.assertIn("idx_work_track_links_unique_track", work_track_link_indexes)
         self.assertIn("idx_gs1_metadata_export_enabled", gs1_indexes)
         self.assertIn("idx_gs1_metadata_contract_number", gs1_indexes)
         self.assertIn(
@@ -1101,6 +1115,247 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                     None,
                 ),
             )
+        finally:
+            conn.close()
+
+    def case_migrate_32_to_33_adds_governance_columns_and_explicit_interest_tables(self):
+        conn = sqlite3.connect(":memory:")
+        try:
+            service = DatabaseSchemaService(conn)
+            conn.execute("PRAGMA foreign_keys = OFF")
+            conn.executescript(
+                """
+                CREATE TABLE Artists (
+                    id INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL
+                );
+                CREATE TABLE Albums (
+                    id INTEGER PRIMARY KEY,
+                    title TEXT NOT NULL
+                );
+                CREATE TABLE Parties (
+                    id INTEGER PRIMARY KEY,
+                    legal_name TEXT NOT NULL,
+                    display_name TEXT,
+                    artist_name TEXT,
+                    company_name TEXT,
+                    first_name TEXT,
+                    middle_name TEXT,
+                    last_name TEXT,
+                    party_type TEXT NOT NULL DEFAULT 'organization',
+                    contact_person TEXT,
+                    email TEXT,
+                    alternative_email TEXT,
+                    phone TEXT,
+                    website TEXT,
+                    street_name TEXT,
+                    street_number TEXT,
+                    address_line1 TEXT,
+                    address_line2 TEXT,
+                    city TEXT,
+                    region TEXT,
+                    postal_code TEXT,
+                    country TEXT,
+                    bank_account_number TEXT,
+                    chamber_of_commerce_number TEXT,
+                    tax_id TEXT,
+                    vat_number TEXT,
+                    pro_affiliation TEXT,
+                    pro_number TEXT,
+                    ipi_cae TEXT,
+                    notes TEXT,
+                    profile_name TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                CREATE TABLE Works (
+                    id INTEGER PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    alternate_titles TEXT,
+                    version_subtitle TEXT,
+                    language TEXT,
+                    lyrics_flag INTEGER NOT NULL DEFAULT 0,
+                    instrumental_flag INTEGER NOT NULL DEFAULT 0,
+                    genre_notes TEXT,
+                    iswc TEXT,
+                    registration_number TEXT,
+                    work_status TEXT,
+                    metadata_complete INTEGER NOT NULL DEFAULT 0,
+                    contract_signed INTEGER NOT NULL DEFAULT 0,
+                    rights_verified INTEGER NOT NULL DEFAULT 0,
+                    notes TEXT,
+                    profile_name TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                CREATE TABLE Contracts (
+                    id INTEGER PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    contract_type TEXT,
+                    draft_date TEXT,
+                    signature_date TEXT,
+                    effective_date TEXT,
+                    start_date TEXT,
+                    end_date TEXT,
+                    renewal_date TEXT,
+                    notice_deadline TEXT,
+                    option_periods TEXT,
+                    reversion_date TEXT,
+                    termination_date TEXT,
+                    status TEXT NOT NULL DEFAULT 'draft',
+                    supersedes_contract_id INTEGER,
+                    superseded_by_contract_id INTEGER,
+                    summary TEXT,
+                    notes TEXT,
+                    profile_name TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                CREATE TABLE Tracks (
+                    id INTEGER PRIMARY KEY,
+                    isrc TEXT NOT NULL,
+                    isrc_compact TEXT,
+                    db_entry_date DATE DEFAULT CURRENT_DATE,
+                    audio_file_path TEXT,
+                    audio_file_storage_mode TEXT,
+                    audio_file_blob BLOB,
+                    audio_file_filename TEXT,
+                    audio_file_mime_type TEXT,
+                    audio_file_size_bytes INTEGER NOT NULL DEFAULT 0,
+                    track_title TEXT NOT NULL,
+                    catalog_number TEXT,
+                    album_art_path TEXT,
+                    album_art_storage_mode TEXT,
+                    album_art_blob BLOB,
+                    album_art_filename TEXT,
+                    album_art_mime_type TEXT,
+                    album_art_size_bytes INTEGER NOT NULL DEFAULT 0,
+                    main_artist_id INTEGER NOT NULL,
+                    buma_work_number TEXT,
+                    album_id INTEGER,
+                    release_date DATE,
+                    track_length_sec INTEGER NOT NULL DEFAULT 0,
+                    iswc TEXT,
+                    upc TEXT,
+                    genre TEXT,
+                    composer TEXT,
+                    publisher TEXT,
+                    comments TEXT,
+                    lyrics TEXT
+                );
+                CREATE TABLE WorkContributors (
+                    id INTEGER PRIMARY KEY,
+                    work_id INTEGER NOT NULL,
+                    party_id INTEGER,
+                    display_name TEXT,
+                    role TEXT NOT NULL,
+                    share_percent REAL,
+                    role_share_percent REAL,
+                    notes TEXT
+                );
+                CREATE TABLE WorkTrackLinks (
+                    work_id INTEGER NOT NULL,
+                    track_id INTEGER NOT NULL,
+                    is_primary INTEGER NOT NULL DEFAULT 1,
+                    notes TEXT,
+                    PRIMARY KEY (work_id, track_id)
+                );
+                INSERT INTO Artists(id, name) VALUES (1, 'Catalog Artist');
+                INSERT INTO Works(id, title) VALUES (1, 'Signal Song'), (2, 'Legacy Parallel Work');
+                INSERT INTO Parties(id, legal_name, display_name) VALUES (1, 'Signal Writer', 'Signal Writer');
+                INSERT INTO Tracks(
+                    id,
+                    isrc,
+                    isrc_compact,
+                    track_title,
+                    main_artist_id,
+                    buma_work_number
+                )
+                VALUES
+                    (1, 'NL-ABC-26-00001', 'NLABC2600001', 'Signal Song', 1, 'BUMA-001'),
+                    (2, 'NL-ABC-26-00002', 'NLABC2600002', 'Signal Song Remix', 1, 'BUMA-002');
+                INSERT INTO WorkContributors(
+                    id,
+                    work_id,
+                    party_id,
+                    display_name,
+                    role,
+                    share_percent,
+                    role_share_percent,
+                    notes
+                )
+                VALUES (1, 1, 1, 'Signal Writer', 'songwriter', 100.0, 100.0, 'legacy row');
+                INSERT INTO WorkTrackLinks(work_id, track_id, is_primary, notes)
+                VALUES
+                    (1, 1, 1, 'keep this'),
+                    (2, 1, 0, 'drop this duplicate'),
+                    (1, 2, 0, 'same work second track');
+                """
+            )
+            conn.execute("PRAGMA user_version = 32")
+            conn.commit()
+            conn.execute("PRAGMA foreign_keys = ON")
+
+            service.migrate_schema()
+
+            track_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(Tracks)").fetchall()
+            }
+            tables = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            work_track_link_indexes = {
+                row[1] for row in conn.execute("PRAGMA index_list(WorkTrackLinks)").fetchall()
+            }
+            governance_rows = conn.execute(
+                """
+                SELECT id, work_id, parent_track_id, relationship_type
+                FROM Tracks
+                ORDER BY id
+                """
+            ).fetchall()
+            shadow_rows = conn.execute(
+                """
+                SELECT work_id, track_id, is_primary
+                FROM WorkTrackLinks
+                ORDER BY work_id, track_id
+                """
+            ).fetchall()
+            contribution_rows = conn.execute(
+                """
+                SELECT work_id, party_id, display_name, role, share_percent, role_share_percent, notes
+                FROM WorkContributionEntries
+                ORDER BY id
+                """
+            ).fetchall()
+
+            self.assertTrue({"work_id", "parent_track_id", "relationship_type"} <= track_columns)
+            self.assertTrue(
+                {
+                    "WorkContributionEntries",
+                    "WorkOwnershipInterests",
+                    "RecordingContributionEntries",
+                    "RecordingOwnershipInterests",
+                }
+                <= tables
+            )
+            self.assertIn("idx_work_track_links_unique_track", work_track_link_indexes)
+            self.assertEqual(
+                governance_rows,
+                [
+                    (1, 1, None, "original"),
+                    (2, 1, None, "original"),
+                ],
+            )
+            self.assertEqual(shadow_rows, [(1, 1, 1), (1, 2, 0)])
+            self.assertEqual(
+                contribution_rows,
+                [(1, 1, "Signal Writer", "songwriter", 100.0, 100.0, "legacy row")],
+            )
+            self.assertEqual(service.get_db_version(), SCHEMA_TARGET)
         finally:
             conn.close()
 

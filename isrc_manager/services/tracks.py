@@ -30,6 +30,20 @@ from isrc_manager.media.blob_files import (
     _read_blob_from_path,
 )
 
+TRACK_RELATIONSHIP_TYPES = frozenset(
+    {
+        "original",
+        "version",
+        "remix",
+        "edit",
+        "live",
+        "instrumental",
+        "alternate_master",
+        "derivative",
+        "other",
+    }
+)
+
 
 def _build_media_fields() -> dict[str, dict[str, object]]:
     validators = {
@@ -69,6 +83,9 @@ class TrackCreatePayload:
     publisher: str | None = None
     comments: str | None = None
     lyrics: str | None = None
+    work_id: int | None = None
+    parent_track_id: int | None = None
+    relationship_type: str | None = None
     audio_file_source_path: str | None = None
     audio_file_storage_mode: str | None = None
     album_art_source_path: str | None = None
@@ -94,6 +111,9 @@ class TrackUpdatePayload:
     publisher: str | None = None
     comments: str | None = None
     lyrics: str | None = None
+    work_id: int | None = None
+    parent_track_id: int | None = None
+    relationship_type: str | None = None
     audio_file_source_path: str | None = None
     audio_file_storage_mode: str | None = None
     album_art_source_path: str | None = None
@@ -122,6 +142,9 @@ class TrackSnapshot:
     publisher: str | None
     comments: str | None
     lyrics: str | None
+    work_id: int | None = None
+    parent_track_id: int | None = None
+    relationship_type: str | None = "original"
     audio_file_path: str | None = None
     audio_file_storage_mode: str | None = None
     audio_file_filename: str | None = None
@@ -271,6 +294,111 @@ class TrackService:
                         self.conn.execute(
                             f"ALTER TABLE Albums ADD COLUMN {column_name} {column_sql}"
                         )
+
+    def _table_names(self) -> set[str]:
+        return {
+            str(row[0])
+            for row in self.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+            if row and row[0]
+        }
+
+    def _track_columns(self) -> set[str]:
+        if "Tracks" not in self._table_names():
+            return set()
+        return {
+            str(row[1])
+            for row in self.conn.execute("PRAGMA table_info(Tracks)").fetchall()
+            if row and row[1]
+        }
+
+    @staticmethod
+    def _normalize_relationship_type(value: str | None) -> str:
+        clean = str(value or "").strip().lower().replace(" ", "_")
+        if clean in TRACK_RELATIONSHIP_TYPES:
+            return clean
+        return "original"
+
+    def _current_track_governance(
+        self, track_id: int, *, cursor: sqlite3.Cursor
+    ) -> tuple[int | None, int | None, str]:
+        track_columns = self._track_columns()
+        if not track_columns:
+            return None, None, "original"
+        work_expr = "work_id" if "work_id" in track_columns else "NULL"
+        parent_expr = "parent_track_id" if "parent_track_id" in track_columns else "NULL"
+        relationship_expr = (
+            "relationship_type" if "relationship_type" in track_columns else "'original'"
+        )
+        row = cursor.execute(
+            f"""
+            SELECT {work_expr}, {parent_expr}, {relationship_expr}
+            FROM Tracks
+            WHERE id=?
+            """,
+            (int(track_id),),
+        ).fetchone()
+        if row is None:
+            return None, None, "original"
+        return (
+            int(row[0]) if row[0] is not None else None,
+            int(row[1]) if row[1] is not None else None,
+            self._normalize_relationship_type(row[2]),
+        )
+
+    def _rebalance_work_track_primary(self, work_id: int, *, cursor: sqlite3.Cursor) -> None:
+        primary_row = cursor.execute(
+            """
+            SELECT track_id
+            FROM WorkTrackLinks
+            WHERE work_id=?
+            ORDER BY is_primary DESC, track_id
+            LIMIT 1
+            """,
+            (int(work_id),),
+        ).fetchone()
+        cursor.execute("UPDATE WorkTrackLinks SET is_primary=0 WHERE work_id=?", (int(work_id),))
+        if primary_row is not None:
+            cursor.execute(
+                """
+                UPDATE WorkTrackLinks
+                SET is_primary=1
+                WHERE work_id=? AND track_id=?
+                """,
+                (int(work_id), int(primary_row[0])),
+            )
+
+    def _sync_shadow_work_link(
+        self,
+        track_id: int,
+        work_id: int | None,
+        *,
+        cursor: sqlite3.Cursor,
+    ) -> None:
+        table_names = self._table_names()
+        if "WorkTrackLinks" not in table_names:
+            return
+        existing_work_rows = cursor.execute(
+            "SELECT work_id FROM WorkTrackLinks WHERE track_id=?",
+            (int(track_id),),
+        ).fetchall()
+        affected_work_ids = {
+            int(row[0]) for row in existing_work_rows if row and row[0] is not None
+        }
+        if work_id is not None:
+            affected_work_ids.add(int(work_id))
+        cursor.execute("DELETE FROM WorkTrackLinks WHERE track_id=?", (int(track_id),))
+        if work_id is not None:
+            cursor.execute(
+                """
+                INSERT INTO WorkTrackLinks(work_id, track_id, is_primary)
+                VALUES (?, ?, 0)
+                """,
+                (int(work_id), int(track_id)),
+            )
+        for affected_work_id in sorted(affected_work_ids):
+            self._rebalance_work_track_primary(affected_work_id, cursor=cursor)
 
     @staticmethod
     def parse_additional_artists(text: str) -> list[str]:
@@ -1280,8 +1408,14 @@ class TrackService:
         include_media_blobs: bool = True,
     ) -> TrackSnapshot | None:
         cur = cursor or self.conn.cursor()
+        track_columns = self._track_columns()
+        work_expr = "t.work_id" if "work_id" in track_columns else "NULL"
+        parent_expr = "t.parent_track_id" if "parent_track_id" in track_columns else "NULL"
+        relationship_expr = (
+            "t.relationship_type" if "relationship_type" in track_columns else "'original'"
+        )
         row = cur.execute(
-            """
+            f"""
             SELECT
                 t.id,
                 t.db_entry_date,
@@ -1304,7 +1438,10 @@ class TrackService:
                 t.audio_file_storage_mode,
                 t.audio_file_filename,
                 t.audio_file_mime_type,
-                t.audio_file_size_bytes
+                t.audio_file_size_bytes,
+                {work_expr},
+                {parent_expr},
+                {relationship_expr}
             FROM Tracks t
             JOIN Artists main_artist ON main_artist.id = t.main_artist_id
             LEFT JOIN Albums album ON album.id = t.album_id
@@ -1355,6 +1492,9 @@ class TrackService:
             publisher=row[14],
             comments=row[15],
             lyrics=row[16],
+            work_id=int(row[22]) if row[22] is not None else None,
+            parent_track_id=int(row[23]) if row[23] is not None else None,
+            relationship_type=self._normalize_relationship_type(row[24]),
             catalog_number=row[4],
             buma_work_number=row[6],
             audio_file_path=str(audio_meta.get("path") or "") or None,
@@ -1375,6 +1515,7 @@ class TrackService:
         self, snapshot: TrackSnapshot, *, cursor: sqlite3.Cursor | None = None
     ) -> None:
         cur = cursor or self.conn.cursor()
+        track_columns = self._track_columns()
         main_artist_id = self.get_or_create_artist(snapshot.artist_name, cursor=cur)
         album_id = self.get_or_create_album(snapshot.album_title, cursor=cur)
         compact_isrc = to_compact_isrc(snapshot.isrc)
@@ -1383,123 +1524,174 @@ class TrackService:
         existing = cur.execute(
             "SELECT 1 FROM Tracks WHERE id=?", (int(snapshot.track_id),)
         ).fetchone()
+        update_assignments = [
+            "db_entry_date=?",
+            "isrc=?",
+            "isrc_compact=?",
+            "audio_file_path=?",
+            "audio_file_storage_mode=?",
+            "audio_file_blob=?",
+            "audio_file_filename=?",
+            "audio_file_mime_type=?",
+            "audio_file_size_bytes=?",
+            "track_title=?",
+            "catalog_number=?",
+            "album_art_path=?",
+            "album_art_storage_mode=?",
+            "album_art_blob=?",
+            "album_art_filename=?",
+            "album_art_mime_type=?",
+            "album_art_size_bytes=?",
+            "main_artist_id=?",
+            "buma_work_number=?",
+            "album_id=?",
+            "release_date=?",
+            "track_length_sec=?",
+            "iswc=?",
+            "upc=?",
+            "genre=?",
+            "composer=?",
+            "publisher=?",
+            "comments=?",
+            "lyrics=?",
+        ]
+        update_values: list[object] = [
+            snapshot.db_entry_date,
+            snapshot.isrc,
+            compact_isrc,
+            snapshot.audio_file_path,
+            snapshot.audio_file_storage_mode,
+            sqlite3.Binary(audio_blob) if audio_blob is not None else None,
+            snapshot.audio_file_filename,
+            snapshot.audio_file_mime_type,
+            int(snapshot.audio_file_size_bytes or 0),
+            snapshot.track_title,
+            snapshot.catalog_number,
+            snapshot.album_art_path,
+            snapshot.album_art_storage_mode,
+            sqlite3.Binary(album_art_blob) if album_art_blob is not None else None,
+            snapshot.album_art_filename,
+            snapshot.album_art_mime_type,
+            int(snapshot.album_art_size_bytes or 0),
+            main_artist_id,
+            snapshot.buma_work_number,
+            album_id,
+            snapshot.release_date,
+            int(snapshot.track_length_sec or 0),
+            snapshot.iswc,
+            snapshot.upc,
+            snapshot.genre,
+            snapshot.composer,
+            snapshot.publisher,
+            snapshot.comments,
+            snapshot.lyrics,
+        ]
+        if "work_id" in track_columns:
+            update_assignments.append("work_id=?")
+            update_values.append(int(snapshot.work_id) if snapshot.work_id is not None else None)
+        if "parent_track_id" in track_columns:
+            update_assignments.append("parent_track_id=?")
+            update_values.append(
+                int(snapshot.parent_track_id) if snapshot.parent_track_id is not None else None
+            )
+        if "relationship_type" in track_columns:
+            update_assignments.append("relationship_type=?")
+            update_values.append(self._normalize_relationship_type(snapshot.relationship_type))
         if existing:
             cur.execute(
-                """
+                f"""
                 UPDATE Tracks SET
-                    db_entry_date=?,
-                    isrc=?,
-                    isrc_compact=?,
-                    audio_file_path=?,
-                    audio_file_storage_mode=?,
-                    audio_file_blob=?,
-                    audio_file_filename=?,
-                    audio_file_mime_type=?,
-                    audio_file_size_bytes=?,
-                    track_title=?,
-                    catalog_number=?,
-                    album_art_path=?,
-                    album_art_storage_mode=?,
-                    album_art_blob=?,
-                    album_art_filename=?,
-                    album_art_mime_type=?,
-                    album_art_size_bytes=?,
-                    main_artist_id=?,
-                    buma_work_number=?,
-                    album_id=?,
-                    release_date=?,
-                    track_length_sec=?,
-                    iswc=?,
-                    upc=?,
-                    genre=?,
-                    composer=?,
-                    publisher=?,
-                    comments=?,
-                    lyrics=?
+                    {", ".join(update_assignments)}
                 WHERE id=?
                 """,
-                (
-                    snapshot.db_entry_date,
-                    snapshot.isrc,
-                    compact_isrc,
-                    snapshot.audio_file_path,
-                    snapshot.audio_file_storage_mode,
-                    sqlite3.Binary(audio_blob) if audio_blob is not None else None,
-                    snapshot.audio_file_filename,
-                    snapshot.audio_file_mime_type,
-                    int(snapshot.audio_file_size_bytes or 0),
-                    snapshot.track_title,
-                    snapshot.catalog_number,
-                    snapshot.album_art_path,
-                    snapshot.album_art_storage_mode,
-                    sqlite3.Binary(album_art_blob) if album_art_blob is not None else None,
-                    snapshot.album_art_filename,
-                    snapshot.album_art_mime_type,
-                    int(snapshot.album_art_size_bytes or 0),
-                    main_artist_id,
-                    snapshot.buma_work_number,
-                    album_id,
-                    snapshot.release_date,
-                    int(snapshot.track_length_sec or 0),
-                    snapshot.iswc,
-                    snapshot.upc,
-                    snapshot.genre,
-                    snapshot.composer,
-                    snapshot.publisher,
-                    snapshot.comments,
-                    snapshot.lyrics,
-                    int(snapshot.track_id),
-                ),
+                (*update_values, int(snapshot.track_id)),
             )
         else:
-            cur.execute(
-                """
-                INSERT INTO Tracks (
-                    id, db_entry_date, isrc, isrc_compact,
-                    audio_file_path, audio_file_storage_mode, audio_file_blob, audio_file_filename,
-                    audio_file_mime_type, audio_file_size_bytes,
-                    track_title, catalog_number,
-                    album_art_path, album_art_storage_mode, album_art_blob, album_art_filename,
-                    album_art_mime_type, album_art_size_bytes,
-                    main_artist_id, buma_work_number, album_id,
-                    release_date, track_length_sec, iswc, upc, genre,
-                    composer, publisher, comments, lyrics
+            insert_columns = [
+                "id",
+                "db_entry_date",
+                "isrc",
+                "isrc_compact",
+                "audio_file_path",
+                "audio_file_storage_mode",
+                "audio_file_blob",
+                "audio_file_filename",
+                "audio_file_mime_type",
+                "audio_file_size_bytes",
+                "track_title",
+                "catalog_number",
+                "album_art_path",
+                "album_art_storage_mode",
+                "album_art_blob",
+                "album_art_filename",
+                "album_art_mime_type",
+                "album_art_size_bytes",
+                "main_artist_id",
+                "buma_work_number",
+                "album_id",
+                "release_date",
+                "track_length_sec",
+                "iswc",
+                "upc",
+                "genre",
+                "composer",
+                "publisher",
+                "comments",
+                "lyrics",
+            ]
+            insert_values: list[object] = [
+                int(snapshot.track_id),
+                snapshot.db_entry_date,
+                snapshot.isrc,
+                compact_isrc,
+                snapshot.audio_file_path,
+                snapshot.audio_file_storage_mode,
+                sqlite3.Binary(audio_blob) if audio_blob is not None else None,
+                snapshot.audio_file_filename,
+                snapshot.audio_file_mime_type,
+                int(snapshot.audio_file_size_bytes or 0),
+                snapshot.track_title,
+                snapshot.catalog_number,
+                snapshot.album_art_path,
+                snapshot.album_art_storage_mode,
+                sqlite3.Binary(album_art_blob) if album_art_blob is not None else None,
+                snapshot.album_art_filename,
+                snapshot.album_art_mime_type,
+                int(snapshot.album_art_size_bytes or 0),
+                main_artist_id,
+                snapshot.buma_work_number,
+                album_id,
+                snapshot.release_date,
+                int(snapshot.track_length_sec or 0),
+                snapshot.iswc,
+                snapshot.upc,
+                snapshot.genre,
+                snapshot.composer,
+                snapshot.publisher,
+                snapshot.comments,
+                snapshot.lyrics,
+            ]
+            if "work_id" in track_columns:
+                insert_columns.append("work_id")
+                insert_values.append(
+                    int(snapshot.work_id) if snapshot.work_id is not None else None
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            if "parent_track_id" in track_columns:
+                insert_columns.append("parent_track_id")
+                insert_values.append(
+                    int(snapshot.parent_track_id) if snapshot.parent_track_id is not None else None
+                )
+            if "relationship_type" in track_columns:
+                insert_columns.append("relationship_type")
+                insert_values.append(self._normalize_relationship_type(snapshot.relationship_type))
+            cur.execute(
+                f"""
+                INSERT INTO Tracks ({", ".join(insert_columns)})
+                VALUES ({", ".join("?" for _ in insert_columns)})
                 """,
-                (
-                    int(snapshot.track_id),
-                    snapshot.db_entry_date,
-                    snapshot.isrc,
-                    compact_isrc,
-                    snapshot.audio_file_path,
-                    snapshot.audio_file_storage_mode,
-                    sqlite3.Binary(audio_blob) if audio_blob is not None else None,
-                    snapshot.audio_file_filename,
-                    snapshot.audio_file_mime_type,
-                    int(snapshot.audio_file_size_bytes or 0),
-                    snapshot.track_title,
-                    snapshot.catalog_number,
-                    snapshot.album_art_path,
-                    snapshot.album_art_storage_mode,
-                    sqlite3.Binary(album_art_blob) if album_art_blob is not None else None,
-                    snapshot.album_art_filename,
-                    snapshot.album_art_mime_type,
-                    int(snapshot.album_art_size_bytes or 0),
-                    main_artist_id,
-                    snapshot.buma_work_number,
-                    album_id,
-                    snapshot.release_date,
-                    int(snapshot.track_length_sec or 0),
-                    snapshot.iswc,
-                    snapshot.upc,
-                    snapshot.genre,
-                    snapshot.composer,
-                    snapshot.publisher,
-                    snapshot.comments,
-                    snapshot.lyrics,
-                ),
+                insert_values,
             )
+        self._sync_shadow_work_link(snapshot.track_id, snapshot.work_id, cursor=cur)
         if self._album_supports_shared_art(album_id, snapshot.album_title):
             self._update_album_art_reference(
                 int(album_id),
@@ -1574,57 +1766,91 @@ class TrackService:
     def create_track(self, payload: TrackCreatePayload) -> int:
         with self.conn:
             cur = self.conn.cursor()
+            track_columns = self._track_columns()
             main_artist_id = self.get_or_create_artist(payload.artist_name, cursor=cur)
             album_id = self.get_or_create_album(payload.album_title, cursor=cur)
             clean_isrc = str(payload.isrc or "").strip()
             compact_isrc = to_compact_isrc(clean_isrc)
-            cur.execute(
-                """
-                INSERT INTO Tracks (
-                    isrc, isrc_compact,
-                    audio_file_path, audio_file_storage_mode, audio_file_blob, audio_file_filename,
-                    audio_file_mime_type, audio_file_size_bytes,
-                    track_title, catalog_number,
-                    album_art_path, album_art_storage_mode, album_art_blob, album_art_filename,
-                    album_art_mime_type, album_art_size_bytes,
-                    main_artist_id, buma_work_number, album_id,
-                    release_date, track_length_sec, iswc, upc, genre,
-                    composer, publisher, comments, lyrics
+            insert_columns = [
+                "isrc",
+                "isrc_compact",
+                "audio_file_path",
+                "audio_file_storage_mode",
+                "audio_file_blob",
+                "audio_file_filename",
+                "audio_file_mime_type",
+                "audio_file_size_bytes",
+                "track_title",
+                "catalog_number",
+                "album_art_path",
+                "album_art_storage_mode",
+                "album_art_blob",
+                "album_art_filename",
+                "album_art_mime_type",
+                "album_art_size_bytes",
+                "main_artist_id",
+                "buma_work_number",
+                "album_id",
+                "release_date",
+                "track_length_sec",
+                "iswc",
+                "upc",
+                "genre",
+                "composer",
+                "publisher",
+                "comments",
+                "lyrics",
+            ]
+            insert_values: list[object] = [
+                clean_isrc,
+                compact_isrc,
+                None,
+                None,
+                None,
+                None,
+                None,
+                0,
+                payload.track_title.strip(),
+                payload.catalog_number,
+                None,
+                None,
+                None,
+                None,
+                None,
+                0,
+                main_artist_id,
+                payload.buma_work_number,
+                album_id,
+                payload.release_date,
+                int(payload.track_length_sec or 0),
+                payload.iswc,
+                payload.upc,
+                payload.genre,
+                payload.composer,
+                payload.publisher,
+                payload.comments,
+                payload.lyrics,
+            ]
+            if "work_id" in track_columns:
+                insert_columns.append("work_id")
+                insert_values.append(int(payload.work_id) if payload.work_id is not None else None)
+            if "parent_track_id" in track_columns:
+                insert_columns.append("parent_track_id")
+                insert_values.append(
+                    int(payload.parent_track_id) if payload.parent_track_id is not None else None
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            if "relationship_type" in track_columns:
+                insert_columns.append("relationship_type")
+                insert_values.append(self._normalize_relationship_type(payload.relationship_type))
+            cur.execute(
+                f"""
+                INSERT INTO Tracks ({", ".join(insert_columns)})
+                VALUES ({", ".join("?" for _ in insert_columns)})
                 """,
-                (
-                    clean_isrc,
-                    compact_isrc,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    0,
-                    payload.track_title.strip(),
-                    payload.catalog_number,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    0,
-                    main_artist_id,
-                    payload.buma_work_number,
-                    album_id,
-                    payload.release_date,
-                    int(payload.track_length_sec or 0),
-                    payload.iswc,
-                    payload.upc,
-                    payload.genre,
-                    payload.composer,
-                    payload.publisher,
-                    payload.comments,
-                    payload.lyrics,
-                ),
+                insert_values,
             )
             track_id = int(cur.lastrowid)
+            self._sync_shadow_work_link(track_id, payload.work_id, cursor=cur)
             if payload.audio_file_source_path:
                 self.set_media_path(
                     track_id,
@@ -1645,10 +1871,25 @@ class TrackService:
             return track_id
 
     def _update_track_row(self, payload: TrackUpdatePayload, *, cursor: sqlite3.Cursor) -> None:
+        track_columns = self._track_columns()
         main_artist_id = self.get_or_create_artist(payload.artist_name, cursor=cursor)
         album_id = self.get_or_create_album(payload.album_title, cursor=cursor)
         clean_isrc = str(payload.isrc or "").strip()
         compact_isrc = to_compact_isrc(clean_isrc)
+        current_work_id, current_parent_track_id, current_relationship_type = (
+            self._current_track_governance(payload.track_id, cursor=cursor)
+        )
+        next_work_id = current_work_id if payload.work_id is None else int(payload.work_id)
+        next_parent_track_id = (
+            current_parent_track_id
+            if payload.parent_track_id is None
+            else int(payload.parent_track_id)
+        )
+        next_relationship_type = (
+            current_relationship_type
+            if payload.relationship_type is None
+            else self._normalize_relationship_type(payload.relationship_type)
+        )
         current_audio = self._get_track_row_media_meta(
             payload.track_id, "audio_file", cursor=cursor
         )
@@ -1667,65 +1908,86 @@ class TrackService:
         )
         shared_album_art = self._album_supports_shared_art(album_id, payload.album_title)
 
+        update_assignments = [
+            "isrc=?",
+            "isrc_compact=?",
+            "audio_file_path=?",
+            "audio_file_storage_mode=?",
+            "audio_file_blob=?",
+            "audio_file_filename=?",
+            "audio_file_mime_type=?",
+            "audio_file_size_bytes=?",
+            "track_title=?",
+            "catalog_number=?",
+            "album_art_path=?",
+            "album_art_storage_mode=?",
+            "album_art_blob=?",
+            "album_art_filename=?",
+            "album_art_mime_type=?",
+            "album_art_size_bytes=?",
+            "main_artist_id=?",
+            "buma_work_number=?",
+            "album_id=?",
+            "release_date=?",
+            "track_length_sec=?",
+            "iswc=?",
+            "upc=?",
+            "genre=?",
+            "composer=?",
+            "publisher=?",
+            "comments=?",
+            "lyrics=?",
+        ]
+        update_values: list[object] = [
+            clean_isrc,
+            compact_isrc,
+            str(current_audio.get("path") or "") or None,
+            str(current_audio.get("storage_mode") or "") or None,
+            sqlite3.Binary(current_audio_blob) if current_audio_blob is not None else None,
+            str(current_audio.get("filename") or "") or None,
+            str(current_audio.get("mime_type") or "") or None,
+            int(current_audio.get("size_bytes") or 0),
+            payload.track_title.strip(),
+            payload.catalog_number,
+            None if shared_album_art else (str(current_track_art.get("path") or "") or None),
+            None if shared_album_art else (str(current_track_art.get("storage_mode") or "") or None),
+            None
+            if shared_album_art or current_track_art_blob is None
+            else sqlite3.Binary(current_track_art_blob),
+            None if shared_album_art else (str(current_track_art.get("filename") or "") or None),
+            None if shared_album_art else (str(current_track_art.get("mime_type") or "") or None),
+            0 if shared_album_art else int(current_track_art.get("size_bytes") or 0),
+            main_artist_id,
+            payload.buma_work_number,
+            album_id,
+            payload.release_date,
+            int(payload.track_length_sec or 0),
+            payload.iswc,
+            payload.upc,
+            payload.genre,
+            payload.composer,
+            payload.publisher,
+            payload.comments,
+            payload.lyrics,
+        ]
+        if "work_id" in track_columns:
+            update_assignments.append("work_id=?")
+            update_values.append(next_work_id)
+        if "parent_track_id" in track_columns:
+            update_assignments.append("parent_track_id=?")
+            update_values.append(next_parent_track_id)
+        if "relationship_type" in track_columns:
+            update_assignments.append("relationship_type=?")
+            update_values.append(next_relationship_type)
         cursor.execute(
-            """
+            f"""
             UPDATE Tracks SET
-                isrc=?, isrc_compact=?,
-                audio_file_path=?, audio_file_storage_mode=?, audio_file_blob=?, audio_file_filename=?, audio_file_mime_type=?, audio_file_size_bytes=?,
-                track_title=?, catalog_number=?,
-                album_art_path=?, album_art_storage_mode=?, album_art_blob=?, album_art_filename=?, album_art_mime_type=?, album_art_size_bytes=?,
-                main_artist_id=?, buma_work_number=?, album_id=?, release_date=?,
-                track_length_sec=?, iswc=?, upc=?, genre=?, composer=?, publisher=?, comments=?, lyrics=?
+                {", ".join(update_assignments)}
             WHERE id=?
             """,
-            (
-                clean_isrc,
-                compact_isrc,
-                str(current_audio.get("path") or "") or None,
-                str(current_audio.get("storage_mode") or "") or None,
-                sqlite3.Binary(current_audio_blob) if current_audio_blob is not None else None,
-                str(current_audio.get("filename") or "") or None,
-                str(current_audio.get("mime_type") or "") or None,
-                int(current_audio.get("size_bytes") or 0),
-                payload.track_title.strip(),
-                payload.catalog_number,
-                (None if shared_album_art else (str(current_track_art.get("path") or "") or None)),
-                (
-                    None
-                    if shared_album_art
-                    else (str(current_track_art.get("storage_mode") or "") or None)
-                ),
-                (
-                    None
-                    if shared_album_art or current_track_art_blob is None
-                    else sqlite3.Binary(current_track_art_blob)
-                ),
-                (
-                    None
-                    if shared_album_art
-                    else (str(current_track_art.get("filename") or "") or None)
-                ),
-                (
-                    None
-                    if shared_album_art
-                    else (str(current_track_art.get("mime_type") or "") or None)
-                ),
-                0 if shared_album_art else int(current_track_art.get("size_bytes") or 0),
-                main_artist_id,
-                payload.buma_work_number,
-                album_id,
-                payload.release_date,
-                int(payload.track_length_sec or 0),
-                payload.iswc,
-                payload.upc,
-                payload.genre,
-                payload.composer,
-                payload.publisher,
-                payload.comments,
-                payload.lyrics,
-                payload.track_id,
-            ),
+            (*update_values, payload.track_id),
         )
+        self._sync_shadow_work_link(payload.track_id, next_work_id, cursor=cursor)
 
         if payload.clear_audio_file:
             self.clear_media(payload.track_id, "audio_file", cursor=cursor)
@@ -1865,6 +2127,9 @@ class TrackService:
                         publisher=snapshot.publisher,
                         comments=snapshot.comments,
                         lyrics=snapshot.lyrics,
+                        work_id=snapshot.work_id,
+                        parent_track_id=snapshot.parent_track_id,
+                        relationship_type=snapshot.relationship_type,
                         album_art_source_path=(
                             album_art_source_path
                             if apply_album_art and not clear_album_art

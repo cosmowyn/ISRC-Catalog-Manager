@@ -94,6 +94,9 @@ class DatabaseSchemaService:
                 main_artist_id INTEGER NOT NULL,
                 buma_work_number TEXT,
                 album_id INTEGER,
+                work_id INTEGER,
+                parent_track_id INTEGER,
+                relationship_type TEXT NOT NULL DEFAULT 'original',
                 release_date DATE,
                 track_length_sec INTEGER NOT NULL DEFAULT 0,
                 iswc TEXT,
@@ -104,7 +107,9 @@ class DatabaseSchemaService:
                 comments TEXT,
                 lyrics TEXT,
                 FOREIGN KEY (main_artist_id) REFERENCES Artists(id) ON DELETE RESTRICT,
-                FOREIGN KEY (album_id) REFERENCES Albums(id) ON DELETE SET NULL
+                FOREIGN KEY (album_id) REFERENCES Albums(id) ON DELETE SET NULL,
+                FOREIGN KEY (work_id) REFERENCES Works(id) ON DELETE SET NULL,
+                FOREIGN KEY (parent_track_id) REFERENCES Tracks(id) ON DELETE SET NULL
             )
             """
         )
@@ -493,6 +498,9 @@ class DatabaseSchemaService:
             elif version == 31:
                 self._apply_migration(31, self._mig_31_to_32)
                 version = 32
+            elif version == 32:
+                self._apply_migration(32, self._mig_32_to_33)
+                version = 33
             else:
                 self.logger.warning("Unknown migration path from version %s", version)
                 break
@@ -914,6 +922,13 @@ class DatabaseSchemaService:
     def _mig_31_to_32(self) -> None:
         self._ensure_repertoire_tables()
 
+    def _mig_32_to_33(self) -> None:
+        self._ensure_current_track_columns()
+        self._ensure_repertoire_tables()
+        self._backfill_track_governance_links()
+        self._backfill_work_contribution_entries()
+        self._ensure_unique_work_track_links()
+
     def _ensure_current_custom_field_value_schema(self) -> None:
         cols = self._table_columns("CustomFieldValues")
         additions = (
@@ -1292,6 +1307,9 @@ class DatabaseSchemaService:
             ("album_art_mime_type", "TEXT"),
             ("album_art_size_bytes", "INTEGER NOT NULL DEFAULT 0"),
             ("buma_work_number", "TEXT"),
+            ("work_id", "INTEGER"),
+            ("parent_track_id", "INTEGER"),
+            ("relationship_type", "TEXT NOT NULL DEFAULT 'original'"),
             ("composer", "TEXT"),
             ("publisher", "TEXT"),
             ("comments", "TEXT"),
@@ -1317,6 +1335,24 @@ class DatabaseSchemaService:
         self.cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_tracks_buma_work_number ON Tracks(buma_work_number)"
         )
+        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_work_id ON Tracks(work_id)")
+        self.cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tracks_parent_track_id ON Tracks(parent_track_id)"
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_tracks_relationship_type
+            ON Tracks(relationship_type)
+            """
+        )
+        if "relationship_type" in self._table_columns("Tracks"):
+            self.cursor.execute(
+                """
+                UPDATE Tracks
+                SET relationship_type='original'
+                WHERE relationship_type IS NULL OR trim(relationship_type)=''
+                """
+            )
 
     def _ensure_optional_isrc_constraints(self) -> None:
         self.cursor.execute("DROP INDEX IF EXISTS idx_tracks_isrc_unique")
@@ -1791,6 +1827,36 @@ class DatabaseSchemaService:
         )
         self.cursor.execute(
             """
+            CREATE TABLE IF NOT EXISTS WorkContributionEntries (
+                id INTEGER PRIMARY KEY,
+                work_id INTEGER NOT NULL,
+                party_id INTEGER,
+                display_name TEXT,
+                role TEXT NOT NULL,
+                share_percent REAL,
+                role_share_percent REAL,
+                notes TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (work_id) REFERENCES Works(id) ON DELETE CASCADE,
+                FOREIGN KEY (party_id) REFERENCES Parties(id) ON DELETE SET NULL
+            )
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_work_contribution_entries_work_id
+            ON WorkContributionEntries(work_id)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_work_contribution_entries_party_id
+            ON WorkContributionEntries(party_id)
+            """
+        )
+        self.cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS WorkTrackLinks (
                 work_id INTEGER NOT NULL,
                 track_id INTEGER NOT NULL,
@@ -1804,6 +1870,35 @@ class DatabaseSchemaService:
         )
         self.cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_work_track_links_track_id ON WorkTrackLinks(track_id)"
+        )
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS RecordingContributionEntries (
+                id INTEGER PRIMARY KEY,
+                track_id INTEGER NOT NULL,
+                party_id INTEGER,
+                display_name TEXT,
+                role TEXT NOT NULL,
+                share_percent REAL,
+                notes TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (track_id) REFERENCES Tracks(id) ON DELETE CASCADE,
+                FOREIGN KEY (party_id) REFERENCES Parties(id) ON DELETE SET NULL
+            )
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_recording_contribution_entries_track_id
+            ON RecordingContributionEntries(track_id)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_recording_contribution_entries_party_id
+            ON RecordingContributionEntries(party_id)
+            """
         )
 
         self.cursor.execute(
@@ -1962,6 +2057,216 @@ class DatabaseSchemaService:
                 FOREIGN KEY (contract_id) REFERENCES Contracts(id) ON DELETE CASCADE,
                 FOREIGN KEY (release_id) REFERENCES Releases(id) ON DELETE CASCADE
             )
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS WorkOwnershipInterests (
+                id INTEGER PRIMARY KEY,
+                work_id INTEGER NOT NULL,
+                party_id INTEGER,
+                display_name TEXT,
+                ownership_role TEXT NOT NULL DEFAULT 'publisher',
+                share_percent REAL,
+                territory TEXT,
+                source_contract_id INTEGER,
+                notes TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (work_id) REFERENCES Works(id) ON DELETE CASCADE,
+                FOREIGN KEY (party_id) REFERENCES Parties(id) ON DELETE SET NULL,
+                FOREIGN KEY (source_contract_id) REFERENCES Contracts(id) ON DELETE SET NULL
+            )
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_work_ownership_interests_work_id
+            ON WorkOwnershipInterests(work_id)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_work_ownership_interests_party_id
+            ON WorkOwnershipInterests(party_id)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_work_ownership_interests_contract_id
+            ON WorkOwnershipInterests(source_contract_id)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS RecordingOwnershipInterests (
+                id INTEGER PRIMARY KEY,
+                track_id INTEGER NOT NULL,
+                party_id INTEGER,
+                display_name TEXT,
+                ownership_role TEXT NOT NULL DEFAULT 'master_owner',
+                share_percent REAL,
+                territory TEXT,
+                source_contract_id INTEGER,
+                notes TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (track_id) REFERENCES Tracks(id) ON DELETE CASCADE,
+                FOREIGN KEY (party_id) REFERENCES Parties(id) ON DELETE SET NULL,
+                FOREIGN KEY (source_contract_id) REFERENCES Contracts(id) ON DELETE SET NULL
+            )
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_recording_ownership_interests_track_id
+            ON RecordingOwnershipInterests(track_id)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_recording_ownership_interests_party_id
+            ON RecordingOwnershipInterests(party_id)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_recording_ownership_interests_contract_id
+            ON RecordingOwnershipInterests(source_contract_id)
+            """
+        )
+
+    def _backfill_track_governance_links(self) -> None:
+        track_columns = self._table_columns("Tracks")
+        tables = {
+            row[0]
+            for row in self.cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        if "relationship_type" in track_columns:
+            self.cursor.execute(
+                """
+                UPDATE Tracks
+                SET relationship_type='original'
+                WHERE relationship_type IS NULL OR trim(relationship_type)=''
+                """
+            )
+        if "work_id" not in track_columns or "WorkTrackLinks" not in tables:
+            return
+        self.cursor.execute(
+            """
+            UPDATE Tracks
+            SET work_id = (
+                SELECT wt.work_id
+                FROM WorkTrackLinks wt
+                WHERE wt.track_id = Tracks.id
+                ORDER BY wt.is_primary DESC, wt.work_id
+                LIMIT 1
+            )
+            WHERE (work_id IS NULL OR work_id = 0)
+              AND EXISTS (
+                SELECT 1
+                FROM WorkTrackLinks wt
+                WHERE wt.track_id = Tracks.id
+              )
+            """
+        )
+        self.cursor.execute(
+            """
+            DELETE FROM WorkTrackLinks
+            WHERE EXISTS (
+                SELECT 1
+                FROM Tracks t
+                WHERE t.id = WorkTrackLinks.track_id
+                  AND t.work_id IS NOT NULL
+                  AND t.work_id != WorkTrackLinks.work_id
+            )
+            """
+        )
+        self.cursor.execute(
+            """
+            INSERT OR IGNORE INTO WorkTrackLinks(work_id, track_id, is_primary)
+            SELECT t.work_id, t.id, 0
+            FROM Tracks t
+            WHERE t.work_id IS NOT NULL
+            """
+        )
+        primary_pairs = self.cursor.execute(
+            """
+            SELECT wt.work_id,
+                   (
+                       SELECT wt2.track_id
+                       FROM WorkTrackLinks wt2
+                       WHERE wt2.work_id = wt.work_id
+                       ORDER BY wt2.is_primary DESC, wt2.track_id
+                       LIMIT 1
+                   ) AS primary_track_id
+            FROM WorkTrackLinks wt
+            GROUP BY wt.work_id
+            """
+        ).fetchall()
+        self.cursor.execute("UPDATE WorkTrackLinks SET is_primary=0")
+        for work_id, track_id in primary_pairs:
+            if work_id is None or track_id is None:
+                continue
+            self.cursor.execute(
+                """
+                UPDATE WorkTrackLinks
+                SET is_primary=1
+                WHERE work_id=? AND track_id=?
+                """,
+                (int(work_id), int(track_id)),
+            )
+
+    def _backfill_work_contribution_entries(self) -> None:
+        tables = {
+            row[0]
+            for row in self.cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        if "WorkContributors" not in tables or "WorkContributionEntries" not in tables:
+            return
+        self.cursor.execute(
+            """
+            INSERT INTO WorkContributionEntries(
+                work_id,
+                party_id,
+                display_name,
+                role,
+                share_percent,
+                role_share_percent,
+                notes
+            )
+            SELECT
+                wc.work_id,
+                wc.party_id,
+                wc.display_name,
+                wc.role,
+                wc.share_percent,
+                wc.role_share_percent,
+                wc.notes
+            FROM WorkContributors wc
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM WorkContributionEntries wce
+                WHERE wce.work_id = wc.work_id
+                  AND COALESCE(wce.party_id, -1) = COALESCE(wc.party_id, -1)
+                  AND COALESCE(wce.display_name, '') = COALESCE(wc.display_name, '')
+                  AND COALESCE(wce.role, '') = COALESCE(wc.role, '')
+                  AND COALESCE(wce.share_percent, -1) = COALESCE(wc.share_percent, -1)
+                  AND COALESCE(wce.role_share_percent, -1) = COALESCE(wc.role_share_percent, -1)
+                  AND COALESCE(wce.notes, '') = COALESCE(wc.notes, '')
+            )
+            """
+        )
+
+    def _ensure_unique_work_track_links(self) -> None:
+        self.cursor.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_work_track_links_unique_track
+            ON WorkTrackLinks(track_id)
             """
         )
 
