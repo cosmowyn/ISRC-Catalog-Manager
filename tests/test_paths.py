@@ -30,6 +30,7 @@ class PathLayoutTests(unittest.TestCase):
         managed_dirs = {path.name for path in layout.iter_standard_dirs()}
         self.assertIn("contract_template_sources", managed_dirs)
         self.assertIn("contract_template_drafts", managed_dirs)
+        self.assertIn("contract_template_artifacts", managed_dirs)
         self.assertEqual(
             layout.managed_storage_dir("contract_template_sources"),
             layout.active_data_root / "contract_template_sources",
@@ -37,6 +38,10 @@ class PathLayoutTests(unittest.TestCase):
         self.assertEqual(
             layout.managed_storage_dir("contract_template_drafts"),
             layout.active_data_root / "contract_template_drafts",
+        )
+        self.assertEqual(
+            layout.managed_storage_dir("contract_template_artifacts"),
+            layout.active_data_root / "contract_template_artifacts",
         )
 
     def test_resolve_layout_uses_qt_roots_and_stored_active_data_root(self):

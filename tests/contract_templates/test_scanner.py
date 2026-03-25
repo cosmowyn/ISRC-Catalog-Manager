@@ -1,11 +1,15 @@
+import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
 
 from isrc_manager.contract_templates import (
     ContractTemplateIngestionError,
     DOCXTemplateScanner,
+    PagesTemplateAdapter,
     detect_template_source_format,
 )
-
+from isrc_manager.contract_templates import ingestion as ingestion_module
 from tests.contract_templates._support import make_docx_bytes
 
 
@@ -52,3 +56,77 @@ class ContractTemplateScannerTests(unittest.TestCase):
         )
         with self.assertRaises(ContractTemplateIngestionError):
             detect_template_source_format(source_filename="agreement.txt")
+
+    def test_pages_adapter_uses_pages_app_export_via_osascript(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source = root / "agreement.pages"
+            target = root / "agreement.docx"
+            pages_app = root / "Pages.app"
+            pages_app.mkdir()
+            source.write_bytes(b"fake-pages")
+            captured: dict[str, object] = {}
+
+            def _fake_run(args, **kwargs):
+                captured["args"] = list(args)
+                captured["input"] = kwargs.get("input")
+                target.write_bytes(b"fake-docx")
+
+                class _Result:
+                    returncode = 0
+                    stdout = ""
+                    stderr = ""
+
+                return _Result()
+
+            adapter = PagesTemplateAdapter(
+                osascript_path="/usr/bin/osascript",
+                pages_app_path=pages_app,
+            )
+            with mock.patch.object(ingestion_module.sys, "platform", "darwin"):
+                with mock.patch.object(ingestion_module.subprocess, "run", side_effect=_fake_run):
+                    converted = adapter.convert_to_docx(source, target)
+                    output_exists = target.exists()
+
+        self.assertEqual(converted, target)
+        self.assertEqual(captured["args"], ["/usr/bin/osascript"])
+        self.assertIn('tell application "Pages"', str(captured["input"]))
+        self.assertIn("export docRef to outputPath as Microsoft Word", str(captured["input"]))
+        self.assertTrue(output_exists)
+
+    def test_pages_adapter_can_export_pdf_via_osascript(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source = root / "agreement.docx"
+            target = root / "agreement.pdf"
+            pages_app = root / "Pages.app"
+            pages_app.mkdir()
+            source.write_bytes(b"fake-docx")
+            captured: dict[str, object] = {}
+
+            def _fake_run(args, **kwargs):
+                captured["args"] = list(args)
+                captured["input"] = kwargs.get("input")
+                target.write_bytes(b"%PDF-1.4\n")
+
+                class _Result:
+                    returncode = 0
+                    stdout = ""
+                    stderr = ""
+
+                return _Result()
+
+            adapter = PagesTemplateAdapter(
+                osascript_path="/usr/bin/osascript",
+                pages_app_path=pages_app,
+            )
+            with mock.patch.object(ingestion_module.sys, "platform", "darwin"):
+                with mock.patch.object(ingestion_module.subprocess, "run", side_effect=_fake_run):
+                    exported = adapter.export_to_pdf(source, target)
+                    output_exists = target.exists()
+
+        self.assertEqual(exported, target)
+        self.assertEqual(captured["args"], ["/usr/bin/osascript"])
+        self.assertIn('tell application "Pages"', str(captured["input"]))
+        self.assertIn("export docRef to outputPath as PDF", str(captured["input"]))
+        self.assertTrue(output_exists)

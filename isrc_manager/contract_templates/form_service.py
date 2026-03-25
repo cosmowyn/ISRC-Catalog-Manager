@@ -13,6 +13,7 @@ from .models import (
     ContractTemplatePlaceholderBindingPayload,
     ContractTemplatePlaceholderBindingRecord,
     ContractTemplatePlaceholderRecord,
+    build_contract_template_selector_scope_key,
 )
 from .parser import parse_placeholder
 
@@ -81,8 +82,7 @@ class ContractTemplateFormService:
             for item in self.template_service.list_placeholder_bindings(revision_id)
         }
         catalog = {
-            item.canonical_symbol: item
-            for item in self.catalog_service.list_known_symbols()
+            item.canonical_symbol: item for item in self.catalog_service.list_known_symbols()
         }
         bindings = [
             self._merged_binding_payload(
@@ -92,9 +92,7 @@ class ContractTemplateFormService:
             )
             for placeholder in placeholders
         ]
-        return self.template_service.replace_placeholder_bindings(
-            revision_id, bindings=bindings
-        )
+        return self.template_service.replace_placeholder_bindings(revision_id, bindings=bindings)
 
     def build_form_definition(self, revision_id: int) -> ContractTemplateFormDefinition:
         revision = self.template_service.fetch_revision(revision_id)
@@ -105,41 +103,45 @@ class ContractTemplateFormService:
             raise ValueError(f"Contract template {revision.template_id} not found")
 
         placeholders = self.template_service.list_placeholders(revision_id)
-        bindings = {
-            item.canonical_symbol: item
-            for item in self.synchronize_bindings(revision_id)
-        }
+        bindings = {item.canonical_symbol: item for item in self.synchronize_bindings(revision_id)}
         catalog = {
-            item.canonical_symbol: item
-            for item in self.catalog_service.list_known_symbols()
+            item.canonical_symbol: item for item in self.catalog_service.list_known_symbols()
         }
 
         selector_fields: list[ContractTemplateFormSelectorField] = []
         manual_fields: list[ContractTemplateFormManualField] = []
         unresolved: list[str] = []
         warnings: list[str] = []
+        selector_groups: dict[
+            str,
+            list[
+                tuple[
+                    ContractTemplatePlaceholderRecord,
+                    ContractTemplatePlaceholderBindingRecord | None,
+                    ContractTemplateCatalogEntry | None,
+                ]
+            ],
+        ] = {}
 
         for placeholder in placeholders:
             token = parse_placeholder(placeholder.canonical_symbol)
             binding = bindings.get(placeholder.canonical_symbol)
             if token.binding_kind == "db":
                 catalog_entry = catalog.get(placeholder.canonical_symbol)
-                selector_field = self._selector_field(
+                selector_scope = self._selector_scope(
                     placeholder,
                     binding=binding,
                     catalog_entry=catalog_entry,
                 )
-                if selector_field is None:
+                if selector_scope is None:
                     unresolved.append(placeholder.canonical_symbol)
                     warnings.append(
                         f"No selector mapping could be derived for {placeholder.canonical_symbol}."
                     )
                     continue
-                if not selector_field.choices:
-                    warnings.append(
-                        f"{selector_field.display_label} has no selectable records yet."
-                    )
-                selector_fields.append(selector_field)
+                selector_groups.setdefault(selector_scope, []).append(
+                    (placeholder, binding, catalog_entry)
+                )
                 continue
             manual_fields.append(
                 self._manual_field(
@@ -147,6 +149,15 @@ class ContractTemplateFormService:
                     binding=binding,
                 )
             )
+
+        for group in selector_groups.values():
+            selector_field = self._selector_field(group)
+            if selector_field is None:
+                unresolved.extend(item[0].canonical_symbol for item in group)
+                continue
+            if not selector_field.choices:
+                warnings.append(f"{selector_field.display_label} has no selectable records yet.")
+            selector_fields.append(selector_field)
 
         return ContractTemplateFormDefinition(
             template_id=template.template_id,
@@ -199,9 +210,7 @@ class ContractTemplateFormService:
             scope_entity_type=current.scope_entity_type or derived.scope_entity_type,
             scope_policy=current.scope_policy or derived.scope_policy,
             widget_hint=current.widget_hint or derived.widget_hint,
-            validation=current.validation
-            if current.validation is not None
-            else derived.validation,
+            validation=current.validation if current.validation is not None else derived.validation,
             metadata=current.metadata if current.metadata is not None else derived.metadata,
         )
 
@@ -274,43 +283,99 @@ class ContractTemplateFormService:
             metadata={"display_label": placeholder.display_label},
         )
 
-    def _selector_field(
+    def _selector_scope(
         self,
         placeholder: ContractTemplatePlaceholderRecord,
         *,
         binding: ContractTemplatePlaceholderBindingRecord | None,
         catalog_entry: ContractTemplateCatalogEntry | None,
-    ) -> ContractTemplateFormSelectorField | None:
+    ) -> str | None:
         token = parse_placeholder(placeholder.canonical_symbol)
         scope_entity_type = (
-            _clean_text(binding.scope_entity_type) if binding is not None else None
-        ) or self._default_scope_entity_type(token.namespace)
+            (_clean_text(binding.scope_entity_type) if binding is not None else None)
+            or (_clean_text(catalog_entry.scope_entity_type) if catalog_entry is not None else None)
+            or self._default_scope_entity_type(token.namespace)
+        )
+        scope_policy = (
+            (_clean_text(binding.scope_policy) if binding is not None else None)
+            or (_clean_text(catalog_entry.scope_policy) if catalog_entry is not None else None)
+            or self._default_scope_policy(token.namespace)
+        )
+        return build_contract_template_selector_scope_key(
+            scope_entity_type,
+            scope_policy,
+        )
+
+    def _selector_field(
+        self,
+        group: list[
+            tuple[
+                ContractTemplatePlaceholderRecord,
+                ContractTemplatePlaceholderBindingRecord | None,
+                ContractTemplateCatalogEntry | None,
+            ]
+        ],
+    ) -> ContractTemplateFormSelectorField | None:
+        first_placeholder, first_binding, first_catalog_entry = group[0]
+        token = parse_placeholder(first_placeholder.canonical_symbol)
+        scope_entity_type = (
+            (_clean_text(first_binding.scope_entity_type) if first_binding is not None else None)
+            or (
+                _clean_text(first_catalog_entry.scope_entity_type)
+                if first_catalog_entry is not None
+                else None
+            )
+            or self._default_scope_entity_type(token.namespace)
+        )
         if scope_entity_type is None:
             return None
-        choices = self._choices_for_entity_type(scope_entity_type)
-        label = (
-            placeholder.display_label
-            or (catalog_entry.display_label if catalog_entry is not None else None)
-            or _display_label_from_key(placeholder.placeholder_key)
-        )
-        description = (
-            catalog_entry.description if catalog_entry is not None else None
-        ) or f"Select the authoritative {scope_entity_type} record for {label}."
-        return ContractTemplateFormSelectorField(
-            selector_key=placeholder.canonical_symbol,
-            display_label=label,
-            scope_entity_type=scope_entity_type,
-            scope_policy=(
-                (_clean_text(binding.scope_policy) if binding is not None else None)
-                or self._default_scope_policy(token.namespace)
-            ),
-            widget_kind=(
-                _clean_text(binding.widget_hint) if binding is not None else None
+        scope_policy = (
+            (_clean_text(first_binding.scope_policy) if first_binding is not None else None)
+            or (
+                _clean_text(first_catalog_entry.scope_policy)
+                if first_catalog_entry is not None
+                else None
             )
-            or self._selector_widget_hint(scope_entity_type),
-            required=placeholder.required,
-            placeholder_symbols=(placeholder.canonical_symbol,),
-            choices=choices,
+            or self._default_scope_policy(token.namespace)
+        )
+        widget_kind = (
+            _clean_text(first_binding.widget_hint) if first_binding is not None else None
+        ) or self._selector_widget_hint(scope_entity_type)
+        display_label = self._SELECTOR_LABELS.get(
+            scope_entity_type,
+            f"{scope_entity_type.replace('_', ' ').title()} Selection",
+        )
+        placeholder_symbols = tuple(item[0].canonical_symbol for item in group)
+        referenced_labels = tuple(
+            dict.fromkeys(
+                (
+                    item[0].display_label
+                    or (item[2].display_label if item[2] is not None else None)
+                    or _display_label_from_key(item[0].placeholder_key)
+                )
+                for item in group
+            )
+        )
+        if len(referenced_labels) == 1:
+            description = (
+                f"Select the authoritative {scope_entity_type} record used to resolve "
+                f"{referenced_labels[0]}."
+            )
+        else:
+            description = (
+                f"Select the authoritative {scope_entity_type} record used to resolve "
+                + ", ".join(referenced_labels)
+                + "."
+            )
+        return ContractTemplateFormSelectorField(
+            selector_key=first_placeholder.canonical_symbol,
+            display_label=display_label,
+            scope_entity_type=scope_entity_type,
+            scope_policy=scope_policy,
+            widget_kind=widget_kind,
+            required=any(item[0].required for item in group),
+            placeholder_symbols=placeholder_symbols,
+            choices=self._choices_for_entity_type(scope_entity_type),
             description=description,
         )
 
@@ -326,9 +391,7 @@ class ContractTemplateFormService:
         )
         options: tuple[str, ...] = ()
         if binding is not None and isinstance(binding.validation, dict):
-            field_type = (
-                _clean_text(binding.validation.get("field_type")) or field_type
-            )
+            field_type = _clean_text(binding.validation.get("field_type")) or field_type
             if binding.validation.get("options"):
                 options = tuple(str(item) for item in binding.validation["options"])
         if binding is not None and binding.widget_hint:
@@ -405,9 +468,7 @@ class ContractTemplateFormService:
         }
         return mapping.get(str(namespace or "").strip().lower())
 
-    def _choices_for_entity_type(
-        self, entity_type: str
-    ) -> tuple[ContractTemplateFormChoice, ...]:
+    def _choices_for_entity_type(self, entity_type: str) -> tuple[ContractTemplateFormChoice, ...]:
         clean_type = str(entity_type or "").strip().lower()
         if clean_type == "track":
             return self._track_choices()

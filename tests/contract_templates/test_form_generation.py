@@ -6,14 +6,17 @@ from pathlib import Path
 from isrc_manager.contract_templates.catalog import ContractTemplateCatalogService
 from isrc_manager.contract_templates.form_service import ContractTemplateFormService
 from isrc_manager.services import (
+    ContractPayload,
+    ContractService,
     ContractTemplatePayload,
     ContractTemplateRevisionPayload,
     ContractTemplateService,
     DatabaseSchemaService,
+    PartyPayload,
+    PartyService,
     TrackCreatePayload,
     TrackService,
 )
-
 from tests.contract_templates._support import make_docx_bytes
 
 
@@ -42,11 +45,35 @@ class ContractTemplateFormGenerationTests(unittest.TestCase):
                 catalog_number=None,
             )
         )
+        self.party_service = PartyService(self.conn)
+        self.party_service.create_party(
+            PartyPayload(
+                legal_name="Aeonium Recordings B.V.",
+                display_name="Aeonium",
+                party_type="licensee",
+                email="licensing@aeonium.test",
+            )
+        )
+        self.contract_service = ContractService(
+            self.conn,
+            self.root,
+            party_service=self.party_service,
+        )
+        self.contract_service.create_contract(
+            ContractPayload(
+                title="Forest License Agreement",
+                contract_type="license",
+                start_date="2026-03-20",
+                status="draft",
+            )
+        )
         self.catalog_service = ContractTemplateCatalogService(self.conn)
         self.template_service = ContractTemplateService(self.conn, data_root=self.root)
         self.form_service = ContractTemplateFormService(
             template_service=self.template_service,
             catalog_service=self.catalog_service,
+            contract_service=self.contract_service,
+            party_service=self.party_service,
         )
 
     def tearDown(self):
@@ -63,7 +90,9 @@ class ContractTemplateFormGenerationTests(unittest.TestCase):
             )
         )
 
-    def test_build_form_definition_collapses_repeated_symbols_and_types_manual_fields(self):
+    def test_build_form_definition_groups_db_placeholders_by_entity_scope_and_types_manual_fields(
+        self,
+    ):
         template = self._create_template()
         source_path = self.root / "form-generation.docx"
         source_path.write_bytes(
@@ -75,6 +104,11 @@ class ContractTemplateFormGenerationTests(unittest.TestCase):
                         " and again ",
                         "{{db.track.track_title}}",
                     ),
+                    ("Artist ", "{{db.track.artist_name}}"),
+                    ("Contract starts ", "{{db.contract.start_date}}"),
+                    ("Licensee ", "{{db.party.display_name}}"),
+                    ("Email ", "{{db.party.email}}"),
+                    ("Legal ", "{{db.party.legal_name}}"),
                     ("Signed on ", "{{manual.license_date}}"),
                 ),
                 header_paragraphs=(("Signed on ", "{{manual.license_date}}"),),
@@ -95,34 +129,68 @@ class ContractTemplateFormGenerationTests(unittest.TestCase):
         placeholders = self.template_service.list_placeholders(revision.revision_id)
         bindings = self.template_service.list_placeholder_bindings(revision.revision_id)
 
-        selector_fields = {item.selector_key: item for item in definition.selector_fields}
+        selector_fields = {item.scope_entity_type: item for item in definition.selector_fields}
         manual_fields = {item.canonical_symbol: item for item in definition.manual_fields}
 
-        self.assertEqual(len(placeholders), 5)
+        self.assertEqual(len(placeholders), 10)
+        self.assertEqual(len(selector_fields), 3)
+        self.assertEqual(len(manual_fields), 4)
+        self.assertEqual(definition.unresolved_placeholders, ())
+        self.assertEqual(definition.warnings, ())
+
+        placeholder_symbols = {item.canonical_symbol for item in placeholders}
         self.assertEqual(
-            [item.canonical_symbol for item in placeholders],
-            [
+            placeholder_symbols,
+            {
+                "{{db.contract.start_date}}",
+                "{{db.party.display_name}}",
+                "{{db.party.email}}",
+                "{{db.party.legal_name}}",
+                "{{db.track.artist_name}}",
                 "{{db.track.track_title}}",
                 "{{manual.general_notes}}",
                 "{{manual.is_exclusive}}",
                 "{{manual.license_date}}",
                 "{{manual.royalty_share}}",
-            ],
+            },
         )
-        self.assertEqual(len(selector_fields), 1)
-        self.assertEqual(len(manual_fields), 4)
-        self.assertEqual(definition.unresolved_placeholders, ())
-        self.assertEqual(definition.warnings, ())
 
-        selector = selector_fields["{{db.track.track_title}}"]
-        self.assertEqual(selector.display_label, "Track Title")
-        self.assertEqual(selector.scope_entity_type, "track")
-        self.assertEqual(selector.scope_policy, "track_context")
-        self.assertEqual(selector.widget_kind, "track_selector")
-        self.assertTrue(selector.required)
-        self.assertEqual(selector.placeholder_symbols, ("{{db.track.track_title}}",))
-        self.assertGreaterEqual(len(selector.choices), 1)
-        self.assertIn("Orbit Signal", selector.choices[0].label)
+        track_selector = selector_fields["track"]
+        self.assertEqual(track_selector.display_label, "Track Selection")
+        self.assertEqual(track_selector.scope_policy, "track_context")
+        self.assertEqual(track_selector.widget_kind, "track_selector")
+        self.assertTrue(track_selector.required)
+        self.assertEqual(
+            track_selector.placeholder_symbols,
+            (
+                "{{db.track.artist_name}}",
+                "{{db.track.track_title}}",
+            ),
+        )
+        self.assertGreaterEqual(len(track_selector.choices), 1)
+        self.assertIn("Orbit Signal", track_selector.choices[0].label)
+
+        contract_selector = selector_fields["contract"]
+        self.assertEqual(contract_selector.display_label, "Contract Selection")
+        self.assertEqual(
+            contract_selector.placeholder_symbols,
+            ("{{db.contract.start_date}}",),
+        )
+        self.assertGreaterEqual(len(contract_selector.choices), 1)
+        self.assertIn("Forest License Agreement", contract_selector.choices[0].label)
+
+        party_selector = selector_fields["party"]
+        self.assertEqual(party_selector.display_label, "Party Selection")
+        self.assertEqual(
+            party_selector.placeholder_symbols,
+            (
+                "{{db.party.display_name}}",
+                "{{db.party.email}}",
+                "{{db.party.legal_name}}",
+            ),
+        )
+        self.assertGreaterEqual(len(party_selector.choices), 1)
+        self.assertIn("Aeonium", party_selector.choices[0].label)
 
         license_date = manual_fields["{{manual.license_date}}"]
         self.assertEqual(license_date.field_type, "date")
@@ -149,4 +217,3 @@ class ContractTemplateFormGenerationTests(unittest.TestCase):
         self.assertEqual(binding.scope_entity_type, "track")
         self.assertEqual(binding.scope_policy, "track_context")
         self.assertEqual(binding.widget_hint, "track_selector")
-

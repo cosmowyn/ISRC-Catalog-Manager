@@ -1,15 +1,17 @@
-import sqlite3
 import inspect
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from PySide6.QtCore import QDate
 
 from isrc_manager.contract_templates.catalog import ContractTemplateCatalogService
-from isrc_manager.contract_templates.form_service import ContractTemplateFormService
 from isrc_manager.contract_templates.dialogs import ContractTemplateWorkspacePanel
+from isrc_manager.contract_templates.form_service import ContractTemplateFormService
 from isrc_manager.services import (
+    ContractTemplateExportService,
     ContractTemplatePayload,
     ContractTemplateRevisionPayload,
     ContractTemplateService,
@@ -18,7 +20,11 @@ from isrc_manager.services import (
     TrackCreatePayload,
     TrackService,
 )
-from tests.contract_templates._support import make_docx_bytes
+from tests.contract_templates._support import (
+    FakeDocxHtmlAdapter,
+    FakePagesAdapter,
+    make_docx_bytes,
+)
 from tests.qt_test_helpers import pump_events, require_qapplication
 
 
@@ -88,10 +94,20 @@ class ContractTemplateWorkspacePanelTests(unittest.TestCase):
             template_service=self.template_service,
             catalog_service=self.catalog_service,
         )
+        self.html_adapter = FakeDocxHtmlAdapter()
+        self.pages_adapter = FakePagesAdapter()
+        self.export_service = ContractTemplateExportService(
+            template_service=self.template_service,
+            catalog_service=self.catalog_service,
+            track_service=self.track_service,
+            html_adapter=self.html_adapter,
+            pages_adapter=self.pages_adapter,
+        )
         panel_kwargs = {
             "catalog_service_provider": lambda: self.catalog_service,
             "template_service_provider": lambda: self.template_service,
             "form_service_provider": lambda: self.form_service,
+            "export_service_provider": lambda: self.export_service,
         }
         panel_signature = inspect.signature(ContractTemplateWorkspacePanel.__init__)
         accepted_kwargs = {
@@ -150,13 +166,14 @@ class ContractTemplateWorkspacePanelTests(unittest.TestCase):
         self.assertEqual(self.panel.table.rowCount(), 1)
         self.panel.table.selectRow(0)
         pump_events(app=self.app, cycles=2)
-        self.assertTrue(
-            self.panel.selected_symbol_edit.text().startswith("{{db.custom.cf_")
-        )
+        self.assertTrue(self.panel.selected_symbol_edit.text().startswith("{{db.custom.cf_"))
         self.assertEqual(self.panel.detail_source_label.text(), "Source Kind: Custom Field")
 
     def test_panel_exposes_fill_tab_and_focuses_requested_form_workspace(self):
-        tab_texts = [self.panel.workspace_tabs.tabText(index).lower() for index in range(self.panel.workspace_tabs.count())]
+        tab_texts = [
+            self.panel.workspace_tabs.tabText(index).lower()
+            for index in range(self.panel.workspace_tabs.count())
+        ]
         if not any("fill" in text for text in tab_texts):
             self.skipTest("Fill tab not yet exposed by ContractTemplateWorkspacePanel")
         fill_index = next(index for index, text in enumerate(tab_texts) if "fill" in text)
@@ -166,7 +183,10 @@ class ContractTemplateWorkspacePanelTests(unittest.TestCase):
         pump_events(app=self.app, cycles=2)
 
         self.assertEqual(self.panel.workspace_tabs.currentIndex(), fill_index)
-        self.assertIn("fill", self.panel.workspace_tabs.tabText(self.panel.workspace_tabs.currentIndex()).lower())
+        self.assertIn(
+            "fill",
+            self.panel.workspace_tabs.tabText(self.panel.workspace_tabs.currentIndex()).lower(),
+        )
 
     def test_fill_tab_can_save_and_resume_drafts_across_storage_modes(self):
         self.panel.focus_tab("fill")
@@ -244,7 +264,9 @@ class ContractTemplateWorkspacePanelTests(unittest.TestCase):
         pump_events(app=self.app, cycles=2)
 
         updated = self.template_service.fetch_draft(drafts[0].draft_id)
-        self.assertEqual(len(self.template_service.list_drafts(revision_id=self.revision.revision_id)), 1)
+        self.assertEqual(
+            len(self.template_service.list_drafts(revision_id=self.revision.revision_id)), 1
+        )
         self.assertEqual(updated.draft_id, drafts[0].draft_id)
         self.assertEqual(updated.storage_mode, "database")
         self.assertTrue(updated.stored_in_database)
@@ -260,6 +282,87 @@ class ContractTemplateWorkspacePanelTests(unittest.TestCase):
                 "type_overrides": {},
             },
         )
+
+    def test_fill_tab_can_export_pdf_and_update_latest_artifact_status(self):
+        self.panel.focus_tab("fill")
+        pump_events(app=self.app, cycles=2)
+
+        selector = self.panel.selector_widgets["{{db.track.track_title}}"]
+        date_widget = self.panel.manual_widgets["{{manual.license_date}}"]
+        selector.setCurrentIndex(1)
+        date_widget.setDate(QDate(2026, 3, 30))
+        self.panel.fill_draft_name_edit.setText("Export From Fill Tab")
+        pump_events(app=self.app, cycles=2)
+
+        self.panel.export_current_pdf()
+        pump_events(app=self.app, cycles=3)
+
+        drafts = self.template_service.list_drafts(revision_id=self.revision.revision_id)
+        self.assertEqual(len(drafts), 1)
+        updated = self.template_service.fetch_draft(drafts[0].draft_id)
+        self.assertIsNotNone(updated.last_resolved_snapshot_id)
+        artifacts = self.template_service.list_output_artifacts(
+            snapshot_id=updated.last_resolved_snapshot_id
+        )
+        self.assertEqual(
+            sorted(artifact.artifact_type for artifact in artifacts),
+            ["pdf", "resolved_docx"],
+        )
+        pdf_artifact = next(artifact for artifact in artifacts if artifact.artifact_type == "pdf")
+        self.assertTrue(Path(pdf_artifact.output_path).exists())
+        self.assertEqual(len(self.pages_adapter.pdf_calls), 1)
+        self.assertEqual(len(self.html_adapter.calls), 0)
+        self.assertIn("Exported PDF", self.panel.fill_export_status_label.text())
+        self.assertIn(str(pdf_artifact.output_path), self.panel.fill_export_status_label.text())
+
+    def test_admin_tab_can_import_templates_and_export_selected_draft(self):
+        source_path = self.root / "admin-import-template.docx"
+        source_path.write_bytes(
+            make_docx_bytes(document_paragraphs=(("Imported ", "{{manual.signing_city}}"),))
+        )
+        with (
+            mock.patch(
+                "isrc_manager.contract_templates.dialogs.QFileDialog.getOpenFileName",
+                return_value=(str(source_path), "Template Documents (*.docx *.pages)"),
+            ),
+            mock.patch(
+                "isrc_manager.contract_templates.dialogs.QInputDialog.getText",
+                return_value=("Imported Admin Template", True),
+            ),
+        ):
+            self.panel.import_template_from_file()
+        pump_events(app=self.app, cycles=3)
+
+        self.panel.focus_tab("fill")
+        self.panel._select_revision_context(self.revision.template_id, self.revision.revision_id)
+        pump_events(app=self.app, cycles=2)
+        selector = self.panel.selector_widgets["{{db.track.track_title}}"]
+        date_widget = self.panel.manual_widgets["{{manual.license_date}}"]
+        selector.setCurrentIndex(1)
+        date_widget.setDate(QDate(2026, 4, 2))
+        self.panel.fill_draft_name_edit.setText("Admin Export Draft")
+        self.panel.save_new_draft()
+        pump_events(app=self.app, cycles=2)
+
+        self.panel.focus_tab("admin")
+        self.panel.refresh_admin_workspace(selected_template_id=self.revision.template_id)
+        pump_events(app=self.app, cycles=3)
+
+        self.assertGreaterEqual(self.panel.admin_template_table.rowCount(), 2)
+        self.assertGreaterEqual(self.panel.admin_revision_table.rowCount(), 1)
+        self.assertGreaterEqual(self.panel.admin_placeholder_table.rowCount(), 1)
+        self.assertGreaterEqual(self.panel.admin_draft_table.rowCount(), 1)
+
+        self.panel.export_selected_admin_draft()
+        pump_events(app=self.app, cycles=3)
+
+        self.assertGreaterEqual(self.panel.admin_snapshot_table.rowCount(), 1)
+        self.assertGreaterEqual(self.panel.admin_artifact_table.rowCount(), 2)
+        self.assertIn("Exported draft", self.panel.admin_status_label.text())
+        first_artifact_id = self.panel._selected_admin_artifact_id()
+        first_artifact = self.template_service.fetch_output_artifact(first_artifact_id)
+        self.assertIsNotNone(first_artifact)
+        self.assertTrue(Path(first_artifact.output_path).exists())
 
     def test_fill_tab_restores_explicit_false_and_zero_values_from_draft(self):
         source_path = self.root / "dialog-template-bool-number.docx"

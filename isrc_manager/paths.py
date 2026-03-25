@@ -41,6 +41,7 @@ MANAGED_STORAGE_SUBDIRS = (
     "gs1_templates",
     "contract_template_sources",
     "contract_template_drafts",
+    "contract_template_artifacts",
 )
 
 

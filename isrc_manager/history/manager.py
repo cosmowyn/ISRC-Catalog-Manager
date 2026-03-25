@@ -50,6 +50,7 @@ class HistoryManager:
         "gs1_templates",
         "contract_template_sources",
         "contract_template_drafts",
+        "contract_template_artifacts",
     )
     FILE_COMPANION_SUFFIXES = (".wal", ".shm")
     SETTINGS_COALESCE_WINDOW_SECONDS = 2.0

@@ -89,8 +89,10 @@ class FakePagesAdapter:
     ):
         self._available = available
         self._docx_bytes = docx_bytes or make_docx_bytes()
+        self._pdf_bytes = b"%PDF-1.4\n% fake-pages-adapter\n"
         self._error_message = error_message
         self.convert_calls: list[tuple[Path, Path]] = []
+        self.pdf_calls: list[tuple[Path, Path]] = []
 
     def is_available(self) -> bool:
         return self._available
@@ -105,9 +107,42 @@ class FakePagesAdapter:
         target = Path(output_path)
         self.convert_calls.append((source, target))
         if not self._available:
-            raise ContractTemplateIngestionError(self.availability_message() or "Pages bridge unavailable")
+            raise ContractTemplateIngestionError(
+                self.availability_message() or "Pages bridge unavailable"
+            )
         if self._error_message:
             raise ContractTemplateIngestionError(self._error_message)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(self._docx_bytes)
         return target
+
+    def export_to_pdf(self, source_path: str | Path, output_path: str | Path) -> Path:
+        source = Path(source_path)
+        target = Path(output_path)
+        self.pdf_calls.append((source, target))
+        if not self._available:
+            raise ContractTemplateIngestionError(
+                self.availability_message() or "Pages bridge unavailable"
+            )
+        if self._error_message:
+            raise ContractTemplateIngestionError(self._error_message)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(self._pdf_bytes)
+        return target
+
+
+class FakeDocxHtmlAdapter:
+    adapter_name = "fake_docx_html"
+
+    def __init__(self, *, html_text: str | None = None):
+        self.html_text = html_text or "<html><body><p>Contract Template Export</p></body></html>"
+        self.calls: list[tuple[bytes, str]] = []
+
+    def docx_bytes_to_html(
+        self,
+        docx_bytes: bytes,
+        *,
+        source_filename: str = "contract-template.docx",
+    ) -> str:
+        self.calls.append((bytes(docx_bytes), str(source_filename)))
+        return self.html_text

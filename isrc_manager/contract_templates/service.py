@@ -10,7 +10,6 @@ from typing import Iterable
 
 from isrc_manager.file_storage import (
     STORAGE_MODE_DATABASE,
-    STORAGE_MODE_MANAGED_FILE,
     ManagedFileStorage,
     bytes_from_blob,
     coalesce_filename,
@@ -37,11 +36,11 @@ from .models import (
     ContractTemplatePlaceholderBindingRecord,
     ContractTemplatePlaceholderPayload,
     ContractTemplatePlaceholderRecord,
+    ContractTemplateRecord,
     ContractTemplateResolvedSnapshotPayload,
     ContractTemplateResolvedSnapshotRecord,
     ContractTemplateRevisionPayload,
     ContractTemplateRevisionRecord,
-    ContractTemplateRecord,
     ContractTemplateScanDiagnostic,
     ContractTemplateScanResult,
 )
@@ -75,6 +74,7 @@ class ContractTemplateService:
 
     TEMPLATE_SOURCE_ROOT = "contract_template_sources"
     DRAFT_ROOT = "contract_template_drafts"
+    ARTIFACT_ROOT = "contract_template_artifacts"
 
     def __init__(
         self,
@@ -89,7 +89,12 @@ class ContractTemplateService:
         self.source_store = ManagedFileStorage(
             data_root=self.data_root, relative_root=self.TEMPLATE_SOURCE_ROOT
         )
-        self.draft_store = ManagedFileStorage(data_root=self.data_root, relative_root=self.DRAFT_ROOT)
+        self.draft_store = ManagedFileStorage(
+            data_root=self.data_root, relative_root=self.DRAFT_ROOT
+        )
+        self.artifact_store = ManagedFileStorage(
+            data_root=self.data_root, relative_root=self.ARTIFACT_ROOT
+        )
         self.docx_scanner = docx_scanner if docx_scanner is not None else DOCXTemplateScanner()
         self.pages_adapter = pages_adapter if pages_adapter is not None else PagesTemplateAdapter()
 
@@ -205,6 +210,63 @@ class ContractTemplateService:
             raise ValueError(f"Contract template {template_id} not found")
         return record
 
+    def duplicate_template(
+        self,
+        template_id: int,
+        *,
+        new_name: str | None = None,
+    ) -> ContractTemplateRecord:
+        template = self.fetch_template(template_id)
+        if template is None:
+            raise ValueError(f"Contract template {template_id} not found")
+        duplicate = self.create_template(
+            ContractTemplatePayload(
+                name=_clean_text(new_name) or f"{template.name} Copy",
+                description=template.description,
+                template_family=template.template_family,
+                source_format=template.source_format,
+            )
+        )
+        active_old_id = (
+            int(template.active_revision_id) if template.active_revision_id is not None else None
+        )
+        active_new_id: int | None = None
+        for revision in reversed(self.list_revisions(template_id)):
+            copied = self.add_revision_from_bytes(
+                duplicate.template_id,
+                self.load_revision_source_bytes(revision.revision_id),
+                payload=ContractTemplateRevisionPayload(
+                    revision_label=revision.revision_label,
+                    source_filename=revision.source_filename,
+                    source_mime_type=revision.source_mime_type,
+                    source_format=revision.source_format,
+                    storage_mode=revision.storage_mode,
+                    scan_status=revision.scan_status,
+                    scan_error=revision.scan_error,
+                    scan_adapter=revision.scan_adapter,
+                    scan_diagnostics=revision.scan_diagnostics,
+                ),
+                placeholders=(
+                    self._placeholder_payload_from_record(item)
+                    for item in self.list_placeholders(revision.revision_id)
+                ),
+                bindings=(
+                    self._binding_payload_from_record(item)
+                    for item in self.list_placeholder_bindings(revision.revision_id)
+                ),
+                activate_template=False,
+            )
+            if active_old_id is not None and int(revision.revision_id) == active_old_id:
+                active_new_id = copied.revision_id
+        if active_new_id is not None:
+            self.set_active_revision(active_new_id)
+        if template.archived:
+            self.archive_template(duplicate.template_id, archived=True)
+        duplicated = self.fetch_template(duplicate.template_id)
+        if duplicated is None:
+            raise RuntimeError(f"Duplicated contract template {duplicate.template_id} disappeared")
+        return duplicated
+
     def add_revision_from_path(
         self,
         template_id: int,
@@ -261,7 +323,9 @@ class ContractTemplateService:
             revision_payload.source_filename,
             default_stem="contract-template",
         )
-        clean_mime = _clean_text(revision_payload.source_mime_type) or guess_mime_type(clean_filename)
+        clean_mime = _clean_text(revision_payload.source_mime_type) or guess_mime_type(
+            clean_filename
+        )
         checksum = sha256_digest(source_bytes)
         managed_file_path = None
         sqlite_blob: bytes | sqlite3.Binary | None = None
@@ -394,8 +458,7 @@ class ContractTemplateService:
                 CASE WHEN source_blob IS NOT NULL THEN 1 ELSE 0 END AS has_blob
             FROM ContractTemplateRevisions
             WHERE id=?
-            """
-            ,
+            """,
             (int(revision_id),),
         ).fetchone()
         if not row:
@@ -459,7 +522,9 @@ class ContractTemplateService:
             )
         template = self.fetch_template(record.template_id)
         if template is None:
-            raise RuntimeError(f"Contract template {record.template_id} disappeared after activation")
+            raise RuntimeError(
+                f"Contract template {record.template_id} disappeared after activation"
+            )
         return template
 
     def scan_source_bytes(
@@ -550,9 +615,7 @@ class ContractTemplateService:
         activate_if_ready: bool = True,
     ) -> ContractTemplateImportResult:
         explicit_source_format = payload.source_format if payload is not None else None
-        source_filename = (
-            payload.source_filename if payload is not None else None
-        ) or (
+        source_filename = (payload.source_filename if payload is not None else None) or (
             "contract-template.pages"
             if explicit_source_format == "pages"
             else "contract-template.docx"
@@ -570,7 +633,9 @@ class ContractTemplateService:
             ),
             payload=payload,
             scan_result=scan_result,
-            source_path=Path(str(payload.source_path).strip()) if payload and payload.source_path else None,
+            source_path=(
+                Path(str(payload.source_path).strip()) if payload and payload.source_path else None
+            ),
         )
         revision = self.add_revision_from_bytes(
             template_id,
@@ -684,9 +749,7 @@ class ContractTemplateService:
             return self.docx_scanner.scan_bytes(source_bytes)
         if source_format == "pages":
             return self._scan_pages_bytes(source_bytes, source_filename=source_filename)
-        raise ContractTemplateIngestionError(
-            f"Unsupported template source format: {source_format}"
-        )
+        raise ContractTemplateIngestionError(f"Unsupported template source format: {source_format}")
 
     def _scan_pages_bytes(
         self,
@@ -763,9 +826,7 @@ class ContractTemplateService:
             ContractTemplatePlaceholderPayload(
                 canonical_symbol=item.canonical_symbol,
                 source_occurrence_count=max(1, int(item.occurrence_count or 1)),
-                metadata={
-                    "occurrences": [occurrence.to_dict() for occurrence in item.occurrences]
-                },
+                metadata={"occurrences": [occurrence.to_dict() for occurrence in item.occurrences]},
             )
             for item in scan_result.placeholders
         )
@@ -922,7 +983,9 @@ class ContractTemplateService:
                     )
         updated = self.fetch_revision(revision_id)
         if updated is None:
-            raise RuntimeError(f"Contract template revision {revision_id} disappeared after conversion")
+            raise RuntimeError(
+                f"Contract template revision {revision_id} disappeared after conversion"
+            )
         return updated
 
     def replace_revision_placeholder_inventory(
@@ -969,7 +1032,9 @@ class ContractTemplateService:
                     effective_scan_status,
                     effective_scan_error,
                     current.scan_adapter if scan_adapter is None else _clean_text(scan_adapter),
-                    _json_dumps(current.scan_diagnostics if scan_diagnostics is None else scan_diagnostics),
+                    _json_dumps(
+                        current.scan_diagnostics if scan_diagnostics is None else scan_diagnostics
+                    ),
                     int(revision_id),
                 ),
             )
@@ -1299,9 +1364,11 @@ class ContractTemplateService:
                     clean_filename,
                     _clean_text(payload.mime_type) or "application/json",
                     len(payload_bytes),
-                    int(payload.last_resolved_snapshot_id)
-                    if payload.last_resolved_snapshot_id is not None
-                    else None,
+                    (
+                        int(payload.last_resolved_snapshot_id)
+                        if payload.last_resolved_snapshot_id is not None
+                        else None
+                    ),
                 ),
             )
             draft_id = int(cur.lastrowid)
@@ -1310,7 +1377,9 @@ class ContractTemplateService:
             raise RuntimeError(f"Contract template draft {draft_id} was not created")
         return record
 
-    def update_draft(self, draft_id: int, payload: ContractTemplateDraftPayload) -> ContractTemplateDraftRecord:
+    def update_draft(
+        self, draft_id: int, payload: ContractTemplateDraftPayload
+    ) -> ContractTemplateDraftRecord:
         current = self.fetch_draft(draft_id)
         if current is None:
             raise ValueError(f"Contract template draft {draft_id} not found")
@@ -1352,21 +1421,27 @@ class ContractTemplateService:
                     int(payload.revision_id),
                     str(payload.name or current.name).strip(),
                     str(payload.status or current.status or "draft").strip() or "draft",
-                    _clean_text(payload.scope_entity_type)
-                    if payload.scope_entity_type is not None
-                    else current.scope_entity_type,
-                    _clean_text(payload.scope_entity_id)
-                    if payload.scope_entity_id is not None
-                    else current.scope_entity_id,
+                    (
+                        _clean_text(payload.scope_entity_type)
+                        if payload.scope_entity_type is not None
+                        else current.scope_entity_type
+                    ),
+                    (
+                        _clean_text(payload.scope_entity_id)
+                        if payload.scope_entity_id is not None
+                        else current.scope_entity_id
+                    ),
                     managed_file_path,
                     clean_mode,
                     sqlite_blob,
                     clean_filename,
                     _clean_text(payload.mime_type) or current.mime_type or "application/json",
                     len(payload_bytes),
-                    int(payload.last_resolved_snapshot_id)
-                    if payload.last_resolved_snapshot_id is not None
-                    else current.last_resolved_snapshot_id,
+                    (
+                        int(payload.last_resolved_snapshot_id)
+                        if payload.last_resolved_snapshot_id is not None
+                        else current.last_resolved_snapshot_id
+                    ),
                     int(draft_id),
                 ),
             )
@@ -1463,6 +1538,86 @@ class ContractTemplateService:
                 records.append(record)
         return records
 
+    def list_template_drafts(
+        self,
+        template_id: int,
+        *,
+        include_archived: bool = False,
+    ) -> list[ContractTemplateDraftRecord]:
+        where_sql = "" if include_archived else "AND d.status != 'archived'"
+        rows = self.conn.execute(
+            f"""
+            SELECT d.id
+            FROM ContractTemplateDrafts d
+            INNER JOIN ContractTemplateRevisions r ON r.id = d.revision_id
+            WHERE r.template_id=?
+            {where_sql}
+            ORDER BY d.updated_at DESC, d.id DESC
+            """,
+            (int(template_id),),
+        ).fetchall()
+        return [
+            record
+            for row in rows
+            for record in [self.fetch_draft(int(row[0]))]
+            if record is not None
+        ]
+
+    def archive_draft(
+        self,
+        draft_id: int,
+        *,
+        archived: bool = True,
+    ) -> ContractTemplateDraftRecord:
+        current = self.fetch_draft(draft_id)
+        if current is None:
+            raise ValueError(f"Contract template draft {draft_id} not found")
+        next_status = "archived" if archived else "draft"
+        with self.conn:
+            self.conn.execute(
+                """
+                UPDATE ContractTemplateDrafts
+                SET status=?,
+                    updated_at=datetime('now')
+                WHERE id=?
+                """,
+                (next_status, int(draft_id)),
+            )
+        updated = self.fetch_draft(draft_id)
+        if updated is None:
+            raise RuntimeError(
+                f"Contract template draft {draft_id} disappeared after archive update"
+            )
+        return updated
+
+    def set_draft_last_resolved_snapshot(
+        self,
+        draft_id: int,
+        snapshot_id: int | None,
+    ) -> ContractTemplateDraftRecord:
+        current = self.fetch_draft(draft_id)
+        if current is None:
+            raise ValueError(f"Contract template draft {draft_id} not found")
+        with self.conn:
+            self.conn.execute(
+                """
+                UPDATE ContractTemplateDrafts
+                SET last_resolved_snapshot_id=?,
+                    updated_at=datetime('now')
+                WHERE id=?
+                """,
+                (
+                    int(snapshot_id) if snapshot_id is not None else None,
+                    int(draft_id),
+                ),
+            )
+        updated = self.fetch_draft(draft_id)
+        if updated is None:
+            raise RuntimeError(
+                f"Contract template draft {draft_id} disappeared after snapshot update"
+            )
+        return updated
+
     def fetch_draft_payload(self, draft_id: int) -> object | None:
         row = self.conn.execute(
             """
@@ -1493,7 +1648,9 @@ class ContractTemplateService:
         text = payload_bytes.decode("utf-8") if payload_bytes else ""
         return _json_loads(text)
 
-    def convert_draft_storage_mode(self, draft_id: int, target_mode: str) -> ContractTemplateDraftRecord:
+    def convert_draft_storage_mode(
+        self, draft_id: int, target_mode: str
+    ) -> ContractTemplateDraftRecord:
         current = self.fetch_draft(draft_id)
         if current is None:
             raise ValueError(f"Contract template draft {draft_id} not found")
@@ -1617,6 +1774,26 @@ class ContractTemplateService:
                 records.append(record)
         return records
 
+    def list_template_resolved_snapshots(
+        self, template_id: int
+    ) -> list[ContractTemplateResolvedSnapshotRecord]:
+        rows = self.conn.execute(
+            """
+            SELECT s.id
+            FROM ContractTemplateResolvedSnapshots s
+            INNER JOIN ContractTemplateRevisions r ON r.id = s.revision_id
+            WHERE r.template_id=?
+            ORDER BY s.created_at DESC, s.id DESC
+            """,
+            (int(template_id),),
+        ).fetchall()
+        return [
+            record
+            for row in rows
+            for record in [self.fetch_resolved_snapshot(int(row[0]))]
+            if record is not None
+        ]
+
     def create_output_artifact(
         self, payload: ContractTemplateOutputArtifactPayload
     ) -> ContractTemplateOutputArtifactRecord:
@@ -1725,6 +1902,185 @@ class ContractTemplateService:
                 records.append(record)
         return records
 
+    def list_template_output_artifacts(
+        self, template_id: int
+    ) -> list[ContractTemplateOutputArtifactRecord]:
+        rows = self.conn.execute(
+            """
+            SELECT a.id
+            FROM ContractTemplateOutputArtifacts a
+            INNER JOIN ContractTemplateResolvedSnapshots s ON s.id = a.snapshot_id
+            INNER JOIN ContractTemplateRevisions r ON r.id = s.revision_id
+            WHERE r.template_id=?
+            ORDER BY a.created_at DESC, a.id DESC
+            """,
+            (int(template_id),),
+        ).fetchall()
+        return [
+            record
+            for row in rows
+            for record in [self.fetch_output_artifact(int(row[0]))]
+            if record is not None
+        ]
+
+    def delete_output_artifact(
+        self,
+        artifact_id: int,
+        *,
+        remove_file: bool = False,
+    ) -> None:
+        record = self.fetch_output_artifact(artifact_id)
+        if record is None:
+            raise ValueError(f"Contract template output artifact {artifact_id} not found")
+        with self.conn:
+            self.conn.execute(
+                "DELETE FROM ContractTemplateOutputArtifacts WHERE id=?",
+                (int(artifact_id),),
+            )
+        if remove_file:
+            self._delete_artifact_file(record.output_path)
+
+    def delete_draft(
+        self,
+        draft_id: int,
+        *,
+        remove_managed_payload: bool = False,
+        remove_output_files: bool = False,
+    ) -> None:
+        current = self.fetch_draft(draft_id)
+        if current is None:
+            raise ValueError(f"Contract template draft {draft_id} not found")
+        payload_path = _clean_text(current.managed_file_path) if remove_managed_payload else None
+        snapshots = tuple(self.list_resolved_snapshots(draft_id=draft_id))
+        snapshot_ids = [snapshot.snapshot_id for snapshot in snapshots]
+        artifact_ids = [
+            artifact.artifact_id
+            for snapshot in snapshots
+            for artifact in self.list_output_artifacts(snapshot_id=snapshot.snapshot_id)
+        ]
+        artifact_paths = (
+            [
+                artifact.output_path
+                for snapshot in snapshots
+                for artifact in self.list_output_artifacts(snapshot_id=snapshot.snapshot_id)
+            ]
+            if remove_output_files
+            else []
+        )
+        with self.conn:
+            if artifact_ids:
+                self._delete_rows_for_ids(
+                    "ContractTemplateOutputArtifacts",
+                    artifact_ids,
+                    cursor=self.conn.cursor(),
+                )
+            if snapshot_ids:
+                self._delete_rows_for_ids(
+                    "ContractTemplateResolvedSnapshots",
+                    snapshot_ids,
+                    cursor=self.conn.cursor(),
+                )
+            self.conn.execute(
+                "DELETE FROM ContractTemplateDrafts WHERE id=?",
+                (int(draft_id),),
+            )
+        if payload_path:
+            resolved = self.draft_store.resolve(payload_path)
+            if resolved is not None:
+                try:
+                    resolved.unlink(missing_ok=True)
+                except Exception:
+                    pass
+        for artifact_path in artifact_paths:
+            self._delete_artifact_file(artifact_path)
+
+    def delete_template(
+        self,
+        template_id: int,
+        *,
+        remove_source_files: bool = False,
+        remove_draft_files: bool = False,
+        remove_output_files: bool = False,
+    ) -> None:
+        template = self.fetch_template(template_id)
+        if template is None:
+            raise ValueError(f"Contract template {template_id} not found")
+        revisions = tuple(self.list_revisions(template_id))
+        revision_ids = [record.revision_id for record in revisions]
+        drafts = tuple(self.list_template_drafts(template_id, include_archived=True))
+        draft_ids = [record.draft_id for record in drafts]
+        snapshots = tuple(self.list_template_resolved_snapshots(template_id))
+        snapshot_ids = [snapshot.snapshot_id for snapshot in snapshots]
+        artifacts = tuple(self.list_template_output_artifacts(template_id))
+        artifact_ids = [artifact.artifact_id for artifact in artifacts]
+        source_paths = [
+            record.managed_file_path
+            for record in revisions
+            if remove_source_files and _clean_text(record.managed_file_path)
+        ]
+        draft_paths = [
+            record.managed_file_path
+            for record in drafts
+            if remove_draft_files and _clean_text(record.managed_file_path)
+        ]
+        artifact_paths = (
+            [artifact.output_path for artifact in artifacts] if remove_output_files else []
+        )
+        with self.conn:
+            if artifact_ids:
+                self._delete_rows_for_ids(
+                    "ContractTemplateOutputArtifacts",
+                    artifact_ids,
+                    cursor=self.conn.cursor(),
+                )
+            if snapshot_ids:
+                self._delete_rows_for_ids(
+                    "ContractTemplateResolvedSnapshots",
+                    snapshot_ids,
+                    cursor=self.conn.cursor(),
+                )
+            if draft_ids:
+                self._delete_rows_for_ids(
+                    "ContractTemplateDrafts",
+                    draft_ids,
+                    cursor=self.conn.cursor(),
+                )
+            if revision_ids:
+                cursor = self.conn.cursor()
+                cursor.execute(
+                    f"DELETE FROM ContractTemplatePlaceholderBindings WHERE revision_id IN ({','.join('?' for _ in revision_ids)})",
+                    tuple(int(revision_id) for revision_id in revision_ids),
+                )
+                cursor.execute(
+                    f"DELETE FROM ContractTemplatePlaceholders WHERE revision_id IN ({','.join('?' for _ in revision_ids)})",
+                    tuple(int(revision_id) for revision_id in revision_ids),
+                )
+                self._delete_rows_for_ids(
+                    "ContractTemplateRevisions",
+                    revision_ids,
+                    cursor=cursor,
+                )
+            self.conn.execute(
+                "DELETE FROM ContractTemplates WHERE id=?",
+                (int(template_id),),
+            )
+        for stored_path in source_paths:
+            resolved = self.source_store.resolve(stored_path)
+            if resolved is not None:
+                try:
+                    resolved.unlink(missing_ok=True)
+                except Exception:
+                    pass
+        for stored_path in draft_paths:
+            resolved = self.draft_store.resolve(stored_path)
+            if resolved is not None:
+                try:
+                    resolved.unlink(missing_ok=True)
+                except Exception:
+                    pass
+        for artifact_path in artifact_paths:
+            self._delete_artifact_file(artifact_path)
+
     @staticmethod
     def _serialize_editable_payload(value: object | None) -> bytes:
         text = _json_dumps(value)
@@ -1744,6 +2100,43 @@ class ContractTemplateService:
             source_occurrence_count=record.source_occurrence_count,
             metadata=record.metadata,
         )
+
+    @staticmethod
+    def _binding_payload_from_record(
+        record: ContractTemplatePlaceholderBindingRecord,
+    ) -> ContractTemplatePlaceholderBindingPayload:
+        return ContractTemplatePlaceholderBindingPayload(
+            canonical_symbol=record.canonical_symbol,
+            resolver_kind=record.resolver_kind,
+            resolver_target=record.resolver_target,
+            scope_entity_type=record.scope_entity_type,
+            scope_policy=record.scope_policy,
+            widget_hint=record.widget_hint,
+            validation=record.validation,
+            metadata=record.metadata,
+        )
+
+    def _delete_artifact_file(self, output_path: str | None) -> None:
+        clean_path = str(output_path or "").strip()
+        if not clean_path:
+            return
+        candidate = Path(clean_path)
+        if not candidate.is_absolute():
+            resolved = self.artifact_store.resolve(clean_path)
+            candidate = resolved if resolved is not None else candidate
+        root_path = self.artifact_store.root_path
+        if root_path is None:
+            raise ValueError("Managed artifact storage is not configured")
+        try:
+            candidate.resolve().relative_to(root_path.resolve())
+        except Exception as exc:
+            raise ValueError(
+                "Artifact file removal is only allowed for managed contract template artifacts."
+            ) from exc
+        try:
+            candidate.unlink(missing_ok=True)
+        except Exception:
+            pass
 
     @staticmethod
     def _delete_unreferenced_managed_file(
@@ -1770,3 +2163,19 @@ class ContractTemplateService:
             resolved.unlink(missing_ok=True)
         except Exception:
             pass
+
+    @staticmethod
+    def _delete_rows_for_ids(
+        table_name: str,
+        row_ids: list[int],
+        *,
+        cursor: sqlite3.Cursor,
+    ) -> None:
+        clean_ids = [int(row_id) for row_id in row_ids]
+        if not clean_ids:
+            return
+        placeholders = ",".join("?" for _ in clean_ids)
+        cursor.execute(
+            f"DELETE FROM {table_name} WHERE id IN ({placeholders})",
+            tuple(clean_ids),
+        )

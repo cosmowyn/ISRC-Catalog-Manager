@@ -5,21 +5,28 @@ from .catalog import (
     ContractTemplateCatalogSection,
     ContractTemplateCatalogService,
 )
+from .export_service import (
+    ContractTemplateExportError,
+    ContractTemplateExportService,
+    TextutilDocxRenderAdapter,
+)
+from .form_service import ContractTemplateFormService
 from .ingestion import (
+    SUPPORTED_TEMPLATE_SOURCE_FORMATS,
     ContractTemplateIngestionError,
     DOCXTemplateScanner,
     PagesTemplateAdapter,
-    SUPPORTED_TEMPLATE_SOURCE_FORMATS,
     detect_template_source_format,
 )
 from .models import (
-    ContractTemplateImportResult,
     ContractTemplateDraftPayload,
     ContractTemplateDraftRecord,
+    ContractTemplateExportResult,
     ContractTemplateFormChoice,
     ContractTemplateFormDefinition,
     ContractTemplateFormManualField,
     ContractTemplateFormSelectorField,
+    ContractTemplateImportResult,
     ContractTemplateOutputArtifactPayload,
     ContractTemplateOutputArtifactRecord,
     ContractTemplatePayload,
@@ -27,11 +34,11 @@ from .models import (
     ContractTemplatePlaceholderBindingRecord,
     ContractTemplatePlaceholderPayload,
     ContractTemplatePlaceholderRecord,
+    ContractTemplateRecord,
     ContractTemplateResolvedSnapshotPayload,
     ContractTemplateResolvedSnapshotRecord,
     ContractTemplateRevisionPayload,
     ContractTemplateRevisionRecord,
-    ContractTemplateRecord,
     ContractTemplateScanDiagnostic,
     ContractTemplateScanEntry,
     ContractTemplateScanOccurrence,
@@ -45,7 +52,6 @@ from .parser import (
     extract_placeholders,
     parse_placeholder,
 )
-from .form_service import ContractTemplateFormService
 from .service import ContractTemplateService
 
 __all__ = [
@@ -54,6 +60,9 @@ __all__ = [
     "ContractTemplateCatalogService",
     "ContractTemplateDraftPayload",
     "ContractTemplateDraftRecord",
+    "ContractTemplateExportError",
+    "ContractTemplateExportResult",
+    "ContractTemplateExportService",
     "ContractTemplateFormChoice",
     "ContractTemplateFormDefinition",
     "ContractTemplateFormManualField",
@@ -84,6 +93,7 @@ __all__ = [
     "PlaceholderOccurrence",
     "PlaceholderToken",
     "SUPPORTED_TEMPLATE_SOURCE_FORMATS",
+    "TextutilDocxRenderAdapter",
     "dedupe_placeholders",
     "detect_template_source_format",
     "extract_placeholders",

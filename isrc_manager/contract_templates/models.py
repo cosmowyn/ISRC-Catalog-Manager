@@ -147,6 +147,22 @@ class ContractTemplateImportResult:
         }
 
 
+def _clean_scope_value(value: str | None) -> str | None:
+    clean = str(value or "").strip().lower()
+    return clean or None
+
+
+def build_contract_template_selector_scope_key(
+    scope_entity_type: str | None,
+    scope_policy: str | None,
+) -> str | None:
+    clean_entity_type = _clean_scope_value(scope_entity_type)
+    if clean_entity_type is None:
+        return None
+    clean_scope_policy = _clean_scope_value(scope_policy) or "selection_required"
+    return f"db_scope.{clean_entity_type}.{clean_scope_policy}"
+
+
 @dataclass(slots=True)
 class ContractTemplateCatalogEntry:
     binding_kind: str
@@ -431,3 +447,23 @@ class ContractTemplateOutputArtifactRecord:
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
+
+
+@dataclass(slots=True)
+class ContractTemplateExportResult:
+    snapshot: ContractTemplateResolvedSnapshotRecord
+    resolved_docx_artifact: ContractTemplateOutputArtifactRecord | None
+    pdf_artifact: ContractTemplateOutputArtifactRecord
+    warnings: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "snapshot": self.snapshot.to_dict(),
+            "resolved_docx_artifact": (
+                self.resolved_docx_artifact.to_dict()
+                if self.resolved_docx_artifact is not None
+                else None
+            ),
+            "pdf_artifact": self.pdf_artifact.to_dict(),
+            "warnings": list(self.warnings),
+        }

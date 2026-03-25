@@ -185,22 +185,24 @@ class DOCXTemplateScanner:
 class PagesTemplateAdapter:
     """Best-effort `.pages` conversion seam using locally available macOS tooling."""
 
-    adapter_name = "pages_textutil_docx"
+    adapter_name = "pages_osascript_docx"
 
     def __init__(
         self,
         *,
+        osascript_path: str | None = None,
         textutil_path: str | None = None,
         pages_app_path: str | Path = "/Applications/Pages.app",
     ):
-        self.textutil_path = textutil_path if textutil_path is not None else shutil.which("textutil")
+        del textutil_path
+        self.osascript_path = (
+            osascript_path if osascript_path is not None else shutil.which("osascript")
+        )
         self.pages_app_path = Path(pages_app_path)
 
     def is_available(self) -> bool:
         return (
-            sys.platform == "darwin"
-            and bool(self.textutil_path)
-            and self.pages_app_path.exists()
+            sys.platform == "darwin" and bool(self.osascript_path) and self.pages_app_path.exists()
         )
 
     def availability_message(self) -> str | None:
@@ -209,35 +211,66 @@ class PagesTemplateAdapter:
         if sys.platform != "darwin":
             return "Pages conversion is only available on macOS hosts."
         if not self.pages_app_path.exists():
-            return "Pages conversion is unavailable because Pages.app was not found in /Applications."
-        if not self.textutil_path:
-            return "Pages conversion is unavailable because the macOS 'textutil' tool was not found."
-        return (
-            "Pages conversion is unavailable on this machine."
-        )
+            return (
+                "Pages conversion is unavailable because Pages.app was not found in /Applications."
+            )
+        if not self.osascript_path:
+            return (
+                "Pages conversion is unavailable because the macOS 'osascript' tool was not found."
+            )
+        return "Pages conversion is unavailable on this machine."
 
     def convert_to_docx(self, source_path: str | Path, output_path: str | Path) -> Path:
+        return self._export_via_pages(
+            source_path=source_path,
+            output_path=output_path,
+            export_kind="Microsoft Word",
+            failure_prefix="Pages conversion via Pages.app export failed.",
+        )
+
+    def export_to_pdf(self, source_path: str | Path, output_path: str | Path) -> Path:
+        return self._export_via_pages(
+            source_path=source_path,
+            output_path=output_path,
+            export_kind="PDF",
+            failure_prefix="Pages PDF export via Pages.app failed.",
+        )
+
+    def _export_via_pages(
+        self,
+        *,
+        source_path: str | Path,
+        output_path: str | Path,
+        export_kind: str,
+        failure_prefix: str,
+    ) -> Path:
         if not self.is_available():
-            raise ContractTemplateIngestionError(self.availability_message() or "Pages conversion is unavailable.")
+            raise ContractTemplateIngestionError(
+                self.availability_message() or "Pages conversion is unavailable."
+            )
         source = Path(source_path)
         target = Path(output_path)
         target.parent.mkdir(parents=True, exist_ok=True)
+        script = f"""
+set sourcePath to POSIX file "{self._applescript_string(source)}"
+set outputPath to POSIX file "{self._applescript_string(target)}"
+tell application "Pages"
+    set docRef to open sourcePath
+    export docRef to outputPath as {export_kind}
+    close docRef saving no
+end tell
+"""
         result = subprocess.run(
-            [
-                str(self.textutil_path),
-                "-convert",
-                "docx",
-                "-output",
-                str(target),
-                str(source),
-            ],
+            [str(self.osascript_path)],
+            input=script,
             capture_output=True,
             text=True,
         )
         if result.returncode != 0 or not target.exists():
-            stderr = str(result.stderr or "").strip()
-            raise ContractTemplateIngestionError(
-                "Pages conversion via textutil failed."
-                + (f" {stderr}" if stderr else "")
-            )
+            stderr = str(result.stderr or result.stdout or "").strip()
+            raise ContractTemplateIngestionError(failure_prefix + (f" {stderr}" if stderr else ""))
         return target
+
+    @staticmethod
+    def _applescript_string(value: str | Path) -> str:
+        return str(value).replace("\\", "\\\\").replace('"', '\\"')

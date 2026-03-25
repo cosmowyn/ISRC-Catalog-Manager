@@ -8,120 +8,117 @@
 # original credits are retained. Not for resale.
 # ------------------------------------------------------------
 
-import os
-import sys
-import re
-import json
-import time
 import hashlib
-import shutil
-import sqlite3
-import tempfile
-import platform
+import json
 import logging
 import mimetypes
-from dataclasses import fields as dataclass_fields
+import os
+import platform
+import re
+import shutil
+import sqlite3
+import sys
+import tempfile
 from contextlib import contextmanager
-from importlib import metadata
-from pathlib import Path
+from dataclasses import fields as dataclass_fields
 from datetime import datetime
+from importlib import metadata
 from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
 from PySide6.QtCore import (
-    QRegularExpression,
-    Signal,
-    QEvent,
-    Qt,
+    QByteArray,
     QDate,
+    QEvent,
+    QEventLoop,
+    QItemSelectionModel,
     QPoint,
     QRect,
+    QRegularExpression,
     QSettings,
-    QStandardPaths,
-    QByteArray,
-    QUrl,
-    QEvent,
-    QTimer,
-    QEventLoop,
     QSortFilterProxyModel,
-    QItemSelectionModel,
+    Qt,
+    QTimer,
     QtMsgType,
+    QUrl,
+    Signal,
     qInstallMessageHandler,
 )
-
 from PySide6.QtGui import (
-    QDesktopServices,
-    QCursor,
     QAction,
-    QIcon,
-    QAction,
-    QKeySequence,
-    QImage,
-    QPixmap,
-    QStandardItemModel,
-    QStandardItem,
     QColor,
+    QCursor,
+    QDesktopServices,
     QFont,
-    QPalette,
-    QTextCursor,
-    QTextDocument,
+    QIcon,
+    QImage,
+    QKeySequence,
+    QPixmap,
+    QStandardItem,
+    QStandardItemModel,
 )
+from PySide6.QtMultimedia import QAudioDecoder, QAudioFormat, QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import (
-    QListView,
-    QMenuBar,
-    QListWidget,
-    QListWidgetItem,
-    QApplication,
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QLabel,
-    QLineEdit,
-    QPushButton,
-    QMessageBox,
-    QCalendarWidget,
-    QRadioButton,
-    QMenuBar,
-    QMenu,
-    QInputDialog,
-    QTableWidget,
-    QTableWidgetItem,
-    QHeaderView,
-    QDialog,
-    QMainWindow,
-    QSizePolicy,
-    QComboBox,
-    QCompleter,
-    QListWidget,
-    QListWidgetItem,
-    QFileDialog,
-    QToolBar,
-    QFrame,
-    QSpinBox,
-    QScrollArea,
-    QSlider,
     QAbstractItemView,
-    QFormLayout,
-    QProgressBar,
-    QTableView,
-    QTabWidget,
-    QDialogButtonBox,
-    QGridLayout,
-    QGroupBox,
-    QPlainTextEdit,
-    QStatusBar,
+    QApplication,
+    QCalendarWidget,
     QCheckBox,
     QColorDialog,
-    QFontComboBox,
-    QTextBrowser,
-    QToolButton,
-    QSplitter,
+    QComboBox,
+    QCompleter,
+    QDialog,
+    QDialogButtonBox,
     QDockWidget,
+    QFileDialog,
+    QFormLayout,
+    QFrame,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QHeaderView,
+    QInputDialog,
+    QLabel,
+    QLineEdit,
+    QListView,
+    QListWidget,
+    QListWidgetItem,
+    QMainWindow,
+    QMenu,
+    QMenuBar,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QRadioButton,
+    QScrollArea,
+    QSizePolicy,
+    QSplitter,
+    QStatusBar,
+    QTableView,
+    QTableWidget,
+    QTableWidgetItem,
+    QTabWidget,
+    QTextBrowser,
+    QToolBar,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
 )
 
-from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput, QAudioDecoder, QAudioFormat
-
+from isrc_manager.app_bootstrap import run_desktop_application
+from isrc_manager.app_dialogs import (
+    AboutDialog,
+    ActionRibbonDialog,
+    ApplicationLogDialog,
+    CustomColumnsDialog,
+    DiagnosticsDialog,
+    HelpContentsDialog,
+)
+from isrc_manager.assets import AssetService
+from isrc_manager.assets.dialogs import AssetBrowserPanel
 from isrc_manager.authenticity import (
     AUTHENTICITY_FEATURE_AVAILABLE,
+    PROVENANCE_ONLY_SUFFIXES,
+    VERIFICATION_INPUT_SUFFIXES,
     AudioAuthenticityService,
     AudioWatermarkService,
     AuthenticityExportPreviewDialog,
@@ -129,17 +126,22 @@ from isrc_manager.authenticity import (
     AuthenticityKeyService,
     AuthenticityManifestService,
     AuthenticityVerificationDialog,
-    PROVENANCE_ONLY_SUFFIXES,
-    VERIFICATION_INPUT_SUFFIXES,
     authenticity_unavailable_message,
 )
-from isrc_manager.history import (
-    HistoryCleanupBlockedError,
-    HistoryManager,
-    HistoryStorageCleanupService,
-    SessionHistoryManager,
+from isrc_manager.blob_icons import (
+    BlobIconDialog,
+    BlobIconEditorWidget,
+    BlobIconSettingsService,
+    default_blob_icon_settings,
+    describe_blob_icon_spec,
+    finalize_blob_icon_spec,
+    icon_from_blob_icon_spec,
+    normalize_blob_icon_settings,
 )
-from isrc_manager.history.dialogs import HistoryCleanupDialog, HistoryDialog
+from isrc_manager.catalog_workspace import (
+    ensure_catalog_workspace_dock,
+    refresh_catalog_workspace_docks,
+)
 from isrc_manager.constants import (
     APP_NAME,
     DEFAULT_AUTO_SNAPSHOT_ENABLED,
@@ -171,6 +173,9 @@ from isrc_manager.constants import (
     PROMOTED_CUSTOM_FIELD_NAMES,
     SCHEMA_TARGET,
 )
+from isrc_manager.contract_templates.dialogs import ContractTemplateWorkspacePanel
+from isrc_manager.contracts import ContractService
+from isrc_manager.contracts.dialogs import ContractBrowserPanel
 from isrc_manager.domain.codes import (
     is_blank,
     is_valid_isrc_compact_or_iso,
@@ -187,91 +192,16 @@ from isrc_manager.domain.standard_fields import (
     standard_media_specs_by_label,
 )
 from isrc_manager.domain.timecode import hms_to_seconds, parse_hms_text, seconds_to_hms
+from isrc_manager.exchange.dialogs import ExchangeImportDialog
+from isrc_manager.exchange.models import ExchangeImportReport, ExchangeInspection
+from isrc_manager.exchange.repertoire_service import RepertoireExchangeService
+from isrc_manager.exchange.service import ExchangeService
 from isrc_manager.file_storage import (
     STORAGE_MODE_DATABASE,
     STORAGE_MODE_MANAGED_FILE,
-    infer_storage_mode,
     normalize_storage_mode,
     sanitize_export_basename,
 )
-from isrc_manager.services.gs1_mapping import (
-    COMMON_CLASSIFICATION_CHOICES,
-    COMMON_LANGUAGE_CHOICES,
-    COMMON_MARKET_CHOICES,
-    COMMON_PACKAGING_CHOICES,
-)
-from isrc_manager.help_content import render_help_html
-from isrc_manager.app_bootstrap import run_desktop_application
-from isrc_manager.blob_icons import (
-    BlobIconDialog,
-    BlobIconEditorWidget,
-    BlobIconSettingsService,
-    default_blob_icon_settings,
-    describe_blob_icon_spec,
-    finalize_blob_icon_spec,
-    icon_from_blob_icon_spec,
-    normalize_blob_icon_settings,
-)
-from isrc_manager.catalog_workspace import (
-    ensure_catalog_workspace_dock,
-    refresh_catalog_workspace_docks,
-)
-from isrc_manager.main_window_shell import build_main_window_shell
-from isrc_manager.paths import (
-    STORAGE_STATE_DEFERRED,
-    configure_qt_application_identity,
-    resolve_app_storage_layout,
-    settings_path,
-)
-from isrc_manager.qss_autocomplete import QssCodeEditor
-from isrc_manager.qss_reference import (
-    QssReferenceEntry,
-    collect_qss_reference_entries,
-    ensure_widget_object_names as _ensure_qss_widget_object_names,
-    repolish_widget_tree as _repolish_qss_widget_tree,
-)
-from isrc_manager.theme_builder import (
-    THEME_COLOR_FIELD_SPECS,
-    THEME_METRIC_FIELD_SPECS,
-    THEME_PAGE_SPECS,
-    build_theme_palette as build_app_theme_palette,
-    build_theme_stylesheet as build_app_theme_stylesheet,
-    color_relative_luminance as theme_color_relative_luminance,
-    contrast_ratio as theme_contrast_ratio,
-    effective_theme_settings as build_effective_theme_settings,
-    normalize_theme_color as normalize_app_theme_color,
-    normalize_theme_font_family as normalize_app_theme_font_family,
-    normalize_theme_settings as normalize_app_theme_settings,
-    normalize_theme_string as normalize_app_theme_string,
-    pick_contrasting_color as pick_theme_contrasting_color,
-    shift_color as shift_theme_color,
-    theme_setting_defaults as default_theme_settings,
-    theme_setting_keys as app_theme_setting_keys,
-)
-from isrc_manager.starter_themes import (
-    STARTER_THEME_SPECS,
-    starter_theme_descriptions,
-    starter_theme_library,
-    starter_theme_names,
-)
-from isrc_manager.gs1_dialog import GS1MetadataDialog
-from isrc_manager.assets import AssetService
-from isrc_manager.assets.dialogs import AssetBrowserDialog, AssetBrowserPanel
-from isrc_manager.app_dialogs import (
-    AboutDialog,
-    ActionRibbonDialog,
-    ApplicationLogDialog,
-    CustomColumnsDialog,
-    DiagnosticsDialog,
-    HelpContentsDialog,
-)
-from isrc_manager.contracts import ContractService
-from isrc_manager.contracts.dialogs import ContractBrowserDialog, ContractBrowserPanel
-from isrc_manager.contract_templates.dialogs import ContractTemplateWorkspacePanel
-from isrc_manager.exchange.dialogs import ExchangeImportDialog
-from isrc_manager.exchange.repertoire_service import RepertoireExchangeService
-from isrc_manager.exchange.models import ExchangeImportReport, ExchangeInspection
-from isrc_manager.exchange.service import ExchangeService
 from isrc_manager.forensics import (
     ForensicExportCoordinator,
     ForensicExportDialog,
@@ -281,72 +211,16 @@ from isrc_manager.forensics import (
     ForensicInspectionReport,
     ForensicWatermarkService,
 )
-from isrc_manager.parties import PartyService
-from isrc_manager.parties.dialogs import PartyManagerDialog, PartyManagerPanel
-from isrc_manager.quality.dialogs import QualityDashboardDialog
-from isrc_manager.quality.models import QualityIssue
-from isrc_manager.quality.service import QualityDashboardService
-from isrc_manager.releases import (
-    ReleasePayload,
-    ReleaseRecord,
-    ReleaseService,
-    ReleaseTrackPlacement,
+from isrc_manager.gs1_dialog import GS1MetadataDialog
+from isrc_manager.help_content import render_help_html
+from isrc_manager.history import (
+    HistoryCleanupBlockedError,
+    HistoryManager,
+    HistoryStorageCleanupService,
+    SessionHistoryManager,
 )
-from isrc_manager.releases.dialogs import ReleaseBrowserPanel, ReleaseEditorDialog
-from isrc_manager.rights import RightsService
-from isrc_manager.rights.dialogs import RightsBrowserDialog, RightsBrowserPanel
-from isrc_manager.search import GlobalSearchService, RelationshipExplorerService
-from isrc_manager.search.dialogs import GlobalSearchPanel
-from isrc_manager.selection_scope import TrackChoice
-from isrc_manager.startup_progress import StartupPhase, startup_phase_label
-from isrc_manager.startup_splash import StartupFeedbackProtocol
-from isrc_manager.services.db_access import DatabaseWriteCoordinator, SQLiteConnectionFactory
-from isrc_manager.services.bulk_edit import MIXED_VALUE, shared_bulk_value, should_apply_bulk_change
-from isrc_manager.services.sqlite_utils import safe_wal_checkpoint
-from isrc_manager.services import (
-    AssetVersionPayload,
-    CatalogAdminService,
-    CatalogReadService,
-    ContractPayload,
-    ContractTemplateCatalogService,
-    ContractTemplateFormService,
-    ContractTemplateService,
-    CustomFieldDefinitionService,
-    CustomFieldValueService,
-    DatabaseMaintenanceService,
-    DatabaseSchemaService,
-    DatabaseSessionService,
-    GS1ContractEntry,
-    GS1ContractImportError,
-    GS1IntegrationService,
-    GS1ProfileDefaults,
-    GS1MetadataRepository,
-    GS1SettingsService,
-    GS1TemplateAsset,
-    HistoryRetentionSettings,
-    LegacyLicenseMigrationService,
-    LegacyPromotedFieldRepairService,
-    XMLExportService,
-    XMLImportService,
-    LicenseService,
-    PartyPayload,
-    ProfileKVService,
-    ProfileStoreService,
-    ProfileWorkflowService,
-    RepertoireWorkflowService,
-    RightPayload,
-    SettingsReadService,
-    SettingsMutationService,
-    TrackCreatePayload,
-    TrackSnapshot,
-    TrackService,
-    TrackUpdatePayload,
-    WorkPayload,
-)
-from isrc_manager.settings import enforce_single_instance, init_settings
-from isrc_manager.tasks import BackgroundTaskManager, TaskFailure
-from isrc_manager.tasks.app_services import BackgroundAppServiceFactory
-from isrc_manager.tasks.history_helpers import run_file_history_action, run_snapshot_history_action
+from isrc_manager.history.dialogs import HistoryCleanupDialog, HistoryDialog
+from isrc_manager.main_window_shell import build_main_window_shell
 from isrc_manager.media import AudioConversionService
 from isrc_manager.media.derivatives import (
     MANAGED_DERIVATIVE_KIND_LOSSY,
@@ -358,11 +232,97 @@ from isrc_manager.media.derivatives import (
     ManagedDerivativeExportRequest,
     ManagedDerivativeExportResult,
 )
+from isrc_manager.parties import PartyService
+from isrc_manager.parties.dialogs import PartyManagerPanel
+from isrc_manager.paths import (
+    configure_qt_application_identity,
+    resolve_app_storage_layout,
+    settings_path,
+)
+from isrc_manager.qss_autocomplete import QssCodeEditor
+from isrc_manager.qss_reference import (
+    QssReferenceEntry,
+    collect_qss_reference_entries,
+)
+from isrc_manager.qss_reference import (
+    ensure_widget_object_names as _ensure_qss_widget_object_names,
+)
+from isrc_manager.qss_reference import (
+    repolish_widget_tree as _repolish_qss_widget_tree,
+)
+from isrc_manager.quality.dialogs import QualityDashboardDialog
+from isrc_manager.quality.models import QualityIssue
+from isrc_manager.quality.service import QualityDashboardService
+from isrc_manager.releases import (
+    ReleasePayload,
+    ReleaseRecord,
+    ReleaseService,
+    ReleaseTrackPlacement,
+)
+from isrc_manager.releases.dialogs import ReleaseBrowserPanel, ReleaseEditorDialog
+from isrc_manager.rights import RightsService
+from isrc_manager.rights.dialogs import RightsBrowserPanel
+from isrc_manager.search import GlobalSearchService, RelationshipExplorerService
+from isrc_manager.search.dialogs import GlobalSearchPanel
+from isrc_manager.selection_scope import TrackChoice
+from isrc_manager.services import (
+    CatalogAdminService,
+    CatalogReadService,
+    ContractTemplateCatalogService,
+    ContractTemplateExportService,
+    ContractTemplateFormService,
+    ContractTemplateService,
+    CustomFieldDefinitionService,
+    CustomFieldValueService,
+    DatabaseMaintenanceService,
+    DatabaseSchemaService,
+    DatabaseSessionService,
+    GS1ContractEntry,
+    GS1ContractImportError,
+    GS1IntegrationService,
+    GS1MetadataRepository,
+    GS1ProfileDefaults,
+    GS1SettingsService,
+    GS1TemplateAsset,
+    HistoryRetentionSettings,
+    LegacyLicenseMigrationService,
+    LegacyPromotedFieldRepairService,
+    LicenseService,
+    ProfileKVService,
+    ProfileStoreService,
+    ProfileWorkflowService,
+    RepertoireWorkflowService,
+    SettingsMutationService,
+    SettingsReadService,
+    TrackCreatePayload,
+    TrackService,
+    TrackSnapshot,
+    TrackUpdatePayload,
+    WorkPayload,
+    XMLExportService,
+    XMLImportService,
+)
+from isrc_manager.services.bulk_edit import MIXED_VALUE, shared_bulk_value, should_apply_bulk_change
+from isrc_manager.services.db_access import DatabaseWriteCoordinator, SQLiteConnectionFactory
+from isrc_manager.services.gs1_mapping import (
+    COMMON_CLASSIFICATION_CHOICES,
+    COMMON_LANGUAGE_CHOICES,
+    COMMON_MARKET_CHOICES,
+    COMMON_PACKAGING_CHOICES,
+)
+from isrc_manager.services.sqlite_utils import safe_wal_checkpoint
+from isrc_manager.settings import enforce_single_instance, init_settings
+from isrc_manager.starter_themes import (
+    STARTER_THEME_SPECS,
+    starter_theme_descriptions,
+    starter_theme_library,
+    starter_theme_names,
+)
+from isrc_manager.startup_progress import StartupPhase, startup_phase_label
+from isrc_manager.startup_splash import StartupFeedbackProtocol
 from isrc_manager.storage_migration import (
     PREFERRED_STATE_CONFLICT,
-    PREFERRED_STATE_EMPTY,
     PREFERRED_STATE_RESUMABLE_STAGE,
-    PREFERRED_STATE_SAFE_NOISE,
     PREFERRED_STATE_VALID_COMPLETE,
     StorageMigrationService,
 )
@@ -371,17 +331,63 @@ from isrc_manager.tags import (
     BulkAudioAttachService,
     TaggedAudioExportService,
     build_catalog_export_tag_data,
-    catalog_metadata_to_tags,
     merge_imported_tags,
     write_catalog_export_tags,
 )
 from isrc_manager.tags.dialogs import BulkAudioAttachDialog, TagPreviewDialog
 from isrc_manager.tags.models import (
-    AudioTagData,
     ArtworkPayload,
+    AudioTagData,
     BulkAudioAttachTrackCandidate,
     TaggedAudioExportItem,
     TaggedAudioExportPlanItem,
+)
+from isrc_manager.tasks import BackgroundTaskManager, TaskFailure
+from isrc_manager.tasks.app_services import BackgroundAppServiceFactory
+from isrc_manager.tasks.history_helpers import run_file_history_action, run_snapshot_history_action
+from isrc_manager.theme_builder import (
+    THEME_COLOR_FIELD_SPECS,
+    THEME_METRIC_FIELD_SPECS,
+    THEME_PAGE_SPECS,
+)
+from isrc_manager.theme_builder import (
+    build_theme_palette as build_app_theme_palette,
+)
+from isrc_manager.theme_builder import (
+    build_theme_stylesheet as build_app_theme_stylesheet,
+)
+from isrc_manager.theme_builder import (
+    color_relative_luminance as theme_color_relative_luminance,
+)
+from isrc_manager.theme_builder import (
+    contrast_ratio as theme_contrast_ratio,
+)
+from isrc_manager.theme_builder import (
+    effective_theme_settings as build_effective_theme_settings,
+)
+from isrc_manager.theme_builder import (
+    normalize_theme_color as normalize_app_theme_color,
+)
+from isrc_manager.theme_builder import (
+    normalize_theme_font_family as normalize_app_theme_font_family,
+)
+from isrc_manager.theme_builder import (
+    normalize_theme_settings as normalize_app_theme_settings,
+)
+from isrc_manager.theme_builder import (
+    normalize_theme_string as normalize_app_theme_string,
+)
+from isrc_manager.theme_builder import (
+    pick_contrasting_color as pick_theme_contrasting_color,
+)
+from isrc_manager.theme_builder import (
+    shift_color as shift_theme_color,
+)
+from isrc_manager.theme_builder import (
+    theme_setting_defaults as default_theme_settings,
+)
+from isrc_manager.theme_builder import (
+    theme_setting_keys as app_theme_setting_keys,
 )
 from isrc_manager.ui_common import (
     DatePickerDialog,
@@ -397,13 +403,13 @@ from isrc_manager.ui_common import (
     _apply_standard_widget_chrome,
     _compose_widget_stylesheet,
     _create_action_button_grid,
-    _create_scrollable_dialog_content,
     _create_round_help_button,
+    _create_scrollable_dialog_content,
     _create_standard_section,
     _prompt_compact_choice_dialog,
 )
 from isrc_manager.works import WorkService
-from isrc_manager.works.dialogs import WorkBrowserPanel, WorkEditorDialog
+from isrc_manager.works.dialogs import WorkBrowserPanel
 
 
 class _JsonLogFormatter(logging.Formatter):
@@ -4324,8 +4330,8 @@ class LicensesBrowserPanel(QWidget):
 
         try:
             opened_externally = False
-            from PySide6.QtPdfWidgets import QPdfView
             from PySide6.QtPdf import QPdfDocument
+            from PySide6.QtPdfWidgets import QPdfView
 
             dlg = QDialog(self)
             dlg.setWindowTitle(abs_path.name)
@@ -5696,6 +5702,7 @@ class App(QMainWindow):
         self.contract_template_catalog_service = None
         self.contract_template_service = None
         self.contract_template_form_service = None
+        self.contract_template_export_service = None
         self.custom_field_values = None
         self.xml_export_service = None
         self.xml_import_service = None
@@ -7791,6 +7798,24 @@ class App(QMainWindow):
             and self.contract_template_catalog_service is not None
             else None
         )
+        self.contract_template_export_service = (
+            ContractTemplateExportService(
+                template_service=self.contract_template_service,
+                catalog_service=self.contract_template_catalog_service,
+                track_service=self.track_service,
+                release_service=self.release_service,
+                work_service=self.work_service,
+                contract_service=self.contract_service,
+                party_service=self.party_service,
+                rights_service=self.rights_service,
+                asset_service=self.asset_service,
+                custom_field_definition_service=self.custom_field_definitions,
+                custom_field_value_service=self.custom_field_values,
+            )
+            if self.contract_template_service is not None
+            and self.contract_template_catalog_service is not None
+            else None
+        )
         self.authenticity_key_service = (
             AuthenticityKeyService(
                 self.conn,
@@ -9599,6 +9624,7 @@ class App(QMainWindow):
         self.contract_template_catalog_service = None
         self.contract_template_service = None
         self.contract_template_form_service = None
+        self.contract_template_export_service = None
         self.gs1_settings_service = None
         self.gs1_integration_service = None
         self.catalog_service = None
@@ -10345,6 +10371,7 @@ class App(QMainWindow):
             catalog_service_provider=lambda: self.contract_template_catalog_service,
             template_service_provider=lambda: self.contract_template_service,
             form_service_provider=lambda: self.contract_template_form_service,
+            export_service_provider=lambda: self.contract_template_export_service,
             parent=parent,
         )
 
@@ -13295,6 +13322,7 @@ class App(QMainWindow):
             self.contract_template_catalog_service is None
             or self.contract_template_service is None
             or self.contract_template_form_service is None
+            or self.contract_template_export_service is None
         ):
             QMessageBox.warning(self, "Contract Template Workspace", "Open a profile first.")
             return
@@ -14529,7 +14557,7 @@ class App(QMainWindow):
                         if skipped_count
                         else ""
                     )
-                    + (f"\n\nWarnings:\n- " + "\n- ".join(warnings[:12]) if warnings else ""),
+                    + ("\n\nWarnings:\n- " + "\n- ".join(warnings[:12]) if warnings else ""),
                 )
 
             self._submit_background_bundle_task(
@@ -14601,7 +14629,7 @@ class App(QMainWindow):
                     self,
                     title,
                     "No readable managed audio files were available for the selected tracks."
-                    + (f"\n\nWarnings:\n- " + "\n- ".join(warnings[:12]) if warnings else ""),
+                    + ("\n\nWarnings:\n- " + "\n- ".join(warnings[:12]) if warnings else ""),
                 )
                 return
 
@@ -14711,7 +14739,7 @@ class App(QMainWindow):
                     self,
                     title,
                     f"Imported tags for {len(changed_ids or [])} track{'s' if len(changed_ids or []) != 1 else ''}."
-                    + (f"\n\nWarnings:\n- " + "\n- ".join(warnings[:12]) if warnings else ""),
+                    + ("\n\nWarnings:\n- " + "\n- ".join(warnings[:12]) if warnings else ""),
                 )
 
             self._submit_background_bundle_task(
@@ -15327,7 +15355,7 @@ class App(QMainWindow):
                     self,
                     title,
                     "No exportable audio files were available for the selected tracks."
-                    + (f"\n\nWarnings:\n- " + "\n- ".join(warnings[:12]) if warnings else ""),
+                    + ("\n\nWarnings:\n- " + "\n- ".join(warnings[:12]) if warnings else ""),
                 )
                 return
 
@@ -15412,7 +15440,7 @@ class App(QMainWindow):
                     "embed trustworthy catalog metadata when it is available."
                     f"\n\nSkipped: {result.skipped}"
                     + (
-                        f"\n\nWarnings:\n- " + "\n- ".join(all_warnings[:12])
+                        "\n\nWarnings:\n- " + "\n- ".join(all_warnings[:12])
                         if all_warnings
                         else ""
                     ),
@@ -16606,7 +16634,7 @@ class App(QMainWindow):
                             else ""
                         )
                         + "\n"
-                        f"Proceed with import now?",
+                        "Proceed with import now?",
                         QMessageBox.Yes | QMessageBox.No,
                     )
                     == QMessageBox.Yes
@@ -17015,7 +17043,7 @@ class App(QMainWindow):
             QMessageBox.warning(
                 self,
                 "Reserved Column Name",
-                f"These names are now standard columns and cannot be used as custom fields:\n"
+                "These names are now standard columns and cannot be used as custom fields:\n"
                 + "\n".join(sorted(set(conflicting))),
             )
             return False
@@ -17801,7 +17829,7 @@ class App(QMainWindow):
             self._preview_blob_bytes(data, title)
         except Exception as e:
             self.conn.rollback()
-            self.logger.exception(f"Preview blob failed: %s", e)
+            self.logger.exception("Preview blob failed: %s", e)
             QMessageBox.critical(self, "Custom Field Error", f"Failed to preview file:\n{e}")
 
     def _do_prev(self, row, col):
@@ -22559,7 +22587,7 @@ class WaveformWidget(QWidget):
         self.update()
 
     def paintEvent(self, e):
-        from PySide6.QtGui import QPainter, QPainterPath, QPen, QColor
+        from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
@@ -22605,7 +22633,10 @@ def load_wav_peaks(path: str, width_px: int):
       else fallback to QtMultimedia's decoder, then `audioread` as a last resort.
     Returns: list[(lo, hi)] in [-1.0, 1.0].
     """
-    import os, struct, shutil, subprocess
+    import os
+    import shutil
+    import struct
+    import subprocess
 
     width_px = max(1, int(width_px))
     buckets = width_px * 4  # ~4 samples/bucket for smooth lines
@@ -22752,7 +22783,8 @@ def load_wav_peaks(path: str, width_px: int):
 
     # --- helper: best-effort find a binary on common paths ---
     def _which(name: str):
-        import shutil, os, platform
+        import os
+        import platform
 
         p = shutil.which(name)
         if p:
@@ -22982,7 +23014,9 @@ def load_wav_peaks(path: str, width_px: int):
     # audioread 3.0.1 still imports stdlib `aifc` via rawread, which breaks on
     # Python 3.13. Keep it only as a legacy fallback behind the Qt path.
     try:
-        import audioread, struct as _st
+        import struct as _st
+
+        import audioread
 
         peaks = []
         with audioread.audio_open(path) as f:

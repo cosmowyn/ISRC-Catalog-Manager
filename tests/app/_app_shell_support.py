@@ -26,7 +26,11 @@ from isrc_manager.services import (
 )
 from isrc_manager.starter_themes import starter_theme_names
 from isrc_manager.startup_progress import StartupPhase, startup_phase_label
-from tests.contract_templates._support import make_docx_bytes
+from tests.contract_templates._support import (
+    FakeDocxHtmlAdapter,
+    FakePagesAdapter,
+    make_docx_bytes,
+)
 from tests.qt_test_helpers import pump_events, require_qapplication, wait_for
 
 try:
@@ -2557,7 +2561,7 @@ class AppShellTestCase(unittest.TestCase):
         self.assertIn(self.window.contract_template_workspace_dock, tabified)
 
     def case_contract_template_workspace_opens_fill_tab_as_tabified_dock(self):
-        track_id = self._create_track(index=151, title="Fill Draft Track")
+        self._create_track(index=151, title="Fill Draft Track")
         template = self.window.contract_template_service.create_template(
             ContractTemplatePayload(
                 name="Shell Fill Template",
@@ -2656,9 +2660,7 @@ class AppShellTestCase(unittest.TestCase):
         panel.save_new_draft()
         self.app.processEvents()
 
-        drafts = self.window.contract_template_service.list_drafts(
-            revision_id=revision.revision_id
-        )
+        drafts = self.window.contract_template_service.list_drafts(revision_id=revision.revision_id)
         self.assertEqual(len(drafts), 1)
         self.assertEqual(panel.fill_draft_combo.count(), 2)
         self.assertEqual(panel.fill_draft_combo.currentData(), drafts[0].draft_id)
@@ -2700,6 +2702,65 @@ class AppShellTestCase(unittest.TestCase):
             self.window.contract_template_workspace_dock,
             self.window.tabifiedDockWidgets(self.window.catalog_table_dock),
         )
+
+    def case_contract_template_workspace_fill_tab_can_export_pdf(self):
+        self._create_track(index=153, title="Fill Export Track")
+        self.window.contract_template_export_service.html_adapter = FakeDocxHtmlAdapter()
+        self.window.contract_template_export_service.pages_adapter = FakePagesAdapter()
+        template = self.window.contract_template_service.create_template(
+            ContractTemplatePayload(
+                name="Shell Export Template",
+                description="App shell export coverage",
+                template_family="contract",
+                source_format="docx",
+            )
+        )
+        source_path = self.root / "shell-export-template.docx"
+        source_path.write_bytes(
+            make_docx_bytes(
+                document_paragraphs=(
+                    ("Track ", "{{db.track.track_title}}"),
+                    ("Date ", "{{manual.license_date}}"),
+                )
+            )
+        )
+        revision = self.window.contract_template_service.import_revision_from_path(
+            template.template_id,
+            source_path,
+            payload=ContractTemplateRevisionPayload(source_filename=source_path.name),
+        ).revision
+
+        self.window.open_contract_template_workspace(initial_tab="fill")
+        self.app.processEvents()
+        panel = self._assert_tabified_workspace_dock(
+            self.window.contract_template_workspace_dock,
+            dock_name="contractTemplateWorkspaceDock",
+            panel_name="contractTemplateWorkspacePanel",
+        )
+
+        selector = panel.selector_widgets["{{db.track.track_title}}"]
+        date_widget = panel.manual_widgets["{{manual.license_date}}"]
+        selector.setCurrentIndex(1)
+        date_widget.setDate(QDate(2026, 3, 30))
+        panel.fill_draft_name_edit.setText("Shell Export Draft")
+        self.app.processEvents()
+
+        panel.export_current_pdf()
+        self.app.processEvents()
+
+        drafts = self.window.contract_template_service.list_drafts(revision_id=revision.revision_id)
+        self.assertEqual(len(drafts), 1)
+        updated = self.window.contract_template_service.fetch_draft(drafts[0].draft_id)
+        self.assertIsNotNone(updated.last_resolved_snapshot_id)
+        artifacts = self.window.contract_template_service.list_output_artifacts(
+            snapshot_id=updated.last_resolved_snapshot_id
+        )
+        self.assertEqual(
+            sorted(artifact.artifact_type for artifact in artifacts),
+            ["pdf", "resolved_docx"],
+        )
+        self.assertIn("Exported PDF", panel.fill_export_status_label.text())
+        self.assertTrue(Path(artifacts[0].output_path).exists())
 
     def case_asset_workspace_rejoins_tabbed_dock_strip_when_reopened(self):
         track_id = self._create_track(index=142, title="Docked Deliverables Track")
