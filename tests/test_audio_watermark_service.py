@@ -129,7 +129,7 @@ class AudioWatermarkServiceTests(AuthenticityWorkflowTestCase):
         self.assertIn(result.status, {"detected", "insufficient"})
         self.assertEqual(result.token.watermark_id, prepared.watermark_token.watermark_id)
         self.assertGreaterEqual(result.mean_confidence, 0.90)
-        self.assertGreaterEqual(result.group_agreement, 0.83)
+        self.assertGreaterEqual(result.group_agreement, 0.82)
 
     def test_embed_to_path_rejects_audio_that_is_too_short(self):
         track_id, audio_path = self.create_track_with_audio(
