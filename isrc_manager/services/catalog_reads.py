@@ -11,11 +11,40 @@ class CatalogReadService:
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
 
+    def _table_names(self) -> set[str]:
+        return {
+            str(row[0])
+            for row in self.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+            if row and row[0]
+        }
+
+    def _table_columns(self, table: str) -> set[str]:
+        if table not in self._table_names():
+            return set()
+        return {
+            str(row[1])
+            for row in self.conn.execute(f"PRAGMA table_info({table})").fetchall()
+            if row and row[1]
+        }
+
     def fetch_rows_with_customs(
         self, active_custom_fields: list[dict]
     ) -> tuple[list[tuple], dict[tuple[int, int], str]]:
+        work_columns = self._table_columns("Works")
+        work_registration_sql = (
+            "COALESCE(NULLIF(w.registration_number, ''), t.buma_work_number, '') AS buma_work_number"
+            if "registration_number" in work_columns
+            else "COALESCE(t.buma_work_number, '') AS buma_work_number"
+        )
+        work_iswc_sql = (
+            "COALESCE(NULLIF(w.iswc, ''), t.iswc, '') AS iswc"
+            if "iswc" in work_columns
+            else "COALESCE(t.iswc, '') AS iswc"
+        )
         base_rows = self.conn.execute(
-            """
+            f"""
             SELECT
                 t.id,
                 '' AS audio_file,
@@ -31,8 +60,8 @@ class CatalogReadService:
                     WHERE ta.track_id = t.id AND ta.role = 'additional'
                 ), '') AS additional_artists,
                 t.isrc,
-                COALESCE(t.buma_work_number, '') AS buma_work_number,
-                COALESCE(w.iswc, t.iswc, '') AS iswc,
+                {work_registration_sql},
+                {work_iswc_sql},
                 COALESCE(t.upc, '') AS upc,
                 COALESCE(t.catalog_number, '') AS catalog_number,
                 COALESCE(t.db_entry_date, '') AS db_entry_date,

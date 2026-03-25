@@ -16,6 +16,7 @@ The current Phase 4 work now covers two connected read-side slices:
 - search relationships, Work Manager read-side track membership, workflow readiness, and XML export now also move toward the same authority path
 - generic exchange JSON/package exports now also prefer governed work metadata over stale track-side composition shadow fields
 - exchange import/update now preserves governed work composition authority for already-linked tracks instead of reintroducing stale track-shadow `iswc` / registration / composer / publisher data during operational updates
+- catalog row projection now prefers authoritative `Works.registration_number` over stale `Tracks.buma_work_number`, so the visible inventory table agrees with the rest of the Phase 4 work on work-registration authority
 
 The corrected creation-flow source of truth is now documented at [`v3-track-first-governed-creation-correction.md`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/docs/implementation_handoffs/v3-track-first-governed-creation-correction.md).
 
@@ -28,6 +29,7 @@ Keep `Catalog` strong as the operational inventory while reducing duplicated gov
 ## What Changed
 
 - `CatalogReadService` now joins `Tracks.work_id` to `Works` and prefers the linked work ISWC in catalog row projections before falling back to track-level shadow ISWC.
+- `CatalogReadService` now also prefers the linked work registration number in the existing `BUMA Wnr.` catalog column before falling back to the track-side shadow field.
 - `QualityDashboardService` now evaluates work-link authority from the v3 governing field on `Tracks` instead of relying on `WorkTrackLinks` as the source of truth:
   - `track_missing_linked_work` now checks whether `Tracks.work_id` resolves to a real work row
   - `orphaned_work_recording_link` now checks whether any tracks point directly at the work through `Tracks.work_id`
@@ -95,6 +97,7 @@ Keep `Catalog` strong as the operational inventory while reducing duplicated gov
 ## Tests Added Or Updated
 
 - Added catalog-read coverage proving the table projection prefers authoritative `Works.iswc` over a stale track-level copy when `Tracks.work_id` is present.
+- Added sibling catalog-read coverage proving the existing `BUMA Wnr.` column now prefers authoritative `Works.registration_number` over stale `Tracks.buma_work_number` when `Tracks.work_id` is present.
 - Added quality coverage proving direct `Tracks.work_id` authority is enough even if `WorkTrackLinks` is missing, so quality does not falsely report:
   - `track_missing_linked_work`
   - `orphaned_work_recording_link`
@@ -113,6 +116,7 @@ Keep `Catalog` strong as the operational inventory while reducing duplicated gov
   - `python3 -m unittest tests.test_catalog_read_service tests.test_quality_service`
   - `python3 -m unittest tests.exchange.test_exchange_json tests.exchange.test_exchange_package`
   - `python3 -m unittest tests.exchange.test_exchange_csv_import tests.exchange.test_exchange_merge_mode`
+  - `python3 -m unittest tests.test_catalog_read_service tests.test_catalog_workflow_integration`
 
 ## What Was Intentionally Deferred
 
@@ -135,6 +139,11 @@ Keep `Catalog` strong as the operational inventory while reducing duplicated gov
   - each populated row resolves governance individually
   - new rows may create new Works from their own track data without duplicate entry
 
+Update after the latest catalog projection slice:
+
+- the existing `BUMA Wnr.` column now shows authoritative work registration when available, but the column name itself is still legacy/track-shaped UI terminology
+- create-mode exchange imports remain the biggest unresolved authority gap because they still create tracks directly from row-level composition fields without first-class work-governance export/import data
+
 ## Workers Used And Workers Closed
 
 - Workers used:
@@ -142,11 +151,17 @@ Keep `Catalog` strong as the operational inventory while reducing duplicated gov
   - `Godel`
   - `Gibbs`
   - `Hegel`
+  - `Noether`
+  - `Kepler`
+  - `Copernicus`
 - Workers closed:
   - `Dewey`
   - `Godel`
   - `Gibbs`
   - `Hegel`
+  - `Noether`
+  - `Kepler`
+  - `Copernicus`
 
 ## QA/QC Summary From Central Oversight
 
@@ -163,7 +178,8 @@ Central Oversight check:
 - good: Work Manager and Global Search now agree with the governing work link even when the shadow table is stale
 - good: the corrected track-first governed creation model can now remain stable while Phase 4 continues on the read side
 - good: matched exchange updates no longer push stale composition metadata back onto governed tracks
-- next: continue with the remaining operational surfaces that still expose or persist track-side composition shadow fields too directly before attempting final legacy deletion
+- good: the visible catalog table now agrees with work-registration authority instead of surfacing stale track-shadow registration data
+- next: continue with the remaining operational surfaces that still expose or persist track-side composition shadow fields too directly before attempting final legacy deletion, with create-mode exchange import still the highest-value remaining gap
 
 ## Exact Safe Pickup Instructions
 
@@ -172,6 +188,6 @@ Next safe Phase 4 continuation:
 1. read the masterplan and [`v3-track-first-governed-creation-correction.md`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/docs/implementation_handoffs/v3-track-first-governed-creation-correction.md) first
 2. treat the track-first correction handoff as the active creation-flow guardrail, not as optional background context
 3. continue from `catalog_reads.py` and other read-only catalog/search/export surfaces before reshaping edit forms
-4. continue with the remaining operational surfaces that still privilege track-side composition shadow fields over authoritative work data, especially create-mode/import repair paths and catalog-facing projections
+4. continue with the remaining operational surfaces that still privilege track-side composition shadow fields over authoritative work data, especially create-mode/import repair paths now that catalog-facing registration projection is corrected
 5. keep adding integration tests as authority moves from shadow structures to v3 authoritative data
 6. defer final legacy-license deletion until the replacement read and operational paths are fully stable

@@ -19,7 +19,8 @@ def make_catalog_read_conn():
         CREATE TABLE Works (
             id INTEGER PRIMARY KEY,
             title TEXT NOT NULL,
-            iswc TEXT
+            iswc TEXT,
+            registration_number TEXT
         );
         CREATE TABLE Tracks (
             id INTEGER PRIMARY KEY,
@@ -65,8 +66,8 @@ def make_catalog_read_conn():
         [(1, "Album One"), (2, "Album Two")],
     )
     conn.executemany(
-        "INSERT INTO Works(id, title, iswc) VALUES (?, ?, ?)",
-        [(1, "Catalog Parent Work", "T-999.999.999-9")],
+        "INSERT INTO Works(id, title, iswc, registration_number) VALUES (?, ?, ?, ?)",
+        [(1, "Catalog Parent Work", "T-999.999.999-9", "BUMA-WORK-999")],
     )
     conn.executemany(
         """
@@ -164,7 +165,7 @@ class CatalogReadServiceTests(unittest.TestCase):
                 "Main Artist",
                 "Guest Artist",
                 "NL-ABC-26-00001",
-                "BUMA-101",
+                "BUMA-WORK-999",
                 "T-999.999.999-9",
                 "123456789012",
                 "CAT-001",
@@ -181,6 +182,12 @@ class CatalogReadServiceTests(unittest.TestCase):
 
         self.assertEqual(rows[0][10], "T-999.999.999-9")
         self.assertEqual(rows[1][10], "")
+
+    def test_fetch_rows_with_customs_prefers_authoritative_work_registration_number(self):
+        rows, _ = self.service.fetch_rows_with_customs([])
+
+        self.assertEqual(rows[0][9], "BUMA-WORK-999")
+        self.assertEqual(rows[1][9], "")
 
     def test_find_album_metadata_returns_first_track_values(self):
         self.assertEqual(
