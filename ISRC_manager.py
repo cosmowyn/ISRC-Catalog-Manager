@@ -232,8 +232,8 @@ from isrc_manager.media.derivatives import (
     ManagedDerivativeExportRequest,
     ManagedDerivativeExportResult,
 )
-from isrc_manager.parties import PartyService
-from isrc_manager.parties.dialogs import PartyManagerPanel
+from isrc_manager.parties import PartyRecord, PartyService
+from isrc_manager.parties.dialogs import PartyEditorDialog, PartyManagerPanel
 from isrc_manager.paths import (
     configure_qt_application_identity,
     resolve_app_storage_layout,
@@ -643,6 +643,7 @@ class ApplicationSettingsDialog(QDialog):
             DEFAULT_HISTORY_PRUNE_PRE_RESTORE_COPIES_AFTER_DAYS
         ),
         owner_party_settings: OwnerPartySettings | None = None,
+        party_service: PartyService | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -689,9 +690,15 @@ class ApplicationSettingsDialog(QDialog):
         self._theme_preview_timer.setInterval(120)
         self._theme_preview_timer.timeout.connect(self._refresh_theme_previews)
         self.gs1_integration_service = getattr(parent, "gs1_integration_service", None)
+        self.party_service = party_service or getattr(parent, "party_service", None)
         self._gs1_template_profile = None
         self._gs1_template_asset = gs1_template_asset
         self._owner_party_settings = owner_party_settings or OwnerPartySettings()
+        self._owner_selected_party_id = (
+            int(self._owner_party_settings.party_id)
+            if self._owner_party_settings.party_id not in (None, "")
+            else None
+        )
         self._pending_gs1_template_path = ""
         self._gs1_default_option_combos: dict[str, QComboBox] = {}
         self._gs1_contract_entries = tuple(gs1_contract_entries or ())
@@ -1112,6 +1119,38 @@ class ApplicationSettingsDialog(QDialog):
         owner_intro_layout.addWidget(owner_intro_label)
         owner_layout.addWidget(owner_intro_box)
 
+        owner_link_box = QGroupBox("Linked Party")
+        owner_link_layout = QVBoxLayout(owner_link_box)
+        owner_link_layout.setContentsMargins(12, 12, 12, 12)
+        owner_link_layout.setSpacing(8)
+        owner_link_description = QLabel(
+            "Link the owner to one canonical Party record. When linked, the fields below mirror "
+            "that Party and should be edited from Party Manager or the quick-create/editor flow here."
+        )
+        owner_link_description.setWordWrap(True)
+        owner_link_layout.addWidget(owner_link_description)
+        owner_link_row = QHBoxLayout()
+        owner_link_row.setContentsMargins(0, 0, 0, 0)
+        owner_link_row.setSpacing(8)
+        self.owner_party_combo = FocusWheelComboBox(owner_link_box)
+        self.owner_party_combo.setEditable(True)
+        self.owner_party_combo.setInsertPolicy(QComboBox.NoInsert)
+        self.owner_party_combo.setMinimumWidth(320)
+        self.owner_party_combo.setPlaceholderText("Search or choose a Party")
+        owner_link_row.addWidget(self.owner_party_combo, 1)
+        self.owner_party_new_button = QPushButton("New Party...", owner_link_box)
+        owner_link_row.addWidget(self.owner_party_new_button)
+        self.owner_party_edit_button = QPushButton("Edit Party...", owner_link_box)
+        owner_link_row.addWidget(self.owner_party_edit_button)
+        self.owner_party_clear_button = QPushButton("Clear Link", owner_link_box)
+        owner_link_row.addWidget(self.owner_party_clear_button)
+        owner_link_layout.addLayout(owner_link_row)
+        self.owner_party_hint_label = QLabel(owner_link_box)
+        self.owner_party_hint_label.setProperty("role", "supportingText")
+        self.owner_party_hint_label.setWordWrap(True)
+        owner_link_layout.addWidget(self.owner_party_hint_label)
+        owner_layout.addWidget(owner_link_box)
+
         owner_identity_box = QGroupBox("Identity")
         owner_identity_grid = QGridLayout(owner_identity_box)
         self._configure_grid(owner_identity_grid)
@@ -1317,6 +1356,39 @@ class ApplicationSettingsDialog(QDialog):
         self.btw_number_edit.textChanged.connect(self.owner_vat_number_display.setText)
         self.buma_relatie_edit.textChanged.connect(self.owner_pro_number_display.setText)
         self.buma_ipi_edit.textChanged.connect(self.owner_ipi_cae_display.setText)
+        self.owner_party_combo.currentIndexChanged.connect(self._owner_party_combo_changed)
+        self.owner_party_new_button.clicked.connect(self._create_owner_party)
+        self.owner_party_edit_button.clicked.connect(self._edit_owner_party)
+        self.owner_party_clear_button.clicked.connect(self._clear_owner_party_link)
+        self._owner_linked_field_widgets = [
+            self.owner_display_name_edit,
+            self.owner_legal_name_edit,
+            self.owner_artist_name_edit,
+            self.owner_company_name_edit,
+            self.owner_first_name_edit,
+            self.owner_middle_name_edit,
+            self.owner_last_name_edit,
+            self.owner_contact_person_edit,
+            self.owner_street_name_edit,
+            self.owner_street_number_edit,
+            self.owner_address_line1_edit,
+            self.owner_address_line2_edit,
+            self.owner_city_edit,
+            self.owner_region_edit,
+            self.owner_postal_code_edit,
+            self.owner_country_edit,
+            self.owner_email_edit,
+            self.owner_alternative_email_edit,
+            self.owner_phone_edit,
+            self.owner_website_edit,
+            self.owner_bank_account_number_edit,
+            self.owner_chamber_of_commerce_number_edit,
+            self.owner_tax_id_edit,
+            self.owner_pro_affiliation_edit,
+            self.owner_notes_edit,
+        ]
+        self._refresh_owner_party_choices()
+        self._sync_owner_party_link_state()
 
         owner_layout.addStretch(1)
         self._owner_tab_index = self.tabs.addTab(self._wrap_tab_page(owner_page), "Owner Party")
@@ -3691,8 +3763,189 @@ class ApplicationSettingsDialog(QDialog):
             if line_edit is not None:
                 line_edit.selectAll()
 
+    @staticmethod
+    def _owner_party_choice_label(record: PartyRecord) -> str:
+        primary = (
+            str(record.display_name or "").strip()
+            or str(record.artist_name or "").strip()
+            or str(record.company_name or "").strip()
+            or str(record.legal_name or "").strip()
+            or f"Party #{int(record.id)}"
+        )
+        legal_name = str(record.legal_name or "").strip()
+        if legal_name and legal_name.casefold() != primary.casefold():
+            return f"{primary} ({legal_name})"
+        return primary
+
+    def _refresh_owner_party_choices(self) -> None:
+        labels: list[str] = []
+        previous_state = self.owner_party_combo.blockSignals(True)
+        try:
+            self.owner_party_combo.clear()
+            self.owner_party_combo.addItem("No linked party", None)
+            if self.party_service is not None:
+                for record in self.party_service.list_parties():
+                    label = self._owner_party_choice_label(record)
+                    self.owner_party_combo.addItem(label, int(record.id))
+                    labels.append(label)
+                if (
+                    self._owner_selected_party_id is not None
+                    and self.owner_party_combo.findData(self._owner_selected_party_id) < 0
+                ):
+                    missing_label = f"Missing Party #{int(self._owner_selected_party_id)}"
+                    self.owner_party_combo.addItem(missing_label, int(self._owner_selected_party_id))
+                    labels.append(missing_label)
+            elif self._owner_selected_party_id is not None:
+                linked_label = f"Linked Party #{int(self._owner_selected_party_id)}"
+                self.owner_party_combo.addItem(linked_label, int(self._owner_selected_party_id))
+                labels.append(linked_label)
+            completer = QCompleter(labels, self.owner_party_combo)
+            completer.setCaseSensitivity(Qt.CaseInsensitive)
+            self.owner_party_combo.setCompleter(completer)
+            if self._owner_selected_party_id is not None:
+                index = self.owner_party_combo.findData(int(self._owner_selected_party_id))
+                self.owner_party_combo.setCurrentIndex(index if index >= 0 else 0)
+            else:
+                self.owner_party_combo.setCurrentIndex(0)
+            if self.party_service is not None and self._owner_selected_party_id is not None:
+                record = self.party_service.fetch_party(int(self._owner_selected_party_id))
+                if record is not None:
+                    self._apply_owner_party_record(record)
+        finally:
+            self.owner_party_combo.blockSignals(previous_state)
+
+    def _apply_owner_party_record(self, record: PartyRecord) -> None:
+        self.owner_display_name_edit.setText(str(record.display_name or "").strip())
+        self.owner_legal_name_edit.setText(str(record.legal_name or "").strip())
+        self.owner_artist_name_edit.setText(str(record.artist_name or "").strip())
+        self.owner_company_name_edit.setText(str(record.company_name or "").strip())
+        self.owner_first_name_edit.setText(str(record.first_name or "").strip())
+        self.owner_middle_name_edit.setText(str(record.middle_name or "").strip())
+        self.owner_last_name_edit.setText(str(record.last_name or "").strip())
+        self.owner_contact_person_edit.setText(str(record.contact_person or "").strip())
+        self.owner_street_name_edit.setText(str(record.street_name or "").strip())
+        self.owner_street_number_edit.setText(str(record.street_number or "").strip())
+        self.owner_address_line1_edit.setText(str(record.address_line1 or "").strip())
+        self.owner_address_line2_edit.setText(str(record.address_line2 or "").strip())
+        self.owner_city_edit.setText(str(record.city or "").strip())
+        self.owner_region_edit.setText(str(record.region or "").strip())
+        self.owner_postal_code_edit.setText(str(record.postal_code or "").strip())
+        self.owner_country_edit.setText(str(record.country or "").strip())
+        self.owner_email_edit.setText(str(record.email or "").strip())
+        self.owner_alternative_email_edit.setText(str(record.alternative_email or "").strip())
+        self.owner_phone_edit.setText(str(record.phone or "").strip())
+        self.owner_website_edit.setText(str(record.website or "").strip())
+        self.owner_bank_account_number_edit.setText(str(record.bank_account_number or "").strip())
+        self.owner_chamber_of_commerce_number_edit.setText(
+            str(record.chamber_of_commerce_number or "").strip()
+        )
+        self.owner_tax_id_edit.setText(str(record.tax_id or "").strip())
+        self.owner_pro_affiliation_edit.setText(str(record.pro_affiliation or "").strip())
+        self.owner_notes_edit.setText(str(record.notes or "").strip())
+
+    def _sync_owner_party_link_state(self) -> None:
+        linked = self._owner_selected_party_id is not None
+        for widget in getattr(self, "_owner_linked_field_widgets", []):
+            widget.setReadOnly(linked)
+        combo_enabled = self.party_service is not None
+        self.owner_party_combo.setEnabled(combo_enabled)
+        self.owner_party_new_button.setEnabled(combo_enabled)
+        self.owner_party_edit_button.setEnabled(combo_enabled and linked)
+        self.owner_party_clear_button.setEnabled(linked)
+        if linked:
+            current_label = self.owner_party_combo.currentText().strip()
+            if not current_label:
+                current_label = f"Party #{int(self._owner_selected_party_id)}"
+            self.owner_party_hint_label.setText(
+                f"Linked to {current_label}. Edit the Party record to change the fields below."
+            )
+            return
+        if combo_enabled:
+            self.owner_party_hint_label.setText(
+                "No canonical Party is linked yet. These fields remain editable as a legacy "
+                "owner snapshot until you choose or create a Party."
+            )
+            return
+        self.owner_party_hint_label.setText(
+            "Party service is unavailable, so owner identity remains editable as profile settings."
+        )
+
+    def _owner_party_combo_changed(self, index: int) -> None:
+        party_id = self.owner_party_combo.itemData(index)
+        if party_id in (None, ""):
+            self._owner_selected_party_id = None
+            self._sync_owner_party_link_state()
+            return
+        if self.party_service is None:
+            self._owner_selected_party_id = int(party_id)
+            self._sync_owner_party_link_state()
+            return
+        record = self.party_service.fetch_party(int(party_id))
+        if record is None:
+            QMessageBox.warning(
+                self,
+                "Owner Party",
+                f"Party #{int(party_id)} could not be loaded.",
+            )
+            self._owner_selected_party_id = None
+            self._refresh_owner_party_choices()
+            self._sync_owner_party_link_state()
+            return
+        self._owner_selected_party_id = int(record.id)
+        self._apply_owner_party_record(record)
+        self._sync_owner_party_link_state()
+
+    def _create_owner_party(self) -> None:
+        if self.party_service is None:
+            return
+        dialog = PartyEditorDialog(party_service=self.party_service, parent=self)
+        if not dialog.exec():
+            return
+        try:
+            party_id = self.party_service.create_party(dialog.payload())
+        except Exception as exc:
+            QMessageBox.warning(self, "Owner Party", str(exc))
+            return
+        self._owner_selected_party_id = int(party_id)
+        record = self.party_service.fetch_party(int(party_id))
+        if record is not None:
+            self._apply_owner_party_record(record)
+        self._refresh_owner_party_choices()
+        self._sync_owner_party_link_state()
+
+    def _edit_owner_party(self) -> None:
+        if self.party_service is None or self._owner_selected_party_id is None:
+            return
+        record = self.party_service.fetch_party(int(self._owner_selected_party_id))
+        if record is None:
+            QMessageBox.warning(
+                self,
+                "Owner Party",
+                f"Party #{int(self._owner_selected_party_id)} could not be loaded.",
+            )
+            return
+        dialog = PartyEditorDialog(party_service=self.party_service, party=record, parent=self)
+        if not dialog.exec():
+            return
+        try:
+            self.party_service.update_party(int(record.id), dialog.payload())
+        except Exception as exc:
+            QMessageBox.warning(self, "Owner Party", str(exc))
+            return
+        refreshed = self.party_service.fetch_party(int(record.id))
+        if refreshed is not None:
+            self._apply_owner_party_record(refreshed)
+        self._refresh_owner_party_choices()
+        self._sync_owner_party_link_state()
+
+    def _clear_owner_party_link(self) -> None:
+        self._owner_selected_party_id = None
+        self._refresh_owner_party_choices()
+        self._sync_owner_party_link_state()
+
     def _owner_party_settings_payload(self) -> OwnerPartySettings:
         return OwnerPartySettings(
+            party_id=self._owner_selected_party_id,
             legal_name=self.owner_legal_name_edit.text().strip(),
             display_name=self.owner_display_name_edit.text().strip(),
             artist_name=self.owner_artist_name_edit.text().strip(),
@@ -9640,6 +9893,7 @@ class App(QMainWindow):
             history_prune_pre_restore_copies_after_days=before_values[
                 "history_prune_pre_restore_copies_after_days"
             ],
+            party_service=self.party_service,
             parent=self,
         )
         dlg.focus_field(initial_focus)

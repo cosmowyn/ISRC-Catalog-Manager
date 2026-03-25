@@ -168,9 +168,40 @@ class SettingsMutationServiceTests(unittest.TestCase):
             self.conn.execute("SELECT value FROM app_kv WHERE key='owner_tax_id'").fetchone(),
             ("TAX-778899",),
         )
+        self.assertIsNone(
+            self.conn.execute("SELECT value FROM app_kv WHERE key='owner_party_id'").fetchone()
+        )
         self.assertIsNone(self.conn.execute("SELECT nr FROM BTW WHERE id=1").fetchone())
         self.assertIsNone(
             self.conn.execute("SELECT relatie_nummer, ipi FROM BUMA_STEMRA WHERE id=1").fetchone()
+        )
+
+    def test_set_owner_party_settings_persists_and_clears_owner_party_id(self):
+        saved = self.service.set_owner_party_settings(
+            OwnerPartySettings(
+                party_id=12,
+                legal_name="Canonical Owner B.V.",
+                display_name="Canonical Owner",
+            )
+        )
+
+        self.assertEqual(saved.party_id, 12)
+        self.assertEqual(
+            self.conn.execute("SELECT value FROM app_kv WHERE key='owner_party_id'").fetchone(),
+            ("12",),
+        )
+
+        cleared = self.service.set_owner_party_settings(
+            OwnerPartySettings(
+                party_id=None,
+                legal_name="Detached Owner B.V.",
+                display_name="Detached Owner",
+            )
+        )
+
+        self.assertIsNone(cleared.party_id)
+        self.assertIsNone(
+            self.conn.execute("SELECT value FROM app_kv WHERE key='owner_party_id'").fetchone()
         )
 
 

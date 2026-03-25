@@ -44,6 +44,41 @@ def make_settings_conn():
             key TEXT PRIMARY KEY,
             value TEXT
         );
+        CREATE TABLE Parties (
+            id INTEGER PRIMARY KEY,
+            legal_name TEXT NOT NULL,
+            display_name TEXT,
+            artist_name TEXT,
+            company_name TEXT,
+            first_name TEXT,
+            middle_name TEXT,
+            last_name TEXT,
+            party_type TEXT,
+            contact_person TEXT,
+            email TEXT,
+            alternative_email TEXT,
+            phone TEXT,
+            website TEXT,
+            street_name TEXT,
+            street_number TEXT,
+            address_line1 TEXT,
+            address_line2 TEXT,
+            city TEXT,
+            region TEXT,
+            postal_code TEXT,
+            country TEXT,
+            bank_account_number TEXT,
+            chamber_of_commerce_number TEXT,
+            tax_id TEXT,
+            vat_number TEXT,
+            pro_affiliation TEXT,
+            pro_number TEXT,
+            ipi_cae TEXT,
+            notes TEXT,
+            profile_name TEXT,
+            created_at TEXT,
+            updated_at TEXT
+        );
         """
     )
     return conn
@@ -166,6 +201,104 @@ class SettingsReadServiceTests(unittest.TestCase):
                 pro_number="REL-3",
                 ipi_cae="IPI-4",
                 notes="",
+            ),
+        )
+
+    def test_load_owner_party_settings_prefers_linked_party_when_owner_party_id_exists(self):
+        with self.conn:
+            self.conn.execute("INSERT INTO BTW (id, nr) VALUES (1, ?)", (" BTW-2 ",))
+            self.conn.execute(
+                "INSERT INTO BUMA_STEMRA (id, relatie_nummer, ipi) VALUES (1, ?, ?)",
+                (" REL-3 ", " IPI-4 "),
+            )
+            self.conn.execute(
+                """
+                INSERT INTO Parties(
+                    id, legal_name, display_name, artist_name, company_name,
+                    first_name, middle_name, last_name, party_type, contact_person,
+                    email, alternative_email, phone, website,
+                    street_name, street_number, address_line1, address_line2,
+                    city, region, postal_code, country,
+                    bank_account_number, chamber_of_commerce_number, tax_id,
+                    vat_number, pro_affiliation, pro_number, ipi_cae, notes
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    7,
+                    "Aeonium Holdings B.V.",
+                    "Aeonium",
+                    "Aeonium Official",
+                    "Aeonium Holdings",
+                    "Lyra",
+                    "",
+                    "Cosmos",
+                    "organization",
+                    "Licensing Desk",
+                    "hello@moonium.test",
+                    "legal@moonium.test",
+                    "+31-555-0101",
+                    "https://aeonium.test",
+                    "Orbit Lane",
+                    "42A",
+                    "",
+                    "Suite 9",
+                    "Amsterdam",
+                    "Noord-Holland",
+                    "1234AB",
+                    "Netherlands",
+                    "NL91TEST0123456789",
+                    "CoC-778899",
+                    "TAX-778899",
+                    "PARTY-VAT",
+                    "BUMA/STEMRA",
+                    "PARTY-PRO",
+                    "PARTY-IPI",
+                    "Canonical owner record",
+                ),
+            )
+            self.conn.executemany(
+                "INSERT INTO app_kv(key, value) VALUES(?, ?)",
+                [
+                    ("owner_party_id", "7"),
+                    ("owner_display_name", "Legacy Owner"),
+                    ("owner_legal_name", "Legacy Owner B.V."),
+                    ("owner_email", "legacy@owner.test"),
+                ],
+            )
+
+        self.assertEqual(
+            self.service.load_owner_party_settings(),
+            OwnerPartySettings(
+                party_id=7,
+                legal_name="Aeonium Holdings B.V.",
+                display_name="Aeonium",
+                artist_name="Aeonium Official",
+                company_name="Aeonium Holdings",
+                first_name="Lyra",
+                middle_name="",
+                last_name="Cosmos",
+                contact_person="Licensing Desk",
+                email="hello@moonium.test",
+                alternative_email="legal@moonium.test",
+                phone="+31-555-0101",
+                website="https://aeonium.test",
+                street_name="Orbit Lane",
+                street_number="42A",
+                address_line1="",
+                address_line2="Suite 9",
+                city="Amsterdam",
+                region="Noord-Holland",
+                postal_code="1234AB",
+                country="Netherlands",
+                bank_account_number="NL91TEST0123456789",
+                chamber_of_commerce_number="CoC-778899",
+                tax_id="TAX-778899",
+                vat_number="BTW-2",
+                pro_affiliation="BUMA/STEMRA",
+                pro_number="REL-3",
+                ipi_cae="IPI-4",
+                notes="Canonical owner record",
             ),
         )
 

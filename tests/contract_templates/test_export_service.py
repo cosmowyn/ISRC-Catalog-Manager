@@ -385,6 +385,73 @@ class ContractTemplateExportServiceTests(unittest.TestCase):
             },
         )
 
+    def test_export_resolves_owner_placeholders_from_linked_owner_party_without_selection(self):
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO app_kv(key, value) VALUES(?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                ("owner_party_id", str(self.party_id)),
+            )
+            self.conn.execute(
+                "INSERT INTO app_kv(key, value) VALUES(?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                ("owner_legal_name", "Legacy Owner B.V."),
+            )
+            self.conn.execute(
+                "INSERT INTO app_kv(key, value) VALUES(?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                ("owner_email", "legacy-owner@test"),
+            )
+        template = self.template_service.create_template(
+            ContractTemplatePayload(
+                name="Linked Owner Export Template",
+                description="Owner party export coverage",
+                template_family="contract",
+                source_format="docx",
+            )
+        )
+        source_path = self.root / "linked-owner-export-template.docx"
+        source_path.write_bytes(
+            make_docx_bytes(
+                document_paragraphs=(
+                    ("Owner ", "{{db.owner.legal_name}}"),
+                    ("Owner Display ", "{{db.owner.display_name}}"),
+                    ("Owner Email ", "{{db.owner.email}}"),
+                    ("Owner VAT ", "{{db.owner.vat_number}}"),
+                ),
+            )
+        )
+        revision = self.template_service.import_revision_from_path(
+            template.template_id,
+            source_path,
+            payload=ContractTemplateRevisionPayload(source_filename=source_path.name),
+        ).revision
+        draft = self.template_service.create_draft(
+            ContractTemplateDraftPayload(
+                revision_id=revision.revision_id,
+                name="Linked Owner Export Draft",
+                editable_payload={
+                    "revision_id": revision.revision_id,
+                    "db_selections": {},
+                    "manual_values": {},
+                    "type_overrides": {},
+                },
+                storage_mode="database",
+            )
+        )
+
+        result = self.export_service.export_draft_to_pdf(draft.draft_id)
+
+        self.assertEqual(
+            result.snapshot.resolved_values,
+            {
+                "{{db.owner.display_name}}": "Aeonium",
+                "{{db.owner.email}}": "hello@moonium.test",
+                "{{db.owner.legal_name}}": "Aeonium Holdings B.V.",
+                "{{db.owner.vat_number}}": "BTW-OWNER",
+            },
+        )
+
     def test_export_rejects_blank_owner_placeholder_values(self):
         template = self.template_service.create_template(
             ContractTemplatePayload(

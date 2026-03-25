@@ -54,6 +54,16 @@ class SettingsMutationService:
     def _clean_text(value: object | None) -> str:
         return str(value or "").strip()
 
+    @staticmethod
+    def _clean_party_id(value: object | None) -> int | None:
+        if value in (None, ""):
+            return None
+        try:
+            clean_value = int(value)
+        except Exception:
+            return None
+        return clean_value if clean_value > 0 else None
+
     def set_identity(self, *, window_title: str, icon_path: str) -> dict[str, str]:
         identity = {
             "window_title": window_title,
@@ -161,6 +171,7 @@ class SettingsMutationService:
 
     def set_owner_party_settings(self, settings: OwnerPartySettings) -> OwnerPartySettings:
         clean_settings = OwnerPartySettings(
+            party_id=self._clean_party_id(getattr(settings, "party_id", None)),
             **{
                 field_name: self._clean_text(getattr(settings, field_name, ""))
                 for field_name in OwnerPartySettings.PROFILE_FIELD_NAMES
@@ -172,9 +183,19 @@ class SettingsMutationService:
         with self.conn:
             self._ensure_profile_store()
             for field_name, value in clean_settings.to_profile_payload().items():
+                if field_name == "party_id":
+                    continue
                 self.conn.execute(
                     "INSERT INTO app_kv(key, value) VALUES(?, ?) "
                     "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                     (f"owner_{field_name}", value),
+                )
+            if clean_settings.party_id is None:
+                self.conn.execute("DELETE FROM app_kv WHERE key='owner_party_id'")
+            else:
+                self.conn.execute(
+                    "INSERT INTO app_kv(key, value) VALUES(?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    ("owner_party_id", str(int(clean_settings.party_id))),
                 )
         return clean_settings

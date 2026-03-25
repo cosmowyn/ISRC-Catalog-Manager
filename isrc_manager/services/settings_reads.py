@@ -36,6 +36,7 @@ class RegistrationSettings:
 
 @dataclass(slots=True)
 class OwnerPartySettings:
+    party_id: int | None = None
     legal_name: str = ""
     display_name: str = ""
     artist_name: str = ""
@@ -94,10 +95,16 @@ class OwnerPartySettings:
     )
 
     def to_profile_payload(self) -> dict[str, str]:
-        return {
+        payload = {
             field_name: str(getattr(self, field_name, "") or "").strip()
             for field_name in self.PROFILE_FIELD_NAMES
         }
+        payload["party_id"] = (
+            str(int(self.party_id))
+            if self.party_id not in (None, "")
+            else ""
+        )
+        return payload
 
 
 @dataclass(slots=True)
@@ -136,6 +143,125 @@ class SettingsReadService:
             return ""
         return str(row[0]).strip()
 
+    def _read_profile_int(self, key: str) -> int | None:
+        raw = self._read_profile_value(key)
+        if raw == "":
+            return None
+        try:
+            value = int(raw)
+        except Exception:
+            return None
+        return value if value > 0 else None
+
+    def _load_owner_party_snapshot(self, registration: RegistrationSettings) -> OwnerPartySettings:
+        return OwnerPartySettings(
+            party_id=self._read_profile_int("owner_party_id"),
+            legal_name=self._read_profile_value("owner_legal_name"),
+            display_name=self._read_profile_value("owner_display_name"),
+            artist_name=self._read_profile_value("owner_artist_name"),
+            company_name=self._read_profile_value("owner_company_name"),
+            first_name=self._read_profile_value("owner_first_name"),
+            middle_name=self._read_profile_value("owner_middle_name"),
+            last_name=self._read_profile_value("owner_last_name"),
+            contact_person=self._read_profile_value("owner_contact_person"),
+            email=self._read_profile_value("owner_email"),
+            alternative_email=self._read_profile_value("owner_alternative_email"),
+            phone=self._read_profile_value("owner_phone"),
+            website=self._read_profile_value("owner_website"),
+            street_name=self._read_profile_value("owner_street_name"),
+            street_number=self._read_profile_value("owner_street_number"),
+            address_line1=self._read_profile_value("owner_address_line1"),
+            address_line2=self._read_profile_value("owner_address_line2"),
+            city=self._read_profile_value("owner_city"),
+            region=self._read_profile_value("owner_region"),
+            postal_code=self._read_profile_value("owner_postal_code"),
+            country=self._read_profile_value("owner_country"),
+            bank_account_number=self._read_profile_value("owner_bank_account_number"),
+            chamber_of_commerce_number=self._read_profile_value("owner_chamber_of_commerce_number"),
+            tax_id=self._read_profile_value("owner_tax_id"),
+            vat_number=registration.btw_number,
+            pro_affiliation=self._read_profile_value("owner_pro_affiliation"),
+            pro_number=registration.buma_relatie_nummer,
+            ipi_cae=registration.buma_ipi,
+            notes=self._read_profile_value("owner_notes"),
+        )
+
+    def _load_owner_party_from_record(
+        self,
+        party_id: int,
+        registration: RegistrationSettings,
+    ) -> OwnerPartySettings | None:
+        try:
+            row = self.conn.execute(
+                """
+                SELECT
+                    id,
+                    legal_name,
+                    display_name,
+                    artist_name,
+                    company_name,
+                    first_name,
+                    middle_name,
+                    last_name,
+                    contact_person,
+                    email,
+                    alternative_email,
+                    phone,
+                    website,
+                    street_name,
+                    street_number,
+                    address_line1,
+                    address_line2,
+                    city,
+                    region,
+                    postal_code,
+                    country,
+                    bank_account_number,
+                    chamber_of_commerce_number,
+                    tax_id,
+                    pro_affiliation,
+                    notes
+                FROM Parties
+                WHERE id=?
+                """,
+                (int(party_id),),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            return None
+        if row is None:
+            return None
+        return OwnerPartySettings(
+            party_id=int(row[0]),
+            legal_name=str(row[1] or "").strip(),
+            display_name=str(row[2] or "").strip(),
+            artist_name=str(row[3] or "").strip(),
+            company_name=str(row[4] or "").strip(),
+            first_name=str(row[5] or "").strip(),
+            middle_name=str(row[6] or "").strip(),
+            last_name=str(row[7] or "").strip(),
+            contact_person=str(row[8] or "").strip(),
+            email=str(row[9] or "").strip(),
+            alternative_email=str(row[10] or "").strip(),
+            phone=str(row[11] or "").strip(),
+            website=str(row[12] or "").strip(),
+            street_name=str(row[13] or "").strip(),
+            street_number=str(row[14] or "").strip(),
+            address_line1=str(row[15] or "").strip(),
+            address_line2=str(row[16] or "").strip(),
+            city=str(row[17] or "").strip(),
+            region=str(row[18] or "").strip(),
+            postal_code=str(row[19] or "").strip(),
+            country=str(row[20] or "").strip(),
+            bank_account_number=str(row[21] or "").strip(),
+            chamber_of_commerce_number=str(row[22] or "").strip(),
+            tax_id=str(row[23] or "").strip(),
+            vat_number=registration.btw_number,
+            pro_affiliation=str(row[24] or "").strip(),
+            pro_number=registration.buma_relatie_nummer,
+            ipi_cae=registration.buma_ipi,
+            notes=str(row[25] or "").strip(),
+        )
+
     def load_isrc_prefix(self) -> str:
         return self._read_scalar("SELECT prefix FROM ISRC_Prefix WHERE id = 1")
 
@@ -165,35 +291,21 @@ class SettingsReadService:
 
     def load_owner_party_settings(self) -> OwnerPartySettings:
         registration = self.load_registration_settings()
+        snapshot = self._load_owner_party_snapshot(registration)
+        if snapshot.party_id is None:
+            return snapshot
+        party_backed = self._load_owner_party_from_record(snapshot.party_id, registration)
+        if party_backed is not None:
+            return party_backed
         return OwnerPartySettings(
-            legal_name=self._read_profile_value("owner_legal_name"),
-            display_name=self._read_profile_value("owner_display_name"),
-            artist_name=self._read_profile_value("owner_artist_name"),
-            company_name=self._read_profile_value("owner_company_name"),
-            first_name=self._read_profile_value("owner_first_name"),
-            middle_name=self._read_profile_value("owner_middle_name"),
-            last_name=self._read_profile_value("owner_last_name"),
-            contact_person=self._read_profile_value("owner_contact_person"),
-            email=self._read_profile_value("owner_email"),
-            alternative_email=self._read_profile_value("owner_alternative_email"),
-            phone=self._read_profile_value("owner_phone"),
-            website=self._read_profile_value("owner_website"),
-            street_name=self._read_profile_value("owner_street_name"),
-            street_number=self._read_profile_value("owner_street_number"),
-            address_line1=self._read_profile_value("owner_address_line1"),
-            address_line2=self._read_profile_value("owner_address_line2"),
-            city=self._read_profile_value("owner_city"),
-            region=self._read_profile_value("owner_region"),
-            postal_code=self._read_profile_value("owner_postal_code"),
-            country=self._read_profile_value("owner_country"),
-            bank_account_number=self._read_profile_value("owner_bank_account_number"),
-            chamber_of_commerce_number=self._read_profile_value("owner_chamber_of_commerce_number"),
-            tax_id=self._read_profile_value("owner_tax_id"),
-            vat_number=registration.btw_number,
-            pro_affiliation=self._read_profile_value("owner_pro_affiliation"),
-            pro_number=registration.buma_relatie_nummer,
-            ipi_cae=registration.buma_ipi,
-            notes=self._read_profile_value("owner_notes"),
+            party_id=None,
+            **{
+                field_name: getattr(snapshot, field_name, "")
+                for field_name in OwnerPartySettings.PROFILE_FIELD_NAMES
+            },
+            vat_number=snapshot.vat_number,
+            pro_number=snapshot.pro_number,
+            ipi_cae=snapshot.ipi_cae,
         )
 
     def load_auto_snapshot_enabled(self) -> bool:

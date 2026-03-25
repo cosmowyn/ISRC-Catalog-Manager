@@ -10,6 +10,7 @@ try:
     from PySide6.QtWidgets import QGridLayout, QLabel, QMessageBox, QWidget
 
     import ISRC_manager as app_module
+    from isrc_manager.parties import PartyRecord
     from isrc_manager.starter_themes import starter_theme_library, starter_theme_names
     from isrc_manager.theme_builder import (
         build_theme_stylesheet,
@@ -28,9 +29,22 @@ class _ThemePreviewHost(QWidget):
         super().__init__()
         self.applied = []
         self.gs1_integration_service = None
+        self.party_service = None
 
     def _apply_theme(self, values):
         self.applied.append(dict(values or {}))
+
+
+class _PartyServiceStub:
+    def __init__(self, records):
+        self._records = {int(record.id): record for record in records}
+
+    def list_parties(self, *, search_text=None, party_type=None):
+        del search_text, party_type
+        return list(self._records.values())
+
+    def fetch_party(self, party_id):
+        return self._records.get(int(party_id))
 
 
 class _ThemeApplyHost(QWidget):
@@ -353,6 +367,98 @@ class ThemeBuilderTests(unittest.TestCase):
             self.assertEqual(owner_settings.vat_number, "BTW-424242")
             self.assertEqual(owner_settings.pro_number, "REL-OWNER")
             self.assertEqual(owner_settings.ipi_cae, "IPI-OWNER")
+        finally:
+            dialog.close()
+            host.close()
+
+    def test_application_settings_dialog_owner_party_selector_loads_linked_party_values(self):
+        host = _ThemePreviewHost()
+        host.party_service = _PartyServiceStub(
+            [
+                PartyRecord(
+                    id=1,
+                    legal_name="Aeonium Holdings B.V.",
+                    display_name="Aeonium",
+                    artist_name="Aeonium Official",
+                    company_name="Aeonium Holdings",
+                    first_name="Lyra",
+                    middle_name="",
+                    last_name="Cosmos",
+                    party_type="organization",
+                    contact_person="Licensing Desk",
+                    email="hello@moonium.test",
+                    alternative_email="legal@moonium.test",
+                    phone="+31-555-0101",
+                    website="https://aeonium.test",
+                    street_name="Orbit Lane",
+                    street_number="42A",
+                    address_line1="",
+                    address_line2="Suite 9",
+                    city="Amsterdam",
+                    region="Noord-Holland",
+                    postal_code="1234AB",
+                    country="Netherlands",
+                    bank_account_number="NL91TEST0123456789",
+                    chamber_of_commerce_number="CoC-778899",
+                    tax_id="TAX-778899",
+                    vat_number="PARTY-VAT",
+                    pro_affiliation="BUMA/STEMRA",
+                    pro_number="PARTY-PRO",
+                    ipi_cae="PARTY-IPI",
+                    notes="Canonical owner record",
+                    profile_name=None,
+                    created_at=None,
+                    updated_at=None,
+                    artist_aliases=(),
+                )
+            ]
+        )
+        dialog = app_module.ApplicationSettingsDialog(
+            window_title="Catalog",
+            icon_path="",
+            artist_code="00",
+            auto_snapshot_enabled=True,
+            auto_snapshot_interval_minutes=30,
+            isrc_prefix="NLABC",
+            sena_number="",
+            btw_number="BTW-424242",
+            buma_relatie_nummer="REL-OWNER",
+            buma_ipi="IPI-OWNER",
+            gs1_template_asset=None,
+            gs1_contracts_csv_path="",
+            gs1_contract_entries=(),
+            gs1_active_contract_number="",
+            gs1_target_market="",
+            gs1_language="",
+            gs1_brand="",
+            gs1_subbrand="",
+            gs1_packaging_type="",
+            gs1_product_classification="",
+            theme_settings={},
+            stored_themes={},
+            current_profile_path="",
+            owner_party_settings=app_module.OwnerPartySettings(
+                party_id=1,
+                legal_name="Legacy Owner B.V.",
+                display_name="Legacy Owner",
+                email="legacy-owner@test",
+            ),
+            party_service=host.party_service,
+            parent=host,
+        )
+        try:
+            self.assertEqual(dialog.owner_party_combo.currentData(), 1)
+            self.assertEqual(dialog.owner_legal_name_edit.text(), "Aeonium Holdings B.V.")
+            self.assertEqual(dialog.owner_display_name_edit.text(), "Aeonium")
+            self.assertTrue(dialog.owner_legal_name_edit.isReadOnly())
+
+            owner_settings = dialog.values()["owner_party_settings"]
+
+            self.assertEqual(owner_settings.party_id, 1)
+            self.assertEqual(owner_settings.legal_name, "Aeonium Holdings B.V.")
+            self.assertEqual(owner_settings.display_name, "Aeonium")
+            self.assertEqual(owner_settings.email, "hello@moonium.test")
+            self.assertEqual(owner_settings.vat_number, "BTW-424242")
         finally:
             dialog.close()
             host.close()
