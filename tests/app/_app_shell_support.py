@@ -548,6 +548,7 @@ class AppShellTestCase(unittest.TestCase):
             "Release Browser…": self.window.release_browser_action,
             "Work Manager…": self.window.work_manager_action,
             "Contract Manager…": self.window.contract_manager_action,
+            "Contract Template Workspace…": self.window.contract_template_workspace_action,
             "Derivative Ledger…": self.window.derivative_ledger_action,
             "Global Search and Relationships…": self.window.global_search_action,
             "Create Snapshot…": self.window.create_snapshot_action,
@@ -1903,6 +1904,7 @@ class AppShellTestCase(unittest.TestCase):
         view_texts = self._menu_action_texts(view_menu)
 
         self.assertIn("Derivative Ledger…", workspace_texts)
+        self.assertIn("Contract Template Workspace…", workspace_texts)
         self.assertIn("Show Add Track Panel", workspace_texts)
         self.assertIn("Show Catalog Table", workspace_texts)
         self.assertNotIn("Show Add Track Panel", view_texts)
@@ -2526,6 +2528,29 @@ class AppShellTestCase(unittest.TestCase):
         self.assertIn(self.window.contract_manager_dock, tabified)
         self.assertIn(self.window.rights_matrix_dock, tabified)
         self.assertIn(self.window.asset_registry_dock, tabified)
+
+    def case_contract_template_workspace_opens_as_tabified_dock(self):
+        self.window.open_contract_template_workspace()
+        self.app.processEvents()
+
+        panel = self._assert_tabified_workspace_dock(
+            self.window.contract_template_workspace_dock,
+            dock_name="contractTemplateWorkspaceDock",
+            panel_name="contractTemplateWorkspacePanel",
+        )
+        self.assertEqual(
+            self.window.contract_template_workspace_action.text(),
+            "Contract Template Workspace…",
+        )
+        self.assertEqual(panel.workspace_tabs.tabText(0), "Symbol Generator")
+        self.assertGreater(panel.table.rowCount(), 0)
+        self.assertTrue(panel.selected_symbol_edit.text().startswith("{{db."))
+        self.assertEqual(
+            panel.symbol_actions_cluster.objectName(),
+            "contractTemplateSymbolActionsCluster",
+        )
+        tabified = set(self.window.tabifiedDockWidgets(self.window.catalog_table_dock))
+        self.assertIn(self.window.contract_template_workspace_dock, tabified)
 
     def case_asset_workspace_rejoins_tabbed_dock_strip_when_reopened(self):
         track_id = self._create_track(index=142, title="Docked Deliverables Track")

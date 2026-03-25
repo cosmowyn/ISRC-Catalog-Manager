@@ -25,6 +25,9 @@ from isrc_manager.contracts import (
     ContractValidationIssue,
 )
 from isrc_manager.contract_templates import (
+    ContractTemplateCatalogEntry,
+    ContractTemplateCatalogSection,
+    ContractTemplateCatalogService,
     ContractTemplateDraftPayload,
     ContractTemplateDraftRecord,
     ContractTemplateImportResult,
@@ -285,6 +288,9 @@ __all__ = [
     "ContractPayload",
     "ContractRecord",
     "ContractService",
+    "ContractTemplateCatalogEntry",
+    "ContractTemplateCatalogSection",
+    "ContractTemplateCatalogService",
     "ContractTemplateDraftPayload",
     "ContractTemplateDraftRecord",
     "ContractTemplateImportResult",

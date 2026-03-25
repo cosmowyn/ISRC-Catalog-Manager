@@ -1,5 +1,10 @@
 """Contract template placeholder workflow package."""
 
+from .catalog import (
+    ContractTemplateCatalogEntry,
+    ContractTemplateCatalogSection,
+    ContractTemplateCatalogService,
+)
 from .ingestion import (
     ContractTemplateIngestionError,
     DOCXTemplateScanner,
@@ -39,6 +44,9 @@ from .parser import (
 from .service import ContractTemplateService
 
 __all__ = [
+    "ContractTemplateCatalogEntry",
+    "ContractTemplateCatalogSection",
+    "ContractTemplateCatalogService",
     "ContractTemplateDraftPayload",
     "ContractTemplateDraftRecord",
     "ContractTemplateImportResult",

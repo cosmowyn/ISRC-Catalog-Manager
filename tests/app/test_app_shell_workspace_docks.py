@@ -38,6 +38,9 @@ class AppShellWorkspaceDockTests(AppShellTestCase):
     test_party_contract_rights_and_asset_windows_open_as_tabified_docks = (
         AppShellTestCase.case_party_contract_rights_and_asset_windows_open_as_tabified_docks
     )
+    test_contract_template_workspace_opens_as_tabified_dock = (
+        AppShellTestCase.case_contract_template_workspace_opens_as_tabified_dock
+    )
     test_asset_workspace_rejoins_tabbed_dock_strip_when_reopened = (
         AppShellTestCase.case_asset_workspace_rejoins_tabbed_dock_strip_when_reopened
     )

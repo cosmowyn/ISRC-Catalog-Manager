@@ -148,6 +148,50 @@ class ContractTemplateImportResult:
 
 
 @dataclass(slots=True)
+class ContractTemplateCatalogEntry:
+    binding_kind: str
+    namespace: str | None
+    key: str
+    canonical_symbol: str
+    display_label: str
+    field_type: str
+    description: str | None
+    scope_entity_type: str | None
+    scope_policy: str | None
+    source_table: str | None
+    source_column: str | None
+    options: tuple[str, ...] = ()
+    custom_field_id: int | None = None
+    is_custom_field: bool = False
+
+    @property
+    def label(self) -> str:
+        return self.display_label
+
+    @property
+    def source_kind(self) -> str:
+        return "Custom Field" if self.is_custom_field else "Database Field"
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "binding_kind": self.binding_kind,
+            "namespace": self.namespace,
+            "key": self.key,
+            "canonical_symbol": self.canonical_symbol,
+            "display_label": self.display_label,
+            "field_type": self.field_type,
+            "description": self.description,
+            "scope_entity_type": self.scope_entity_type,
+            "scope_policy": self.scope_policy,
+            "source_table": self.source_table,
+            "source_column": self.source_column,
+            "options": list(self.options),
+            "custom_field_id": self.custom_field_id,
+            "is_custom_field": self.is_custom_field,
+        }
+
+
+@dataclass(slots=True)
 class ContractTemplatePlaceholderPayload:
     canonical_symbol: str
     display_label: str | None = None

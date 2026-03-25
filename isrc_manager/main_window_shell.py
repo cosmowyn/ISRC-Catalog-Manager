@@ -341,6 +341,12 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         shortcuts=("Ctrl+Alt+C", "Meta+Alt+C"),
     )
     workspace_menu.addAction(app.contract_manager_action)
+    app.contract_template_workspace_action = app._create_action(
+        "Contract Template Workspace…",
+        slot=app.open_contract_template_workspace,
+        shortcuts=("Ctrl+Alt+Shift+T", "Meta+Alt+Shift+T"),
+    )
+    workspace_menu.addAction(app.contract_template_workspace_action)
     app.rights_matrix_action = app._create_action(
         "Rights Matrix…",
         slot=app.open_rights_matrix,

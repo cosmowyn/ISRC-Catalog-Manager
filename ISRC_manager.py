@@ -267,6 +267,7 @@ from isrc_manager.app_dialogs import (
 )
 from isrc_manager.contracts import ContractService
 from isrc_manager.contracts.dialogs import ContractBrowserDialog, ContractBrowserPanel
+from isrc_manager.contract_templates.dialogs import ContractTemplateWorkspacePanel
 from isrc_manager.exchange.dialogs import ExchangeImportDialog
 from isrc_manager.exchange.repertoire_service import RepertoireExchangeService
 from isrc_manager.exchange.models import ExchangeImportReport, ExchangeInspection
@@ -307,6 +308,7 @@ from isrc_manager.services import (
     CatalogAdminService,
     CatalogReadService,
     ContractPayload,
+    ContractTemplateCatalogService,
     CustomFieldDefinitionService,
     CustomFieldValueService,
     DatabaseMaintenanceService,
@@ -5689,6 +5691,7 @@ class App(QMainWindow):
         self.license_migration_service = None
         self.profile_kv = None
         self.custom_field_definitions = None
+        self.contract_template_catalog_service = None
         self.custom_field_values = None
         self.xml_export_service = None
         self.xml_import_service = None
@@ -7714,6 +7717,14 @@ class App(QMainWindow):
         self.custom_field_definitions = (
             CustomFieldDefinitionService(self.conn) if self.conn is not None else None
         )
+        self.contract_template_catalog_service = (
+            ContractTemplateCatalogService(
+                self.conn,
+                custom_field_definition_service=self.custom_field_definitions,
+            )
+            if self.conn is not None
+            else None
+        )
         self.custom_field_values = (
             CustomFieldValueService(self.conn, self.custom_field_definitions, self.data_root)
             if self.conn is not None
@@ -9563,6 +9574,7 @@ class App(QMainWindow):
         self.settings_reads = None
         self.settings_mutations = None
         self.blob_icon_settings_service = None
+        self.contract_template_catalog_service = None
         self.gs1_settings_service = None
         self.gs1_integration_service = None
         self.catalog_service = None
@@ -10302,6 +10314,14 @@ class App(QMainWindow):
             parent=parent,
         )
 
+    def _create_contract_template_workspace_panel(
+        self, parent: QWidget
+    ) -> ContractTemplateWorkspacePanel:
+        return ContractTemplateWorkspacePanel(
+            catalog_service_provider=lambda: self.contract_template_catalog_service,
+            parent=parent,
+        )
+
     def _create_rights_matrix_panel(self, parent: QWidget) -> RightsBrowserPanel:
         return RightsBrowserPanel(
             rights_service_provider=lambda: self.rights_service,
@@ -10394,6 +10414,17 @@ class App(QMainWindow):
         self.contract_manager_dock = dock
         return dock
 
+    def _ensure_contract_template_workspace_dock(self) -> QDockWidget:
+        dock = ensure_catalog_workspace_dock(
+            self,
+            key="contract_template_workspace",
+            title="Contract Template Workspace",
+            object_name="contractTemplateWorkspaceDock",
+            panel_factory=self._create_contract_template_workspace_panel,
+        )
+        self.contract_template_workspace_dock = dock
+        return dock
+
     def _ensure_rights_matrix_dock(self) -> QDockWidget:
         dock = ensure_catalog_workspace_dock(
             self,
@@ -10434,6 +10465,7 @@ class App(QMainWindow):
                 self._ensure_license_browser_dock,
                 self._ensure_party_manager_dock,
                 self._ensure_contract_manager_dock,
+                self._ensure_contract_template_workspace_dock,
                 self._ensure_rights_matrix_dock,
                 self._ensure_asset_registry_dock,
             ):
@@ -13230,6 +13262,16 @@ class App(QMainWindow):
             panel_attr="contract_manager_panel",
             legacy_attr="contract_manager_dialog",
             configure=lambda panel: panel.focus_contract(contract_id),
+        )
+
+    def open_contract_template_workspace(self, *, initial_tab: str = "symbols"):
+        if self.contract_template_catalog_service is None:
+            QMessageBox.warning(self, "Contract Template Workspace", "Open a profile first.")
+            return
+        return self._show_workspace_panel(
+            self._ensure_contract_template_workspace_dock,
+            panel_attr="contract_template_workspace_panel",
+            configure=lambda panel: panel.focus_tab(initial_tab),
         )
 
     def open_rights_matrix(self, right_id: int | None = None):
