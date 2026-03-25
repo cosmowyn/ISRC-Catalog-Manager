@@ -8,9 +8,11 @@ Date: 2026-03-25
 
 ## Status And Scope
 
-Phase 2 is planned and not started.
+Phase 2 is ready to start.
 
-This placeholder handoff was created during Phase 0 so the domain-model revision has a reserved continuation path.
+Phase 1 is now completed, so Phase 2 is the active next implementation phase.
+
+No runtime Phase 2 changes have landed yet in this handoff. This document now serves as the direct pickup point for the domain-model revision.
 
 ## Phase Goal
 
@@ -18,9 +20,9 @@ Revise the domain model toward a parent `Work`, child `Track`, and explicitly se
 
 ## What Changed
 
-None yet.
+No runtime changes yet.
 
-This file was created during Phase 0 to reserve the handoff path and record the intended scope boundary.
+This handoff now reflects the post-Phase-1 starting boundary for the schema and service revision.
 
 ## Source Of Truth Files And Surfaces
 
@@ -65,17 +67,19 @@ Expected early test focus:
 
 None yet.
 
-Workers should be recorded here when Phase 2 actually starts.
+Workers should be recorded here when Phase 2 implementation begins.
 
 ## QA/QC Summary From Central Oversight
 
-Phase 0 central-oversight instruction:
+Central-oversight instruction for the Phase 2 kickoff:
 
 - separate work ownership, recording ownership, and contribution roles explicitly instead of hiding them behind generic rights rows
+- treat the completed Phase 1 Party cutover as a prerequisite that is now satisfied
+- keep the first Phase 2 landing at the schema/service layer; do not mix in Work Manager expansion or track-creation UX yet
 
 ## Exact Safe Pickup Instructions
 
-Before starting Phase 2:
+When starting Phase 2:
 
 1. read the masterplan and the completed Phase 1 handoff
 2. confirm the Party authority cutover needed by this model is in place

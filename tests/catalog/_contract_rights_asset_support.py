@@ -32,11 +32,13 @@ try:
         ContractEditorDialog,
         ContractObligationEditor,
     )
+    from isrc_manager.rights.dialogs import RightEditorDialog
 except Exception:  # pragma: no cover - environment-specific fallback
     ContractBrowserPanel = None
     ContractDocumentEditor = None
     ContractEditorDialog = None
     ContractObligationEditor = None
+    RightEditorDialog = None
     QFrame = None
 
 
@@ -1038,6 +1040,60 @@ class ContractRightsAssetServiceTestCase(unittest.TestCase):
             self.assertTrue(compact_groups)
         finally:
             panel.deleteLater()
+
+    def case_right_editor_supports_party_quick_create_and_edit(self):
+        if RightEditorDialog is None:
+            self.skipTest("Right editor dialog unavailable")
+        require_qapplication()
+
+        dialog = RightEditorDialog(
+            rights_service=self.rights_service,
+            party_service=self.party_service,
+            contract_service=self.contract_service,
+        )
+        try:
+            with mock.patch("isrc_manager.rights.dialogs.PartyEditorDialog") as party_dialog_cls:
+                party_dialog = party_dialog_cls.return_value
+                party_dialog.exec.return_value = True
+                party_dialog.payload.return_value = PartyPayload(
+                    legal_name="Signal Grantor B.V.",
+                    display_name="Signal Grantor",
+                    party_type="organization",
+                )
+                dialog.granted_by_new_button.click()
+
+            created_parties = self.party_service.list_parties()
+            self.assertEqual(len(created_parties), 1)
+            created_party_id = created_parties[0].id
+            created_index = dialog.granted_by_combo.findData(created_party_id)
+            self.assertGreaterEqual(created_index, 0)
+            dialog.granted_by_combo.setCurrentIndex(created_index)
+            self.assertEqual(dialog.granted_by_combo.currentData(), created_party_id)
+
+            dialog.title_edit.setText("Signal Grant")
+            dialog.territory_edit.setText("EU")
+
+            with mock.patch("isrc_manager.rights.dialogs.PartyEditorDialog") as party_dialog_cls:
+                party_dialog = party_dialog_cls.return_value
+                party_dialog.exec.return_value = True
+                party_dialog.payload.return_value = PartyPayload(
+                    legal_name="Signal Grantor B.V.",
+                    display_name="Signal Grantor Updated",
+                    party_type="organization",
+                )
+                dialog.granted_by_edit_button.click()
+
+            refreshed_index = dialog.granted_by_combo.findData(created_party_id)
+            self.assertGreaterEqual(refreshed_index, 0)
+            dialog.granted_by_combo.setCurrentIndex(refreshed_index)
+            self.assertEqual(dialog.granted_by_combo.currentData(), created_party_id)
+            self.assertIn("Signal Grantor Updated", dialog.granted_by_combo.itemText(refreshed_index))
+
+            payload = dialog.payload()
+            self.assertEqual(payload.granted_by_party_id, created_party_id)
+            self.assertEqual(payload.territory, "EU")
+        finally:
+            dialog.close()
 
     def case_contract_validation_rejects_invalid_date_ranges(self):
         with self.assertRaises(ValueError):

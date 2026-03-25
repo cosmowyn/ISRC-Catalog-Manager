@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from functools import partial
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -28,6 +30,7 @@ from PySide6.QtWidgets import (
 
 from isrc_manager.contracts import ContractService
 from isrc_manager.parties import PartyService
+from isrc_manager.parties.dialogs import PartyEditorDialog
 from isrc_manager.ui_common import (
     _add_standard_dialog_header,
     _apply_compact_dialog_control_heights,
@@ -82,6 +85,18 @@ class RightEditorDialog(QDialog):
         self.granted_by_combo = QComboBox()
         self.granted_to_combo = QComboBox()
         self.retained_by_combo = QComboBox()
+        self.granted_by_field = self._build_party_reference_field(
+            self.granted_by_combo,
+            label="Granted By",
+        )
+        self.granted_to_field = self._build_party_reference_field(
+            self.granted_to_combo,
+            label="Granted To",
+        )
+        self.retained_by_field = self._build_party_reference_field(
+            self.retained_by_combo,
+            label="Retained By",
+        )
         self.contract_combo = QComboBox()
         self.work_combo = QComboBox()
         self.track_combo = QComboBox()
@@ -158,9 +173,9 @@ class RightEditorDialog(QDialog):
         )
         parties_form = QFormLayout()
         _configure_standard_form_layout(parties_form)
-        parties_form.addRow("Granted By", self.granted_by_combo)
-        parties_form.addRow("Granted To", self.granted_to_combo)
-        parties_form.addRow("Retained By", self.retained_by_combo)
+        parties_form.addRow("Granted By", self.granted_by_field)
+        parties_form.addRow("Granted To", self.granted_to_field)
+        parties_form.addRow("Retained By", self.retained_by_field)
         parties_form.addRow("Source Contract", self.contract_combo)
         parties_layout.addLayout(parties_form)
         links_layout.addWidget(parties_box)
@@ -217,6 +232,155 @@ class RightEditorDialog(QDialog):
             self._set_combo_id(self.track_combo, right.track_id)
             self._set_combo_id(self.release_combo, right.release_id)
             self.notes_edit.setPlainText(right.notes or "")
+        self._sync_party_action_state()
+
+    def _party_choice_label(self, party) -> str:
+        primary = (
+            str(getattr(party, "display_name", "") or "").strip()
+            or str(getattr(party, "artist_name", "") or "").strip()
+            or str(getattr(party, "company_name", "") or "").strip()
+            or str(getattr(party, "legal_name", "") or "").strip()
+            or f"Party #{int(party.id)}"
+        )
+        legal_name = str(getattr(party, "legal_name", "") or "").strip()
+        if legal_name and legal_name.casefold() != primary.casefold():
+            return f"{primary} ({legal_name})"
+        return primary
+
+    def _party_combos(self) -> tuple[QComboBox, QComboBox, QComboBox]:
+        return (
+            self.granted_by_combo,
+            self.granted_to_combo,
+            self.retained_by_combo,
+        )
+
+    @staticmethod
+    def _current_combo_id(combo: QComboBox) -> int | None:
+        data = combo.currentData()
+        if data in (None, ""):
+            return None
+        try:
+            return int(data)
+        except Exception:
+            return None
+
+    def _build_party_reference_field(self, combo: QComboBox, *, label: str) -> QWidget:
+        container = QWidget(self)
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        combo.setEditable(True)
+        combo.setInsertPolicy(QComboBox.NoInsert)
+        layout.addWidget(combo, 1)
+
+        new_button = QPushButton("New Party...", container)
+        new_button.clicked.connect(partial(self._create_party_for_combo, combo))
+        layout.addWidget(new_button)
+
+        edit_button = QPushButton("Edit Party...", container)
+        edit_button.clicked.connect(partial(self._edit_party_for_combo, combo, label))
+        layout.addWidget(edit_button)
+
+        if combo is self.granted_by_combo:
+            self.granted_by_new_button = new_button
+            self.granted_by_edit_button = edit_button
+        elif combo is self.granted_to_combo:
+            self.granted_to_new_button = new_button
+            self.granted_to_edit_button = edit_button
+        else:
+            self.retained_by_new_button = new_button
+            self.retained_by_edit_button = edit_button
+
+        combo.currentIndexChanged.connect(self._sync_party_action_state)
+        combo.currentTextChanged.connect(self._sync_party_action_state)
+        return container
+
+    def _refresh_party_combos(
+        self,
+        *,
+        overrides: dict[QComboBox, int | None] | None = None,
+    ) -> None:
+        selected_ids = {
+            combo: self._current_combo_id(combo)
+            for combo in self._party_combos()
+        }
+        if overrides:
+            selected_ids.update(overrides)
+        labels: list[str] = []
+        parties = list(self.party_service.list_parties() or [])
+        for combo in self._party_combos():
+            previous_state = combo.blockSignals(True)
+            try:
+                combo.clear()
+                combo.addItem("", None)
+                for party in parties:
+                    label = self._party_choice_label(party)
+                    combo.addItem(label, int(party.id))
+                    labels.append(label)
+                selected_id = selected_ids.get(combo)
+                if selected_id is not None and combo.findData(int(selected_id)) < 0:
+                    missing_label = f"Missing Party #{int(selected_id)}"
+                    combo.addItem(missing_label, int(selected_id))
+                    labels.append(missing_label)
+                self._set_combo_id(combo, selected_id)
+            finally:
+                combo.blockSignals(previous_state)
+            completer = QCompleter(labels, combo)
+            completer.setCaseSensitivity(Qt.CaseInsensitive)
+            combo.setCompleter(completer)
+        self._sync_party_action_state()
+
+    def _sync_party_action_state(self, *_args) -> None:
+        self.granted_by_new_button.setEnabled(True)
+        self.granted_to_new_button.setEnabled(True)
+        self.retained_by_new_button.setEnabled(True)
+        self.granted_by_edit_button.setEnabled(
+            self._current_combo_id(self.granted_by_combo) is not None
+        )
+        self.granted_to_edit_button.setEnabled(
+            self._current_combo_id(self.granted_to_combo) is not None
+        )
+        self.retained_by_edit_button.setEnabled(
+            self._current_combo_id(self.retained_by_combo) is not None
+        )
+
+    def _create_party_for_combo(self, combo: QComboBox) -> None:
+        dialog = PartyEditorDialog(party_service=self.party_service, parent=self)
+        if not dialog.exec():
+            return
+        try:
+            party_id = int(self.party_service.create_party(dialog.payload()))
+        except Exception as exc:
+            QMessageBox.warning(self, "Rights Matrix", str(exc))
+            return
+        self._refresh_party_combos(overrides={combo: party_id})
+
+    def _edit_party_for_combo(self, combo: QComboBox, label: str) -> None:
+        party_id = self._current_combo_id(combo)
+        if party_id is None:
+            QMessageBox.information(
+                self,
+                "Rights Matrix",
+                f"Select a Party in {label} first.",
+            )
+            return
+        record = self.party_service.fetch_party(int(party_id))
+        if record is None:
+            QMessageBox.warning(
+                self,
+                "Rights Matrix",
+                f"Party #{int(party_id)} could not be loaded.",
+            )
+            return
+        dialog = PartyEditorDialog(party_service=self.party_service, party=record, parent=self)
+        if not dialog.exec():
+            return
+        try:
+            self.party_service.update_party(int(record.id), dialog.payload())
+        except Exception as exc:
+            QMessageBox.warning(self, "Rights Matrix", str(exc))
+            return
+        self._refresh_party_combos(overrides={combo: int(record.id)})
 
     def _populate_reference_combos(self) -> None:
         for combo in (
@@ -230,11 +394,8 @@ class RightEditorDialog(QDialog):
         ):
             combo.addItem("", None)
             combo.setEditable(True)
-        for party in self.party_service.list_parties():
-            label = party.display_name or party.legal_name
-            self.granted_by_combo.addItem(label, party.id)
-            self.granted_to_combo.addItem(label, party.id)
-            self.retained_by_combo.addItem(label, party.id)
+            combo.setInsertPolicy(QComboBox.NoInsert)
+        self._refresh_party_combos()
         for contract in self.contract_service.list_contracts():
             self.contract_combo.addItem(contract.title, contract.id)
         conn = getattr(self.rights_service, "conn", None)

@@ -256,6 +256,13 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
             self.assertIsNotNone(tabs)
             self.assertEqual(tabs.count(), 2)
             self.assertEqual(dialog.contract_combo.count(), 1)
+            self.assertTrue(dialog.granted_by_combo.isEditable())
+            self.assertTrue(dialog.granted_to_combo.isEditable())
+            self.assertTrue(dialog.retained_by_combo.isEditable())
+            self.assertIsNotNone(dialog.granted_by_new_button)
+            self.assertIsNotNone(dialog.granted_to_new_button)
+            self.assertIsNotNone(dialog.retained_by_new_button)
+            self.assertFalse(dialog.granted_by_edit_button.isEnabled())
         finally:
             dialog.close()
 
