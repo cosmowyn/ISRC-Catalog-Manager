@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -57,6 +59,240 @@ from .models import (
     WorkRecord,
 )
 from .service import WorkService
+
+
+@dataclass(frozen=True)
+class GovernedMusicalEntryPlan:
+    """Describes the next governed musical creation step chosen by the user."""
+
+    mode: str
+    work_id: int | None = None
+    relationship_type: str = "original"
+
+
+class GovernedMusicalEntryDialog(QDialog):
+    """Choose the governed musical creation path before opening any editor surface."""
+
+    MODE_NEW_WORK_SINGLE = "new_work_single"
+    MODE_NEW_WORK_ALBUM = "new_work_album"
+    MODE_EXISTING_WORK_SINGLE = "existing_work_single"
+    MODE_EXISTING_WORK_ALBUM = "existing_work_album"
+    MODE_AUTO_GOVERNED_ALBUM = "auto_governed_album"
+
+    def __init__(
+        self,
+        *,
+        work_service: WorkService,
+        selected_work_id: int | None = None,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.work_service = work_service
+        self._selected_work_id_seed = int(selected_work_id) if selected_work_id else None
+        self._work_records = list(self.work_service.list_works())
+        self.setWindowTitle("Create Musical Entry")
+        self.resize(760, 520)
+        self.setMinimumSize(680, 460)
+        _apply_standard_dialog_chrome(self, "governedMusicalEntryDialog")
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(14)
+        _add_standard_dialog_header(
+            root,
+            self,
+            title=self.windowTitle(),
+            subtitle=(
+                "Use one governed workflow for new works, first tracks, child tracks, remixes, "
+                "and governed album batches. Work remains the parent governance layer."
+            ),
+        )
+
+        options_box, options_layout = _create_standard_section(
+            self,
+            "Creation Outcome",
+            "Choose whether this entry creates a new parent work or adds governed recordings under an existing work. "
+            "Album batches stay within the same governed model and never mix governance modes within one save.",
+        )
+
+        form = QFormLayout()
+        _configure_standard_form_layout(form)
+
+        self.mode_combo = QComboBox(self)
+        self.mode_combo.addItem("New Work + First Track", self.MODE_NEW_WORK_SINGLE)
+        self.mode_combo.addItem("New Work + Governed Album Batch", self.MODE_NEW_WORK_ALBUM)
+        self.mode_combo.addItem("Child Track Under Existing Work", self.MODE_EXISTING_WORK_SINGLE)
+        self.mode_combo.addItem(
+            "Governed Album Batch Under Existing Work",
+            self.MODE_EXISTING_WORK_ALBUM,
+        )
+        self.mode_combo.addItem(
+            "Auto-Governed Album Batch (One Work Per Track)",
+            self.MODE_AUTO_GOVERNED_ALBUM,
+        )
+        self.mode_combo.currentIndexChanged.connect(self._refresh_state)
+        form.addRow("Create", self.mode_combo)
+
+        self.work_combo = QComboBox(self)
+        self.work_combo.addItem("Choose a parent work...", None)
+        for record in self._work_records:
+            self.work_combo.addItem(self._work_choice_label(record), int(record.id))
+        if self._selected_work_id_seed is not None:
+            selected_index = self.work_combo.findData(int(self._selected_work_id_seed))
+            self.work_combo.setCurrentIndex(selected_index if selected_index >= 0 else 0)
+        self.work_combo.currentIndexChanged.connect(self._refresh_state)
+        form.addRow("Parent Work", self.work_combo)
+
+        self.relationship_combo = QComboBox(self)
+        for value in (
+            "original",
+            "version",
+            "edit",
+            "live",
+            "instrumental",
+            "alternate_master",
+            "remix",
+            "derivative",
+            "other",
+        ):
+            self.relationship_combo.addItem(value.replace("_", " ").title(), value)
+        self.relationship_combo.currentIndexChanged.connect(self._refresh_state)
+        form.addRow("Child Type", self.relationship_combo)
+        options_layout.addLayout(form)
+
+        preview_box, preview_layout = _create_standard_section(
+            self,
+            "Preview",
+            "Review the exact governed result before opening the next editor surface.",
+        )
+        self.preview_title = QLabel("")
+        self.preview_title.setWordWrap(True)
+        self.preview_title.setProperty("role", "sectionTitle")
+        preview_layout.addWidget(self.preview_title)
+        self.preview_text = QLabel("")
+        self.preview_text.setWordWrap(True)
+        self.preview_text.setProperty("role", "secondary")
+        preview_layout.addWidget(self.preview_text)
+        options_layout.addWidget(preview_box)
+        root.addWidget(options_box, 1)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)
+        ok_button = button_box.button(QDialogButtonBox.Ok)
+        if ok_button is not None:
+            ok_button.setText("Continue")
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        root.addWidget(button_box)
+
+        default_mode = (
+            self.MODE_EXISTING_WORK_SINGLE
+            if self._selected_work_id_seed is not None
+            else self.MODE_NEW_WORK_SINGLE
+        )
+        default_index = self.mode_combo.findData(default_mode)
+        self.mode_combo.setCurrentIndex(default_index if default_index >= 0 else 0)
+        self._refresh_state()
+
+    @staticmethod
+    def _work_choice_label(record: WorkRecord) -> str:
+        title = str(record.title or "").strip() or f"Work #{int(record.id)}"
+        if str(record.iswc or "").strip():
+            return f"{title} ({str(record.iswc).strip()})"
+        return title
+
+    def _selected_mode(self) -> str:
+        return str(self.mode_combo.currentData() or self.MODE_NEW_WORK_SINGLE)
+
+    def _selected_work_id(self) -> int | None:
+        value = self.work_combo.currentData()
+        try:
+            return int(value) if value not in (None, "") else None
+        except (TypeError, ValueError):
+            return None
+
+    def _selected_relationship_type(self) -> str:
+        value = str(self.relationship_combo.currentData() or "original").strip().lower()
+        return value or "original"
+
+    def _mode_requires_existing_work(self, mode: str) -> bool:
+        return mode in {self.MODE_EXISTING_WORK_SINGLE, self.MODE_EXISTING_WORK_ALBUM}
+
+    def _mode_uses_relationship(self, mode: str) -> bool:
+        return mode in {self.MODE_EXISTING_WORK_SINGLE, self.MODE_EXISTING_WORK_ALBUM}
+
+    def _refresh_state(self) -> None:
+        mode = self._selected_mode()
+        requires_existing_work = self._mode_requires_existing_work(mode)
+        uses_relationship = self._mode_uses_relationship(mode)
+        self.work_combo.setEnabled(requires_existing_work)
+        self.relationship_combo.setEnabled(uses_relationship)
+
+        work_id = self._selected_work_id()
+        relationship_label = self._selected_relationship_type().replace("_", " ")
+        work_label = ""
+        if work_id is not None:
+            work_index = self.work_combo.findData(int(work_id))
+            if work_index >= 0:
+                work_label = self.work_combo.itemText(work_index)
+
+        if mode == self.MODE_NEW_WORK_SINGLE:
+            self.preview_title.setText("Create a new parent work and its first governed track.")
+            self.preview_text.setText(
+                "The workflow will open Work metadata first. After that saves, the Recording Editor opens already scoped to the new work so the first child track saves as an original."
+            )
+            return
+        if mode == self.MODE_NEW_WORK_ALBUM:
+            self.preview_title.setText("Create a new parent work and a governed album batch.")
+            self.preview_text.setText(
+                "The workflow will create the new parent work first, then open Album Batch Entry locked to that work. Every saved track in the batch will attach to the same parent work as original children."
+            )
+            return
+        if mode == self.MODE_EXISTING_WORK_SINGLE:
+            if work_label:
+                self.preview_title.setText(f"Add a governed child track under {work_label}.")
+                self.preview_text.setText(
+                    f"The Recording Editor will open under the selected work with child type '{relationship_label}'. Choose an optional parent track there when this entry is a version, remix, or alternate master."
+                )
+            else:
+                self.preview_title.setText("Choose the existing parent work first.")
+                self.preview_text.setText(
+                    "This path adds one governed child track under an existing work. Select the parent work before continuing."
+                )
+            return
+        if mode == self.MODE_EXISTING_WORK_ALBUM:
+            if work_label:
+                self.preview_title.setText(f"Add a governed album batch under {work_label}.")
+                self.preview_text.setText(
+                    f"Album Batch Entry will open locked to the selected work, and every saved track in that batch will inherit child type '{relationship_label}'. The batch will stay in one shared-parent governance mode."
+                )
+            else:
+                self.preview_title.setText("Choose the existing parent work first.")
+                self.preview_text.setText(
+                    "This path saves the whole album batch under one existing parent work. Select that work before continuing."
+                )
+            return
+        self.preview_title.setText("Open the auto-governed album fallback.")
+        self.preview_text.setText(
+            "Album Batch Entry will open without a shared parent work. Saving the batch will create one new parent work per saved track, and the save will not silently mix governance modes."
+        )
+
+    def selected_plan(self) -> GovernedMusicalEntryPlan:
+        return GovernedMusicalEntryPlan(
+            mode=self._selected_mode(),
+            work_id=self._selected_work_id(),
+            relationship_type=self._selected_relationship_type(),
+        )
+
+    def accept(self) -> None:
+        plan = self.selected_plan()
+        if self._mode_requires_existing_work(plan.mode) and plan.work_id is None:
+            QMessageBox.information(
+                self,
+                "Create Musical Entry",
+                "Choose the parent work that should govern this new child entry.",
+            )
+            return
+        super().accept()
 
 
 class WorkEditorDialog(QDialog):
@@ -629,6 +865,7 @@ class WorkEditorDialog(QDialog):
 class WorkBrowserPanel(QWidget):
     """Browse, create, duplicate, and link first-class work records inside a workspace panel."""
 
+    create_musical_entry_requested = Signal(object)
     filter_requested = Signal(list)
     create_requested = Signal(object)
     create_child_track_requested = Signal(int)
@@ -686,12 +923,8 @@ class WorkBrowserPanel(QWidget):
         self.search_edit.textChanged.connect(self.refresh)
         controls.addWidget(self.search_edit, 1)
 
-        add_button = QPushButton("Add")
-        add_button.clicked.connect(self.create_work)
-        self.create_child_track_button = QPushButton("Add Track to Work")
-        self.create_child_track_button.clicked.connect(self.create_child_track)
-        self.create_album_for_work_button = QPushButton("Add Album to Work")
-        self.create_album_for_work_button.clicked.connect(self.create_album_for_work)
+        self.create_musical_entry_button = QPushButton("Create Musical Entry…")
+        self.create_musical_entry_button.clicked.connect(self.launch_musical_entry_workflow)
         edit_button = QPushButton("Edit")
         edit_button.clicked.connect(self.edit_selected)
         duplicate_button = QPushButton("Duplicate")
@@ -706,9 +939,7 @@ class WorkBrowserPanel(QWidget):
         self.manage_actions_cluster = _create_action_button_cluster(
             self,
             [
-                add_button,
-                self.create_child_track_button,
-                self.create_album_for_work_button,
+                self.create_musical_entry_button,
                 edit_button,
                 duplicate_button,
                 link_button,
@@ -808,6 +1039,9 @@ class WorkBrowserPanel(QWidget):
         if not work_id:
             return
         self._restore_selection(int(work_id))
+
+    def selected_work_id(self) -> int | None:
+        return self._selected_work_id()
 
     def refresh(self) -> None:
         selected_work_id = self._selected_work_id()
@@ -952,6 +1186,13 @@ class WorkBrowserPanel(QWidget):
             return
         self.create_requested.emit(dialog.payload())
 
+    def launch_musical_entry_workflow(self) -> None:
+        service = self._work_service()
+        if service is None:
+            QMessageBox.warning(self, "Work Manager", "Open a profile first.")
+            return
+        self.create_musical_entry_requested.emit(self._selected_work_id())
+
     def create_child_track(self) -> None:
         service = self._work_service()
         if service is None:
@@ -1051,6 +1292,7 @@ class WorkBrowserPanel(QWidget):
 class WorkBrowserDialog(QDialog):
     """Compatibility dialog wrapper around the reusable work manager panel."""
 
+    create_musical_entry_requested = Signal(object)
     filter_requested = Signal(list)
     create_requested = Signal(object)
     create_child_track_requested = Signal(int)
@@ -1088,6 +1330,7 @@ class WorkBrowserDialog(QDialog):
             parent=self,
         )
         self.panel.filter_requested.connect(self.filter_requested.emit)
+        self.panel.create_musical_entry_requested.connect(self.create_musical_entry_requested.emit)
         self.panel.create_requested.connect(self.create_requested.emit)
         self.panel.create_child_track_requested.connect(self.create_child_track_requested.emit)
         self.panel.create_album_for_work_requested.connect(

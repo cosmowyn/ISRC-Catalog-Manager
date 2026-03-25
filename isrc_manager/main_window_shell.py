@@ -73,15 +73,15 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         slot=lambda: app._copy_selection_to_clipboard(True),
         shortcuts=("Ctrl+Shift+C", "Meta+Shift+C"),
     )
+    app.create_musical_entry_action = app._create_action(
+        "Create Musical Entry…",
+        slot=app.open_musical_entry_workflow,
+        shortcuts=("Ctrl+Alt+N", "Meta+Alt+N"),
+    )
     app.save_entry_action = app._create_action(
-        "Save Track",
+        "Save Recording",
         slot=app.save,
         standard_key=QKeySequence.Save,
-    )
-    app.add_album_action = app._create_action(
-        "Add Album…",
-        slot=app.open_add_album_dialog,
-        shortcuts=("Ctrl+Alt+A", "Meta+Alt+A"),
     )
     app.edit_selected_action = app._create_action(
         "Edit Selected…",
@@ -93,7 +93,7 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         shortcuts=("Delete", "Meta+Backspace"),
     )
     app.reset_form_action = app._create_action(
-        "Reset Form and Search",
+        "Reset Recording Draft and Search",
         slot=lambda: (app.init_form(), app.reset_search()),
         shortcuts=("Escape",),
     )
@@ -300,11 +300,9 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     edit_menu.addAction(app.undo_action)
     edit_menu.addAction(app.redo_action)
     edit_menu.addSeparator()
-    edit_menu.addAction(app.save_entry_action)
-    edit_menu.addAction(app.add_album_action)
+    edit_menu.addAction(app.create_musical_entry_action)
     edit_menu.addAction(app.edit_selected_action)
     edit_menu.addAction(app.delete_entry_action)
-    edit_menu.addAction(app.reset_form_action)
     edit_menu.addSeparator()
     edit_menu.addAction(app.copy_action)
     edit_menu.addAction(app.copy_with_headers_action)
@@ -371,14 +369,13 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     )
     workspace_menu.addAction(app.global_search_action)
     app.add_data_action = app._create_action(
-        "Show Track Entry Panel",
+        "Show Recording Editor",
         checkable=True,
         checked=False,
         toggled_slot=app._on_toggle_add_data,
         shortcuts=("Ctrl+Shift+D", "Meta+Shift+D"),
     )
     workspace_menu.addSeparator()
-    workspace_menu.addAction(app.add_data_action)
 
     app.catalog_table_action = app._create_action(
         "Show Catalog Table",
@@ -578,6 +575,7 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     )
     view_menu.addAction(app.profiles_toolbar_visibility_action)
     view_menu.addAction(app.action_ribbon_visibility_action)
+    view_menu.addAction(app.add_data_action)
 
     app.customize_action_ribbon_action = app._create_action(
         "Customize Action Ribbon…",
@@ -764,11 +762,11 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.add_data_title_row.setContentsMargins(0, 0, 0, 0)
     app.add_data_title_row.setSpacing(8)
 
-    app.add_data_title = QLabel("Track Entry")
+    app.add_data_title = QLabel("Recording Editor")
     app.add_data_title.setProperty("role", "sectionTitle")
 
     app.add_data_subtitle = QLabel(
-        "Use Work Manager for governed creation, or use this recording-entry surface for direct imports, repairs, and standalone track admin."
+        "Use Work Manager for governed musical creation. This recording editor is reused after a governed start and remains available for repair and administrative follow-up."
     )
     app.add_data_subtitle.setWordWrap(True)
     app.add_data_subtitle.setProperty("role", "secondary")
@@ -776,7 +774,7 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.add_data_title_row.addWidget(app.add_data_title)
     app.add_data_title_row.addStretch(1)
     app.add_data_title_row.addWidget(
-        _create_round_help_button(app, "add-data", "Open help for the Track Entry panel")
+        _create_round_help_button(app, "add-data", "Open help for the Recording Editor")
     )
     app.add_data_header_layout.addLayout(app.add_data_title_row)
     app.add_data_header_layout.addWidget(app.add_data_subtitle)
@@ -823,8 +821,10 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.add_data_work_context_actions_layout = QHBoxLayout(app.add_data_work_context_actions)
     app.add_data_work_context_actions_layout.setContentsMargins(0, 0, 0, 0)
     app.add_data_work_context_actions_layout.setSpacing(8)
-    app.add_data_clear_work_context_button = QPushButton("Clear Work Context")
-    app.add_data_clear_work_context_button.clicked.connect(app._clear_work_track_creation_context)
+    app.add_data_clear_work_context_button = QPushButton("Return to Work Manager")
+    app.add_data_clear_work_context_button.clicked.connect(
+        app._return_from_work_track_creation_context
+    )
     app.add_data_work_context_actions_layout.addStretch(1)
     app.add_data_work_context_actions_layout.addWidget(app.add_data_clear_work_context_button)
     add_data_work_context_layout.addWidget(app.add_data_work_context_actions)
@@ -1079,19 +1079,16 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     button_row = QHBoxLayout()
     button_row.setContentsMargins(0, 4, 0, 0)
     button_row.setSpacing(8)
-    app.cancel_button = QPushButton("Reset Form")
+    app.cancel_button = QPushButton("Clear Draft")
     app.cancel_button.clicked.connect(app.clear_form_fields)
     app.cancel_button.setMinimumHeight(32)
-    app.add_album_button = QPushButton("Add Album…")
-    app.add_album_button.clicked.connect(app.open_add_album_dialog)
-    app.add_album_button.setMinimumHeight(32)
     app.edit_button = QPushButton("Edit Selected")
     app.edit_button.clicked.connect(app.open_selected_editor)
     app.edit_button.setMinimumHeight(32)
     app.edit_button.setToolTip(
         "Open the selected table row, or bulk edit when multiple rows are selected."
     )
-    app.save_button = QPushButton("Save Track")
+    app.save_button = QPushButton("Save Recording")
     app.save_button.clicked.connect(app.save)
     app.save_button.setMinimumHeight(32)
     app.save_button.setDefault(True)
@@ -1100,7 +1097,6 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.delete_button.setMinimumHeight(32)
     app.delete_button.setToolTip("Delete the currently selected track from the table.")
     button_row.addWidget(app.cancel_button)
-    button_row.addWidget(app.add_album_button)
     button_row.addStretch(1)
     button_row.addWidget(app.edit_button)
     button_row.addWidget(app.delete_button)
@@ -1127,7 +1123,7 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.left_scroll.setWidgetResizable(True)
     app.left_scroll.setWidget(app.left_widget_container)
     app.left_scroll.setMinimumWidth(300)
-    app.add_data_dock = QDockWidget("Track Entry", app)
+    app.add_data_dock = QDockWidget("Recording Editor", app)
     app.add_data_dock.setObjectName("addDataDock")
     app.add_data_dock.setAllowedAreas(Qt.AllDockWidgetAreas)
     app.add_data_dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)

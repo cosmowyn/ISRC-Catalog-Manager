@@ -412,7 +412,12 @@ from isrc_manager.ui_common import (
     _prompt_compact_choice_dialog,
 )
 from isrc_manager.works import WorkService
-from isrc_manager.works.dialogs import WorkBrowserPanel
+from isrc_manager.works.dialogs import (
+    GovernedMusicalEntryDialog,
+    GovernedMusicalEntryPlan,
+    WorkBrowserPanel,
+    WorkEditorDialog,
+)
 
 
 class _JsonLogFormatter(logging.Formatter):
@@ -10906,6 +10911,7 @@ class App(QMainWindow):
         panel.filter_requested.connect(
             lambda track_ids: self._replace_catalog_track_filter(track_ids, source_label="work")
         )
+        panel.create_musical_entry_requested.connect(self.open_musical_entry_workflow)
         panel.create_requested.connect(self.create_work)
         panel.create_child_track_requested.connect(self._begin_work_child_track_creation)
         panel.create_album_for_work_requested.connect(self.open_add_album_dialog_for_work)
@@ -11180,18 +11186,19 @@ class App(QMainWindow):
     def _initialize_action_ribbon_registry(self):
         specs = [
             {
-                "id": "save_entry",
-                "label": "Save Track",
-                "category": "Edit",
-                "description": "Save the current recording from the Track Entry panel.",
-                "action": self.save_entry_action,
+                "id": "create_musical_entry",
+                "label": "Create Musical Entry",
+                "category": "Catalog",
+                "description": "Open the single governed musical creation workflow from Work Manager.",
+                "action": self.create_musical_entry_action,
+                "default": True,
             },
             {
-                "id": "add_album",
-                "label": "Add Album",
+                "id": "save_entry",
+                "label": "Save Recording",
                 "category": "Edit",
-                "description": "Open the structured batch recording dialog. Governed album batches can also be launched from Work Manager.",
-                "action": self.add_album_action,
+                "description": "Save the current governed recording draft from the Recording Editor.",
+                "action": self.save_entry_action,
             },
             {
                 "id": "edit_selected",
@@ -11237,9 +11244,9 @@ class App(QMainWindow):
             },
             {
                 "id": "reset_form",
-                "label": "Reset Form and Search",
+                "label": "Reset Recording Draft and Search",
                 "category": "Edit",
-                "description": "Clear the Track Entry form and reset the current search filter.",
+                "description": "Clear the current Recording Editor draft and reset the current search filter.",
                 "action": self.reset_form_action,
             },
             {
@@ -11515,9 +11522,9 @@ class App(QMainWindow):
             },
             {
                 "id": "show_add_data",
-                "label": "Show Track Entry Panel",
-                "category": "Catalog",
-                "description": "Toggle the recording-entry dock panel. Governed creation normally starts from Work Manager.",
+                "label": "Show Recording Editor",
+                "category": "View",
+                "description": "Toggle the reusable Recording Editor dock. New musical creation still starts from Work Manager.",
                 "action": self.add_data_action,
             },
             {
@@ -12561,11 +12568,11 @@ class App(QMainWindow):
             focus_work(int(work_id))
 
     def _reset_add_track_heading(self) -> None:
-        self.add_data_title.setText("Track Entry")
+        self.add_data_title.setText("Recording Editor")
         self.add_data_subtitle.setText(
-            "Use Work Manager for governed creation, or use this recording-entry surface for direct imports, repairs, and standalone track admin."
+            "Use Work Manager for governed musical creation. This recording editor is reused after a governed start and remains available for repair and administrative follow-up."
         )
-        self.save_button.setText("Save Track")
+        self.save_button.setText("Save Recording")
 
     def _refresh_work_track_creation_context_ui(self) -> None:
         context_group = getattr(self, "add_data_work_context_group", None)
@@ -12688,6 +12695,14 @@ class App(QMainWindow):
     def _clear_work_track_creation_context(self) -> None:
         self._pending_work_track_context = None
         self._refresh_work_track_creation_context_ui()
+
+    def _return_from_work_track_creation_context(self) -> None:
+        context = self._current_work_track_context()
+        work_id = int(context["work_id"]) if context is not None else None
+        self._clear_work_track_creation_context()
+        self.clear_form_fields()
+        self._apply_add_data_panel_state(False)
+        self.open_work_manager(work_id=work_id)
 
     def _begin_work_child_track_creation(self, work_id: int, *, seed_from_work: bool = True) -> bool:
         if self.work_service is None:
@@ -13296,6 +13311,18 @@ class App(QMainWindow):
     # Save / Edit / Delete
     # =============================================================================
     def save(self):
+        work_track_context = self._current_work_track_context()
+        if work_track_context is None:
+            response = QMessageBox.question(
+                self,
+                "Governed Musical Creation",
+                "New musical entries now start from Work Manager through Create Musical Entry. Open that governed workflow now?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if response == QMessageBox.Yes:
+                self.open_musical_entry_workflow()
+            return
         if is_blank(self.track_title_field.text()) or is_blank(self.artist_field.currentText()):
             QMessageBox.warning(self, "Missing data", "Track Title and Artist are required.")
             return
@@ -13374,17 +13401,13 @@ class App(QMainWindow):
                 audio_file_source_path=(self.audio_file_field.text().strip() or None),
                 album_art_source_path=(self.album_art_field.text().strip() or None),
             )
-            work_track_context = self._current_work_track_context()
-            if work_track_context is not None:
-                payload.work_id = int(work_track_context["work_id"])
-                payload.parent_track_id = (
-                    int(work_track_context["parent_track_id"])
-                    if work_track_context.get("parent_track_id") is not None
-                    else None
-                )
-                payload.relationship_type = str(
-                    work_track_context.get("relationship_type") or "original"
-                )
+            payload.work_id = int(work_track_context["work_id"])
+            payload.parent_track_id = (
+                int(work_track_context["parent_track_id"])
+                if work_track_context.get("parent_track_id") is not None
+                else None
+            )
+            payload.relationship_type = str(work_track_context.get("relationship_type") or "original")
             if payload.audio_file_source_path and not self._confirm_lossy_primary_audio_selection(
                 [payload.audio_file_source_path],
                 title="Save Track Media",
@@ -13452,8 +13475,9 @@ class App(QMainWindow):
         work_id: int | None = None,
         lock_work: bool = False,
         relationship_type: str | None = None,
+        inherit_work_context: bool = True,
     ):
-        current_context = self._current_work_track_context()
+        current_context = self._current_work_track_context() if inherit_work_context else None
         effective_work_id = (
             int(work_id)
             if work_id is not None
@@ -13485,6 +13509,7 @@ class App(QMainWindow):
             work_id=int(work_id),
             lock_work=True,
             relationship_type="original",
+            inherit_work_context=False,
         )
 
     def open_track_editor(self, track_id: int, *, batch_track_ids: list[int] | None = None):
@@ -14582,10 +14607,10 @@ class App(QMainWindow):
             if callable(refresh_scope):
                 refresh_scope()
 
-    def create_work(self, payload: WorkPayload):
+    def _create_work_record(self, payload: WorkPayload) -> int | None:
         if self.work_service is None:
             QMessageBox.warning(self, "Work Manager", "Open a profile first.")
-            return
+            return None
         payload.profile_name = payload.profile_name or self._current_profile_name()
         try:
             work_id = self._run_snapshot_history_action(
@@ -14612,10 +14637,16 @@ class App(QMainWindow):
             self.conn.rollback()
             self.logger.exception(f"Create work failed: {exc}")
             QMessageBox.critical(self, "Work Manager", f"Could not create the work:\n{exc}")
-            return
+            return None
         self._refresh_history_actions()
         self._refresh_work_manager_panel()
         self._focus_work_in_manager(work_id)
+        return int(work_id)
+
+    def create_work(self, payload: WorkPayload):
+        work_id = self._create_work_record(payload)
+        if not work_id:
+            return
         if not list(payload.track_ids):
             response = QMessageBox.question(
                 self,
@@ -14626,6 +14657,127 @@ class App(QMainWindow):
             )
             if response == QMessageBox.Yes:
                 self._begin_work_child_track_creation(work_id)
+
+    def _open_work_creation_dialog(self) -> WorkPayload | None:
+        if self.work_service is None:
+            QMessageBox.warning(self, "Work Manager", "Open a profile first.")
+            return None
+        dialog = WorkEditorDialog(
+            work_service=self.work_service,
+            track_title_resolver=self._get_track_title,
+            selected_track_ids_provider=lambda: [],
+            track_ids=[],
+            parent=self,
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return None
+        return dialog.payload()
+
+    def _launch_work_scoped_child_track_creation(
+        self,
+        work_id: int,
+        *,
+        relationship_type: str = "original",
+        parent_track_id: int | None = None,
+        seed_from_work: bool = True,
+    ) -> bool:
+        self._pending_work_track_context = {
+            "work_id": int(work_id),
+            "relationship_type": self._normalize_work_track_relationship(relationship_type),
+            "parent_track_id": int(parent_track_id) if parent_track_id is not None else None,
+        }
+        return self._begin_work_child_track_creation(int(work_id), seed_from_work=seed_from_work)
+
+    def _current_work_manager_selected_work_id(self) -> int | None:
+        for attr in ("work_manager_panel", "work_browser_dialog"):
+            panel = getattr(self, attr, None)
+            if panel is None:
+                continue
+            selected_work_id = getattr(panel, "selected_work_id", None)
+            if callable(selected_work_id):
+                try:
+                    value = selected_work_id()
+                except Exception:
+                    value = None
+                if value:
+                    return int(value)
+        return None
+
+    def open_musical_entry_workflow(self, selected_work_id: object | None = None):
+        if self.work_service is None:
+            QMessageBox.warning(self, "Work Manager", "Open a profile first.")
+            return
+        normalized_selected_work_id: int | None = None
+        try:
+            if isinstance(selected_work_id, bool):
+                normalized_selected_work_id = None
+            elif selected_work_id not in (None, ""):
+                normalized_selected_work_id = int(selected_work_id)
+        except (TypeError, ValueError):
+            normalized_selected_work_id = None
+        self.open_work_manager(work_id=normalized_selected_work_id)
+        if normalized_selected_work_id is None:
+            normalized_selected_work_id = self._current_work_manager_selected_work_id()
+
+        dialog = GovernedMusicalEntryDialog(
+            work_service=self.work_service,
+            selected_work_id=normalized_selected_work_id,
+            parent=self,
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return
+        plan = dialog.selected_plan()
+
+        if plan.mode == GovernedMusicalEntryDialog.MODE_NEW_WORK_SINGLE:
+            payload = self._open_work_creation_dialog()
+            if payload is None:
+                return
+            work_id = self._create_work_record(payload)
+            if not work_id:
+                return
+            self._launch_work_scoped_child_track_creation(work_id, relationship_type="original")
+            return
+
+        if plan.mode == GovernedMusicalEntryDialog.MODE_NEW_WORK_ALBUM:
+            payload = self._open_work_creation_dialog()
+            if payload is None:
+                return
+            work_id = self._create_work_record(payload)
+            if not work_id:
+                return
+            self.open_add_album_dialog(
+                work_id=work_id,
+                lock_work=True,
+                relationship_type="original",
+                inherit_work_context=False,
+            )
+            return
+
+        if plan.mode == GovernedMusicalEntryDialog.MODE_EXISTING_WORK_SINGLE and plan.work_id:
+            self._focus_work_in_manager(int(plan.work_id))
+            self._launch_work_scoped_child_track_creation(
+                int(plan.work_id),
+                relationship_type=plan.relationship_type,
+            )
+            return
+
+        if plan.mode == GovernedMusicalEntryDialog.MODE_EXISTING_WORK_ALBUM and plan.work_id:
+            self._focus_work_in_manager(int(plan.work_id))
+            self.open_add_album_dialog(
+                work_id=int(plan.work_id),
+                lock_work=True,
+                relationship_type=plan.relationship_type,
+                inherit_work_context=False,
+            )
+            return
+
+        self._clear_work_track_creation_context()
+        self.open_add_album_dialog(
+            work_id=None,
+            lock_work=False,
+            relationship_type=None,
+            inherit_work_context=False,
+        )
 
     def update_work(self, work_id: int, payload: WorkPayload):
         if self.work_service is None:
@@ -17264,8 +17416,8 @@ class App(QMainWindow):
     def init_form(self):
         self.refresh_table_preserve_view()
         self.populate_all_comboboxes()
-        self._clear_work_track_creation_context()
         self.clear_form_fields()
+        self._refresh_work_track_creation_context_ui()
 
     # =============================================================================
     # Album autofill
@@ -17782,7 +17934,7 @@ class App(QMainWindow):
             self.settings.sync()
 
         self._run_setting_bundle_history_action(
-            action_label="Toggle Track Entry Panel",
+            action_label="Toggle Recording Editor",
             setting_keys=["display/add_data_panel"],
             mutation=mutation,
             entity_id="display/add_data_panel",
@@ -21091,17 +21243,20 @@ class AlbumEntryDialog(QDialog):
     def _refresh_work_context_summary(self) -> None:
         work_id = self._selected_parent_work_id()
         if work_id is None or self.app.work_service is None:
+            self.relationship_type_combo.setEnabled(False)
             self.work_context_summary.setText(
                 "No shared parent work selected. This album save will create one parent work per saved track so the batch still lands in the governed v3 model."
             )
             self.work_context_hint.setText(
-                "When every track in this batch belongs to the same composition-level work, choose that work here so the whole batch links under one parent instead."
+                "When every track in this batch belongs to the same composition-level work, choose that work here so the whole batch links under one parent instead. Without a shared parent work, this fallback mode stays fixed to one new work per track."
             )
             return
+        self.relationship_type_combo.setEnabled(True)
         detail = self.app.work_service.fetch_work_detail(int(work_id))
         if detail is None:
+            self.relationship_type_combo.setEnabled(False)
             self.work_context_summary.setText(
-                f"Parent work #{int(work_id)} could not be loaded. Choose another work or leave the batch standalone."
+                f"Parent work #{int(work_id)} could not be loaded. Choose another work or use the explicit auto-governed batch mode instead."
             )
             self.work_context_hint.setText(
                 "The selected work could not be loaded from the current profile."
@@ -21143,7 +21298,11 @@ class AlbumEntryDialog(QDialog):
             else state_message
         )
 
-        self.setWindowTitle("Add Album to Work" if self._selected_work_id_seed is not None else "Add Album")
+        self.setWindowTitle(
+            "Album Batch Entry for Work"
+            if self._selected_work_id_seed is not None
+            else "Album Batch Entry"
+        )
         self.setModal(True)
         self.resize(960, 960)
         self.setMinimumSize(820, 760)
@@ -21334,7 +21493,7 @@ class AlbumEntryDialog(QDialog):
         buttons.setContentsMargins(0, 0, 0, 0)
         buttons.setSpacing(8)
         buttons.addStretch(1)
-        self.save_button = QPushButton("Save Album")
+        self.save_button = QPushButton("Save Album Batch")
         self.save_button.setDefault(True)
         self._apply_button_height(self.save_button)
         self.save_button.clicked.connect(self.save_album)
@@ -21497,7 +21656,9 @@ class AlbumEntryDialog(QDialog):
         if is_blank(album_title):
             self.primary_tabs.setCurrentWidget(self.album_details_tab)
             QMessageBox.warning(
-                self, "Missing Album Title", "Album Title is required when using Add Album."
+                self,
+                "Missing Album Title",
+                "Album Title is required when using Album Batch Entry.",
             )
             return None
 
@@ -21705,7 +21866,7 @@ class AlbumEntryDialog(QDialog):
 
         try:
             result_ids = self.app._run_snapshot_history_action(
-                action_label=f"Add Album: {album_title}",
+                action_label=f"Create Album Batch: {album_title}",
                 action_type="album.create",
                 entity_type="Album",
                 entity_id=album_title,

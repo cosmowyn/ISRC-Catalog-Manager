@@ -54,9 +54,9 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         <p>The app is organized around a few core ideas:</p>
         <ul>
           <li><strong>Profiles</strong>: each profile is a self-contained catalog database, so separate catalogs remain clean and portable.</li>
-          <li><strong>Work Manager</strong>: the primary governance surface for creating works and adding governed child tracks under them.</li>
-          <li><strong>Track Entry panel</strong>: the dockable recording-entry workspace used for direct recording admin, imports, repairs, and work-context track creation.</li>
-          <li><strong>Add Album</strong>: a structured multi-track workflow for grouped recording entry, including batches created under one parent work.</li>
+          <li><strong>Work Manager</strong>: the primary governance surface and the one governed entry point for musical creation through <strong>Create Musical Entry</strong>.</li>
+          <li><strong>Recording Editor</strong>: the dockable recording editor that opens after a governed start and remains available for repair and administrative follow-up.</li>
+          <li><strong>Album Batch Entry</strong>: the batch-entry surface used by the same governed creation system for shared-parent batches and explicit auto-governed fallback batches.</li>
           <li><strong>Releases</strong>: first-class product records for UPC/EAN, release artwork, ordering, and release-level metadata.</li>
           <li><strong>Works</strong>: a composition layer that stays distinct from recordings so the same work can connect to multiple tracks.</li>
           <li><strong>Parties</strong>: reusable people and companies for writers, publishers, labels, managers, licensees, and organizations.</li>
@@ -75,7 +75,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Flexible file storage</strong>: file-backed records can be kept as database BLOBs or as managed local files without changing the surrounding UI workflow.</li>
           <li><strong>Media badge icons</strong>: separate visual indicators for stored audio and image BLOBs can be configured with system icons, emoji, or compressed custom images.</li>
         </ul>
-        <p>The menu bar mirrors those workflows. <strong>File</strong> handles profiles and exchange, <strong>Edit</strong> focuses on direct catalog actions, <strong>Catalog</strong> opens the richer repertoire tools, <strong>Settings</strong> controls app and profile configuration, <strong>View</strong> manages layout and columns, <strong>History</strong> protects recoverability, and <strong>Help</strong> gives you diagnostics, logs, and this manual.</p>
+        <p>The menu bar mirrors those workflows. <strong>File</strong> handles profiles and exchange, <strong>Edit</strong> can launch the unified musical creation workflow and edit the current selection, <strong>Catalog</strong> opens the richer repertoire tools, <strong>Settings</strong> controls app and profile configuration, <strong>View</strong> manages layout and helper surfaces, <strong>History</strong> protects recoverability, and <strong>Help</strong> gives you diagnostics, logs, and this manual.</p>
         """,
     ),
     HelpChapter(
@@ -93,13 +93,13 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "quick actions",
         ),
         content_html="""
-        <p>The main window is designed as a practical catalog workspace rather than a single fixed screen. By default, the left side contains the <strong>Track Entry</strong> workspace and the right side contains the <strong>Catalog Table</strong>, but both can be shown, hidden, floated, and re-docked.</p>
+        <p>The main window is designed as a practical catalog workspace rather than a single fixed screen. The <strong>Catalog Table</strong> stays central, <strong>Work Manager</strong> acts as the governed creation start for musical entries, and the <strong>Recording Editor</strong> can be shown as a helper surface when that workflow opens it or when you need operational follow-up.</p>
         <ul>
           <li><strong>Action ribbon</strong>: a customizable strip of high-frequency actions. Use <strong>View &gt; Customize Action Ribbon…</strong> to make it match your workflow.</li>
           <li><strong>Profiles toolbar</strong>: switch databases, create a new profile, browse to an external profile, reload the profile list, or remove the selected entry.</li>
           <li><strong>Profiles ribbon toggle</strong>: use <strong>View &gt; Show Profiles Ribbon</strong> when you want that toolbar visible or hidden, and the choice is remembered with the rest of the workspace.</li>
           <li><strong>Dockable panes</strong>: keep the window focused on your current task by showing only the panes you need.</li>
-          <li><strong>Tabbed catalog tools</strong>: Release Browser, Work Manager, Catalog Managers, License Browser, Party Manager, Contract Manager, Rights Matrix, Deliverables and Asset Versions, and Global Search open as docked tabs beside the table so you can keep using the track browser while those panels remain open.</li>
+          <li><strong>Tabbed catalog tools</strong>: Release Browser, Work Manager, Catalog Managers, License Browser, Party Manager, Contract Manager, Rights Matrix, Deliverables and Asset Versions, and Global Search open as docked tabs beside the table so you can keep using the catalog inventory while those panels remain open.</li>
           <li><strong>Saved layout</strong>: column layout, dock placement, and visibility preferences are remembered so the app opens the way you work.</li>
         </ul>
         <p>Use the menus when you need the full surface of the product, or stay inside the docked views for everyday entry and review. The window title, branding, and appearance can be customized from <strong>Settings &gt; Application Settings</strong>. When you open multiple catalog tools, the app prefers tabbed docking so the workspace stays compact and easier to navigate while the table remains usable.</p>
@@ -158,8 +158,8 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
     ),
     HelpChapter(
         chapter_id="add-data",
-        title="Track Entry Panel",
-        summary="How to use the recording-entry surface directly, how it behaves under work governance, and how to attach the metadata and media needed for a real catalog.",
+        title="Recording Editor",
+        summary="How the reusable recording editor behaves after a governed start, how it keeps work context visible, and where it still fits into operational follow-up.",
         keywords=(
             "add data",
             "add track",
@@ -172,20 +172,20 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "dsp",
         ),
         content_html="""
-        <p>The Track Entry panel is the recording-focused editor in the main window. In the v3 workflow, governed creation should normally begin from <strong>Work Manager</strong>, which can open this panel already scoped to the selected parent work. The panel can still be used directly for repairs, imports, and standalone recording administration.</p>
+        <p>The Recording Editor is the recording-focused editor in the main window. In the v3 workflow, new musical creation begins from <strong>Work Manager</strong> through <strong>Create Musical Entry</strong>, which can open this editor already scoped to the selected parent work. The editor itself remains useful for repairs, imports, and administrative follow-up once the governed relationship is known.</p>
         <ul>
           <li><strong>Track</strong>: track title, main artist, additional artists, and genre.</li>
           <li><strong>Release</strong>: album title, release date, and track length.</li>
           <li><strong>Codes</strong>: preview-only generated values such as the future row ID, generated ISRC, and entry date, plus ISWC, UPC/EAN, catalog number, and BUMA work number.</li>
           <li><strong>Media</strong>: attach a local audio file and album art image, then choose whether each file should be stored in the database or in managed local storage.</li>
         </ul>
-        <p>Use <strong>Save Track</strong> to create the record, or <strong>Reset Form</strong> to clear the current draft. When the panel is opened from <strong>Work Manager</strong>, the work-governance summary shows the parent work, child relationship type, and optional parent track link that will be written on save. If ISRC generation is configured, the preview updates automatically from your active settings. If it is not configured yet, the track still saves cleanly and can be completed later.</p>
+        <p>Use <strong>Save Recording</strong> to save the governed child recording currently in progress, or <strong>Clear Draft</strong> to clear only the current recording draft while keeping the parent-work context intact. When the editor is opened from <strong>Work Manager</strong>, the work-governance summary shows the parent work, child relationship type, and optional parent track link that will be written on save. If you try to start a brand-new musical entry without that governed context, the app routes you back into <strong>Create Musical Entry</strong> instead of creating a floating track.</p>
         """,
     ),
     HelpChapter(
         chapter_id="album-entry",
-        title="Add Album Dialog",
-        summary="How to create a multi-track release efficiently by entering shared metadata once and saving the whole set together.",
+        title="Album Batch Entry",
+        summary="How the governed batch-entry surface handles shared-parent album batches and the explicit per-track auto-governed fallback.",
         keywords=(
             "add album",
             "album dialog",
@@ -195,16 +195,16 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "shared metadata",
         ),
         content_html="""
-        <p>The <strong>Add Album</strong> dialog is built for grouped recording entry. Instead of retyping the same album data over and over, you enter the shared product details once and then complete each track on its own tab. When the whole batch belongs to one work, open it from <strong>Work Manager</strong> or select a parent work inside the dialog so every created track is governed immediately. If you leave the parent-work selector blank, the dialog now creates one work per saved track automatically so album batches do not stay orphaned from the v3 work layer.</p>
+        <p><strong>Album Batch Entry</strong> is the grouped recording-entry surface inside the same governed creation system. Instead of retyping the same album data over and over, you enter the shared product details once and then complete each track on its own tab. When the whole batch belongs to one work, launch it from <strong>Create Musical Entry</strong> or <strong>Work Manager</strong> so every created track is governed immediately. If you explicitly leave the parent-work selector blank, the dialog creates one work per saved track automatically so album batches do not stay orphaned from the v3 work layer.</p>
         <ul>
-          <li><strong>Work Governance</strong>: optionally bind the whole batch to one parent work and choose the relationship type that should be applied to every created track. If you leave it blank, the dialog creates one work per saved track automatically.</li>
+          <li><strong>Work Governance</strong>: either bind the whole batch to one parent work and choose the shared child relationship type, or use the explicit auto-governed fallback that creates one work per saved track.</li>
           <li><strong>Album Overview</strong>: album title, UPC/EAN, genre, catalog number, album art, album-art storage choice, and the release-year rule used when auto-generating blank ISRC values.</li>
           <li><strong>Track Tabs</strong>: each tab stores one track title, main artist, additional artists, release date, track length, optional ISRC, optional ISWC, optional BUMA work number, an audio file, and its storage choice.</li>
           <li><strong>Dynamic layout</strong>: the dialog opens with two track tabs by default, but you can add more or remove the current tab at any time.</li>
           <li><strong>Blank-tab handling</strong>: completely unused track tabs are ignored when you save, so you do not need to delete every spare tab before closing the dialog.</li>
           <li><strong>Shared album art</strong>: the selected album art is stored once and linked across the saved album tracks automatically.</li>
         </ul>
-        <p>If ISRC generation is configured, blank track ISRC fields can be generated automatically during save. If not, the dialog still creates the release and track rows successfully so you can complete identifiers later.</p>
+        <p>If ISRC generation is configured, blank track ISRC fields can be generated automatically during save. If not, the dialog still creates the release and track rows successfully so you can complete identifiers later. One save always resolves as exactly one governance mode: one shared parent work for the whole batch, or one newly created work per saved track.</p>
         """,
     ),
     HelpChapter(
@@ -361,7 +361,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         <ul>
           <li><strong>Release fields</strong>: title, subtitle/version, primary artist, album artist, release type, release dates, label, sublabel, catalog number, UPC/EAN, barcode validation status, territory, explicit flag, notes, and release artwork.</li>
           <li><strong>Release order</strong>: releases store disc number, track number, and sequence separately from the track metadata itself.</li>
-          <li><strong>Add Album integration</strong>: saving a grouped album entry automatically creates or updates a real release and attaches the created tracks.</li>
+          <li><strong>Album batch integration</strong>: saving a governed grouped album entry automatically creates or updates a real release and attaches the created tracks.</li>
           <li><strong>Release Browser…</strong>: browse releases, inspect the ordered track list, duplicate releases, add the current track selection, and filter the main catalog table to a chosen release.</li>
           <li><strong>Docked workflow</strong>: the Release Browser stays open as a tabbed workspace panel, so you can keep changing the track-table selection while assigning or reviewing releases.</li>
           <li><strong>Single-track workflows</strong>: saving the Add Track panel or the Edit Track dialog also keeps the corresponding release record synchronized when release-level fields change.</li>

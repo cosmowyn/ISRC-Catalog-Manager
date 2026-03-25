@@ -73,8 +73,8 @@ The app is intentionally broader than a track/release tool and intentionally nar
 
 Create and maintain:
 
-- single-track entries from the docked Add Data panel
-- multi-track projects through the Add Album workflow
+- governed musical creation through Work Manager and Create Musical Entry
+- grouped release entry through the governed Album Batch Entry workflow
 - first-class release records with ordered track lists
 - UPC/EAN, catalog number, explicit flags, artwork, and release sequencing
 - import/export-ready track metadata with portable media attachments in database or managed-file storage
@@ -304,7 +304,7 @@ That focus is deliberate. The goal is depth and reliability in catalog maintenan
 
 ### 1. Build or import the catalog
 
-Use the Add Data panel for single tracks, Add Album for grouped releases, exchange import when catalog data already exists elsewhere, or Bulk Attach Audio Files when track rows already exist but their media still needs to be attached. Incoming structured data can be previewed, mapped, skipped field-by-field, matched, merged, or inserted as new records depending on the source and the job.
+Use Work Manager and Create Musical Entry for governed new works, first tracks, child tracks, and album batches, exchange import when catalog data already exists elsewhere, or Bulk Attach Audio Files when track rows already exist but their media still needs to be attached. Incoming structured data can be previewed, mapped, skipped field-by-field, matched, merged, or inserted as new records depending on the source and the job.
 
 ### 2. Organize the repertoire graph
 

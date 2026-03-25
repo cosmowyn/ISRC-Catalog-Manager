@@ -23,6 +23,9 @@ class AppShellWorkspaceDockTests(AppShellTestCase):
     test_work_manager_opens_album_dialog_for_selected_work = (
         AppShellTestCase.case_work_manager_opens_album_dialog_for_selected_work
     )
+    test_unified_creation_workflow_opens_auto_governed_album_fallback = (
+        AppShellTestCase.case_unified_creation_workflow_opens_auto_governed_album_fallback
+    )
     test_relationship_search_work_entity_focuses_requested_work_manager_row = (
         AppShellTestCase.case_relationship_search_work_entity_focuses_requested_work_manager_row
     )

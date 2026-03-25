@@ -8,9 +8,13 @@ Date: 2026-03-25
 
 ## Status And Scope
 
-Phase 4 is `in_progress`.
+Phase 4 is `in_progress`, with broader expansion intentionally paused until the completed Phase 3 single-entrypoint closeout is reconciled.
 
 This first Phase 4 slice starts the read-side authority cleanup so operational inventory and diagnostics consume the v3 work model instead of older shadow assumptions.
+
+The pre-Phase-4 creation-flow consolidation is now completed and documented at [`v3-workflow-revision-phase-3-single-entrypoint-closeout.md`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/docs/implementation_handoffs/v3-workflow-revision-phase-3-single-entrypoint-closeout.md).
+
+Album-governance boundaries remain anchored to the reconciled decision note at [`v3-workflow-revision-album-governance-decision-note.md`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/docs/implementation_handoffs/v3-workflow-revision-album-governance-decision-note.md).
 
 ## Phase Goal
 
@@ -52,6 +56,8 @@ Keep `Catalog` strong as the operational inventory while reducing duplicated gov
 
 ## What Was Intentionally Deferred
 
+- broader Phase 4 expansion until the reconciled album-governance guardrails are applied consistently
+- broader Phase 4 read-side work in this specific turn while the creation-flow consolidation was being completed and validated
 - broader catalog workspace projection changes
 - bulk-edit and track-edit operational cleanup
 - search/export authority cleanup beyond the Phase 3 governance-routing closeout
@@ -64,6 +70,10 @@ Keep `Catalog` strong as the operational inventory while reducing duplicated gov
 - catalog changes should consume the Phase 2 and Phase 3 model instead of inventing transitional duplicate fields
 - `WorkTrackLinks` still exists as shadow compatibility in other services; this slice narrows read authority in catalog/quality first, but does not delete that table or fully remove legacy read paths elsewhere
 - catalog rows still surface some track-side composition shadow fields such as `buma_work_number`; richer work-summary projection remains a later Phase 4 slice
+- album-related follow-up must respect the reconciled decision note:
+  - the album dialog stays a release/batch-entry surface
+  - fallback mode auto-creates governed work parents
+  - no album batch save may silently mix governance modes
 
 ## Workers Used And Workers Closed
 
@@ -87,8 +97,9 @@ Central Oversight check:
 
 Next safe Phase 4 continuation:
 
-1. read the masterplan plus the completed Phase 3 handoff first
-2. continue from `catalog_reads.py` and other read-only catalog/search/export surfaces before reshaping edit forms
-3. replace remaining read paths that still privilege track-side composition shadow fields or `WorkTrackLinks` over direct `Tracks.work_id`
-4. keep adding integration tests as authority moves from shadow structures to v3 authoritative data
-5. defer final legacy-license deletion until the replacement read and operational paths are fully stable
+1. read the masterplan, the completed Phase 3 handoff, the single-entrypoint closeout handoff, and [`v3-workflow-revision-album-governance-decision-note.md`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/docs/implementation_handoffs/v3-workflow-revision-album-governance-decision-note.md) first
+2. treat the single-entrypoint closeout and the album-governance note as active guardrails, not as optional background context
+3. continue from `catalog_reads.py` and other read-only catalog/search/export surfaces before reshaping edit forms
+4. replace remaining read paths that still privilege track-side composition shadow fields or `WorkTrackLinks` over direct `Tracks.work_id`
+5. keep adding integration tests as authority moves from shadow structures to v3 authoritative data
+6. defer final legacy-license deletion until the replacement read and operational paths are fully stable

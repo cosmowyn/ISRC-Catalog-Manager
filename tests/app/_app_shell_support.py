@@ -553,6 +553,7 @@ class AppShellTestCase(unittest.TestCase):
         expected_actions = {
             "New Profile…": self.window.new_profile_action,
             "Open Profile…": self.window.open_profile_action,
+            "Create Musical Entry…": self.window.create_musical_entry_action,
             "Release Browser…": self.window.release_browser_action,
             "Work Manager…": self.window.work_manager_action,
             "Contract Manager…": self.window.contract_manager_action,
@@ -803,6 +804,19 @@ class AppShellTestCase(unittest.TestCase):
                 "Audio Authenticity Keys…",
             ],
         )
+        edit_texts = self._menu_action_texts(self._menu_by_text("Edit"))
+        self.assertEqual(
+            edit_texts,
+            [
+                "Undo",
+                "Redo",
+                "Create Musical Entry…",
+                "Edit Selected…",
+                "Delete Selected Track",
+                "Copy",
+                "Copy with Headers",
+            ],
+        )
 
         view_snapshot = self._menu_snapshot(self._menu_by_text("View"))
         self.assertEqual(
@@ -811,6 +825,7 @@ class AppShellTestCase(unittest.TestCase):
                 "Columns",
                 "Show Profiles Ribbon",
                 "Show Action Ribbon",
+                "Show Recording Editor",
                 "Customize Action Ribbon…",
                 "Table Layout",
             ],
@@ -854,6 +869,7 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(
             self.window._action_ribbon_default_ids,
             [
+                "create_musical_entry",
                 "release_browser",
                 "work_manager",
                 "quality_dashboard",
@@ -909,11 +925,18 @@ class AppShellTestCase(unittest.TestCase):
             mock.patch.object(
                 app_module.App, "open_gs1_dialog", autospec=True, side_effect=_record("gs1")
             ),
+            mock.patch.object(
+                app_module.App,
+                "open_musical_entry_workflow",
+                autospec=True,
+                side_effect=_record("create_musical_entry"),
+            ),
         ):
             self.window = app_module.App()
             self.window.show()
             self._drain_events()
 
+            self.window.create_musical_entry_action.trigger()
             self.window.settings_action.trigger()
             self.window.show_history_action.trigger()
             self.window.help_contents_action.trigger()
@@ -926,6 +949,7 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(
             [name for name, _payload in routed_calls],
             [
+                "create_musical_entry",
                 "settings",
                 "history",
                 "help",
@@ -1592,14 +1616,47 @@ class AppShellTestCase(unittest.TestCase):
                 iswc="T-123.456.789-0",
             )
         )
+        existing_parent_track_id = self.window.track_service.create_track(
+            TrackCreatePayload(
+                isrc="NL-TST-26-10101",
+                track_title="Docked Parent Work Original",
+                artist_name="Moonwake",
+                additional_artists=[],
+                album_title="Docked Parent Work",
+                release_date="2026-03-17",
+                track_length_sec=205,
+                iswc=None,
+                upc=None,
+                genre="Ambient",
+                catalog_number=None,
+                work_id=work_id,
+                relationship_type="original",
+            )
+        )
 
         panel = self.window.open_work_manager()
         self.app.processEvents()
         panel.focus_work(work_id)
         self.app.processEvents()
 
-        panel.create_child_track()
-        self.app.processEvents()
+        with (
+            mock.patch.object(
+                app_module.GovernedMusicalEntryDialog,
+                "exec",
+                return_value=app_module.QDialog.Accepted,
+            ),
+            mock.patch.object(
+                app_module.GovernedMusicalEntryDialog,
+                "selected_plan",
+                return_value=app_module.GovernedMusicalEntryPlan(
+                    mode=app_module.GovernedMusicalEntryDialog.MODE_EXISTING_WORK_SINGLE,
+                    work_id=work_id,
+                    relationship_type="remix",
+                ),
+            ),
+        ):
+            self._button_by_text(panel.manage_actions_cluster, "Create Musical Entry…").click()
+            self.app.processEvents()
 
         self.assertFalse(self.window.add_data_dock.isHidden())
         self.assertTrue(self.window.add_data_work_context_group.isVisible())
@@ -1608,10 +1665,15 @@ class AppShellTestCase(unittest.TestCase):
         self.assertIn("Docked Parent Work", self.window.add_data_work_context_summary.text())
         self.assertEqual(self.window.track_title_field.text(), "Docked Parent Work")
         self.assertEqual(self.window.iswc_field.text(), "T-123.456.789-0")
-        self.assertFalse(self.window.add_data_work_parent_combo.isEnabled())
+        self.assertEqual(self.window.add_data_work_relationship_combo.currentData(), "remix")
+        self.assertTrue(self.window.add_data_work_parent_combo.isEnabled())
+        parent_index = self.window.add_data_work_parent_combo.findData(existing_parent_track_id)
+        self.assertGreaterEqual(parent_index, 0)
+        self.window.add_data_work_parent_combo.setCurrentIndex(parent_index)
+        self.app.processEvents()
 
         self.window.artist_field.setCurrentText("Moonwake")
-        self.window.track_title_field.setText("Docked Parent Work Master")
+        self.window.track_title_field.setText("Docked Parent Work Remix")
         with mock.patch.object(
             app_module.QMessageBox,
             "information",
@@ -1628,37 +1690,48 @@ class AppShellTestCase(unittest.TestCase):
             ORDER BY id DESC
             LIMIT 1
             """,
-            ("Docked Parent Work Master",),
+            ("Docked Parent Work Remix",),
         ).fetchone()
         self.assertIsNotNone(row)
         assert row is not None
-        track_id, linked_work_id, parent_track_id, relationship_type = row
+        track_id, linked_work_id, created_parent_track_id, relationship_type = row
         self.assertEqual(linked_work_id, work_id)
-        self.assertIsNone(parent_track_id)
-        self.assertEqual(relationship_type, "original")
+        self.assertEqual(created_parent_track_id, existing_parent_track_id)
+        self.assertEqual(relationship_type, "remix")
         detail = self.window.work_service.fetch_work_detail(work_id)
         self.assertIsNotNone(detail)
         assert detail is not None
         self.assertIn(int(track_id), detail.track_ids)
-        self.assertTrue(self.window.add_data_work_parent_combo.isEnabled())
         self.assertGreaterEqual(self.window.add_data_work_parent_combo.count(), 2)
 
     def case_create_work_offers_first_track_creation_context(self):
         panel = self.window.open_work_manager()
         self.app.processEvents()
 
-        with mock.patch.object(
-            app_module.QMessageBox,
-            "question",
-            return_value=app_module.QMessageBox.Yes,
-        ):
-            self.window.create_work(
-                app_module.WorkPayload(
+        with (
+            mock.patch.object(
+                app_module.GovernedMusicalEntryDialog,
+                "exec",
+                return_value=app_module.QDialog.Accepted,
+            ),
+            mock.patch.object(
+                app_module.GovernedMusicalEntryDialog,
+                "selected_plan",
+                return_value=app_module.GovernedMusicalEntryPlan(
+                    mode=app_module.GovernedMusicalEntryDialog.MODE_NEW_WORK_SINGLE,
+                ),
+            ),
+            mock.patch.object(
+                self.window,
+                "_open_work_creation_dialog",
+                return_value=app_module.WorkPayload(
                     title="Immediate First Track Work",
                     iswc="T-123.456.789-0",
-                )
-            )
-        self.app.processEvents()
+                ),
+            ),
+        ):
+            self._button_by_text(panel.manage_actions_cluster, "Create Musical Entry…").click()
+            self.app.processEvents()
 
         works = [
             record
@@ -1688,25 +1761,126 @@ class AppShellTestCase(unittest.TestCase):
         panel.focus_work(work_id)
         self.app.processEvents()
 
-        captured: dict[str, object] = {}
+        def _save_album_in_dialog(dialog):
+            self.assertEqual(dialog.windowTitle(), "Album Batch Entry for Work")
+            self.assertEqual(dialog.parent_work_combo.currentData(), work_id)
+            self.assertFalse(dialog.parent_work_combo.isEnabled())
+            self.assertEqual(dialog.relationship_type_combo.currentData(), "alternate_master")
+            dialog.album_title.setCurrentText("Unified Governed Album")
+            first_section = dialog._track_sections[0]
+            second_section = dialog._track_sections[1]
+            first_section.track_title.setText("Unified Governed Mix")
+            first_section.artist_name.setCurrentText("Moonwake")
+            second_section.track_title.setText("Unified Governed Dub")
+            second_section.artist_name.setCurrentText("Moonwake")
+            dialog.save_album()
+            return dialog.result()
 
-        class _FakeAlbumEntryDialog:
-            def __init__(self, app, *, work_id=None, lock_work=False, relationship_type=None):
-                captured["app"] = app
-                captured["work_id"] = work_id
-                captured["lock_work"] = lock_work
-                captured["relationship_type"] = relationship_type
+        with (
+            mock.patch.object(
+                app_module.GovernedMusicalEntryDialog,
+                "exec",
+                return_value=app_module.QDialog.Accepted,
+            ),
+            mock.patch.object(
+                app_module.GovernedMusicalEntryDialog,
+                "selected_plan",
+                return_value=app_module.GovernedMusicalEntryPlan(
+                    mode=app_module.GovernedMusicalEntryDialog.MODE_EXISTING_WORK_ALBUM,
+                    work_id=work_id,
+                    relationship_type="alternate_master",
+                ),
+            ),
+            mock.patch.object(
+                app_module.AlbumEntryDialog,
+                "exec",
+                new=_save_album_in_dialog,
+            ),
+        ):
+            self._button_by_text(panel.manage_actions_cluster, "Create Musical Entry…").click()
+            self.app.processEvents()
 
-            def exec(self):
-                return app_module.QDialog.Rejected
+        created_rows = self.window.conn.execute(
+            """
+            SELECT track_title, work_id, relationship_type
+            FROM Tracks
+            WHERE album_id = (
+                SELECT id FROM Albums WHERE title=? ORDER BY id DESC LIMIT 1
+            )
+            ORDER BY track_title
+            """,
+            ("Unified Governed Album",),
+        ).fetchall()
+        self.assertEqual(
+            created_rows,
+            [
+                ("Unified Governed Dub", work_id, "alternate_master"),
+                ("Unified Governed Mix", work_id, "alternate_master"),
+            ],
+        )
 
-        with mock.patch.object(app_module, "AlbumEntryDialog", _FakeAlbumEntryDialog):
-            panel.create_album_for_work()
+    def case_unified_creation_workflow_opens_auto_governed_album_fallback(self):
+        def _save_album_in_dialog(dialog):
+            self.assertEqual(dialog.windowTitle(), "Album Batch Entry")
+            self.assertIsNone(dialog.parent_work_combo.currentData())
+            self.assertFalse(dialog.relationship_type_combo.isEnabled())
+            dialog.album_title.setCurrentText("Unified Auto Governed Album")
+            first_section = dialog._track_sections[0]
+            second_section = dialog._track_sections[1]
+            first_section.track_title.setText("Unified Auto Governed One")
+            first_section.artist_name.setCurrentText("Moonwake")
+            first_section.iswc.setText("T-123.456.789-0")
+            second_section.track_title.setText("Unified Auto Governed Two")
+            second_section.artist_name.setCurrentText("Moonwake")
+            second_section.iswc.setText("T-123.456.780-0")
+            dialog.save_album()
+            return dialog.result()
 
-        self.assertIs(captured.get("app"), self.window)
-        self.assertEqual(captured.get("work_id"), work_id)
-        self.assertTrue(captured.get("lock_work"))
-        self.assertEqual(captured.get("relationship_type"), "original")
+        with (
+            mock.patch.object(
+                app_module.GovernedMusicalEntryDialog,
+                "exec",
+                return_value=app_module.QDialog.Accepted,
+            ),
+            mock.patch.object(
+                app_module.GovernedMusicalEntryDialog,
+                "selected_plan",
+                return_value=app_module.GovernedMusicalEntryPlan(
+                    mode=app_module.GovernedMusicalEntryDialog.MODE_AUTO_GOVERNED_ALBUM,
+                ),
+            ),
+            mock.patch.object(
+                app_module.AlbumEntryDialog,
+                "exec",
+                new=_save_album_in_dialog,
+            ),
+        ):
+            self.window.open_musical_entry_workflow()
+            self.app.processEvents()
+
+        rows = self.window.conn.execute(
+            """
+            SELECT t.track_title, t.work_id, t.relationship_type, w.title, w.iswc
+            FROM Tracks t
+            JOIN Works w ON w.id = t.work_id
+            WHERE t.album_id = (
+                SELECT id FROM Albums WHERE title=? ORDER BY id DESC LIMIT 1
+            )
+            ORDER BY t.track_title
+            """,
+            ("Unified Auto Governed Album",),
+        ).fetchall()
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0][0], "Unified Auto Governed One")
+        self.assertEqual(
+            rows[0][2:],
+            ("original", "Unified Auto Governed One", "T-123.456.789-0"),
+        )
+        self.assertEqual(rows[1][0], "Unified Auto Governed Two")
+        self.assertEqual(
+            rows[1][2:],
+            ("original", "Unified Auto Governed Two", "T-123.456.780-0"),
+        )
 
     def case_relationship_search_work_entity_focuses_requested_work_manager_row(self):
         first_work_id = self.window.work_service.create_work(
@@ -1952,28 +2126,33 @@ class AppShellTestCase(unittest.TestCase):
         self.window.open_work_manager()
         self.app.processEvents()
         work_panel = self.window.work_manager_dock.widget()
-        add_button = self._button_by_text(work_panel.manage_actions_cluster, "Add")
-        add_track_button = self._button_by_text(
-            work_panel.manage_actions_cluster, "Add Track to Work"
-        )
-        add_album_button = self._button_by_text(
-            work_panel.manage_actions_cluster, "Add Album to Work"
+        create_button = self._button_by_text(
+            work_panel.manage_actions_cluster, "Create Musical Entry…"
         )
         edit_button = self._button_by_text(work_panel.manage_actions_cluster, "Edit")
         duplicate_button = self._button_by_text(work_panel.manage_actions_cluster, "Duplicate")
+        link_button = self._button_by_text(work_panel.manage_actions_cluster, "Link Selected Tracks")
+        delete_button = self._button_by_text(work_panel.manage_actions_cluster, "Delete")
 
-        self.assertGreater(add_track_button.geometry().left() - add_button.geometry().right(), 0)
-        self.assertGreater(add_album_button.geometry().top() - add_button.geometry().bottom(), 0)
-        self.assertGreater(edit_button.geometry().left() - add_album_button.geometry().right(), 0)
-        self.assertGreater(duplicate_button.geometry().top() - add_track_button.geometry().bottom(), 0)
+        self.assertGreater(edit_button.geometry().left() - create_button.geometry().right(), 0)
+        self.assertGreater(duplicate_button.geometry().top() - create_button.geometry().bottom(), 0)
+        self.assertGreater(link_button.geometry().left() - duplicate_button.geometry().right(), 0)
+        self.assertGreater(delete_button.geometry().top() - edit_button.geometry().bottom(), 0)
         for button in (
-            add_button,
-            add_track_button,
-            add_album_button,
+            create_button,
             edit_button,
             duplicate_button,
+            link_button,
+            delete_button,
         ):
             self.assertGreaterEqual(button.width(), button.minimumSizeHint().width())
+
+        cluster_texts = [
+            button.text()
+            for button in work_panel.manage_actions_cluster.findChildren(app_module.QPushButton)
+        ]
+        self.assertNotIn("Add Track to Work", cluster_texts)
+        self.assertNotIn("Add Album to Work", cluster_texts)
 
     def case_catalog_managers_open_as_tabified_dock_and_focus_requested_tab(self):
         self.window.open_catalog_managers_dialog(initial_tab="licensees")
@@ -2096,12 +2275,12 @@ class AppShellTestCase(unittest.TestCase):
 
         self.assertIn("Derivative Ledger…", workspace_texts)
         self.assertIn("Contract Template Workspace…", workspace_texts)
-        self.assertIn("Show Track Entry Panel", workspace_texts)
         self.assertIn("Show Catalog Table", workspace_texts)
-        self.assertNotIn("Show Track Entry Panel", view_texts)
+        self.assertNotIn("Show Recording Editor", workspace_texts)
+        self.assertIn("Show Recording Editor", view_texts)
         self.assertNotIn("Show Catalog Table", view_texts)
         self.assertEqual(
-            self.window._action_ribbon_specs_by_id["show_add_data"]["category"], "Catalog"
+            self.window._action_ribbon_specs_by_id["show_add_data"]["category"], "View"
         )
         self.assertEqual(
             self.window._action_ribbon_specs_by_id["show_catalog_table"]["category"], "Catalog"
@@ -3419,10 +3598,11 @@ class AppShellTestCase(unittest.TestCase):
             relationship_type="alternate_master",
         )
         try:
-            self.assertEqual(dialog.windowTitle(), "Add Album to Work")
+            self.assertEqual(dialog.windowTitle(), "Album Batch Entry for Work")
             self.assertEqual(dialog.parent_work_combo.currentData(), work_id)
             self.assertFalse(dialog.parent_work_combo.isEnabled())
             self.assertEqual(dialog.relationship_type_combo.currentData(), "alternate_master")
+            self.assertTrue(dialog.relationship_type_combo.isEnabled())
 
             dialog.album_title.setCurrentText("Governed Album")
             first_section = dialog._track_sections[0]
@@ -3459,6 +3639,7 @@ class AppShellTestCase(unittest.TestCase):
         dialog = app_module.AlbumEntryDialog(self.window)
         try:
             self.assertIsNone(dialog.parent_work_combo.currentData())
+            self.assertFalse(dialog.relationship_type_combo.isEnabled())
             dialog.album_title.setCurrentText("Auto Governed Album")
             first_section = dialog._track_sections[0]
             second_section = dialog._track_sections[1]
@@ -3502,6 +3683,24 @@ class AppShellTestCase(unittest.TestCase):
                 self.assertNotIn(int(track_id), linked_track_ids)
         finally:
             dialog.close()
+
+    def case_save_recording_without_work_context_redirects_to_governed_creation(self):
+        existing_count = self.window.conn.execute("SELECT COUNT(*) FROM Tracks").fetchone()[0]
+
+        with (
+            mock.patch.object(
+                app_module.QMessageBox,
+                "question",
+                return_value=app_module.QMessageBox.Yes,
+            ),
+            mock.patch.object(self.window, "open_musical_entry_workflow") as open_workflow,
+        ):
+            self.window.save()
+            self.app.processEvents()
+
+        open_workflow.assert_called_once_with()
+        current_count = self.window.conn.execute("SELECT COUNT(*) FROM Tracks").fetchone()[0]
+        self.assertEqual(current_count, existing_count)
 
     def case_add_data_comboboxes_include_release_level_catalog_values(self):
         with self.window.conn:

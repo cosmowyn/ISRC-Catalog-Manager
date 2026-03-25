@@ -14,7 +14,7 @@ try:
         RelationshipSection,
         SavedSearchRecord,
     )
-    from isrc_manager.works.dialogs import WorkBrowserDialog
+    from isrc_manager.works.dialogs import GovernedMusicalEntryDialog, WorkBrowserDialog
     from isrc_manager.works.models import WorkContributorRecord, WorkDetail, WorkRecord
 except Exception as exc:  # pragma: no cover - environment-specific fallback
     DIALOG_IMPORT_ERROR = exc
@@ -368,6 +368,69 @@ class DialogControllerBehaviorTests(unittest.TestCase):
             self.assertEqual(emitted_deletes, [1])
         finally:
             dialog.close()
+
+    def test_unified_work_creation_dialog_uses_selected_work_context_and_validates_existing_modes(self):
+        service = _WorkService()
+        selected_track_ids: list[int] = []
+        dialog = WorkBrowserDialog(
+            work_service=service,
+            track_title_resolver=lambda track_id: f"Track {track_id}",
+            selected_track_ids_provider=lambda: list(selected_track_ids),
+        )
+        emitted_creation_launches = []
+        dialog.create_musical_entry_requested.connect(
+            lambda work_id: emitted_creation_launches.append(work_id)
+        )
+        try:
+            dialog.launch_musical_entry_workflow()
+            self.assertEqual(emitted_creation_launches, [None])
+
+            dialog.table.selectRow(0)
+            self.app.processEvents()
+            dialog.launch_musical_entry_workflow()
+            self.assertEqual(emitted_creation_launches, [None, 1])
+        finally:
+            dialog.close()
+
+        selected_work_dialog = GovernedMusicalEntryDialog(
+            work_service=service,
+            selected_work_id=1,
+        )
+        try:
+            self.assertEqual(
+                selected_work_dialog.selected_plan().mode,
+                selected_work_dialog.MODE_EXISTING_WORK_SINGLE,
+            )
+            self.assertEqual(selected_work_dialog.selected_plan().work_id, 1)
+
+            album_mode_index = selected_work_dialog.mode_combo.findData(
+                selected_work_dialog.MODE_AUTO_GOVERNED_ALBUM
+            )
+            selected_work_dialog.mode_combo.setCurrentIndex(album_mode_index)
+            self.app.processEvents()
+            self.assertFalse(selected_work_dialog.relationship_combo.isEnabled())
+            self.assertIn(
+                "one new parent work per saved track",
+                selected_work_dialog.preview_text.text().lower(),
+            )
+        finally:
+            selected_work_dialog.close()
+
+        validation_dialog = GovernedMusicalEntryDialog(
+            work_service=service,
+            selected_work_id=None,
+        )
+        try:
+            existing_mode_index = validation_dialog.mode_combo.findData(
+                validation_dialog.MODE_EXISTING_WORK_SINGLE
+            )
+            validation_dialog.mode_combo.setCurrentIndex(existing_mode_index)
+            validation_dialog.work_combo.setCurrentIndex(0)
+            with mock.patch.object(QMessageBox, "information", return_value=None) as info:
+                validation_dialog.accept()
+            info.assert_called_once()
+        finally:
+            validation_dialog.close()
 
 
 if __name__ == "__main__":

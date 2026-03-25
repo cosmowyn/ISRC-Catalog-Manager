@@ -57,6 +57,21 @@ class HelpContentTests(unittest.TestCase):
         self.assertIn("Provenance", chapter.content_html)
         self.assertIn("separate managed export workflow", chapter.content_html.lower())
 
+    def test_help_chapters_describe_work_manager_first_governed_creation(self):
+        overview = HELP_CHAPTERS_BY_ID["overview"]
+        add_data = HELP_CHAPTERS_BY_ID["add-data"]
+        album_entry = HELP_CHAPTERS_BY_ID["album-entry"]
+
+        self.assertIn("Create Musical Entry", overview.content_html)
+        self.assertIn("Work Manager", overview.content_html)
+        self.assertIn("Recording Editor", add_data.title)
+        self.assertIn("routes you back into", add_data.content_html)
+        self.assertIn("Album Batch Entry", album_entry.title)
+        self.assertIn(
+            "one save always resolves as exactly one governance mode",
+            album_entry.content_html.lower(),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

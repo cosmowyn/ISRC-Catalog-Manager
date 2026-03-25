@@ -33,6 +33,9 @@ class AppShellEditorSurfaceTests(AppShellTestCase):
     test_album_entry_creates_parent_work_per_track_when_no_work_selected = (
         AppShellTestCase.case_album_entry_creates_parent_work_per_track_when_no_work_selected
     )
+    test_save_recording_without_work_context_redirects_to_governed_creation = (
+        AppShellTestCase.case_save_recording_without_work_context_redirects_to_governed_creation
+    )
     test_gs1_dialog_uses_top_level_workflow_tabs = (
         AppShellTestCase.case_gs1_dialog_uses_top_level_workflow_tabs
     )
