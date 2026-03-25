@@ -136,6 +136,128 @@ class ExchangeService:
     def _normalize_header_name(name: str) -> str:
         return str(name or "").strip().lower().replace(" ", "_")
 
+    def _table_names(self) -> set[str]:
+        return {
+            str(row[0])
+            for row in self.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+            if row and row[0]
+        }
+
+    def _table_columns(self, table: str) -> set[str]:
+        return {
+            str(row[1])
+            for row in self.conn.execute(f"PRAGMA table_info({table})").fetchall()
+            if row and len(row) > 1 and row[1]
+        }
+
+    @staticmethod
+    def _append_unique_name(target: dict[int, list[str]], key: int, value: object) -> None:
+        clean = str(value or "").strip()
+        if not clean:
+            return
+        bucket = target.setdefault(int(key), [])
+        if clean not in bucket:
+            bucket.append(clean)
+
+    def _work_export_overrides(self, track_ids: list[int]) -> dict[int, dict[str, str]]:
+        clean_track_ids = sorted({int(track_id) for track_id in track_ids if int(track_id) > 0})
+        if not clean_track_ids:
+            return {}
+        if "Tracks" not in self._table_names():
+            return {}
+        if "work_id" not in self._table_columns("Tracks") or "Works" not in self._table_names():
+            return {}
+
+        placeholders = ",".join("?" for _ in clean_track_ids)
+        track_rows = self.conn.execute(
+            f"""
+            SELECT
+                t.id,
+                t.work_id,
+                COALESCE(w.iswc, '') AS work_iswc,
+                COALESCE(w.registration_number, '') AS work_registration_number
+            FROM Tracks t
+            LEFT JOIN Works w ON w.id = t.work_id
+            WHERE t.id IN ({placeholders})
+            ORDER BY t.id
+            """,
+            clean_track_ids,
+        ).fetchall()
+
+        track_to_work: dict[int, int] = {}
+        work_iswc_by_track: dict[int, str] = {}
+        work_registration_by_track: dict[int, str] = {}
+        work_ids: set[int] = set()
+        for row in track_rows:
+            track_id = int(row[0])
+            work_id = int(row[1]) if row[1] is not None else 0
+            if work_id > 0:
+                track_to_work[track_id] = work_id
+                work_ids.add(work_id)
+                work_iswc_by_track[track_id] = str(row[2] or "").strip()
+                work_registration_by_track[track_id] = str(row[3] or "").strip()
+
+        if not work_ids:
+            return {}
+
+        work_placeholders = ",".join("?" for _ in work_ids)
+        author_names: dict[int, list[str]] = {}
+        publisher_names: dict[int, list[str]] = {}
+        fallback_publisher_names: dict[int, list[str]] = {}
+
+        if "WorkContributors" in self._table_names():
+            for row in self.conn.execute(
+                f"""
+                SELECT
+                    wc.work_id,
+                    wc.role,
+                    COALESCE(p.display_name, p.legal_name, wc.display_name, '') AS name
+                FROM WorkContributors wc
+                LEFT JOIN Parties p ON p.id = wc.party_id
+                WHERE wc.work_id IN ({work_placeholders})
+                ORDER BY wc.work_id, name, wc.id
+                """,
+                sorted(work_ids),
+            ).fetchall():
+                work_id = int(row[0])
+                role = str(row[1] or "").strip().lower()
+                name = row[2]
+                if role in {"songwriter", "composer", "lyricist", "arranger", "adaptor"}:
+                    self._append_unique_name(author_names, work_id, name)
+                if role in {"publisher", "subpublisher"}:
+                    self._append_unique_name(fallback_publisher_names, work_id, name)
+
+        if "WorkOwnershipInterests" in self._table_names():
+            for row in self.conn.execute(
+                f"""
+                SELECT
+                    o.work_id,
+                    COALESCE(p.display_name, p.legal_name, o.display_name, '') AS name
+                FROM WorkOwnershipInterests o
+                LEFT JOIN Parties p ON p.id = o.party_id
+                WHERE o.work_id IN ({work_placeholders})
+                  AND o.ownership_role IN ('publisher', 'subpublisher')
+                ORDER BY o.work_id, name, o.id
+                """,
+                sorted(work_ids),
+            ).fetchall():
+                self._append_unique_name(publisher_names, int(row[0]), row[1])
+
+        overrides: dict[int, dict[str, str]] = {}
+        for track_id, work_id in track_to_work.items():
+            resolved_publishers = publisher_names.get(work_id) or fallback_publisher_names.get(
+                work_id
+            ) or []
+            overrides[track_id] = {
+                "iswc": work_iswc_by_track.get(track_id, ""),
+                "buma_work_number": work_registration_by_track.get(track_id, ""),
+                "composer": ", ".join(author_names.get(work_id, [])),
+                "publisher": ", ".join(resolved_publishers),
+            }
+        return overrides
+
     def _release_columns_for_track_rows(self) -> dict[int, dict[str, object]]:
         release_rows = self.conn.execute(
             """
@@ -410,10 +532,12 @@ class ExchangeService:
         headers = list(self.BASE_EXPORT_COLUMNS) + custom_headers
         release_map = self._release_columns_for_track_rows()
         license_map = self._license_map()
+        work_overrides = self._work_export_overrides([int(row[0]) for row in rows])
 
         exported_rows: list[dict[str, object]] = []
         for row in rows:
             track_id = int(row[0])
+            work_override = work_overrides.get(track_id, {})
             audio_meta = self.track_service.get_media_meta(track_id, "audio_file")
             artwork_meta = self.track_service.get_media_meta(track_id, "album_art")
             effective_audio_path = str(audio_meta.get("path") or "").strip()
@@ -428,13 +552,13 @@ class ExchangeService:
                 "release_date": row[6] or "",
                 "track_length_sec": int(row[7] or 0),
                 "track_length_hms": seconds_to_hms(int(row[7] or 0)),
-                "iswc": row[8] or "",
+                "iswc": work_override.get("iswc") or row[8] or "",
                 "upc": row[9] or "",
                 "genre": row[10] or "",
                 "catalog_number": row[11] or "",
-                "buma_work_number": row[12] or "",
-                "composer": row[13] or "",
-                "publisher": row[14] or "",
+                "buma_work_number": work_override.get("buma_work_number") or row[12] or "",
+                "composer": work_override.get("composer") or row[13] or "",
+                "publisher": work_override.get("publisher") or row[14] or "",
                 "comments": row[15] or "",
                 "lyrics": row[16] or "",
                 "audio_file_path": effective_audio_path,

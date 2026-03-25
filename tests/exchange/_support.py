@@ -9,6 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from openpyxl import Workbook
 
 from isrc_manager.exchange import ExchangeImportOptions, ExchangeService
+from isrc_manager.parties import PartyService
 from isrc_manager.releases import ReleasePayload, ReleaseService, ReleaseTrackPlacement
 from isrc_manager.services import (
     CustomFieldDefinitionService,
@@ -18,6 +19,7 @@ from isrc_manager.services import (
     TrackCreatePayload,
     TrackService,
 )
+from isrc_manager.works import WorkContributorPayload, WorkPayload, WorkService
 
 
 class ExchangeServiceTestCase(unittest.TestCase):
@@ -29,6 +31,8 @@ class ExchangeServiceTestCase(unittest.TestCase):
         DatabaseSchemaService(self.conn, data_root=self.data_root).migrate_schema()
         self.track_service = TrackService(self.conn, self.data_root)
         self.release_service = ReleaseService(self.conn, self.data_root)
+        self.party_service = PartyService(self.conn)
+        self.work_service = WorkService(self.conn, party_service=self.party_service)
         self.custom_defs = CustomFieldDefinitionService(self.conn)
         self.custom_values = CustomFieldValueService(self.conn, self.custom_defs)
         self.service = ExchangeService(
@@ -119,6 +123,36 @@ class ExchangeServiceTestCase(unittest.TestCase):
             (track_id, field_name),
         ).fetchone()
         return None if row is None else str(row[0] or "")
+
+    def _govern_track_with_work(
+        self,
+        track_id: int,
+        *,
+        work_title: str,
+        work_iswc: str,
+        registration_number: str,
+        writer_name: str,
+        publisher_name: str,
+    ) -> int:
+        return self.work_service.create_work(
+            WorkPayload(
+                title=work_title,
+                iswc=work_iswc,
+                registration_number=registration_number,
+                contributors=[
+                    WorkContributorPayload(
+                        role="songwriter",
+                        name=writer_name,
+                        share_percent=100,
+                    ),
+                    WorkContributorPayload(
+                        role="publisher",
+                        name=publisher_name,
+                    ),
+                ],
+                track_ids=[track_id],
+            )
+        )
 
     def case_json_round_trip_preserves_release_and_custom_fields(self):
         track_id = self._create_track(isrc="NL-ABC-26-00001", title="Orbit")
@@ -293,6 +327,72 @@ class ExchangeServiceTestCase(unittest.TestCase):
 
         self.assertIn("license_files", manifest["columns"])
         self.assertEqual(manifest["rows"][0]["license_files"], "track-license.pdf")
+
+    def case_json_export_prefers_authoritative_governed_work_metadata(self):
+        track_id = self._create_track(isrc="NL-ABC-26-00034", title="Governed Orbit")
+        self.conn.execute(
+            """
+            UPDATE Tracks
+            SET iswc='T-000.000.000-0',
+                buma_work_number='BUMA-TRACK-OLD',
+                composer='Legacy Composer',
+                publisher='Legacy Publisher'
+            WHERE id=?
+            """,
+            (track_id,),
+        )
+        self._govern_track_with_work(
+            track_id,
+            work_title="Governed Orbit",
+            work_iswc="T-999.888.777-6",
+            registration_number="BUMA-WORK-900",
+            writer_name="Governed Writer",
+            publisher_name="Governed Publishing",
+        )
+
+        export_path = self.data_root / "governed-export.json"
+        self.service.export_json(export_path)
+        payload = json.loads(export_path.read_text(encoding="utf-8"))
+
+        row = payload["rows"][0]
+        self.assertEqual(row["iswc"], "T-999.888.777-6")
+        self.assertEqual(row["buma_work_number"], "BUMA-WORK-900")
+        self.assertEqual(row["composer"], "Governed Writer")
+        self.assertEqual(row["publisher"], "Governed Publishing")
+
+    def case_package_export_prefers_authoritative_governed_work_metadata(self):
+        track_id = self._create_track(isrc="NL-ABC-26-00035", title="Governed Package")
+        self.conn.execute(
+            """
+            UPDATE Tracks
+            SET iswc='T-100.100.100-1',
+                buma_work_number='BUMA-TRACK-100',
+                composer='Package Legacy Composer',
+                publisher='Package Legacy Publisher'
+            WHERE id=?
+            """,
+            (track_id,),
+        )
+        self._govern_track_with_work(
+            track_id,
+            work_title="Governed Package",
+            work_iswc="T-555.444.333-2",
+            registration_number="BUMA-WORK-555",
+            writer_name="Package Writer",
+            publisher_name="Package Publishing",
+        )
+
+        package_path = self.data_root / "governed-package.zip"
+        self.service.export_package(package_path)
+
+        with ZipFile(package_path, "r") as archive:
+            manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+
+        row = manifest["rows"][0]
+        self.assertEqual(row["iswc"], "T-555.444.333-2")
+        self.assertEqual(row["buma_work_number"], "BUMA-WORK-555")
+        self.assertEqual(row["composer"], "Package Writer")
+        self.assertEqual(row["publisher"], "Package Publishing")
 
     def case_package_export_includes_shared_album_art_once(self):
         artwork_path = self.data_root / "cover.png"
