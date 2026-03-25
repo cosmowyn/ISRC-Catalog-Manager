@@ -14,8 +14,14 @@ try:
         RelationshipSection,
         SavedSearchRecord,
     )
-    from isrc_manager.works.dialogs import GovernedMusicalEntryDialog, WorkBrowserDialog
-    from isrc_manager.works.models import WorkContributorRecord, WorkDetail, WorkRecord
+    from isrc_manager.works.dialogs import WorkBrowserDialog
+    from isrc_manager.works.models import (
+        WorkContributorPayload,
+        WorkContributorRecord,
+        WorkDetail,
+        WorkPayload,
+        WorkRecord,
+    )
 except Exception as exc:  # pragma: no cover - environment-specific fallback
     DIALOG_IMPORT_ERROR = exc
 else:
@@ -369,7 +375,7 @@ class DialogControllerBehaviorTests(unittest.TestCase):
         finally:
             dialog.close()
 
-    def test_unified_work_creation_dialog_uses_selected_work_context_and_validates_existing_modes(self):
+    def test_work_browser_create_work_emits_payload(self):
         service = _WorkService()
         selected_track_ids: list[int] = []
         dialog = WorkBrowserDialog(
@@ -377,60 +383,32 @@ class DialogControllerBehaviorTests(unittest.TestCase):
             track_title_resolver=lambda track_id: f"Track {track_id}",
             selected_track_ids_provider=lambda: list(selected_track_ids),
         )
-        emitted_creation_launches = []
-        dialog.create_musical_entry_requested.connect(
-            lambda work_id: emitted_creation_launches.append(work_id)
-        )
+        created_payloads = []
+        dialog.create_requested.connect(lambda payload: created_payloads.append(payload))
         try:
-            dialog.launch_musical_entry_workflow()
-            self.assertEqual(emitted_creation_launches, [None])
+            class _AcceptedDialog:
+                def exec(self):
+                    return QDialog.Accepted
 
-            dialog.table.selectRow(0)
-            self.app.processEvents()
-            dialog.launch_musical_entry_workflow()
-            self.assertEqual(emitted_creation_launches, [None, 1])
+                def payload(self):
+                    return WorkPayload(
+                        title="Fresh Work",
+                        contributors=[
+                            WorkContributorPayload(
+                                role="songwriter",
+                                name="Lyra Moonwake",
+                            )
+                        ],
+                    )
+
+            with mock.patch.object(dialog.panel, "_edit_dialog_for", return_value=_AcceptedDialog()):
+                dialog.create_work()
+
+            self.assertEqual(len(created_payloads), 1)
+            self.assertEqual(created_payloads[0].title, "Fresh Work")
+            self.assertEqual(created_payloads[0].contributors[0].name, "Lyra Moonwake")
         finally:
             dialog.close()
-
-        selected_work_dialog = GovernedMusicalEntryDialog(
-            work_service=service,
-            selected_work_id=1,
-        )
-        try:
-            self.assertEqual(
-                selected_work_dialog.selected_plan().mode,
-                selected_work_dialog.MODE_EXISTING_WORK_SINGLE,
-            )
-            self.assertEqual(selected_work_dialog.selected_plan().work_id, 1)
-
-            album_mode_index = selected_work_dialog.mode_combo.findData(
-                selected_work_dialog.MODE_AUTO_GOVERNED_ALBUM
-            )
-            selected_work_dialog.mode_combo.setCurrentIndex(album_mode_index)
-            self.app.processEvents()
-            self.assertFalse(selected_work_dialog.relationship_combo.isEnabled())
-            self.assertIn(
-                "one new parent work per saved track",
-                selected_work_dialog.preview_text.text().lower(),
-            )
-        finally:
-            selected_work_dialog.close()
-
-        validation_dialog = GovernedMusicalEntryDialog(
-            work_service=service,
-            selected_work_id=None,
-        )
-        try:
-            existing_mode_index = validation_dialog.mode_combo.findData(
-                validation_dialog.MODE_EXISTING_WORK_SINGLE
-            )
-            validation_dialog.mode_combo.setCurrentIndex(existing_mode_index)
-            validation_dialog.work_combo.setCurrentIndex(0)
-            with mock.patch.object(QMessageBox, "information", return_value=None) as info:
-                validation_dialog.accept()
-            info.assert_called_once()
-        finally:
-            validation_dialog.close()
 
 
 if __name__ == "__main__":

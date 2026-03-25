@@ -54,9 +54,9 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         <p>The app is organized around a few core ideas:</p>
         <ul>
           <li><strong>Profiles</strong>: each profile is a self-contained catalog database, so separate catalogs remain clean and portable.</li>
-          <li><strong>Work Manager</strong>: the primary governance surface and the one governed entry point for musical creation through <strong>Create Musical Entry</strong>.</li>
-          <li><strong>Recording Editor</strong>: the dockable recording editor that opens after a governed start and remains available for repair and administrative follow-up.</li>
-          <li><strong>Album Batch Entry</strong>: the batch-entry surface used by the same governed creation system for shared-parent batches and explicit auto-governed fallback batches.</li>
+          <li><strong>Add Track</strong>: the primary single-track creation entry point. Every new track must either link to an existing Work or create a new Work from the track before save.</li>
+          <li><strong>Add Album</strong>: the primary batch-entry surface. It behaves as batch Add Track, so each populated row resolves Work governance before the album save completes.</li>
+          <li><strong>Work Manager</strong>: the parent governance and management surface for work metadata, ownership, contributions, and linked tracks after or alongside track-first entry.</li>
           <li><strong>Releases</strong>: first-class product records for UPC/EAN, release artwork, ordering, and release-level metadata.</li>
           <li><strong>Works</strong>: a composition layer that stays distinct from recordings so the same work can connect to multiple tracks.</li>
           <li><strong>Parties</strong>: reusable people and companies for writers, publishers, labels, managers, licensees, and organizations.</li>
@@ -75,7 +75,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Flexible file storage</strong>: file-backed records can be kept as database BLOBs or as managed local files without changing the surrounding UI workflow.</li>
           <li><strong>Media badge icons</strong>: separate visual indicators for stored audio and image BLOBs can be configured with system icons, emoji, or compressed custom images.</li>
         </ul>
-        <p>The menu bar mirrors those workflows. <strong>File</strong> handles profiles and exchange, <strong>Edit</strong> can launch the unified musical creation workflow and edit the current selection, <strong>Catalog</strong> opens the richer repertoire tools, <strong>Settings</strong> controls app and profile configuration, <strong>View</strong> manages layout and helper surfaces, <strong>History</strong> protects recoverability, and <strong>Help</strong> gives you diagnostics, logs, and this manual.</p>
+        <p>The menu bar mirrors those workflows. <strong>File</strong> handles profiles and exchange, <strong>Edit</strong> starts governed musical entry with <strong>Add Track</strong> and <strong>Add Album</strong> and edits the current selection, <strong>Catalog</strong> opens the richer repertoire tools, <strong>Settings</strong> controls app and profile configuration, <strong>View</strong> manages layout and helper surfaces, <strong>History</strong> protects recoverability, and <strong>Help</strong> gives you diagnostics, logs, and this manual.</p>
         """,
     ),
     HelpChapter(
@@ -93,7 +93,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "quick actions",
         ),
         content_html="""
-        <p>The main window is designed as a practical catalog workspace rather than a single fixed screen. The <strong>Catalog Table</strong> stays central, <strong>Work Manager</strong> acts as the governed creation start for musical entries, and the <strong>Recording Editor</strong> can be shown as a helper surface when that workflow opens it or when you need operational follow-up.</p>
+        <p>The main window is designed as a practical catalog workspace rather than a single fixed screen. The <strong>Catalog Table</strong> stays central, <strong>Add Track</strong> and <strong>Add Album</strong> are the primary governed entry points for new musical items, and <strong>Work Manager</strong> stays available as the governance and follow-up surface once those entries exist.</p>
         <ul>
           <li><strong>Action ribbon</strong>: a customizable strip of high-frequency actions. Use <strong>View &gt; Customize Action Ribbon…</strong> to make it match your workflow.</li>
           <li><strong>Profiles toolbar</strong>: switch databases, create a new profile, browse to an external profile, reload the profile list, or remove the selected entry.</li>
@@ -158,8 +158,8 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
     ),
     HelpChapter(
         chapter_id="add-data",
-        title="Recording Editor",
-        summary="How the reusable recording editor behaves after a governed start, how it keeps work context visible, and where it still fits into operational follow-up.",
+        title="Add Track",
+        summary="How the primary single-track entry flow works, how Work governance is required before save, and how shared metadata seeds a new Work automatically.",
         keywords=(
             "add data",
             "add track",
@@ -172,20 +172,21 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "dsp",
         ),
         content_html="""
-        <p>The Recording Editor is the recording-focused editor in the main window. In the v3 workflow, new musical creation begins from <strong>Work Manager</strong> through <strong>Create Musical Entry</strong>, which can open this editor already scoped to the selected parent work. The editor itself remains useful for repairs, imports, and administrative follow-up once the governed relationship is known.</p>
+        <p><strong>Add Track</strong> is the primary single-item musical creation workflow in the main window. Before a new track can be saved, it must either link to an existing <strong>Work</strong> or create a new <strong>Work</strong> from the track. That keeps the recording entry flow fast while preventing new orphan tracks.</p>
         <ul>
           <li><strong>Track</strong>: track title, main artist, additional artists, and genre.</li>
           <li><strong>Release</strong>: album title, release date, and track length.</li>
           <li><strong>Codes</strong>: preview-only generated values such as the future row ID, generated ISRC, and entry date, plus ISWC, UPC/EAN, catalog number, and BUMA work number.</li>
           <li><strong>Media</strong>: attach a local audio file and album art image, then choose whether each file should be stored in the database or in managed local storage.</li>
         </ul>
-        <p>Use <strong>Save Recording</strong> to save the governed child recording currently in progress, or <strong>Clear Draft</strong> to clear only the current recording draft while keeping the parent-work context intact. When the editor is opened from <strong>Work Manager</strong>, the work-governance summary shows the parent work, child relationship type, and optional parent track link that will be written on save. If you try to start a brand-new musical entry without that governed context, the app routes you back into <strong>Create Musical Entry</strong> instead of creating a floating track.</p>
+        <p>Use <strong>Save Track</strong> to save the governed track currently in progress, or <strong>Clear Draft</strong> to reset the current Add Track draft. In <strong>Create New Work From Track</strong> mode, the app seeds the new parent Work directly from the track title, ISWC, and registration number you already entered, then links the track immediately as the first governed original. In <strong>Link to Existing Work</strong> mode, you choose the parent Work plus the child relationship type and optional parent track before save.</p>
+        <p>Main artist names resolve through the <strong>Party</strong> layer on save, so when a Party-backed artist is selected the stored artist display comes from that authoritative Party record instead of loose text. Later track edits do not silently overwrite Work metadata, but the initial creation flow avoids making you enter the same shared concepts twice.</p>
         """,
     ),
     HelpChapter(
         chapter_id="album-entry",
-        title="Album Batch Entry",
-        summary="How the governed batch-entry surface handles shared-parent album batches and the explicit per-track auto-governed fallback.",
+        title="Add Album",
+        summary="How the governed batch-entry surface works as batch Add Track, with per-row Work decisions and automatic Work seeding for new rows.",
         keywords=(
             "add album",
             "album dialog",
@@ -195,16 +196,16 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "shared metadata",
         ),
         content_html="""
-        <p><strong>Album Batch Entry</strong> is the grouped recording-entry surface inside the same governed creation system. Instead of retyping the same album data over and over, you enter the shared product details once and then complete each track on its own tab. When the whole batch belongs to one work, launch it from <strong>Create Musical Entry</strong> or <strong>Work Manager</strong> so every created track is governed immediately. If you explicitly leave the parent-work selector blank, the dialog creates one work per saved track automatically so album batches do not stay orphaned from the v3 work layer.</p>
+        <p><strong>Add Album</strong> is batch Add Track. Instead of retyping the same album data over and over, you enter the shared product details once and then complete each track on its own tab. Every populated row must resolve Work governance before save: either link that row to an existing Work, or create a new Work from that row so the track saves as its first governed original.</p>
         <ul>
-          <li><strong>Work Governance</strong>: either bind the whole batch to one parent work and choose the shared child relationship type, or use the explicit auto-governed fallback that creates one work per saved track.</li>
+          <li><strong>Work Governance</strong>: each populated track row chooses its own governed outcome. You can link a row to an existing Work or create a new Work from that row without leaving the album workflow.</li>
           <li><strong>Album Overview</strong>: album title, UPC/EAN, genre, catalog number, album art, album-art storage choice, and the release-year rule used when auto-generating blank ISRC values.</li>
           <li><strong>Track Tabs</strong>: each tab stores one track title, main artist, additional artists, release date, track length, optional ISRC, optional ISWC, optional BUMA work number, an audio file, and its storage choice.</li>
           <li><strong>Dynamic layout</strong>: the dialog opens with two track tabs by default, but you can add more or remove the current tab at any time.</li>
           <li><strong>Blank-tab handling</strong>: completely unused track tabs are ignored when you save, so you do not need to delete every spare tab before closing the dialog.</li>
           <li><strong>Shared album art</strong>: the selected album art is stored once and linked across the saved album tracks automatically.</li>
         </ul>
-        <p>If ISRC generation is configured, blank track ISRC fields can be generated automatically during save. If not, the dialog still creates the release and track rows successfully so you can complete identifiers later. One save always resolves as exactly one governance mode: one shared parent work for the whole batch, or one newly created work per saved track.</p>
+        <p>If ISRC generation is configured, blank track ISRC fields can be generated automatically during save. If not, the dialog still creates the release and track rows successfully so you can complete identifiers later. Shared album metadata is entered once, while each row still governs itself explicitly so the batch never creates floating orphan tracks and does not force you to repeat Work metadata when a new Work is created from a row.</p>
         """,
     ),
     HelpChapter(

@@ -1,4 +1,4 @@
-"""Main-window composition helpers for the legacy entry point."""
+"""Main-window composition helpers for the workspace shell."""
 
 from __future__ import annotations
 
@@ -73,13 +73,18 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         slot=lambda: app._copy_selection_to_clipboard(True),
         shortcuts=("Ctrl+Shift+C", "Meta+Shift+C"),
     )
-    app.create_musical_entry_action = app._create_action(
-        "Create Musical Entry…",
-        slot=app.open_musical_entry_workflow,
+    app.add_track_action = app._create_action(
+        "Add Track…",
+        slot=app.open_add_track_entry,
         shortcuts=("Ctrl+Alt+N", "Meta+Alt+N"),
     )
+    app.add_album_action = app._create_action(
+        "Add Album…",
+        slot=lambda: app.open_add_album_dialog(inherit_work_context=False),
+        shortcuts=("Ctrl+Alt+Shift+N", "Meta+Alt+Shift+N"),
+    )
     app.save_entry_action = app._create_action(
-        "Save Recording",
+        "Save Track",
         slot=app.save,
         standard_key=QKeySequence.Save,
     )
@@ -93,7 +98,7 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         shortcuts=("Delete", "Meta+Backspace"),
     )
     app.reset_form_action = app._create_action(
-        "Reset Recording Draft and Search",
+        "Reset Add Track Draft and Search",
         slot=lambda: (app.init_form(), app.reset_search()),
         shortcuts=("Escape",),
     )
@@ -300,7 +305,8 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     edit_menu.addAction(app.undo_action)
     edit_menu.addAction(app.redo_action)
     edit_menu.addSeparator()
-    edit_menu.addAction(app.create_musical_entry_action)
+    edit_menu.addAction(app.add_track_action)
+    edit_menu.addAction(app.add_album_action)
     edit_menu.addAction(app.edit_selected_action)
     edit_menu.addAction(app.delete_entry_action)
     edit_menu.addSeparator()
@@ -369,12 +375,13 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     )
     workspace_menu.addAction(app.global_search_action)
     app.add_data_action = app._create_action(
-        "Show Recording Editor",
+        "Show Add Track Panel",
         checkable=True,
         checked=False,
         toggled_slot=app._on_toggle_add_data,
         shortcuts=("Ctrl+Shift+D", "Meta+Shift+D"),
     )
+    workspace_menu.addAction(app.add_data_action)
     workspace_menu.addSeparator()
 
     app.catalog_table_action = app._create_action(
@@ -762,11 +769,11 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.add_data_title_row.setContentsMargins(0, 0, 0, 0)
     app.add_data_title_row.setSpacing(8)
 
-    app.add_data_title = QLabel("Recording Editor")
+    app.add_data_title = QLabel("Add Track")
     app.add_data_title.setProperty("role", "sectionTitle")
 
     app.add_data_subtitle = QLabel(
-        "Use Work Manager for governed musical creation. This recording editor is reused after a governed start and remains available for repair and administrative follow-up."
+        "Add a single track here, then decide whether it links to an existing Work or creates a new Work from the track before save."
     )
     app.add_data_subtitle.setWordWrap(True)
     app.add_data_subtitle.setProperty("role", "secondary")
@@ -774,25 +781,47 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.add_data_title_row.addWidget(app.add_data_title)
     app.add_data_title_row.addStretch(1)
     app.add_data_title_row.addWidget(
-        _create_round_help_button(app, "add-data", "Open help for the Recording Editor")
+        _create_round_help_button(app, "add-data", "Open help for Add Track")
     )
     app.add_data_header_layout.addLayout(app.add_data_title_row)
     app.add_data_header_layout.addWidget(app.add_data_subtitle)
     app.left_panel.addWidget(app.add_data_header)
 
     app.add_data_work_context_group, add_data_work_context_layout = app._create_add_data_group(
-        "Work Context"
+        "Work Governance"
     )
     app.add_data_work_context_summary = QLabel("")
     app.add_data_work_context_summary.setWordWrap(True)
     app.add_data_work_context_summary.setProperty("role", "sectionTitle")
     add_data_work_context_layout.addWidget(app.add_data_work_context_summary)
     app.add_data_work_context_hint = QLabel(
-        "Choose the child relationship and optionally point to an existing track version under the same work."
+        "Every new track must either link to an existing Work or create a new Work from the track before it can be saved."
     )
     app.add_data_work_context_hint.setWordWrap(True)
     app.add_data_work_context_hint.setProperty("role", "secondary")
     add_data_work_context_layout.addWidget(app.add_data_work_context_hint)
+    app.add_data_work_mode_label = QLabel("Governance")
+    app.add_data_work_mode_combo = FocusWheelComboBox()
+    app.add_data_work_mode_combo.setEditable(False)
+    app.add_data_work_mode_combo.currentIndexChanged.connect(
+        app._on_add_track_governance_mode_changed
+    )
+    add_data_work_context_layout.addWidget(
+        app._create_add_data_row(
+            app.add_data_work_mode_label,
+            app.add_data_work_mode_combo,
+        )
+    )
+    app.add_data_work_work_label = QLabel("Work")
+    app.add_data_work_work_combo = FocusWheelComboBox()
+    app.add_data_work_work_combo.setEditable(False)
+    app.add_data_work_work_combo.currentIndexChanged.connect(app._on_add_track_work_changed)
+    add_data_work_context_layout.addWidget(
+        app._create_add_data_row(
+            app.add_data_work_work_label,
+            app.add_data_work_work_combo,
+        )
+    )
     app.add_data_work_relationship_label = QLabel("Child Type")
     app.add_data_work_relationship_combo = FocusWheelComboBox()
     app.add_data_work_relationship_combo.setEditable(False)
@@ -821,14 +850,14 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.add_data_work_context_actions_layout = QHBoxLayout(app.add_data_work_context_actions)
     app.add_data_work_context_actions_layout.setContentsMargins(0, 0, 0, 0)
     app.add_data_work_context_actions_layout.setSpacing(8)
-    app.add_data_clear_work_context_button = QPushButton("Return to Work Manager")
+    app.add_data_clear_work_context_button = QPushButton("Open Work Manager")
     app.add_data_clear_work_context_button.clicked.connect(
         app._return_from_work_track_creation_context
     )
     app.add_data_work_context_actions_layout.addStretch(1)
     app.add_data_work_context_actions_layout.addWidget(app.add_data_clear_work_context_button)
     add_data_work_context_layout.addWidget(app.add_data_work_context_actions)
-    app.add_data_work_context_group.setVisible(False)
+    app.add_data_work_context_group.setVisible(True)
     app.left_panel.addWidget(app.add_data_work_context_group)
 
     app.add_data_tabs = QTabWidget()
@@ -1088,7 +1117,7 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.edit_button.setToolTip(
         "Open the selected table row, or bulk edit when multiple rows are selected."
     )
-    app.save_button = QPushButton("Save Recording")
+    app.save_button = QPushButton("Create Work + Save Track")
     app.save_button.clicked.connect(app.save)
     app.save_button.setMinimumHeight(32)
     app.save_button.setDefault(True)
@@ -1123,7 +1152,7 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.left_scroll.setWidgetResizable(True)
     app.left_scroll.setWidget(app.left_widget_container)
     app.left_scroll.setMinimumWidth(300)
-    app.add_data_dock = QDockWidget("Recording Editor", app)
+    app.add_data_dock = QDockWidget("Add Track", app)
     app.add_data_dock.setObjectName("addDataDock")
     app.add_data_dock.setAllowedAreas(Qt.AllDockWidgetAreas)
     app.add_data_dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)

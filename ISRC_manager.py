@@ -413,8 +413,6 @@ from isrc_manager.ui_common import (
 )
 from isrc_manager.works import WorkService
 from isrc_manager.works.dialogs import (
-    GovernedMusicalEntryDialog,
-    GovernedMusicalEntryPlan,
     WorkBrowserPanel,
     WorkEditorDialog,
 )
@@ -3783,6 +3781,178 @@ class ApplicationSettingsDialog(QDialog):
         if legal_name and legal_name.casefold() != primary.casefold():
             return f"{primary} ({legal_name})"
         return primary
+
+    @staticmethod
+    def _artist_party_primary_label(record: PartyRecord) -> str:
+        return (
+            str(record.artist_name or "").strip()
+            or str(record.display_name or "").strip()
+            or str(record.company_name or "").strip()
+            or str(record.legal_name or "").strip()
+            or f"Party #{int(record.id)}"
+        )
+
+    @classmethod
+    def _artist_party_choice_label(cls, record: PartyRecord) -> str:
+        primary = cls._artist_party_primary_label(record)
+        legal_name = str(record.legal_name or "").strip()
+        if legal_name and legal_name.casefold() != primary.casefold():
+            return f"{primary} ({legal_name})"
+        return primary
+
+    def _artist_party_records(self) -> list[PartyRecord]:
+        if self.party_service is None:
+            return []
+        try:
+            return list(self.party_service.list_parties() or [])
+        except Exception:
+            return []
+
+    def _configure_artist_party_combo(
+        self,
+        combo: QComboBox,
+        *,
+        allow_empty: bool = False,
+        selected_party_id: int | None = None,
+        current_text: str | None = None,
+    ) -> None:
+        clean_text_value = str(current_text or "").strip()
+        labels: list[str] = []
+        previous_state = combo.blockSignals(True)
+        try:
+            combo.clear()
+            combo.setEditable(True)
+            combo.setInsertPolicy(QComboBox.NoInsert)
+            if allow_empty:
+                combo.addItem("", None)
+            for record in self._artist_party_records():
+                label = self._artist_party_choice_label(record)
+                combo.addItem(label, int(record.id))
+                combo.setItemData(combo.count() - 1, self._artist_party_primary_label(record), Qt.UserRole + 1)
+                labels.append(label)
+                labels.extend(
+                    alias
+                    for alias in getattr(record, "artist_aliases", ()) or ()
+                    if str(alias or "").strip()
+                )
+            if selected_party_id is not None and combo.findData(int(selected_party_id)) < 0:
+                fallback_label = clean_text_value or f"Party #{int(selected_party_id)}"
+                combo.addItem(fallback_label, int(selected_party_id))
+                combo.setItemData(combo.count() - 1, fallback_label, Qt.UserRole + 1)
+                labels.append(fallback_label)
+            completer = QCompleter(sorted({label for label in labels if label}), combo)
+            completer.setCaseSensitivity(Qt.CaseInsensitive)
+            combo.setCompleter(completer)
+            if selected_party_id is not None:
+                index = combo.findData(int(selected_party_id))
+                combo.setCurrentIndex(index if index >= 0 else 0)
+            elif clean_text_value:
+                combo.setCurrentIndex(-1)
+                combo.setEditText(clean_text_value)
+            elif allow_empty:
+                combo.setCurrentIndex(0)
+        finally:
+            combo.blockSignals(previous_state)
+
+    def _resolve_artist_party_choice(self, combo: QComboBox) -> tuple[str, int | None]:
+        clean = str(combo.currentText() or "").strip()
+        if not clean:
+            return "", None
+        current_index = combo.currentIndex()
+        if current_index >= 0:
+            data = combo.itemData(current_index)
+            label = str(combo.itemText(current_index) or "").strip()
+            if data not in (None, "") and clean.casefold() == label.casefold():
+                primary_label = str(combo.itemData(current_index, Qt.UserRole + 1) or label).strip()
+                return primary_label or label, int(data)
+        for index in range(combo.count()):
+            label = str(combo.itemText(index) or "").strip()
+            if clean.casefold() != label.casefold():
+                continue
+            data = combo.itemData(index)
+            if data not in (None, ""):
+                primary_label = str(combo.itemData(index, Qt.UserRole + 1) or label).strip()
+                return primary_label or label, int(data)
+        return clean, None
+
+    def _resolve_party_backed_artist_name(
+        self,
+        raw_name: str,
+        *,
+        selected_party_id: int | None = None,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> tuple[str, int | None]:
+        clean_name = str(raw_name or "").strip()
+        if not clean_name:
+            return "", None
+        if self.party_service is None:
+            return clean_name, None
+        party_id = int(selected_party_id) if selected_party_id not in (None, "") else None
+        if party_id is None:
+            existing_id = self.party_service.find_party_id_by_name(clean_name, cursor=cursor)
+            if existing_id is not None:
+                party_id = int(existing_id)
+            else:
+                party_id = int(
+                    self.party_service.ensure_party_by_name(
+                        clean_name,
+                        party_type="artist",
+                        cursor=cursor,
+                    )
+                )
+        record = self.party_service.fetch_party(int(party_id))
+        if record is None:
+            return clean_name, int(party_id)
+        return self._artist_party_primary_label(record), int(record.id)
+
+    def _resolve_party_backed_additional_artist_names(
+        self,
+        names: list[str],
+        *,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> list[str]:
+        resolved: list[str] = []
+        seen: set[str] = set()
+        for raw_name in names:
+            clean_name, _party_id = self._resolve_party_backed_artist_name(
+                raw_name,
+                cursor=cursor,
+            )
+            normalized = clean_name.casefold()
+            if not clean_name or normalized in seen:
+                continue
+            seen.add(normalized)
+            resolved.append(clean_name)
+        return resolved
+
+    def _refresh_add_track_artist_party_choices(self) -> None:
+        for combo, allow_empty in (
+            (getattr(self, "artist_field", None), False),
+            (getattr(self, "additional_artist_field", None), True),
+        ):
+            if not isinstance(combo, QComboBox):
+                continue
+            current_text, selected_party_id = self._resolve_artist_party_choice(combo)
+            self._configure_artist_party_combo(
+                combo,
+                allow_empty=allow_empty,
+                selected_party_id=selected_party_id,
+                current_text=current_text,
+            )
+
+    def _work_payload_from_track_seed(
+        self,
+        *,
+        track_title: str,
+        iswc: str | None,
+        registration_number: str | None,
+    ) -> WorkPayload:
+        return WorkPayload(
+            title=str(track_title or "").strip(),
+            iswc=str(iswc or "").strip() or None,
+            registration_number=str(registration_number or "").strip() or None,
+            profile_name=self._current_profile_name(),
+        )
 
     def _refresh_owner_party_choices(self) -> None:
         labels: list[str] = []
@@ -10911,7 +11081,6 @@ class App(QMainWindow):
         panel.filter_requested.connect(
             lambda track_ids: self._replace_catalog_track_filter(track_ids, source_label="work")
         )
-        panel.create_musical_entry_requested.connect(self.open_musical_entry_workflow)
         panel.create_requested.connect(self.create_work)
         panel.create_child_track_requested.connect(self._begin_work_child_track_creation)
         panel.create_album_for_work_requested.connect(self.open_add_album_dialog_for_work)
@@ -11186,18 +11355,26 @@ class App(QMainWindow):
     def _initialize_action_ribbon_registry(self):
         specs = [
             {
-                "id": "create_musical_entry",
-                "label": "Create Musical Entry",
+                "id": "add_track",
+                "label": "Add Track",
                 "category": "Catalog",
-                "description": "Open the single governed musical creation workflow from Work Manager.",
-                "action": self.create_musical_entry_action,
+                "description": "Open the primary single-track entry workflow with mandatory Work governance.",
+                "action": self.add_track_action,
+                "default": True,
+            },
+            {
+                "id": "add_album",
+                "label": "Add Album",
+                "category": "Catalog",
+                "description": "Open the batch Add Album workflow with per-track Work governance.",
+                "action": self.add_album_action,
                 "default": True,
             },
             {
                 "id": "save_entry",
-                "label": "Save Recording",
+                "label": "Save Track",
                 "category": "Edit",
-                "description": "Save the current governed recording draft from the Recording Editor.",
+                "description": "Save the current governed track draft from the Add Track panel.",
                 "action": self.save_entry_action,
             },
             {
@@ -11244,9 +11421,9 @@ class App(QMainWindow):
             },
             {
                 "id": "reset_form",
-                "label": "Reset Recording Draft and Search",
+                "label": "Reset Add Track Draft and Search",
                 "category": "Edit",
-                "description": "Clear the current Recording Editor draft and reset the current search filter.",
+                "description": "Clear the current Add Track draft and reset the current search filter.",
                 "action": self.reset_form_action,
             },
             {
@@ -11401,7 +11578,7 @@ class App(QMainWindow):
                 "id": "work_manager",
                 "label": "Work Manager",
                 "category": "Catalog",
-                "description": "Create governed works, then add child tracks or album batches under the selected work.",
+                "description": "Review works, manage linked tracks, and handle work governance follow-up.",
                 "action": self.work_manager_action,
                 "default": True,
             },
@@ -11522,9 +11699,9 @@ class App(QMainWindow):
             },
             {
                 "id": "show_add_data",
-                "label": "Show Recording Editor",
+                "label": "Show Add Track Panel",
                 "category": "View",
-                "description": "Toggle the reusable Recording Editor dock. New musical creation still starts from Work Manager.",
+                "description": "Toggle the Add Track dock for single-track entry and follow-up maintenance.",
                 "action": self.add_data_action,
             },
             {
@@ -12498,6 +12675,7 @@ class App(QMainWindow):
         if self.conn is None:
             return
         self._apply_catalog_combo_values(self._catalog_combo_values_from_connection(self.conn))
+        self._refresh_add_track_artist_party_choices()
 
     @staticmethod
     def _populate_combobox(combo: QComboBox, items, allow_empty=False):
@@ -12508,6 +12686,182 @@ class App(QMainWindow):
         comp = QCompleter(items)
         comp.setCaseSensitivity(Qt.CaseInsensitive)
         combo.setCompleter(comp)
+
+    @staticmethod
+    def _artist_party_primary_label(record: PartyRecord) -> str:
+        return (
+            str(record.artist_name or "").strip()
+            or str(record.display_name or "").strip()
+            or str(record.company_name or "").strip()
+            or str(record.legal_name or "").strip()
+            or f"Party #{int(record.id)}"
+        )
+
+    @classmethod
+    def _artist_party_choice_label(cls, record: PartyRecord) -> str:
+        primary = cls._artist_party_primary_label(record)
+        legal_name = str(record.legal_name or "").strip()
+        if legal_name and legal_name.casefold() != primary.casefold():
+            return f"{primary} ({legal_name})"
+        return primary
+
+    def _artist_party_records(self) -> list[PartyRecord]:
+        if self.party_service is None:
+            return []
+        try:
+            return list(self.party_service.list_parties() or [])
+        except Exception:
+            return []
+
+    def _configure_artist_party_combo(
+        self,
+        combo: QComboBox,
+        *,
+        allow_empty: bool = False,
+        selected_party_id: int | None = None,
+        current_text: str | None = None,
+    ) -> None:
+        clean_text_value = str(current_text or "").strip()
+        labels: list[str] = []
+        previous_state = combo.blockSignals(True)
+        try:
+            combo.clear()
+            combo.setEditable(True)
+            combo.setInsertPolicy(QComboBox.NoInsert)
+            if allow_empty:
+                combo.addItem("", None)
+            for record in self._artist_party_records():
+                label = self._artist_party_choice_label(record)
+                combo.addItem(label, int(record.id))
+                combo.setItemData(
+                    combo.count() - 1,
+                    self._artist_party_primary_label(record),
+                    Qt.UserRole + 1,
+                )
+                labels.append(label)
+                labels.extend(
+                    alias
+                    for alias in getattr(record, "artist_aliases", ()) or ()
+                    if str(alias or "").strip()
+                )
+            if selected_party_id is not None and combo.findData(int(selected_party_id)) < 0:
+                fallback_label = clean_text_value or f"Party #{int(selected_party_id)}"
+                combo.addItem(fallback_label, int(selected_party_id))
+                combo.setItemData(combo.count() - 1, fallback_label, Qt.UserRole + 1)
+                labels.append(fallback_label)
+            completer = QCompleter(sorted({label for label in labels if label}), combo)
+            completer.setCaseSensitivity(Qt.CaseInsensitive)
+            combo.setCompleter(completer)
+            if selected_party_id is not None:
+                index = combo.findData(int(selected_party_id))
+                combo.setCurrentIndex(index if index >= 0 else 0)
+            elif clean_text_value:
+                combo.setCurrentIndex(-1)
+                combo.setEditText(clean_text_value)
+            elif allow_empty:
+                combo.setCurrentIndex(0)
+        finally:
+            combo.blockSignals(previous_state)
+
+    def _resolve_artist_party_choice(self, combo: QComboBox) -> tuple[str, int | None]:
+        clean = str(combo.currentText() or "").strip()
+        if not clean:
+            return "", None
+        current_index = combo.currentIndex()
+        if current_index >= 0:
+            data = combo.itemData(current_index)
+            label = str(combo.itemText(current_index) or "").strip()
+            if data not in (None, "") and clean.casefold() == label.casefold():
+                primary_label = str(combo.itemData(current_index, Qt.UserRole + 1) or label).strip()
+                return primary_label or label, int(data)
+        for index in range(combo.count()):
+            label = str(combo.itemText(index) or "").strip()
+            if clean.casefold() != label.casefold():
+                continue
+            data = combo.itemData(index)
+            if data not in (None, ""):
+                primary_label = str(combo.itemData(index, Qt.UserRole + 1) or label).strip()
+                return primary_label or label, int(data)
+        return clean, None
+
+    def _resolve_party_backed_artist_name(
+        self,
+        raw_name: str,
+        *,
+        selected_party_id: int | None = None,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> tuple[str, int | None]:
+        clean_name = str(raw_name or "").strip()
+        if not clean_name:
+            return "", None
+        if self.party_service is None:
+            return clean_name, None
+        party_id = int(selected_party_id) if selected_party_id not in (None, "") else None
+        if party_id is None:
+            existing_id = self.party_service.find_party_id_by_name(clean_name, cursor=cursor)
+            if existing_id is not None:
+                party_id = int(existing_id)
+            else:
+                party_id = int(
+                    self.party_service.ensure_party_by_name(
+                        clean_name,
+                        party_type="artist",
+                        cursor=cursor,
+                    )
+                )
+        record = self.party_service.fetch_party(int(party_id))
+        if record is None:
+            return clean_name, int(party_id)
+        return self._artist_party_primary_label(record), int(record.id)
+
+    def _resolve_party_backed_additional_artist_names(
+        self,
+        names: list[str],
+        *,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> list[str]:
+        resolved: list[str] = []
+        seen: set[str] = set()
+        for raw_name in names:
+            clean_name, _party_id = self._resolve_party_backed_artist_name(
+                raw_name,
+                cursor=cursor,
+            )
+            normalized = clean_name.casefold()
+            if not clean_name or normalized in seen:
+                continue
+            seen.add(normalized)
+            resolved.append(clean_name)
+        return resolved
+
+    def _refresh_add_track_artist_party_choices(self) -> None:
+        for combo, allow_empty in (
+            (getattr(self, "artist_field", None), False),
+            (getattr(self, "additional_artist_field", None), True),
+        ):
+            if not isinstance(combo, QComboBox):
+                continue
+            current_text, selected_party_id = self._resolve_artist_party_choice(combo)
+            self._configure_artist_party_combo(
+                combo,
+                allow_empty=allow_empty,
+                selected_party_id=selected_party_id,
+                current_text=current_text,
+            )
+
+    def _work_payload_from_track_seed(
+        self,
+        *,
+        track_title: str,
+        iswc: str | None,
+        registration_number: str | None,
+    ) -> WorkPayload:
+        return WorkPayload(
+            title=str(track_title or "").strip(),
+            iswc=str(iswc or "").strip() or None,
+            registration_number=str(registration_number or "").strip() or None,
+            profile_name=self._current_profile_name(),
+        )
 
     @staticmethod
     def _work_track_relationship_choices() -> list[str]:
@@ -12532,14 +12886,40 @@ class App(QMainWindow):
         clean = str(value or "").strip().lower().replace(" ", "_")
         return clean if clean in TRACK_RELATIONSHIP_TYPES else "original"
 
-    def _current_work_track_context(self) -> dict[str, object] | None:
+    @staticmethod
+    def _work_track_governance_modes() -> tuple[tuple[str, str], ...]:
+        return (
+            ("create_new_work", "Create New Work from This Track"),
+            ("link_existing_work", "Link to Existing Work"),
+        )
+
+    def _default_work_track_context(self) -> dict[str, object]:
+        return {
+            "mode": "create_new_work",
+            "work_id": None,
+            "relationship_type": "original",
+            "parent_track_id": None,
+            "locked_work": False,
+            "return_to_work_manager": False,
+        }
+
+    def _set_pending_work_track_context(self, **overrides: object) -> dict[str, object]:
+        context = self._default_work_track_context()
+        context.update(overrides)
+        self._pending_work_track_context = context
+        return self._current_work_track_context()
+
+    def _current_work_track_context(self) -> dict[str, object]:
         context = getattr(self, "_pending_work_track_context", None)
         if not isinstance(context, dict):
-            return None
+            context = self._default_work_track_context()
+        mode = str(context.get("mode") or "create_new_work").strip().lower()
+        if mode not in {"create_new_work", "link_existing_work"}:
+            mode = "create_new_work"
         try:
             work_id = int(context.get("work_id"))
         except (TypeError, ValueError):
-            return None
+            work_id = None
         parent_track_id = context.get("parent_track_id")
         try:
             normalized_parent_track_id = (
@@ -12547,15 +12927,40 @@ class App(QMainWindow):
             )
         except (TypeError, ValueError):
             normalized_parent_track_id = None
+        locked_work = bool(context.get("locked_work"))
+        return_to_work_manager = bool(context.get("return_to_work_manager"))
+        if locked_work and work_id is not None:
+            mode = "link_existing_work"
         normalized = {
-            "work_id": work_id,
-            "relationship_type": self._normalize_work_track_relationship(
-                str(context.get("relationship_type") or "original")
+            "mode": mode,
+            "work_id": work_id if mode == "link_existing_work" else None,
+            "relationship_type": (
+                self._normalize_work_track_relationship(str(context.get("relationship_type") or "original"))
+                if mode == "link_existing_work"
+                else "original"
             ),
-            "parent_track_id": normalized_parent_track_id,
+            "parent_track_id": normalized_parent_track_id if mode == "link_existing_work" else None,
+            "locked_work": locked_work,
+            "return_to_work_manager": return_to_work_manager,
         }
         self._pending_work_track_context = normalized
         return normalized
+
+    def _available_work_records(self) -> list:
+        if self.work_service is None:
+            return []
+        try:
+            return list(self.work_service.list_works())
+        except Exception:
+            return []
+
+    @staticmethod
+    def _work_choice_label(record) -> str:
+        title = str(getattr(record, "title", "") or "").strip()
+        work_id = int(getattr(record, "id", 0) or 0)
+        iswc = str(getattr(record, "iswc", "") or "").strip()
+        base = title or (f"Work #{work_id}" if work_id > 0 else "Untitled Work")
+        return f"{base} ({iswc})" if iswc else base
 
     def _focus_work_in_manager(self, work_id: int | None) -> None:
         if not work_id:
@@ -12568,77 +12973,123 @@ class App(QMainWindow):
             focus_work(int(work_id))
 
     def _reset_add_track_heading(self) -> None:
-        self.add_data_title.setText("Recording Editor")
+        self.add_data_title.setText("Add Track")
         self.add_data_subtitle.setText(
-            "Use Work Manager for governed musical creation. This recording editor is reused after a governed start and remains available for repair and administrative follow-up."
+            "Add single-track musical entries here. Every new track must either link to an existing Work or create a new Work from the track before it can be saved."
         )
-        self.save_button.setText("Save Recording")
+        self.save_button.setText("Create Work + Save Track")
 
     def _refresh_work_track_creation_context_ui(self) -> None:
         context_group = getattr(self, "add_data_work_context_group", None)
+        mode_combo = getattr(self, "add_data_work_mode_combo", None)
+        work_combo = getattr(self, "add_data_work_work_combo", None)
         relationship_combo = getattr(self, "add_data_work_relationship_combo", None)
         parent_combo = getattr(self, "add_data_work_parent_combo", None)
-        if context_group is None or relationship_combo is None or parent_combo is None:
+        if (
+            context_group is None
+            or mode_combo is None
+            or work_combo is None
+            or relationship_combo is None
+            or parent_combo is None
+        ):
             return
 
         context = self._current_work_track_context()
-        if context is None or self.work_service is None:
-            self._pending_work_track_context = None
-            context_group.setVisible(False)
-            self._reset_add_track_heading()
-            for combo in (relationship_combo, parent_combo):
-                previous_state = combo.blockSignals(True)
+        detail = None
+        if context.get("work_id") is not None and self.work_service is not None:
+            detail = self.work_service.fetch_work_detail(int(context["work_id"]))
+
+        self._reset_add_track_heading()
+        context_group.setVisible(True)
+
+        previous_mode_state = mode_combo.blockSignals(True)
+        try:
+            mode_combo.clear()
+            for value, label in self._work_track_governance_modes():
+                mode_combo.addItem(label, value)
+            selected_mode_index = mode_combo.findData(str(context.get("mode") or "create_new_work"))
+            mode_combo.setCurrentIndex(selected_mode_index if selected_mode_index >= 0 else 0)
+        finally:
+            mode_combo.blockSignals(previous_mode_state)
+
+        previous_work_state = work_combo.blockSignals(True)
+        try:
+            work_combo.clear()
+            work_combo.addItem("Choose the governing Work…", None)
+            for record in self._available_work_records():
                 try:
-                    combo.clear()
-                    combo.setEnabled(False)
-                finally:
-                    combo.blockSignals(previous_state)
-            return
+                    work_id = int(getattr(record, "id", 0) or 0)
+                except (TypeError, ValueError):
+                    continue
+                if work_id <= 0:
+                    continue
+                work_combo.addItem(self._work_choice_label(record), work_id)
+            selected_work_id = context.get("work_id")
+            if selected_work_id is not None and work_combo.findData(int(selected_work_id)) < 0:
+                work_combo.addItem(f"Missing Work #{int(selected_work_id)}", int(selected_work_id))
+            selected_work_index = (
+                work_combo.findData(int(selected_work_id))
+                if selected_work_id is not None
+                else 0
+            )
+            work_combo.setCurrentIndex(selected_work_index if selected_work_index >= 0 else 0)
+            work_combo.setEnabled(
+                str(context.get("mode")) == "link_existing_work" and not bool(context.get("locked_work"))
+            )
+        finally:
+            work_combo.blockSignals(previous_work_state)
 
-        detail = self.work_service.fetch_work_detail(int(context["work_id"]))
-        if detail is None:
-            self._pending_work_track_context = None
-            context_group.setVisible(False)
-            self._reset_add_track_heading()
-            return
-
-        relationship_type = self._normalize_work_track_relationship(
-            str(context.get("relationship_type") or "original")
-        )
+        relationship_type = self._normalize_work_track_relationship(str(context.get("relationship_type") or "original"))
         track_choices: list[tuple[int, str]] = []
-        for track_id in detail.track_ids:
-            title = str(self._get_track_title(int(track_id)) or "").strip()
-            track_choices.append((int(track_id), title or f"Track #{int(track_id)}"))
+        if detail is not None:
+            for track_id in detail.track_ids:
+                title = str(self._get_track_title(int(track_id)) or "").strip()
+                track_choices.append((int(track_id), title or f"Track #{int(track_id)}"))
         valid_parent_track_ids = {track_id for track_id, _title in track_choices}
         parent_track_id = context.get("parent_track_id")
         if parent_track_id not in valid_parent_track_ids:
             parent_track_id = None
         self._pending_work_track_context = {
-            "work_id": int(context["work_id"]),
+            "mode": str(context.get("mode") or "create_new_work"),
+            "work_id": int(context["work_id"]) if context.get("work_id") is not None else None,
             "relationship_type": relationship_type,
             "parent_track_id": parent_track_id,
+            "locked_work": bool(context.get("locked_work")),
+            "return_to_work_manager": bool(context.get("return_to_work_manager")),
         }
 
-        self.add_data_title.setText("Add Track to Work")
-        self.add_data_subtitle.setText(
-            "Create a governed child track under the selected work. Composition metadata stays on the parent work."
-        )
-        self.save_button.setText("Save Child Track")
-        context_group.setVisible(True)
-
-        work_title = str(detail.work.title or "").strip() or f"Work #{int(detail.work.id)}"
-        self.add_data_work_context_summary.setText(
-            f"Creating a child track under Work #{int(detail.work.id)}: {work_title}"
-        )
-        if track_choices:
-            self.add_data_work_context_hint.setText(
-                f"{len(track_choices)} linked track{'s' if len(track_choices) != 1 else ''} already sit under this work. "
-                "Choose a parent track when this new recording is a version, remix, or alternate master."
+        if str(context.get("mode")) == "create_new_work":
+            self.add_data_work_context_summary.setText(
+                "Saving this track will create a new parent Work from the track title, ISWC, and registration number, then link the track immediately as the first governed original."
             )
+            self.add_data_work_context_hint.setText(
+                "Main artist names resolve through Party records on save. Creating the Work from this panel avoids entering the same shared metadata twice."
+            )
+            self.save_button.setText("Create Work + Save Track")
+        elif detail is None:
+            self.add_data_work_context_summary.setText(
+                "Choose the existing Work that should govern this track before saving."
+            )
+            self.add_data_work_context_hint.setText(
+                "Use child relationship and optional parent track when this entry is a version, remix, alternate master, or other derivative under an existing Work."
+            )
+            self.save_button.setText("Save Governed Track")
         else:
-            self.add_data_work_context_hint.setText(
-                "This work does not have any governed tracks yet. The next save will create the first child track under the work."
+            work_title = str(detail.work.title or "").strip() or f"Work #{int(detail.work.id)}"
+            relationship_label = self._work_track_relationship_label(relationship_type)
+            self.add_data_work_context_summary.setText(
+                f"This track will link to Work #{int(detail.work.id)}: {work_title} as {relationship_label}."
             )
+            if track_choices:
+                self.add_data_work_context_hint.setText(
+                    f"{len(track_choices)} linked track{'s' if len(track_choices) != 1 else ''} already sit under this work. "
+                    "Choose a parent track when this new recording derives from one of them."
+                )
+            else:
+                self.add_data_work_context_hint.setText(
+                    "This Work does not have any linked tracks yet. Saving now will create the first governed track under it."
+                )
+            self.save_button.setText("Save Governed Track")
 
         previous_relationship_state = relationship_combo.blockSignals(True)
         try:
@@ -12649,7 +13100,11 @@ class App(QMainWindow):
             relationship_combo.setCurrentIndex(
                 selected_relationship_index if selected_relationship_index >= 0 else 0
             )
-            relationship_combo.setEnabled(relationship_combo.count() > 0)
+            relationship_combo.setEnabled(
+                str(context.get("mode")) == "link_existing_work"
+                and detail is not None
+                and relationship_combo.count() > 0
+            )
         finally:
             relationship_combo.blockSignals(previous_relationship_state)
 
@@ -12665,24 +13120,47 @@ class App(QMainWindow):
                 else 0
             )
             parent_combo.setCurrentIndex(selected_parent_index if selected_parent_index >= 0 else 0)
-            parent_combo.setEnabled(bool(track_choices))
+            parent_combo.setEnabled(
+                str(context.get("mode")) == "link_existing_work" and bool(track_choices)
+            )
         finally:
             parent_combo.blockSignals(previous_parent_state)
+        self.add_data_clear_work_context_button.setVisible(bool(context.get("return_to_work_manager")))
+
+    def _on_add_track_governance_mode_changed(self, _index: int) -> None:
+        context = self._current_work_track_context()
+        mode = str(self.add_data_work_mode_combo.currentData() or "create_new_work")
+        context["mode"] = mode
+        if mode == "create_new_work":
+            context["work_id"] = None
+            context["relationship_type"] = "original"
+            context["parent_track_id"] = None
+            context["locked_work"] = False
+        self._pending_work_track_context = context
+        self._refresh_work_track_creation_context_ui()
+
+    def _on_add_track_work_changed(self, _index: int) -> None:
+        context = self._current_work_track_context()
+        work_id = self.add_data_work_work_combo.currentData()
+        try:
+            context["work_id"] = int(work_id) if work_id not in (None, "") else None
+        except (TypeError, ValueError):
+            context["work_id"] = None
+        context["parent_track_id"] = None
+        self._pending_work_track_context = context
+        self._refresh_work_track_creation_context_ui()
 
     def _on_add_track_relationship_changed(self, _index: int) -> None:
         context = self._current_work_track_context()
-        if context is None:
-            return
         relationship_type = self._normalize_work_track_relationship(
             self.add_data_work_relationship_combo.currentData()
         )
         context["relationship_type"] = relationship_type
         self._pending_work_track_context = context
+        self._refresh_work_track_creation_context_ui()
 
     def _on_add_track_parent_track_changed(self, _index: int) -> None:
         context = self._current_work_track_context()
-        if context is None:
-            return
         parent_track_id = self.add_data_work_parent_combo.currentData()
         try:
             context["parent_track_id"] = (
@@ -12693,16 +13171,26 @@ class App(QMainWindow):
         self._pending_work_track_context = context
 
     def _clear_work_track_creation_context(self) -> None:
-        self._pending_work_track_context = None
+        self._pending_work_track_context = self._default_work_track_context()
         self._refresh_work_track_creation_context_ui()
 
     def _return_from_work_track_creation_context(self) -> None:
         context = self._current_work_track_context()
-        work_id = int(context["work_id"]) if context is not None else None
+        work_id = int(context["work_id"]) if context.get("work_id") is not None else None
         self._clear_work_track_creation_context()
         self.clear_form_fields()
         self._apply_add_data_panel_state(False)
         self.open_work_manager(work_id=work_id)
+
+    def open_add_track_entry(self) -> None:
+        if self.track_service is None or self.conn is None:
+            QMessageBox.warning(self, "Add Track", "Open a profile first.")
+            return
+        self._apply_add_data_panel_state(True)
+        self._set_pending_work_track_context()
+        self.clear_form_fields()
+        self._refresh_work_track_creation_context_ui()
+        self.track_title_field.setFocus()
 
     def _begin_work_child_track_creation(self, work_id: int, *, seed_from_work: bool = True) -> bool:
         if self.work_service is None:
@@ -12715,18 +13203,21 @@ class App(QMainWindow):
         current_context = self._current_work_track_context()
         relationship_type = (
             str(current_context.get("relationship_type") or "original")
-            if current_context is not None and int(current_context["work_id"]) == int(work_id)
+            if int(current_context.get("work_id") or 0) == int(work_id)
             else "original"
         )
         parent_track_id = (
             current_context.get("parent_track_id")
-            if current_context is not None and int(current_context["work_id"]) == int(work_id)
+            if int(current_context.get("work_id") or 0) == int(work_id)
             else None
         )
         self._pending_work_track_context = {
+            "mode": "link_existing_work",
             "work_id": int(work_id),
             "relationship_type": self._normalize_work_track_relationship(relationship_type),
             "parent_track_id": parent_track_id,
+            "locked_work": False,
+            "return_to_work_manager": True,
         }
         self._apply_add_data_panel_state(True)
         self.clear_form_fields()
@@ -13312,19 +13803,18 @@ class App(QMainWindow):
     # =============================================================================
     def save(self):
         work_track_context = self._current_work_track_context()
-        if work_track_context is None:
-            response = QMessageBox.question(
-                self,
-                "Governed Musical Creation",
-                "New musical entries now start from Work Manager through Create Musical Entry. Open that governed workflow now?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.Yes,
-            )
-            if response == QMessageBox.Yes:
-                self.open_musical_entry_workflow()
-            return
         if is_blank(self.track_title_field.text()) or is_blank(self.artist_field.currentText()):
             QMessageBox.warning(self, "Missing data", "Track Title and Artist are required.")
+            return
+        if (
+            str(work_track_context.get("mode") or "create_new_work") == "link_existing_work"
+            and work_track_context.get("work_id") is None
+        ):
+            QMessageBox.warning(
+                self,
+                "Missing Work",
+                "Choose the existing Work that should govern this track, or switch the governance mode to create a new Work from the track.",
+            )
             return
         if not valid_upc_ean(self.upc_field.currentText()):
             QMessageBox.warning(
@@ -13383,13 +13873,25 @@ class App(QMainWindow):
                 isrc_compact=comp,
                 track_title=self.track_title_field.text().strip(),
             )
+            selected_artist_name, selected_artist_party_id = self._resolve_artist_party_choice(
+                self.artist_field
+            )
+            resolved_artist_name, _artist_party_id = self._resolve_party_backed_artist_name(
+                selected_artist_name or self.artist_field.currentText(),
+                selected_party_id=selected_artist_party_id,
+                cursor=self.cursor,
+            )
+            resolved_additional_artists = self._resolve_party_backed_additional_artist_names(
+                self._parse_additional_artists(self.additional_artist_field.currentText()),
+                cursor=self.cursor,
+            )
+            self.artist_field.setCurrentText(resolved_artist_name)
+            self.additional_artist_field.setCurrentText(", ".join(resolved_additional_artists))
             payload = TrackCreatePayload(
                 isrc=generated_iso,
                 track_title=self.track_title_field.text().strip(),
-                artist_name=self.artist_field.currentText(),
-                additional_artists=self._parse_additional_artists(
-                    self.additional_artist_field.currentText()
-                ),
+                artist_name=resolved_artist_name,
+                additional_artists=resolved_additional_artists,
                 album_title=self.album_title_field.currentText().strip() or None,
                 release_date=release_date_sql,
                 track_length_sec=track_seconds,
@@ -13401,13 +13903,20 @@ class App(QMainWindow):
                 audio_file_source_path=(self.audio_file_field.text().strip() or None),
                 album_art_source_path=(self.album_art_field.text().strip() or None),
             )
-            payload.work_id = int(work_track_context["work_id"])
-            payload.parent_track_id = (
-                int(work_track_context["parent_track_id"])
-                if work_track_context.get("parent_track_id") is not None
-                else None
-            )
-            payload.relationship_type = str(work_track_context.get("relationship_type") or "original")
+            if str(work_track_context.get("mode") or "create_new_work") == "link_existing_work":
+                payload.work_id = int(work_track_context["work_id"])
+                payload.parent_track_id = (
+                    int(work_track_context["parent_track_id"])
+                    if work_track_context.get("parent_track_id") is not None
+                    else None
+                )
+                payload.relationship_type = str(
+                    work_track_context.get("relationship_type") or "original"
+                )
+            else:
+                payload.work_id = None
+                payload.parent_track_id = None
+                payload.relationship_type = "original"
             if payload.audio_file_source_path and not self._confirm_lossy_primary_audio_selection(
                 [payload.audio_file_source_path],
                 title="Save Track Media",
@@ -13423,23 +13932,65 @@ class App(QMainWindow):
                 return
             payload.audio_file_storage_mode, payload.album_art_storage_mode = media_modes
 
-            def mutation():
-                created_track_id = self.track_service.create_track(payload)
-                release_ids = self._sync_releases_for_tracks([created_track_id])
-                return created_track_id, release_ids
+            work_id_for_refresh: int | None = None
+            if str(work_track_context.get("mode") or "create_new_work") == "create_new_work":
+                work_payload = self._work_payload_from_track_seed(
+                    track_title=payload.track_title,
+                    iswc=payload.iswc,
+                    registration_number=payload.buma_work_number,
+                )
 
-            track_id, release_ids = self._run_snapshot_history_action(
-                action_label=f"Create Track: {payload.track_title}",
-                action_type="track.create",
-                entity_type="Track",
-                entity_id=payload.track_title,
-                payload={
-                    "track_title": payload.track_title,
-                    "artist_name": payload.artist_name,
-                    "album_title": payload.album_title,
-                },
-                mutation=mutation,
-            )
+                def mutation():
+                    nonlocal work_id_for_refresh
+                    with self.conn:
+                        cur = self.conn.cursor()
+                        work_id_for_refresh = self.work_service.create_work(work_payload, cursor=cur)
+                        payload.work_id = int(work_id_for_refresh)
+                        payload.parent_track_id = None
+                        payload.relationship_type = "original"
+                        created_track_id = self.track_service.create_track(payload)
+                        release_ids = self._sync_releases_for_tracks([created_track_id])
+                        return int(work_id_for_refresh), created_track_id, release_ids
+
+                work_id_for_refresh, track_id, release_ids = self._run_snapshot_history_action(
+                    action_label=f"Create Work + Track: {payload.track_title}",
+                    action_type="track.create_governed",
+                    entity_type="Track",
+                    entity_id=payload.track_title,
+                    payload={
+                        "track_title": payload.track_title,
+                        "artist_name": payload.artist_name,
+                        "album_title": payload.album_title,
+                        "created_work_from_track": True,
+                    },
+                    mutation=mutation,
+                )
+                self._audit(
+                    "CREATE",
+                    "Work",
+                    ref_id=work_id_for_refresh,
+                    details=f"title={work_payload.title}",
+                )
+            else:
+                work_id_for_refresh = int(work_track_context["work_id"])
+
+                def mutation():
+                    created_track_id = self.track_service.create_track(payload)
+                    release_ids = self._sync_releases_for_tracks([created_track_id])
+                    return created_track_id, release_ids
+
+                track_id, release_ids = self._run_snapshot_history_action(
+                    action_label=f"Create Track: {payload.track_title}",
+                    action_type="track.create",
+                    entity_type="Track",
+                    entity_id=payload.track_title,
+                    payload={
+                        "track_title": payload.track_title,
+                        "artist_name": payload.artist_name,
+                        "album_title": payload.album_title,
+                    },
+                    mutation=mutation,
+                )
             self._log_event(
                 "track.create",
                 "Track created",
@@ -13454,10 +14005,12 @@ class App(QMainWindow):
             self.refresh_table_preserve_view(focus_id=track_id)
             self.populate_all_comboboxes()
             self.clear_form_fields()
+            if str(work_track_context.get("mode") or "create_new_work") == "create_new_work":
+                self._set_pending_work_track_context()
             self._refresh_work_track_creation_context_ui()
-            if work_track_context is not None:
+            if work_id_for_refresh is not None:
                 self._refresh_work_manager_panel()
-                self._focus_work_in_manager(int(work_track_context["work_id"]))
+                self._focus_work_in_manager(int(work_id_for_refresh))
             self._refresh_history_actions()
             QMessageBox.information(self, "Success", "Track info saved successfully!")
         except sqlite3.IntegrityError as e:
@@ -14651,7 +15204,7 @@ class App(QMainWindow):
             response = QMessageBox.question(
                 self,
                 "Work Manager",
-                "Work created. Do you want to create the first track under this work now?",
+                "Work created. Do you want to open Add Track with this Work preselected now?",
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.Yes,
             )
@@ -14702,82 +15255,6 @@ class App(QMainWindow):
                 if value:
                     return int(value)
         return None
-
-    def open_musical_entry_workflow(self, selected_work_id: object | None = None):
-        if self.work_service is None:
-            QMessageBox.warning(self, "Work Manager", "Open a profile first.")
-            return
-        normalized_selected_work_id: int | None = None
-        try:
-            if isinstance(selected_work_id, bool):
-                normalized_selected_work_id = None
-            elif selected_work_id not in (None, ""):
-                normalized_selected_work_id = int(selected_work_id)
-        except (TypeError, ValueError):
-            normalized_selected_work_id = None
-        self.open_work_manager(work_id=normalized_selected_work_id)
-        if normalized_selected_work_id is None:
-            normalized_selected_work_id = self._current_work_manager_selected_work_id()
-
-        dialog = GovernedMusicalEntryDialog(
-            work_service=self.work_service,
-            selected_work_id=normalized_selected_work_id,
-            parent=self,
-        )
-        if dialog.exec() != QDialog.Accepted:
-            return
-        plan = dialog.selected_plan()
-
-        if plan.mode == GovernedMusicalEntryDialog.MODE_NEW_WORK_SINGLE:
-            payload = self._open_work_creation_dialog()
-            if payload is None:
-                return
-            work_id = self._create_work_record(payload)
-            if not work_id:
-                return
-            self._launch_work_scoped_child_track_creation(work_id, relationship_type="original")
-            return
-
-        if plan.mode == GovernedMusicalEntryDialog.MODE_NEW_WORK_ALBUM:
-            payload = self._open_work_creation_dialog()
-            if payload is None:
-                return
-            work_id = self._create_work_record(payload)
-            if not work_id:
-                return
-            self.open_add_album_dialog(
-                work_id=work_id,
-                lock_work=True,
-                relationship_type="original",
-                inherit_work_context=False,
-            )
-            return
-
-        if plan.mode == GovernedMusicalEntryDialog.MODE_EXISTING_WORK_SINGLE and plan.work_id:
-            self._focus_work_in_manager(int(plan.work_id))
-            self._launch_work_scoped_child_track_creation(
-                int(plan.work_id),
-                relationship_type=plan.relationship_type,
-            )
-            return
-
-        if plan.mode == GovernedMusicalEntryDialog.MODE_EXISTING_WORK_ALBUM and plan.work_id:
-            self._focus_work_in_manager(int(plan.work_id))
-            self.open_add_album_dialog(
-                work_id=int(plan.work_id),
-                lock_work=True,
-                relationship_type=plan.relationship_type,
-                inherit_work_context=False,
-            )
-            return
-
-        self._clear_work_track_creation_context()
-        self.open_add_album_dialog(
-            work_id=None,
-            lock_work=False,
-            relationship_type=None,
-            inherit_work_context=False,
-        )
 
     def update_work(self, work_id: int, payload: WorkPayload):
         if self.work_service is None:
@@ -17417,6 +17894,7 @@ class App(QMainWindow):
         self.refresh_table_preserve_view()
         self.populate_all_comboboxes()
         self.clear_form_fields()
+        self._set_pending_work_track_context()
         self._refresh_work_track_creation_context_ui()
 
     # =============================================================================
@@ -17934,7 +18412,7 @@ class App(QMainWindow):
             self.settings.sync()
 
         self._run_setting_bundle_history_action(
-            action_label="Toggle Recording Editor",
+            action_label="Toggle Add Track Panel",
             setting_keys=["display/add_data_panel"],
             mutation=mutation,
             entity_id="display/add_data_panel",
@@ -20906,7 +21384,9 @@ class _AlbumTrackSection(QWidget):
         root.setContentsMargins(6, 8, 6, 10)
         root.setSpacing(12)
 
-        self.track_note = QLabel("Track-specific metadata, timing, codes, and managed audio.")
+        self.track_note = QLabel(
+            "Track-specific governance, metadata, timing, codes, and managed audio."
+        )
         self.track_note.setProperty("role", "secondary")
         self.track_note.setWordWrap(True)
         root.addWidget(self.track_note)
@@ -20940,6 +21420,11 @@ class _AlbumTrackSection(QWidget):
             self.section_tabs.addTab(page, tab_title)
             return box_layout
 
+        governance_layout = create_tab(
+            "Governance",
+            "Work Governance",
+            "Resolve this row to either an existing Work or a new Work created from this track before save.",
+        )
         details_layout = create_tab(
             "Details",
             "Track Details",
@@ -20955,6 +21440,47 @@ class _AlbumTrackSection(QWidget):
             "Managed Audio",
             "Attach the source audio file used when saving these album tracks.",
         )
+
+        self.governance_summary = QLabel("")
+        self.governance_summary.setWordWrap(True)
+        self.governance_summary.setProperty("role", "sectionTitle")
+        governance_layout.addWidget(self.governance_summary)
+
+        self.governance_hint = QLabel("")
+        self.governance_hint.setWordWrap(True)
+        self.governance_hint.setProperty("role", "secondary")
+        governance_layout.addWidget(self.governance_hint)
+
+        self.governance_mode = FocusWheelComboBox()
+        self.governance_mode.setEditable(False)
+        self.dialog._apply_input_height(self.governance_mode)
+        self.governance_mode.addItem("Create New Work from This Track", "create_new_work")
+        self.governance_mode.addItem("Link to Existing Work", "link_existing_work")
+        self.governance_mode.currentIndexChanged.connect(self._refresh_governance_state)
+        self._add_labeled_widget(governance_layout, "Governance", self.governance_mode)
+
+        self.parent_work = FocusWheelComboBox()
+        self.parent_work.setEditable(False)
+        self.dialog._apply_input_height(self.parent_work)
+        self.parent_work.currentIndexChanged.connect(self._refresh_governance_state)
+        self._add_labeled_widget(governance_layout, "Work", self.parent_work)
+
+        self.relationship_type = FocusWheelComboBox()
+        self.relationship_type.setEditable(False)
+        self.dialog._apply_input_height(self.relationship_type)
+        for value in self.app._work_track_relationship_choices():
+            self.relationship_type.addItem(
+                self.app._work_track_relationship_label(value),
+                value,
+            )
+        self.relationship_type.currentIndexChanged.connect(self._refresh_governance_state)
+        self._add_labeled_widget(governance_layout, "Child Relationship", self.relationship_type)
+
+        self.parent_track = FocusWheelComboBox()
+        self.parent_track.setEditable(False)
+        self.dialog._apply_input_height(self.parent_track)
+        self.parent_track.currentIndexChanged.connect(self._refresh_governance_state)
+        self._add_labeled_widget(governance_layout, "Parent Track", self.parent_track)
 
         self.track_title = QLineEdit()
         self.track_title.setPlaceholderText("Track title")
@@ -21085,6 +21611,10 @@ class _AlbumTrackSection(QWidget):
 
         root.addStretch(1)
         self.set_track_number(number)
+        self.apply_governance_seed(
+            work_id=self.dialog._selected_work_id_seed,
+            relationship_type=self.dialog._initial_relationship_type,
+        )
 
     @staticmethod
     def _add_labeled_widget(layout: QVBoxLayout, label_text: str, widget: QWidget) -> None:
@@ -21112,6 +21642,147 @@ class _AlbumTrackSection(QWidget):
 
     def track_length_seconds(self) -> int:
         return hms_to_seconds(self.len_h.value(), self.len_m.value(), self.len_s.value())
+
+    def _selected_governance_mode(self) -> str:
+        return str(self.governance_mode.currentData() or "create_new_work")
+
+    def selected_work_id(self) -> int | None:
+        value = self.parent_work.currentData()
+        try:
+            return int(value) if value not in (None, "") else None
+        except (TypeError, ValueError):
+            return None
+
+    def selected_relationship_type(self) -> str:
+        return self.app._normalize_work_track_relationship(self.relationship_type.currentData())
+
+    def selected_parent_track_id(self) -> int | None:
+        value = self.parent_track.currentData()
+        try:
+            return int(value) if value not in (None, "") else None
+        except (TypeError, ValueError):
+            return None
+
+    def selected_governance_mode(self) -> str:
+        return self._selected_governance_mode()
+
+    def apply_governance_seed(
+        self,
+        *,
+        work_id: int | None,
+        relationship_type: str | None,
+    ) -> None:
+        previous_mode_state = self.governance_mode.blockSignals(True)
+        previous_relationship_state = self.relationship_type.blockSignals(True)
+        try:
+            mode = "link_existing_work" if work_id is not None else "create_new_work"
+            mode_index = self.governance_mode.findData(mode)
+            self.governance_mode.setCurrentIndex(mode_index if mode_index >= 0 else 0)
+            relationship_index = self.relationship_type.findData(
+                self.app._normalize_work_track_relationship(relationship_type)
+            )
+            self.relationship_type.setCurrentIndex(relationship_index if relationship_index >= 0 else 0)
+        finally:
+            self.governance_mode.blockSignals(previous_mode_state)
+            self.relationship_type.blockSignals(previous_relationship_state)
+        self._populate_parent_work_combo(selected_work_id=work_id)
+        self._refresh_governance_state()
+
+    def _populate_parent_work_combo(self, *, selected_work_id: int | None) -> None:
+        previous_state = self.parent_work.blockSignals(True)
+        try:
+            self.parent_work.clear()
+            self.parent_work.addItem("Choose the governing Work…", None)
+            for record in self.dialog._available_work_records():
+                try:
+                    work_id = int(getattr(record, "id", 0) or 0)
+                except (TypeError, ValueError):
+                    continue
+                if work_id <= 0:
+                    continue
+                self.parent_work.addItem(self.dialog._work_choice_label(record), work_id)
+            if selected_work_id is not None and self.parent_work.findData(int(selected_work_id)) < 0:
+                self.parent_work.addItem(f"Missing Work #{int(selected_work_id)}", int(selected_work_id))
+            selected_index = (
+                self.parent_work.findData(int(selected_work_id))
+                if selected_work_id is not None
+                else 0
+            )
+            self.parent_work.setCurrentIndex(selected_index if selected_index >= 0 else 0)
+        finally:
+            self.parent_work.blockSignals(previous_state)
+
+    def _refresh_governance_state(self) -> None:
+        mode = self._selected_governance_mode()
+        work_id = self.selected_work_id()
+        detail = (
+            self.app.work_service.fetch_work_detail(int(work_id))
+            if work_id is not None and self.app.work_service is not None
+            else None
+        )
+
+        track_choices: list[tuple[int, str]] = []
+        if detail is not None:
+            for track_id in detail.track_ids:
+                title = str(self.app._get_track_title(int(track_id)) or "").strip()
+                track_choices.append((int(track_id), title or f"Track #{int(track_id)}"))
+
+        previous_parent_state = self.parent_track.blockSignals(True)
+        try:
+            current_parent_track_id = self.selected_parent_track_id()
+            self.parent_track.clear()
+            self.parent_track.addItem("No direct parent track", None)
+            for track_id, title in track_choices:
+                self.parent_track.addItem(title, int(track_id))
+            parent_index = (
+                self.parent_track.findData(int(current_parent_track_id))
+                if current_parent_track_id is not None
+                else 0
+            )
+            self.parent_track.setCurrentIndex(parent_index if parent_index >= 0 else 0)
+        finally:
+            self.parent_track.blockSignals(previous_parent_state)
+
+        if mode == "create_new_work":
+            self.parent_work.setEnabled(False)
+            self.relationship_type.setEnabled(False)
+            self.parent_track.setEnabled(False)
+            self.governance_summary.setText(
+                "This row will create a new Work from the track title, ISWC, and registration number, then save the track as that Work's first governed original."
+            )
+            self.governance_hint.setText(
+                "Artist names resolve through Party records on save so this row can seed authoritative identity without making you enter shared data twice."
+            )
+            return
+
+        self.parent_work.setEnabled(True)
+        self.relationship_type.setEnabled(detail is not None)
+        self.parent_track.setEnabled(bool(track_choices))
+        if detail is None:
+            self.governance_summary.setText(
+                "Choose the existing Work that should govern this row before saving the album batch."
+            )
+            self.governance_hint.setText(
+                "Use the child relationship and optional parent track when this row is a version, remix, alternate master, edit, live take, or other derivative under that Work."
+            )
+            return
+
+        relationship_label = self.app._work_track_relationship_label(
+            self.selected_relationship_type()
+        )
+        work_title = str(detail.work.title or "").strip() or f"Work #{int(detail.work.id)}"
+        self.governance_summary.setText(
+            f"This row will link to Work #{int(detail.work.id)}: {work_title} as {relationship_label}."
+        )
+        if track_choices:
+            self.governance_hint.setText(
+                f"{len(track_choices)} governed track{'s' if len(track_choices) != 1 else ''} already sit under this Work. "
+                "Choose a parent track when this row derives from one of them."
+            )
+        else:
+            self.governance_hint.setText(
+                "This Work does not have any linked tracks yet. Saving this row will create the first governed track under it."
+            )
 
     def is_effectively_blank(self) -> bool:
         return all(
@@ -21205,72 +21876,6 @@ class AlbumEntryDialog(QDialog):
         except Exception:
             return []
 
-    def _populate_parent_work_combo(self) -> None:
-        previous_state = self.parent_work_combo.blockSignals(True)
-        try:
-            self.parent_work_combo.clear()
-            self.parent_work_combo.addItem("No parent work selected", None)
-            for record in self._available_work_records():
-                try:
-                    work_id = int(getattr(record, "id", 0) or 0)
-                except (TypeError, ValueError):
-                    continue
-                if work_id <= 0:
-                    continue
-                self.parent_work_combo.addItem(self._work_choice_label(record), work_id)
-            selected_index = (
-                self.parent_work_combo.findData(int(self._selected_work_id_seed))
-                if self._selected_work_id_seed is not None
-                else 0
-            )
-            self.parent_work_combo.setCurrentIndex(selected_index if selected_index >= 0 else 0)
-        finally:
-            self.parent_work_combo.blockSignals(previous_state)
-        self._refresh_work_context_summary()
-
-    def _selected_parent_work_id(self) -> int | None:
-        value = self.parent_work_combo.currentData()
-        try:
-            return int(value) if value not in (None, "") else None
-        except (TypeError, ValueError):
-            return None
-
-    def _selected_relationship_type(self) -> str:
-        return self.app._normalize_work_track_relationship(
-            self.relationship_type_combo.currentData()
-        )
-
-    def _refresh_work_context_summary(self) -> None:
-        work_id = self._selected_parent_work_id()
-        if work_id is None or self.app.work_service is None:
-            self.relationship_type_combo.setEnabled(False)
-            self.work_context_summary.setText(
-                "No shared parent work selected. This album save will create one parent work per saved track so the batch still lands in the governed v3 model."
-            )
-            self.work_context_hint.setText(
-                "When every track in this batch belongs to the same composition-level work, choose that work here so the whole batch links under one parent instead. Without a shared parent work, this fallback mode stays fixed to one new work per track."
-            )
-            return
-        self.relationship_type_combo.setEnabled(True)
-        detail = self.app.work_service.fetch_work_detail(int(work_id))
-        if detail is None:
-            self.relationship_type_combo.setEnabled(False)
-            self.work_context_summary.setText(
-                f"Parent work #{int(work_id)} could not be loaded. Choose another work or use the explicit auto-governed batch mode instead."
-            )
-            self.work_context_hint.setText(
-                "The selected work could not be loaded from the current profile."
-            )
-            return
-        work_title = str(detail.work.title or "").strip() or f"Work #{int(work_id)}"
-        lock_text = "This batch is locked to the selected work." if self._lock_work else ""
-        self.work_context_summary.setText(
-            f"Creating album tracks under Work #{int(detail.work.id)}: {work_title}"
-        )
-        self.work_context_hint.setText(
-            f"Every created track in this batch will inherit the parent work and relationship type '{self._selected_relationship_type().replace('_', ' ')}'. {lock_text}".strip()
-        )
-
     def __init__(
         self,
         app: App,
@@ -21298,11 +21903,7 @@ class AlbumEntryDialog(QDialog):
             else state_message
         )
 
-        self.setWindowTitle(
-            "Album Batch Entry for Work"
-            if self._selected_work_id_seed is not None
-            else "Album Batch Entry"
-        )
+        self.setWindowTitle("Add Album")
         self.setModal(True)
         self.resize(960, 960)
         self.setMinimumSize(820, 760)
@@ -21317,9 +21918,9 @@ class AlbumEntryDialog(QDialog):
             title=self.windowTitle(),
             subtitle=(
                 "Capture shared album metadata once, then use the Tracks tab to work through one tab per track. "
-                "Blank track tabs are ignored when you save."
+                "Each populated row must resolve its own Work governance before save."
                 + (
-                    " This batch is already aimed at a selected parent work."
+                    " Rows currently start seeded from the selected Work."
                     if self._selected_work_id_seed is not None
                     else ""
                 )
@@ -21340,44 +21941,21 @@ class AlbumEntryDialog(QDialog):
 
         work_context_box, work_context_layout = _create_standard_section(
             self.album_details_tab,
-            "Work Governance",
-            "Use a parent work when this whole batch belongs to one composition-level work and should be governed immediately.",
+            "Governance Rules",
+            "Add Album is batch Add Track: each populated row must either link to an existing Work or create a new Work from that row before save.",
         )
-        self.work_context_summary = QLabel("")
+        self.work_context_summary = QLabel(
+            "Every saved album row must end in one of two explicit outcomes: link that row to an existing Work, or create a new Work from that row and save the track as its first governed original."
+        )
         self.work_context_summary.setWordWrap(True)
         self.work_context_summary.setProperty("role", "sectionTitle")
         work_context_layout.addWidget(self.work_context_summary)
-        self.work_context_hint = QLabel("")
+        self.work_context_hint = QLabel(
+            "Open the Governance tab inside each track row to make that choice. If this dialog opened from Work Manager, each row starts preselected to that Work, but you can still change any row before save."
+        )
         self.work_context_hint.setWordWrap(True)
         self.work_context_hint.setProperty("role", "secondary")
         work_context_layout.addWidget(self.work_context_hint)
-
-        self.parent_work_combo = FocusWheelComboBox()
-        self.parent_work_combo.setEditable(False)
-        self._apply_input_height(self.parent_work_combo)
-        self.parent_work_combo.currentIndexChanged.connect(self._refresh_work_context_summary)
-        self._add_labeled_widget(work_context_layout, "Parent Work", self.parent_work_combo)
-
-        self.relationship_type_combo = FocusWheelComboBox()
-        self.relationship_type_combo.setEditable(False)
-        for value in self.app._work_track_relationship_choices():
-            self.relationship_type_combo.addItem(
-                self.app._work_track_relationship_label(value),
-                value,
-            )
-        relationship_index = self.relationship_type_combo.findData(
-            self._initial_relationship_type
-        )
-        self.relationship_type_combo.setCurrentIndex(relationship_index if relationship_index >= 0 else 0)
-        self.relationship_type_combo.currentIndexChanged.connect(
-            self._refresh_work_context_summary
-        )
-        self._apply_input_height(self.relationship_type_combo)
-        self._add_labeled_widget(
-            work_context_layout,
-            "Child Relationship",
-            self.relationship_type_combo,
-        )
         album_details_layout.addWidget(work_context_box)
 
         summary_box, summary_layout = _create_standard_section(
@@ -21388,7 +21966,7 @@ class AlbumEntryDialog(QDialog):
         summary_label = QLabel(
             "Album Title, UPC/EAN, Genre, Catalog#, and Album Art are shared across the new album tracks. "
             + self.isrc_help_text
-            + " If no shared parent work is selected, the dialog now creates one work per saved track automatically."
+            + " Each populated track row still resolves its own Work governance before save so the batch never creates orphan tracks."
         )
         summary_label.setWordWrap(True)
         summary_label.setProperty("role", "supportingText")
@@ -21485,10 +22063,6 @@ class AlbumEntryDialog(QDialog):
         for _ in range(2):
             self.add_track_section()
 
-        self._populate_parent_work_combo()
-        if self._lock_work:
-            self.parent_work_combo.setEnabled(False)
-
         buttons = QHBoxLayout()
         buttons.setContentsMargins(0, 0, 0, 0)
         buttons.setSpacing(8)
@@ -21522,10 +22096,10 @@ class AlbumEntryDialog(QDialog):
         return combo
 
     def _build_artist_combo(self, *, allow_empty: bool) -> FocusWheelComboBox:
-        return self._combo_from_query(
-            "SELECT DISTINCT name FROM Artists WHERE name IS NOT NULL AND name != '' ORDER BY name",
-            allow_empty=allow_empty,
-        )
+        combo = FocusWheelComboBox()
+        self.app._configure_artist_party_combo(combo, allow_empty=allow_empty)
+        self._apply_input_height(combo)
+        return combo
 
     def _build_album_combo(self) -> FocusWheelComboBox:
         return self._combo_from_query(
@@ -21674,10 +22248,6 @@ class AlbumEntryDialog(QDialog):
         catalog_number = self.catalog_number.currentText().strip() or None
         album_art_source_path = self.album_art.text().strip() or None
         use_release_year = bool(self.use_release_year.isChecked())
-        parent_work_id = self._selected_parent_work_id()
-        relationship_type = (
-            self._selected_relationship_type() if parent_work_id is not None else None
-        )
         any_audio_source_path = any(
             (section.audio_file.text() or "").strip() for section in self._track_sections
         )
@@ -21722,6 +22292,17 @@ class AlbumEntryDialog(QDialog):
                     self,
                     "Missing Track Data",
                     f"{section.title()} needs both a Track Title and a Main Artist.",
+                )
+                return None
+            if (
+                section.selected_governance_mode() == "link_existing_work"
+                and section.selected_work_id() is None
+            ):
+                self._focus_track_section(section)
+                QMessageBox.warning(
+                    self,
+                    "Missing Work",
+                    f"{section.title()} must choose the existing Work that governs this row, or switch the row back to creating a new Work from the track.",
                 )
                 return None
 
@@ -21780,14 +22361,43 @@ class AlbumEntryDialog(QDialog):
                     )
                     return None
 
+            selected_artist_name, selected_artist_party_id = self.app._resolve_artist_party_choice(
+                section.artist_name
+            )
+            resolved_artist_name, _artist_party_id = self.app._resolve_party_backed_artist_name(
+                selected_artist_name or artist_name,
+                selected_party_id=selected_artist_party_id,
+                cursor=self.app.cursor,
+            )
+            resolved_additional_artists = self.app._resolve_party_backed_additional_artist_names(
+                self.app._parse_additional_artists(section.additional_artists.currentText()),
+                cursor=self.app.cursor,
+            )
+            section.artist_name.setCurrentText(resolved_artist_name)
+            section.additional_artists.setCurrentText(", ".join(resolved_additional_artists))
+
+            selected_work_id = (
+                section.selected_work_id()
+                if section.selected_governance_mode() == "link_existing_work"
+                else None
+            )
+            relationship_type = (
+                section.selected_relationship_type()
+                if section.selected_governance_mode() == "link_existing_work"
+                else "original"
+            )
+            parent_track_id = (
+                section.selected_parent_track_id()
+                if section.selected_governance_mode() == "link_existing_work"
+                else None
+            )
+
             payloads.append(
                 TrackCreatePayload(
                     isrc=iso_isrc,
                     track_title=track_title,
-                    artist_name=artist_name,
-                    additional_artists=self.app._parse_additional_artists(
-                        section.additional_artists.currentText()
-                    ),
+                    artist_name=resolved_artist_name,
+                    additional_artists=resolved_additional_artists,
                     album_title=album_title,
                     release_date=section.release_date_iso(),
                     track_length_sec=section.track_length_seconds(),
@@ -21796,7 +22406,8 @@ class AlbumEntryDialog(QDialog):
                     genre=genre,
                     catalog_number=catalog_number,
                     buma_work_number=(section.buma_work_number.text().strip() or None),
-                    work_id=parent_work_id,
+                    work_id=selected_work_id,
+                    parent_track_id=parent_track_id,
                     relationship_type=relationship_type,
                     audio_file_source_path=(section.audio_file.text().strip() or None),
                     audio_file_storage_mode=(
@@ -21817,30 +22428,28 @@ class AlbumEntryDialog(QDialog):
             return
 
         created_track_ids: list[int] = []
+        created_work_ids: list[int] = []
         album_title = payloads[0].album_title or "Album"
-        selected_work_id = self._selected_parent_work_id()
-        selected_relationship_type = (
-            self._selected_relationship_type() if selected_work_id is not None else "original"
-        )
 
         def mutation():
             nonlocal created_track_ids
+            nonlocal created_work_ids
             created_track_ids = []
+            created_work_ids = []
             cur = self.app.conn.cursor()
             for payload in payloads:
-                if selected_work_id is not None:
-                    payload.work_id = int(selected_work_id)
-                    payload.relationship_type = selected_relationship_type
-                    payload.parent_track_id = None
-                else:
-                    work_payload = WorkPayload(
-                        title=payload.track_title,
+                if payload.work_id is None:
+                    work_payload = self.app._work_payload_from_track_seed(
+                        track_title=payload.track_title,
                         iswc=payload.iswc,
-                        profile_name=self.app._current_profile_name(),
+                        registration_number=payload.buma_work_number,
                     )
                     payload.work_id = self.app.work_service.create_work(work_payload, cursor=cur)
                     payload.relationship_type = "original"
                     payload.parent_track_id = None
+                    created_work_ids.append(int(payload.work_id))
+                else:
+                    created_work_ids.append(int(payload.work_id))
                 created_track_ids.append(self.app.track_service.create_track(payload))
             release_ids = self.app._sync_releases_for_tracks(created_track_ids)
 
@@ -21885,9 +22494,9 @@ class AlbumEntryDialog(QDialog):
         focus_id = self.created_track_ids[0] if self.created_track_ids else None
         self.app.refresh_table_preserve_view(focus_id=focus_id)
         self.app.populate_all_comboboxes()
-        if selected_work_id is not None:
+        if created_work_ids:
             self.app._refresh_work_manager_panel()
-            self.app._focus_work_in_manager(int(selected_work_id))
+            self.app._focus_work_in_manager(int(created_work_ids[0]))
         if hasattr(self.app, "statusBar"):
             self.app.statusBar().showMessage(
                 f"Saved album '{album_title}' with {len(self.created_track_ids)} track{'s' if len(self.created_track_ids) != 1 else ''}.",

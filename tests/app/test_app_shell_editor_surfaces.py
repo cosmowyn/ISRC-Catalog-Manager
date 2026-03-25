@@ -33,8 +33,14 @@ class AppShellEditorSurfaceTests(AppShellTestCase):
     test_album_entry_creates_parent_work_per_track_when_no_work_selected = (
         AppShellTestCase.case_album_entry_creates_parent_work_per_track_when_no_work_selected
     )
-    test_save_recording_without_work_context_redirects_to_governed_creation = (
+    test_add_track_requires_work_when_link_mode_selected = (
         AppShellTestCase.case_save_recording_without_work_context_redirects_to_governed_creation
+    )
+    test_add_track_creates_new_work_from_track_with_seeded_work_metadata_and_party_artist = (
+        AppShellTestCase.case_add_track_creates_new_work_from_track_with_seeded_work_metadata_and_party_artist
+    )
+    test_album_entry_can_mix_existing_and_new_work_governance_per_row = (
+        AppShellTestCase.case_album_entry_can_mix_existing_and_new_work_governance_per_row
     )
     test_gs1_dialog_uses_top_level_workflow_tabs = (
         AppShellTestCase.case_gs1_dialog_uses_top_level_workflow_tabs

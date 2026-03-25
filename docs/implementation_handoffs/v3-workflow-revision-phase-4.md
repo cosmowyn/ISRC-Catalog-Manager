@@ -8,7 +8,7 @@ Date: 2026-03-25
 
 ## Status And Scope
 
-Phase 4 is `in_progress`, with broader expansion intentionally paused until the completed Phase 3 single-entrypoint closeout is reconciled.
+Phase 4 is `in_progress`, with broader expansion intentionally paused until the corrected track-first governed creation model is reconciled.
 
 The current Phase 4 work now covers two connected read-side slices:
 
@@ -16,9 +16,9 @@ The current Phase 4 work now covers two connected read-side slices:
 - search relationships, Work Manager read-side track membership, workflow readiness, and XML export now also move toward the same authority path
 - generic exchange JSON/package exports now also prefer governed work metadata over stale track-side composition shadow fields
 
-The pre-Phase-4 creation-flow consolidation is now completed and documented at [`v3-workflow-revision-phase-3-single-entrypoint-closeout.md`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/docs/implementation_handoffs/v3-workflow-revision-phase-3-single-entrypoint-closeout.md).
+The corrected creation-flow source of truth is now documented at [`v3-track-first-governed-creation-correction.md`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/docs/implementation_handoffs/v3-track-first-governed-creation-correction.md).
 
-Album-governance boundaries remain anchored to the reconciled decision note at [`v3-workflow-revision-album-governance-decision-note.md`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/docs/implementation_handoffs/v3-workflow-revision-album-governance-decision-note.md).
+The earlier Phase 3 single-entrypoint closeout and album-governance decision note remain useful as historical context, but the track-first correction handoff supersedes them where they conflict about the main creation start or about per-row album governance.
 
 ## Phase Goal
 
@@ -106,8 +106,8 @@ Keep `Catalog` strong as the operational inventory while reducing duplicated gov
 
 ## What Was Intentionally Deferred
 
-- broader Phase 4 expansion until the reconciled album-governance guardrails are applied consistently
-- broader Phase 4 read-side work in this specific turn while the creation-flow consolidation was being completed and validated
+- broader Phase 4 expansion until the corrected track-first governed creation handoff is fully reconciled
+- broader Phase 4 read-side work in this specific turn while the creation-flow correction was being completed and validated
 - broader catalog workspace projection changes
 - bulk-edit and track-edit operational cleanup
 - broader exchange import/update normalization around governed work metadata
@@ -121,10 +121,10 @@ Keep `Catalog` strong as the operational inventory while reducing duplicated gov
 - `WorkTrackLinks` still exists as shadow compatibility in other services; this slice narrows read authority in catalog, quality, search, work navigation, workflow readiness, and XML export first, but does not delete that table or fully remove legacy read paths elsewhere
 - `CatalogReadService` still projects track-side `buma_work_number` because the catalog table does not yet have a dedicated first-class work registration field in its row model
 - exchange import/update flows still accept and persist track-side composition fields because this slice only changed outward-facing export authority
-- album-related follow-up must respect the reconciled decision note:
+- album-related follow-up must respect the corrected track-first creation handoff:
   - the album dialog stays a release/batch-entry surface
-  - fallback mode auto-creates governed work parents
-  - no album batch save may silently mix governance modes
+  - each populated row resolves governance individually
+  - new rows may create new Works from their own track data without duplicate entry
 
 ## Workers Used And Workers Closed
 
@@ -152,14 +152,15 @@ Central Oversight check:
 - good: inventory and diagnostics are starting to consume the parent-governance model
 - good: no new creation surface was added to Catalog
 - good: Work Manager and Global Search now agree with the governing work link even when the shadow table is stale
+- good: the corrected track-first governed creation model can now remain stable while Phase 4 continues on the read side
 - next: continue with the remaining import/update and operational read paths that still treat track-side composition shadow fields as authoritative before attempting final legacy deletion
 
 ## Exact Safe Pickup Instructions
 
 Next safe Phase 4 continuation:
 
-1. read the masterplan, the completed Phase 3 handoff, the single-entrypoint closeout handoff, and [`v3-workflow-revision-album-governance-decision-note.md`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/docs/implementation_handoffs/v3-workflow-revision-album-governance-decision-note.md) first
-2. treat the single-entrypoint closeout and the album-governance note as active guardrails, not as optional background context
+1. read the masterplan and [`v3-track-first-governed-creation-correction.md`](/Users/cosmowyn/Projects/ISRC%20code%20manager/Source/ISRC-Catalog-Manager/docs/implementation_handoffs/v3-track-first-governed-creation-correction.md) first
+2. treat the track-first correction handoff as the active creation-flow guardrail, not as optional background context
 3. continue from `catalog_reads.py` and other read-only catalog/search/export surfaces before reshaping edit forms
 4. continue with the remaining import/update and operational exchange paths that still privilege track-side composition shadow fields over authoritative work data
 5. keep adding integration tests as authority moves from shadow structures to v3 authoritative data
