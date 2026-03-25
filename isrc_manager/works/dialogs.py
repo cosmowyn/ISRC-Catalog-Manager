@@ -632,6 +632,7 @@ class WorkBrowserPanel(QWidget):
     filter_requested = Signal(list)
     create_requested = Signal(object)
     create_child_track_requested = Signal(int)
+    create_album_for_work_requested = Signal(int)
     update_requested = Signal(int, object)
     duplicate_requested = Signal(int)
     link_tracks_requested = Signal(int, list)
@@ -665,15 +666,15 @@ class WorkBrowserPanel(QWidget):
             self,
             title="Work Manager",
             subtitle=(
-                "Browse compositions separately from recordings, validate splits, and "
-                "attach selected tracks to the correct work."
+                "Use works as the governance layer for creation. Start here to create a work, "
+                "add governed child tracks or album batches, then use linking and filtering for operational follow-up."
             ),
         )
 
         controls_box, controls_layout = _create_standard_section(
             self,
             "Find and Manage",
-            "Search by work title, alternate title, ISWC, or registration number, then use the actions to maintain the selected work.",
+            "Search by work title, alternate title, ISWC, or registration number, then create and govern child recordings from the selected work.",
         )
         controls = QHBoxLayout()
         controls.setContentsMargins(0, 0, 0, 0)
@@ -689,6 +690,8 @@ class WorkBrowserPanel(QWidget):
         add_button.clicked.connect(self.create_work)
         self.create_child_track_button = QPushButton("Add Track to Work")
         self.create_child_track_button.clicked.connect(self.create_child_track)
+        self.create_album_for_work_button = QPushButton("Add Album to Work")
+        self.create_album_for_work_button.clicked.connect(self.create_album_for_work)
         edit_button = QPushButton("Edit")
         edit_button.clicked.connect(self.edit_selected)
         duplicate_button = QPushButton("Duplicate")
@@ -705,6 +708,7 @@ class WorkBrowserPanel(QWidget):
             [
                 add_button,
                 self.create_child_track_button,
+                self.create_album_for_work_button,
                 edit_button,
                 duplicate_button,
                 link_button,
@@ -947,6 +951,17 @@ class WorkBrowserPanel(QWidget):
             return
         self.create_child_track_requested.emit(work_id)
 
+    def create_album_for_work(self) -> None:
+        service = self._work_service()
+        if service is None:
+            QMessageBox.warning(self, "Work Manager", "Open a profile first.")
+            return
+        work_id = self._selected_work_id()
+        if not work_id:
+            QMessageBox.information(self, "Work Manager", "Select a work first.")
+            return
+        self.create_album_for_work_requested.emit(work_id)
+
     def edit_selected(self) -> None:
         service = self._work_service()
         if service is None:
@@ -1027,6 +1042,7 @@ class WorkBrowserDialog(QDialog):
     filter_requested = Signal(list)
     create_requested = Signal(object)
     create_child_track_requested = Signal(int)
+    create_album_for_work_requested = Signal(int)
     update_requested = Signal(int, object)
     duplicate_requested = Signal(int)
     link_tracks_requested = Signal(int, list)
@@ -1062,6 +1078,9 @@ class WorkBrowserDialog(QDialog):
         self.panel.filter_requested.connect(self.filter_requested.emit)
         self.panel.create_requested.connect(self.create_requested.emit)
         self.panel.create_child_track_requested.connect(self.create_child_track_requested.emit)
+        self.panel.create_album_for_work_requested.connect(
+            self.create_album_for_work_requested.emit
+        )
         self.panel.update_requested.connect(self.update_requested.emit)
         self.panel.duplicate_requested.connect(self.duplicate_requested.emit)
         self.panel.link_tracks_requested.connect(self.link_tracks_requested.emit)

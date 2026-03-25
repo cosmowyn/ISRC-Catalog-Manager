@@ -854,8 +854,8 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(
             self.window._action_ribbon_default_ids,
             [
-                "save_entry",
                 "release_browser",
+                "work_manager",
                 "quality_dashboard",
                 "gs1_metadata",
                 "settings",
@@ -1679,6 +1679,35 @@ class AppShellTestCase(unittest.TestCase):
         assert context is not None
         self.assertEqual(context["work_id"], work_id)
 
+    def case_work_manager_opens_album_dialog_for_selected_work(self):
+        work_id = self.window.work_service.create_work(
+            app_module.WorkPayload(title="Album Parent Work")
+        )
+        panel = self.window.open_work_manager()
+        self.app.processEvents()
+        panel.focus_work(work_id)
+        self.app.processEvents()
+
+        captured: dict[str, object] = {}
+
+        class _FakeAlbumEntryDialog:
+            def __init__(self, app, *, work_id=None, lock_work=False, relationship_type=None):
+                captured["app"] = app
+                captured["work_id"] = work_id
+                captured["lock_work"] = lock_work
+                captured["relationship_type"] = relationship_type
+
+            def exec(self):
+                return app_module.QDialog.Rejected
+
+        with mock.patch.object(app_module, "AlbumEntryDialog", _FakeAlbumEntryDialog):
+            panel.create_album_for_work()
+
+        self.assertIs(captured.get("app"), self.window)
+        self.assertEqual(captured.get("work_id"), work_id)
+        self.assertTrue(captured.get("lock_work"))
+        self.assertEqual(captured.get("relationship_type"), "original")
+
     def case_global_search_opens_as_dock_and_keeps_entity_navigation_live(self):
         track_id = self._create_track(index=121, title="Searchable Dock Track")
         self.window.refresh_table()
@@ -1878,14 +1907,26 @@ class AppShellTestCase(unittest.TestCase):
         self.app.processEvents()
         work_panel = self.window.work_manager_dock.widget()
         add_button = self._button_by_text(work_panel.manage_actions_cluster, "Add")
-        add_track_button = self._button_by_text(work_panel.manage_actions_cluster, "Add Track to Work")
+        add_track_button = self._button_by_text(
+            work_panel.manage_actions_cluster, "Add Track to Work"
+        )
+        add_album_button = self._button_by_text(
+            work_panel.manage_actions_cluster, "Add Album to Work"
+        )
         edit_button = self._button_by_text(work_panel.manage_actions_cluster, "Edit")
         duplicate_button = self._button_by_text(work_panel.manage_actions_cluster, "Duplicate")
 
         self.assertGreater(add_track_button.geometry().left() - add_button.geometry().right(), 0)
-        self.assertGreater(edit_button.geometry().top() - add_button.geometry().bottom(), 0)
-        self.assertGreater(duplicate_button.geometry().left() - edit_button.geometry().right(), 0)
-        for button in (add_button, add_track_button, edit_button, duplicate_button):
+        self.assertGreater(add_album_button.geometry().top() - add_button.geometry().bottom(), 0)
+        self.assertGreater(edit_button.geometry().left() - add_album_button.geometry().right(), 0)
+        self.assertGreater(duplicate_button.geometry().top() - add_track_button.geometry().bottom(), 0)
+        for button in (
+            add_button,
+            add_track_button,
+            add_album_button,
+            edit_button,
+            duplicate_button,
+        ):
             self.assertGreaterEqual(button.width(), button.minimumSizeHint().width())
 
     def case_catalog_managers_open_as_tabified_dock_and_focus_requested_tab(self):
@@ -2009,9 +2050,9 @@ class AppShellTestCase(unittest.TestCase):
 
         self.assertIn("Derivative Ledger…", workspace_texts)
         self.assertIn("Contract Template Workspace…", workspace_texts)
-        self.assertIn("Show Add Track Panel", workspace_texts)
+        self.assertIn("Show Track Entry Panel", workspace_texts)
         self.assertIn("Show Catalog Table", workspace_texts)
-        self.assertNotIn("Show Add Track Panel", view_texts)
+        self.assertNotIn("Show Track Entry Panel", view_texts)
         self.assertNotIn("Show Catalog Table", view_texts)
         self.assertEqual(
             self.window._action_ribbon_specs_by_id["show_add_data"]["category"], "Catalog"
@@ -3318,6 +3359,101 @@ class AppShellTestCase(unittest.TestCase):
             self.assertEqual(current_page.property("role"), "workspaceCanvas")
             self.assertIsInstance(dialog.catalog_number, app_module.QComboBox)
             self.assertTrue(dialog.catalog_number.isEditable())
+        finally:
+            dialog.close()
+
+    def case_album_entry_can_create_tracks_under_selected_work(self):
+        work_id = self.window.work_service.create_work(
+            app_module.WorkPayload(title="Governed Album Work", iswc="T-123.456.789-0")
+        )
+        dialog = app_module.AlbumEntryDialog(
+            self.window,
+            work_id=work_id,
+            lock_work=True,
+            relationship_type="alternate_master",
+        )
+        try:
+            self.assertEqual(dialog.windowTitle(), "Add Album to Work")
+            self.assertEqual(dialog.parent_work_combo.currentData(), work_id)
+            self.assertFalse(dialog.parent_work_combo.isEnabled())
+            self.assertEqual(dialog.relationship_type_combo.currentData(), "alternate_master")
+
+            dialog.album_title.setCurrentText("Governed Album")
+            first_section = dialog._track_sections[0]
+            second_section = dialog._track_sections[1]
+            first_section.track_title.setText("Governed Album Mix")
+            first_section.artist_name.setCurrentText("Moonwake")
+            second_section.track_title.setText("Governed Album Dub")
+            second_section.artist_name.setCurrentText("Moonwake")
+            dialog.save_album()
+            self.app.processEvents()
+
+            created_rows = self.window.conn.execute(
+                """
+                SELECT track_title, work_id, relationship_type
+                FROM Tracks
+                WHERE album_id = (
+                    SELECT id FROM Albums WHERE title=? ORDER BY id DESC LIMIT 1
+                )
+                ORDER BY track_title
+                """,
+                ("Governed Album",),
+            ).fetchall()
+            self.assertEqual(
+                created_rows,
+                [
+                    ("Governed Album Dub", work_id, "alternate_master"),
+                    ("Governed Album Mix", work_id, "alternate_master"),
+                ],
+            )
+        finally:
+            dialog.close()
+
+    def case_album_entry_creates_parent_work_per_track_when_no_work_selected(self):
+        dialog = app_module.AlbumEntryDialog(self.window)
+        try:
+            self.assertIsNone(dialog.parent_work_combo.currentData())
+            dialog.album_title.setCurrentText("Auto Governed Album")
+            first_section = dialog._track_sections[0]
+            second_section = dialog._track_sections[1]
+            first_section.track_title.setText("Auto Governed One")
+            first_section.artist_name.setCurrentText("Moonwake")
+            first_section.iswc.setText("T-123.456.789-0")
+            second_section.track_title.setText("Auto Governed Two")
+            second_section.artist_name.setCurrentText("Moonwake")
+            second_section.iswc.setText("T-123.456.780-0")
+            dialog.save_album()
+            self.app.processEvents()
+
+            rows = self.window.conn.execute(
+                """
+                SELECT t.track_title, t.work_id, t.relationship_type, w.title, w.iswc
+                FROM Tracks t
+                JOIN Works w ON w.id = t.work_id
+                WHERE t.album_id = (
+                    SELECT id FROM Albums WHERE title=? ORDER BY id DESC LIMIT 1
+                )
+                ORDER BY t.track_title
+                """,
+                ("Auto Governed Album",),
+            ).fetchall()
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[0][0], "Auto Governed One")
+            self.assertEqual(rows[0][2:], ("original", "Auto Governed One", "T-123.456.789-0"))
+            self.assertEqual(rows[1][0], "Auto Governed Two")
+            self.assertEqual(rows[1][2:], ("original", "Auto Governed Two", "T-123.456.780-0"))
+            linked_track_ids = {
+                int(issue.track_id)
+                for issue in self.window.quality_service.scan().issues
+                if issue.issue_type == "track_missing_linked_work" and issue.track_id is not None
+            }
+            for track_title, work_id, _relationship_type, _work_title, _work_iswc in rows:
+                self.assertIsNotNone(work_id, track_title)
+                track_id = self.window.conn.execute(
+                    "SELECT id FROM Tracks WHERE track_title=? ORDER BY id DESC LIMIT 1",
+                    (track_title,),
+                ).fetchone()[0]
+                self.assertNotIn(int(track_id), linked_track_ids)
         finally:
             dialog.close()
 

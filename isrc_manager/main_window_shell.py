@@ -317,18 +317,18 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         shortcuts=("Ctrl+Alt+G", "Meta+Alt+G"),
     )
     workspace_menu.addAction(app.catalog_managers_action)
-    app.release_browser_action = app._create_action(
-        "Release Browser…",
-        slot=app.open_release_browser,
-        shortcuts=("Ctrl+Alt+Shift+R", "Meta+Alt+Shift+R"),
-    )
-    workspace_menu.addAction(app.release_browser_action)
     app.work_manager_action = app._create_action(
         "Work Manager…",
         slot=app.open_work_manager,
         shortcuts=("Ctrl+Alt+W", "Meta+Alt+W"),
     )
     workspace_menu.addAction(app.work_manager_action)
+    app.release_browser_action = app._create_action(
+        "Release Browser…",
+        slot=app.open_release_browser,
+        shortcuts=("Ctrl+Alt+Shift+R", "Meta+Alt+Shift+R"),
+    )
+    workspace_menu.addAction(app.release_browser_action)
     app.party_manager_action = app._create_action(
         "Party Manager…",
         slot=app.open_party_manager,
@@ -371,7 +371,7 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     )
     workspace_menu.addAction(app.global_search_action)
     app.add_data_action = app._create_action(
-        "Show Add Track Panel",
+        "Show Track Entry Panel",
         checkable=True,
         checked=False,
         toggled_slot=app._on_toggle_add_data,
@@ -764,11 +764,11 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.add_data_title_row.setContentsMargins(0, 0, 0, 0)
     app.add_data_title_row.setSpacing(8)
 
-    app.add_data_title = QLabel("Add Track")
+    app.add_data_title = QLabel("Track Entry")
     app.add_data_title.setProperty("role", "sectionTitle")
 
     app.add_data_subtitle = QLabel(
-        "Create a new track with all core metadata, release details, and managed media in one place."
+        "Use Work Manager for governed creation, or use this recording-entry surface for direct imports, repairs, and standalone track admin."
     )
     app.add_data_subtitle.setWordWrap(True)
     app.add_data_subtitle.setProperty("role", "secondary")
@@ -776,7 +776,7 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.add_data_title_row.addWidget(app.add_data_title)
     app.add_data_title_row.addStretch(1)
     app.add_data_title_row.addWidget(
-        _create_round_help_button(app, "add-data", "Open help for the Add Track panel")
+        _create_round_help_button(app, "add-data", "Open help for the Track Entry panel")
     )
     app.add_data_header_layout.addLayout(app.add_data_title_row)
     app.add_data_header_layout.addWidget(app.add_data_subtitle)
@@ -1127,7 +1127,7 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.left_scroll.setWidgetResizable(True)
     app.left_scroll.setWidget(app.left_widget_container)
     app.left_scroll.setMinimumWidth(300)
-    app.add_data_dock = QDockWidget("Add Track", app)
+    app.add_data_dock = QDockWidget("Track Entry", app)
     app.add_data_dock.setObjectName("addDataDock")
     app.add_data_dock.setAllowedAreas(Qt.AllDockWidgetAreas)
     app.add_data_dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)

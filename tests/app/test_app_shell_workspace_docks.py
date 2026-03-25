@@ -20,6 +20,9 @@ class AppShellWorkspaceDockTests(AppShellTestCase):
     test_create_work_offers_first_track_creation_context = (
         AppShellTestCase.case_create_work_offers_first_track_creation_context
     )
+    test_work_manager_opens_album_dialog_for_selected_work = (
+        AppShellTestCase.case_work_manager_opens_album_dialog_for_selected_work
+    )
     test_global_search_opens_as_dock_and_keeps_entity_navigation_live = (
         AppShellTestCase.case_global_search_opens_as_dock_and_keeps_entity_navigation_live
     )

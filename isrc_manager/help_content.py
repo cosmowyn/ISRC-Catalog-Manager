@@ -54,8 +54,9 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         <p>The app is organized around a few core ideas:</p>
         <ul>
           <li><strong>Profiles</strong>: each profile is a self-contained catalog database, so separate catalogs remain clean and portable.</li>
-          <li><strong>Add Track</strong>: the dockable track-entry workspace for fast single-record creation.</li>
-          <li><strong>Add Album</strong>: a structured multi-track workflow for releases that share core metadata.</li>
+          <li><strong>Work Manager</strong>: the primary governance surface for creating works and adding governed child tracks under them.</li>
+          <li><strong>Track Entry panel</strong>: the dockable recording-entry workspace used for direct recording admin, imports, repairs, and work-context track creation.</li>
+          <li><strong>Add Album</strong>: a structured multi-track workflow for grouped recording entry, including batches created under one parent work.</li>
           <li><strong>Releases</strong>: first-class product records for UPC/EAN, release artwork, ordering, and release-level metadata.</li>
           <li><strong>Works</strong>: a composition layer that stays distinct from recordings so the same work can connect to multiple tracks.</li>
           <li><strong>Parties</strong>: reusable people and companies for writers, publishers, labels, managers, licensees, and organizations.</li>
@@ -92,7 +93,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "quick actions",
         ),
         content_html="""
-        <p>The main window is designed as a practical catalog workspace rather than a single fixed screen. By default, the left side contains the <strong>Add Track</strong> workspace and the right side contains the <strong>Catalog Table</strong>, but both can be shown, hidden, floated, and re-docked.</p>
+        <p>The main window is designed as a practical catalog workspace rather than a single fixed screen. By default, the left side contains the <strong>Track Entry</strong> workspace and the right side contains the <strong>Catalog Table</strong>, but both can be shown, hidden, floated, and re-docked.</p>
         <ul>
           <li><strong>Action ribbon</strong>: a customizable strip of high-frequency actions. Use <strong>View &gt; Customize Action Ribbon…</strong> to make it match your workflow.</li>
           <li><strong>Profiles toolbar</strong>: switch databases, create a new profile, browse to an external profile, reload the profile list, or remove the selected entry.</li>
@@ -157,8 +158,8 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
     ),
     HelpChapter(
         chapter_id="add-data",
-        title="Add Track Panel",
-        summary="How to add a track quickly, organize the entry flow by tab, and attach the metadata and media needed for a real catalog.",
+        title="Track Entry Panel",
+        summary="How to use the recording-entry surface directly, how it behaves under work governance, and how to attach the metadata and media needed for a real catalog.",
         keywords=(
             "add data",
             "add track",
@@ -171,14 +172,14 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "dsp",
         ),
         content_html="""
-        <p>The Add Track panel is the fastest way to create a new recording. It is organized into focused tabs so you can move quickly without losing access to the full metadata path.</p>
+        <p>The Track Entry panel is the recording-focused editor in the main window. In the v3 workflow, governed creation should normally begin from <strong>Work Manager</strong>, which can open this panel already scoped to the selected parent work. The panel can still be used directly for repairs, imports, and standalone recording administration.</p>
         <ul>
           <li><strong>Track</strong>: track title, main artist, additional artists, and genre.</li>
           <li><strong>Release</strong>: album title, release date, and track length.</li>
           <li><strong>Codes</strong>: preview-only generated values such as the future row ID, generated ISRC, and entry date, plus ISWC, UPC/EAN, catalog number, and BUMA work number.</li>
           <li><strong>Media</strong>: attach a local audio file and album art image, then choose whether each file should be stored in the database or in managed local storage.</li>
         </ul>
-        <p>Use <strong>Save Track</strong> to create the record, or <strong>Reset Form</strong> to clear the current draft. If ISRC generation is configured, the preview updates automatically from your active settings. If it is not configured yet, the track still saves cleanly and can be completed later.</p>
+        <p>Use <strong>Save Track</strong> to create the record, or <strong>Reset Form</strong> to clear the current draft. When the panel is opened from <strong>Work Manager</strong>, the work-governance summary shows the parent work, child relationship type, and optional parent track link that will be written on save. If ISRC generation is configured, the preview updates automatically from your active settings. If it is not configured yet, the track still saves cleanly and can be completed later.</p>
         """,
     ),
     HelpChapter(
@@ -194,8 +195,9 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "shared metadata",
         ),
         content_html="""
-        <p>The <strong>Add Album</strong> dialog is built for real release entry. Instead of retyping the same album data over and over, you enter the shared product details once and then complete each track on its own tab.</p>
+        <p>The <strong>Add Album</strong> dialog is built for grouped recording entry. Instead of retyping the same album data over and over, you enter the shared product details once and then complete each track on its own tab. When the whole batch belongs to one work, open it from <strong>Work Manager</strong> or select a parent work inside the dialog so every created track is governed immediately. If you leave the parent-work selector blank, the dialog now creates one work per saved track automatically so album batches do not stay orphaned from the v3 work layer.</p>
         <ul>
+          <li><strong>Work Governance</strong>: optionally bind the whole batch to one parent work and choose the relationship type that should be applied to every created track. If you leave it blank, the dialog creates one work per saved track automatically.</li>
           <li><strong>Album Overview</strong>: album title, UPC/EAN, genre, catalog number, album art, album-art storage choice, and the release-year rule used when auto-generating blank ISRC values.</li>
           <li><strong>Track Tabs</strong>: each tab stores one track title, main artist, additional artists, release date, track length, optional ISRC, optional ISWC, optional BUMA work number, an audio file, and its storage choice.</li>
           <li><strong>Dynamic layout</strong>: the dialog opens with two track tabs by default, but you can add more or remove the current tab at any time.</li>

@@ -27,6 +27,12 @@ class AppShellEditorSurfaceTests(AppShellTestCase):
     test_album_entry_track_sections_use_internal_tabs = (
         AppShellTestCase.case_album_entry_track_sections_use_internal_tabs
     )
+    test_album_entry_can_create_tracks_under_selected_work = (
+        AppShellTestCase.case_album_entry_can_create_tracks_under_selected_work
+    )
+    test_album_entry_creates_parent_work_per_track_when_no_work_selected = (
+        AppShellTestCase.case_album_entry_creates_parent_work_per_track_when_no_work_selected
+    )
     test_gs1_dialog_uses_top_level_workflow_tabs = (
         AppShellTestCase.case_gs1_dialog_uses_top_level_workflow_tabs
     )

@@ -305,10 +305,14 @@ class DialogControllerBehaviorTests(unittest.TestCase):
         emitted_filters = []
         emitted_links = []
         emitted_child_creations = []
+        emitted_album_creations = []
         emitted_deletes = []
         dialog.filter_requested.connect(lambda track_ids: emitted_filters.append(track_ids))
         dialog.create_child_track_requested.connect(
             lambda work_id: emitted_child_creations.append(work_id)
+        )
+        dialog.create_album_for_work_requested.connect(
+            lambda work_id: emitted_album_creations.append(work_id)
         )
         dialog.link_tracks_requested.connect(
             lambda work_id, track_ids: emitted_links.append((work_id, track_ids))
@@ -317,6 +321,10 @@ class DialogControllerBehaviorTests(unittest.TestCase):
         try:
             with mock.patch.object(QMessageBox, "information", return_value=None) as info:
                 dialog.create_child_track()
+            info.assert_called_once()
+
+            with mock.patch.object(QMessageBox, "information", return_value=None) as info:
+                dialog.create_album_for_work()
             info.assert_called_once()
 
             with mock.patch.object(QMessageBox, "information", return_value=None) as info:
@@ -333,6 +341,9 @@ class DialogControllerBehaviorTests(unittest.TestCase):
 
             dialog.create_child_track()
             self.assertEqual(emitted_child_creations, [1])
+
+            dialog.create_album_for_work()
+            self.assertEqual(emitted_album_creations, [1])
 
             dialog.link_selected_tracks()
             self.assertEqual(emitted_links, [(1, [11, 12])])
