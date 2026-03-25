@@ -243,9 +243,20 @@ class CatalogWorkflowIntegrationTests(unittest.TestCase):
         self.assertTrue(any(item.entity_type == "work" for item in results))
         self.assertTrue(any(item.entity_type == "contract" for item in results))
 
+        self.conn.execute(
+            "DELETE FROM WorkTrackLinks WHERE work_id=? AND track_id=?",
+            (ids["work_id"], ids["track_id"]),
+        )
+
         sections = self.relationship_service.describe_links("track", ids["track_id"])
         section_titles = {section.section_title for section in sections}
         self.assertTrue({"Works", "Releases", "Contracts", "Rights", "Assets"} <= section_titles)
+        work_section = next(section for section in sections if section.section_title == "Works")
+        self.assertEqual([item.entity_id for item in work_section.results], [ids["work_id"]])
+
+        work_sections = self.relationship_service.describe_links("work", ids["work_id"])
+        track_section = next(section for section in work_sections if section.section_title == "Tracks")
+        self.assertEqual([item.entity_id for item in track_section.results], [ids["track_id"]])
 
         scan = self.quality_service.scan()
         issue_types = {issue.issue_type for issue in scan.issues}

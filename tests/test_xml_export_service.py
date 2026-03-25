@@ -22,6 +22,12 @@ def make_export_conn():
             album_art_mime_type TEXT,
             album_art_size_bytes INTEGER NOT NULL DEFAULT 0
         );
+        CREATE TABLE Works (
+            id INTEGER PRIMARY KEY,
+            title TEXT NOT NULL,
+            iswc TEXT,
+            registration_number TEXT
+        );
         CREATE TABLE Tracks (
             id INTEGER PRIMARY KEY,
             isrc TEXT NOT NULL,
@@ -36,6 +42,7 @@ def make_export_conn():
             album_art_size_bytes INTEGER NOT NULL DEFAULT 0,
             main_artist_id INTEGER NOT NULL,
             buma_work_number TEXT,
+            work_id INTEGER,
             album_id INTEGER,
             release_date TEXT,
             track_length_sec INTEGER NOT NULL DEFAULT 0,
@@ -76,6 +83,12 @@ def make_export_conn():
         VALUES (1, 'Album One', 'track_media/images/cover.png', 'image/png', 42)
         """
     )
+    conn.execute(
+        """
+        INSERT INTO Works(id, title, iswc, registration_number)
+        VALUES (1, 'First Song Work', 'T-123.456.789-0', 'BUMA-42')
+        """
+    )
     conn.executemany(
         """
         INSERT INTO Tracks(
@@ -83,9 +96,9 @@ def make_export_conn():
             audio_file_path, audio_file_mime_type, audio_file_size_bytes,
             track_title, catalog_number,
             album_art_path, album_art_mime_type, album_art_size_bytes,
-            main_artist_id, buma_work_number, album_id, release_date, track_length_sec, iswc, upc, genre
+            main_artist_id, buma_work_number, work_id, album_id, release_date, track_length_sec, iswc, upc, genre
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             (
@@ -101,11 +114,12 @@ def make_export_conn():
                 None,
                 0,
                 1,
-                "BUMA-42",
+                "BUMA-TRACK-OLD",
+                1,
                 1,
                 "2026-03-14",
                 195,
-                "T-123.456.789-0",
+                "T-000.000.000-0",
                 "123456789012",
                 "Pop",
             ),
@@ -123,6 +137,7 @@ def make_export_conn():
                 0,
                 3,
                 "",
+                None,
                 None,
                 "",
                 60,
@@ -184,6 +199,7 @@ class XMLExportServiceTests(unittest.TestCase):
         self.assertEqual(first.findtext("track_length_sec"), "195")
         self.assertEqual(first.findtext("catalog_number"), "CAT-001")
         self.assertEqual(first.findtext("buma_work_number"), "BUMA-42")
+        self.assertEqual(first.findtext("iswc"), "T-123.456.789-0")
         self.assertEqual(first.findtext("audio_file_mime_type"), "audio/wav")
         self.assertEqual(first.findtext("album_art_size_bytes"), "42")
         mood = first.find("./CustomFields/Field[@name='Mood']/Value")
@@ -211,6 +227,7 @@ class XMLExportServiceTests(unittest.TestCase):
         self.assertEqual(track.findtext("Title"), "First Song")
         self.assertEqual(track.findtext("AdditionalArtists"), "Guest Artist")
         self.assertEqual(track.findtext("TrackLength"), "00:03:15")
+        self.assertEqual(track.findtext("ISWC"), "T-123.456.789-0")
         self.assertEqual(track.findtext("CatalogNumber"), "CAT-001")
         self.assertEqual(track.findtext("BUMAWorkNumber"), "BUMA-42")
         self.assertEqual(track.findtext("AudioFileMimeType"), "audio/wav")

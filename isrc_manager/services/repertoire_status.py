@@ -113,22 +113,29 @@ class RepertoireWorkflowService:
                     metadata_complete,
                     contract_signed,
                     rights_verified,
-                    (COALESCE(audio_file_path, '') != '' OR audio_file_blob IS NOT NULL)
+                    (COALESCE(audio_file_path, '') != '' OR audio_file_blob IS NOT NULL),
+                    work_id,
+                    EXISTS(SELECT 1 FROM Works w WHERE w.id = Tracks.work_id)
                 FROM Tracks
                 WHERE id=?
                 """,
                 (entity_id,),
             ).fetchone()
-            work_count = self.conn.execute(
-                "SELECT COUNT(*) FROM WorkTrackLinks WHERE track_id=?",
-                (entity_id,),
-            ).fetchone()
+            work_linked = False
+            if row and row[4] is not None:
+                work_linked = bool(row[5])
+            else:
+                work_count = self.conn.execute(
+                    "SELECT COUNT(*) FROM WorkTrackLinks WHERE track_id=?",
+                    (entity_id,),
+                ).fetchone()
+                work_linked = bool(work_count and work_count[0])
             return {
                 "metadata_complete": bool(row[0]) if row else False,
                 "contract_signed": bool(row[1]) if row else False,
                 "rights_verified": bool(row[2]) if row else False,
                 "audio_attached": bool(row[3]) if row else False,
-                "work_linked": bool(work_count and work_count[0]),
+                "work_linked": work_linked,
             }
         if entity_type == "release":
             row = self.conn.execute(

@@ -288,6 +288,39 @@ class WorkAndPartyServiceTests(unittest.TestCase):
         self.assertEqual(self.work_service.fetch_work_detail(first_work_id).track_ids, [])
         self.assertEqual(self.work_service.fetch_work_detail(second_work_id).track_ids, [track_id])
 
+    def test_work_reads_prefer_direct_track_governance_over_shadow_link_rows(self):
+        track_id = self._create_track("NL-ABC-26-00022", "Direct Governance")
+        work_id = self.work_service.create_work(
+            WorkPayload(
+                title="Direct Governance",
+                contributors=[
+                    WorkContributorPayload(
+                        role="songwriter",
+                        name="Governed Writer",
+                        share_percent=100,
+                    )
+                ],
+                track_ids=[track_id],
+            )
+        )
+
+        self.conn.execute(
+            "DELETE FROM WorkTrackLinks WHERE work_id=? AND track_id=?",
+            (work_id, track_id),
+        )
+
+        work = self.work_service.fetch_work(work_id)
+        detail = self.work_service.fetch_work_detail(work_id)
+        listed = self.work_service.list_works(linked_track_id=track_id)
+
+        self.assertIsNotNone(work)
+        self.assertIsNotNone(detail)
+        assert work is not None
+        assert detail is not None
+        self.assertEqual(work.track_count, 1)
+        self.assertEqual(detail.track_ids, [track_id])
+        self.assertEqual([item.id for item in listed], [work_id])
+
     def test_party_duplicate_detection_merge_usage_summary_and_filters(self):
         primary_id = self.party_service.create_party(
             PartyPayload(

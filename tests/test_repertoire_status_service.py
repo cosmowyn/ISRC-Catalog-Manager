@@ -182,6 +182,18 @@ class RepertoireWorkflowServiceTests(unittest.TestCase):
         self.assertEqual(self.workflow_service.set_track_status([], status="cleared"), 0)
         self.assertEqual(self.workflow_service.readiness_snapshot("unknown", 1), {})
 
+    def test_track_readiness_prefers_direct_work_id_over_shadow_link_rows(self):
+        work_id, track_id, _release_id = self._seed_repertoire()
+
+        self.conn.execute(
+            "DELETE FROM WorkTrackLinks WHERE work_id=? AND track_id=?",
+            (work_id, track_id),
+        )
+
+        snapshot = self.workflow_service.readiness_snapshot("track", track_id)
+
+        self.assertTrue(snapshot["work_linked"])
+
 
 if __name__ == "__main__":
     unittest.main()

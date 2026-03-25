@@ -510,20 +510,55 @@ class RelationshipExplorerService:
             return self._for_asset(entity_id)
         return []
 
+    def _work_track_rows(self, work_id: int) -> list[tuple[int, str, str]]:
+        rows = self.conn.execute(
+            """
+            SELECT DISTINCT
+                t.id,
+                t.track_title,
+                COALESCE(a.name, '') AS artist_name,
+                CASE WHEN t.work_id=? THEN 0 ELSE 1 END AS authority_rank,
+                COALESCE(wt.is_primary, 0) AS compatibility_primary
+            FROM Tracks t
+            LEFT JOIN Artists a ON a.id = t.main_artist_id
+            LEFT JOIN WorkTrackLinks wt
+              ON wt.track_id = t.id
+             AND wt.work_id = ?
+            WHERE t.work_id = ?
+               OR (t.work_id IS NULL AND wt.work_id IS NOT NULL)
+            ORDER BY authority_rank, compatibility_primary DESC, t.track_title, t.id
+            """,
+            (int(work_id), int(work_id), int(work_id)),
+        ).fetchall()
+        return [(int(row[0]), str(row[1] or ""), str(row[2] or "")) for row in rows]
+
+    def _track_work_rows(self, track_id: int) -> list[tuple[int, str, str, str]]:
+        rows = self.conn.execute(
+            """
+            SELECT DISTINCT
+                w.id,
+                w.title,
+                COALESCE(w.iswc, '') AS iswc,
+                COALESCE(w.work_status, '') AS work_status,
+                CASE WHEN t.work_id = w.id THEN 0 ELSE 1 END AS authority_rank,
+                COALESCE(wt.is_primary, 0) AS compatibility_primary
+            FROM Tracks t
+            LEFT JOIN WorkTrackLinks wt ON wt.track_id = t.id
+            JOIN Works w ON w.id = COALESCE(t.work_id, wt.work_id)
+            WHERE t.id=?
+            ORDER BY authority_rank, compatibility_primary DESC, w.title, w.id
+            """,
+            (int(track_id),),
+        ).fetchall()
+        return [
+            (int(row[0]), str(row[1] or ""), str(row[2] or ""), str(row[3] or ""))
+            for row in rows
+        ]
+
     def _for_work(self, work_id: int) -> list[RelationshipSection]:
         tracks = [
             self._result("track", row[0], row[1], row[2])
-            for row in self.conn.execute(
-                """
-                SELECT t.id, t.track_title, COALESCE(a.name, '')
-                FROM WorkTrackLinks wt
-                JOIN Tracks t ON t.id = wt.track_id
-                LEFT JOIN Artists a ON a.id = t.main_artist_id
-                WHERE wt.work_id=?
-                ORDER BY wt.is_primary DESC, t.track_title, t.id
-                """,
-                (int(work_id),),
-            ).fetchall()
+            for row in self._work_track_rows(work_id)
         ]
         parties = [
             self._result("party", row[0], row[1], row[2])
@@ -573,16 +608,7 @@ class RelationshipExplorerService:
     def _for_track(self, track_id: int) -> list[RelationshipSection]:
         works = [
             self._result("work", row[0], row[1], row[2], row[3])
-            for row in self.conn.execute(
-                """
-                SELECT w.id, w.title, COALESCE(w.iswc, ''), COALESCE(w.work_status, '')
-                FROM WorkTrackLinks wt
-                JOIN Works w ON w.id = wt.work_id
-                WHERE wt.track_id=?
-                ORDER BY wt.is_primary DESC, w.title, w.id
-                """,
-                (int(track_id),),
-            ).fetchall()
+            for row in self._track_work_rows(track_id)
         ]
         releases = [
             self._result("release", row[0], row[1], row[2], row[3])

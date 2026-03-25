@@ -299,6 +299,11 @@ class SearchAndRepertoireExchangeTestCase(unittest.TestCase):
         self.search_service.delete_saved_search(saved_id)
         self.assertEqual(self.search_service.list_saved_searches(), [])
 
+        self.conn.execute(
+            "DELETE FROM WorkTrackLinks WHERE work_id=? AND track_id=?",
+            (ids["work_id"], ids["track_id"]),
+        )
+
         by_type_expectations = {
             "work": {"Tracks", "Parties", "Contracts", "Rights"},
             "track": {"Works", "Releases", "Contracts", "Rights", "Assets"},
@@ -326,6 +331,18 @@ class SearchAndRepertoireExchangeTestCase(unittest.TestCase):
                 )
                 section_titles = {section.section_title for section in sections}
                 self.assertTrue(expected_sections <= section_titles)
+
+        work_sections = self.relationship_service.describe_links("work", ids["work_id"])
+        work_track_section = next(
+            section for section in work_sections if section.section_title == "Tracks"
+        )
+        self.assertEqual([item.entity_id for item in work_track_section.results], [ids["track_id"]])
+
+        track_sections = self.relationship_service.describe_links("track", ids["track_id"])
+        track_work_section = next(
+            section for section in track_sections if section.section_title == "Works"
+        )
+        self.assertEqual([item.entity_id for item in track_work_section.results], [ids["work_id"]])
         self.assertEqual(self.relationship_service.describe_links("unknown", 99), [])
 
     def case_repertoire_exchange_json_round_trip(self):

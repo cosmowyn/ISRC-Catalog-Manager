@@ -181,6 +181,18 @@ class WorkService:
             (*params, int(track_id)),
         )
 
+    @staticmethod
+    def _work_track_membership_clause(
+        *,
+        work_alias: str,
+        track_alias: str,
+        link_alias: str,
+    ) -> str:
+        return (
+            f"{track_alias}.work_id = {work_alias}.id "
+            f"OR ({track_alias}.work_id IS NULL AND {link_alias}.work_id IS NOT NULL)"
+        )
+
     def validate_work(
         self,
         payload: WorkPayload,
@@ -545,8 +557,11 @@ class WorkService:
             self._normalize_primary_track(affected_work_id, cursor=cursor)
 
     def fetch_work(self, work_id: int) -> WorkRecord | None:
+        membership_clause = self._work_track_membership_clause(
+            work_alias="w", track_alias="t", link_alias="wt"
+        )
         row = self.conn.execute(
-            """
+            f"""
             SELECT
                 w.id,
                 w.title,
@@ -566,10 +581,16 @@ class WorkService:
                 w.profile_name,
                 w.created_at,
                 w.updated_at,
-                COUNT(DISTINCT wt.track_id) AS track_count,
+                (
+                    SELECT COUNT(DISTINCT t.id)
+                    FROM Tracks t
+                    LEFT JOIN WorkTrackLinks wt
+                      ON wt.track_id = t.id
+                     AND wt.work_id = w.id
+                    WHERE {membership_clause}
+                ) AS track_count,
                 COUNT(DISTINCT wc.id) AS contributor_count
             FROM Works w
-            LEFT JOIN WorkTrackLinks wt ON wt.work_id = w.id
             LEFT JOIN WorkContributors wc ON wc.work_id = w.id
             WHERE w.id=?
             GROUP BY w.id
@@ -602,12 +623,20 @@ class WorkService:
         ).fetchall()
         track_rows = self.conn.execute(
             """
-            SELECT track_id
-            FROM WorkTrackLinks
-            WHERE work_id=?
-            ORDER BY is_primary DESC, track_id
+            SELECT DISTINCT
+                t.id
+            FROM Tracks t
+            LEFT JOIN WorkTrackLinks wt
+              ON wt.track_id = t.id
+             AND wt.work_id = ?
+            WHERE t.work_id = ?
+               OR (t.work_id IS NULL AND wt.work_id IS NOT NULL)
+            ORDER BY
+                CASE WHEN t.work_id = ? THEN 0 ELSE 1 END,
+                COALESCE(wt.is_primary, 0) DESC,
+                t.id
             """,
-            (int(work_id),),
+            (int(work_id), int(work_id), int(work_id)),
         ).fetchall()
         return WorkDetail(
             work=work,
@@ -622,6 +651,9 @@ class WorkService:
         status: str | None = None,
         linked_track_id: int | None = None,
     ) -> list[WorkRecord]:
+        membership_clause = self._work_track_membership_clause(
+            work_alias="w", track_alias="t", link_alias="wt"
+        )
         clauses: list[str] = []
         params: list[object] = []
         clean_search = clean_text(search_text)
@@ -645,7 +677,17 @@ class WorkService:
             params.append(clean_status)
         if linked_track_id is not None:
             clauses.append(
-                "EXISTS (SELECT 1 FROM WorkTrackLinks wt2 WHERE wt2.work_id=w.id AND wt2.track_id=?)"
+                """
+                EXISTS (
+                    SELECT 1
+                    FROM Tracks t2
+                    LEFT JOIN WorkTrackLinks wt2
+                      ON wt2.track_id = t2.id
+                     AND wt2.work_id = w.id
+                    WHERE t2.id=?
+                      AND (t2.work_id = w.id OR (t2.work_id IS NULL AND wt2.work_id IS NOT NULL))
+                )
+                """
             )
             params.append(int(linked_track_id))
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
@@ -670,10 +712,16 @@ class WorkService:
                 w.profile_name,
                 w.created_at,
                 w.updated_at,
-                COUNT(DISTINCT wt.track_id) AS track_count,
+                (
+                    SELECT COUNT(DISTINCT t.id)
+                    FROM Tracks t
+                    LEFT JOIN WorkTrackLinks wt
+                      ON wt.track_id = t.id
+                     AND wt.work_id = w.id
+                    WHERE {membership_clause}
+                ) AS track_count,
                 COUNT(DISTINCT wc.id) AS contributor_count
             FROM Works w
-            LEFT JOIN WorkTrackLinks wt ON wt.work_id = w.id
             LEFT JOIN WorkContributors wc ON wc.work_id = w.id
             {where}
             GROUP BY w.id

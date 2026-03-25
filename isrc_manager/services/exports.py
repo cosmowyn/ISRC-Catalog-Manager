@@ -111,8 +111,21 @@ class XMLExportService:
         else:
             where_clause = ""
             params = []
+        track_columns = self._table_columns("Tracks")
+        work_columns = self._table_columns("Works") if "work_id" in track_columns else set()
         album_columns = self._table_columns("Albums")
         album_art_blob_sql = "al.album_art_blob" if "album_art_blob" in album_columns else "NULL"
+        work_join_sql = "LEFT JOIN Works w ON w.id = t.work_id" if work_columns else ""
+        work_iswc_sql = (
+            "COALESCE(NULLIF(w.iswc, ''), t.iswc, '') AS iswc"
+            if "iswc" in work_columns
+            else "COALESCE(t.iswc, '') AS iswc"
+        )
+        work_registration_sql = (
+            "COALESCE(NULLIF(w.registration_number, ''), t.buma_work_number, '') AS buma_work_number"
+            if "registration_number" in work_columns
+            else "COALESCE(t.buma_work_number, '') AS buma_work_number"
+        )
 
         rows = self.conn.execute(
             f"""
@@ -131,11 +144,11 @@ class XMLExportService:
                 COALESCE(al.title, '') AS album_title,
                 COALESCE(t.release_date, '') AS release_date,
                 COALESCE(t.track_length_sec, 0) AS track_length_sec,
-                COALESCE(t.iswc, '') AS iswc,
+                {work_iswc_sql},
                 COALESCE(t.upc, '') AS upc,
                 COALESCE(t.genre, '') AS genre,
                 COALESCE(t.catalog_number, '') AS catalog_number,
-                COALESCE(t.buma_work_number, '') AS buma_work_number,
+                {work_registration_sql},
                 COALESCE(t.audio_file_mime_type, '') AS audio_file_mime_type,
                 COALESCE(t.audio_file_size_bytes, 0) AS audio_file_size_bytes,
                 CASE
@@ -157,6 +170,7 @@ class XMLExportService:
             FROM Tracks t
             LEFT JOIN Artists a ON a.id = t.main_artist_id
             LEFT JOIN Albums al ON al.id = t.album_id
+            {work_join_sql}
             {where_clause}
             ORDER BY t.id
             """,
