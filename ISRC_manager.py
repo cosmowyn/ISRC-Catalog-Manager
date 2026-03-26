@@ -234,7 +234,10 @@ from isrc_manager.media.derivatives import (
     ManagedDerivativeExportResult,
 )
 from isrc_manager.parties import PartyPayload, PartyRecord, PartyService
-from isrc_manager.parties.dialogs import OwnerBootstrapDialog, PartyEditorDialog, PartyManagerPanel
+from isrc_manager.parties.dialogs import (
+    OwnerBootstrapDialog,
+    PartyManagerPanel,
+)
 from isrc_manager.paths import (
     configure_qt_application_identity,
     resolve_app_storage_layout,
@@ -700,6 +703,9 @@ class ApplicationSettingsDialog(QDialog):
         self.party_service = party_service or getattr(parent, "party_service", None)
         self._gs1_template_profile = None
         self._gs1_template_asset = gs1_template_asset
+        self._btw_number_value = str(btw_number or "").strip()
+        self._buma_relatie_nummer_value = str(buma_relatie_nummer or "").strip()
+        self._buma_ipi_value = str(buma_ipi or "").strip()
         self._owner_party_settings = owner_party_settings or OwnerPartySettings()
         self._owner_selected_party_id = (
             int(self._owner_party_settings.party_id)
@@ -887,42 +893,6 @@ class ApplicationSettingsDialog(QDialog):
         self.sena_number_edit.setMinimumWidth(180)
         self.sena_number_edit.setMaximumWidth(320)
         self._add_row(registration_grid, 2, "SENA Number", self.sena_number_edit)
-
-        self.btw_number_edit = QLineEdit((btw_number or "").strip())
-        self.btw_number_edit.setReadOnly(True)
-        self.btw_number_edit.setMinimumWidth(180)
-        self.btw_number_edit.setMaximumWidth(320)
-        self._add_row(
-            registration_grid,
-            3,
-            "VAT / BTW Number",
-            self.btw_number_edit,
-            "Read from the current Owner Party. Use Owner Party or Party Manager to edit it.",
-        )
-
-        self.buma_relatie_edit = QLineEdit((buma_relatie_nummer or "").strip())
-        self.buma_relatie_edit.setReadOnly(True)
-        self.buma_relatie_edit.setMinimumWidth(180)
-        self.buma_relatie_edit.setMaximumWidth(320)
-        self._add_row(
-            registration_grid,
-            4,
-            "BUMA/STEMRA Relation Number",
-            self.buma_relatie_edit,
-            "Read from the current Owner Party. Use Owner Party or Party Manager to edit it.",
-        )
-
-        self.buma_ipi_edit = QLineEdit((buma_ipi or "").strip())
-        self.buma_ipi_edit.setReadOnly(True)
-        self.buma_ipi_edit.setMinimumWidth(180)
-        self.buma_ipi_edit.setMaximumWidth(320)
-        self._add_row(
-            registration_grid,
-            5,
-            "BUMA/STEMRA IPI Number",
-            self.buma_ipi_edit,
-            "Read from the current Owner Party. Use Owner Party or Party Manager to edit it.",
-        )
 
         snapshots_box = QGroupBox("Snapshots")
         snapshots_grid = QGridLayout(snapshots_box)
@@ -1114,299 +1084,6 @@ class ApplicationSettingsDialog(QDialog):
 
         general_layout.addStretch(1)
         self._general_tab_index = self.tabs.addTab(self._wrap_tab_page(general_page), "General")
-
-        owner_page = QWidget(self)
-        owner_page.setProperty("role", "workspaceCanvas")
-        owner_layout = QVBoxLayout(owner_page)
-        owner_layout.setContentsMargins(10, 10, 10, 10)
-        owner_layout.setSpacing(14)
-
-        owner_intro_box = QGroupBox("Owner Party")
-        owner_intro_layout = QVBoxLayout(owner_intro_box)
-        owner_intro_layout.setContentsMargins(12, 12, 12, 12)
-        owner_intro_layout.setSpacing(8)
-        owner_intro_label = QLabel(
-            "The current Owner is always one canonical Party. Edit identity, contact, address, "
-            "VAT / PRO / IPI, and legal details on that Party record, then use this page only to "
-            "choose or switch which Party acts as the application Owner."
-        )
-        owner_intro_label.setWordWrap(True)
-        owner_intro_layout.addWidget(owner_intro_label)
-        owner_layout.addWidget(owner_intro_box)
-
-        owner_link_box = QGroupBox("Linked Party")
-        owner_link_layout = QVBoxLayout(owner_link_box)
-        owner_link_layout.setContentsMargins(12, 12, 12, 12)
-        owner_link_layout.setSpacing(8)
-        owner_link_description = QLabel(
-            "Choose the single Party that should act as the application Owner. The details below "
-            "mirror that Party and are no longer edited as a separate owner snapshot."
-        )
-        owner_link_description.setWordWrap(True)
-        owner_link_layout.addWidget(owner_link_description)
-        owner_link_row = QHBoxLayout()
-        owner_link_row.setContentsMargins(0, 0, 0, 0)
-        owner_link_row.setSpacing(8)
-        self.owner_party_combo = FocusWheelComboBox(owner_link_box)
-        self.owner_party_combo.setEditable(True)
-        self.owner_party_combo.setInsertPolicy(QComboBox.NoInsert)
-        self.owner_party_combo.setMinimumWidth(320)
-        self.owner_party_combo.setPlaceholderText("Search or choose a Party")
-        owner_link_row.addWidget(self.owner_party_combo, 1)
-        self.owner_party_new_button = QPushButton("New Party...", owner_link_box)
-        owner_link_row.addWidget(self.owner_party_new_button)
-        self.owner_party_edit_button = QPushButton("Edit Party...", owner_link_box)
-        owner_link_row.addWidget(self.owner_party_edit_button)
-        self.owner_party_clear_button = QPushButton("Clear Link", owner_link_box)
-        owner_link_row.addWidget(self.owner_party_clear_button)
-        owner_link_layout.addLayout(owner_link_row)
-        self.owner_party_hint_label = QLabel(owner_link_box)
-        self.owner_party_hint_label.setProperty("role", "supportingText")
-        self.owner_party_hint_label.setWordWrap(True)
-        owner_link_layout.addWidget(self.owner_party_hint_label)
-        owner_layout.addWidget(owner_link_box)
-
-        owner_identity_box = QGroupBox("Identity")
-        owner_identity_grid = QGridLayout(owner_identity_box)
-        self._configure_grid(owner_identity_grid)
-        owner_layout.addWidget(owner_identity_box)
-
-        self.owner_display_name_edit = QLineEdit(self._owner_party_settings.display_name)
-        self.owner_display_name_edit.setClearButtonEnabled(True)
-        self._add_row(
-            owner_identity_grid,
-            0,
-            "Display Name",
-            self.owner_display_name_edit,
-            "Friendly public name used when the owner acts as the licensor or rights-holder.",
-        )
-
-        self.owner_legal_name_edit = QLineEdit(self._owner_party_settings.legal_name)
-        self.owner_legal_name_edit.setClearButtonEnabled(True)
-        self._add_row(
-            owner_identity_grid,
-            1,
-            "Legal Name",
-            self.owner_legal_name_edit,
-            "Formal legal or contracting name for the application owner.",
-        )
-
-        self.owner_artist_name_edit = QLineEdit(self._owner_party_settings.artist_name)
-        self.owner_artist_name_edit.setClearButtonEnabled(True)
-        self._add_row(
-            owner_identity_grid,
-            2,
-            "Artist Name",
-            self.owner_artist_name_edit,
-            "Artist-facing owner name when the owner is also the credited artist identity.",
-        )
-
-        self.owner_company_name_edit = QLineEdit(self._owner_party_settings.company_name)
-        self.owner_company_name_edit.setClearButtonEnabled(True)
-        self._add_row(owner_identity_grid, 3, "Company Name", self.owner_company_name_edit)
-
-        self.owner_first_name_edit = QLineEdit(self._owner_party_settings.first_name)
-        self.owner_first_name_edit.setClearButtonEnabled(True)
-        self._add_row(owner_identity_grid, 4, "First Name", self.owner_first_name_edit)
-
-        self.owner_middle_name_edit = QLineEdit(self._owner_party_settings.middle_name)
-        self.owner_middle_name_edit.setClearButtonEnabled(True)
-        self._add_row(owner_identity_grid, 5, "Middle Name", self.owner_middle_name_edit)
-
-        self.owner_last_name_edit = QLineEdit(self._owner_party_settings.last_name)
-        self.owner_last_name_edit.setClearButtonEnabled(True)
-        self._add_row(owner_identity_grid, 6, "Last Name", self.owner_last_name_edit)
-
-        self.owner_contact_person_edit = QLineEdit(self._owner_party_settings.contact_person)
-        self.owner_contact_person_edit.setClearButtonEnabled(True)
-        self._add_row(owner_identity_grid, 7, "Contact Person", self.owner_contact_person_edit)
-
-        owner_address_box = QGroupBox("Address")
-        owner_address_grid = QGridLayout(owner_address_box)
-        self._configure_grid(owner_address_grid)
-        owner_layout.addWidget(owner_address_box)
-
-        self.owner_street_name_edit = QLineEdit(self._owner_party_settings.street_name)
-        self.owner_street_name_edit.setClearButtonEnabled(True)
-        self._add_row(owner_address_grid, 0, "Street Name", self.owner_street_name_edit)
-
-        self.owner_street_number_edit = QLineEdit(self._owner_party_settings.street_number)
-        self.owner_street_number_edit.setClearButtonEnabled(True)
-        self._add_row(owner_address_grid, 1, "Street Number", self.owner_street_number_edit)
-
-        self.owner_address_line1_edit = QLineEdit(self._owner_party_settings.address_line1)
-        self.owner_address_line1_edit.setClearButtonEnabled(True)
-        self._add_row(owner_address_grid, 2, "Address Line 1", self.owner_address_line1_edit)
-
-        self.owner_address_line2_edit = QLineEdit(self._owner_party_settings.address_line2)
-        self.owner_address_line2_edit.setClearButtonEnabled(True)
-        self._add_row(owner_address_grid, 3, "Address Line 2", self.owner_address_line2_edit)
-
-        self.owner_city_edit = QLineEdit(self._owner_party_settings.city)
-        self.owner_city_edit.setClearButtonEnabled(True)
-        self._add_row(owner_address_grid, 4, "City", self.owner_city_edit)
-
-        self.owner_region_edit = QLineEdit(self._owner_party_settings.region)
-        self.owner_region_edit.setClearButtonEnabled(True)
-        self._add_row(owner_address_grid, 5, "Region / State", self.owner_region_edit)
-
-        self.owner_postal_code_edit = QLineEdit(self._owner_party_settings.postal_code)
-        self.owner_postal_code_edit.setClearButtonEnabled(True)
-        self._add_row(owner_address_grid, 6, "Postal Code", self.owner_postal_code_edit)
-
-        self.owner_country_edit = QLineEdit(self._owner_party_settings.country)
-        self.owner_country_edit.setClearButtonEnabled(True)
-        self._add_row(owner_address_grid, 7, "Country", self.owner_country_edit)
-
-        owner_contact_box = QGroupBox("Contact")
-        owner_contact_grid = QGridLayout(owner_contact_box)
-        self._configure_grid(owner_contact_grid)
-        owner_layout.addWidget(owner_contact_box)
-
-        self.owner_email_edit = QLineEdit(self._owner_party_settings.email)
-        self.owner_email_edit.setClearButtonEnabled(True)
-        self._add_row(owner_contact_grid, 0, "Email Address", self.owner_email_edit)
-
-        self.owner_alternative_email_edit = QLineEdit(self._owner_party_settings.alternative_email)
-        self.owner_alternative_email_edit.setClearButtonEnabled(True)
-        self._add_row(
-            owner_contact_grid,
-            1,
-            "Alternative Email",
-            self.owner_alternative_email_edit,
-        )
-
-        self.owner_phone_edit = QLineEdit(self._owner_party_settings.phone)
-        self.owner_phone_edit.setClearButtonEnabled(True)
-        self._add_row(owner_contact_grid, 2, "Phone Number", self.owner_phone_edit)
-
-        self.owner_website_edit = QLineEdit(self._owner_party_settings.website)
-        self.owner_website_edit.setClearButtonEnabled(True)
-        self._add_row(owner_contact_grid, 3, "Website", self.owner_website_edit)
-
-        owner_business_box = QGroupBox("Business / Legal")
-        owner_business_grid = QGridLayout(owner_business_box)
-        self._configure_grid(owner_business_grid)
-        owner_layout.addWidget(owner_business_box)
-
-        self.owner_bank_account_number_edit = QLineEdit(
-            self._owner_party_settings.bank_account_number
-        )
-        self.owner_bank_account_number_edit.setClearButtonEnabled(True)
-        self._add_row(
-            owner_business_grid,
-            0,
-            "Bank Account Number",
-            self.owner_bank_account_number_edit,
-        )
-
-        self.owner_chamber_of_commerce_number_edit = QLineEdit(
-            self._owner_party_settings.chamber_of_commerce_number
-        )
-        self.owner_chamber_of_commerce_number_edit.setClearButtonEnabled(True)
-        self._add_row(
-            owner_business_grid,
-            1,
-            "Chamber Of Commerce Number",
-            self.owner_chamber_of_commerce_number_edit,
-        )
-
-        self.owner_tax_id_edit = QLineEdit(self._owner_party_settings.tax_id)
-        self.owner_tax_id_edit.setClearButtonEnabled(True)
-        self._add_row(
-            owner_business_grid,
-            2,
-            "Tax ID",
-            self.owner_tax_id_edit,
-            "Stored on the selected Owner Party and reused anywhere owner identity is resolved.",
-        )
-
-        self.owner_pro_affiliation_edit = QLineEdit(self._owner_party_settings.pro_affiliation)
-        self.owner_pro_affiliation_edit.setClearButtonEnabled(True)
-        self._add_row(
-            owner_business_grid,
-            3,
-            "PRO Affiliation",
-            self.owner_pro_affiliation_edit,
-        )
-
-        self.owner_vat_number_display = QLineEdit(self._owner_party_settings.vat_number)
-        self.owner_vat_number_display.setReadOnly(True)
-        self._add_row(
-            owner_business_grid,
-            4,
-            "VAT / BTW Number",
-            self.owner_vat_number_display,
-            "Stored on the selected Owner Party.",
-        )
-
-        self.owner_pro_number_display = QLineEdit(self._owner_party_settings.pro_number)
-        self.owner_pro_number_display.setReadOnly(True)
-        self._add_row(
-            owner_business_grid,
-            5,
-            "PRO Number",
-            self.owner_pro_number_display,
-            "Stored on the selected Owner Party.",
-        )
-
-        self.owner_ipi_cae_display = QLineEdit(self._owner_party_settings.ipi_cae)
-        self.owner_ipi_cae_display.setReadOnly(True)
-        self._add_row(
-            owner_business_grid,
-            6,
-            "IPI / CAE",
-            self.owner_ipi_cae_display,
-            "Stored on the selected Owner Party.",
-        )
-
-        self.owner_notes_edit = QLineEdit(self._owner_party_settings.notes)
-        self.owner_notes_edit.setClearButtonEnabled(True)
-        self._add_row(
-            owner_business_grid,
-            7,
-            "Notes",
-            self.owner_notes_edit,
-        )
-        self.owner_party_combo.currentIndexChanged.connect(self._owner_party_combo_changed)
-        self.owner_party_new_button.clicked.connect(self._create_owner_party)
-        self.owner_party_edit_button.clicked.connect(self._edit_owner_party)
-        self.owner_party_clear_button.clicked.connect(self._clear_owner_party_link)
-        self._owner_linked_field_widgets = [
-            self.owner_display_name_edit,
-            self.owner_legal_name_edit,
-            self.owner_artist_name_edit,
-            self.owner_company_name_edit,
-            self.owner_first_name_edit,
-            self.owner_middle_name_edit,
-            self.owner_last_name_edit,
-            self.owner_contact_person_edit,
-            self.owner_street_name_edit,
-            self.owner_street_number_edit,
-            self.owner_address_line1_edit,
-            self.owner_address_line2_edit,
-            self.owner_city_edit,
-            self.owner_region_edit,
-            self.owner_postal_code_edit,
-            self.owner_country_edit,
-            self.owner_email_edit,
-            self.owner_alternative_email_edit,
-            self.owner_phone_edit,
-            self.owner_website_edit,
-            self.owner_bank_account_number_edit,
-            self.owner_chamber_of_commerce_number_edit,
-            self.owner_tax_id_edit,
-            self.owner_pro_affiliation_edit,
-            self.owner_notes_edit,
-        ]
-        for widget in self._owner_linked_field_widgets:
-            widget.setReadOnly(True)
-        self.owner_party_clear_button.setVisible(False)
-        self._refresh_owner_party_choices()
-        self._sync_owner_party_link_state()
-
-        owner_layout.addStretch(1)
-        self._owner_tab_index = self.tabs.addTab(self._wrap_tab_page(owner_page), "Owner Party")
 
         gs1_page = QWidget(self)
         gs1_page.setProperty("role", "workspaceCanvas")
@@ -1775,29 +1452,6 @@ class ApplicationSettingsDialog(QDialog):
                 self.history_prune_pre_restore_copies_after_days_spin,
             ),
             "sena_number": (self._general_tab_index, self.sena_number_edit),
-            "btw_number": (self._general_tab_index, self.btw_number_edit),
-            "buma_relatie_nummer": (self._general_tab_index, self.buma_relatie_edit),
-            "buma_ipi": (self._general_tab_index, self.buma_ipi_edit),
-            "owner_party_id": (self._owner_tab_index, self.owner_party_combo),
-            "owner_display_name": (self._owner_tab_index, self.owner_display_name_edit),
-            "owner_legal_name": (self._owner_tab_index, self.owner_legal_name_edit),
-            "owner_artist_name": (self._owner_tab_index, self.owner_artist_name_edit),
-            "owner_company_name": (self._owner_tab_index, self.owner_company_name_edit),
-            "owner_email": (self._owner_tab_index, self.owner_email_edit),
-            "owner_first_name": (self._owner_tab_index, self.owner_first_name_edit),
-            "owner_last_name": (self._owner_tab_index, self.owner_last_name_edit),
-            "owner_street_name": (self._owner_tab_index, self.owner_street_name_edit),
-            "owner_postal_code": (self._owner_tab_index, self.owner_postal_code_edit),
-            "owner_country": (self._owner_tab_index, self.owner_country_edit),
-            "owner_bank_account_number": (
-                self._owner_tab_index,
-                self.owner_bank_account_number_edit,
-            ),
-            "owner_chamber_of_commerce_number": (
-                self._owner_tab_index,
-                self.owner_chamber_of_commerce_number_edit,
-            ),
-            "owner_pro_affiliation": (self._owner_tab_index, self.owner_pro_affiliation_edit),
             "gs1_template_path": (self._gs1_tab_index, self.gs1_template_path_edit),
             "gs1_contracts_csv_path": (self._gs1_tab_index, self.gs1_contracts_csv_edit),
             "gs1_active_contract_number": (self._gs1_tab_index, self.gs1_active_contract_edit),
@@ -3967,254 +3621,84 @@ class ApplicationSettingsDialog(QDialog):
             profile_name=self._current_profile_name(),
         )
 
-    def _refresh_owner_party_choices(self) -> None:
-        labels: list[str] = []
-        previous_state = self.owner_party_combo.blockSignals(True)
-        try:
-            self.owner_party_combo.clear()
-            records: list[PartyRecord] = []
-            if self.party_service is not None:
-                records = list(self.party_service.list_parties() or [])
-                for record in records:
-                    label = self._owner_party_choice_label(record)
-                    self.owner_party_combo.addItem(label, int(record.id))
-                    labels.append(label)
-                if (
-                    self._owner_selected_party_id is not None
-                    and self.owner_party_combo.findData(self._owner_selected_party_id) < 0
-                ):
-                    missing_label = f"Missing Party #{int(self._owner_selected_party_id)}"
-                    self.owner_party_combo.addItem(
-                        missing_label, int(self._owner_selected_party_id)
-                    )
-                    labels.append(missing_label)
-            elif self._owner_selected_party_id is not None:
-                linked_label = f"Linked Party #{int(self._owner_selected_party_id)}"
-                self.owner_party_combo.addItem(linked_label, int(self._owner_selected_party_id))
-                labels.append(linked_label)
-            if self.owner_party_combo.count() == 0:
-                self.owner_party_combo.addItem("Create a Party first", None)
-            completer = QCompleter(labels, self.owner_party_combo)
-            completer.setCaseSensitivity(Qt.CaseInsensitive)
-            self.owner_party_combo.setCompleter(completer)
-            if self._owner_selected_party_id is not None:
-                index = self.owner_party_combo.findData(int(self._owner_selected_party_id))
-                self.owner_party_combo.setCurrentIndex(index if index >= 0 else 0)
-            elif records:
-                self._owner_selected_party_id = int(records[0].id)
-                index = self.owner_party_combo.findData(self._owner_selected_party_id)
-                self.owner_party_combo.setCurrentIndex(index if index >= 0 else 0)
-            else:
-                self.owner_party_combo.setCurrentIndex(0)
-            if self.party_service is not None and self._owner_selected_party_id is not None:
-                record = self.party_service.fetch_party(int(self._owner_selected_party_id))
-                if record is not None:
-                    self._apply_owner_party_record(record)
-                else:
-                    self._apply_owner_party_settings_view(OwnerPartySettings())
-            elif not records:
-                self._apply_owner_party_settings_view(OwnerPartySettings())
-        finally:
-            self.owner_party_combo.blockSignals(previous_state)
-
-    def _apply_owner_party_settings_view(self, settings: OwnerPartySettings) -> None:
-        self.btw_number_edit.setText(str(settings.vat_number or "").strip())
-        self.buma_relatie_edit.setText(str(settings.pro_number or "").strip())
-        self.buma_ipi_edit.setText(str(settings.ipi_cae or "").strip())
-        self.owner_display_name_edit.setText(str(settings.display_name or "").strip())
-        self.owner_legal_name_edit.setText(str(settings.legal_name or "").strip())
-        self.owner_artist_name_edit.setText(str(settings.artist_name or "").strip())
-        self.owner_company_name_edit.setText(str(settings.company_name or "").strip())
-        self.owner_first_name_edit.setText(str(settings.first_name or "").strip())
-        self.owner_middle_name_edit.setText(str(settings.middle_name or "").strip())
-        self.owner_last_name_edit.setText(str(settings.last_name or "").strip())
-        self.owner_contact_person_edit.setText(str(settings.contact_person or "").strip())
-        self.owner_street_name_edit.setText(str(settings.street_name or "").strip())
-        self.owner_street_number_edit.setText(str(settings.street_number or "").strip())
-        self.owner_address_line1_edit.setText(str(settings.address_line1 or "").strip())
-        self.owner_address_line2_edit.setText(str(settings.address_line2 or "").strip())
-        self.owner_city_edit.setText(str(settings.city or "").strip())
-        self.owner_region_edit.setText(str(settings.region or "").strip())
-        self.owner_postal_code_edit.setText(str(settings.postal_code or "").strip())
-        self.owner_country_edit.setText(str(settings.country or "").strip())
-        self.owner_email_edit.setText(str(settings.email or "").strip())
-        self.owner_alternative_email_edit.setText(str(settings.alternative_email or "").strip())
-        self.owner_phone_edit.setText(str(settings.phone or "").strip())
-        self.owner_website_edit.setText(str(settings.website or "").strip())
-        self.owner_bank_account_number_edit.setText(str(settings.bank_account_number or "").strip())
-        self.owner_chamber_of_commerce_number_edit.setText(
-            str(settings.chamber_of_commerce_number or "").strip()
+    @staticmethod
+    def _owner_party_settings_from_record(record: PartyRecord) -> OwnerPartySettings:
+        return OwnerPartySettings(
+            party_id=int(record.id),
+            legal_name=str(record.legal_name or "").strip(),
+            display_name=str(record.display_name or "").strip(),
+            artist_name=str(record.artist_name or "").strip(),
+            company_name=str(record.company_name or "").strip(),
+            first_name=str(record.first_name or "").strip(),
+            middle_name=str(record.middle_name or "").strip(),
+            last_name=str(record.last_name or "").strip(),
+            contact_person=str(record.contact_person or "").strip(),
+            email=str(record.email or "").strip(),
+            alternative_email=str(record.alternative_email or "").strip(),
+            phone=str(record.phone or "").strip(),
+            website=str(record.website or "").strip(),
+            street_name=str(record.street_name or "").strip(),
+            street_number=str(record.street_number or "").strip(),
+            address_line1=str(record.address_line1 or "").strip(),
+            address_line2=str(record.address_line2 or "").strip(),
+            city=str(record.city or "").strip(),
+            region=str(record.region or "").strip(),
+            postal_code=str(record.postal_code or "").strip(),
+            country=str(record.country or "").strip(),
+            bank_account_number=str(record.bank_account_number or "").strip(),
+            chamber_of_commerce_number=str(record.chamber_of_commerce_number or "").strip(),
+            tax_id=str(record.tax_id or "").strip(),
+            vat_number=str(record.vat_number or "").strip(),
+            pro_affiliation=str(record.pro_affiliation or "").strip(),
+            pro_number=str(record.pro_number or "").strip(),
+            ipi_cae=str(record.ipi_cae or "").strip(),
+            notes=str(record.notes or "").strip(),
         )
-        self.owner_tax_id_edit.setText(str(settings.tax_id or "").strip())
-        self.owner_pro_affiliation_edit.setText(str(settings.pro_affiliation or "").strip())
-        self.owner_vat_number_display.setText(str(settings.vat_number or "").strip())
-        self.owner_pro_number_display.setText(str(settings.pro_number or "").strip())
-        self.owner_ipi_cae_display.setText(str(settings.ipi_cae or "").strip())
-        self.owner_notes_edit.setText(str(settings.notes or "").strip())
-
-    def _apply_owner_party_record(self, record: PartyRecord) -> None:
-        self._apply_owner_party_settings_view(
-            OwnerPartySettings(
-                party_id=int(record.id),
-                legal_name=str(record.legal_name or "").strip(),
-                display_name=str(record.display_name or "").strip(),
-                artist_name=str(record.artist_name or "").strip(),
-                company_name=str(record.company_name or "").strip(),
-                first_name=str(record.first_name or "").strip(),
-                middle_name=str(record.middle_name or "").strip(),
-                last_name=str(record.last_name or "").strip(),
-                contact_person=str(record.contact_person or "").strip(),
-                email=str(record.email or "").strip(),
-                alternative_email=str(record.alternative_email or "").strip(),
-                phone=str(record.phone or "").strip(),
-                website=str(record.website or "").strip(),
-                street_name=str(record.street_name or "").strip(),
-                street_number=str(record.street_number or "").strip(),
-                address_line1=str(record.address_line1 or "").strip(),
-                address_line2=str(record.address_line2 or "").strip(),
-                city=str(record.city or "").strip(),
-                region=str(record.region or "").strip(),
-                postal_code=str(record.postal_code or "").strip(),
-                country=str(record.country or "").strip(),
-                bank_account_number=str(record.bank_account_number or "").strip(),
-                chamber_of_commerce_number=str(record.chamber_of_commerce_number or "").strip(),
-                tax_id=str(record.tax_id or "").strip(),
-                vat_number=str(record.vat_number or "").strip(),
-                pro_affiliation=str(record.pro_affiliation or "").strip(),
-                pro_number=str(record.pro_number or "").strip(),
-                ipi_cae=str(record.ipi_cae or "").strip(),
-                notes=str(record.notes or "").strip(),
-            )
-        )
-
-    def _sync_owner_party_link_state(self) -> None:
-        combo_enabled = self.party_service is not None
-        self.owner_party_combo.setEnabled(combo_enabled)
-        self.owner_party_new_button.setEnabled(combo_enabled)
-        linked = self._owner_selected_party_id is not None
-        self.owner_party_edit_button.setEnabled(combo_enabled and linked)
-        self.owner_party_clear_button.setEnabled(False)
-        if linked:
-            current_label = self.owner_party_combo.currentText().strip()
-            if not current_label:
-                current_label = f"Party #{int(self._owner_selected_party_id)}"
-            self.owner_party_hint_label.setText(
-                f"{current_label} is the current Owner Party. Edit the Party record to change the fields below."
-            )
-            return
-        if combo_enabled:
-            self.owner_party_hint_label.setText(
-                "Choose or create the Party that should become the current Owner."
-            )
-            return
-        self.owner_party_hint_label.setText(
-            "Party service is unavailable, so the current Owner cannot be changed here."
-        )
-
-    def _owner_party_combo_changed(self, index: int) -> None:
-        party_id = self.owner_party_combo.itemData(index)
-        if party_id in (None, ""):
-            self._owner_selected_party_id = None
-            self._apply_owner_party_settings_view(OwnerPartySettings())
-            self._sync_owner_party_link_state()
-            return
-        if self.party_service is None:
-            self._owner_selected_party_id = int(party_id)
-            self._sync_owner_party_link_state()
-            return
-        record = self.party_service.fetch_party(int(party_id))
-        if record is None:
-            QMessageBox.warning(
-                self,
-                "Owner Party",
-                f"Party #{int(party_id)} could not be loaded.",
-            )
-            self._owner_selected_party_id = None
-            self._refresh_owner_party_choices()
-            self._sync_owner_party_link_state()
-            return
-        self._owner_selected_party_id = int(record.id)
-        self._apply_owner_party_record(record)
-        self._sync_owner_party_link_state()
-
-    def _create_owner_party(self) -> None:
-        if self.party_service is None:
-            return
-        dialog = PartyEditorDialog(party_service=self.party_service, parent=self)
-        if not dialog.exec():
-            return
-        try:
-            party_id = self.party_service.create_party(dialog.payload())
-        except Exception as exc:
-            QMessageBox.warning(self, "Owner Party", str(exc))
-            return
-        self._owner_selected_party_id = int(party_id)
-        record = self.party_service.fetch_party(int(party_id))
-        if record is not None:
-            self._apply_owner_party_record(record)
-        self._refresh_owner_party_choices()
-        self._sync_owner_party_link_state()
-
-    def _edit_owner_party(self) -> None:
-        if self.party_service is None or self._owner_selected_party_id is None:
-            return
-        record = self.party_service.fetch_party(int(self._owner_selected_party_id))
-        if record is None:
-            QMessageBox.warning(
-                self,
-                "Owner Party",
-                f"Party #{int(self._owner_selected_party_id)} could not be loaded.",
-            )
-            return
-        dialog = PartyEditorDialog(party_service=self.party_service, party=record, parent=self)
-        if not dialog.exec():
-            return
-        try:
-            self.party_service.update_party(int(record.id), dialog.payload())
-        except Exception as exc:
-            QMessageBox.warning(self, "Owner Party", str(exc))
-            return
-        refreshed = self.party_service.fetch_party(int(record.id))
-        if refreshed is not None:
-            self._apply_owner_party_record(refreshed)
-        self._refresh_owner_party_choices()
-        self._sync_owner_party_link_state()
-
-    def _clear_owner_party_link(self) -> None:
-        return
 
     def _owner_party_settings_payload(self) -> OwnerPartySettings:
-        return OwnerPartySettings(
-            party_id=self._owner_selected_party_id,
-            legal_name=self.owner_legal_name_edit.text().strip(),
-            display_name=self.owner_display_name_edit.text().strip(),
-            artist_name=self.owner_artist_name_edit.text().strip(),
-            company_name=self.owner_company_name_edit.text().strip(),
-            first_name=self.owner_first_name_edit.text().strip(),
-            middle_name=self.owner_middle_name_edit.text().strip(),
-            last_name=self.owner_last_name_edit.text().strip(),
-            contact_person=self.owner_contact_person_edit.text().strip(),
-            email=self.owner_email_edit.text().strip(),
-            alternative_email=self.owner_alternative_email_edit.text().strip(),
-            phone=self.owner_phone_edit.text().strip(),
-            website=self.owner_website_edit.text().strip(),
-            street_name=self.owner_street_name_edit.text().strip(),
-            street_number=self.owner_street_number_edit.text().strip(),
-            address_line1=self.owner_address_line1_edit.text().strip(),
-            address_line2=self.owner_address_line2_edit.text().strip(),
-            city=self.owner_city_edit.text().strip(),
-            region=self.owner_region_edit.text().strip(),
-            postal_code=self.owner_postal_code_edit.text().strip(),
-            country=self.owner_country_edit.text().strip(),
-            bank_account_number=self.owner_bank_account_number_edit.text().strip(),
-            chamber_of_commerce_number=self.owner_chamber_of_commerce_number_edit.text().strip(),
-            tax_id=self.owner_tax_id_edit.text().strip(),
-            vat_number=self.btw_number_edit.text().strip(),
-            pro_affiliation=self.owner_pro_affiliation_edit.text().strip(),
-            pro_number=self.buma_relatie_edit.text().strip(),
-            ipi_cae=self.buma_ipi_edit.text().strip(),
-            notes=self.owner_notes_edit.text().strip(),
-        )
+        if self._owner_selected_party_id is None:
+            return OwnerPartySettings()
+        if self.party_service is not None:
+            record = self.party_service.fetch_party(int(self._owner_selected_party_id))
+            if record is not None:
+                return self._owner_party_settings_from_record(record)
+        if self._owner_party_settings.party_id == self._owner_selected_party_id:
+            return OwnerPartySettings(
+                party_id=self._owner_selected_party_id,
+                legal_name=str(self._owner_party_settings.legal_name or "").strip(),
+                display_name=str(self._owner_party_settings.display_name or "").strip(),
+                artist_name=str(self._owner_party_settings.artist_name or "").strip(),
+                company_name=str(self._owner_party_settings.company_name or "").strip(),
+                first_name=str(self._owner_party_settings.first_name or "").strip(),
+                middle_name=str(self._owner_party_settings.middle_name or "").strip(),
+                last_name=str(self._owner_party_settings.last_name or "").strip(),
+                contact_person=str(self._owner_party_settings.contact_person or "").strip(),
+                email=str(self._owner_party_settings.email or "").strip(),
+                alternative_email=str(self._owner_party_settings.alternative_email or "").strip(),
+                phone=str(self._owner_party_settings.phone or "").strip(),
+                website=str(self._owner_party_settings.website or "").strip(),
+                street_name=str(self._owner_party_settings.street_name or "").strip(),
+                street_number=str(self._owner_party_settings.street_number or "").strip(),
+                address_line1=str(self._owner_party_settings.address_line1 or "").strip(),
+                address_line2=str(self._owner_party_settings.address_line2 or "").strip(),
+                city=str(self._owner_party_settings.city or "").strip(),
+                region=str(self._owner_party_settings.region or "").strip(),
+                postal_code=str(self._owner_party_settings.postal_code or "").strip(),
+                country=str(self._owner_party_settings.country or "").strip(),
+                bank_account_number=str(
+                    self._owner_party_settings.bank_account_number or ""
+                ).strip(),
+                chamber_of_commerce_number=str(
+                    self._owner_party_settings.chamber_of_commerce_number or ""
+                ).strip(),
+                tax_id=str(self._owner_party_settings.tax_id or "").strip(),
+                vat_number=str(self._owner_party_settings.vat_number or "").strip(),
+                pro_affiliation=str(self._owner_party_settings.pro_affiliation or "").strip(),
+                pro_number=str(self._owner_party_settings.pro_number or "").strip(),
+                ipi_cae=str(self._owner_party_settings.ipi_cae or "").strip(),
+                notes=str(self._owner_party_settings.notes or "").strip(),
+            )
+        return OwnerPartySettings(party_id=self._owner_selected_party_id)
 
     def values(self) -> dict[str, object]:
         theme_values = self._theme_value_payload()
@@ -4238,9 +3722,9 @@ class ApplicationSettingsDialog(QDialog):
                 self.history_prune_pre_restore_copies_after_days_spin.value()
             ),
             "sena_number": self.sena_number_edit.text().strip(),
-            "btw_number": self.btw_number_edit.text().strip(),
-            "buma_relatie_nummer": self.buma_relatie_edit.text().strip(),
-            "buma_ipi": self.buma_ipi_edit.text().strip(),
+            "btw_number": self._btw_number_value,
+            "buma_relatie_nummer": self._buma_relatie_nummer_value,
+            "buma_ipi": self._buma_ipi_value,
             "owner_party_id": self._owner_selected_party_id,
             "owner_party_settings": self._owner_party_settings_payload(),
             "gs1_template_asset": self._gs1_template_asset,
@@ -4299,15 +3783,6 @@ class ApplicationSettingsDialog(QDialog):
             if not self._import_gs1_contracts_csv(gs1_contracts_csv_path, show_errors=True):
                 self.focus_field("gs1_contracts_csv_path")
                 return
-        if self.party_service is not None and self._owner_selected_party_id is None:
-            QMessageBox.warning(
-                self,
-                "Owner Party Required",
-                "Choose or create the current Owner Party before saving Application Settings.",
-            )
-            self.tabs.setCurrentIndex(self._owner_tab_index)
-            self.owner_party_combo.setFocus(Qt.OtherFocusReason)
-            return
         for kind, spec in normalize_blob_icon_settings(values.get("blob_icon_settings")).items():
             mode = str(spec.get("mode") or "").strip().lower()
             if mode == "emoji" and not str(spec.get("emoji") or "").strip():
@@ -18727,35 +18202,34 @@ class App(QMainWindow):
             self.logger.exception(f"Set SENA number failed: {e}")
             QMessageBox.critical(self, "Error", f"Could not save SENA number:\n{e}")
 
-    def set_btw_number(self, value: str | None = None):
-        if value is None:
-            self.open_settings_dialog(initial_focus="owner_party_id")
+    def _redirect_owner_registration_edit_to_party_manager(self, field_label: str) -> None:
+        owner_party_id = self._current_owner_party_id()
+        if owner_party_id is None:
+            QMessageBox.information(
+                self,
+                field_label,
+                f"{field_label} is edited on the current Owner Party in Party Manager.",
+            )
+            self.open_party_manager()
             return
-        try:
-            self._apply_single_setting_value("btw_number", (value or "").strip())
-        except Exception as e:
-            self.logger.exception(f"Set BTW failed: {e}")
-            QMessageBox.critical(self, "Error", f"Could not save BTW number:\n{e}")
+        QMessageBox.information(
+            self,
+            field_label,
+            f"{field_label} is edited on the current Owner Party in Party Manager.",
+        )
+        self.open_party_manager(owner_party_id)
+
+    def set_btw_number(self, value: str | None = None):
+        del value
+        self._redirect_owner_registration_edit_to_party_manager("VAT / BTW Number")
 
     def set_buma_info(self, value: str | None = None):
-        if value is None:
-            self.open_settings_dialog(initial_focus="owner_party_id")
-            return
-        try:
-            self._apply_single_setting_value("buma_relatie_nummer", (value or "").strip())
-        except Exception as e:
-            self.logger.exception(f"Set BUMA relatie nummer failed: {e}")
-            QMessageBox.critical(self, "Error", f"Could not save BUMA relatie nummer:\n{e}")
+        del value
+        self._redirect_owner_registration_edit_to_party_manager("BUMA/STEMRA Relation Number")
 
     def set_ipi_info(self, value: str | None = None):
-        if value is None:
-            self.open_settings_dialog(initial_focus="owner_party_id")
-            return
-        try:
-            self._apply_single_setting_value("buma_ipi", (value or "").strip())
-        except Exception as e:
-            self.logger.exception(f"Set BUMA IPI failed: {e}")
-            QMessageBox.critical(self, "Error", f"Could not save BUMA IPI:\n{e}")
+        del value
+        self._redirect_owner_registration_edit_to_party_manager("BUMA/STEMRA IPI Number")
 
     def show_settings_summary(self):
         AboutDialog(self, parent=self).exec()

@@ -314,7 +314,7 @@ class ThemeBuilderTests(unittest.TestCase):
             dialog.close()
             host.close()
 
-    def test_application_settings_dialog_exposes_owner_party_tab_and_party_backed_payload(self):
+    def test_application_settings_dialog_hides_owner_management_controls(self):
         host = _ThemePreviewHost()
         host.party_service = _PartyServiceStub(
             [
@@ -380,20 +380,18 @@ class ThemeBuilderTests(unittest.TestCase):
             theme_settings={},
             stored_themes={},
             current_profile_path="",
-            owner_party_settings=app_module.OwnerPartySettings(),
+            owner_party_settings=app_module.OwnerPartySettings(party_id=1),
             party_service=host.party_service,
             parent=host,
         )
         try:
             tab_labels = [dialog.tabs.tabText(index) for index in range(dialog.tabs.count())]
-            self.assertIn("Owner Party", tab_labels)
-            self.assertEqual(dialog.owner_party_combo.currentData(), 1)
-            self.assertTrue(dialog.owner_company_name_edit.isReadOnly())
-            self.assertTrue(dialog.owner_email_edit.isReadOnly())
-            self.assertEqual(dialog.owner_company_name_edit.text(), "Moonwake Records")
-            self.assertEqual(dialog.owner_first_name_edit.text(), "Lyra")
-            self.assertEqual(dialog.owner_last_name_edit.text(), "Moonwake")
-            self.assertEqual(dialog.owner_pro_affiliation_edit.text(), "BUMA/STEMRA")
+            self.assertNotIn("Owner Party", tab_labels)
+            self.assertFalse(hasattr(dialog, "owner_party_combo"))
+            self.assertFalse(hasattr(dialog, "owner_party_manage_button"))
+            self.assertFalse(hasattr(dialog, "btw_number_edit"))
+            self.assertFalse(hasattr(dialog, "buma_relatie_edit"))
+            self.assertFalse(hasattr(dialog, "buma_ipi_edit"))
 
             values = dialog.values()
             owner_settings = values["owner_party_settings"]
@@ -412,7 +410,7 @@ class ThemeBuilderTests(unittest.TestCase):
             dialog.close()
             host.close()
 
-    def test_application_settings_dialog_owner_party_selector_loads_linked_party_values(self):
+    def test_application_settings_dialog_keeps_party_backed_owner_payload_without_owner_tab(self):
         host = _ThemePreviewHost()
         host.party_service = _PartyServiceStub(
             [
@@ -488,10 +486,10 @@ class ThemeBuilderTests(unittest.TestCase):
             parent=host,
         )
         try:
-            self.assertEqual(dialog.owner_party_combo.currentData(), 1)
-            self.assertEqual(dialog.owner_legal_name_edit.text(), "Aeonium Holdings B.V.")
-            self.assertEqual(dialog.owner_display_name_edit.text(), "Aeonium")
-            self.assertTrue(dialog.owner_legal_name_edit.isReadOnly())
+            tab_labels = [dialog.tabs.tabText(index) for index in range(dialog.tabs.count())]
+            self.assertNotIn("Owner Party", tab_labels)
+            self.assertFalse(hasattr(dialog, "owner_legal_name_edit"))
+            self.assertFalse(hasattr(dialog, "owner_display_name_edit"))
 
             owner_settings = dialog.values()["owner_party_settings"]
 
