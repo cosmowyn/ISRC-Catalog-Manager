@@ -3158,6 +3158,8 @@ class AppShellTestCase(unittest.TestCase):
         settings.setFallbacksEnabled(False)
         settings.setValue("display/catalog_table_panel", False)
         settings.sync()
+        settings.deleteLater() if hasattr(settings, "deleteLater") else None
+        self._drain_events()
 
         self.window = app_module.App()
         self.window.show()
@@ -3182,6 +3184,8 @@ class AppShellTestCase(unittest.TestCase):
         settings.setFallbacksEnabled(False)
         self.assertTrue(settings.value("display/add_data_panel", False, bool))
         self.assertTrue(settings.value("display/catalog_table_panel", False, bool))
+        settings.deleteLater() if hasattr(settings, "deleteLater") else None
+        self._drain_events()
 
         self.window = app_module.App()
         self.window.show()
