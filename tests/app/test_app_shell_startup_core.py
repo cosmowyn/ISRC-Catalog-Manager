@@ -8,6 +8,9 @@ class AppShellStartupCoreTests(AppShellTestCase):
     test_startup_status_messages_cover_real_bootstrap_phases_and_ready_boundary = (
         AppShellTestCase.case_startup_status_messages_cover_real_bootstrap_phases_and_ready_boundary
     )
+    test_startup_splash_waits_for_catalog_refresh_completion = (
+        AppShellTestCase.case_startup_splash_waits_for_catalog_refresh_completion
+    )
     test_startup_first_launch_prompt_can_open_settings_and_clears_pending_flag = (
         AppShellTestCase.case_startup_first_launch_prompt_can_open_settings_and_clears_pending_flag
     )

@@ -21,31 +21,72 @@ from PySide6.QtWidgets import (
 from .models import TaskCancelledError, TaskFailure, TaskProgressUpdate
 
 
-def _configure_progress_dialog(dialog: QProgressDialog) -> None:
+_PROGRESS_DIALOG_MIN_WIDTH = 520
+_PROGRESS_DIALOG_MAX_WIDTH = 680
+_PROGRESS_DIALOG_SIDE_PADDING = 72
+_PROGRESS_DIALOG_BUTTON_GAP = 16
+_PROGRESS_DIALOG_LABEL_MIN_WIDTH = 360
+_PROGRESS_DIALOG_PROGRESS_MIN_WIDTH = 320
+_PROGRESS_DIALOG_BUTTON_MIN_WIDTH = 80
+_PROGRESS_DIALOG_BUTTON_MAX_WIDTH = 148
+
+
+def _progress_dialog_target_width(dialog: QProgressDialog) -> int:
     parent_widget = dialog.parentWidget()
-    max_width = 680
     if parent_widget is not None and parent_widget.width() > 0:
-        max_width = min(680, max(520, int(parent_widget.width() * 0.6)))
-    label_max_width = max(420, max_width - 60)
-    progress_max_width = max(320, max_width - 120)
-    dialog.setMinimumWidth(420)
-    dialog.setMaximumWidth(max_width)
+        return min(
+            _PROGRESS_DIALOG_MAX_WIDTH,
+            max(_PROGRESS_DIALOG_MIN_WIDTH, int(parent_widget.width() * 0.6)),
+        )
+    return _PROGRESS_DIALOG_MIN_WIDTH
+
+
+def _configure_progress_dialog(dialog: QProgressDialog) -> None:
+    width = int(
+        getattr(dialog, "_stable_width", 0)  # type: ignore[attr-defined]
+        or _progress_dialog_target_width(dialog)
+    )
+    dialog._stable_width = width  # type: ignore[attr-defined]
+    dialog.setMinimumWidth(width)
+    dialog.setMaximumWidth(width)
     dialog.setSizeGripEnabled(False)
+    buttons = [button for button in dialog.findChildren(QPushButton) if not button.isHidden()]
+    button_width = 0
+    for button in buttons:
+        preferred_width = max(_PROGRESS_DIALOG_BUTTON_MIN_WIDTH, button.sizeHint().width())
+        button_width = max(button_width, min(_PROGRESS_DIALOG_BUTTON_MAX_WIDTH, preferred_width))
+    label_max_width = max(_PROGRESS_DIALOG_LABEL_MIN_WIDTH, width - _PROGRESS_DIALOG_SIDE_PADDING)
+    progress_max_width = width - _PROGRESS_DIALOG_SIDE_PADDING
+    if button_width:
+        progress_max_width -= button_width + _PROGRESS_DIALOG_BUTTON_GAP
+    progress_max_width = max(_PROGRESS_DIALOG_PROGRESS_MIN_WIDTH, progress_max_width)
     for label in dialog.findChildren(QLabel):
         label.setWordWrap(True)
-        label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+        label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        label.setMinimumWidth(0)
         label.setMaximumWidth(label_max_width)
     for progress_bar in dialog.findChildren(QProgressBar):
-        progress_bar.setMinimumWidth(260)
+        progress_bar.setMinimumWidth(min(_PROGRESS_DIALOG_PROGRESS_MIN_WIDTH, progress_max_width))
         progress_bar.setMaximumWidth(progress_max_width)
         progress_bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-    for button in dialog.findChildren(QPushButton):
-        button.setMinimumWidth(112)
-        button.setMaximumWidth(148)
-    dialog.adjustSize()
-    hint = dialog.sizeHint()
-    width = min(max(int(hint.width()), 420), max_width)
-    dialog.resize(width, int(hint.height()))
+    if button_width:
+        for button in buttons:
+            button.setMinimumWidth(button_width)
+            button.setMaximumWidth(button_width)
+            button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+    _refresh_progress_dialog_height(dialog)
+
+
+def _refresh_progress_dialog_height(dialog: QProgressDialog) -> None:
+    width = int(
+        getattr(dialog, "_stable_width", 0)  # type: ignore[attr-defined]
+        or _progress_dialog_target_width(dialog)
+    )
+    layout = dialog.layout()
+    if layout is not None:
+        layout.activate()
+    height = max(dialog.minimumSizeHint().height(), dialog.sizeHint().height())
+    dialog.resize(width, int(height))
 
 
 class BackgroundTaskContext:
@@ -317,14 +358,14 @@ class BackgroundTaskManager(QObject):
                     dialog.setMaximum(max(0, int(update.maximum)))
                 elif update.value is not None:
                     dialog.setValue(max(0, int(update.value)))
-                _configure_progress_dialog(dialog)
+                _refresh_progress_dialog_height(dialog)
             if on_progress is not None:
                 on_progress(update)
 
         def _apply_status(message: str) -> None:
             if dialog is not None and message:
                 dialog.setLabelText(message)
-                _configure_progress_dialog(dialog)
+                _refresh_progress_dialog_height(dialog)
             if on_status is not None:
                 on_status(message)
 

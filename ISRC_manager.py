@@ -320,7 +320,10 @@ from isrc_manager.starter_themes import (
     starter_theme_names,
 )
 from isrc_manager.startup_progress import StartupPhase, startup_phase_label
-from isrc_manager.startup_splash import StartupFeedbackProtocol
+from isrc_manager.startup_splash import (
+    StartupFeedbackProtocol,
+    create_startup_splash_controller,
+)
 from isrc_manager.storage_migration import (
     PREFERRED_STATE_CONFLICT,
     PREFERRED_STATE_RESUMABLE_STAGE,
@@ -6327,6 +6330,8 @@ class App(QMainWindow):
         configure_qt_application_identity(self)
         self._startup_feedback = startup_feedback
         self._startup_feedback_completed = False
+        self._startup_ready_emitted = False
+        self._startup_catalog_refresh_complete = False
         self._post_ready_startup_tasks_scheduled = False
         self.startupReady.connect(self.complete_startup_feedback)
         self.startupReady.connect(self._schedule_post_ready_startup_tasks)
@@ -6471,7 +6476,12 @@ class App(QMainWindow):
             app_instance.installEventFilter(self)
         self._ensure_widget_object_names(self)
         self._apply_theme()
-        self._refresh_catalog_ui_in_background(unique_key="catalog.ui.startup")
+        startup_task_id = self._refresh_catalog_ui_in_background(
+            unique_key="catalog.ui.startup",
+            on_complete=self._handle_startup_catalog_refresh_complete,
+        )
+        if startup_task_id is None:
+            self._handle_startup_catalog_refresh_complete()
 
     def _report_startup_phase(
         self,
@@ -6521,6 +6531,78 @@ class App(QMainWindow):
             except Exception:
                 pass
         self._drain_qt_events()
+
+    def _set_loading_feedback_phase(
+        self,
+        feedback: StartupFeedbackProtocol | None,
+        phase: StartupPhase,
+        message_override: str | None = None,
+    ) -> None:
+        if feedback is None:
+            return
+        set_phase = getattr(feedback, "set_phase", None)
+        if callable(set_phase):
+            try:
+                set_phase(StartupPhase(phase), message_override)
+                return
+            except Exception:
+                pass
+        self._set_loading_feedback_status(feedback, message_override or startup_phase_label(phase))
+
+    def _set_loading_feedback_status(
+        self,
+        feedback: StartupFeedbackProtocol | None,
+        message: str,
+    ) -> None:
+        if feedback is None:
+            return
+        set_status = getattr(feedback, "set_status", None)
+        if callable(set_status):
+            try:
+                set_status(str(message or ""))
+                return
+            except Exception:
+                pass
+        current_phase = getattr(feedback, "current_phase", None)
+        fallback_phase = StartupPhase(current_phase) if current_phase is not None else None
+        set_phase = getattr(feedback, "set_phase", None)
+        if callable(set_phase) and fallback_phase is not None:
+            try:
+                set_phase(fallback_phase, str(message or ""))
+            except Exception:
+                pass
+
+    def _create_runtime_loading_feedback(self) -> StartupFeedbackProtocol | None:
+        app = QApplication.instance()
+        if app is None:
+            return None
+        feedback = create_startup_splash_controller(app)
+        if feedback is not None:
+            feedback.show()
+        return feedback
+
+    def _finish_loading_feedback(self, feedback: StartupFeedbackProtocol | None) -> None:
+        finish = getattr(feedback, "finish", None)
+        if callable(finish):
+            try:
+                finish(self)
+            except Exception:
+                pass
+
+    def _handle_startup_catalog_refresh_complete(self) -> None:
+        self._startup_catalog_refresh_complete = True
+        self._maybe_finish_startup_loading()
+
+    def _maybe_finish_startup_loading(self) -> None:
+        if self._startup_ready_emitted:
+            return
+        if not getattr(self, "_workspace_layout_restore_complete", False):
+            return
+        if not getattr(self, "_startup_catalog_refresh_complete", False):
+            self._report_startup_phase(StartupPhase.LOADING_CATALOG)
+            return
+        self._startup_ready_emitted = True
+        self.startupReady.emit()
 
     def _run_startup_message_box(
         self,
@@ -11266,7 +11348,7 @@ class App(QMainWindow):
         self._store_workspace_panel_visibility_preferences(sync=False)
         self._schedule_main_window_geometry_save()
         self._schedule_main_dock_state_save()
-        self.startupReady.emit()
+        self._maybe_finish_startup_loading()
 
     def _materialize_visible_workspace_dock_panels(self) -> None:
         registry = getattr(self, "_catalog_workspace_docks", {})
@@ -11997,7 +12079,9 @@ class App(QMainWindow):
         *,
         title: str,
         description: str,
+        show_dialog: bool = True,
         on_success,
+        on_error=None,
         on_finished=None,
     ) -> str | None:
         target_path = str(Path(path))
@@ -12017,6 +12101,16 @@ class App(QMainWindow):
             finally:
                 self.database_session.close(session.conn)
 
+        def _handle_error(failure: TaskFailure) -> None:
+            if on_error is not None:
+                on_error(failure)
+                return
+            self._show_background_task_error(
+                title,
+                failure,
+                user_message="Could not prepare the selected profile:",
+            )
+
         return self._submit_background_task(
             title=title,
             description=description,
@@ -12024,16 +12118,12 @@ class App(QMainWindow):
             kind="exclusive",
             unique_key=f"profile.prepare.{target_path}",
             requires_profile=False,
-            show_dialog=True,
+            show_dialog=show_dialog,
             cancellable=False,
             owner=self,
             on_success=on_success,
             on_finished=on_finished,
-            on_error=lambda failure: self._show_background_task_error(
-                title,
-                failure,
-                user_message="Could not prepare the selected profile:",
-            ),
+            on_error=_handle_error,
         )
 
     def _activate_profile_in_background(
@@ -12051,15 +12141,41 @@ class App(QMainWindow):
             except Exception:
                 pass
 
+        loading_feedback = self._create_runtime_loading_feedback()
+        if loading_feedback is not None:
+            self._set_loading_feedback_phase(
+                loading_feedback,
+                StartupPhase.OPENING_PROFILE_DB,
+                description,
+            )
+
         prepared = {"path": None}
 
         def _success(prepared_path: str):
             prepared["path"] = str(prepared_path)
 
+        def _error(failure: TaskFailure) -> None:
+            try:
+                self._show_background_task_error(
+                    title,
+                    failure,
+                    user_message="Could not prepare the selected profile:",
+                )
+            finally:
+                self._finish_loading_feedback(loading_feedback)
+
         def _finished():
             prepared_path = str(prepared.get("path") or "").strip()
             if not prepared_path:
+                self._finish_loading_feedback(loading_feedback)
                 return
+            self._set_loading_feedback_phase(
+                loading_feedback,
+                StartupPhase.PREPARING_DATABASE,
+                "Opening selected profile database...",
+            )
+            if loading_feedback is not None:
+                self._drain_qt_events()
             self.open_database(prepared_path)
             with self._suspend_table_layout_history():
                 try:
@@ -12069,19 +12185,32 @@ class App(QMainWindow):
                 except Exception:
                     pass
                 self._reload_profiles_list(select_path=prepared_path)
-                self._refresh_catalog_ui_in_background(
+                self._set_loading_feedback_phase(
+                    loading_feedback,
+                    StartupPhase.LOADING_CATALOG,
+                    "Loading catalog rows and workspace data...",
+                )
+                if loading_feedback is not None:
+                    self._drain_qt_events()
+                task_id = self._refresh_catalog_ui_in_background(
                     select_path=prepared_path,
                     unique_key=f"catalog.ui.profile.{prepared_path}",
+                    show_dialog=loading_feedback is None,
                     on_finished=lambda: (
                         on_activated(prepared_path) if on_activated is not None else None
                     ),
+                    on_complete=lambda: self._finish_loading_feedback(loading_feedback),
                 )
+                if task_id is None:
+                    self._finish_loading_feedback(loading_feedback)
 
         return self._prepare_profile_database_background(
             path,
             title=title,
             description=description,
+            show_dialog=loading_feedback is None,
             on_success=_success,
+            on_error=_error,
             on_finished=_finished,
         )
 
@@ -12116,7 +12245,7 @@ class App(QMainWindow):
         return max(candidates, key=lambda item: (self._history_time_key(item[1]), item[1].entry_id))
 
     def _session_history_open_profile(self, path: str):
-        self._activate_profile(path)
+        self._activate_profile_in_background(path)
 
     def _session_history_reload_profiles(self, select_path: str | None = None):
         chosen_path = select_path or getattr(self, "current_db_path", None)
@@ -13348,11 +13477,15 @@ class App(QMainWindow):
         *,
         focus_id: int | None = None,
         select_path: str | None = None,
+        show_dialog: bool = False,
         on_finished=None,
+        on_complete=None,
         unique_key: str = "catalog.ui.refresh",
         retry_count: int = 0,
     ) -> str | None:
         if self.conn is None:
+            if on_complete is not None:
+                on_complete()
             return None
         state = self._capture_view_state()
         sort_enabled = self.table.isSortingEnabled()
@@ -13361,6 +13494,15 @@ class App(QMainWindow):
         self.table.setRowCount(0)
         self._update_count_label()
         self._update_duration_label()
+        completion_notified = False
+
+        def _notify_complete() -> None:
+            nonlocal completion_notified
+            if completion_notified:
+                return
+            completion_notified = True
+            if on_complete is not None:
+                on_complete()
 
         def _worker(bundle, ctx):
             ctx.set_status("Loading catalog rows and lookup values...")
@@ -13394,12 +13536,40 @@ class App(QMainWindow):
                         pass
                 self._update_add_data_generated_fields()
                 self._refresh_history_actions()
-                if on_finished is not None:
-                    on_finished()
+                try:
+                    if on_finished is not None:
+                        on_finished()
+                finally:
+                    _notify_complete()
 
         def _finished():
             if not sort_enabled:
                 self.table.setSortingEnabled(False)
+
+        def _handle_error(failure: TaskFailure) -> None:
+            retry_message = str(failure.message or "").lower()
+            if retry_count < 3 and "exclusive database task is currently running" in retry_message:
+                QTimer.singleShot(
+                    100,
+                    lambda: self._refresh_catalog_ui_in_background(
+                        focus_id=focus_id,
+                        select_path=select_path,
+                        show_dialog=show_dialog,
+                        on_finished=on_finished,
+                        on_complete=on_complete,
+                        unique_key=unique_key,
+                        retry_count=retry_count + 1,
+                    ),
+                )
+                return
+            try:
+                self._show_background_task_error(
+                    "Load Catalog",
+                    failure,
+                    user_message="Could not load the catalog view:",
+                )
+            finally:
+                _notify_complete()
 
         task_id = self._submit_background_bundle_task(
             title="Load Catalog",
@@ -13407,31 +13577,14 @@ class App(QMainWindow):
             task_fn=_worker,
             kind="read",
             unique_key=unique_key,
-            show_dialog=False,
+            show_dialog=show_dialog,
             owner=self,
             on_success=_success,
-            on_error=lambda failure: (
-                QTimer.singleShot(
-                    100,
-                    lambda: self._refresh_catalog_ui_in_background(
-                        focus_id=focus_id,
-                        select_path=select_path,
-                        on_finished=on_finished,
-                        unique_key=unique_key,
-                        retry_count=retry_count + 1,
-                    ),
-                )
-                if retry_count < 3
-                and "exclusive database task is currently running"
-                in str(failure.message or "").lower()
-                else self._show_background_task_error(
-                    "Load Catalog",
-                    failure,
-                    user_message="Could not load the catalog view:",
-                )
-            ),
+            on_error=_handle_error,
             on_finished=_finished,
         )
+        if task_id is None:
+            _notify_complete()
         return task_id
 
     def refresh_table(self):

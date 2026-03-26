@@ -47,8 +47,11 @@ else:
 
 def _no_catalog_background_refresh(self, *args, **kwargs):
     on_finished = kwargs.get("on_finished")
+    on_complete = kwargs.get("on_complete")
     if callable(on_finished):
         on_finished()
+    if callable(on_complete):
+        on_complete()
     return None
 
 
@@ -131,14 +134,19 @@ class _FakeStartupSplashController:
         self.resume_calls = 0
         self.suspended = False
         self._finished = False
+        self.current_phase = None
 
     def show(self):
         self.show_calls += 1
 
     def set_phase(self, phase, message_override=None):
+        self.current_phase = phase
         message = str(message_override or startup_phase_label(StartupPhase(phase)))
         self.phase_updates.append((phase, message))
         self.messages.append(message)
+
+    def set_status(self, message):
+        self.messages.append(str(message))
 
     def suspend(self):
         self.suspended = True
@@ -599,6 +607,40 @@ class AppShellTestCase(unittest.TestCase):
             [phase for phase, _message in splash.phase_updates[-2:]],
             [StartupPhase.RESTORING_WORKSPACE, StartupPhase.READY],
         )
+        self.assertEqual(splash.finish_calls, [self.window])
+
+    def case_startup_splash_waits_for_catalog_refresh_completion(self):
+        self._close_window()
+        splash = _FakeStartupSplashController()
+        splash.show()
+        callbacks: dict[str, object] = {}
+
+        def _deferred_refresh(window, *args, **kwargs):
+            del window, args
+            callbacks["complete"] = kwargs.get("on_complete")
+            return "deferred-startup-refresh"
+
+        with mock.patch.object(
+            app_module.App,
+            "_refresh_catalog_ui_in_background",
+            autospec=True,
+            side_effect=_deferred_refresh,
+        ):
+            self.window = app_module.App(startup_feedback=splash)
+            self.window.show()
+            self._drain_events()
+
+        self.assertTrue(callable(callbacks.get("complete")))
+        self.assertEqual(
+            [phase for phase, _message in splash.phase_updates[-2:]],
+            [StartupPhase.RESTORING_WORKSPACE, StartupPhase.LOADING_CATALOG],
+        )
+        self.assertEqual(splash.finish_calls, [])
+
+        callbacks["complete"]()
+        self._drain_events()
+
+        self.assertEqual(splash.phase_updates[-1][0], StartupPhase.READY)
         self.assertEqual(splash.finish_calls, [self.window])
 
     def case_startup_first_launch_prompt_can_open_settings_and_clears_pending_flag(self):
@@ -1325,6 +1367,78 @@ class AppShellTestCase(unittest.TestCase):
 
         self.assertEqual(self.window.current_db_path, str(external_path))
         self.assertGreaterEqual(self.window.profile_combo.findData(str(external_path)), 0)
+
+    def case_profile_switch_loading_feedback_waits_for_catalog_refresh_completion(self):
+        target_path = self.root / "switched-profile.db"
+        self._create_profile_database(target_path)
+        feedback = _FakeStartupSplashController()
+        refresh_callbacks: dict[str, object] = {}
+        activated: list[str] = []
+
+        def _create_feedback():
+            feedback.show()
+            return feedback
+
+        def _prepare_now(
+            _window,
+            path,
+            *,
+            on_success,
+            on_finished=None,
+            **kwargs,
+        ):
+            del kwargs
+            on_success(str(Path(path)))
+            if callable(on_finished):
+                on_finished()
+            return "prepared-profile"
+
+        def _deferred_refresh(window, *args, **kwargs):
+            del window, args
+            refresh_callbacks["finished"] = kwargs.get("on_finished")
+            refresh_callbacks["complete"] = kwargs.get("on_complete")
+            return "deferred-profile-refresh"
+
+        with (
+            mock.patch.object(
+                self.window,
+                "_create_runtime_loading_feedback",
+                side_effect=_create_feedback,
+            ),
+            mock.patch.object(
+                app_module.App,
+                "_prepare_profile_database_background",
+                autospec=True,
+                side_effect=_prepare_now,
+            ),
+            mock.patch.object(
+                app_module.App,
+                "_refresh_catalog_ui_in_background",
+                autospec=True,
+                side_effect=_deferred_refresh,
+            ),
+        ):
+            self.window._activate_profile_in_background(
+                str(target_path),
+                on_activated=lambda prepared_path: activated.append(prepared_path),
+            )
+            self._drain_events()
+
+        self.assertEqual(self.window.current_db_path, str(target_path))
+        self.assertTrue(callable(refresh_callbacks.get("finished")))
+        self.assertTrue(callable(refresh_callbacks.get("complete")))
+        self.assertEqual(feedback.show_calls, 1)
+        self.assertEqual(feedback.finish_calls, [])
+        self.assertEqual(feedback.phase_updates[0][0], StartupPhase.OPENING_PROFILE_DB)
+        self.assertEqual(feedback.phase_updates[-1][0], StartupPhase.LOADING_CATALOG)
+        self.assertEqual(activated, [])
+
+        refresh_callbacks["finished"]()
+        refresh_callbacks["complete"]()
+        self._drain_events()
+
+        self.assertEqual(activated, [str(target_path)])
+        self.assertEqual(feedback.finish_calls, [self.window])
 
     def case_cancelled_profile_creation_and_restore_leave_shell_idle(self):
         initial_path = self.window.current_db_path

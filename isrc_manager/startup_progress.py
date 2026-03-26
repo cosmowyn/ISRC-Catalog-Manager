@@ -14,6 +14,7 @@ class StartupPhase(IntEnum):
     PREPARING_DATABASE = 70
     FINALIZING_INTERFACE = 85
     RESTORING_WORKSPACE = 95
+    LOADING_CATALOG = 98
     READY = 100
 
 
@@ -26,6 +27,7 @@ STARTUP_PHASE_LABELS: dict[StartupPhase, str] = {
     StartupPhase.PREPARING_DATABASE: "Preparing database…",
     StartupPhase.FINALIZING_INTERFACE: "Finalizing interface…",
     StartupPhase.RESTORING_WORKSPACE: "Restoring workspace…",
+    StartupPhase.LOADING_CATALOG: "Loading catalog…",
     StartupPhase.READY: "Ready",
 }
 

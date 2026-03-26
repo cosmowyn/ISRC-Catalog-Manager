@@ -218,28 +218,94 @@ class BackgroundTaskManagerTests(unittest.TestCase):
         )
         pump_events(app=self.app)
 
-        self.assertEqual(dialog.minimumWidth(), 420)
-        self.assertEqual(dialog.maximumWidth(), 680)
-        self.assertGreaterEqual(dialog.width(), 420)
+        self.assertEqual(dialog.minimumWidth(), dialog.maximumWidth())
+        self.assertGreaterEqual(dialog.width(), 520)
         self.assertLessEqual(dialog.width(), 680)
 
         labels = dialog.findChildren(QLabel)
         self.assertTrue(labels)
         self.assertTrue(all(label.wordWrap() for label in labels))
-        self.assertTrue(all(label.maximumWidth() <= 620 for label in labels))
+        self.assertTrue(all(label.maximumWidth() <= dialog.width() for label in labels))
 
         progress_bars = dialog.findChildren(QProgressBar)
         self.assertTrue(progress_bars)
-        self.assertTrue(all(bar.maximumWidth() <= 560 for bar in progress_bars))
+        self.assertTrue(all(bar.maximumWidth() < dialog.width() for bar in progress_bars))
 
         buttons = dialog.findChildren(QPushButton)
         self.assertTrue(buttons)
         self.assertTrue(all(button.maximumWidth() <= 148 for button in buttons))
+        self.assertTrue(all(dialog.rect().contains(button.geometry()) for button in buttons))
 
         release.set()
         self._wait_for_task_completion(
             finished.is_set,
             description="compact progress dialog completion",
+        )
+
+    def test_progress_dialog_keeps_width_stable_and_buttons_visible_during_updates(self):
+        finished = threading.Event()
+        allow_second_update = threading.Event()
+        second_update_emitted = threading.Event()
+
+        def _long_running(ctx):
+            ctx.report_progress(
+                value=1,
+                maximum=3,
+                message="Preparing the export task with a long status message for layout checks.",
+            )
+            while not allow_second_update.is_set():
+                time.sleep(0.01)
+            ctx.report_progress(
+                value=2,
+                maximum=3,
+                message=(
+                    "Writing metadata tags for a deliberately long filename so the dialog keeps "
+                    "its width stable and the Cancel button stays visible."
+                ),
+            )
+            second_update_emitted.set()
+            return "done"
+
+        task_id = self.manager.submit(
+            title="Stable Progress Task",
+            description="Testing progress dialog geometry stability.",
+            task_fn=_long_running,
+            show_dialog=True,
+            cancellable=True,
+            on_finished=finished.set,
+        )
+        self.assertIsNotNone(task_id)
+        record = self.manager._tasks[task_id]
+        dialog = record.dialog
+        self.assertIsNotNone(dialog)
+        assert dialog is not None
+
+        self._wait_for_task_completion(
+            lambda: dialog.isVisible(),
+            description="stable progress dialog visibility",
+        )
+        pump_events(app=self.app)
+
+        first_width = dialog.width()
+        buttons = dialog.findChildren(QPushButton)
+        self.assertTrue(buttons)
+        self.assertTrue(all(button.isVisible() for button in buttons))
+        self.assertTrue(all(dialog.rect().contains(button.geometry()) for button in buttons))
+
+        allow_second_update.set()
+        self._wait_for_task_completion(
+            lambda: second_update_emitted.is_set(),
+            description="second progress update emission",
+        )
+        pump_events(app=self.app)
+
+        self.assertEqual(dialog.width(), first_width)
+        self.assertTrue(all(button.isVisible() for button in buttons))
+        self.assertTrue(all(dialog.rect().contains(button.geometry()) for button in buttons))
+
+        self._wait_for_task_completion(
+            lambda: finished.is_set(),
+            description="stable progress dialog completion",
         )
 
 

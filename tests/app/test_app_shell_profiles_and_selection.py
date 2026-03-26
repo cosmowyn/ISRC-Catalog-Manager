@@ -5,6 +5,9 @@ class AppShellProfileAndSelectionTests(AppShellTestCase):
     test_create_new_profile_and_browse_profile_switch_workspace = (
         AppShellTestCase.case_create_new_profile_and_browse_profile_switch_workspace
     )
+    test_profile_switch_loading_feedback_waits_for_catalog_refresh_completion = (
+        AppShellTestCase.case_profile_switch_loading_feedback_waits_for_catalog_refresh_completion
+    )
     test_cancelled_profile_creation_and_restore_leave_shell_idle = (
         AppShellTestCase.case_cancelled_profile_creation_and_restore_leave_shell_idle
     )

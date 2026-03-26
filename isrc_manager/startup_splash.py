@@ -21,6 +21,8 @@ class StartupFeedbackProtocol(Protocol):
 
     def show(self) -> None: ...
 
+    def set_status(self, message: str) -> None: ...
+
     def set_phase(
         self,
         phase: StartupPhase,
