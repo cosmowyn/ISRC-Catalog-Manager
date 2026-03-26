@@ -201,9 +201,7 @@ class AppShellTestCase(unittest.TestCase):
         for patcher in self._patchers:
             patcher.start()
         self._set_first_launch_prompt_pending(False)
-        self.window = app_module.App()
-        self.window.show()
-        pump_events(app=self.app)
+        self._open_window(skip_background_prepare=True)
 
     def tearDown(self):
         try:
