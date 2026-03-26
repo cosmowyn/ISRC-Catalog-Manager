@@ -218,6 +218,8 @@ class BackgroundTaskManagerTests(unittest.TestCase):
         )
         pump_events(app=self.app)
 
+        self.assertEqual(dialog.objectName(), "backgroundTaskProgressDialog")
+        self.assertTrue(bool(dialog.styleSheet().strip()))
         self.assertEqual(dialog.minimumWidth(), 360)
         self.assertEqual(dialog.maximumWidth(), 480)
         self.assertGreaterEqual(dialog.width(), 360)
@@ -229,20 +231,98 @@ class BackgroundTaskManagerTests(unittest.TestCase):
         self.assertTrue(labels)
         self.assertTrue(all(label.wordWrap() for label in labels))
         self.assertTrue(all(label.maximumWidth() <= dialog.width() for label in labels))
+        self.assertTrue(
+            all(label.objectName() == "backgroundTaskProgressLabel" for label in labels)
+        )
 
         progress_bars = dialog.findChildren(QProgressBar)
         self.assertTrue(progress_bars)
         self.assertTrue(all(bar.maximumWidth() < dialog.width() for bar in progress_bars))
+        self.assertTrue(
+            all(bar.objectName() == "backgroundTaskProgressBar" for bar in progress_bars)
+        )
+        self.assertTrue(all(not bar.isTextVisible() for bar in progress_bars))
 
         buttons = dialog.findChildren(QPushButton)
         self.assertTrue(buttons)
         self.assertTrue(all(button.maximumWidth() <= 110 for button in buttons))
         self.assertTrue(all(dialog.rect().contains(button.geometry()) for button in buttons))
+        self.assertTrue(
+            all(button.objectName() == "backgroundTaskProgressButton" for button in buttons)
+        )
+        primary_label = labels[0]
+        primary_bar = progress_bars[0]
+        primary_button = buttons[0]
+        self.assertLess(primary_label.geometry().bottom(), primary_bar.geometry().top())
+        self.assertLess(primary_bar.geometry().bottom(), primary_button.geometry().top())
+        self.assertLessEqual(
+            abs(primary_label.geometry().center().x() - dialog.rect().center().x()),
+            2,
+        )
+        self.assertLessEqual(
+            abs(primary_button.geometry().center().x() - dialog.rect().center().x()),
+            2,
+        )
+        bottom_padding = dialog.rect().bottom() - primary_button.geometry().bottom()
+        self.assertGreaterEqual(bottom_padding, 10)
+        self.assertLessEqual(bottom_padding, 20)
 
         release.set()
         self._wait_for_task_completion(
             finished.is_set,
             description="compact progress dialog completion",
+        )
+
+    def test_non_cancellable_progress_dialog_uses_full_width_progress_surface(self):
+        finished = threading.Event()
+        release = threading.Event()
+
+        def _long_running(ctx):
+            ctx.set_status("Applying governed work metadata during a background save.")
+            while not release.is_set():
+                time.sleep(0.01)
+            return "done"
+
+        task_id = self.manager.submit(
+            title="Non-cancellable Progress Task",
+            description="Testing non-cancellable progress dialog layout.",
+            task_fn=_long_running,
+            show_dialog=True,
+            cancellable=False,
+            on_finished=finished.set,
+        )
+        self.assertIsNotNone(task_id)
+        dialog = self.manager._tasks[task_id].dialog
+        self.assertIsNotNone(dialog)
+        assert dialog is not None
+
+        self._wait_for_task_completion(
+            lambda: dialog.isVisible(),
+            description="non-cancellable dialog visibility",
+        )
+        pump_events(app=self.app)
+
+        progress_bars = dialog.findChildren(QProgressBar)
+        self.assertTrue(progress_bars)
+        self.assertTrue(all(not bar.isTextVisible() for bar in progress_bars))
+        self.assertGreaterEqual(progress_bars[0].maximumWidth(), dialog.width() - 56)
+        labels = dialog.findChildren(QLabel)
+        self.assertTrue(labels)
+        self.assertLess(labels[0].geometry().bottom(), progress_bars[0].geometry().top())
+        self.assertLessEqual(
+            abs(labels[0].geometry().center().x() - dialog.rect().center().x()),
+            2,
+        )
+
+        visible_buttons = [
+            button for button in dialog.findChildren(QPushButton) if button.isVisible()
+        ]
+        self.assertFalse(visible_buttons)
+
+        release.set()
+        self._wait_for_task_completion(
+            lambda: finished.is_set(),
+            description="non-cancellable dialog completion",
         )
 
     def test_progress_dialog_keeps_width_stable_and_buttons_visible_during_updates(self):

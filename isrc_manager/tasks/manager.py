@@ -19,20 +19,86 @@ from PySide6.QtWidgets import (
 )
 
 from .models import TaskCancelledError, TaskFailure, TaskProgressUpdate
-from ..ui_common import _abbreviate_middle_text
+from ..ui_common import _abbreviate_middle_text, _compose_widget_stylesheet
 
 
 _PROGRESS_DIALOG_MIN_WIDTH = 360
 _PROGRESS_DIALOG_MAX_WIDTH = 480
 _PROGRESS_DIALOG_MIN_HEIGHT = 118
 _PROGRESS_DIALOG_MAX_HEIGHT = 220
-_PROGRESS_DIALOG_SIDE_PADDING = 48
+_PROGRESS_DIALOG_SIDE_PADDING = 36
 _PROGRESS_DIALOG_BUTTON_GAP = 12
 _PROGRESS_DIALOG_LABEL_MIN_WIDTH = 220
 _PROGRESS_DIALOG_PROGRESS_MIN_WIDTH = 180
 _PROGRESS_DIALOG_BUTTON_MIN_WIDTH = 76
 _PROGRESS_DIALOG_BUTTON_MAX_WIDTH = 110
 _PROGRESS_DIALOG_LONG_TEXT_THRESHOLD = 60
+_PROGRESS_DIALOG_CORNER_RADIUS = 18
+_PROGRESS_DIALOG_TOP_PADDING = 16
+_PROGRESS_DIALOG_BOTTOM_PADDING = 16
+_PROGRESS_DIALOG_LABEL_BAR_GAP = 8
+
+
+def _progress_dialog_stylesheet() -> str:
+    return f"""
+    QProgressDialog#backgroundTaskProgressDialog {{
+        background: qlineargradient(
+            x1: 0, y1: 0, x2: 0, y2: 1,
+            stop: 0 rgba(18, 34, 54, 244),
+            stop: 1 rgba(10, 20, 34, 248)
+        );
+        border: 1px solid rgba(115, 154, 196, 118);
+        border-radius: {_PROGRESS_DIALOG_CORNER_RADIUS}px;
+    }}
+    QProgressDialog#backgroundTaskProgressDialog QLabel#backgroundTaskProgressLabel {{
+        background: transparent;
+        color: #f4f7fb;
+        font-size: 14px;
+        font-weight: 600;
+        padding: 0;
+        margin: 0;
+    }}
+    QProgressDialog#backgroundTaskProgressDialog QProgressBar#backgroundTaskProgressBar {{
+        background: rgba(125, 157, 191, 38);
+        border: 1px solid rgba(125, 157, 191, 82);
+        border-radius: 7px;
+        min-height: 14px;
+        max-height: 14px;
+        text-align: center;
+        color: transparent;
+    }}
+    QProgressDialog#backgroundTaskProgressDialog QProgressBar#backgroundTaskProgressBar::chunk {{
+        background: qlineargradient(
+            x1: 0, y1: 0, x2: 1, y2: 0,
+            stop: 0 #ffbf5a,
+            stop: 1 #f29a38
+        );
+        border-radius: 6px;
+        margin: 1px;
+    }}
+    QProgressDialog#backgroundTaskProgressDialog QPushButton#backgroundTaskProgressButton {{
+        min-height: 30px;
+        padding: 0 14px;
+        border-radius: 10px;
+        border: 1px solid rgba(79, 149, 214, 182);
+        background: rgba(24, 70, 108, 208);
+        color: #f5f7fb;
+        font-weight: 600;
+    }}
+    QProgressDialog#backgroundTaskProgressDialog QPushButton#backgroundTaskProgressButton:hover {{
+        background: rgba(34, 90, 136, 224);
+    }}
+    QProgressDialog#backgroundTaskProgressDialog QPushButton#backgroundTaskProgressButton:pressed {{
+        background: rgba(17, 55, 88, 228);
+    }}
+    """
+
+
+def _apply_progress_dialog_chrome(dialog: QProgressDialog) -> None:
+    dialog.setObjectName("backgroundTaskProgressDialog")
+    dialog.setProperty("role", "panel")
+    dialog.setAttribute(Qt.WA_StyledBackground, True)
+    dialog.setStyleSheet(_compose_widget_stylesheet(dialog, _progress_dialog_stylesheet()))
 
 
 def _progress_dialog_target_width(dialog: QProgressDialog) -> int:
@@ -73,6 +139,7 @@ def _format_progress_dialog_message(message: str | None) -> str:
 
 def _configure_progress_dialog(dialog: QProgressDialog) -> None:
     width = _progress_dialog_target_width(dialog)
+    _apply_progress_dialog_chrome(dialog)
     dialog.setMinimumWidth(_PROGRESS_DIALOG_MIN_WIDTH)
     dialog.setMaximumWidth(_PROGRESS_DIALOG_MAX_WIDTH)
     dialog.setMinimumHeight(_PROGRESS_DIALOG_MIN_HEIGHT)
@@ -81,23 +148,27 @@ def _configure_progress_dialog(dialog: QProgressDialog) -> None:
     buttons = [button for button in dialog.findChildren(QPushButton) if not button.isHidden()]
     button_width = 0
     for button in buttons:
+        button.setObjectName("backgroundTaskProgressButton")
+        button.setCursor(Qt.PointingHandCursor)
         preferred_width = max(_PROGRESS_DIALOG_BUTTON_MIN_WIDTH, button.sizeHint().width())
         button_width = max(button_width, min(_PROGRESS_DIALOG_BUTTON_MAX_WIDTH, preferred_width))
     label_max_width = max(_PROGRESS_DIALOG_LABEL_MIN_WIDTH, width - _PROGRESS_DIALOG_SIDE_PADDING)
-    progress_max_width = width - _PROGRESS_DIALOG_SIDE_PADDING
-    if button_width:
-        progress_max_width -= button_width + _PROGRESS_DIALOG_BUTTON_GAP
-    progress_max_width = max(_PROGRESS_DIALOG_PROGRESS_MIN_WIDTH, progress_max_width)
+    progress_max_width = max(
+        _PROGRESS_DIALOG_PROGRESS_MIN_WIDTH, width - _PROGRESS_DIALOG_SIDE_PADDING
+    )
     for label in dialog.findChildren(QLabel):
+        label.setObjectName("backgroundTaskProgressLabel")
         label.setWordWrap(True)
-        label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+        label.setAlignment(Qt.AlignHCenter | Qt.AlignVCenter | Qt.TextWordWrap)
         label.setMinimumWidth(0)
         label.setMaximumWidth(label_max_width)
     for progress_bar in dialog.findChildren(QProgressBar):
+        progress_bar.setObjectName("backgroundTaskProgressBar")
+        progress_bar.setTextVisible(False)
         progress_bar.setMinimumWidth(min(_PROGRESS_DIALOG_PROGRESS_MIN_WIDTH, progress_max_width))
         progress_bar.setMaximumWidth(progress_max_width)
-        progress_bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        progress_bar.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
     if button_width:
         for button in buttons:
             button.setMinimumWidth(button_width)
@@ -108,18 +179,86 @@ def _configure_progress_dialog(dialog: QProgressDialog) -> None:
 
 def _refresh_progress_dialog_height(dialog: QProgressDialog) -> None:
     width = _progress_dialog_target_width(dialog)
-    layout = dialog.layout()
-    if layout is not None:
-        layout.activate()
+    label = next(iter(dialog.findChildren(QLabel)), None)
+    progress_bar = next(iter(dialog.findChildren(QProgressBar)), None)
+    buttons = [button for button in dialog.findChildren(QPushButton) if not button.isHidden()]
+    label_width = max(_PROGRESS_DIALOG_LABEL_MIN_WIDTH, width - _PROGRESS_DIALOG_SIDE_PADDING)
+    label_height = 0
+    if label is not None:
+        label_height = max(
+            label.fontMetrics().lineSpacing() + 2,
+            label.heightForWidth(label_width) if label.wordWrap() else label.sizeHint().height(),
+        )
+    progress_height = progress_bar.sizeHint().height() if progress_bar is not None else 14
+    button_height = max((button.sizeHint().height() for button in buttons), default=0)
+    preferred_height = (
+        _PROGRESS_DIALOG_TOP_PADDING
+        + label_height
+        + _PROGRESS_DIALOG_LABEL_BAR_GAP
+        + progress_height
+        + _PROGRESS_DIALOG_BOTTOM_PADDING
+    )
+    if button_height:
+        preferred_height += _PROGRESS_DIALOG_BUTTON_GAP + button_height
     height = min(
         _PROGRESS_DIALOG_MAX_HEIGHT,
         max(
             _PROGRESS_DIALOG_MIN_HEIGHT,
-            dialog.minimumSizeHint().height(),
-            dialog.sizeHint().height(),
+            int(preferred_height),
         ),
     )
     dialog.resize(width, int(height))
+    _relayout_progress_dialog(dialog)
+
+
+def _relayout_progress_dialog(dialog: QProgressDialog) -> None:
+    label = next(iter(dialog.findChildren(QLabel)), None)
+    progress_bar = next(iter(dialog.findChildren(QProgressBar)), None)
+    buttons = [button for button in dialog.findChildren(QPushButton) if not button.isHidden()]
+    if label is None or progress_bar is None:
+        return
+
+    content_rect = dialog.rect().adjusted(
+        _PROGRESS_DIALOG_SIDE_PADDING // 2,
+        _PROGRESS_DIALOG_TOP_PADDING,
+        -(_PROGRESS_DIALOG_SIDE_PADDING // 2),
+        -_PROGRESS_DIALOG_BOTTOM_PADDING,
+    )
+    label_width = max(_PROGRESS_DIALOG_LABEL_MIN_WIDTH, content_rect.width())
+    label_height = max(
+        label.fontMetrics().lineSpacing() + 2,
+        label.heightForWidth(label_width) if label.wordWrap() else label.sizeHint().height(),
+    )
+    progress_height = max(progress_bar.minimumHeight(), progress_bar.sizeHint().height())
+    stack_height = label_height + _PROGRESS_DIALOG_LABEL_BAR_GAP + progress_height
+
+    button_height = 0
+    button_top = content_rect.bottom() + 1
+    if buttons:
+        button = buttons[0]
+        button_width = min(
+            _PROGRESS_DIALOG_BUTTON_MAX_WIDTH,
+            max(_PROGRESS_DIALOG_BUTTON_MIN_WIDTH, button.sizeHint().width()),
+        )
+        button_height = max(button.minimumHeight(), button.sizeHint().height())
+        button_top = content_rect.bottom() - button_height + 1
+        button_left = content_rect.left() + max(0, (content_rect.width() - button_width) // 2)
+        button.setGeometry(button_left, button_top, button_width, button_height)
+
+    available_bottom = (
+        button_top - _PROGRESS_DIALOG_BUTTON_GAP if button_height else content_rect.bottom() + 1
+    )
+    available_height = max(0, available_bottom - content_rect.top())
+    stack_top = content_rect.top() + max(0, (available_height - stack_height) // 2)
+
+    label.setGeometry(content_rect.left(), stack_top, content_rect.width(), label_height)
+    progress_top = label.geometry().bottom() + 1 + _PROGRESS_DIALOG_LABEL_BAR_GAP
+    progress_bar.setGeometry(
+        content_rect.left(),
+        progress_top,
+        content_rect.width(),
+        progress_height,
+    )
 
 
 class BackgroundTaskContext:
@@ -366,9 +505,15 @@ class BackgroundTaskManager(QObject):
 
         dialog = None
         if show_dialog:
+            dialog_label = QLabel(_format_progress_dialog_message(description), owner)
+            dialog_label.setWordWrap(True)
+            dialog_label.setTextFormat(Qt.PlainText)
+            dialog_label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+            dialog_progress = QProgressBar(owner)
+            dialog_progress.setTextVisible(False)
             dialog = QProgressDialog(
-                _format_progress_dialog_message(description),
-                "Cancel" if cancellable else "",
+                "",
+                "",
                 0,
                 0,
                 owner,
@@ -379,9 +524,13 @@ class BackgroundTaskManager(QObject):
             dialog.setAutoReset(False)
             dialog.setMinimumDuration(0)
             dialog.setValue(0)
+            dialog.setLabel(dialog_label)
+            dialog.setBar(dialog_progress)
             if not cancellable:
                 dialog.setCancelButton(None)
             else:
+                cancel_button = QPushButton("Cancel", owner)
+                dialog.setCancelButton(cancel_button)
                 dialog.canceled.connect(context.cancel)
             _configure_progress_dialog(dialog)
             dialog.show()
