@@ -244,11 +244,12 @@ class AppShellTestCase(unittest.TestCase):
             return ""
         settings_path = window.settings.fileName()
         self._cancel_background_tasks(window)
-        top_level_widgets = [
-            widget
-            for widget in self.app.topLevelWidgets()
-            if widget is not None and widget is not self.app.activeModalWidget()
-        ]
+        top_level_widgets = [widget for widget in self.app.topLevelWidgets() if widget is not None]
+        active_modal = self.app.activeModalWidget()
+        active_popup = self.app.activePopupWidget()
+        for extra_widget in (active_modal, active_popup):
+            if extra_widget is not None and extra_widget not in top_level_widgets:
+                top_level_widgets.append(extra_widget)
         if window not in top_level_widgets:
             top_level_widgets.append(window)
 
