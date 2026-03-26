@@ -23,6 +23,7 @@ from isrc_manager.services import (
     PartyPayload,
     RightPayload,
     TrackCreatePayload,
+    TrackUpdatePayload,
 )
 from isrc_manager.starter_themes import starter_theme_names
 from isrc_manager.startup_progress import StartupPhase, startup_phase_label
@@ -310,21 +311,26 @@ class AppShellTestCase(unittest.TestCase):
             DatabaseSessionService.close(session.conn)
 
     def _create_track(self, *, index: int, title: str, album_title: str = "Workspace Tests") -> int:
-        return self.window.track_service.create_track(
-            TrackCreatePayload(
-                isrc=f"NL-TST-26-{index:05d}",
-                track_title=title,
-                artist_name="Moonwake",
-                additional_artists=[],
-                album_title=album_title,
-                release_date="2026-03-17",
-                track_length_sec=180 + index,
-                iswc=None,
-                upc=None,
-                genre="Ambient",
-                catalog_number=None,
-            )
+        payload = TrackCreatePayload(
+            isrc=f"NL-TST-26-{index:05d}",
+            track_title=title,
+            artist_name="Moonwake",
+            additional_artists=[],
+            album_title=album_title,
+            release_date="2026-03-17",
+            track_length_sec=180 + index,
+            iswc=None,
+            upc=None,
+            genre="Ambient",
+            catalog_number=None,
         )
+        if getattr(self.window, "governed_track_creation_service", None) is not None:
+            return self.window.governed_track_creation_service.create_governed_track(
+                payload,
+                governance_mode="create_new_work",
+                profile_name=self.window._current_profile_name(),
+            ).track_id
+        return self.window.track_service.create_track(payload)
 
     def _create_media_file(self, name: str, payload: bytes) -> Path:
         path = self.root / name
@@ -1609,21 +1615,7 @@ class AppShellTestCase(unittest.TestCase):
             "Orbit Drift",
         ]
         for index, title in enumerate(titles, start=1):
-            self.window.track_service.create_track(
-                TrackCreatePayload(
-                    isrc=f"NL-TST-26-{index:05d}",
-                    track_title=title,
-                    artist_name="Moonwake",
-                    additional_artists=[],
-                    album_title="Selection Test",
-                    release_date="2026-03-17",
-                    track_length_sec=180,
-                    iswc=None,
-                    upc=None,
-                    genre="Ambient",
-                    catalog_number=None,
-                )
-            )
+            self._create_track(index=index, title=title, album_title="Selection Test")
 
         self.window.refresh_table()
         self.window.search_field.setText("Crossroads of the Unwritten Self")
@@ -3394,20 +3386,8 @@ class AppShellTestCase(unittest.TestCase):
         self.assertIn("MP3", self.window.audio_file_warning_label.text())
 
     def case_track_editor_uses_tabbed_sections(self):
-        track_id = self.window.track_service.create_track(
-            TrackCreatePayload(
-                isrc="NL-TST-26-09001",
-                track_title="Tabbed Editor",
-                artist_name="Moonwake",
-                additional_artists=[],
-                album_title="Editor Layout",
-                release_date="2026-03-17",
-                track_length_sec=205,
-                iswc=None,
-                upc=None,
-                genre="Ambient",
-                catalog_number=None,
-            )
+        track_id = self._create_track(
+            index=9001, title="Tabbed Editor", album_title="Editor Layout"
         )
 
         dialog = app_module.EditDialog(track_id, self.window)
@@ -4064,8 +4044,10 @@ class AppShellTestCase(unittest.TestCase):
         self.assertIn("CAT-REL-900", catalog_values)
 
     def case_gs1_dialog_uses_top_level_workflow_tabs(self):
-        track_id = self.window.track_service.create_track(
-            TrackCreatePayload(
+        track_id = self._create_track(index=9002, title="GS1 Layout", album_title="GS1 Layout")
+        self.window.track_service.update_track(
+            TrackUpdatePayload(
+                track_id=track_id,
                 isrc="NL-TST-26-09002",
                 track_title="GS1 Layout",
                 artist_name="Moonwake",

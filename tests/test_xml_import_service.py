@@ -4,90 +4,23 @@ import textwrap
 import unittest
 from pathlib import Path
 
-from isrc_manager.services import CustomFieldDefinitionService, TrackService, XMLImportService
+from isrc_manager.parties import PartyService
+from isrc_manager.services import (
+    CustomFieldDefinitionService,
+    DatabaseSchemaService,
+    TrackCreatePayload,
+    TrackService,
+    XMLImportService,
+)
+from isrc_manager.works import WorkPayload, WorkService
 
 
 def make_import_conn():
     conn = sqlite3.connect(":memory:")
     conn.execute("PRAGMA foreign_keys = ON")
-    conn.executescript(
-        """
-        CREATE TABLE Artists (
-            id INTEGER PRIMARY KEY,
-            name TEXT NOT NULL
-        );
-        CREATE TABLE Albums (
-            id INTEGER PRIMARY KEY,
-            title TEXT NOT NULL
-        );
-        CREATE TABLE Tracks (
-            id INTEGER PRIMARY KEY,
-            isrc TEXT NOT NULL,
-            isrc_compact TEXT,
-            audio_file_path TEXT,
-            audio_file_mime_type TEXT,
-            audio_file_size_bytes INTEGER NOT NULL DEFAULT 0,
-            track_title TEXT NOT NULL,
-            catalog_number TEXT,
-            album_art_path TEXT,
-            album_art_mime_type TEXT,
-            album_art_size_bytes INTEGER NOT NULL DEFAULT 0,
-            main_artist_id INTEGER NOT NULL,
-            buma_work_number TEXT,
-            album_id INTEGER,
-            release_date DATE,
-            track_length_sec INTEGER NOT NULL DEFAULT 0,
-            iswc TEXT,
-            upc TEXT,
-            genre TEXT
-        );
-        CREATE TABLE TrackArtists (
-            track_id INTEGER NOT NULL,
-            artist_id INTEGER NOT NULL,
-            role TEXT NOT NULL DEFAULT 'additional',
-            PRIMARY KEY (track_id, artist_id, role)
-        );
-        CREATE TABLE CustomFieldDefs (
-            id INTEGER PRIMARY KEY,
-            name TEXT NOT NULL UNIQUE,
-            active INTEGER NOT NULL DEFAULT 1,
-            sort_order INTEGER,
-            field_type TEXT NOT NULL DEFAULT 'text',
-            options TEXT
-        );
-        CREATE TABLE CustomFieldValues (
-            track_id INTEGER NOT NULL,
-            field_def_id INTEGER NOT NULL,
-            value TEXT,
-            PRIMARY KEY (track_id, field_def_id)
-        );
-        """
-    )
-    conn.execute(
-        """
-        INSERT INTO CustomFieldDefs(id, name, active, sort_order, field_type, options)
-        VALUES (1, 'Mood', 1, 0, 'dropdown', '["Happy","Calm"]')
-        """
-    )
-    conn.execute("INSERT INTO Artists(id, name) VALUES (1, 'Existing Artist')")
-    conn.execute(
-        """
-        INSERT INTO Tracks(
-            id, isrc, isrc_compact,
-            audio_file_path, audio_file_mime_type, audio_file_size_bytes,
-            track_title, catalog_number,
-            album_art_path, album_art_mime_type, album_art_size_bytes,
-            main_artist_id, buma_work_number, album_id, release_date, track_length_sec, iswc, upc, genre
-        )
-        VALUES (
-            1, 'NL-ABC-26-00001', 'NLABC2600001',
-            NULL, NULL, 0,
-            'Existing Song', NULL,
-            NULL, NULL, 0,
-            1, NULL, NULL, '2026-03-13', 180, NULL, NULL, NULL
-        )
-        """
-    )
+    schema = DatabaseSchemaService(conn)
+    schema.init_db()
+    schema.migrate_schema()
     conn.commit()
     return conn
 
@@ -97,7 +30,41 @@ class XMLImportServiceTests(unittest.TestCase):
         self.conn = make_import_conn()
         self.track_service = TrackService(self.conn)
         self.custom_fields = CustomFieldDefinitionService(self.conn)
-        self.service = XMLImportService(self.conn, self.track_service, self.custom_fields)
+        self.custom_fields.ensure_fields(
+            [
+                {
+                    "name": "Mood",
+                    "field_type": "dropdown",
+                    "options": '["Happy","Calm"]',
+                }
+            ]
+        )
+        self.party_service = PartyService(self.conn)
+        self.work_service = WorkService(self.conn, party_service=self.party_service)
+        existing_work_id = self.work_service.create_work(WorkPayload(title="Existing Song"))
+        self.track_service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00001",
+                track_title="Existing Song",
+                artist_name="Existing Artist",
+                additional_artists=[],
+                album_title=None,
+                release_date="2026-03-13",
+                track_length_sec=180,
+                iswc=None,
+                upc=None,
+                genre=None,
+                work_id=existing_work_id,
+            )
+        )
+        self.service = XMLImportService(
+            self.conn,
+            self.track_service,
+            self.custom_fields,
+            party_service=self.party_service,
+            work_service=self.work_service,
+            profile_name="import-test.db",
+        )
         self.tmpdir = tempfile.TemporaryDirectory()
 
     def tearDown(self):
@@ -243,10 +210,13 @@ class XMLImportServiceTests(unittest.TestCase):
                 t.upc,
                 t.genre,
                 t.catalog_number,
-                t.buma_work_number
+                t.buma_work_number,
+                t.work_id,
+                w.title
             FROM Tracks t
             JOIN Artists a ON a.id = t.main_artist_id
             LEFT JOIN Albums al ON al.id = t.album_id
+            LEFT JOIN Works w ON w.id = t.work_id
             WHERE t.isrc_compact='NLABC2600002'
             """
         ).fetchone()
@@ -269,7 +239,7 @@ class XMLImportServiceTests(unittest.TestCase):
         ).fetchone()
 
         self.assertEqual(
-            row,
+            row[:11],
             (
                 "NL-ABC-26-00002",
                 "New Song",
@@ -284,6 +254,8 @@ class XMLImportServiceTests(unittest.TestCase):
                 "BUMA-IMP-55",
             ),
         )
+        self.assertIsNotNone(row[11])
+        self.assertEqual(row[12], "New Song")
         self.assertEqual([name for (name,) in extras], ["Guest One", "Guest Two"])
         self.assertEqual(custom, ("Calm",))
 
@@ -313,12 +285,13 @@ class XMLImportServiceTests(unittest.TestCase):
         )
         row = self.conn.execute(
             """
-            SELECT isrc, isrc_compact, track_title
+            SELECT isrc, isrc_compact, track_title, work_id
             FROM Tracks
             WHERE track_title = 'No Code Yet'
             """
         ).fetchone()
-        self.assertEqual(row, ("", "", "No Code Yet"))
+        self.assertEqual(row[:3], ("", "", "No Code Yet"))
+        self.assertIsNotNone(row[3])
 
     def test_execute_import_can_create_missing_custom_fields(self):
         file_path = self._write_xml(
@@ -353,7 +326,7 @@ class XMLImportServiceTests(unittest.TestCase):
         ).fetchone()
         custom_row = self.conn.execute(
             """
-            SELECT cfv.value
+            SELECT cfv.value, t.work_id
             FROM CustomFieldValues cfv
             JOIN Tracks t ON t.id = cfv.track_id
             JOIN CustomFieldDefs cfd ON cfd.id = cfv.field_def_id
@@ -362,7 +335,8 @@ class XMLImportServiceTests(unittest.TestCase):
         ).fetchone()
 
         self.assertEqual(field_row, ("dropdown", '["High"]'))
-        self.assertEqual(custom_row, ("High",))
+        self.assertEqual(custom_row[0], "High")
+        self.assertIsNotNone(custom_row[1])
 
 
 if __name__ == "__main__":

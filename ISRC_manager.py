@@ -310,6 +310,7 @@ from isrc_manager.services.gs1_mapping import (
     COMMON_MARKET_CHOICES,
     COMMON_PACKAGING_CHOICES,
 )
+from isrc_manager.services.import_governance import GovernedImportCoordinator
 from isrc_manager.services.sqlite_utils import safe_wal_checkpoint
 from isrc_manager.services.tracks import TRACK_RELATIONSHIP_TYPES
 from isrc_manager.settings import enforce_single_instance, init_settings
@@ -8517,7 +8518,13 @@ class App(QMainWindow):
             else None
         )
         self.track_service = (
-            TrackService(self.conn, self.data_root) if self.conn is not None else None
+            TrackService(
+                self.conn,
+                self.data_root,
+                require_governed_creation=True,
+            )
+            if self.conn is not None
+            else None
         )
         self.settings_reads = SettingsReadService(self.conn) if self.conn is not None else None
         self.settings_mutations = (
@@ -8566,6 +8573,33 @@ class App(QMainWindow):
         self.work_service = (
             WorkService(self.conn, party_service=self.party_service)
             if self.conn is not None
+            else None
+        )
+        self.governed_track_creation_service = (
+            GovernedImportCoordinator(
+                self.conn,
+                track_service=self.track_service,
+                party_service=self.party_service,
+                work_service=self.work_service,
+                profile_name=self._current_profile_name(),
+            )
+            if self.conn is not None and self.track_service is not None
+            else None
+        )
+        self.xml_import_service = (
+            XMLImportService(
+                self.conn,
+                self.track_service,
+                self.custom_field_definitions,
+                party_service=self.party_service,
+                work_service=self.work_service,
+                profile_name=self._current_profile_name(),
+            )
+            if (
+                self.conn is not None
+                and self.track_service is not None
+                and self.custom_field_definitions is not None
+            )
             else None
         )
         self.contract_service = (
@@ -8807,6 +8841,9 @@ class App(QMainWindow):
                 self.release_service,
                 self.custom_field_definitions,
                 self.data_root,
+                party_service=self.party_service,
+                work_service=self.work_service,
+                profile_name=self._current_profile_name(),
             )
             if (
                 self.conn is not None
@@ -14060,6 +14097,7 @@ class App(QMainWindow):
             )
             self.artist_field.setCurrentText(resolved_artist_name)
             self.additional_artist_field.setCurrentText(", ".join(resolved_additional_artists))
+            governance_mode = str(work_track_context.get("mode") or "create_new_work")
             payload = TrackCreatePayload(
                 isrc=generated_iso,
                 track_title=self.track_title_field.text().strip(),
@@ -14076,7 +14114,7 @@ class App(QMainWindow):
                 audio_file_source_path=(self.audio_file_field.text().strip() or None),
                 album_art_source_path=(self.album_art_field.text().strip() or None),
             )
-            if str(work_track_context.get("mode") or "create_new_work") == "link_existing_work":
+            if governance_mode == "link_existing_work":
                 payload.work_id = int(work_track_context["work_id"])
                 payload.parent_track_id = (
                     int(work_track_context["parent_track_id"])
@@ -14105,66 +14143,51 @@ class App(QMainWindow):
                 return
             payload.audio_file_storage_mode, payload.album_art_storage_mode = media_modes
 
+            if self.governed_track_creation_service is None:
+                raise ValueError("Governed track creation service is unavailable.")
+
             work_id_for_refresh: int | None = None
-            if str(work_track_context.get("mode") or "create_new_work") == "create_new_work":
-                work_payload = self._work_payload_from_track_seed(
-                    track_title=payload.track_title,
-                    iswc=payload.iswc,
-                    registration_number=payload.buma_work_number,
-                )
 
-                def mutation():
-                    nonlocal work_id_for_refresh
-                    with self.conn:
-                        cur = self.conn.cursor()
-                        work_id_for_refresh = self.work_service.create_work(
-                            work_payload, cursor=cur
-                        )
-                        payload.work_id = int(work_id_for_refresh)
-                        payload.parent_track_id = None
-                        payload.relationship_type = "original"
-                        created_track_id = self.track_service.create_track(payload)
-                        release_ids = self._sync_releases_for_tracks([created_track_id])
-                        return int(work_id_for_refresh), created_track_id, release_ids
+            def mutation():
+                with self.conn:
+                    cur = self.conn.cursor()
+                    result = self.governed_track_creation_service.create_governed_track(
+                        payload,
+                        cursor=cur,
+                        governance_mode=governance_mode,
+                        profile_name=self._current_profile_name(),
+                    )
+                    created_track_id = int(result.track_id)
+                    release_ids = self._sync_releases_for_tracks([created_track_id])
+                    return int(result.work_id), created_track_id, release_ids
 
-                work_id_for_refresh, track_id, release_ids = self._run_snapshot_history_action(
-                    action_label=f"Create Work + Track: {payload.track_title}",
-                    action_type="track.create_governed",
-                    entity_type="Track",
-                    entity_id=payload.track_title,
-                    payload={
-                        "track_title": payload.track_title,
-                        "artist_name": payload.artist_name,
-                        "album_title": payload.album_title,
-                        "created_work_from_track": True,
-                    },
-                    mutation=mutation,
-                )
+            work_id_for_refresh, track_id, release_ids = self._run_snapshot_history_action(
+                action_label=(
+                    f"Create Work + Track: {payload.track_title}"
+                    if governance_mode == "create_new_work"
+                    else f"Create Track: {payload.track_title}"
+                ),
+                action_type=(
+                    "track.create_governed"
+                    if governance_mode == "create_new_work"
+                    else "track.create"
+                ),
+                entity_type="Track",
+                entity_id=payload.track_title,
+                payload={
+                    "track_title": payload.track_title,
+                    "artist_name": payload.artist_name,
+                    "album_title": payload.album_title,
+                    "created_work_from_track": governance_mode == "create_new_work",
+                },
+                mutation=mutation,
+            )
+            if governance_mode == "create_new_work":
                 self._audit(
                     "CREATE",
                     "Work",
                     ref_id=work_id_for_refresh,
-                    details=f"title={work_payload.title}",
-                )
-            else:
-                work_id_for_refresh = int(work_track_context["work_id"])
-
-                def mutation():
-                    created_track_id = self.track_service.create_track(payload)
-                    release_ids = self._sync_releases_for_tracks([created_track_id])
-                    return created_track_id, release_ids
-
-                track_id, release_ids = self._run_snapshot_history_action(
-                    action_label=f"Create Track: {payload.track_title}",
-                    action_type="track.create",
-                    entity_type="Track",
-                    entity_id=payload.track_title,
-                    payload={
-                        "track_title": payload.track_title,
-                        "artist_name": payload.artist_name,
-                        "album_title": payload.album_title,
-                    },
-                    mutation=mutation,
+                    details=f"title={payload.track_title}",
                 )
             self._log_event(
                 "track.create",
@@ -14180,7 +14203,7 @@ class App(QMainWindow):
             self.refresh_table_preserve_view(focus_id=track_id)
             self.populate_all_comboboxes()
             self.clear_form_fields()
-            if str(work_track_context.get("mode") or "create_new_work") == "create_new_work":
+            if governance_mode == "create_new_work":
                 self._set_pending_work_track_context()
             self._refresh_work_track_creation_context_ui()
             if work_id_for_refresh is not None:
@@ -22290,21 +22313,16 @@ class AlbumEntryDialog(QDialog):
             nonlocal created_work_ids
             created_track_ids = []
             created_work_ids = []
+            if self.app.governed_track_creation_service is None:
+                raise ValueError("Governed track creation service is unavailable.")
             cur = self.app.conn.cursor()
-            for payload in payloads:
-                if payload.work_id is None:
-                    work_payload = self.app._work_payload_from_track_seed(
-                        track_title=payload.track_title,
-                        iswc=payload.iswc,
-                        registration_number=payload.buma_work_number,
-                    )
-                    payload.work_id = self.app.work_service.create_work(work_payload, cursor=cur)
-                    payload.relationship_type = "original"
-                    payload.parent_track_id = None
-                    created_work_ids.append(int(payload.work_id))
-                else:
-                    created_work_ids.append(int(payload.work_id))
-                created_track_ids.append(self.app.track_service.create_track(payload))
+            results = self.app.governed_track_creation_service.create_governed_tracks_batch(
+                payloads,
+                cursor=cur,
+                profile_name=self.app._current_profile_name(),
+            )
+            created_track_ids = [int(result.track_id) for result in results]
+            created_work_ids = [int(result.work_id) for result in results]
             release_ids = self.app._sync_releases_for_tracks(created_track_ids)
 
             try:

@@ -180,7 +180,11 @@ class BackgroundAppServiceFactory:
         settings.setFallbacksEnabled(False)
         conn = self.connection_factory.open(self.db_path)
 
-        track_service = TrackService(conn, self.data_root)
+        track_service = TrackService(
+            conn,
+            self.data_root,
+            require_governed_creation=True,
+        )
         release_service = ReleaseService(conn, self.data_root)
         license_service = LicenseService(conn, self.data_root)
         custom_field_definitions = CustomFieldDefinitionService(conn)
@@ -263,13 +267,23 @@ class BackgroundAppServiceFactory:
             custom_field_definitions=custom_field_definitions,
             custom_field_values=custom_field_values,
             xml_export_service=XMLExportService(conn),
-            xml_import_service=XMLImportService(conn, track_service, custom_field_definitions),
+            xml_import_service=XMLImportService(
+                conn,
+                track_service,
+                custom_field_definitions,
+                party_service=party_service,
+                work_service=work_service,
+                profile_name=Path(self.db_path).name,
+            ),
             exchange_service=ExchangeService(
                 conn,
                 track_service,
                 release_service,
                 custom_field_definitions,
                 self.data_root,
+                party_service=party_service,
+                work_service=work_service,
+                profile_name=Path(self.db_path).name,
             ),
             repertoire_exchange_service=RepertoireExchangeService(
                 conn,

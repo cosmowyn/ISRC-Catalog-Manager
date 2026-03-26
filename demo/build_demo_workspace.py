@@ -23,6 +23,7 @@ from PySide6.QtWidgets import QApplication
 
 from isrc_manager.constants import APP_NAME
 from isrc_manager.history import HistoryManager
+from isrc_manager.parties import PartyService
 from isrc_manager.services import (
     CatalogAdminService,
     CustomFieldDefinitionService,
@@ -34,6 +35,8 @@ from isrc_manager.services import (
     TrackCreatePayload,
     TrackService,
 )
+from isrc_manager.services.import_governance import GovernedImportCoordinator
+from isrc_manager.works import WorkService
 
 
 @dataclass(frozen=True, slots=True)
@@ -232,19 +235,54 @@ DEMO_TRACKS: tuple[DemoTrack, ...] = (
 
 
 CUSTOM_FIELD_DEFINITIONS = [
-    {"id": None, "name": "Distribution Status", "field_type": "dropdown", "options": json.dumps(["Draft", "Scheduled", "Released"])},
+    {
+        "id": None,
+        "name": "Distribution Status",
+        "field_type": "dropdown",
+        "options": json.dumps(["Draft", "Scheduled", "Released"]),
+    },
     {"id": None, "name": "Mastered", "field_type": "checkbox", "options": None},
     {"id": None, "name": "Notes", "field_type": "text", "options": None},
     {"id": None, "name": "Buy URL", "field_type": "text", "options": None},
-    {"id": None, "name": "Mood", "field_type": "dropdown", "options": json.dumps(["Cinematic", "Reflective", "Driving", "Dreamy", "Lush", "Expansive", "Uplifting", "Night Drive"])},
+    {
+        "id": None,
+        "name": "Mood",
+        "field_type": "dropdown",
+        "options": json.dumps(
+            [
+                "Cinematic",
+                "Reflective",
+                "Driving",
+                "Dreamy",
+                "Lush",
+                "Expansive",
+                "Uplifting",
+                "Night Drive",
+            ]
+        ),
+    },
 ]
 
 
 def _png_chunk(tag: bytes, data: bytes) -> bytes:
-    return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+    return (
+        struct.pack(">I", len(data))
+        + tag
+        + data
+        + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+    )
 
 
-def _write_png(path: Path, *, width: int = 1400, height: int = 1400, title: str, subtitle: str, start: str, end: str) -> None:
+def _write_png(
+    path: Path,
+    *,
+    width: int = 1400,
+    height: int = 1400,
+    title: str,
+    subtitle: str,
+    start: str,
+    end: str,
+) -> None:
     image = QImage(width, height, QImage.Format_ARGB32)
     image.fill(QColor("#0f172a"))
 
@@ -351,12 +389,29 @@ def build_demo_workspace(base_dir: Path) -> dict[str, Path]:
     db_path = data_root / "Database" / "demo_showcase.db"
 
     album_art_specs = {
-        "luminous-cartography.png": ("Luminous Cartography", "Fictional ambient-electronica release", "#1d4ed8", "#0f766e"),
-        "city-of-quiet-motion.png": ("City of Quiet Motion", "Fictional indie-electronic release", "#b45309", "#7c2d12"),
-        "satellite-letters.png": ("Satellite Letters", "Fictional dream-pop release", "#9333ea", "#0f766e"),
+        "luminous-cartography.png": (
+            "Luminous Cartography",
+            "Fictional ambient-electronica release",
+            "#1d4ed8",
+            "#0f766e",
+        ),
+        "city-of-quiet-motion.png": (
+            "City of Quiet Motion",
+            "Fictional indie-electronic release",
+            "#b45309",
+            "#7c2d12",
+        ),
+        "satellite-letters.png": (
+            "Satellite Letters",
+            "Fictional dream-pop release",
+            "#9333ea",
+            "#0f766e",
+        ),
     }
     for filename, (title, subtitle, start, end) in album_art_specs.items():
-        _write_png(asset_root / "images" / filename, title=title, subtitle=subtitle, start=start, end=end)
+        _write_png(
+            asset_root / "images" / filename, title=title, subtitle=subtitle, start=start, end=end
+        )
 
     tone_specs = {
         "aurora-signal.wav": (4, 246.94),
@@ -372,9 +427,21 @@ def build_demo_workspace(base_dir: Path) -> dict[str, Path]:
         _write_tone(asset_root / "audio" / filename, seconds=seconds, frequency=frequency)
 
     license_specs = {
-        "northwind_sync_license.pdf": ["Northwind Atlas", "Sync License", "Demo-only paperwork for repository screenshots."],
-        "paper_moons_live_license.pdf": ["Paper Moons", "Live Recording License", "Fictional agreement for a showcase release."],
-        "june_meridian_artwork_clearance.pdf": ["June Meridian", "Artwork Clearance", "Fictional supporting document for the demo catalog."],
+        "northwind_sync_license.pdf": [
+            "Northwind Atlas",
+            "Sync License",
+            "Demo-only paperwork for repository screenshots.",
+        ],
+        "paper_moons_live_license.pdf": [
+            "Paper Moons",
+            "Live Recording License",
+            "Fictional agreement for a showcase release.",
+        ],
+        "june_meridian_artwork_clearance.pdf": [
+            "June Meridian",
+            "Artwork Clearance",
+            "Fictional supporting document for the demo catalog.",
+        ],
     }
     for filename, lines in license_specs.items():
         _write_pdf(asset_root / "licenses" / filename, title=lines[0], body_lines=lines[1:])
@@ -387,12 +454,21 @@ def build_demo_workspace(base_dir: Path) -> dict[str, Path]:
     schema.init_db()
     schema.migrate_schema()
 
-    track_service = TrackService(conn, data_root)
+    track_service = TrackService(conn, data_root, require_governed_creation=True)
     custom_defs = CustomFieldDefinitionService(conn)
     custom_values = CustomFieldValueService(conn, custom_defs, data_root)
     license_service = LicenseService(conn, data_root)
     catalog_admin = CatalogAdminService(conn)
     profile_kv = ProfileKVService(conn)
+    party_service = PartyService(conn)
+    work_service = WorkService(conn, party_service=party_service)
+    governed_tracks = GovernedImportCoordinator(
+        conn,
+        track_service=track_service,
+        party_service=party_service,
+        work_service=work_service,
+        profile_name=db_path.name,
+    )
     profile_kv.ensure_store()
 
     with conn:
@@ -443,11 +519,21 @@ def build_demo_workspace(base_dir: Path) -> dict[str, Path]:
             audio_file_source_path=str(asset_root / "audio" / track.audio_asset),
             album_art_source_path=str(asset_root / "images" / track.art_asset),
         )
-        track_id = track_service.create_track(payload)
+        track_id = governed_tracks.create_governed_track(
+            payload,
+            governance_mode="create_new_work",
+            profile_name=db_path.name,
+        ).track_id
         track_ids.append(track_id)
-        history.record_track_create(track_id=track_id, cleanup_artist_names=[], cleanup_album_titles=[])
-        custom_values.save_value(track_id, field_ids["Distribution Status"], value=track.distribution_status)
-        custom_values.save_value(track_id, field_ids["Mastered"], value="1" if track.mastered else "0")
+        history.record_track_create(
+            track_id=track_id, cleanup_artist_names=[], cleanup_album_titles=[]
+        )
+        custom_values.save_value(
+            track_id, field_ids["Distribution Status"], value=track.distribution_status
+        )
+        custom_values.save_value(
+            track_id, field_ids["Mastered"], value="1" if track.mastered else "0"
+        )
         custom_values.save_value(track_id, field_ids["Mood"], value=track.mood)
         custom_values.save_value(track_id, field_ids["Buy URL"], value=track.buy_url)
         custom_values.save_value(track_id, field_ids["Notes"], value=track.notes)
@@ -495,7 +581,9 @@ def build_demo_workspace(base_dir: Path) -> dict[str, Path]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Build a fictional demo workspace for ISRC Catalog Manager.")
+    parser = argparse.ArgumentParser(
+        description="Build a fictional demo workspace for ISRC Catalog Manager."
+    )
     parser.add_argument(
         "--output",
         type=Path,

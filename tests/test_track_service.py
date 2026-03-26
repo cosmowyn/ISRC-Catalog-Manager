@@ -191,6 +191,30 @@ class TrackServiceTests(unittest.TestCase):
             ).fetchone()
         )
 
+    def test_create_track_requires_linked_work_when_governance_is_enforced(self):
+        enable_governance_schema(self.conn)
+        self.service = TrackService(
+            self.conn,
+            self.data_root,
+            require_governed_creation=True,
+        )
+
+        with self.assertRaisesRegex(ValueError, "linked Work"):
+            self.service.create_track(
+                TrackCreatePayload(
+                    isrc="NL-ABC-26-00004",
+                    track_title="Governed Only",
+                    artist_name="Main Artist",
+                    additional_artists=[],
+                    album_title="Governed Album",
+                    release_date=None,
+                    track_length_sec=0,
+                    iswc=None,
+                    upc=None,
+                    genre=None,
+                )
+            )
+
     def test_update_track_replaces_track_and_additional_artist_data(self):
         track_id = self.service.create_track(
             TrackCreatePayload(

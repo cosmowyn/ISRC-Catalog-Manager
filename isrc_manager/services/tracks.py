@@ -235,11 +235,18 @@ class TrackService:
         }
     )
 
-    def __init__(self, conn: sqlite3.Connection, data_root: str | Path | None = None):
+    def __init__(
+        self,
+        conn: sqlite3.Connection,
+        data_root: str | Path | None = None,
+        *,
+        require_governed_creation: bool = False,
+    ):
         self.conn = conn
         self.data_root = Path(data_root) if data_root is not None else None
         self.media_root = self.data_root / "track_media" if self.data_root is not None else None
         self.media_store = ManagedFileStorage(data_root=data_root, relative_root="track_media")
+        self.require_governed_creation = bool(require_governed_creation)
         self._ensure_storage_columns()
 
     def _ensure_storage_columns(self) -> None:
@@ -312,6 +319,33 @@ class TrackService:
             for row in self.conn.execute("PRAGMA table_info(Tracks)").fetchall()
             if row and row[1]
         }
+
+    def _creation_requires_governed_work(self) -> bool:
+        return (
+            self.require_governed_creation
+            and "Tracks" in self._table_names()
+            and "Works" in self._table_names()
+            and "work_id" in self._track_columns()
+        )
+
+    @staticmethod
+    def _work_exists(work_id: int, *, cursor: sqlite3.Cursor) -> bool:
+        row = cursor.execute("SELECT 1 FROM Works WHERE id=? LIMIT 1", (int(work_id),)).fetchone()
+        return row is not None
+
+    def _validate_track_creation_governance(
+        self,
+        payload: TrackCreatePayload,
+        *,
+        cursor: sqlite3.Cursor,
+    ) -> None:
+        if payload.work_id is not None and "Works" in self._table_names():
+            if not self._work_exists(int(payload.work_id), cursor=cursor):
+                raise ValueError(f"Work {int(payload.work_id)} was not found.")
+        if self._creation_requires_governed_work() and payload.work_id is None:
+            raise ValueError(
+                "Track creation requires a linked Work. Use the governed creation workflow first."
+            )
 
     @staticmethod
     def _normalize_relationship_type(value: str | None) -> str:
@@ -1764,6 +1798,7 @@ class TrackService:
 
     def _create_track_row(self, payload: TrackCreatePayload, *, cursor: sqlite3.Cursor) -> int:
         cur = cursor
+        self._validate_track_creation_governance(payload, cursor=cur)
         track_columns = self._track_columns()
         main_artist_id = self.get_or_create_artist(payload.artist_name, cursor=cur)
         album_id = self.get_or_create_album(payload.album_title, cursor=cur)
@@ -1891,6 +1926,9 @@ class TrackService:
             self._current_track_governance(payload.track_id, cursor=cursor)
         )
         next_work_id = current_work_id if payload.work_id is None else int(payload.work_id)
+        if next_work_id is not None and "Works" in self._table_names():
+            if not self._work_exists(int(next_work_id), cursor=cursor):
+                raise ValueError(f"Work {int(next_work_id)} was not found.")
         next_parent_track_id = (
             current_parent_track_id
             if payload.parent_track_id is None

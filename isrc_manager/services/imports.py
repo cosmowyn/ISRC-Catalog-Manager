@@ -18,9 +18,12 @@ from isrc_manager.domain.codes import (
 )
 from isrc_manager.domain.standard_fields import promoted_text_value_columns_by_label_lower
 from isrc_manager.domain.timecode import parse_hms_text, seconds_to_hms
+from isrc_manager.parties import PartyService
+from isrc_manager.works import WorkService
 
 from .custom_fields import CustomFieldDefinitionService
-from .tracks import TrackService
+from .import_governance import GovernedImportCoordinator
+from .tracks import TrackCreatePayload, TrackService
 
 PROMOTED_TEXT_CUSTOM_FIELDS = promoted_text_value_columns_by_label_lower()
 
@@ -74,10 +77,21 @@ class XMLImportService:
         conn: sqlite3.Connection,
         track_service: TrackService,
         custom_fields: CustomFieldDefinitionService,
+        *,
+        party_service: PartyService | None = None,
+        work_service: WorkService | None = None,
+        profile_name: str | None = None,
     ):
         self.conn = conn
         self.track_service = track_service
         self.custom_fields = custom_fields
+        self.governed_tracks = GovernedImportCoordinator(
+            conn,
+            track_service=track_service,
+            party_service=party_service,
+            work_service=work_service,
+            profile_name=profile_name,
+        )
 
     def inspect_file(self, file_path: str) -> ImportInspection:
         schema, records, invalid_count = self._parse_file(file_path)
@@ -161,37 +175,27 @@ class XMLImportService:
 
                 self.conn.execute("SAVEPOINT row_import")
                 try:
-                    main_artist_id = self.track_service.get_or_create_artist(
-                        record.artist, cursor=cur
-                    )
-                    album_id = self.track_service.get_or_create_album(record.album, cursor=cur)
-                    cur.execute(
-                        """
-                        INSERT INTO Tracks (
-                            isrc, isrc_compact, track_title, main_artist_id, album_id,
-                            release_date, track_length_sec, iswc, upc, genre,
-                            catalog_number, buma_work_number
-                        )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            record.iso_isrc,
-                            record.comp_isrc,
-                            record.title,
-                            main_artist_id,
-                            album_id,
-                            record.release_date,
-                            record.track_length_sec,
-                            record.iso_iswc,
-                            record.upc,
-                            record.genre,
-                            record.catalog_number,
-                            record.buma_work_number,
+                    result = self.governed_tracks.create_governed_track(
+                        TrackCreatePayload(
+                            isrc=record.iso_isrc,
+                            track_title=record.title,
+                            artist_name=record.artist,
+                            additional_artists=self.track_service.parse_additional_artists(
+                                record.additional_artists
+                            ),
+                            album_title=record.album or None,
+                            release_date=record.release_date,
+                            track_length_sec=int(record.track_length_sec or 0),
+                            iswc=record.iso_iswc,
+                            upc=record.upc,
+                            genre=record.genre,
+                            catalog_number=record.catalog_number,
+                            buma_work_number=record.buma_work_number,
                         ),
+                        cursor=cur,
+                        governance_mode="match_or_create_work",
                     )
-                    track_id = int(cur.lastrowid)
-                    extras = self.track_service.parse_additional_artists(record.additional_artists)
-                    self.track_service.replace_additional_artists(track_id, extras, cursor=cur)
+                    track_id = int(result.track_id)
 
                     for custom in record.custom_fields:
                         if not custom["name"] or not custom["type"]:

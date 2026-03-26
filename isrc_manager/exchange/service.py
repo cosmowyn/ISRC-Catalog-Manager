@@ -140,6 +140,7 @@ class ExchangeService:
         self.data_root = Path(data_root) if data_root is not None else None
         self.governed_imports = GovernedImportCoordinator(
             conn,
+            track_service=track_service,
             party_service=party_service,
             work_service=work_service,
             profile_name=profile_name,
@@ -893,7 +894,14 @@ class ExchangeService:
         )
 
     def inspect_xml(self, path: str | Path) -> ExchangeInspection:
-        xml_service = XMLImportService(self.conn, self.track_service, self.custom_fields)
+        xml_service = XMLImportService(
+            self.conn,
+            self.track_service,
+            self.custom_fields,
+            party_service=self.governed_imports.party_service,
+            work_service=self.governed_imports.work_service,
+            profile_name=self.governed_imports.profile_name,
+        )
         _inspection, exchange_inspection = xml_service.build_exchange_inspection(str(path))
         return exchange_inspection
 
@@ -1001,7 +1009,14 @@ class ExchangeService:
         mapping: dict[str, str] | None = None,
         options: ExchangeImportOptions | None = None,
     ) -> ExchangeImportReport:
-        xml_service = XMLImportService(self.conn, self.track_service, self.custom_fields)
+        xml_service = XMLImportService(
+            self.conn,
+            self.track_service,
+            self.custom_fields,
+            party_service=self.governed_imports.party_service,
+            work_service=self.governed_imports.work_service,
+            profile_name=self.governed_imports.profile_name,
+        )
         inspection = xml_service.inspect_file(str(path))
         rows = xml_service.exchange_rows_from_inspection(inspection)
         if inspection.conflicting_custom_fields:
@@ -1567,19 +1582,15 @@ class ExchangeService:
                                 f"Row {index}: no existing match was found for update mode."
                             )
                             continue
-                        payload_kwargs["work_id"] = self.governed_imports.ensure_governed_work_id(
-                            track_title=payload_kwargs["track_title"],
-                            iswc=payload_kwargs["iswc"],
-                            registration_number=payload_kwargs["buma_work_number"],
-                            composer=payload_kwargs["composer"],
-                            publisher=payload_kwargs["publisher"],
+                        create_result = self.governed_imports.create_governed_track(
+                            TrackCreatePayload(
+                                **payload_kwargs,
+                            ),
                             cursor=cur,
                             batch_cache=work_batch_cache,
+                            governance_mode="match_or_create_work",
                         )
-                        track_id = self.track_service.create_track(
-                            TrackCreatePayload(**payload_kwargs),
-                            cursor=cur,
-                        )
+                        track_id = int(create_result.track_id)
                         if source_track_key:
                             source_track_map[source_track_key] = track_id
                         created_tracks.append(track_id)
