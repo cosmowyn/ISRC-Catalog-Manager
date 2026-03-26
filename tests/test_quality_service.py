@@ -13,7 +13,6 @@ from isrc_manager.rights import RightPayload, RightsService
 from isrc_manager.services import (
     CustomFieldDefinitionService,
     DatabaseSchemaService,
-    LicenseService,
     TrackCreatePayload,
     TrackService,
 )
@@ -75,32 +74,22 @@ class QualityDashboardServiceTests(unittest.TestCase):
             )
         )
 
-    def test_scan_reports_orphaned_license_when_track_reference_is_broken(self):
+    def test_scan_ignores_legacy_license_archive_rows(self):
         track_id = self._create_track(isrc="NL-ABC-26-00090")
-        license_service = LicenseService(self.conn, self.data_root)
-        license_pdf = self.data_root / "orphaned-license.pdf"
-        license_pdf.write_bytes(b"%PDF-1.4\norphaned license test\n")
-        license_id = license_service.add_license(
-            track_id=track_id,
-            licensee_name="Broken Label",
-            source_pdf_path=license_pdf,
-        )
-
-        self.conn.execute("PRAGMA foreign_keys = OFF")
         self.conn.execute(
-            "UPDATE Licenses SET track_id=? WHERE id=?",
-            (track_id + 999, license_id),
+            "INSERT INTO Licensees(id, name) VALUES (?, ?)",
+            (1, "Broken Label"),
         )
-        self.conn.execute("PRAGMA foreign_keys = ON")
+        self.conn.execute(
+            """
+            INSERT INTO Licenses(id, track_id, licensee_id, file_path, filename)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (1, track_id + 999, 1, "licenses/orphaned-license.pdf", "orphaned-license.pdf"),
+        )
 
         result = self.service.scan()
-        orphaned_license_issues = [
-            issue for issue in result.issues if issue.issue_type == "orphaned_license"
-        ]
-
-        self.assertEqual(len(orphaned_license_issues), 1)
-        self.assertEqual(orphaned_license_issues[0].severity, "warning")
-        self.assertEqual(result.counts_by_type["orphaned_license"], 1)
+        self.assertNotIn("orphaned_license", result.counts_by_type)
 
     def test_scan_reports_expected_issues(self):
         track_id = self._create_track(isrc="")

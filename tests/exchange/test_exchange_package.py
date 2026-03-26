@@ -8,8 +8,8 @@ class ExchangePackageTests(ExchangeServiceTestCase):
     test_package_export_prefers_authoritative_governed_work_metadata = (
         ExchangeServiceTestCase.case_package_export_prefers_authoritative_governed_work_metadata
     )
-    test_package_export_includes_legacy_license_files_column = (
-        ExchangeServiceTestCase.case_package_export_includes_legacy_license_files_column
+    test_package_export_omits_legacy_license_files_column = (
+        ExchangeServiceTestCase.case_package_export_omits_legacy_license_files_column
     )
     test_package_export_includes_shared_album_art_once = (
         ExchangeServiceTestCase.case_package_export_includes_shared_album_art_once

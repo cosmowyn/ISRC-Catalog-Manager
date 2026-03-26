@@ -389,24 +389,11 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     )
     workspace_menu.addAction(app.catalog_table_action)
     metadata_menu = catalog_menu.addMenu("Metadata & Standards")
-    legacy_special_menu = catalog_menu.addMenu("Legacy")
     audio_menu = catalog_menu.addMenu("Audio")
     audio_ingest_menu = audio_menu.addMenu("Import & Attach")
     audio_export_menu = audio_menu.addMenu("Delivery & Conversion")
     authenticity_menu = audio_menu.addMenu("Authenticity & Provenance")
     quality_menu = catalog_menu.addMenu("Quality & Repair")
-    legacy_menu = legacy_special_menu.addMenu("Legacy License Archive")
-    app.license_browser_action = app._create_action(
-        "License Browser…",
-        slot=lambda: app.open_licenses_browser(track_filter_id=None),
-        shortcuts=("Ctrl+L", "Meta+L"),
-    )
-    legacy_menu.addAction(app.license_browser_action)
-    app.legacy_license_migration_action = app._create_action(
-        "Migrate Legacy Licenses to Contracts…",
-        slot=app.migrate_legacy_licenses_to_contracts,
-    )
-    legacy_menu.addAction(app.legacy_license_migration_action)
     app.create_release_action = app._create_action(
         "Create Release from Selection…",
         slot=app.create_release_from_selection,

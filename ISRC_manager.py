@@ -286,9 +286,7 @@ from isrc_manager.services import (
     GS1SettingsService,
     GS1TemplateAsset,
     HistoryRetentionSettings,
-    LegacyLicenseMigrationService,
     LegacyPromotedFieldRepairService,
-    LicenseService,
     OwnerPartySettings,
     ProfileKVService,
     ProfileStoreService,
@@ -3828,7 +3826,9 @@ class ApplicationSettingsDialog(QDialog):
             for record in self._artist_party_records():
                 label = self._artist_party_choice_label(record)
                 combo.addItem(label, int(record.id))
-                combo.setItemData(combo.count() - 1, self._artist_party_primary_label(record), Qt.UserRole + 1)
+                combo.setItemData(
+                    combo.count() - 1, self._artist_party_primary_label(record), Qt.UserRole + 1
+                )
                 labels.append(label)
                 labels.extend(
                     alias
@@ -3970,7 +3970,9 @@ class ApplicationSettingsDialog(QDialog):
                     and self.owner_party_combo.findData(self._owner_selected_party_id) < 0
                 ):
                     missing_label = f"Missing Party #{int(self._owner_selected_party_id)}"
-                    self.owner_party_combo.addItem(missing_label, int(self._owner_selected_party_id))
+                    self.owner_party_combo.addItem(
+                        missing_label, int(self._owner_selected_party_id)
+                    )
                     labels.append(missing_label)
             elif self._owner_selected_party_id is not None:
                 linked_label = f"Linked Party #{int(self._owner_selected_party_id)}"
@@ -6202,7 +6204,7 @@ class _CatalogLicenseesPane(_CatalogManagerPaneBase):
 
 
 class CatalogManagersPanel(QWidget):
-    TAB_ORDER = ("artists", "albums", "licensees")
+    TAB_ORDER = ("artists", "albums")
 
     def __init__(self, app, *, initial_tab: str = "artists", parent=None):
         super().__init__(parent or app)
@@ -6251,9 +6253,7 @@ class CatalogManagersPanel(QWidget):
         title_label.setObjectName("catalogTitle")
         root.addWidget(title_label)
 
-        subtitle_label = QLabel(
-            "Manage stored artists and album names here, and keep the legacy license archive separate but still accessible."
-        )
+        subtitle_label = QLabel("Manage stored artists and album names here.")
         subtitle_label.setObjectName("catalogSubtitle")
         subtitle_label.setWordWrap(True)
         root.addWidget(subtitle_label)
@@ -6261,10 +6261,8 @@ class CatalogManagersPanel(QWidget):
         self.tabs = QTabWidget()
         self.artists_tab = _CatalogArtistsPane(app, self)
         self.albums_tab = _CatalogAlbumsPane(app, self)
-        self.licensees_tab = _CatalogLicenseesPane(app, self)
         self.tabs.addTab(self.artists_tab, "Artists")
         self.tabs.addTab(self.albums_tab, "Albums")
-        self.tabs.addTab(self.licensees_tab, "Licensees")
         root.addWidget(self.tabs, 1)
 
         self.focus_tab(initial_tab)
@@ -6279,11 +6277,10 @@ class CatalogManagersPanel(QWidget):
     def refresh(self) -> None:
         self.artists_tab.reload()
         self.albums_tab.reload()
-        self.licensees_tab.reload()
 
 
 class CatalogManagersDialog(QDialog):
-    TAB_ORDER = ("artists", "albums", "licensees")
+    TAB_ORDER = ("artists", "albums")
 
     def __init__(self, app, *, initial_tab: str = "artists", parent=None):
         super().__init__(parent or app)
@@ -6303,7 +6300,6 @@ class CatalogManagersDialog(QDialog):
         self.tabs = self.panel.tabs
         self.artists_tab = self.panel.artists_tab
         self.albums_tab = self.panel.albums_tab
-        self.licensees_tab = self.panel.licensees_tab
         root.addWidget(self.panel, 1)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Close, Qt.Horizontal, self)
@@ -8450,9 +8446,6 @@ class App(QMainWindow):
         )
         self.catalog_service = CatalogAdminService(self.conn) if self.conn is not None else None
         self.catalog_reads = CatalogReadService(self.conn) if self.conn is not None else None
-        self.license_service = (
-            LicenseService(self.conn, self.data_root) if self.conn is not None else None
-        )
         self.profile_kv = ProfileKVService(self.conn) if self.conn is not None else None
         self.custom_field_definitions = (
             CustomFieldDefinitionService(self.conn) if self.conn is not None else None
@@ -8491,21 +8484,6 @@ class App(QMainWindow):
         self.contract_service = (
             ContractService(self.conn, self.data_root, party_service=self.party_service)
             if self.conn is not None
-            else None
-        )
-        self.license_migration_service = (
-            LegacyLicenseMigrationService(
-                self.conn,
-                license_service=self.license_service,
-                party_service=self.party_service,
-                contract_service=self.contract_service,
-                release_service=self.release_service,
-                work_service=self.work_service,
-            )
-            if self.conn is not None
-            and self.license_service is not None
-            and self.party_service is not None
-            and self.contract_service is not None
             else None
         )
         self.rights_service = RightsService(self.conn) if self.conn is not None else None
@@ -10358,9 +10336,6 @@ class App(QMainWindow):
     def _manage_stored_albums(self):
         self.open_catalog_managers_dialog(initial_tab="albums")
 
-    def _manage_licensees(self):
-        self.open_catalog_managers_dialog(initial_tab="licensees")
-
     def _close_database_connection(self):
         if hasattr(self, "auto_snapshot_timer"):
             self.auto_snapshot_timer.stop()
@@ -11102,13 +11077,6 @@ class App(QMainWindow):
     def _create_catalog_managers_panel(self, parent: QWidget) -> CatalogManagersPanel:
         return CatalogManagersPanel(self, parent=parent)
 
-    def _create_license_browser_panel(self, parent: QWidget) -> LicensesBrowserPanel:
-        return LicensesBrowserPanel(
-            app=self,
-            license_service_provider=lambda: self.license_service,
-            parent=parent,
-        )
-
     def _create_party_manager_panel(self, parent: QWidget) -> PartyManagerPanel:
         return PartyManagerPanel(
             party_service_provider=lambda: self.party_service,
@@ -11191,17 +11159,6 @@ class App(QMainWindow):
         self.catalog_managers_dock = dock
         return dock
 
-    def _ensure_license_browser_dock(self) -> QDockWidget:
-        dock = ensure_catalog_workspace_dock(
-            self,
-            key="license_browser",
-            title="License Browser",
-            object_name="licenseBrowserDock",
-            panel_factory=self._create_license_browser_panel,
-        )
-        self.license_browser_dock = dock
-        return dock
-
     def _ensure_party_manager_dock(self) -> QDockWidget:
         dock = ensure_catalog_workspace_dock(
             self,
@@ -11272,7 +11229,6 @@ class App(QMainWindow):
                 self._ensure_work_manager_dock,
                 self._ensure_global_search_dock,
                 self._ensure_catalog_managers_dock,
-                self._ensure_license_browser_dock,
                 self._ensure_party_manager_dock,
                 self._ensure_contract_manager_dock,
                 self._ensure_contract_template_workspace_dock,
@@ -11546,24 +11502,10 @@ class App(QMainWindow):
                 "action": self.verify_action,
             },
             {
-                "id": "license_browser",
-                "label": "License Browser",
-                "category": "Catalog",
-                "description": "Browse, preview, edit, and export stored license PDFs.",
-                "action": self.license_browser_action,
-            },
-            {
-                "id": "migrate_legacy_licenses",
-                "label": "Migrate Legacy Licenses",
-                "category": "Catalog",
-                "description": "Convert the legacy license/licensee archive into parties, contracts, and managed contract documents.",
-                "action": self.legacy_license_migration_action,
-            },
-            {
                 "id": "catalog_managers",
                 "label": "Catalog Managers",
                 "category": "Catalog",
-                "description": "Open the artists, albums, and licensees manager dialog.",
+                "description": "Open the artists and albums manager dialog.",
                 "action": self.catalog_managers_action,
             },
             {
@@ -12935,7 +12877,9 @@ class App(QMainWindow):
             "mode": mode,
             "work_id": work_id if mode == "link_existing_work" else None,
             "relationship_type": (
-                self._normalize_work_track_relationship(str(context.get("relationship_type") or "original"))
+                self._normalize_work_track_relationship(
+                    str(context.get("relationship_type") or "original")
+                )
                 if mode == "link_existing_work"
                 else "original"
             ),
@@ -13028,18 +12972,19 @@ class App(QMainWindow):
             if selected_work_id is not None and work_combo.findData(int(selected_work_id)) < 0:
                 work_combo.addItem(f"Missing Work #{int(selected_work_id)}", int(selected_work_id))
             selected_work_index = (
-                work_combo.findData(int(selected_work_id))
-                if selected_work_id is not None
-                else 0
+                work_combo.findData(int(selected_work_id)) if selected_work_id is not None else 0
             )
             work_combo.setCurrentIndex(selected_work_index if selected_work_index >= 0 else 0)
             work_combo.setEnabled(
-                str(context.get("mode")) == "link_existing_work" and not bool(context.get("locked_work"))
+                str(context.get("mode")) == "link_existing_work"
+                and not bool(context.get("locked_work"))
             )
         finally:
             work_combo.blockSignals(previous_work_state)
 
-        relationship_type = self._normalize_work_track_relationship(str(context.get("relationship_type") or "original"))
+        relationship_type = self._normalize_work_track_relationship(
+            str(context.get("relationship_type") or "original")
+        )
         track_choices: list[tuple[int, str]] = []
         if detail is not None:
             for track_id in detail.track_ids:
@@ -13115,9 +13060,7 @@ class App(QMainWindow):
             for track_id, title in track_choices:
                 parent_combo.addItem(title, int(track_id))
             selected_parent_index = (
-                parent_combo.findData(int(parent_track_id))
-                if parent_track_id is not None
-                else 0
+                parent_combo.findData(int(parent_track_id)) if parent_track_id is not None else 0
             )
             parent_combo.setCurrentIndex(selected_parent_index if selected_parent_index >= 0 else 0)
             parent_combo.setEnabled(
@@ -13125,7 +13068,9 @@ class App(QMainWindow):
             )
         finally:
             parent_combo.blockSignals(previous_parent_state)
-        self.add_data_clear_work_context_button.setVisible(bool(context.get("return_to_work_manager")))
+        self.add_data_clear_work_context_button.setVisible(
+            bool(context.get("return_to_work_manager"))
+        )
 
     def _on_add_track_governance_mode_changed(self, _index: int) -> None:
         context = self._current_work_track_context()
@@ -13192,7 +13137,9 @@ class App(QMainWindow):
         self._refresh_work_track_creation_context_ui()
         self.track_title_field.setFocus()
 
-    def _begin_work_child_track_creation(self, work_id: int, *, seed_from_work: bool = True) -> bool:
+    def _begin_work_child_track_creation(
+        self, work_id: int, *, seed_from_work: bool = True
+    ) -> bool:
         if self.work_service is None:
             QMessageBox.warning(self, "Work Manager", "Open a profile first.")
             return False
@@ -13944,7 +13891,9 @@ class App(QMainWindow):
                     nonlocal work_id_for_refresh
                     with self.conn:
                         cur = self.conn.cursor()
-                        work_id_for_refresh = self.work_service.create_work(work_payload, cursor=cur)
+                        work_id_for_refresh = self.work_service.create_work(
+                            work_payload, cursor=cur
+                        )
                         payload.work_id = int(work_id_for_refresh)
                         payload.parent_track_id = None
                         payload.relationship_type = "original"
@@ -17505,9 +17454,7 @@ class App(QMainWindow):
             supported_headers = self.exchange_service.supported_import_targets()
             inspection_payload = inspection
             if normalized_format == "xml":
-                inspection_payload = (
-                    inspection if isinstance(inspection, dict) else {}
-                )
+                inspection_payload = inspection if isinstance(inspection, dict) else {}
                 xml_inspection = inspection_payload.get("xml_inspection")
                 if xml_inspection is None:
                     raise ValueError("XML inspection did not return the expected preflight data.")
@@ -17869,9 +17816,6 @@ class App(QMainWindow):
             return
         if issue.entity_type == "release" and issue.release_id:
             self.open_release_editor(issue.release_id)
-            return
-        if issue.entity_type == "license":
-            self.open_licenses_browser(track_filter_id=None)
             return
 
     def delete_entry(self):
@@ -18832,20 +18776,6 @@ class App(QMainWindow):
 
         if track_id:
             menu.addSeparator()
-            licenses_menu = menu.addMenu("Licenses")
-
-            act_add_license = QAction("Add License to this Track…", self)
-            act_add_license.triggered.connect(
-                lambda: self.open_license_upload(preselect_track_id=track_id)
-            )
-            licenses_menu.addAction(act_add_license)
-
-            act_view_licenses = QAction("View Licenses for this Track…", self)
-            act_view_licenses.triggered.connect(
-                lambda: self.open_licenses_browser(track_filter_id=track_id)
-            )
-            licenses_menu.addAction(act_view_licenses)
-
             if self.track_has_media(track_id, "audio_file"):
                 export_track_ids = selected_ids if track_id in selected_ids else [track_id]
                 audio_menu = menu.addMenu("Audio")
@@ -21058,141 +20988,6 @@ class App(QMainWindow):
     def _list_all_tracks(self):
         return self.catalog_reads.list_tracks()
 
-    def _list_licensees(self):
-        return self.catalog_service.list_licensee_choices()
-
-    def migrate_legacy_licenses_to_contracts(self):
-        if self.license_migration_service is None or self.history_manager is None:
-            QMessageBox.warning(self, "Legacy License Migration", "Open a profile first.")
-            return
-
-        summary = self.license_migration_service.inspect()
-        if summary.legacy_license_count == 0 and summary.legacy_licensee_count == 0:
-            QMessageBox.information(
-                self,
-                "Legacy License Migration",
-                "No legacy license records or legacy licensee names were found in this profile.",
-            )
-            return
-
-        if not summary.ready:
-            detail_lines = [issue.message for issue in summary.issues[:8]]
-            extra_count = max(0, len(summary.issues) - len(detail_lines))
-            if extra_count:
-                detail_lines.append(f"...and {extra_count} more issue(s).")
-            QMessageBox.warning(
-                self,
-                "Legacy License Migration Blocked",
-                "\n\n".join(
-                    [
-                        (
-                            "The migration cannot start until every legacy license row still points "
-                            "to a valid managed PDF and a valid track."
-                        ),
-                        "\n".join(detail_lines),
-                    ]
-                ),
-            )
-            return
-
-        confirm_message = "\n".join(
-            [
-                "Migrate the legacy license archive into the new party and contract model?",
-                "",
-                f"Legacy license PDFs to migrate: {summary.legacy_license_count}",
-                f"Legacy licensee names to migrate: {summary.legacy_licensee_count}",
-                f"Unused legacy licensee names to convert into parties: {summary.unused_licensee_count}",
-                "",
-                "This will:",
-                "- create or reuse Party records for legacy licensees",
-                "- create Contract records linked to the original tracks and related releases/works where found",
-                "- copy each legacy PDF into managed contract-document storage and verify its checksum",
-                "- remove the migrated legacy license rows, legacy licensee rows, and old managed license files only after verification",
-                "- capture before/after restore points so the migration can be rolled back safely",
-            ]
-        )
-        if (
-            QMessageBox.question(
-                self,
-                "Legacy License Migration",
-                confirm_message,
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No,
-            )
-            != QMessageBox.Yes
-        ):
-            return
-
-        def _worker(bundle, ctx):
-            ctx.set_status("Preparing legacy license migration...")
-            return run_snapshot_history_action(
-                history_manager=bundle.history_manager,
-                action_label="Migrate Legacy Licenses to Contracts",
-                action_type="license.migrate_legacy",
-                entity_type="License",
-                entity_id="legacy_migration",
-                payload={
-                    "legacy_license_count": summary.legacy_license_count,
-                    "legacy_licensee_count": summary.legacy_licensee_count,
-                },
-                mutation=lambda: bundle.license_migration_service.migrate_all(ctx=ctx),
-                logger=self.logger,
-            )
-
-        def _success(result):
-            self._refresh_after_history_change()
-            QMessageBox.information(
-                self,
-                "Legacy License Migration",
-                "\n".join(
-                    [
-                        "Legacy license migration completed successfully.",
-                        "",
-                        f"Migrated legacy licenses: {result.migrated_license_count}",
-                        f"Migrated legacy licensees: {result.migrated_licensee_count}",
-                        f"Created contracts: {result.created_contract_count}",
-                        f"Created contract documents: {result.created_document_count}",
-                        f"Deleted old legacy files: {result.deleted_legacy_file_count}",
-                    ]
-                ),
-            )
-
-        self._submit_background_bundle_task(
-            title="Legacy License Migration",
-            description="Migrating legacy license PDFs into structured contracts...",
-            task_fn=_worker,
-            kind="write",
-            unique_key="licenses.migrate_legacy",
-            on_success=_success,
-            on_error=lambda failure: self._show_background_task_error(
-                "Legacy License Migration",
-                failure,
-                user_message="Could not migrate the legacy license archive:",
-            ),
-        )
-
-    def open_license_upload(self, preselect_track_id=None):
-        dlg = LicenseUploadDialog(
-            self.license_service,
-            self._list_all_tracks(),
-            self._list_licensees(),
-            preselect_track_id=preselect_track_id,
-            parent=self,
-        )
-        dlg.saved.connect(lambda: self.statusBar().showMessage("License saved", 3000))
-        dlg.exec()
-
-    def open_licenses_browser(self, track_filter_id=None):
-        if self.license_service is None:
-            QMessageBox.warning(self, "License Browser", "Open a profile first.")
-            return
-        return self._show_workspace_panel(
-            self._ensure_license_browser_dock,
-            panel_attr="license_browser_panel",
-            legacy_attr="licenses_browser_dialog",
-            configure=lambda panel: panel.set_track_filter_id(track_filter_id),
-        )
-
 
 class _AlbumTrackSection(QWidget):
     """Reusable track-entry section for the Add Album dialog."""
@@ -21507,7 +21302,9 @@ class _AlbumTrackSection(QWidget):
             relationship_index = self.relationship_type.findData(
                 self.app._normalize_work_track_relationship(relationship_type)
             )
-            self.relationship_type.setCurrentIndex(relationship_index if relationship_index >= 0 else 0)
+            self.relationship_type.setCurrentIndex(
+                relationship_index if relationship_index >= 0 else 0
+            )
         finally:
             self.governance_mode.blockSignals(previous_mode_state)
             self.relationship_type.blockSignals(previous_relationship_state)
@@ -21527,8 +21324,13 @@ class _AlbumTrackSection(QWidget):
                 if work_id <= 0:
                     continue
                 self.parent_work.addItem(self.dialog._work_choice_label(record), work_id)
-            if selected_work_id is not None and self.parent_work.findData(int(selected_work_id)) < 0:
-                self.parent_work.addItem(f"Missing Work #{int(selected_work_id)}", int(selected_work_id))
+            if (
+                selected_work_id is not None
+                and self.parent_work.findData(int(selected_work_id)) < 0
+            ):
+                self.parent_work.addItem(
+                    f"Missing Work #{int(selected_work_id)}", int(selected_work_id)
+                )
             selected_index = (
                 self.parent_work.findData(int(selected_work_id))
                 if selected_work_id is not None
@@ -24224,31 +24026,6 @@ class _AudioPreviewDialog(QDialog):
             return
 
         super().keyPressEvent(e)
-
-
-# ==== Licenses: helpers & actions ====
-def open_license_upload(self, preselect_track_id=None):
-    dlg = LicenseUploadDialog(
-        self.license_service,
-        self._list_all_tracks(),
-        self._list_licensees(),
-        preselect_track_id=preselect_track_id,
-        parent=self,
-    )
-    dlg.saved.connect(lambda: self.statusBar().showMessage("License saved", 3000))
-    dlg.exec()
-
-
-def open_licenses_browser(self, track_filter_id=None):
-    if self.license_service is None:
-        QMessageBox.warning(self, "License Browser", "Open a profile first.")
-        return
-    return self._show_workspace_panel(
-        self._ensure_license_browser_dock,
-        panel_attr="license_browser_panel",
-        legacy_attr="licenses_browser_dialog",
-        configure=lambda panel: panel.set_track_filter_id(track_filter_id),
-    )
 
 
 class WaveformWidget(QWidget):

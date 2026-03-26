@@ -2141,7 +2141,7 @@ class AppShellTestCase(unittest.TestCase):
         self.assertIn("Add Album to Work", cluster_texts)
 
     def case_catalog_managers_open_as_tabified_dock_and_focus_requested_tab(self):
-        self.window.open_catalog_managers_dialog(initial_tab="licensees")
+        self.window.open_catalog_managers_dialog(initial_tab="albums")
         self.app.processEvents()
 
         panel = self._assert_tabified_workspace_dock(
@@ -2150,13 +2150,13 @@ class AppShellTestCase(unittest.TestCase):
             panel_name="catalogManagersPanel",
         )
 
-        self.assertEqual(panel.tabs.currentWidget(), panel.licensees_tab)
-        self.assertEqual(panel.tabs.tabText(panel.tabs.currentIndex()), "Licensees")
+        self.assertEqual(panel.tabs.currentWidget(), panel.albums_tab)
+        self.assertEqual(panel.tabs.tabText(panel.tabs.currentIndex()), "Albums")
         self.assertTrue(panel.isVisible())
 
     def case_catalog_managers_dialog_uses_compact_size_and_consistent_tabs(self):
         dialog = app_module.CatalogManagersDialog(
-            self.window, initial_tab="licensees", parent=self.window
+            self.window, initial_tab="albums", parent=self.window
         )
         try:
             dialog.show()
@@ -2167,9 +2167,9 @@ class AppShellTestCase(unittest.TestCase):
             self.assertEqual(dialog.size().height(), 700)
             self.assertEqual(
                 [dialog.tabs.tabText(index) for index in range(dialog.tabs.count())],
-                ["Artists", "Albums", "Licensees"],
+                ["Artists", "Albums"],
             )
-            self.assertIs(dialog.tabs.currentWidget(), dialog.licensees_tab)
+            self.assertIs(dialog.tabs.currentWidget(), dialog.albums_tab)
         finally:
             dialog.close()
 
@@ -2182,14 +2182,6 @@ class AppShellTestCase(unittest.TestCase):
         for pane, controls in (
             (panel.artists_tab, (panel.artists_tab.refresh_btn, panel.artists_tab.delete_btn)),
             (panel.albums_tab, (panel.albums_tab.refresh_btn, panel.albums_tab.delete_btn)),
-            (
-                panel.licensees_tab,
-                (
-                    panel.licensees_tab.add_btn,
-                    panel.licensees_tab.rename_btn,
-                    panel.licensees_tab.delete_btn,
-                ),
-            ),
         ):
             panel.tabs.setCurrentWidget(pane)
             self.app.processEvents()
@@ -2201,7 +2193,7 @@ class AppShellTestCase(unittest.TestCase):
             for control in controls:
                 self.assertTrue(self._is_within_scroll_content(pane.scroll_area, control))
 
-    def case_catalog_menu_hides_top_level_release_creation_and_groups_legacy_tools(self):
+    def case_catalog_menu_hides_top_level_release_creation_and_removes_legacy_tools(self):
         catalog_action = next(
             action for action in self.window.menuBar().actions() if action.text() == "Catalog"
         )
@@ -2215,7 +2207,6 @@ class AppShellTestCase(unittest.TestCase):
             [
                 "Workspace",
                 "Metadata & Standards",
-                "Legacy",
                 "Audio",
                 "Quality & Repair",
             ],
@@ -2225,22 +2216,12 @@ class AppShellTestCase(unittest.TestCase):
             list(catalog_quality_snapshot.get("texts") or []), ["Data Quality Dashboard…"]
         )
         metadata_snapshot = self._menu_snapshot_at_path(catalog_snapshot, "Metadata & Standards")
-        legacy_snapshot = self._menu_snapshot_at_path(catalog_snapshot, "Legacy")
         audio_snapshot = self._menu_snapshot_at_path(catalog_snapshot, "Audio")
-        legacy_texts = list(
-            self._menu_snapshot_at_path(catalog_snapshot, "Legacy", "Legacy License Archive").get(
-                "texts"
-            )
-            or []
-        )
-        self.assertIn("License Browser…", legacy_texts)
-        self.assertIn("Migrate Legacy Licenses to Contracts…", legacy_texts)
         self.assertEqual(list(metadata_snapshot.get("texts") or []), ["GS1 Metadata…"])
         self.assertEqual(
             list(audio_snapshot.get("texts") or []),
             ["Import & Attach", "Delivery & Conversion", "Authenticity & Provenance"],
         )
-        self.assertEqual(list(legacy_snapshot.get("texts") or []), ["Legacy License Archive"])
         self.assertNotIn("create_release", self.window._action_ribbon_specs_by_id)
         self.assertNotIn("add_selected_to_release", self.window._action_ribbon_specs_by_id)
 
@@ -2672,37 +2653,10 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(self.window.width(), 1111)
         self.assertEqual(self.window.height(), 777)
 
-    def case_license_browser_opens_as_tabified_dock_and_applies_track_filter(self):
-        track_id = self._create_track(index=131, title="Licensed Track")
-        other_track_id = self._create_track(index=132, title="Other Licensed Track")
-        pdf_one = self.root / "license-one.pdf"
-        pdf_two = self.root / "license-two.pdf"
-        pdf_one.write_bytes(b"%PDF-1.4\n%stub license one\n")
-        pdf_two.write_bytes(b"%PDF-1.4\n%stub license two\n")
-
-        self.window.license_service.add_license(
-            track_id=track_id,
-            licensee_name="Aurora Licensing",
-            source_pdf_path=pdf_one,
-        )
-        self.window.license_service.add_license(
-            track_id=other_track_id,
-            licensee_name="Aurora Licensing",
-            source_pdf_path=pdf_two,
-        )
-
-        self.window.open_licenses_browser(track_filter_id=track_id)
-        self.app.processEvents()
-
-        panel = self._assert_tabified_workspace_dock(
-            self.window.license_browser_dock,
-            dock_name="licenseBrowserDock",
-            panel_name="licensesBrowserPanel",
-        )
-
-        self.assertEqual(panel.model.rowCount(), 1)
-        self.assertEqual(panel._track_filter_id, track_id)
-        self.assertEqual(panel.model.item(0, 1).text(), "Licensed Track")
+    def case_legacy_license_browser_is_not_exposed_in_workspace(self):
+        self.assertFalse(hasattr(self.window, "license_browser_action"))
+        self.assertFalse(hasattr(self.window, "legacy_license_migration_action"))
+        self.assertFalse(hasattr(self.window, "license_browser_dock"))
 
     def case_party_contract_rights_and_asset_windows_open_as_tabified_docks(self):
         track_id = self._create_track(index=141, title="Docked Rights Track")
@@ -4013,15 +3967,14 @@ class AppShellTestCase(unittest.TestCase):
         self.assertIn("Open Primary Release…", top_level_texts)
         self.assertIn("Link Selected Track(s) to Work…", top_level_texts)
         self.assertIn("Delete Track", top_level_texts)
-        self.assertIn("Licenses", top_level_texts)
         self.assertIn("Audio", top_level_texts)
 
         self.assertNotIn("Import Metadata from Audio Files…", top_level_texts)
         self.assertNotIn("Export Audio Derivatives…", top_level_texts)
         self.assertNotIn("Export Catalog Audio Copies…", top_level_texts)
         self.assertNotIn("Convert External Audio Files…", top_level_texts)
-        self.assertIn("Add License to this Track…", license_texts)
-        self.assertIn("View Licenses for this Track…", license_texts)
+        self.assertFalse(licenses_snapshot)
+        self.assertEqual(license_texts, [])
 
         self.assertIn("Import Metadata from Audio Files…", audio_texts)
         self.assertIn("Export Audio Derivatives…", audio_texts)

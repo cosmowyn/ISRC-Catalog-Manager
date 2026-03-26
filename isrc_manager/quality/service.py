@@ -60,7 +60,6 @@ class QualityDashboardService:
         issues.extend(self._media_issues())
         issues.extend(self._ordering_issues())
         issues.extend(self._release_backfill_issues())
-        issues.extend(self._license_issues())
         issues.extend(self._custom_field_issues())
         issues.extend(self._work_issues())
         issues.extend(self._contract_issues())
@@ -647,27 +646,6 @@ class QualityDashboardService:
                 )
             )
         return issues
-
-    def _license_issues(self) -> list[QualityIssue]:
-        rows = self.conn.execute(
-            """
-            SELECT l.id
-            FROM Licenses l
-            LEFT JOIN Tracks t ON t.id = l.track_id
-            WHERE t.id IS NULL
-            """
-        ).fetchall()
-        return [
-            QualityIssue(
-                "orphaned_license",
-                "warning",
-                "Orphaned License",
-                "License record points to a missing track.",
-                "license",
-                int(license_id),
-            )
-            for (license_id,) in rows
-        ]
 
     def _custom_field_issues(self) -> list[QualityIssue]:
         issues: list[QualityIssue] = []

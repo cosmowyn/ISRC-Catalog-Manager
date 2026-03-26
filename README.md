@@ -90,7 +90,6 @@ Docked workspace panels include:
 - Release Browser
 - Work Manager
 - Catalog Managers
-- License Browser
 - Party Manager
 - Contract Manager
 - Rights Matrix
@@ -225,7 +224,7 @@ The app includes:
 - repair actions for supported issues such as history reconciliation, legacy promoted-field repair, and storage-layout migration
 - a staged app-data migration path for older storage layouts
 
-Imports, restore flows, legacy license migration, and other higher-risk operations are designed to be recoverable rather than one-way.
+Imports, restore flows, and other higher-risk operations are designed to be recoverable rather than one-way.
 
 ### Theme builder and advanced QSS
 
@@ -263,7 +262,7 @@ Advanced users can go further with a selector reference and syntax-aware QSS edi
 
 Some of the strongest workflow features are easy to underestimate from a quick skim:
 
-- the docked workspace keeps Release Browser, Work Manager, Party Manager, Contract Manager, Rights Matrix, Asset Registry, License Browser, Global Search, and Catalog Managers open beside the table as tabbed panels
+- the docked workspace keeps Release Browser, Work Manager, Party Manager, Contract Manager, Rights Matrix, Asset Registry, Global Search, and Catalog Managers open beside the table as tabbed panels
 - the deliverables workspace pairs the Asset Registry with a Derivative Ledger for managed export batches, lineage review, and safe cleanup
 - layout and dock state are remembered, so the app reopens as a real workstation instead of a fixed single screen
 - the action ribbon can be customized around your high-frequency commands
@@ -272,7 +271,6 @@ Some of the strongest workflow features are easy to underestimate from a quick s
 - global search and relationship browsing give the richer catalog model a usable navigation layer
 - package exchange can carry managed files and restore their recorded storage mode on import
 - audio tag import workflows can preview conflicts before writing metadata into the catalog, while catalog-backed audio exports embed metadata automatically and plain external conversion stays metadata-free
-- legacy license migration can move older PDF-based license records into the richer contract/document model with snapshot protection
 - history settings now include retention and safety presets, storage budgets, and cleanup prompts that keep manual restore points protected by default
 - theme tooling goes beyond colors into starter themes, optional hint text, a live preview pane, app-wide preview, BLOB badge icons, selector discovery, and QSS autocomplete
 

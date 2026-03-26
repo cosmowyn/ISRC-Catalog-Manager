@@ -50,8 +50,8 @@ class AppShellWorkspaceDockTests(AppShellTestCase):
     test_hidden_catalog_table_does_not_block_workspace_dock_access_or_peer_tabifying = (
         AppShellTestCase.case_hidden_catalog_table_does_not_block_workspace_dock_access_or_peer_tabifying
     )
-    test_license_browser_opens_as_tabified_dock_and_applies_track_filter = (
-        AppShellTestCase.case_license_browser_opens_as_tabified_dock_and_applies_track_filter
+    test_legacy_license_browser_is_not_exposed_in_workspace = (
+        AppShellTestCase.case_legacy_license_browser_is_not_exposed_in_workspace
     )
     test_party_contract_rights_and_asset_windows_open_as_tabified_docks = (
         AppShellTestCase.case_party_contract_rights_and_asset_windows_open_as_tabified_docks

@@ -26,8 +26,8 @@ class AppShellStartupCoreTests(AppShellTestCase):
     test_bundled_themes_are_available_and_not_persisted_as_user_library_entries = (
         AppShellTestCase.case_bundled_themes_are_available_and_not_persisted_as_user_library_entries
     )
-    test_catalog_menu_hides_top_level_release_creation_and_groups_legacy_tools = (
-        AppShellTestCase.case_catalog_menu_hides_top_level_release_creation_and_groups_legacy_tools
+    test_catalog_menu_hides_top_level_release_creation_and_removes_legacy_tools = (
+        AppShellTestCase.case_catalog_menu_hides_top_level_release_creation_and_removes_legacy_tools
     )
     test_catalog_menu_hosts_panel_toggle_actions_and_preserves_existing_behavior = (
         AppShellTestCase.case_catalog_menu_hosts_panel_toggle_actions_and_preserves_existing_behavior

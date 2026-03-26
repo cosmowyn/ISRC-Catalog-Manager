@@ -119,7 +119,6 @@ class ExchangeService:
         "disc_number",
         "track_number",
         "sequence_number",
-        "license_files",
     )
 
     def __init__(
@@ -368,19 +367,6 @@ class ExchangeService:
         }
         return defs, value_map
 
-    def _license_map(self) -> dict[int, str]:
-        rows = self.conn.execute(
-            """
-            SELECT track_id, filename
-            FROM Licenses
-            ORDER BY track_id, filename
-            """
-        ).fetchall()
-        license_map: dict[int, list[str]] = {}
-        for track_id, filename in rows:
-            license_map.setdefault(int(track_id), []).append(str(filename or ""))
-        return {track_id: "; ".join(values) for track_id, values in license_map.items()}
-
     def _effective_track_media_paths(self, track_id: int) -> tuple[str, str]:
         audio_meta = self.track_service.get_media_meta(int(track_id), "audio_file")
         artwork_meta = self.track_service.get_media_meta(int(track_id), "album_art")
@@ -561,7 +547,6 @@ class ExchangeService:
         ]
         headers = list(self.BASE_EXPORT_COLUMNS) + custom_headers
         release_map = self._release_columns_for_track_rows()
-        license_map = self._license_map()
         work_overrides = self._work_export_overrides([int(row[0]) for row in rows])
 
         exported_rows: list[dict[str, object]] = []
@@ -595,7 +580,6 @@ class ExchangeService:
                 "audio_file_storage_mode": str(audio_meta.get("storage_mode") or ""),
                 "album_art_path": effective_album_art_path,
                 "album_art_storage_mode": str(artwork_meta.get("storage_mode") or ""),
-                "license_files": license_map.get(track_id, ""),
             }
             placements = release_map.get(track_id) or [
                 {

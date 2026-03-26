@@ -402,7 +402,7 @@ class ExchangeServiceTestCase(unittest.TestCase):
         self.assertTrue(isinstance(manifest.get("packaged_media_index"), dict))
         self.assertTrue(manifest["packaged_media_index"])
 
-    def case_package_export_includes_legacy_license_files_column(self):
+    def case_package_export_omits_legacy_license_files_column(self):
         track_id = self._create_track(isrc="NL-ABC-26-00033", title="License Trail")
         self._create_release(track_id)
         license_service = LicenseService(self.conn, self.data_root)
@@ -420,8 +420,8 @@ class ExchangeServiceTestCase(unittest.TestCase):
         with ZipFile(package_path, "r") as archive:
             manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
 
-        self.assertIn("license_files", manifest["columns"])
-        self.assertEqual(manifest["rows"][0]["license_files"], "track-license.pdf")
+        self.assertNotIn("license_files", manifest["columns"])
+        self.assertNotIn("license_files", manifest["rows"][0])
 
     def case_json_export_prefers_authoritative_governed_work_metadata(self):
         track_id = self._create_track(isrc="NL-ABC-26-00034", title="Governed Orbit")

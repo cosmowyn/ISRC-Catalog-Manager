@@ -99,7 +99,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Profiles toolbar</strong>: switch databases, create a new profile, browse to an external profile, reload the profile list, or remove the selected entry.</li>
           <li><strong>Profiles ribbon toggle</strong>: use <strong>View &gt; Show Profiles Ribbon</strong> when you want that toolbar visible or hidden, and the choice is remembered with the rest of the workspace.</li>
           <li><strong>Dockable panes</strong>: keep the window focused on your current task by showing only the panes you need.</li>
-          <li><strong>Tabbed catalog tools</strong>: Release Browser, Work Manager, Catalog Managers, License Browser, Party Manager, Contract Manager, Rights Matrix, Deliverables and Asset Versions, and Global Search open as docked tabs beside the table so you can keep using the catalog inventory while those panels remain open.</li>
+          <li><strong>Tabbed catalog tools</strong>: Release Browser, Work Manager, Catalog Managers, Party Manager, Contract Manager, Rights Matrix, Deliverables and Asset Versions, and Global Search open as docked tabs beside the table so you can keep using the catalog inventory while those panels remain open.</li>
           <li><strong>Saved layout</strong>: column layout, dock placement, and visibility preferences are remembered so the app opens the way you work.</li>
         </ul>
         <p>Use the menus when you need the full surface of the product, or stay inside the docked views for everyday entry and review. The window title, branding, and appearance can be customized from <strong>Settings &gt; Application Settings</strong>. When you open multiple catalog tools, the app prefers tabbed docking so the workspace stays compact and easier to navigate while the table remains usable.</p>
@@ -563,34 +563,17 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         """,
     ),
     HelpChapter(
-        chapter_id="licenses",
-        title="Licenses and Managed PDFs",
-        summary="Upload signed license PDFs, browse them, update them, download them, and manage licensees.",
-        keywords=("licenses", "licensees", "pdf", "upload", "download", "browse licenses"),
-        content_html="""
-        <p>The app can store signed license PDFs alongside the catalog. This legacy-oriented license workflow remains available for straightforward PDF tracking while the richer contracts-and-documents model covers broader agreement management.</p>
-        <ul>
-          <li><strong>Add License (PDF)</strong>: attach a PDF to a track, assign a licensee, and choose whether the file should be stored in the database or as a managed local file.</li>
-          <li><strong>Licenses</strong>: browse all stored license records, preview them, download them, edit them, convert their storage mode, or delete them from a docked catalog panel that can stay open beside the track table.</li>
-          <li><strong>Manage Licensees</strong>: add, rename, and delete reusable licensee names.</li>
-        </ul>
-        <p>If you are moving into the richer contract system, <strong>Catalog &gt; Migrate Legacy Licenses to Contracts…</strong> converts the legacy license archive into Party records plus Contract records with managed contract documents. The migration copies each stored PDF into the newer contract-document archive, verifies the copied file, and only then removes the legacy rows and old managed license files. Before/after restore points are captured automatically so the migration can be rolled back safely.</p>
-        <p>License actions participate in snapshot-based history so the catalog and managed files remain recoverable when possible.</p>
-        """,
-    ),
-    HelpChapter(
         chapter_id="catalog-managers",
         title="Catalog Managers",
-        summary="Manage reusable artist, album, and licensee data from one consolidated manager panel.",
-        keywords=("catalog managers", "artists", "albums", "licensees", "purge unused", "manage"),
+        summary="Manage reusable artist and album data from one consolidated manager panel.",
+        keywords=("catalog managers", "artists", "albums", "purge unused", "manage"),
         content_html="""
-        <p>The consolidated <strong>Catalog Managers</strong> workspace groups artist, album, and licensee maintenance into one docked panel. It is one specific cleanup surface inside the larger docked workspace, not the name of the whole tabbed workspace model.</p>
+        <p>The consolidated <strong>Catalog Managers</strong> workspace groups artist and album maintenance into one docked panel. It is one specific cleanup surface inside the larger docked workspace, not the name of the whole tabbed workspace model.</p>
         <ul>
           <li><strong>Artists</strong>: inspect artist usage counts and remove or purge only artists that are no longer used.</li>
           <li><strong>Albums</strong>: inspect album usage counts and remove or purge unused albums.</li>
-          <li><strong>Licensees</strong>: maintain reusable licensee names used by license records.</li>
         </ul>
-        <p>These tools are intended for cleanup and normalization. The app prevents deletion of items that are still referenced by tracks or licenses where that would break data integrity. Because the manager is docked, you can keep it open while reviewing the main catalog table and related workspace panels.</p>
+        <p>These tools are intended for cleanup and normalization. The app prevents deletion of items that are still referenced by tracks where that would break data integrity. Because the manager is docked, you can keep it open while reviewing the main catalog table and related workspace panels.</p>
         """,
     ),
     HelpChapter(
