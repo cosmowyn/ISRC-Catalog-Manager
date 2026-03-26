@@ -749,8 +749,6 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(
             export_texts,
             [
-                "Export Selected Catalog XML…",
-                "Export Full Catalog XML…",
                 "Catalog Exchange",
                 "Contracts and Rights",
             ],
@@ -764,7 +762,9 @@ class AppShellTestCase(unittest.TestCase):
         exchange_menu = exchange_action.menu()
         assert exchange_menu is not None
         exchange_texts = [action.text() for action in exchange_menu.actions() if action.text()]
+        self.assertIn("Export Selected Exchange XML…", exchange_texts)
         self.assertIn("Export Selected Exchange CSV…", exchange_texts)
+        self.assertIn("Export Full Exchange XML…", exchange_texts)
         self.assertIn("Export Full Exchange ZIP Package…", exchange_texts)
 
         contracts_action = next(

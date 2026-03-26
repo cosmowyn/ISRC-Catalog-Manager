@@ -196,21 +196,13 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     repertoire_import_menu.addAction(app.import_repertoire_package_action)
 
     export_submenu = file_menu.addMenu("Export")
+    exchange_export_menu = export_submenu.addMenu("Catalog Exchange")
     app.export_selected_action = app._create_action(
-        "Export Selected Catalog XML…",
+        "Export Selected Exchange XML…",
         slot=app.export_selected_to_xml,
         shortcuts=("Ctrl+E", "Meta+E"),
     )
-    export_submenu.addAction(app.export_selected_action)
-
-    app.export_all_action = app._create_action(
-        "Export Full Catalog XML…",
-        slot=app.export_full_to_xml,
-        shortcuts=("Ctrl+Shift+E", "Meta+Shift+E"),
-    )
-    export_submenu.addAction(app.export_all_action)
-
-    exchange_export_menu = export_submenu.addMenu("Catalog Exchange")
+    exchange_export_menu.addAction(app.export_selected_action)
     app.export_selected_csv_action = app._create_action(
         "Export Selected Exchange CSV…",
         slot=lambda: app.export_exchange_file("csv", selected_only=True),
@@ -232,6 +224,12 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     )
     exchange_export_menu.addAction(app.export_selected_package_action)
     exchange_export_menu.addSeparator()
+    app.export_all_action = app._create_action(
+        "Export Full Exchange XML…",
+        slot=app.export_full_to_xml,
+        shortcuts=("Ctrl+Shift+E", "Meta+Shift+E"),
+    )
+    exchange_export_menu.addAction(app.export_all_action)
     app.export_all_csv_action = app._create_action(
         "Export Full Exchange CSV…",
         slot=lambda: app.export_exchange_file("csv", selected_only=False),

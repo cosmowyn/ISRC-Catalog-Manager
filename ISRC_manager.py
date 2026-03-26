@@ -11491,16 +11491,16 @@ class App(QMainWindow):
             },
             {
                 "id": "export_selected",
-                "label": "Export Selected Catalog XML",
+                "label": "Export Selected Exchange XML",
                 "category": "File",
-                "description": "Export the current selected catalog rows to XML.",
+                "description": "Export the current selected catalog rows as exchange XML.",
                 "action": self.export_selected_action,
             },
             {
                 "id": "export_all",
-                "label": "Export Full Catalog XML",
+                "label": "Export Full Exchange XML",
                 "category": "File",
-                "description": "Export the full active profile catalog to XML.",
+                "description": "Export the full active profile catalog as exchange XML.",
                 "action": self.export_all_action,
             },
             {
