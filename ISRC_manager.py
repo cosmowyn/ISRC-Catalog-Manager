@@ -10098,6 +10098,41 @@ class App(QMainWindow):
             self.logger.error("%s traceback:\n%s", title, failure.traceback_text)
         QMessageBox.critical(self, title, f"{user_message}\n{failure.message}")
 
+    @staticmethod
+    def _scaled_progress_callback(progress_callback, *, start: int, end: int):
+        span = max(0, int(end) - int(start))
+
+        def _report(value=None, maximum=None, message=None):
+            if progress_callback is None:
+                return
+            numeric_value = None
+            numeric_maximum = None
+            try:
+                if value is not None and maximum not in (None, 0):
+                    ratio = min(max(float(value) / float(maximum), 0.0), 1.0)
+                    numeric_value = int(round(int(start) + (ratio * span)))
+                    numeric_maximum = 100
+                elif value is not None:
+                    numeric_value = min(max(int(value), int(start)), int(end))
+                    numeric_maximum = 100
+            except Exception:
+                numeric_value = None
+                numeric_maximum = None
+            progress_callback(
+                value=numeric_value,
+                maximum=numeric_maximum,
+                message=str(message or ""),
+            )
+
+        return _report
+
+    @staticmethod
+    def _advance_task_ui_progress(ui_progress, *, value: int, message: str) -> None:
+        ui_progress.report_progress(value=int(value), maximum=100, message=message)
+        app = QApplication.instance()
+        if app is not None:
+            app.processEvents()
+
     def _submit_background_task(
         self,
         *,
@@ -10110,7 +10145,10 @@ class App(QMainWindow):
         show_dialog: bool = True,
         cancellable: bool = False,
         owner: QWidget | None = None,
+        worker_completion_progress: tuple[int, str] | None = None,
+        on_success_before_cleanup=None,
         on_success=None,
+        on_success_after_cleanup=None,
         on_error=None,
         on_cancelled=None,
         on_finished=None,
@@ -10130,9 +10168,18 @@ class App(QMainWindow):
             if write_lock is not None:
                 with write_lock.acquire():
                     ctx.raise_if_cancelled()
-                    return task_fn(ctx)
-            ctx.raise_if_cancelled()
-            return task_fn(ctx)
+                    result = task_fn(ctx)
+            else:
+                ctx.raise_if_cancelled()
+                result = task_fn(ctx)
+            if worker_completion_progress is not None:
+                progress_value, progress_message = worker_completion_progress
+                ctx.report_progress(
+                    value=int(progress_value),
+                    maximum=100,
+                    message=str(progress_message or ""),
+                )
+            return result
 
         return self.background_tasks.submit(
             title=title,
@@ -10143,7 +10190,9 @@ class App(QMainWindow):
             owner=owner or self,
             show_dialog=show_dialog,
             cancellable=cancellable,
+            on_success_before_cleanup=on_success_before_cleanup,
             on_success=on_success,
+            on_success_after_cleanup=on_success_after_cleanup,
             on_error=on_error,
             on_cancelled=on_cancelled,
             on_finished=on_finished,
@@ -10163,7 +10212,10 @@ class App(QMainWindow):
         show_dialog: bool = True,
         cancellable: bool = False,
         owner: QWidget | None = None,
+        worker_completion_progress: tuple[int, str] | None = None,
+        on_success_before_cleanup=None,
         on_success=None,
+        on_success_after_cleanup=None,
         on_error=None,
         on_cancelled=None,
         on_finished=None,
@@ -10172,7 +10224,15 @@ class App(QMainWindow):
     ):
         def _bundle_task(ctx):
             with self.background_service_factory.open_bundle() as bundle:
-                return task_fn(bundle, ctx)
+                result = task_fn(bundle, ctx)
+            if worker_completion_progress is not None:
+                progress_value, progress_message = worker_completion_progress
+                ctx.report_progress(
+                    value=int(progress_value),
+                    maximum=100,
+                    message=str(progress_message or ""),
+                )
+            return result
 
         return self._submit_background_task(
             title=title,
@@ -10184,7 +10244,9 @@ class App(QMainWindow):
             show_dialog=show_dialog,
             cancellable=cancellable,
             owner=owner,
+            on_success_before_cleanup=on_success_before_cleanup,
             on_success=on_success,
+            on_success_after_cleanup=on_success_after_cleanup,
             on_error=on_error,
             on_cancelled=on_cancelled,
             on_finished=on_finished,
@@ -14960,30 +15022,84 @@ class App(QMainWindow):
             )
             if not path:
                 return
-            self.repertoire_exchange_service.export_json(path)
         elif normalized == "xlsx":
             path, _ = QFileDialog.getSaveFileName(
                 self, "Export Repertoire XLSX", "", "Excel Files (*.xlsx)"
             )
             if not path:
                 return
-            self.repertoire_exchange_service.export_xlsx(path)
         elif normalized == "csv":
             path = QFileDialog.getExistingDirectory(self, "Export Repertoire CSV Bundle")
             if not path:
                 return
-            self.repertoire_exchange_service.export_csv_bundle(path)
         elif normalized == "package":
             path, _ = QFileDialog.getSaveFileName(
                 self, "Export Repertoire ZIP Package", "", "ZIP Files (*.zip)"
             )
             if not path:
                 return
-            self.repertoire_exchange_service.export_package(path)
         else:
             return
-        if self.statusBar() is not None:
-            self.statusBar().showMessage("Repertoire export complete.", 5000)
+
+        def _worker(bundle, ctx):
+            export_progress = self._scaled_progress_callback(ctx.report_progress, start=0, end=94)
+
+            def _mutation():
+                if normalized == "json":
+                    bundle.repertoire_exchange_service.export_json(
+                        path,
+                        progress_callback=export_progress,
+                    )
+                elif normalized == "xlsx":
+                    bundle.repertoire_exchange_service.export_xlsx(
+                        path,
+                        progress_callback=export_progress,
+                    )
+                elif normalized == "csv":
+                    bundle.repertoire_exchange_service.export_csv_bundle(
+                        path,
+                        progress_callback=export_progress,
+                    )
+                else:
+                    bundle.repertoire_exchange_service.export_package(
+                        path,
+                        progress_callback=export_progress,
+                    )
+                return path
+
+            return run_file_history_action(
+                history_manager=bundle.history_manager,
+                action_label="Export Contracts and Rights",
+                action_type=f"file.repertoire_export_{normalized}",
+                target_path=path,
+                mutation=_mutation,
+                entity_type="RepertoireExport",
+                entity_id=path,
+                payload={"path": path, "format": normalized},
+                progress_callback=ctx.report_progress,
+                post_mutation_progress=(96, "Capturing repertoire export history..."),
+                record_progress=(98, "Recording repertoire export history..."),
+                logger=self.logger,
+            )
+
+        def _success(_path: str) -> None:
+            if self.statusBar() is not None:
+                self.statusBar().showMessage("Repertoire export complete.", 5000)
+
+        self._submit_background_bundle_task(
+            title=f"Export Contracts and Rights {normalized.upper()}",
+            description=f"Exporting {normalized.upper()} Contracts and Rights data from the current profile...",
+            task_fn=_worker,
+            kind="read",
+            unique_key=f"repertoire.export.{normalized}",
+            worker_completion_progress=(100, "Contracts and Rights export complete."),
+            on_success_after_cleanup=_success,
+            on_error=lambda failure: self._show_background_task_error(
+                "Repertoire Exchange",
+                failure,
+                user_message="Could not complete the Contracts and Rights export:",
+            ),
+        )
 
     def import_repertoire_exchange(self, format_name: str):
         if self.repertoire_exchange_service is None:
@@ -15010,6 +15126,7 @@ class App(QMainWindow):
             return
 
         def _worker(bundle, ctx):
+            import_progress = self._scaled_progress_callback(ctx.report_progress, start=0, end=90)
             ctx.report_progress(
                 value=0,
                 maximum=100,
@@ -15020,24 +15137,24 @@ class App(QMainWindow):
                 if normalized == "json":
                     return bundle.repertoire_exchange_service.import_json(
                         path,
-                        progress_callback=ctx.report_progress,
+                        progress_callback=import_progress,
                         cancel_callback=ctx.raise_if_cancelled,
                     )
                 if normalized == "xlsx":
                     return bundle.repertoire_exchange_service.import_xlsx(
                         path,
-                        progress_callback=ctx.report_progress,
+                        progress_callback=import_progress,
                         cancel_callback=ctx.raise_if_cancelled,
                     )
                 if normalized == "csv":
                     return bundle.repertoire_exchange_service.import_csv_bundle(
                         path,
-                        progress_callback=ctx.report_progress,
+                        progress_callback=import_progress,
                         cancel_callback=ctx.raise_if_cancelled,
                     )
                 return bundle.repertoire_exchange_service.import_package(
                     path,
-                    progress_callback=ctx.report_progress,
+                    progress_callback=import_progress,
                     cancel_callback=ctx.raise_if_cancelled,
                 )
 
@@ -15049,18 +15166,38 @@ class App(QMainWindow):
                 entity_id=path,
                 payload={"path": path, "format": normalized},
                 mutation=_mutation,
+                progress_callback=ctx.report_progress,
+                post_mutation_progress=(92, "Capturing import history snapshot..."),
+                record_progress=(94, "Recording import history..."),
                 logger=self.logger,
             )
 
-        def _success(_result) -> None:
+        def _before_cleanup(_result, ui_progress) -> None:
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=97,
+                message="Applying imported Contracts and Rights changes...",
+            )
             try:
                 self.conn.commit()
             except Exception:
                 pass
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=99,
+                message="Refreshing catalog views and history...",
+            )
             self.refresh_table_preserve_view()
             self.populate_all_comboboxes()
             self._refresh_catalog_workspace_docks()
             self._refresh_history_actions()
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=100,
+                message="Contracts and Rights import complete.",
+            )
+
+        def _success(_result) -> None:
             if self.statusBar() is not None:
                 self.statusBar().showMessage("Repertoire import complete.", 5000)
 
@@ -15070,7 +15207,9 @@ class App(QMainWindow):
             task_fn=_worker,
             kind="write",
             unique_key=f"repertoire.import.{normalized}",
-            on_success=_success,
+            worker_completion_progress=(96, "Finalizing background import transaction..."),
+            on_success_before_cleanup=_before_cleanup,
+            on_success_after_cleanup=_success,
             on_error=lambda failure: self._show_background_task_error(
                 "Repertoire Exchange",
                 failure,
@@ -15164,20 +15303,30 @@ class App(QMainWindow):
             options.mode = "create"
 
         def _worker(bundle, ctx):
-            ctx.set_status("Reapplying repaired import row...")
+            repair_progress = self._scaled_progress_callback(ctx.report_progress, start=0, end=90)
+            ctx.report_progress(
+                value=0,
+                maximum=100,
+                message="Reapplying repaired import row...",
+            )
             return bundle.exchange_service.import_prepared_rows(
                 [edited_row],
                 mapping=entry.mapping,
                 options=options,
                 format_name=entry.source_format,
                 source_path=entry.source_path,
-                progress_callback=ctx.report_progress,
+                progress_callback=repair_progress,
                 cancel_callback=ctx.raise_if_cancelled,
                 repair_entry_id=int(entry.id),
                 repair_override=repair_override,
             )
 
-        def _success(report: ExchangeImportReport) -> None:
+        def _before_cleanup(report: ExchangeImportReport, ui_progress) -> None:
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=97,
+                message="Applying repaired import changes...",
+            )
             try:
                 self.conn.commit()
             except Exception:
@@ -15186,7 +15335,19 @@ class App(QMainWindow):
                 focus_id = (report.created_tracks or report.updated_tracks)[0]
                 self.refresh_table_preserve_view(focus_id=focus_id)
                 self.populate_all_comboboxes()
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=99,
+                message="Refreshing repair queue state...",
+            )
             self._refresh_track_import_repair_queue_dialog()
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=100,
+                message="Import repair row complete.",
+            )
+
+        def _success(report: ExchangeImportReport) -> None:
             if report.passed:
                 if self.statusBar() is not None:
                     self.statusBar().showMessage("Import repair row applied.", 5000)
@@ -15208,7 +15369,9 @@ class App(QMainWindow):
             task_fn=_worker,
             kind="write",
             unique_key=f"track.import.repair.{int(entry.id)}",
-            on_success=_success,
+            worker_completion_progress=(96, "Finalizing repaired import transaction..."),
+            on_success_before_cleanup=_before_cleanup,
+            on_success_after_cleanup=_success,
             on_error=lambda failure: self._show_background_task_error(
                 "Track Import Repair Queue",
                 failure,
@@ -15339,19 +15502,25 @@ class App(QMainWindow):
             if normalized_format == "csv":
                 return bundle.party_exchange_service.inspect_csv(
                     path,
-                    progress_callback=ctx.report_progress,
+                    progress_callback=self._scaled_progress_callback(
+                        ctx.report_progress, start=0, end=90
+                    ),
                     cancel_callback=ctx.raise_if_cancelled,
                 )
             if normalized_format == "xlsx":
                 return bundle.party_exchange_service.inspect_xlsx(
                     path,
-                    progress_callback=ctx.report_progress,
+                    progress_callback=self._scaled_progress_callback(
+                        ctx.report_progress, start=0, end=90
+                    ),
                     cancel_callback=ctx.raise_if_cancelled,
                 )
             if normalized_format == "json":
                 return bundle.party_exchange_service.inspect_json(
                     path,
-                    progress_callback=ctx.report_progress,
+                    progress_callback=self._scaled_progress_callback(
+                        ctx.report_progress, start=0, end=90
+                    ),
                     cancel_callback=ctx.raise_if_cancelled,
                 )
             raise ValueError(f"Unsupported Party exchange format: {normalized_format}")
@@ -15376,6 +15545,11 @@ class App(QMainWindow):
             selected_csv_delimiter = dlg.resolved_csv_delimiter()
 
             def _import_worker(bundle, ctx):
+                import_progress = self._scaled_progress_callback(
+                    ctx.report_progress,
+                    start=0,
+                    end=(90 if options.mode != "dry_run" else 96),
+                )
                 ctx.report_progress(
                     value=0,
                     maximum=100,
@@ -15389,7 +15563,7 @@ class App(QMainWindow):
                             mapping=mapping,
                             options=options,
                             delimiter=selected_csv_delimiter,
-                            progress_callback=ctx.report_progress,
+                            progress_callback=import_progress,
                             cancel_callback=ctx.raise_if_cancelled,
                         )
                     if normalized_format == "xlsx":
@@ -15397,14 +15571,14 @@ class App(QMainWindow):
                             path,
                             mapping=mapping,
                             options=options,
-                            progress_callback=ctx.report_progress,
+                            progress_callback=import_progress,
                             cancel_callback=ctx.raise_if_cancelled,
                         )
                     return bundle.party_exchange_service.import_json(
                         path,
                         mapping=mapping,
                         options=options,
-                        progress_callback=ctx.report_progress,
+                        progress_callback=import_progress,
                         cancel_callback=ctx.raise_if_cancelled,
                     )
 
@@ -15418,27 +15592,55 @@ class App(QMainWindow):
                     entity_id=path,
                     payload={"path": path, "mode": options.mode},
                     mutation=_mutation,
+                    progress_callback=ctx.report_progress,
+                    post_mutation_progress=(92, "Capturing Party import history snapshot..."),
+                    record_progress=(94, "Recording Party import history..."),
                     logger=self.logger,
+                )
+
+            def _import_before_cleanup(report: PartyImportReport, ui_progress) -> None:
+                changed_ids = list(report.created_parties or []) + list(
+                    report.updated_parties or []
+                )
+                if options.mode == "dry_run":
+                    self._advance_task_ui_progress(
+                        ui_progress,
+                        value=100,
+                        message="Party import validation complete.",
+                    )
+                    return
+                self._advance_task_ui_progress(
+                    ui_progress,
+                    value=97,
+                    message="Applying imported Party changes...",
+                )
+                try:
+                    self.conn.commit()
+                except Exception:
+                    pass
+                self._advance_task_ui_progress(
+                    ui_progress,
+                    value=99,
+                    message="Refreshing Party views and history...",
+                )
+                self.populate_all_comboboxes()
+                self._refresh_catalog_workspace_docks()
+                self._refresh_history_actions()
+                if changed_ids:
+                    focus_party_id = int(changed_ids[0])
+                    panel = getattr(self, "party_manager_panel", None)
+                    if isinstance(panel, PartyManagerPanel):
+                        panel.focus_party(focus_party_id)
+                self._advance_task_ui_progress(
+                    ui_progress,
+                    value=100,
+                    message="Party import complete.",
                 )
 
             def _import_success(report: PartyImportReport):
                 changed_ids = list(report.created_parties or []) + list(
                     report.updated_parties or []
                 )
-                if options.mode != "dry_run":
-                    try:
-                        self.conn.commit()
-                    except Exception:
-                        pass
-                    self.populate_all_comboboxes()
-                    self._refresh_party_manager_panel()
-                    self._refresh_catalog_workspace_docks()
-                    self._refresh_history_actions()
-                    if changed_ids:
-                        focus_party_id = int(changed_ids[0])
-                        panel = getattr(self, "party_manager_panel", None)
-                        if isinstance(panel, PartyManagerPanel):
-                            panel.focus_party(focus_party_id)
                 self._log_event(
                     f"party.import.{normalized_format}",
                     f"Imported {normalized_format.upper()} Party data",
@@ -15473,7 +15675,13 @@ class App(QMainWindow):
                 task_fn=_import_worker,
                 kind=("read" if options.mode == "dry_run" else "write"),
                 unique_key=f"party.import.{normalized_format}",
-                on_success=_import_success,
+                worker_completion_progress=(
+                    (96, "Finalizing background Party import...")
+                    if options.mode != "dry_run"
+                    else (100, "Party import validation complete.")
+                ),
+                on_success_before_cleanup=_import_before_cleanup,
+                on_success_after_cleanup=_import_success,
                 on_error=lambda failure: self._show_background_task_error(
                     "Import Parties",
                     failure,
@@ -15487,7 +15695,8 @@ class App(QMainWindow):
             task_fn=_inspection_worker,
             kind="read",
             unique_key=f"party.inspect.{normalized_format}",
-            on_success=_inspection_success,
+            worker_completion_progress=(100, "Party import inspection complete."),
+            on_success_after_cleanup=_inspection_success,
             on_error=lambda failure: self._show_background_task_error(
                 "Import Parties",
                 failure,
@@ -15539,15 +15748,21 @@ class App(QMainWindow):
         export_ids = list(selected_party_ids) if selected_only else None
 
         def _worker(bundle, ctx):
-            ctx.set_status(f"Exporting {normalized_format.upper()} Party data...")
+            export_progress = self._scaled_progress_callback(ctx.report_progress, start=0, end=94)
 
             def _mutation():
                 if normalized_format == "csv":
-                    return bundle.party_exchange_service.export_csv(path, export_ids)
+                    return bundle.party_exchange_service.export_csv(
+                        path, export_ids, progress_callback=export_progress
+                    )
                 if normalized_format == "xlsx":
-                    return bundle.party_exchange_service.export_xlsx(path, export_ids)
+                    return bundle.party_exchange_service.export_xlsx(
+                        path, export_ids, progress_callback=export_progress
+                    )
                 if normalized_format == "json":
-                    return bundle.party_exchange_service.export_json(path, export_ids)
+                    return bundle.party_exchange_service.export_json(
+                        path, export_ids, progress_callback=export_progress
+                    )
                 raise ValueError(f"Unsupported Party exchange format: {normalized_format}")
 
             return run_file_history_action(
@@ -15564,6 +15779,9 @@ class App(QMainWindow):
                     "selected_only": bool(selected_only),
                     "count": count,
                 },
+                progress_callback=ctx.report_progress,
+                post_mutation_progress=(96, "Capturing Party export history..."),
+                record_progress=(98, "Recording Party export history..."),
                 logger=self.logger,
             )
 
@@ -15596,7 +15814,8 @@ class App(QMainWindow):
             task_fn=_worker,
             kind="read",
             unique_key=f"party.export.{normalized_format}",
-            on_success=_success,
+            worker_completion_progress=(100, "Party export complete."),
+            on_success_after_cleanup=_success,
             on_error=lambda failure: self._show_background_task_error(
                 "Export Parties",
                 failure,
@@ -16915,6 +17134,9 @@ class App(QMainWindow):
 
             def _import_worker(bundle, ctx):
                 profile_name = self._current_profile_name()
+                import_progress = self._scaled_progress_callback(
+                    ctx.report_progress, start=0, end=90
+                )
 
                 def _mutation():
                     updated_track_ids: list[int] = []
@@ -16946,7 +17168,7 @@ class App(QMainWindow):
                                 track_service=bundle.track_service,
                             )
                             updated_track_ids.append(track_id)
-                            ctx.report_progress(
+                            import_progress(
                                 value=index,
                                 maximum=total,
                                 message=f"Importing tags for track {index} of {total}...",
@@ -16971,16 +17193,39 @@ class App(QMainWindow):
                         "policy": chosen_policy,
                     },
                     mutation=_mutation,
+                    progress_callback=ctx.report_progress,
+                    post_mutation_progress=(92, "Capturing tag import history snapshot..."),
+                    record_progress=(94, "Recording tag import history..."),
                     logger=self.logger,
                 )
 
-            def _import_success(result: dict[str, object]):
+            def _import_before_cleanup(result: dict[str, object], ui_progress) -> None:
                 changed_ids = list(result.get("changed_ids") or [])
+                self._advance_task_ui_progress(
+                    ui_progress,
+                    value=97,
+                    message="Applying imported tag changes...",
+                )
                 try:
                     self.conn.commit()
                 except Exception:
                     pass
+                self._advance_task_ui_progress(
+                    ui_progress,
+                    value=99,
+                    message="Refreshing catalog views and history...",
+                )
+                self.refresh_table_preserve_view(focus_id=changed_ids[0] if changed_ids else None)
+                self.populate_all_comboboxes()
                 self._refresh_history_actions()
+                self._advance_task_ui_progress(
+                    ui_progress,
+                    value=100,
+                    message="Audio tag import complete.",
+                )
+
+            def _import_success(result: dict[str, object]):
+                changed_ids = list(result.get("changed_ids") or [])
                 self._log_event(
                     "tags.import",
                     "Imported embedded tags from audio",
@@ -16995,8 +17240,6 @@ class App(QMainWindow):
                     details=f"track_ids={','.join(str(track_id) for track_id in changed_ids)}; policy={chosen_policy}",
                 )
                 self._audit_commit()
-                self.refresh_table_preserve_view(focus_id=changed_ids[0] if changed_ids else None)
-                self.populate_all_comboboxes()
                 QMessageBox.information(
                     self,
                     title,
@@ -17011,7 +17254,9 @@ class App(QMainWindow):
                 kind="write",
                 unique_key="tags.import.apply",
                 cancellable=False,
-                on_success=_import_success,
+                worker_completion_progress=(96, "Finalizing background tag import..."),
+                on_success_before_cleanup=_import_before_cleanup,
+                on_success_after_cleanup=_import_success,
                 on_error=lambda failure: self._show_background_task_error(
                     title,
                     failure,
@@ -18203,18 +18448,46 @@ class App(QMainWindow):
             return
 
         def _inspection_worker(bundle, ctx):
-            ctx.set_status(f"Inspecting {normalized_format.upper()} source file...")
+            inspection_progress = self._scaled_progress_callback(
+                ctx.report_progress, start=0, end=90
+            )
+            ctx.report_progress(
+                value=0,
+                maximum=100,
+                message=f"Inspecting {normalized_format.upper()} source file...",
+            )
             if normalized_format == "csv":
-                return bundle.exchange_service.inspect_csv(path)
+                return bundle.exchange_service.inspect_csv(
+                    path,
+                    progress_callback=inspection_progress,
+                    cancel_callback=ctx.raise_if_cancelled,
+                )
             if normalized_format == "xlsx":
-                return bundle.exchange_service.inspect_xlsx(path)
+                return bundle.exchange_service.inspect_xlsx(
+                    path,
+                    progress_callback=inspection_progress,
+                    cancel_callback=ctx.raise_if_cancelled,
+                )
             if normalized_format == "json":
-                return bundle.exchange_service.inspect_json(path)
+                return bundle.exchange_service.inspect_json(
+                    path,
+                    progress_callback=inspection_progress,
+                    cancel_callback=ctx.raise_if_cancelled,
+                )
             if normalized_format == "package":
-                return bundle.exchange_service.inspect_package(path)
+                return bundle.exchange_service.inspect_package(
+                    path,
+                    progress_callback=inspection_progress,
+                    cancel_callback=ctx.raise_if_cancelled,
+                )
             if normalized_format == "xml":
                 xml_inspection, exchange_inspection = (
                     bundle.xml_import_service.build_exchange_inspection(path)
+                )
+                inspection_progress(
+                    value=90,
+                    maximum=100,
+                    message="Building exchange import preview...",
                 )
                 return {
                     "xml_inspection": xml_inspection,
@@ -18264,7 +18537,16 @@ class App(QMainWindow):
             selected_csv_delimiter = dlg.resolved_csv_delimiter()
 
             def _import_worker(bundle, ctx):
-                ctx.set_status(f"Importing {normalized_format.upper()} exchange data...")
+                import_progress = self._scaled_progress_callback(
+                    ctx.report_progress,
+                    start=0,
+                    end=(90 if options.mode != "dry_run" else 96),
+                )
+                ctx.report_progress(
+                    value=0,
+                    maximum=100,
+                    message=f"Importing {normalized_format.upper()} exchange data...",
+                )
 
                 def _mutation():
                     if normalized_format == "csv":
@@ -18273,7 +18555,7 @@ class App(QMainWindow):
                             mapping=mapping,
                             options=options,
                             delimiter=selected_csv_delimiter,
-                            progress_callback=ctx.report_progress,
+                            progress_callback=import_progress,
                             cancel_callback=ctx.raise_if_cancelled,
                         )
                     if normalized_format == "xlsx":
@@ -18281,7 +18563,7 @@ class App(QMainWindow):
                             path,
                             mapping=mapping,
                             options=options,
-                            progress_callback=ctx.report_progress,
+                            progress_callback=import_progress,
                             cancel_callback=ctx.raise_if_cancelled,
                         )
                     if normalized_format == "package":
@@ -18289,7 +18571,7 @@ class App(QMainWindow):
                             path,
                             mapping=mapping,
                             options=options,
-                            progress_callback=ctx.report_progress,
+                            progress_callback=import_progress,
                             cancel_callback=ctx.raise_if_cancelled,
                         )
                     if normalized_format == "xml":
@@ -18297,14 +18579,14 @@ class App(QMainWindow):
                             path,
                             mapping=mapping,
                             options=options,
-                            progress_callback=ctx.report_progress,
+                            progress_callback=import_progress,
                             cancel_callback=ctx.raise_if_cancelled,
                         )
                     return bundle.exchange_service.import_json(
                         path,
                         mapping=mapping,
                         options=options,
-                        progress_callback=ctx.report_progress,
+                        progress_callback=import_progress,
                         cancel_callback=ctx.raise_if_cancelled,
                     )
 
@@ -18319,29 +18601,48 @@ class App(QMainWindow):
                     entity_id=path,
                     payload={"path": path, "mode": options.mode},
                     mutation=_mutation,
+                    progress_callback=ctx.report_progress,
+                    post_mutation_progress=(92, "Capturing import history snapshot..."),
+                    record_progress=(94, "Recording import history..."),
                     logger=self.logger,
                 )
 
-            def _import_success(report: ExchangeImportReport):
+            def _import_before_cleanup(report: ExchangeImportReport, ui_progress) -> None:
                 changed = bool(report.created_tracks or report.updated_tracks)
+                if options.mode == "dry_run":
+                    self._advance_task_ui_progress(
+                        ui_progress,
+                        value=100,
+                        message="Exchange import validation complete.",
+                    )
+                    return
+                self._advance_task_ui_progress(
+                    ui_progress,
+                    value=97,
+                    message="Applying imported catalog changes...",
+                )
                 try:
                     self.conn.commit()
                 except Exception:
                     pass
+                self._advance_task_ui_progress(
+                    ui_progress,
+                    value=99,
+                    message="Refreshing catalog views and history...",
+                )
                 if options.mode != "dry_run":
-                    self.active_custom_fields = self.load_active_custom_fields()
-                    self._rebuild_table_headers()
-                    try:
-                        self._load_header_state()
-                    except Exception:
-                        pass
-                    self._refresh_history_actions()
-                if changed:
                     self.refresh_table_preserve_view(
                         focus_id=(report.created_tracks or report.updated_tracks or [None])[0]
                     )
+                    self._refresh_history_actions()
                     self.populate_all_comboboxes()
+                self._advance_task_ui_progress(
+                    ui_progress,
+                    value=100,
+                    message="Exchange import complete.",
+                )
 
+            def _import_success(report: ExchangeImportReport):
                 self._log_event(
                     f"import.{normalized_format}",
                     f"Imported {normalized_format.upper()} exchange data",
@@ -18374,7 +18675,13 @@ class App(QMainWindow):
                 task_fn=_import_worker,
                 kind=("read" if options.mode == "dry_run" else "write"),
                 unique_key=f"exchange.import.{normalized_format}",
-                on_success=_import_success,
+                worker_completion_progress=(
+                    (96, "Finalizing background import transaction...")
+                    if options.mode != "dry_run"
+                    else (100, "Exchange import validation complete.")
+                ),
+                on_success_before_cleanup=_import_before_cleanup,
+                on_success_after_cleanup=_import_success,
                 on_error=lambda failure: self._show_background_task_error(
                     "Import Exchange",
                     failure,
@@ -18388,7 +18695,8 @@ class App(QMainWindow):
             task_fn=_inspection_worker,
             kind="read",
             unique_key=f"exchange.inspect.{normalized_format}",
-            on_success=_inspection_success,
+            worker_completion_progress=(100, "Exchange import inspection complete."),
+            on_success_after_cleanup=_inspection_success,
             on_error=lambda failure: self._show_background_task_error(
                 "Import Exchange",
                 failure,
@@ -18489,17 +18797,25 @@ class App(QMainWindow):
             return
 
         def _worker(bundle, ctx):
-            ctx.set_status(f"Exporting {normalized_format.upper()} exchange data...")
+            export_progress = self._scaled_progress_callback(ctx.report_progress, start=0, end=94)
 
             def mutation():
                 if normalized_format == "csv":
-                    return bundle.exchange_service.export_csv(path, track_ids)
+                    return bundle.exchange_service.export_csv(
+                        path, track_ids, progress_callback=export_progress
+                    )
                 if normalized_format == "xlsx":
-                    return bundle.exchange_service.export_xlsx(path, track_ids)
+                    return bundle.exchange_service.export_xlsx(
+                        path, track_ids, progress_callback=export_progress
+                    )
                 if normalized_format == "json":
-                    return bundle.exchange_service.export_json(path, track_ids)
+                    return bundle.exchange_service.export_json(
+                        path, track_ids, progress_callback=export_progress
+                    )
                 if normalized_format == "package":
-                    return bundle.exchange_service.export_package(path, track_ids)
+                    return bundle.exchange_service.export_package(
+                        path, track_ids, progress_callback=export_progress
+                    )
                 raise ValueError(f"Unsupported exchange format: {normalized_format}")
 
             return run_file_history_action(
@@ -18516,6 +18832,9 @@ class App(QMainWindow):
                     "selected_only": bool(selected_only),
                     "count": count,
                 },
+                progress_callback=ctx.report_progress,
+                post_mutation_progress=(96, "Capturing exchange export history..."),
+                record_progress=(98, "Recording exchange export history..."),
                 logger=self.logger,
             )
 
@@ -18547,7 +18866,8 @@ class App(QMainWindow):
             task_fn=_worker,
             kind="read",
             unique_key=f"exchange.export.{normalized_format}",
-            on_success=_success,
+            worker_completion_progress=(100, "Exchange export complete."),
+            on_success_after_cleanup=_success,
             on_error=lambda failure: self._show_background_task_error(
                 "Export Exchange",
                 failure,
@@ -18733,16 +19053,22 @@ class App(QMainWindow):
                 return
 
         def _worker(bundle, ctx):
-            ctx.set_status("Exporting the full catalog to XML...")
+            export_progress = self._scaled_progress_callback(ctx.report_progress, start=0, end=94)
             return run_file_history_action(
                 history_manager=bundle.history_manager,
                 action_label=lambda count: f"Export XML: {count} tracks",
                 action_type="file.export_xml_all",
                 target_path=path,
-                mutation=lambda: bundle.xml_export_service.export_all(path),
+                mutation=lambda: bundle.xml_export_service.export_all(
+                    path,
+                    progress_callback=export_progress,
+                ),
                 entity_type="Export",
                 entity_id=path,
                 payload=lambda count: {"path": path, "count": count},
+                progress_callback=ctx.report_progress,
+                post_mutation_progress=(96, "Capturing XML export history..."),
+                record_progress=(98, "Recording XML export history..."),
                 logger=self.logger,
             )
 
@@ -18769,7 +19095,8 @@ class App(QMainWindow):
             task_fn=_worker,
             kind="read",
             unique_key="export.xml.all",
-            on_success=_success,
+            worker_completion_progress=(100, "XML export complete."),
+            on_success_after_cleanup=_success,
             on_error=lambda failure: self._show_background_task_error(
                 "Export Error",
                 failure,
@@ -18816,7 +19143,7 @@ class App(QMainWindow):
             return
 
         def _worker(bundle, ctx):
-            ctx.set_status("Exporting the selected tracks to XML...")
+            export_progress = self._scaled_progress_callback(ctx.report_progress, start=0, end=94)
             return run_file_history_action(
                 history_manager=bundle.history_manager,
                 action_label=lambda count: f"Export Selected XML: {count} tracks",
@@ -18826,10 +19153,14 @@ class App(QMainWindow):
                     out_path,
                     track_ids,
                     current_db_path=str(self.current_db_path),
+                    progress_callback=export_progress,
                 ),
                 entity_type="Export",
                 entity_id=out_path,
                 payload=lambda count: {"path": out_path, "count": count, "track_ids": track_ids},
+                progress_callback=ctx.report_progress,
+                post_mutation_progress=(96, "Capturing XML export history..."),
+                record_progress=(98, "Recording XML export history..."),
                 logger=self.logger,
             )
 
@@ -18850,7 +19181,8 @@ class App(QMainWindow):
             task_fn=_worker,
             kind="read",
             unique_key="export.xml.selected",
-            on_success=_success,
+            worker_completion_progress=(100, "Selected XML export complete."),
+            on_success_after_cleanup=_success,
             on_error=lambda failure: self._show_background_task_error(
                 "Export Error",
                 failure,

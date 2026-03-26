@@ -308,6 +308,31 @@ class BackgroundTaskContext:
             )
 
 
+@dataclass(slots=True)
+class TaskUiProgressContext:
+    """UI-thread progress proxy used for truthful post-worker finalization."""
+
+    progress_handler: Callable[[TaskProgressUpdate], None]
+    status_handler: Callable[[str], None]
+
+    def report_progress(
+        self,
+        value: int | None = None,
+        maximum: int | None = None,
+        message: str | None = None,
+    ) -> None:
+        self.progress_handler(
+            TaskProgressUpdate(
+                value=value,
+                maximum=maximum,
+                message=message,
+            )
+        )
+
+    def set_status(self, message: str) -> None:
+        self.status_handler(str(message or ""))
+
+
 class _BackgroundTaskWorker(QObject):
     progress = Signal(object)
     status = Signal(str)
@@ -365,7 +390,9 @@ class _TaskCallbackRelay(QObject):
         *,
         progress_handler: Callable[[TaskProgressUpdate], None],
         status_handler: Callable[[str], None],
+        success_before_cleanup_handler: Callable[[object, TaskUiProgressContext], None] | None,
         success_handler: Callable[[object], None] | None,
+        success_after_cleanup_handler: Callable[[object], None] | None,
         error_handler: Callable[[TaskFailure], None] | None,
         cancelled_handler: Callable[[], None] | None,
         finished_handler: Callable[[], None] | None,
@@ -374,11 +401,19 @@ class _TaskCallbackRelay(QObject):
         super().__init__()
         self._progress_handler = progress_handler
         self._status_handler = status_handler
+        self._success_before_cleanup_handler = success_before_cleanup_handler
         self._success_handler = success_handler
+        self._success_after_cleanup_handler = success_after_cleanup_handler
         self._error_handler = error_handler
         self._cancelled_handler = cancelled_handler
         self._finished_handler = finished_handler
         self._cleanup_handler = cleanup_handler
+        self._ui_progress_context = TaskUiProgressContext(
+            progress_handler=progress_handler,
+            status_handler=status_handler,
+        )
+        self._success_result = None
+        self._success_pending = False
 
     @Slot(object)
     def handle_progress(self, update: object) -> None:
@@ -393,8 +428,22 @@ class _TaskCallbackRelay(QObject):
 
     @Slot(object)
     def handle_success(self, result: object) -> None:
-        if self._success_handler is not None:
-            self._success_handler(result)
+        self._success_result = result
+        self._success_pending = True
+        try:
+            if self._success_before_cleanup_handler is not None:
+                self._success_before_cleanup_handler(result, self._ui_progress_context)
+            if self._success_handler is not None:
+                self._success_handler(result)
+        except Exception as exc:  # pragma: no cover - defensive UI path
+            self._success_pending = False
+            if self._error_handler is not None:
+                self._error_handler(
+                    TaskFailure(
+                        message=str(exc),
+                        traceback_text=traceback.format_exc(),
+                    )
+                )
 
     @Slot(object)
     def handle_error(self, failure: object) -> None:
@@ -419,7 +468,14 @@ class _TaskCallbackRelay(QObject):
 
     @Slot()
     def handle_cleanup(self) -> None:
-        self._cleanup_handler()
+        try:
+            self._cleanup_handler()
+            if self._success_pending and self._success_after_cleanup_handler is not None:
+                self._success_after_cleanup_handler(self._success_result)
+        finally:
+            if self._finished_handler is not None:
+                self._finished_handler()
+            self.deleteLater()
 
 
 @dataclass(slots=True)
@@ -482,7 +538,9 @@ class BackgroundTaskManager(QObject):
         owner: QWidget | None = None,
         show_dialog: bool = True,
         cancellable: bool = False,
+        on_success_before_cleanup: Callable[[object, TaskUiProgressContext], None] | None = None,
         on_success: Callable[[object], None] | None = None,
+        on_success_after_cleanup: Callable[[object], None] | None = None,
         on_error: Callable[[TaskFailure], None] | None = None,
         on_cancelled: Callable[[], None] | None = None,
         on_finished: Callable[[], None] | None = None,
@@ -563,17 +621,16 @@ class BackgroundTaskManager(QObject):
                 current.dialog.deleteLater()
             thread.deleteLater()
             self.task_state_changed.emit()
-            if on_finished is not None:
-                on_finished()
-            relay.deleteLater()
 
         relay = _TaskCallbackRelay(
             progress_handler=_apply_progress,
             status_handler=_apply_status,
+            success_before_cleanup_handler=on_success_before_cleanup,
             success_handler=on_success,
+            success_after_cleanup_handler=on_success_after_cleanup,
             error_handler=on_error,
             cancelled_handler=on_cancelled,
-            finished_handler=None,
+            finished_handler=on_finished,
             cleanup_handler=_cleanup,
         )
         relay.setParent(self)

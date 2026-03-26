@@ -237,6 +237,31 @@ class XMLExportServiceTests(unittest.TestCase):
             track.findtext("./CustomFields/Field[@name='Artwork']/MimeType"), "image/png"
         )
 
+    def test_export_all_reports_staged_progress(self):
+        output = Path(self.tmpdir.name) / "progress.xml"
+        progress_events: list[tuple[int, int, str]] = []
+
+        exported = self.service.export_all(
+            output,
+            progress_callback=lambda value, maximum, message: progress_events.append(
+                (value, maximum, message)
+            ),
+        )
+
+        self.assertEqual(exported, 2)
+        self.assertTrue(output.exists())
+        self.assertGreaterEqual(len(progress_events), 4)
+        self.assertEqual(
+            progress_events[0],
+            (5, 100, "Collecting catalog rows for XML export..."),
+        )
+        self.assertEqual(progress_events[-1], (90, 100, "Writing XML export file..."))
+        self.assertEqual(
+            [value for value, _maximum, _message in progress_events],
+            sorted(value for value, _maximum, _message in progress_events),
+        )
+        self.assertTrue(any("Writing XML tracks" in message for *_rest, message in progress_events))
+
 
 if __name__ == "__main__":
     unittest.main()

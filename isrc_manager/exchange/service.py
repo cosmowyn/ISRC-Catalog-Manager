@@ -499,8 +499,9 @@ class ExchangeService:
         row["release_artwork_storage_mode"] = storage_mode
 
     def export_rows(
-        self, track_ids: list[int] | None = None
+        self, track_ids: list[int] | None = None, *, progress_callback=None
     ) -> tuple[list[str], list[dict[str, object]]]:
+        self._report_progress(progress_callback, 5, "Collecting catalog export rows...")
         where_clause = ""
         params: list[object] = []
         if track_ids:
@@ -555,7 +556,13 @@ class ExchangeService:
         work_overrides = self._work_export_overrides([int(row[0]) for row in rows])
 
         exported_rows: list[dict[str, object]] = []
-        for row in rows:
+        total_rows = max(len(rows), 1)
+        for index, row in enumerate(rows, start=1):
+            self._report_progress(
+                progress_callback,
+                10 + int(((index - 1) / total_rows) * 30),
+                f"Preparing catalog export rows ({index} of {total_rows})...",
+            )
             track_id = int(row[0])
             work_override = work_overrides.get(track_id, {})
             audio_meta = self.track_service.get_media_meta(track_id, "audio_file")
@@ -621,35 +628,60 @@ class ExchangeService:
                         (track_id, int(field["id"])), ""
                     )
                 exported_rows.append(export_row)
+        self._report_progress(progress_callback, 40, "Catalog export rows prepared.")
         return headers, exported_rows
 
-    def export_csv(self, path: str | Path, track_ids: list[int] | None = None) -> int:
-        headers, rows = self.export_rows(track_ids)
+    def export_csv(
+        self, path: str | Path, track_ids: list[int] | None = None, progress_callback=None
+    ) -> int:
+        headers, rows = self.export_rows(track_ids, progress_callback=progress_callback)
         output_path = Path(path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        self._report_progress(progress_callback, 50, "Writing catalog CSV header...")
         with output_path.open("w", encoding="utf-8", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=headers)
             writer.writeheader()
-            writer.writerows(rows)
+            total_rows = max(len(rows), 1)
+            for index, row in enumerate(rows, start=1):
+                writer.writerow(row)
+                self._report_progress(
+                    progress_callback,
+                    50 + int((index / total_rows) * 40),
+                    f"Writing catalog CSV rows ({index} of {total_rows})...",
+                )
+        self._report_progress(progress_callback, 90, "Catalog CSV data written.")
         return len(rows)
 
-    def export_xlsx(self, path: str | Path, track_ids: list[int] | None = None) -> int:
-        headers, rows = self.export_rows(track_ids)
+    def export_xlsx(
+        self, path: str | Path, track_ids: list[int] | None = None, progress_callback=None
+    ) -> int:
+        headers, rows = self.export_rows(track_ids, progress_callback=progress_callback)
         workbook = Workbook()
         sheet = workbook.active
         sheet.title = "CatalogExport"
+        self._report_progress(progress_callback, 50, "Building catalog workbook header...")
         sheet.append(headers)
-        for row in rows:
+        total_rows = max(len(rows), 1)
+        for index, row in enumerate(rows, start=1):
             sheet.append([row.get(header, "") for header in headers])
+            self._report_progress(
+                progress_callback,
+                50 + int((index / total_rows) * 40),
+                f"Writing catalog workbook rows ({index} of {total_rows})...",
+            )
         output_path = Path(path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         workbook.save(output_path)
+        self._report_progress(progress_callback, 90, "Catalog workbook written.")
         return len(rows)
 
-    def export_json(self, path: str | Path, track_ids: list[int] | None = None) -> int:
+    def export_json(
+        self, path: str | Path, track_ids: list[int] | None = None, progress_callback=None
+    ) -> int:
         output_path = Path(path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        headers, rows = self.export_rows(track_ids)
+        headers, rows = self.export_rows(track_ids, progress_callback=progress_callback)
+        self._report_progress(progress_callback, 50, "Serializing catalog JSON payload...")
         payload = {
             "schema_version": JSON_SCHEMA_VERSION,
             "exported_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
@@ -657,17 +689,27 @@ class ExchangeService:
             "rows": rows,
             "custom_field_defs": self.custom_fields.list_active_fields(),
         }
+        self._report_progress(progress_callback, 80, "Writing catalog JSON file...")
         output_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        self._report_progress(progress_callback, 90, "Catalog JSON data written.")
         return len(rows)
 
-    def export_package(self, path: str | Path, track_ids: list[int] | None = None) -> int:
+    def export_package(
+        self, path: str | Path, track_ids: list[int] | None = None, progress_callback=None
+    ) -> int:
         zip_path = Path(path)
         zip_path.parent.mkdir(parents=True, exist_ok=True)
-        headers, rows = self.export_rows(track_ids)
+        headers, rows = self.export_rows(track_ids, progress_callback=progress_callback)
         packaged_media_index: dict[str, str] = {}
         with ZipFile(zip_path, "w", compression=ZIP_DEFLATED) as archive:
             written_media: set[str] = set()
-            for row in rows:
+            total_rows = max(len(rows), 1)
+            for index, row in enumerate(rows, start=1):
+                self._report_progress(
+                    progress_callback,
+                    50 + int(((index - 1) / total_rows) * 35),
+                    f"Packaging catalog media ({index} of {total_rows})...",
+                )
                 try:
                     track_id = int(row.get("track_id") or 0)
                 except Exception:
@@ -707,6 +749,7 @@ class ExchangeService:
                 "packaged_media_index": packaged_media_index,
             }
             archive.writestr("manifest.json", json.dumps(payload, indent=2, ensure_ascii=False))
+        self._report_progress(progress_callback, 90, "Catalog exchange package written.")
         return len(rows)
 
     def _load_json_payload(self, path: str | Path) -> dict[str, object]:
@@ -833,12 +876,23 @@ class ExchangeService:
             dialect = csv.excel
         return dialect, str(getattr(dialect, "delimiter", ",") or ",")
 
-    def inspect_csv(self, path: str | Path, *, delimiter: str | None = None) -> ExchangeInspection:
+    def inspect_csv(
+        self,
+        path: str | Path,
+        *,
+        delimiter: str | None = None,
+        progress_callback=None,
+        cancel_callback=None,
+    ) -> ExchangeInspection:
+        self._report_progress(progress_callback, 5, "Reading exchange CSV source...")
+        if cancel_callback is not None:
+            cancel_callback()
         with self._open_csv_dict_reader(path, delimiter=delimiter) as (reader, resolved_delimiter):
             headers = list(reader.fieldnames or [])
             preview_rows = []
             for _, row in zip(range(5), reader):
                 preview_rows.append(dict(row))
+        self._report_progress(progress_callback, 60, "Building exchange import preview...")
         return ExchangeInspection(
             file_path=str(path),
             format_name="csv",
@@ -848,7 +902,12 @@ class ExchangeService:
             resolved_delimiter=resolved_delimiter,
         )
 
-    def inspect_xlsx(self, path: str | Path) -> ExchangeInspection:
+    def inspect_xlsx(
+        self, path: str | Path, *, progress_callback=None, cancel_callback=None
+    ) -> ExchangeInspection:
+        self._report_progress(progress_callback, 5, "Reading exchange workbook...")
+        if cancel_callback is not None:
+            cancel_callback()
         workbook = load_workbook(filename=str(path), read_only=True, data_only=True)
         sheet = workbook.active
         rows = list(sheet.iter_rows(values_only=True))
@@ -856,6 +915,7 @@ class ExchangeService:
         preview_rows = []
         for row in rows[1:6]:
             preview_rows.append({header: row[index] for index, header in enumerate(headers)})
+        self._report_progress(progress_callback, 60, "Building exchange import preview...")
         return ExchangeInspection(
             file_path=str(path),
             format_name="xlsx",
@@ -864,11 +924,17 @@ class ExchangeService:
             suggested_mapping=self._suggest_mapping(headers),
         )
 
-    def inspect_json(self, path: str | Path) -> ExchangeInspection:
+    def inspect_json(
+        self, path: str | Path, *, progress_callback=None, cancel_callback=None
+    ) -> ExchangeInspection:
+        self._report_progress(progress_callback, 5, "Reading exchange JSON source...")
+        if cancel_callback is not None:
+            cancel_callback()
         payload = self._load_json_payload(path)
         headers = list(payload.get("columns") or [])
         preview_rows = [dict(row) for row in list(payload.get("rows") or [])[:5]]
         warnings = []
+        self._report_progress(progress_callback, 60, "Building exchange import preview...")
         return ExchangeInspection(
             file_path=str(path),
             format_name="json",
@@ -878,7 +944,12 @@ class ExchangeService:
             warnings=warnings,
         )
 
-    def inspect_package(self, path: str | Path) -> ExchangeInspection:
+    def inspect_package(
+        self, path: str | Path, *, progress_callback=None, cancel_callback=None
+    ) -> ExchangeInspection:
+        self._report_progress(progress_callback, 5, "Reading exchange package manifest...")
+        if cancel_callback is not None:
+            cancel_callback()
         payload = self._load_package_payload(path)
         headers = list(payload.get("columns") or [])
         preview_rows = [dict(row) for row in list(payload.get("rows") or [])[:5]]
@@ -888,6 +959,7 @@ class ExchangeService:
         if not bool(payload.get("packaged_media")):
             warnings.append("This ZIP does not advertise packaged media.")
         warnings.append(f"Packaged media entries detected: {media_count}")
+        self._report_progress(progress_callback, 60, "Building exchange import preview...")
         return ExchangeInspection(
             file_path=str(path),
             format_name="package",

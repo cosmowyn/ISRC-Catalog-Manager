@@ -425,6 +425,70 @@ class BackgroundTaskManagerTests(unittest.TestCase):
         self.assertEqual(updates[0].maximum, 10)
         self.assertEqual(updates[0].message, "Reading package manifest...")
 
+    def test_success_after_cleanup_runs_only_after_dialog_cleanup(self):
+        finished = threading.Event()
+        callback_order: list[str] = []
+        captured: dict[str, object] = {}
+        task_id_holder: dict[str, str] = {}
+
+        def _task(ctx):
+            ctx.report_progress(90, 100, "Worker work complete.")
+            time.sleep(0.05)
+            return "done"
+
+        def _before_cleanup(result, ui_progress):
+            callback_order.append("before_cleanup")
+            dialog = self.manager._tasks[task_id_holder["task_id"]].dialog
+            captured["before_result"] = result
+            captured["before_running"] = self.manager.has_running_tasks()
+            captured["before_dialog_visible"] = bool(dialog is not None and dialog.isVisible())
+            captured["dialog"] = dialog
+            ui_progress.report_progress(99, 100, "Applying final UI state...")
+
+        def _after_cleanup(result):
+            callback_order.append("after_cleanup")
+            dialog = captured.get("dialog")
+            captured["after_result"] = result
+            captured["after_running"] = self.manager.has_running_tasks()
+            captured["after_dialog_visible"] = bool(dialog is not None and dialog.isVisible())
+
+        def _finished():
+            callback_order.append("finished")
+            finished.set()
+
+        task_id = self.manager.submit(
+            title="Cleanup Ordering Task",
+            description="Testing truthful cleanup ordering.",
+            task_fn=_task,
+            show_dialog=True,
+            cancellable=False,
+            on_success_before_cleanup=_before_cleanup,
+            on_success_after_cleanup=_after_cleanup,
+            on_finished=_finished,
+        )
+        self.assertIsNotNone(task_id)
+        task_id_holder["task_id"] = str(task_id)
+        dialog = self.manager._tasks[str(task_id)].dialog
+        self.assertIsNotNone(dialog)
+        assert dialog is not None
+
+        self._wait_for_task_completion(
+            lambda: dialog.isVisible(),
+            description="cleanup-ordering dialog visibility",
+        )
+        self._wait_for_task_completion(
+            finished.is_set,
+            description="cleanup-ordering task completion",
+        )
+
+        self.assertEqual(callback_order, ["before_cleanup", "after_cleanup", "finished"])
+        self.assertEqual(captured.get("before_result"), "done")
+        self.assertEqual(captured.get("after_result"), "done")
+        self.assertTrue(captured.get("before_running"))
+        self.assertFalse(captured.get("after_running"))
+        self.assertTrue(captured.get("before_dialog_visible"))
+        self.assertFalse(captured.get("after_dialog_visible"))
+
     def test_progress_dialog_wraps_long_status_updates_with_bounded_height(self):
         finished = threading.Event()
         allow_second_update = threading.Event()

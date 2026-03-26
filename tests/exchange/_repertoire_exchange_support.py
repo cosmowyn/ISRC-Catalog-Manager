@@ -681,6 +681,36 @@ class SearchAndRepertoireExchangeTestCase(unittest.TestCase):
         finally:
             new_conn.close()
 
+    def case_repertoire_export_reports_staged_progress(self):
+        self._seed_repertoire()
+        json_path = self.data_root / "repertoire-export-progress.json"
+        progress_events: list[tuple[int, int, str]] = []
+
+        self.exchange_service.export_json(
+            json_path,
+            progress_callback=lambda value, maximum, message: progress_events.append(
+                (value, maximum, message)
+            ),
+        )
+
+        self.assertTrue(json_path.exists())
+        self.assertGreaterEqual(len(progress_events), 5)
+        self.assertEqual(progress_events[0], (5, 100, "Collecting Party records for export..."))
+        self.assertEqual(progress_events[-1], (90, 100, "Repertoire JSON written."))
+        self.assertEqual(
+            [value for value, _maximum, _message in progress_events],
+            sorted(value for value, _maximum, _message in progress_events),
+        )
+        self.assertTrue(
+            any("Collecting Work records" in message for *_rest, message in progress_events)
+        )
+        self.assertTrue(
+            any(
+                "Serializing repertoire JSON payload" in message
+                for *_rest, message in progress_events
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

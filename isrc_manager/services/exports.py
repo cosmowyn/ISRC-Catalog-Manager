@@ -16,6 +16,14 @@ class XMLExportService:
     def __init__(self, conn):
         self.conn = conn
 
+    @staticmethod
+    def _report_progress(
+        progress_callback, value: int, message: str, *, maximum: int = 100
+    ) -> None:
+        if progress_callback is None:
+            return
+        progress_callback(int(value), int(maximum), str(message or ""))
+
     def _table_columns(self, table: str) -> set[str]:
         return {
             str(row[1])
@@ -23,13 +31,20 @@ class XMLExportService:
             if row and len(row) > 1 and row[1]
         }
 
-    def export_all(self, path: str | Path) -> int:
+    def export_all(self, path: str | Path, *, progress_callback=None) -> int:
+        self._report_progress(progress_callback, 5, "Collecting catalog rows for XML export...")
         cols, rows = self._fetch_base_rows()
         track_ids = [row[0] for row in rows]
         custom_by_track = self._fetch_custom_by_track(track_ids)
 
         root = ET.Element("DeclarationOfSoundRecordingRightsClaimMessage")
-        for row in rows:
+        total_rows = max(len(rows), 1)
+        for index, row in enumerate(rows, start=1):
+            self._report_progress(
+                progress_callback,
+                10 + int(((index - 1) / total_rows) * 75),
+                f"Writing XML tracks ({index} of {total_rows})...",
+            )
             item = ET.SubElement(root, "SoundRecording")
             row_dict = dict(zip(cols, row))
             for col in cols:
@@ -42,12 +57,19 @@ class XMLExportService:
 
             self._append_custom_fields(item, custom_by_track.get(row_dict["id"], []))
 
+        self._report_progress(progress_callback, 90, "Writing XML export file...")
         self._write_xml(path, root)
         return len(rows)
 
     def export_selected(
-        self, path: str | Path, track_ids: list[int], *, current_db_path: str
+        self,
+        path: str | Path,
+        track_ids: list[int],
+        *,
+        current_db_path: str,
+        progress_callback=None,
     ) -> int:
+        self._report_progress(progress_callback, 5, "Collecting selected tracks for XML export...")
         _, rows = self._fetch_base_rows(track_ids)
         custom_by_track = self._fetch_custom_by_track(track_ids)
 
@@ -57,7 +79,8 @@ class XMLExportService:
         ET.SubElement(meta, "ProfileDB").text = str(current_db_path)
 
         tracks_element = ET.SubElement(root, "Tracks")
-        for (
+        total_rows = max(len(rows), 1)
+        for index, (
             tid,
             isrc,
             db_entry_date,
@@ -76,7 +99,12 @@ class XMLExportService:
             audio_file_size_bytes,
             album_art_mime_type,
             album_art_size_bytes,
-        ) in rows:
+        ) in enumerate(rows, start=1):
+            self._report_progress(
+                progress_callback,
+                10 + int(((index - 1) / total_rows) * 75),
+                f"Writing selected XML tracks ({index} of {total_rows})...",
+            )
             track = ET.SubElement(tracks_element, "Track", id=str(tid))
             ET.SubElement(track, "ISRC").text = (
                 to_iso_isrc(isrc) or to_compact_isrc(isrc) or (isrc or "")
@@ -100,6 +128,7 @@ class XMLExportService:
 
             self._append_custom_fields(track, custom_by_track.get(tid, []))
 
+        self._report_progress(progress_callback, 90, "Writing selected XML export file...")
         self._write_xml(path, root)
         return len(rows)
 

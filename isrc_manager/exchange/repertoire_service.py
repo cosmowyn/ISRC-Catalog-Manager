@@ -76,30 +76,51 @@ class RepertoireExchangeService:
             return
         progress_callback(int(value), int(maximum), str(message or ""))
 
-    def export_payload(self) -> dict[str, object]:
+    def export_payload(self, *, progress_callback=None) -> dict[str, object]:
+        self._report_progress(progress_callback, 5, "Collecting Party records for export...")
+        parties = self.party_service.export_rows()
+        self._report_progress(progress_callback, 12, "Collecting Work records for export...")
+        works = self.work_service.export_rows()
+        self._report_progress(progress_callback, 20, "Collecting Contract records for export...")
+        contracts = self.contract_service.export_rows()
+        self._report_progress(progress_callback, 28, "Collecting Right records for export...")
+        rights = self.rights_service.export_rows()
+        self._report_progress(progress_callback, 36, "Collecting Asset records for export...")
+        assets = self.asset_service.export_rows()
+        self._report_progress(progress_callback, 40, "Repertoire export rows prepared.")
         return {
             "schema_version": REPERTOIRE_JSON_SCHEMA_VERSION,
-            "parties": self.party_service.export_rows(),
-            "works": self.work_service.export_rows(),
-            "contracts": self.contract_service.export_rows(),
-            "rights": self.rights_service.export_rows(),
-            "assets": self.asset_service.export_rows(),
+            "parties": parties,
+            "works": works,
+            "contracts": contracts,
+            "rights": rights,
+            "assets": assets,
         }
 
-    def export_json(self, path: str | Path) -> None:
+    def export_json(self, path: str | Path, *, progress_callback=None) -> None:
         output = Path(path)
         output.parent.mkdir(parents=True, exist_ok=True)
+        payload = self.export_payload(progress_callback=progress_callback)
+        self._report_progress(progress_callback, 55, "Serializing repertoire JSON payload...")
+        self._report_progress(progress_callback, 85, "Writing repertoire JSON file...")
         output.write_text(
-            json.dumps(self.export_payload(), indent=2, ensure_ascii=False),
+            json.dumps(payload, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
+        self._report_progress(progress_callback, 90, "Repertoire JSON written.")
 
-    def export_xlsx(self, path: str | Path) -> None:
+    def export_xlsx(self, path: str | Path, *, progress_callback=None) -> None:
         workbook = Workbook()
-        payload = self.export_payload()
+        payload = self.export_payload(progress_callback=progress_callback)
         default_sheet = workbook.active
         workbook.remove(default_sheet)
-        for sheet_name in ("parties", "works", "contracts", "rights", "assets"):
+        sheet_names = ("parties", "works", "contracts", "rights", "assets")
+        for index, sheet_name in enumerate(sheet_names, start=1):
+            self._report_progress(
+                progress_callback,
+                45 + int(((index - 1) / len(sheet_names)) * 40),
+                f"Writing repertoire workbook sheet {index} of {len(sheet_names)}...",
+            )
             rows = [dict(row) for row in payload.get(sheet_name, [])]
             sheet = workbook.create_sheet(sheet_name.title())
             headers = sorted({key for row in rows for key in row}) if rows else ["id"]
@@ -116,12 +137,19 @@ class RepertoireExchangeService:
         output = Path(path)
         output.parent.mkdir(parents=True, exist_ok=True)
         workbook.save(output)
+        self._report_progress(progress_callback, 90, "Repertoire workbook written.")
 
-    def export_csv_bundle(self, directory: str | Path) -> None:
+    def export_csv_bundle(self, directory: str | Path, *, progress_callback=None) -> None:
         output_dir = Path(directory)
         output_dir.mkdir(parents=True, exist_ok=True)
-        payload = self.export_payload()
-        for entity_name, filename in self.ENTITY_FILENAMES.items():
+        payload = self.export_payload(progress_callback=progress_callback)
+        items = list(self.ENTITY_FILENAMES.items())
+        for index, (entity_name, filename) in enumerate(items, start=1):
+            self._report_progress(
+                progress_callback,
+                45 + int(((index - 1) / len(items)) * 40),
+                f"Writing repertoire CSV file {index} of {len(items)}...",
+            )
             rows = [dict(row) for row in payload.get(entity_name, [])]
             headers = sorted({key for row in rows for key in row}) if rows else ["id"]
             with (output_dir / filename).open("w", encoding="utf-8", newline="") as handle:
@@ -138,14 +166,22 @@ class RepertoireExchangeService:
                             for key, value in row.items()
                         }
                     )
+        self._report_progress(progress_callback, 90, "Repertoire CSV bundle written.")
 
-    def export_package(self, path: str | Path) -> None:
-        payload = self.export_payload()
+    def export_package(self, path: str | Path, *, progress_callback=None) -> None:
+        payload = self.export_payload(progress_callback=progress_callback)
         packaged_files: dict[str, str] = {}
         package_path = Path(path)
         package_path.parent.mkdir(parents=True, exist_ok=True)
         with ZipFile(package_path, "w", compression=ZIP_DEFLATED) as archive:
-            for contract in payload["contracts"]:
+            contracts = list(payload["contracts"])
+            total_contracts = max(len(contracts), 1)
+            for index, contract in enumerate(contracts, start=1):
+                self._report_progress(
+                    progress_callback,
+                    45 + int(((index - 1) / total_contracts) * 35),
+                    f"Packaging repertoire contract files ({index} of {total_contracts})...",
+                )
                 contract_id = int(contract.get("id") or 0)
                 for document in contract.get("documents", []):
                     stored_path = str(document.get("file_path") or "").strip()
@@ -176,7 +212,14 @@ class RepertoireExchangeService:
                         archive.writestr(arcname, data)
                     document["file_path"] = package_key
                     packaged_files[package_key] = arcname
-            for asset in payload["assets"]:
+            assets = list(payload["assets"])
+            total_assets = max(len(assets), 1)
+            for index, asset in enumerate(assets, start=1):
+                self._report_progress(
+                    progress_callback,
+                    80 + int(((index - 1) / total_assets) * 8),
+                    f"Packaging repertoire assets ({index} of {total_assets})...",
+                )
                 stored_path = str(asset.get("stored_path") or "").strip()
                 asset_id = int(asset.get("id") or 0)
                 abs_path = self.asset_service.resolve_asset_path(stored_path)
@@ -205,6 +248,7 @@ class RepertoireExchangeService:
                 packaged_files[package_key] = arcname
             payload["packaged_files"] = packaged_files
             archive.writestr("manifest.json", json.dumps(payload, indent=2, ensure_ascii=False))
+        self._report_progress(progress_callback, 90, "Repertoire package written.")
 
     def _load_json_payload(self, path: str | Path) -> dict[str, object]:
         payload = json.loads(Path(path).read_text(encoding="utf-8"))

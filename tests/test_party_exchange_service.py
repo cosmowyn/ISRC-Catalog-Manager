@@ -317,3 +317,38 @@ class PartyExchangeServiceTests(unittest.TestCase):
         self.assertTrue(
             any("Creating and updating Parties" in message for *_rest, message in progress_events)
         )
+
+    def test_export_reports_staged_progress(self):
+        party_id = self.party_service.create_party(
+            PartyPayload(
+                legal_name="Progress Party Export B.V.",
+                display_name="Progress Party Export",
+                email="hello@progress-export.test",
+            )
+        )
+        export_path = self.data_root / "party-progress-export.json"
+        progress_events: list[tuple[int, int, str]] = []
+
+        exported = self.exchange_service.export_json(
+            export_path,
+            [party_id],
+            progress_callback=lambda value, maximum, message: progress_events.append(
+                (value, maximum, message)
+            ),
+        )
+
+        self.assertEqual(exported, 1)
+        self.assertTrue(export_path.exists())
+        self.assertGreaterEqual(len(progress_events), 4)
+        self.assertEqual(progress_events[0], (5, 100, "Collecting Party export rows..."))
+        self.assertEqual(progress_events[-1], (90, 100, "Party JSON data written."))
+        self.assertEqual(
+            [value for value, _maximum, _message in progress_events],
+            sorted(value for value, _maximum, _message in progress_events),
+        )
+        self.assertTrue(
+            any("Preparing Party export rows" in message for *_rest, message in progress_events)
+        )
+        self.assertTrue(
+            any("Serializing Party JSON payload" in message for *_rest, message in progress_events)
+        )

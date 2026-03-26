@@ -242,53 +242,86 @@ class PartyExchangeService:
         progress_callback(int(value), int(maximum), str(message or ""))
 
     def export_rows(
-        self, party_ids: list[int] | None = None
+        self, party_ids: list[int] | None = None, *, progress_callback=None
     ) -> tuple[list[str], list[dict[str, object]]]:
+        self._report_progress(progress_callback, 5, "Collecting Party export rows...")
         exported = self.party_service.export_rows(party_ids)
         owner_party_id = self._current_owner_party_id()
         rows: list[dict[str, object]] = []
-        for source_row in exported:
+        total_rows = max(len(exported), 1)
+        for index, source_row in enumerate(exported, start=1):
+            self._report_progress(
+                progress_callback,
+                10 + int(((index - 1) / total_rows) * 30),
+                f"Preparing Party export rows ({index} of {total_rows})...",
+            )
             row = {field_name: source_row.get(field_name) for field_name in PARTY_EXCHANGE_FIELDS}
             row["artist_aliases"] = list(source_row.get("artist_aliases") or [])
             row["is_owner"] = bool(int(source_row.get("id") or 0) == int(owner_party_id or 0))
             rows.append(row)
+        self._report_progress(progress_callback, 40, "Party export rows prepared.")
         return list(PARTY_EXCHANGE_FIELDS), rows
 
-    def export_csv(self, path: str | Path, party_ids: list[int] | None = None) -> int:
-        headers, rows = self.export_rows(party_ids)
+    def export_csv(
+        self, path: str | Path, party_ids: list[int] | None = None, progress_callback=None
+    ) -> int:
+        headers, rows = self.export_rows(party_ids, progress_callback=progress_callback)
         output_path = Path(path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        self._report_progress(progress_callback, 50, "Writing Party CSV header...")
         with output_path.open("w", encoding="utf-8", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=headers)
             writer.writeheader()
-            for row in rows:
+            total_rows = max(len(rows), 1)
+            for index, row in enumerate(rows, start=1):
                 writer.writerow(self._serialized_row(row))
+                self._report_progress(
+                    progress_callback,
+                    50 + int((index / total_rows) * 40),
+                    f"Writing Party CSV rows ({index} of {total_rows})...",
+                )
+        self._report_progress(progress_callback, 90, "Party CSV data written.")
         return len(rows)
 
-    def export_xlsx(self, path: str | Path, party_ids: list[int] | None = None) -> int:
-        headers, rows = self.export_rows(party_ids)
+    def export_xlsx(
+        self, path: str | Path, party_ids: list[int] | None = None, progress_callback=None
+    ) -> int:
+        headers, rows = self.export_rows(party_ids, progress_callback=progress_callback)
         workbook = Workbook()
         sheet = workbook.active
         sheet.title = "PartyCatalog"
+        self._report_progress(progress_callback, 50, "Building Party workbook header...")
         sheet.append(headers)
-        for row in rows:
+        total_rows = max(len(rows), 1)
+        for index, row in enumerate(rows, start=1):
             sheet.append([self._serialize_cell(row.get(header)) for header in headers])
+            self._report_progress(
+                progress_callback,
+                50 + int((index / total_rows) * 40),
+                f"Writing Party workbook rows ({index} of {total_rows})...",
+            )
         output_path = Path(path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         workbook.save(output_path)
+        self._report_progress(progress_callback, 90, "Party workbook written.")
         return len(rows)
 
-    def export_json(self, path: str | Path, party_ids: list[int] | None = None) -> int:
-        headers, rows = self.export_rows(party_ids)
+    def export_json(
+        self, path: str | Path, party_ids: list[int] | None = None, progress_callback=None
+    ) -> int:
+        headers, rows = self.export_rows(party_ids, progress_callback=progress_callback)
         output_path = Path(path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        self._report_progress(progress_callback, 50, "Serializing Party JSON payload...")
         payload = {
             "schema_version": PARTY_JSON_SCHEMA_VERSION,
             "exported_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
             "columns": headers,
             "rows": rows,
         }
+        self._report_progress(progress_callback, 80, "Writing Party JSON file...")
         output_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        self._report_progress(progress_callback, 90, "Party JSON data written.")
         return len(rows)
 
     def inspect_csv(

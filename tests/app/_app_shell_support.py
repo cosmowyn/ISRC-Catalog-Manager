@@ -282,13 +282,27 @@ class AppShellTestCase(unittest.TestCase):
             def raise_if_cancelled(self):
                 return None
 
+        class _InlineUiProgress:
+            def set_status(self, _message):
+                return None
+
+            def report_progress(self, *args, **kwargs):
+                del args, kwargs
+                return None
+
         if hasattr(window, "_prepare_for_background_db_task"):
             window._prepare_for_background_db_task()
         with window.background_service_factory.open_bundle() as bundle:
             result = kwargs["task_fn"](bundle, _InlineTaskContext())
+        on_success_before_cleanup = kwargs.get("on_success_before_cleanup")
+        if callable(on_success_before_cleanup):
+            on_success_before_cleanup(result, _InlineUiProgress())
         on_success = kwargs.get("on_success")
         if callable(on_success):
             on_success(result)
+        on_success_after_cleanup = kwargs.get("on_success_after_cleanup")
+        if callable(on_success_after_cleanup):
+            on_success_after_cleanup(result)
         on_finished = kwargs.get("on_finished")
         if callable(on_finished):
             on_finished()
@@ -3431,6 +3445,31 @@ class AppShellTestCase(unittest.TestCase):
         submit_task.assert_called_once()
         information_mock.assert_not_called()
         self.assertEqual(submit_task.call_args.kwargs["title"], "Export Parties CSV")
+
+    def case_repertoire_export_uses_background_task_instead_of_direct_sync_write(self):
+        export_path = self.root / "repertoire-export.json"
+
+        with (
+            mock.patch.object(
+                app_module.QFileDialog,
+                "getSaveFileName",
+                return_value=(str(export_path), "JSON Files (*.json)"),
+            ) as get_save_file_name,
+            mock.patch.object(self.window, "_submit_background_bundle_task") as submit_task,
+            mock.patch.object(
+                self.window.repertoire_exchange_service, "export_json"
+            ) as direct_export,
+        ):
+            self.window.export_repertoire_exchange("json")
+            self.app.processEvents()
+
+        get_save_file_name.assert_called_once()
+        submit_task.assert_called_once()
+        direct_export.assert_not_called()
+        self.assertEqual(
+            submit_task.call_args.kwargs["title"],
+            "Export Contracts and Rights JSON",
+        )
 
     def case_contract_template_workspace_opens_as_tabified_dock(self):
         self.window.open_contract_template_workspace()

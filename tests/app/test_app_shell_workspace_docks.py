@@ -68,6 +68,9 @@ class AppShellWorkspaceDockTests(AppShellTestCase):
     test_file_menu_party_export_uses_dock_panel_selection_without_panel_attr = (
         AppShellTestCase.case_file_menu_party_export_uses_dock_panel_selection_without_panel_attr
     )
+    test_repertoire_export_uses_background_task_instead_of_direct_sync_write = (
+        AppShellTestCase.case_repertoire_export_uses_background_task_instead_of_direct_sync_write
+    )
     test_contract_template_workspace_opens_as_tabified_dock = (
         AppShellTestCase.case_contract_template_workspace_opens_as_tabified_dock
     )

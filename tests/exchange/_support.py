@@ -352,6 +352,37 @@ class ExchangeServiceTestCase(unittest.TestCase):
         )
         self.assertEqual(progress_events[-1][2], "Import complete.")
 
+    def case_export_json_reports_staged_progress(self):
+        track_id = self._create_track(isrc="NL-ABC-26-09994", title="Progress Export")
+        self._create_release(track_id)
+        export_path = self.data_root / "progress-export.json"
+        progress_events: list[tuple[int, int, str]] = []
+
+        exported = self.service.export_json(
+            export_path,
+            progress_callback=lambda value, maximum, message: progress_events.append(
+                (value, maximum, message)
+            ),
+        )
+
+        self.assertEqual(exported, 1)
+        self.assertTrue(export_path.exists())
+        self.assertGreaterEqual(len(progress_events), 4)
+        self.assertEqual(progress_events[0], (5, 100, "Collecting catalog export rows..."))
+        self.assertEqual(progress_events[-1], (90, 100, "Catalog JSON data written."))
+        self.assertEqual(
+            [value for value, _maximum, _message in progress_events],
+            sorted(value for value, _maximum, _message in progress_events),
+        )
+        self.assertTrue(
+            any("Preparing catalog export rows" in message for *_rest, message in progress_events)
+        )
+        self.assertTrue(
+            any(
+                "Serializing catalog JSON payload" in message for *_rest, message in progress_events
+            )
+        )
+
     def case_import_csv_creates_track_from_multiple_columns(self):
         csv_path = self.data_root / "create-import.csv"
         csv_path.write_text(

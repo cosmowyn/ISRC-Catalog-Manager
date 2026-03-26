@@ -6,6 +6,13 @@ import logging
 from pathlib import Path
 
 
+def _emit_progress(progress_callback, update) -> None:
+    if progress_callback is None or update is None:
+        return
+    value, message = update
+    progress_callback(int(value), 100, str(message or ""))
+
+
 def run_snapshot_history_action(
     *,
     history_manager,
@@ -19,6 +26,9 @@ def run_snapshot_history_action(
     before_label: str | None = None,
     after_kind: str | None = None,
     after_label: str | None = None,
+    progress_callback=None,
+    post_mutation_progress: tuple[int, str] | None = None,
+    record_progress: tuple[int, str] | None = None,
     logger: logging.Logger | None = None,
 ):
     if history_manager is None:
@@ -32,10 +42,12 @@ def run_snapshot_history_action(
     after_snapshot = None
     try:
         result = mutation()
+        _emit_progress(progress_callback, post_mutation_progress)
         after_snapshot = history_manager.capture_snapshot(
             kind=after_kind or f"post_{safe_kind}",
             label=after_label or f"After {action_label}",
         )
+        _emit_progress(progress_callback, record_progress)
         history_manager.record_snapshot_action(
             label=action_label,
             action_type=action_type,
@@ -75,6 +87,9 @@ def run_file_history_action(
     entity_type: str | None = "File",
     entity_id: str | None = None,
     payload=None,
+    progress_callback=None,
+    post_mutation_progress: tuple[int, str] | None = None,
+    record_progress: tuple[int, str] | None = None,
     logger: logging.Logger | None = None,
 ):
     if history_manager is None:
@@ -86,11 +101,13 @@ def run_file_history_action(
     )
     try:
         result = mutation()
+        _emit_progress(progress_callback, post_mutation_progress)
         after_state = history_manager.capture_file_state(
             target_path,
             companion_suffixes=companion_suffixes,
         )
         if before_state != after_state:
+            _emit_progress(progress_callback, record_progress)
             final_label = action_label(result) if callable(action_label) else action_label
             final_payload = payload(result) if callable(payload) else (payload or {})
             history_manager.record_file_write_action(
