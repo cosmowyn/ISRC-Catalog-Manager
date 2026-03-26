@@ -508,6 +508,119 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
             finally:
                 conn.close()
 
+    def test_party_manager_panel_exposes_import_export_buttons_with_format_menus(self):
+        actions = []
+        panel = PartyManagerPanel(
+            party_service_provider=lambda: None,
+            import_party_handler=lambda format_name: actions.append(("import", format_name)),
+            export_party_handler=lambda format_name, selected_only, party_ids=None: actions.append(
+                ("export", format_name, selected_only, list(party_ids or []))
+            ),
+        )
+        try:
+            self.assertIsNotNone(panel.import_button.menu())
+            self.assertIsNotNone(panel.export_selected_button.menu())
+            self.assertIsNotNone(panel.export_all_button.menu())
+
+            import_texts = [action.text() for action in panel.import_button.menu().actions()]
+            selected_export_texts = [
+                action.text() for action in panel.export_selected_button.menu().actions()
+            ]
+            self.assertEqual(import_texts, ["Import CSV…", "Import XLSX…", "Import JSON…"])
+            self.assertEqual(selected_export_texts, ["CSV…", "XLSX…", "JSON…"])
+
+            panel.import_button.menu().actions()[0].trigger()
+            panel.export_all_button.menu().actions()[2].trigger()
+            self.app.processEvents()
+
+            self.assertEqual(actions[0], ("import", "csv"))
+            self.assertEqual(actions[1], ("export", "json", False, []))
+        finally:
+            panel.close()
+
+    def test_party_manager_selection_falls_back_to_current_row_for_export_actions(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = sqlite3.connect(":memory:")
+            try:
+                schema = DatabaseSchemaService(conn, data_root=Path(tmpdir))
+                schema.init_db()
+                schema.migrate_schema()
+                party_service = PartyService(conn)
+                party_id = party_service.create_party(
+                    PartyPayload(
+                        legal_name="Current Row Party",
+                        display_name="Current Row Party",
+                        party_type="person",
+                    )
+                )
+                conn.commit()
+
+                panel = PartyManagerPanel(party_service_provider=lambda: party_service)
+                try:
+                    target_row = -1
+                    for row in range(panel.table.rowCount()):
+                        item = panel.table.item(row, 0)
+                        if item is not None and int(item.text()) == party_id:
+                            target_row = row
+                            break
+                    self.assertGreaterEqual(target_row, 0)
+
+                    panel.table.clearSelection()
+                    panel.table.setCurrentCell(target_row, 0)
+                    self.app.processEvents()
+
+                    self.assertEqual(panel.selected_party_ids(), [party_id])
+                finally:
+                    panel.close()
+            finally:
+                conn.close()
+
+    def test_party_manager_export_menu_uses_last_known_selected_party(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = sqlite3.connect(":memory:")
+            try:
+                schema = DatabaseSchemaService(conn, data_root=Path(tmpdir))
+                schema.init_db()
+                schema.migrate_schema()
+                party_service = PartyService(conn)
+                party_id = party_service.create_party(
+                    PartyPayload(
+                        legal_name="Exported Selected Party",
+                        display_name="Exported Selected Party",
+                        party_type="person",
+                    )
+                )
+                conn.commit()
+
+                captured = []
+                panel = PartyManagerPanel(
+                    party_service_provider=lambda: party_service,
+                    export_party_handler=lambda format_name, selected_only, party_ids=None: captured.append(
+                        (format_name, selected_only, list(party_ids or []))
+                    ),
+                )
+                try:
+                    target_row = -1
+                    for row in range(panel.table.rowCount()):
+                        item = panel.table.item(row, 0)
+                        if item is not None and int(item.text()) == party_id:
+                            target_row = row
+                            break
+                    self.assertGreaterEqual(target_row, 0)
+
+                    panel.table.selectRow(target_row)
+                    self.app.processEvents()
+                    panel.table.clearSelection()
+                    self.app.processEvents()
+                    panel.export_selected_button.menu().actions()[0].trigger()
+                    self.app.processEvents()
+
+                    self.assertEqual(captured, [("csv", True, [party_id])])
+                finally:
+                    panel.close()
+            finally:
+                conn.close()
+
     def test_release_editor_uses_editable_combos_for_safe_metadata_fields(self):
         dialog = ReleaseEditorDialog(
             release_service=object(),

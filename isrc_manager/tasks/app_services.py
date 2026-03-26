@@ -23,7 +23,7 @@ from isrc_manager.exchange.service import ExchangeService
 from isrc_manager.forensics import ForensicExportCoordinator, ForensicWatermarkService
 from isrc_manager.history import HistoryManager
 from isrc_manager.media import AudioConversionService
-from isrc_manager.parties import PartyService
+from isrc_manager.parties import PartyExchangeService, PartyService
 from isrc_manager.quality.service import QualityDashboardService
 from isrc_manager.releases import ReleaseService
 from isrc_manager.rights import RightsService
@@ -76,6 +76,7 @@ class BackgroundAppServiceBundle:
     xml_import_service: XMLImportService
     exchange_service: ExchangeService
     repertoire_exchange_service: RepertoireExchangeService
+    party_exchange_service: PartyExchangeService
     quality_service: QualityDashboardService
     party_service: PartyService
     work_service: WorkService
@@ -293,6 +294,12 @@ class BackgroundAppServiceFactory:
                 rights_service=rights_service,
                 asset_service=asset_service,
                 data_root=self.data_root,
+            ),
+            party_exchange_service=PartyExchangeService(
+                conn,
+                party_service=party_service,
+                settings_mutations=settings_mutations,
+                profile_name=Path(self.db_path).name,
             ),
             quality_service=QualityDashboardService(
                 conn,

@@ -59,6 +59,12 @@ class AppShellWorkspaceDockTests(AppShellTestCase):
     test_party_contract_rights_and_asset_windows_open_as_tabified_docks = (
         AppShellTestCase.case_party_contract_rights_and_asset_windows_open_as_tabified_docks
     )
+    test_party_export_selected_uses_live_selection_when_menu_payload_is_empty = (
+        AppShellTestCase.case_party_export_selected_uses_live_selection_when_menu_payload_is_empty
+    )
+    test_file_menu_party_export_uses_dock_panel_selection_without_panel_attr = (
+        AppShellTestCase.case_file_menu_party_export_uses_dock_panel_selection_without_panel_attr
+    )
     test_contract_template_workspace_opens_as_tabified_dock = (
         AppShellTestCase.case_contract_template_workspace_opens_as_tabified_dock
     )

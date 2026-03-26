@@ -233,9 +233,18 @@ from isrc_manager.media.derivatives import (
     ManagedDerivativeExportRequest,
     ManagedDerivativeExportResult,
 )
-from isrc_manager.parties import PartyPayload, PartyRecord, PartyService
+from isrc_manager.parties import (
+    PartyExchangeService,
+    PartyExchangeInspection,
+    PartyImportOptions,
+    PartyImportReport,
+    PartyPayload,
+    PartyRecord,
+    PartyService,
+)
 from isrc_manager.parties.dialogs import (
     OwnerBootstrapDialog,
+    PartyImportDialog,
     PartyManagerPanel,
 )
 from isrc_manager.paths import (
@@ -5988,6 +5997,7 @@ class App(QMainWindow):
         self.audio_tag_service = None
         self.tagged_audio_export_service = None
         self.exchange_service = None
+        self.party_exchange_service = None
         self.quality_service = None
         self.release_browser_dialog = None
         self._explicit_row_filter_track_ids = None
@@ -8396,6 +8406,16 @@ class App(QMainWindow):
             )
             else None
         )
+        self.party_exchange_service = (
+            PartyExchangeService(
+                self.conn,
+                party_service=self.party_service,
+                settings_mutations=self.settings_mutations,
+                profile_name=self._current_profile_name(),
+            )
+            if self.conn is not None and self.party_service is not None
+            else None
+        )
         self.repertoire_exchange_service = (
             RepertoireExchangeService(
                 self.conn,
@@ -10006,6 +10026,7 @@ class App(QMainWindow):
         self.audio_tag_service = None
         self.tagged_audio_export_service = None
         self.exchange_service = None
+        self.party_exchange_service = None
         self.repertoire_exchange_service = None
         self.quality_service = None
         self._pending_work_track_context = None
@@ -10786,6 +10807,8 @@ class App(QMainWindow):
             party_service_provider=lambda: self.party_service,
             current_owner_party_id_provider=self._current_owner_party_id,
             set_owner_party_handler=self._assign_owner_party,
+            import_party_handler=self.import_party_exchange_file,
+            export_party_handler=self.export_party_exchange_file,
             parent=parent,
         )
 
@@ -14961,6 +14984,342 @@ class App(QMainWindow):
         if self.statusBar() is not None:
             self.statusBar().showMessage("Repertoire import complete.", 5000)
 
+    def _selected_party_manager_ids(self) -> list[int]:
+        seen_panel_ids: set[int] = set()
+        candidate_panels: list[PartyManagerPanel] = []
+
+        def _append_candidate(panel) -> None:
+            if not isinstance(panel, PartyManagerPanel):
+                return
+            panel_id = id(panel)
+            if panel_id in seen_panel_ids:
+                return
+            seen_panel_ids.add(panel_id)
+            candidate_panels.append(panel)
+
+        _append_candidate(getattr(self, "party_manager_panel", None))
+        dialog = getattr(self, "party_manager_dialog", None)
+        _append_candidate(getattr(dialog, "panel", None) if dialog is not None else None)
+        dock = getattr(self, "party_manager_dock", None)
+        _append_candidate(getattr(dock, "widget", lambda: None)() if dock is not None else None)
+
+        for panel in candidate_panels:
+            if not panel.isVisible():
+                continue
+            selected_ids = panel.selected_party_ids()
+            if selected_ids:
+                return selected_ids
+
+        for panel in candidate_panels:
+            selected_ids = panel.selected_party_ids()
+            if selected_ids:
+                return selected_ids
+        return []
+
+    def _show_party_import_report(self, path: str, report: PartyImportReport) -> None:
+        lines = [
+            f"Format: {report.format_name.upper()}",
+            f"Mode: {report.mode}",
+            f"Passed: {report.passed}",
+            f"Failed: {report.failed}",
+            f"Skipped: {report.skipped}",
+        ]
+        if report.mode == "dry_run":
+            lines.extend(
+                [
+                    "",
+                    "No database changes were made because this run used Dry run validation mode.",
+                ]
+            )
+        if report.created_parties:
+            lines.append(f"Created: {len(report.created_parties)}")
+        if report.updated_parties:
+            lines.append(f"Updated: {len(report.updated_parties)}")
+        if report.owner_party_id is not None:
+            lines.append(f"Owner Party: {report.owner_party_id}")
+        if report.duplicates:
+            lines.append(f"Duplicates: {len(report.duplicates)}")
+        if report.unknown_fields:
+            lines.append("Unmapped fields: " + ", ".join(report.unknown_fields[:8]))
+        if report.warnings:
+            lines.append("")
+            lines.append("Warnings:")
+            lines.extend(f"- {warning}" for warning in report.warnings[:12])
+        QMessageBox.information(
+            self,
+            "Import Parties",
+            "\n".join(lines) + f"\n\nSource:\n{path}",
+        )
+
+    def import_party_exchange_file(self, format_name: str):
+        if self.party_exchange_service is None:
+            QMessageBox.warning(self, "Import Parties", "Open a profile first.")
+            return
+        normalized_format = str(format_name or "").strip().lower()
+        filters = {
+            "csv": "CSV Files (*.csv)",
+            "xlsx": "Excel Workbook (*.xlsx)",
+            "json": "JSON Files (*.json)",
+        }
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            f"Import Parties {normalized_format.upper()}",
+            "",
+            filters.get(normalized_format, "All files (*)"),
+        )
+        if not path:
+            return
+
+        def _inspection_worker(bundle, ctx):
+            ctx.set_status(f"Inspecting {normalized_format.upper()} Party source file...")
+            if normalized_format == "csv":
+                return bundle.party_exchange_service.inspect_csv(path)
+            if normalized_format == "xlsx":
+                return bundle.party_exchange_service.inspect_xlsx(path)
+            if normalized_format == "json":
+                return bundle.party_exchange_service.inspect_json(path)
+            raise ValueError(f"Unsupported Party exchange format: {normalized_format}")
+
+        def _inspection_success(inspection: PartyExchangeInspection):
+            def _csv_reinspect(delimiter: str | None) -> PartyExchangeInspection:
+                return self.party_exchange_service.inspect_csv(path, delimiter=delimiter)
+
+            dlg = PartyImportDialog(
+                inspection=inspection,
+                supported_headers=self.party_exchange_service.supported_import_targets(),
+                settings=self.settings,
+                initial_mode="dry_run",
+                csv_reinspect_callback=(_csv_reinspect if normalized_format == "csv" else None),
+                parent=self,
+            )
+            if dlg.exec() != QDialog.Accepted:
+                return
+
+            mapping = dlg.mapping()
+            options: PartyImportOptions = dlg.import_options()
+            selected_csv_delimiter = dlg.resolved_csv_delimiter()
+
+            def _import_worker(bundle, ctx):
+                ctx.set_status(
+                    f"Importing {normalized_format.upper()} Parties into the current profile..."
+                )
+
+                def _mutation():
+                    if normalized_format == "csv":
+                        return bundle.party_exchange_service.import_csv(
+                            path,
+                            mapping=mapping,
+                            options=options,
+                            delimiter=selected_csv_delimiter,
+                        )
+                    if normalized_format == "xlsx":
+                        return bundle.party_exchange_service.import_xlsx(
+                            path,
+                            mapping=mapping,
+                            options=options,
+                        )
+                    return bundle.party_exchange_service.import_json(
+                        path,
+                        mapping=mapping,
+                        options=options,
+                    )
+
+                if options.mode == "dry_run":
+                    return _mutation()
+                return run_snapshot_history_action(
+                    history_manager=bundle.history_manager,
+                    action_label=f"Import Parties {normalized_format.upper()}: {Path(path).name}",
+                    action_type=f"party.import.{normalized_format}",
+                    entity_type="PartyImport",
+                    entity_id=path,
+                    payload={"path": path, "mode": options.mode},
+                    mutation=_mutation,
+                    logger=self.logger,
+                )
+
+            def _import_success(report: PartyImportReport):
+                changed_ids = list(report.created_parties or []) + list(
+                    report.updated_parties or []
+                )
+                if options.mode != "dry_run":
+                    try:
+                        self.conn.commit()
+                    except Exception:
+                        pass
+                    self.populate_all_comboboxes()
+                    self._refresh_party_manager_panel()
+                    self._refresh_catalog_workspace_docks()
+                    self._refresh_history_actions()
+                    if changed_ids:
+                        focus_party_id = int(changed_ids[0])
+                        panel = getattr(self, "party_manager_panel", None)
+                        if isinstance(panel, PartyManagerPanel):
+                            panel.focus_party(focus_party_id)
+                self._log_event(
+                    f"party.import.{normalized_format}",
+                    f"Imported {normalized_format.upper()} Party data",
+                    path=path,
+                    mode=options.mode,
+                    passed=report.passed,
+                    failed=report.failed,
+                    skipped=report.skipped,
+                    created=len(report.created_parties),
+                    updated=len(report.updated_parties),
+                    owner_party_id=report.owner_party_id,
+                    warnings=report.warnings,
+                    duplicates=report.duplicates,
+                    unknown_fields=report.unknown_fields,
+                )
+                self._audit(
+                    "IMPORT",
+                    "Parties",
+                    ref_id=path,
+                    details=(
+                        f"format={normalized_format}; mode={options.mode}; passed={report.passed}; "
+                        f"failed={report.failed}; skipped={report.skipped}; "
+                        f"created={len(report.created_parties)}; updated={len(report.updated_parties)}"
+                    ),
+                )
+                self._audit_commit()
+                self._show_party_import_report(path, report)
+
+            self._submit_background_bundle_task(
+                title=f"Import Parties {normalized_format.upper()}",
+                description=f"Importing {normalized_format.upper()} Party data into the current profile...",
+                task_fn=_import_worker,
+                kind=("read" if options.mode == "dry_run" else "write"),
+                unique_key=f"party.import.{normalized_format}",
+                on_success=_import_success,
+                on_error=lambda failure: self._show_background_task_error(
+                    "Import Parties",
+                    failure,
+                    user_message="Could not complete the Party import:",
+                ),
+            )
+
+        self._submit_background_bundle_task(
+            title=f"Inspect Parties {normalized_format.upper()}",
+            description=f"Inspecting the selected {normalized_format.upper()} Party source...",
+            task_fn=_inspection_worker,
+            kind="read",
+            unique_key=f"party.inspect.{normalized_format}",
+            on_success=_inspection_success,
+            on_error=lambda failure: self._show_background_task_error(
+                "Import Parties",
+                failure,
+                user_message="Could not inspect the selected Party file:",
+            ),
+        )
+
+    def export_party_exchange_file(
+        self,
+        format_name: str,
+        selected_only: bool,
+        *,
+        party_ids: list[int] | None = None,
+    ):
+        if self.party_exchange_service is None:
+            QMessageBox.warning(self, "Export Parties", "Open a profile first.")
+            return
+        normalized_format = str(format_name or "").strip().lower()
+        selected_party_ids = [int(party_id) for party_id in (party_ids or [])]
+        if selected_only and not selected_party_ids:
+            selected_party_ids = self._selected_party_manager_ids()
+        if selected_only and not selected_party_ids:
+            QMessageBox.information(
+                self,
+                "Export Parties",
+                "Select one or more Party rows in Party Manager first.",
+            )
+            return
+
+        extension_map = {
+            "csv": ("CSV Files (*.csv)", ".csv"),
+            "xlsx": ("Excel Workbooks (*.xlsx)", ".xlsx"),
+            "json": ("JSON Files (*.json)", ".json"),
+        }
+        file_filter, suffix = extension_map.get(normalized_format, ("All files (*)", ""))
+        default_name = (
+            f"{'selected_parties' if selected_only else 'party_catalog'}_"
+            f"{normalized_format}_{datetime.now().strftime('%Y%m%d_%H%M%S')}{suffix}"
+        )
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            f"Export Parties {normalized_format.upper()}",
+            str(self.exports_dir / default_name),
+            file_filter,
+        )
+        if not path:
+            return
+
+        export_ids = list(selected_party_ids) if selected_only else None
+
+        def _worker(bundle, ctx):
+            ctx.set_status(f"Exporting {normalized_format.upper()} Party data...")
+
+            def _mutation():
+                if normalized_format == "csv":
+                    return bundle.party_exchange_service.export_csv(path, export_ids)
+                if normalized_format == "xlsx":
+                    return bundle.party_exchange_service.export_xlsx(path, export_ids)
+                if normalized_format == "json":
+                    return bundle.party_exchange_service.export_json(path, export_ids)
+                raise ValueError(f"Unsupported Party exchange format: {normalized_format}")
+
+            return run_file_history_action(
+                history_manager=bundle.history_manager,
+                action_label=lambda count: f"Export Parties {normalized_format.upper()}: {count} rows",
+                action_type=f"file.party_export_{normalized_format}",
+                target_path=path,
+                mutation=_mutation,
+                entity_type="PartyExport",
+                entity_id=path,
+                payload=lambda count: {
+                    "path": path,
+                    "format": normalized_format,
+                    "selected_only": bool(selected_only),
+                    "count": count,
+                },
+                logger=self.logger,
+            )
+
+        def _success(exported_count: int):
+            self._refresh_history_actions()
+            self._log_event(
+                f"party.export.{normalized_format}",
+                f"Exported {normalized_format.upper()} Party data",
+                path=path,
+                exported=exported_count,
+                selected_only=selected_only,
+                selected_party_count=len(selected_party_ids) if selected_only else None,
+            )
+            self._audit(
+                "EXPORT",
+                "Parties",
+                ref_id=path,
+                details=f"format={normalized_format}; count={exported_count}; selected_only={int(bool(selected_only))}",
+            )
+            self._audit_commit()
+            QMessageBox.information(
+                self,
+                "Export Parties",
+                f"Exported {exported_count} Part{'ies' if exported_count != 1 else 'y'} to:\n{path}",
+            )
+
+        self._submit_background_bundle_task(
+            title=f"Export Parties {normalized_format.upper()}",
+            description=f"Exporting {normalized_format.upper()} Party data...",
+            task_fn=_worker,
+            kind="read",
+            unique_key=f"party.export.{normalized_format}",
+            on_success=_success,
+            on_error=lambda failure: self._show_background_task_error(
+                "Export Parties",
+                failure,
+                user_message="Could not export the selected Party data:",
+            ),
+        )
+
     def open_release_editor(
         self,
         release_id: int | None = None,
@@ -15166,6 +15525,20 @@ class App(QMainWindow):
             refresh_scope = getattr(panel, "refresh_selection_scope", None)
             if callable(refresh_scope):
                 refresh_scope()
+
+    def _refresh_party_manager_panel(self) -> None:
+        seen_panel_ids: set[int] = set()
+        for attr in ("party_manager_panel", "party_manager_dialog"):
+            panel = getattr(self, attr, None)
+            if panel is None or not panel.isVisible():
+                continue
+            panel_id = id(panel)
+            if panel_id in seen_panel_ids:
+                continue
+            seen_panel_ids.add(panel_id)
+            refresh = getattr(panel, "refresh", None)
+            if callable(refresh):
+                refresh()
 
     def _work_manager_task_owner(self) -> QWidget:
         for attr in ("work_manager_panel", "work_browser_dialog"):

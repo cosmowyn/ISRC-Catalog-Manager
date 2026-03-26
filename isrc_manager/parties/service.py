@@ -1018,5 +1018,19 @@ class PartyService:
             raise ValueError("Merged party could not be loaded.")
         return merged
 
-    def export_rows(self) -> list[dict[str, object]]:
-        return [record.to_dict() for record in self.list_parties()]
+    def export_rows(self, party_ids: list[int] | None = None) -> list[dict[str, object]]:
+        if party_ids is None:
+            records = self.list_parties()
+            return [record.to_dict() for record in records]
+        normalized_ids = [int(party_id) for party_id in party_ids]
+        if not normalized_ids:
+            return []
+        placeholders = ",".join("?" for _ in normalized_ids)
+        records = self._select_party_rows(
+            where_sql=(
+                f"WHERE id IN ({placeholders}) "
+                "ORDER BY COALESCE(display_name, artist_name, company_name, legal_name), legal_name, id"
+            ),
+            params=[int(party_id) for party_id in normalized_ids],
+        )
+        return [record.to_dict() for record in records]

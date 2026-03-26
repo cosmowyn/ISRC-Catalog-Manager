@@ -839,10 +839,12 @@ class AppShellTestCase(unittest.TestCase):
             list(import_snapshot.get("texts") or []),
             [
                 "Catalog Exchange",
+                "Parties",
                 "Contracts and Rights",
             ],
         )
         import_exchange_menu = self._menu_snapshot_at_path(import_snapshot, "Catalog Exchange")
+        parties_menu = self._menu_snapshot_at_path(import_snapshot, "Parties")
         contracts_menu = self._menu_snapshot_at_path(import_snapshot, "Contracts and Rights")
         self.assertEqual(
             list(import_exchange_menu.get("texts") or []),
@@ -853,6 +855,14 @@ class AppShellTestCase(unittest.TestCase):
                 "Import JSON…",
                 "Import ZIP Package…",
                 "Reset Saved Import Choices…",
+            ],
+        )
+        self.assertEqual(
+            list(parties_menu.get("texts") or []),
+            [
+                "Import Parties CSV…",
+                "Import Parties XLSX…",
+                "Import Parties JSON…",
             ],
         )
         self.assertEqual(
@@ -871,16 +881,31 @@ class AppShellTestCase(unittest.TestCase):
         with mock.patch.object(
             app_module.QFileDialog,
             "getOpenFileName",
-            return_value=("", ""),
+            side_effect=[("", ""), ("", "")],
         ) as get_open_file_name:
             self.window.import_xml_action.trigger()
+            self.window.import_party_json_action.trigger()
             self.app.processEvents()
 
-        get_open_file_name.assert_called_once_with(
-            self.window,
-            "Import XML",
-            "",
-            "XML Files (*.xml)",
+        first_call = get_open_file_name.mock_calls[0]
+        self.assertEqual(
+            first_call,
+            mock.call(
+                self.window,
+                "Import XML",
+                "",
+                "XML Files (*.xml)",
+            ),
+        )
+        second_call = get_open_file_name.mock_calls[1]
+        self.assertEqual(
+            second_call,
+            mock.call(
+                self.window,
+                "Import Parties JSON",
+                "",
+                "JSON Files (*.json)",
+            ),
         )
 
     def case_file_menu_groups_exchange_exports_and_saved_import_reset(self):
@@ -901,6 +926,7 @@ class AppShellTestCase(unittest.TestCase):
             export_texts,
             [
                 "Catalog Exchange",
+                "Parties",
                 "Contracts and Rights",
             ],
         )
@@ -917,6 +943,26 @@ class AppShellTestCase(unittest.TestCase):
         self.assertIn("Export Selected Exchange CSV…", exchange_texts)
         self.assertIn("Export Full Exchange XML…", exchange_texts)
         self.assertIn("Export Full Exchange ZIP Package…", exchange_texts)
+
+        parties_action = next(
+            action
+            for action in export_menu.actions()
+            if action.menu() is not None and action.text() == "Parties"
+        )
+        parties_menu = parties_action.menu()
+        assert parties_menu is not None
+        parties_texts = [action.text() for action in parties_menu.actions() if action.text()]
+        self.assertEqual(
+            parties_texts,
+            [
+                "Export Selected Parties CSV…",
+                "Export Selected Parties XLSX…",
+                "Export Selected Parties JSON…",
+                "Export Full Party Catalog CSV…",
+                "Export Full Party Catalog XLSX…",
+                "Export Full Party Catalog JSON…",
+            ],
+        )
 
         contracts_action = next(
             action
@@ -3212,6 +3258,83 @@ class AppShellTestCase(unittest.TestCase):
         self.assertIn(self.window.contract_manager_dock, tabified)
         self.assertIn(self.window.rights_matrix_dock, tabified)
         self.assertIn(self.window.asset_registry_dock, tabified)
+
+    def case_party_export_selected_uses_live_selection_when_menu_payload_is_empty(self):
+        party_id = self.window.party_service.create_party(
+            PartyPayload(
+                legal_name="Selected Export Party",
+                display_name="Selected Export Party",
+                party_type="person",
+            )
+        )
+        self.window.conn.commit()
+
+        self.window.open_party_manager(party_id)
+        self.app.processEvents()
+        party_panel = self._assert_tabified_workspace_dock(
+            self.window.party_manager_dock,
+            dock_name="partyManagerDock",
+            panel_name="partyManagerPanel",
+        )
+        self.assertEqual(party_panel.selected_party_ids(), [party_id])
+
+        export_path = self.root / "selected-party-export.csv"
+        with (
+            mock.patch.object(
+                app_module.QFileDialog,
+                "getSaveFileName",
+                return_value=(str(export_path), "CSV Files (*.csv)"),
+            ) as get_save_file_name,
+            mock.patch.object(self.window, "_submit_background_bundle_task") as submit_task,
+            mock.patch.object(app_module.QMessageBox, "information") as information_mock,
+        ):
+            party_panel.export_selected_button.menu().actions()[0].trigger()
+            self.app.processEvents()
+
+        get_save_file_name.assert_called_once()
+        submit_task.assert_called_once()
+        information_mock.assert_not_called()
+        self.assertEqual(submit_task.call_args.kwargs["title"], "Export Parties CSV")
+
+    def case_file_menu_party_export_uses_dock_panel_selection_without_panel_attr(self):
+        party_id = self.window.party_service.create_party(
+            PartyPayload(
+                legal_name="File Menu Export Party",
+                display_name="File Menu Export Party",
+                party_type="person",
+            )
+        )
+        self.window.conn.commit()
+
+        self.window.open_party_manager(party_id)
+        self.app.processEvents()
+        party_panel = self._assert_tabified_workspace_dock(
+            self.window.party_manager_dock,
+            dock_name="partyManagerDock",
+            panel_name="partyManagerPanel",
+        )
+        self.assertEqual(party_panel.selected_party_ids(), [party_id])
+
+        self.window.party_manager_panel = None
+        self.window.party_manager_dialog = None
+
+        export_path = self.root / "file-menu-selected-party-export.csv"
+        with (
+            mock.patch.object(
+                app_module.QFileDialog,
+                "getSaveFileName",
+                return_value=(str(export_path), "CSV Files (*.csv)"),
+            ) as get_save_file_name,
+            mock.patch.object(self.window, "_submit_background_bundle_task") as submit_task,
+            mock.patch.object(app_module.QMessageBox, "information") as information_mock,
+        ):
+            self.window.export_selected_parties_csv_action.trigger()
+            self.app.processEvents()
+
+        get_save_file_name.assert_called_once()
+        submit_task.assert_called_once()
+        information_mock.assert_not_called()
+        self.assertEqual(submit_task.call_args.kwargs["title"], "Export Parties CSV")
 
     def case_contract_template_workspace_opens_as_tabified_dock(self):
         self.window.open_contract_template_workspace()

@@ -173,6 +173,23 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     )
     import_exchange_menu.addAction(app.reset_saved_import_choices_action)
 
+    party_import_menu = import_menu.addMenu("Parties")
+    app.import_party_csv_action = app._create_action(
+        "Import Parties CSV…",
+        slot=lambda: app.import_party_exchange_file("csv"),
+    )
+    party_import_menu.addAction(app.import_party_csv_action)
+    app.import_party_xlsx_action = app._create_action(
+        "Import Parties XLSX…",
+        slot=lambda: app.import_party_exchange_file("xlsx"),
+    )
+    party_import_menu.addAction(app.import_party_xlsx_action)
+    app.import_party_json_action = app._create_action(
+        "Import Parties JSON…",
+        slot=lambda: app.import_party_exchange_file("json"),
+    )
+    party_import_menu.addAction(app.import_party_json_action)
+
     repertoire_import_menu = import_menu.addMenu("Contracts and Rights")
     app.import_repertoire_json_action = app._create_action(
         "Import Contracts and Rights JSON…",
@@ -250,6 +267,39 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         slot=lambda: app.export_exchange_file("package", selected_only=False),
     )
     exchange_export_menu.addAction(app.export_all_package_action)
+
+    party_export_menu = export_submenu.addMenu("Parties")
+    app.export_selected_parties_csv_action = app._create_action(
+        "Export Selected Parties CSV…",
+        slot=lambda: app.export_party_exchange_file("csv", True),
+    )
+    party_export_menu.addAction(app.export_selected_parties_csv_action)
+    app.export_selected_parties_xlsx_action = app._create_action(
+        "Export Selected Parties XLSX…",
+        slot=lambda: app.export_party_exchange_file("xlsx", True),
+    )
+    party_export_menu.addAction(app.export_selected_parties_xlsx_action)
+    app.export_selected_parties_json_action = app._create_action(
+        "Export Selected Parties JSON…",
+        slot=lambda: app.export_party_exchange_file("json", True),
+    )
+    party_export_menu.addAction(app.export_selected_parties_json_action)
+    party_export_menu.addSeparator()
+    app.export_all_parties_csv_action = app._create_action(
+        "Export Full Party Catalog CSV…",
+        slot=lambda: app.export_party_exchange_file("csv", False),
+    )
+    party_export_menu.addAction(app.export_all_parties_csv_action)
+    app.export_all_parties_xlsx_action = app._create_action(
+        "Export Full Party Catalog XLSX…",
+        slot=lambda: app.export_party_exchange_file("xlsx", False),
+    )
+    party_export_menu.addAction(app.export_all_parties_xlsx_action)
+    app.export_all_parties_json_action = app._create_action(
+        "Export Full Party Catalog JSON…",
+        slot=lambda: app.export_party_exchange_file("json", False),
+    )
+    party_export_menu.addAction(app.export_all_parties_json_action)
 
     repertoire_export_menu = export_submenu.addMenu("Contracts and Rights")
     app.export_repertoire_json_action = app._create_action(
