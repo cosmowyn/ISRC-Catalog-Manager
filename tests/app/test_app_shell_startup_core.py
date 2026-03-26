@@ -11,6 +11,12 @@ class AppShellStartupCoreTests(AppShellTestCase):
     test_startup_splash_waits_for_catalog_refresh_completion = (
         AppShellTestCase.case_startup_splash_waits_for_catalog_refresh_completion
     )
+    test_startup_prepares_database_before_live_open = (
+        AppShellTestCase.case_startup_prepares_database_before_live_open
+    )
+    test_audio_conversion_format_prompt_uses_export_button_label = (
+        AppShellTestCase.case_audio_conversion_format_prompt_uses_export_button_label
+    )
     test_startup_first_launch_prompt_can_open_settings_and_clears_pending_flag = (
         AppShellTestCase.case_startup_first_launch_prompt_can_open_settings_and_clears_pending_flag
     )
@@ -49,6 +55,9 @@ class AppShellStartupCoreTests(AppShellTestCase):
     )
     test_track_editor_save_succeeds_without_album_propagation = (
         AppShellTestCase.case_track_editor_save_succeeds_without_album_propagation
+    )
+    test_prepared_database_open_skips_schema_work = (
+        AppShellTestCase.case_prepared_database_open_skips_schema_work
     )
 
 

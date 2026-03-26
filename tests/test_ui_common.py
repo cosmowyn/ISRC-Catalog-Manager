@@ -27,6 +27,7 @@ else:
 from isrc_manager.ui_common import (
     DatePickerDialog,
     TwoDigitSpinBox,
+    _abbreviate_middle_text,
     _apply_compact_dialog_control_heights,
     _apply_dialog_width_constraints,
     _apply_standard_dialog_chrome,
@@ -203,6 +204,18 @@ class UICommonTests(unittest.TestCase):
             self.assertLessEqual(dialog.width(), 480)
         finally:
             dialog.close()
+
+    def test_abbreviate_middle_text_preserves_short_values_and_compacts_long_values(self):
+        short_value = "Short export title"
+        long_value = (
+            "This is a deliberately long export filename that should keep the most useful edges"
+        )
+
+        self.assertEqual(_abbreviate_middle_text(short_value), short_value)
+        self.assertEqual(
+            _abbreviate_middle_text(long_value),
+            "This is a deliberate...eep the most useful edges",
+        )
 
 
 if __name__ == "__main__":

@@ -8,6 +8,9 @@ class AppShellProfileAndSelectionTests(AppShellTestCase):
     test_profile_switch_loading_feedback_waits_for_catalog_refresh_completion = (
         AppShellTestCase.case_profile_switch_loading_feedback_waits_for_catalog_refresh_completion
     )
+    test_profile_switch_reuses_prepared_database_activation_path = (
+        AppShellTestCase.case_profile_switch_reuses_prepared_database_activation_path
+    )
     test_cancelled_profile_creation_and_restore_leave_shell_idle = (
         AppShellTestCase.case_cancelled_profile_creation_and_restore_leave_shell_idle
     )

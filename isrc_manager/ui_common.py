@@ -31,6 +31,10 @@ from PySide6.QtWidgets import (
 
 from isrc_manager.help_content import help_topic_title
 
+_MIDDLE_ABBREVIATION_PREFIX_LENGTH = 20
+_MIDDLE_ABBREVIATION_SUFFIX_LENGTH = 25
+_MIDDLE_ABBREVIATION_THRESHOLD = 60
+
 
 def _find_theme_owner(widget: QWidget | None):
     current = widget
@@ -297,6 +301,22 @@ def _apply_dialog_width_constraints(
     dialog.resize(width, int(hint.height()))
 
 
+def _abbreviate_middle_text(
+    value: str | object,
+    *,
+    threshold: int = _MIDDLE_ABBREVIATION_THRESHOLD,
+    prefix_length: int = _MIDDLE_ABBREVIATION_PREFIX_LENGTH,
+    suffix_length: int = _MIDDLE_ABBREVIATION_SUFFIX_LENGTH,
+) -> str:
+    text = str(value or "")
+    if not text:
+        return ""
+    minimum_abbreviated_length = int(prefix_length) + int(suffix_length) + 3
+    if len(text) <= max(int(threshold), minimum_abbreviated_length):
+        return text
+    return f"{text[: int(prefix_length)]}...{text[-int(suffix_length) :]}"
+
+
 def _prompt_compact_choice_dialog(
     parent: QWidget | None,
     *,
@@ -305,8 +325,8 @@ def _prompt_compact_choice_dialog(
     choices: list[tuple[str, str]],
     object_name: str = "compactChoiceDialog",
     ok_text: str = "Continue",
-    min_width: int = 360,
-    max_width: int = 480,
+    min_width: int = 320,
+    max_width: int = 420,
 ) -> str | None:
     if not choices:
         return None
@@ -324,16 +344,19 @@ def _prompt_compact_choice_dialog(
     root.addWidget(prompt_label)
 
     combo = QComboBox(dialog)
-    combo.setMinimumWidth(240)
-    combo.setMaximumWidth(360)
+    combo.setMinimumWidth(0)
+    combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
     for value, label in choices:
         combo.addItem(str(label), str(value))
-    root.addWidget(combo, 0, Qt.AlignLeft)
+    root.addWidget(combo)
 
     buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, Qt.Horizontal, dialog)
     ok_button = buttons.button(QDialogButtonBox.Ok)
     if ok_button is not None:
         ok_button.setText(str(ok_text or "Continue"))
+        ok_button.setAutoDefault(True)
+        ok_button.setDefault(True)
+    buttons.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
     buttons.accepted.connect(dialog.accept)
     buttons.rejected.connect(dialog.reject)
     root.addWidget(buttons)

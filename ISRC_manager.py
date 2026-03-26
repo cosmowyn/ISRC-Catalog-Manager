@@ -6451,7 +6451,12 @@ class App(QMainWindow):
         self._pending_work_track_context: dict[str, object] | None = None
         self._background_write_lock = None
         self._report_startup_phase(StartupPhase.OPENING_PROFILE_DB)
-        self.open_database(last_db)
+        startup_db_prepared = self._prepare_database_for_open_blocking(
+            last_db,
+            title="Open Profile",
+            description="Preparing profile database...",
+        )
+        self.open_database(last_db, schema_prepared=startup_db_prepared)
 
         try:
             movable = self.settings.value(
@@ -10618,7 +10623,85 @@ class App(QMainWindow):
     # -------------------------------------------------------------------------
     # DB: open/init helpers + MIGRATIONS
     # -------------------------------------------------------------------------
-    def open_database(self, path: str):
+    @staticmethod
+    def _background_schema_audit_callback(conn):
+        def _audit(action: str, entity: str, ref_id, details) -> None:
+            try:
+                conn.execute(
+                    "INSERT INTO AuditLog (user, action, entity, ref_id, details) VALUES (?, ?, ?, ?, ?)",
+                    (
+                        None,
+                        action,
+                        entity,
+                        str(ref_id) if ref_id is not None else None,
+                        details,
+                    ),
+                )
+            except Exception:
+                pass
+
+        return _audit
+
+    def _prepare_database_session(self, path: str) -> str:
+        target_path = str(Path(path))
+        session = self.database_session.open(target_path)
+        try:
+            schema_service = DatabaseSchemaService(
+                session.conn,
+                logger=self.logger,
+                audit_callback=self._background_schema_audit_callback(session.conn),
+                audit_commit=session.conn.commit,
+                data_root=self.data_root,
+            )
+            schema_service.init_db()
+            schema_service.migrate_schema()
+            return target_path
+        finally:
+            self.database_session.close(session.conn)
+
+    def _prepare_database_for_open_blocking(
+        self,
+        path: str,
+        *,
+        title: str,
+        description: str,
+    ) -> bool:
+        target_path = str(Path(path))
+        prepared: dict[str, str] = {}
+        failure: dict[str, TaskFailure] = {}
+        loop = QEventLoop(self)
+
+        def _quit_loop() -> None:
+            if loop.isRunning():
+                loop.quit()
+
+        self._report_startup_phase(StartupPhase.PREPARING_DATABASE)
+        task_id = self._prepare_profile_database_background(
+            target_path,
+            title=title,
+            description=description,
+            show_dialog=False,
+            on_success=lambda prepared_path: prepared.setdefault("path", str(prepared_path)),
+            on_error=lambda task_failure: failure.setdefault("value", task_failure),
+            on_finished=_quit_loop,
+        )
+        if task_id is None:
+            return False
+        if "path" not in prepared and "value" not in failure:
+            loop.exec()
+        task_failure = failure.get("value")
+        if task_failure is not None:
+            self.logger.warning(
+                "Background database preparation failed for %s: %s",
+                target_path,
+                task_failure.message,
+            )
+            if task_failure.traceback_text:
+                self.logger.debug(task_failure.traceback_text)
+            return False
+        return str(prepared.get("path") or "").strip() == target_path
+
+    def open_database(self, path: str, *, schema_prepared: bool = False):
         """Open (or create) the SQLite DB at path; initialize schema if needed."""
         self._close_database_connection()
         session = self.database_session.open(path)
@@ -10644,22 +10727,23 @@ class App(QMainWindow):
         self.logger.info("Settings synced to disk")
 
         # Create base tables/indices if missing
-        self._report_startup_phase(StartupPhase.PREPARING_DATABASE)
-        self.init_db()
+        if not schema_prepared:
+            self._report_startup_phase(StartupPhase.PREPARING_DATABASE)
+            self.init_db()
 
-        # Run schema migrations and then refresh caches that depend on schema
-        try:
-            self.migrate_schema()
-        except Exception as e:
-            self.logger.exception(f"Schema migration failed: {e}")
-            self._run_startup_message_box(
-                title="Migration Error",
-                icon=QMessageBox.Critical,
-                text=f"Database migration failed:\n{e}",
-            )
-            # keep going; DB might still be usable
-        if self.history_manager is not None:
-            self.history_manager._ensure_history_invariants()
+            # Run schema migrations and then refresh caches that depend on schema
+            try:
+                self.migrate_schema()
+            except Exception as e:
+                self.logger.exception(f"Schema migration failed: {e}")
+                self._run_startup_message_box(
+                    title="Migration Error",
+                    icon=QMessageBox.Critical,
+                    text=f"Database migration failed:\n{e}",
+                )
+                # keep going; DB might still be usable
+            if self.history_manager is not None:
+                self.history_manager._ensure_history_invariants()
 
         self.blob_icon_settings = self._load_blob_icon_settings()
         self.active_custom_fields = self.load_active_custom_fields()
@@ -12088,18 +12172,7 @@ class App(QMainWindow):
 
         def _worker(ctx):
             ctx.set_status(description)
-            session = self.database_session.open(target_path)
-            try:
-                schema_service = DatabaseSchemaService(
-                    session.conn,
-                    logger=self.logger,
-                    data_root=self.data_root,
-                )
-                schema_service.init_db()
-                schema_service.migrate_schema()
-                return target_path
-            finally:
-                self.database_session.close(session.conn)
+            return self._prepare_database_session(target_path)
 
         def _handle_error(failure: TaskFailure) -> None:
             if on_error is not None:
@@ -12171,12 +12244,12 @@ class App(QMainWindow):
                 return
             self._set_loading_feedback_phase(
                 loading_feedback,
-                StartupPhase.PREPARING_DATABASE,
+                StartupPhase.LOADING_SERVICES,
                 "Opening selected profile database...",
             )
             if loading_feedback is not None:
                 self._drain_qt_events()
-            self.open_database(prepared_path)
+            self.open_database(prepared_path, schema_prepared=True)
             with self._suspend_table_layout_history():
                 try:
                     self.active_custom_fields = self.load_active_custom_fields()
@@ -16482,7 +16555,7 @@ class App(QMainWindow):
             title=title,
             prompt=prompt,
             choices=[(profile.id, profile.label) for profile in profiles],
-            ok_text="Choose Format",
+            ok_text="Export",
         )
 
     def _selected_track_ids_with_audio(self, track_ids: list[int] | None = None) -> list[int]:

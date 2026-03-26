@@ -592,8 +592,8 @@ class AppShellTestCase(unittest.TestCase):
                 StartupPhase.RESOLVING_STORAGE,
                 StartupPhase.INITIALIZING_SETTINGS,
                 StartupPhase.OPENING_PROFILE_DB,
-                StartupPhase.LOADING_SERVICES,
                 StartupPhase.PREPARING_DATABASE,
+                StartupPhase.LOADING_SERVICES,
                 StartupPhase.FINALIZING_INTERFACE,
             ],
         )
@@ -642,6 +642,67 @@ class AppShellTestCase(unittest.TestCase):
 
         self.assertEqual(splash.phase_updates[-1][0], StartupPhase.READY)
         self.assertEqual(splash.finish_calls, [self.window])
+
+    def case_startup_prepares_database_before_live_open(self):
+        self._close_window()
+        splash = _FakeStartupSplashController()
+        splash.show()
+        open_calls: list[bool] = []
+        original_open_database = app_module.App.open_database
+
+        def _spy_open_database(window, path, *args, **kwargs):
+            del args
+            open_calls.append(bool(kwargs.get("schema_prepared")))
+            return original_open_database(window, path, **kwargs)
+
+        with (
+            mock.patch.object(
+                app_module.App,
+                "_prepare_database_for_open_blocking",
+                return_value=True,
+            ),
+            mock.patch.object(
+                app_module.App,
+                "open_database",
+                autospec=True,
+                side_effect=_spy_open_database,
+            ),
+        ):
+            self.window = app_module.App(startup_feedback=splash)
+            self.window.show()
+            self._drain_events()
+
+        self.assertEqual(open_calls, [True])
+
+    def case_audio_conversion_format_prompt_uses_export_button_label(self):
+        fake_capabilities = SimpleNamespace(
+            managed_targets=(SimpleNamespace(id="wav", label="WAV"),),
+            managed_forensic_targets=(),
+            managed_lossy_targets=(SimpleNamespace(id="mp3", label="MP3"),),
+            external_targets=(),
+        )
+        captured = {}
+
+        with (
+            mock.patch.object(
+                self.window.audio_conversion_service,
+                "capabilities",
+                return_value=fake_capabilities,
+            ),
+            mock.patch.object(
+                app_module,
+                "_prompt_compact_choice_dialog",
+                side_effect=lambda *args, **kwargs: captured.update(kwargs) or "mp3",
+            ),
+        ):
+            selected = self.window._prompt_audio_conversion_format(
+                title="Export Audio Derivatives",
+                prompt="Choose a managed derivative output format.",
+                capability_group="managed_any",
+            )
+
+        self.assertEqual(selected, "mp3")
+        self.assertEqual(captured.get("ok_text"), "Export")
 
     def case_startup_first_launch_prompt_can_open_settings_and_clears_pending_flag(self):
         self._close_window()
@@ -1439,6 +1500,81 @@ class AppShellTestCase(unittest.TestCase):
 
         self.assertEqual(activated, [str(target_path)])
         self.assertEqual(feedback.finish_calls, [self.window])
+
+    def case_profile_switch_reuses_prepared_database_activation_path(self):
+        target_path = self.root / "prepared-profile.db"
+        self._create_profile_database(target_path)
+        feedback = _FakeStartupSplashController()
+        open_calls: list[bool] = []
+        original_open_database = app_module.App.open_database
+
+        def _create_feedback():
+            feedback.show()
+            return feedback
+
+        def _prepare_now(
+            _window,
+            path,
+            *,
+            on_success,
+            on_finished=None,
+            **kwargs,
+        ):
+            del kwargs
+            on_success(str(Path(path)))
+            if callable(on_finished):
+                on_finished()
+            return "prepared-profile"
+
+        def _spy_open_database(window, path, *args, **kwargs):
+            del args
+            open_calls.append(bool(kwargs.get("schema_prepared")))
+            return original_open_database(window, path, **kwargs)
+
+        with (
+            mock.patch.object(
+                self.window,
+                "_create_runtime_loading_feedback",
+                side_effect=_create_feedback,
+            ),
+            mock.patch.object(
+                app_module.App,
+                "_prepare_profile_database_background",
+                autospec=True,
+                side_effect=_prepare_now,
+            ),
+            mock.patch.object(
+                app_module.App,
+                "_refresh_catalog_ui_in_background",
+                autospec=True,
+                side_effect=_no_catalog_background_refresh,
+            ),
+            mock.patch.object(
+                app_module.App,
+                "open_database",
+                autospec=True,
+                side_effect=_spy_open_database,
+            ),
+        ):
+            self.window._activate_profile_in_background(str(target_path))
+            self._drain_events()
+
+        self.assertEqual(open_calls, [True])
+        self.assertEqual(self.window.current_db_path, str(target_path))
+
+    def case_prepared_database_open_skips_schema_work(self):
+        target_path = self.root / "prepared-open.db"
+        self._create_profile_database(target_path)
+
+        with (
+            mock.patch.object(self.window, "init_db", autospec=True) as init_db,
+            mock.patch.object(self.window, "migrate_schema", autospec=True) as migrate_schema,
+        ):
+            self.window.open_database(str(target_path), schema_prepared=True)
+
+        init_db.assert_not_called()
+        migrate_schema.assert_not_called()
+        self.assertEqual(self.window.current_db_path, str(target_path))
 
     def case_cancelled_profile_creation_and_restore_leave_shell_idle(self):
         initial_path = self.window.current_db_path

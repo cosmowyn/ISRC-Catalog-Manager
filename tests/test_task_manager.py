@@ -15,7 +15,7 @@ except ImportError as exc:  # pragma: no cover - environment-specific fallback
 else:
     QT_IMPORT_ERROR = None
 
-from isrc_manager.tasks.manager import BackgroundTaskManager
+from isrc_manager.tasks.manager import BackgroundTaskManager, _format_progress_dialog_message
 from tests.qt_test_helpers import pump_events, wait_for
 
 
@@ -218,9 +218,12 @@ class BackgroundTaskManagerTests(unittest.TestCase):
         )
         pump_events(app=self.app)
 
-        self.assertEqual(dialog.minimumWidth(), dialog.maximumWidth())
-        self.assertGreaterEqual(dialog.width(), 520)
-        self.assertLessEqual(dialog.width(), 680)
+        self.assertEqual(dialog.minimumWidth(), 360)
+        self.assertEqual(dialog.maximumWidth(), 480)
+        self.assertGreaterEqual(dialog.width(), 360)
+        self.assertLessEqual(dialog.width(), 480)
+        self.assertGreaterEqual(dialog.height(), 118)
+        self.assertLessEqual(dialog.height(), 220)
 
         labels = dialog.findChildren(QLabel)
         self.assertTrue(labels)
@@ -233,7 +236,7 @@ class BackgroundTaskManagerTests(unittest.TestCase):
 
         buttons = dialog.findChildren(QPushButton)
         self.assertTrue(buttons)
-        self.assertTrue(all(button.maximumWidth() <= 148 for button in buttons))
+        self.assertTrue(all(button.maximumWidth() <= 110 for button in buttons))
         self.assertTrue(all(dialog.rect().contains(button.geometry()) for button in buttons))
 
         release.set()
@@ -246,6 +249,7 @@ class BackgroundTaskManagerTests(unittest.TestCase):
         finished = threading.Event()
         allow_second_update = threading.Event()
         second_update_emitted = threading.Event()
+        allow_finish = threading.Event()
 
         def _long_running(ctx):
             ctx.report_progress(
@@ -264,6 +268,8 @@ class BackgroundTaskManagerTests(unittest.TestCase):
                 ),
             )
             second_update_emitted.set()
+            while not allow_finish.is_set():
+                time.sleep(0.01)
             return "done"
 
         task_id = self.manager.submit(
@@ -287,7 +293,7 @@ class BackgroundTaskManagerTests(unittest.TestCase):
         pump_events(app=self.app)
 
         first_width = dialog.width()
-        buttons = dialog.findChildren(QPushButton)
+        buttons = [button for button in dialog.findChildren(QPushButton) if not button.isHidden()]
         self.assertTrue(buttons)
         self.assertTrue(all(button.isVisible() for button in buttons))
         self.assertTrue(all(dialog.rect().contains(button.geometry()) for button in buttons))
@@ -303,9 +309,72 @@ class BackgroundTaskManagerTests(unittest.TestCase):
         self.assertTrue(all(button.isVisible() for button in buttons))
         self.assertTrue(all(dialog.rect().contains(button.geometry()) for button in buttons))
 
+        allow_finish.set()
         self._wait_for_task_completion(
             lambda: finished.is_set(),
             description="stable progress dialog completion",
+        )
+
+    def test_progress_dialog_message_format_abbreviates_only_long_dynamic_suffixes(self):
+        short_message = "Converting 1 of 1: Short Title"
+        long_title = (
+            "This is a deliberately long export title that should keep its useful start and end"
+        )
+        formatted_short = _format_progress_dialog_message(short_message)
+        formatted_long = _format_progress_dialog_message(f"Converting 1 of 1: {long_title}")
+
+        self.assertEqual(formatted_short, short_message)
+        self.assertEqual(
+            formatted_long,
+            "Converting 1 of 1: This is a deliberate... its useful start and end",
+        )
+
+    def test_progress_dialog_wraps_long_status_updates_with_bounded_height(self):
+        finished = threading.Event()
+        allow_second_update = threading.Event()
+        second_update_emitted = threading.Event()
+
+        def _long_running(ctx):
+            ctx.set_status("Starting export.")
+            while not allow_second_update.is_set():
+                time.sleep(0.01)
+            ctx.set_status("Writing metadata tags for a moderately long export status message.")
+            second_update_emitted.set()
+            return "done"
+
+        task_id = self.manager.submit(
+            title="Wrapped Status Task",
+            description="Testing wrapped status geometry.",
+            task_fn=_long_running,
+            show_dialog=True,
+            cancellable=True,
+            on_finished=finished.set,
+        )
+        self.assertIsNotNone(task_id)
+        dialog = self.manager._tasks[task_id].dialog
+        self.assertIsNotNone(dialog)
+        assert dialog is not None
+
+        self._wait_for_task_completion(
+            lambda: dialog.isVisible(),
+            description="wrapped status dialog visibility",
+        )
+        pump_events(app=self.app)
+        first_height = dialog.height()
+
+        allow_second_update.set()
+        self._wait_for_task_completion(
+            lambda: second_update_emitted.is_set(),
+            description="wrapped status second update emission",
+        )
+        pump_events(app=self.app)
+
+        self.assertGreaterEqual(dialog.height(), first_height)
+        self.assertLessEqual(dialog.height(), 220)
+
+        self._wait_for_task_completion(
+            lambda: finished.is_set(),
+            description="wrapped status dialog completion",
         )
 
 
