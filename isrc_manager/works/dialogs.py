@@ -209,10 +209,25 @@ class WorkEditorDialog(QDialog):
         self.new_contributor_party_button.clicked.connect(self._create_contributor_party)
         self.edit_contributor_party_button = QPushButton("Edit Linked Party...")
         self.edit_contributor_party_button.clicked.connect(self._edit_contributor_party)
+        self.equal_split_share_button = QPushButton("Equal Split Share")
+        self.equal_split_share_button.clicked.connect(
+            lambda _checked=False, self=self: self._equal_split_contributors((2,))
+        )
+        self.equal_split_role_share_button = QPushButton("Equal Split Role Share")
+        self.equal_split_role_share_button.clicked.connect(
+            lambda _checked=False, self=self: self._equal_split_contributors((3,))
+        )
+        self.equal_split_both_button = QPushButton("Equal Split Both")
+        self.equal_split_both_button.clicked.connect(
+            lambda _checked=False, self=self: self._equal_split_contributors((2, 3))
+        )
         contributors_actions.addWidget(self.add_contributor_button)
         contributors_actions.addWidget(self.remove_contributor_button)
         contributors_actions.addWidget(self.new_contributor_party_button)
         contributors_actions.addWidget(self.edit_contributor_party_button)
+        contributors_actions.addWidget(self.equal_split_share_button)
+        contributors_actions.addWidget(self.equal_split_role_share_button)
+        contributors_actions.addWidget(self.equal_split_both_button)
         contributors_actions.addStretch(1)
         contributors_layout.addLayout(contributors_actions)
 
@@ -524,19 +539,64 @@ class WorkEditorDialog(QDialog):
         self.contributors_table.setCellWidget(row, 1, role_combo)
 
         share_item = QTableWidgetItem(
-            ""
-            if contributor_payload is None or contributor_payload.share_percent is None
-            else str(contributor_payload.share_percent)
+            "100"
+            if contributor_payload is None
+            else (
+                ""
+                if contributor_payload.share_percent is None
+                else str(contributor_payload.share_percent)
+            )
         )
         role_share_item = QTableWidgetItem(
-            ""
-            if contributor_payload is None or contributor_payload.role_share_percent is None
-            else str(contributor_payload.role_share_percent)
+            "100"
+            if contributor_payload is None
+            else (
+                ""
+                if contributor_payload.role_share_percent is None
+                else str(contributor_payload.role_share_percent)
+            )
         )
         self.contributors_table.setItem(row, 2, share_item)
         self.contributors_table.setItem(row, 3, role_share_item)
         self.contributors_table.setCurrentCell(row, 0)
         self._refresh_contributor_party_action_state()
+
+    @staticmethod
+    def _format_split_value(basis_points: int) -> str:
+        value = basis_points / 100.0
+        if float(value).is_integer():
+            return str(int(value))
+        return f"{value:.2f}"
+
+    def _assigned_contributor_rows(self) -> list[int]:
+        rows: list[int] = []
+        for row in range(self.contributors_table.rowCount()):
+            combo = self._contributor_party_combo(row)
+            name, _party_id = self._resolve_contributor_party_choice(combo) if combo else ("", None)
+            if name:
+                rows.append(row)
+        return rows
+
+    def _equal_split_contributors(self, columns: tuple[int, ...]) -> None:
+        rows = self._assigned_contributor_rows()
+        if not rows:
+            QMessageBox.information(
+                self,
+                "Work Contributors",
+                "Add or assign at least one contributor first.",
+            )
+            return
+        total_basis_points = 10000
+        base_value = total_basis_points // len(rows)
+        remainder = total_basis_points - (base_value * len(rows))
+        for row_index, row in enumerate(rows):
+            row_value = base_value + (remainder if row_index == len(rows) - 1 else 0)
+            for column in columns:
+                item = self.contributors_table.item(row, column)
+                if item is None:
+                    item = QTableWidgetItem("")
+                    self.contributors_table.setItem(row, column, item)
+                item.setText(self._format_split_value(row_value))
 
     def _remove_contributor_rows(self) -> None:
         for row in sorted(
@@ -823,10 +883,7 @@ class WorkBrowserPanel(QWidget):
             self.refresh_selection_scope()
             return
 
-        rows = service.list_works(
-            search_text=self.search_edit.text(),
-            linked_track_id=self.linked_track_id,
-        )
+        rows = service.list_works(search_text=self.search_edit.text())
         self.table.setRowCount(0)
         for record in rows:
             row = self.table.rowCount()

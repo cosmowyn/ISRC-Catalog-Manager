@@ -6,7 +6,7 @@ import csv
 import json
 import sqlite3
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -229,6 +229,18 @@ class PartyExchangeService:
     def supported_import_targets(self) -> list[str]:
         return list(PARTY_EXCHANGE_FIELDS)
 
+    @staticmethod
+    def _report_progress(
+        progress_callback,
+        value: int,
+        message: str,
+        *,
+        maximum: int = 100,
+    ) -> None:
+        if progress_callback is None:
+            return
+        progress_callback(int(value), int(maximum), str(message or ""))
+
     def export_rows(
         self, party_ids: list[int] | None = None
     ) -> tuple[list[str], list[dict[str, object]]]:
@@ -280,11 +292,20 @@ class PartyExchangeService:
         return len(rows)
 
     def inspect_csv(
-        self, path: str | Path, *, delimiter: str | None = None
+        self,
+        path: str | Path,
+        *,
+        delimiter: str | None = None,
+        progress_callback=None,
+        cancel_callback=None,
     ) -> PartyExchangeInspection:
+        self._report_progress(progress_callback, 5, "Reading Party CSV source...")
+        if cancel_callback is not None:
+            cancel_callback()
         with self._open_csv_dict_reader(path, delimiter=delimiter) as (reader, resolved_delimiter):
             headers = list(reader.fieldnames or [])
             preview_rows = [dict(row) for _, row in zip(range(PREVIEW_ROW_LIMIT), reader)]
+        self._report_progress(progress_callback, 60, "Building Party import preview...")
         return PartyExchangeInspection(
             file_path=str(path),
             format_name="csv",
@@ -294,7 +315,16 @@ class PartyExchangeService:
             resolved_delimiter=resolved_delimiter,
         )
 
-    def inspect_xlsx(self, path: str | Path) -> PartyExchangeInspection:
+    def inspect_xlsx(
+        self,
+        path: str | Path,
+        *,
+        progress_callback=None,
+        cancel_callback=None,
+    ) -> PartyExchangeInspection:
+        self._report_progress(progress_callback, 5, "Reading Party workbook...")
+        if cancel_callback is not None:
+            cancel_callback()
         workbook = load_workbook(filename=str(path), read_only=True, data_only=True)
         sheet = workbook.active
         values = list(sheet.iter_rows(values_only=True))
@@ -303,6 +333,7 @@ class PartyExchangeService:
             {header: row[index] for index, header in enumerate(headers)}
             for row in values[1 : 1 + PREVIEW_ROW_LIMIT]
         ]
+        self._report_progress(progress_callback, 60, "Building Party import preview...")
         return PartyExchangeInspection(
             file_path=str(path),
             format_name="xlsx",
@@ -311,10 +342,20 @@ class PartyExchangeService:
             suggested_mapping=self._suggest_mapping(headers),
         )
 
-    def inspect_json(self, path: str | Path) -> PartyExchangeInspection:
+    def inspect_json(
+        self,
+        path: str | Path,
+        *,
+        progress_callback=None,
+        cancel_callback=None,
+    ) -> PartyExchangeInspection:
+        self._report_progress(progress_callback, 5, "Reading Party JSON source...")
+        if cancel_callback is not None:
+            cancel_callback()
         _headers, rows = self._load_json_rows(path)
         headers = sorted({str(key) for row in rows for key in row.keys()})
         preview_rows = [dict(row) for row in rows[:PREVIEW_ROW_LIMIT]]
+        self._report_progress(progress_callback, 60, "Building Party import preview...")
         return PartyExchangeInspection(
             file_path=str(path),
             format_name="json",
@@ -330,10 +371,23 @@ class PartyExchangeService:
         mapping: dict[str, str] | None = None,
         options: PartyImportOptions | None = None,
         delimiter: str | None = None,
+        progress_callback=None,
+        cancel_callback=None,
     ) -> PartyImportReport:
+        self._report_progress(progress_callback, 5, "Reading Party source file...")
+        if cancel_callback is not None:
+            cancel_callback()
         with self._open_csv_dict_reader(path, delimiter=delimiter) as (reader, _resolved_delimiter):
             rows = [dict(row) for row in reader]
-        return self._import_rows(rows, mapping=mapping, options=options, format_name="csv")
+        self._report_progress(progress_callback, 20, "Parsing CSV Party rows...")
+        return self._import_rows(
+            rows,
+            mapping=mapping,
+            options=options,
+            format_name="csv",
+            progress_callback=progress_callback,
+            cancel_callback=cancel_callback,
+        )
 
     def import_xlsx(
         self,
@@ -341,13 +395,26 @@ class PartyExchangeService:
         *,
         mapping: dict[str, str] | None = None,
         options: PartyImportOptions | None = None,
+        progress_callback=None,
+        cancel_callback=None,
     ) -> PartyImportReport:
+        self._report_progress(progress_callback, 5, "Reading Party workbook...")
+        if cancel_callback is not None:
+            cancel_callback()
         workbook = load_workbook(filename=str(path), read_only=True, data_only=True)
         sheet = workbook.active
         values = list(sheet.iter_rows(values_only=True))
         headers = [str(value or "").strip() for value in (values[0] if values else ())]
         rows = [{header: row[index] for index, header in enumerate(headers)} for row in values[1:]]
-        return self._import_rows(rows, mapping=mapping, options=options, format_name="xlsx")
+        self._report_progress(progress_callback, 20, "Parsing workbook Party rows...")
+        return self._import_rows(
+            rows,
+            mapping=mapping,
+            options=options,
+            format_name="xlsx",
+            progress_callback=progress_callback,
+            cancel_callback=cancel_callback,
+        )
 
     def import_json(
         self,
@@ -355,9 +422,22 @@ class PartyExchangeService:
         *,
         mapping: dict[str, str] | None = None,
         options: PartyImportOptions | None = None,
+        progress_callback=None,
+        cancel_callback=None,
     ) -> PartyImportReport:
+        self._report_progress(progress_callback, 5, "Reading Party JSON source...")
+        if cancel_callback is not None:
+            cancel_callback()
         _headers, rows = self._load_json_rows(path)
-        return self._import_rows(rows, mapping=mapping, options=options, format_name="json")
+        self._report_progress(progress_callback, 20, "Parsing JSON Party rows...")
+        return self._import_rows(
+            rows,
+            mapping=mapping,
+            options=options,
+            format_name="json",
+            progress_callback=progress_callback,
+            cancel_callback=cancel_callback,
+        )
 
     def _import_rows(
         self,
@@ -366,8 +446,13 @@ class PartyExchangeService:
         mapping: dict[str, str] | None,
         options: PartyImportOptions | None,
         format_name: str,
+        progress_callback=None,
+        cancel_callback=None,
     ) -> PartyImportReport:
         opts = options or PartyImportOptions()
+        self._report_progress(progress_callback, 30, "Mapping and normalizing Party rows...")
+        if cancel_callback is not None:
+            cancel_callback()
         normalized_rows, unknown_fields = self._normalize_source_rows(rows, mapping)
         owner_row_indexes = [
             index
@@ -389,6 +474,7 @@ class PartyExchangeService:
         created_parties: list[int] = []
         updated_parties: list[int] = []
         owner_party_id: int | None = None
+        total_rows = max(len(normalized_rows), 1)
 
         if not normalized_rows:
             return PartyImportReport(
@@ -403,6 +489,14 @@ class PartyExchangeService:
             )
 
         for index, row in enumerate(normalized_rows, start=1):
+            if cancel_callback is not None:
+                cancel_callback()
+            row_progress = 40 + int(((index - 1) / total_rows) * 50)
+            self._report_progress(
+                progress_callback,
+                row_progress,
+                f"Creating and updating Parties for row {index} of {total_rows}...",
+            )
             if not any(
                 not _is_blank_like(value) for key, value in row.items() if key != "is_owner"
             ):
@@ -463,6 +557,8 @@ class PartyExchangeService:
             and self.settings_mutations is not None
         ):
             self.settings_mutations.set_owner_party_id(owner_party_id)
+        self._report_progress(progress_callback, 96, "Finalizing Party import...")
+        self._report_progress(progress_callback, 100, "Party import complete.")
 
         return PartyImportReport(
             format_name=format_name,

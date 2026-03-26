@@ -338,6 +338,41 @@ class XMLImportServiceTests(unittest.TestCase):
         self.assertEqual(custom_row[0], "High")
         self.assertIsNotNone(custom_row[1])
 
+    def test_execute_import_queues_blocked_rows_before_raising(self):
+        file_path = self._write_xml(
+            "queued-failure.xml",
+            """
+            <ISRCExport>
+              <Tracks>
+                <Track>
+                  <ISRC>NL-ABC-26-00999</ISRC>
+                  <Title>Queued XML Row</Title>
+                  <MainArtist>Queued XML Artist</MainArtist>
+                  <TrackLength>00:03:15</TrackLength>
+                  <CustomFields>
+                    <Field name="Energy" type="text">
+                      <Value>High</Value>
+                    </Field>
+                  </CustomFields>
+                </Track>
+              </Tracks>
+            </ISRCExport>
+            """,
+        )
+
+        with self.assertRaisesRegex(ValueError, "Missing custom columns"):
+            self.service.execute_import(file_path)
+
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Tracks").fetchone()[0], 1)
+        queued_rows = self.conn.execute(
+            """
+            SELECT status, source_format
+            FROM TrackImportRepairQueue
+            ORDER BY id
+            """
+        ).fetchall()
+        self.assertEqual(queued_rows, [("pending", "xml")])
+
 
 if __name__ == "__main__":
     unittest.main()

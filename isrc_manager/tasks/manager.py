@@ -296,7 +296,6 @@ class BackgroundTaskContext:
         self,
         value: int | None = None,
         maximum: int | None = None,
-        *,
         message: str | None = None,
     ) -> None:
         if self._progress_callback is not None:

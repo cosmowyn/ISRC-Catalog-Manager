@@ -42,6 +42,7 @@ from isrc_manager.services import (
     RepertoireWorkflowService,
     SettingsMutationService,
     SettingsReadService,
+    TrackImportRepairQueueService,
     TrackService,
     WorkService,
     XMLExportService,
@@ -91,6 +92,7 @@ class BackgroundAppServiceBundle:
     gs1_integration_service: GS1IntegrationService
     audio_tag_service: AudioTagService
     tagged_audio_export_service: TaggedAudioExportService
+    track_import_repair_queue: TrackImportRepairQueueService
     history_manager: HistoryManager
     database_maintenance: DatabaseMaintenanceService
     settings_reads: SettingsReadService
@@ -216,6 +218,7 @@ class BackgroundAppServiceFactory:
         global_search_service = GlobalSearchService(conn)
         relationship_explorer_service = RelationshipExplorerService(conn)
         profile_kv = ProfileKVService(conn)
+        track_import_repair_queue = TrackImportRepairQueueService(conn)
         if AUTHENTICITY_FEATURE_AVAILABLE:
             authenticity_key_service = AuthenticityKeyService(
                 conn,
@@ -275,6 +278,7 @@ class BackgroundAppServiceFactory:
                 party_service=party_service,
                 work_service=work_service,
                 profile_name=Path(self.db_path).name,
+                repair_queue_service=track_import_repair_queue,
             ),
             exchange_service=ExchangeService(
                 conn,
@@ -285,6 +289,7 @@ class BackgroundAppServiceFactory:
                 party_service=party_service,
                 work_service=work_service,
                 profile_name=Path(self.db_path).name,
+                repair_queue_service=track_import_repair_queue,
             ),
             repertoire_exchange_service=RepertoireExchangeService(
                 conn,
@@ -324,6 +329,7 @@ class BackgroundAppServiceFactory:
             ),
             audio_tag_service=audio_tag_service,
             tagged_audio_export_service=TaggedAudioExportService(audio_tag_service),
+            track_import_repair_queue=track_import_repair_queue,
             history_manager=HistoryManager(
                 conn,
                 settings,

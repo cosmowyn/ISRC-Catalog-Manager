@@ -14,6 +14,9 @@ class AppShellWorkspaceDockTests(AppShellTestCase):
     test_work_manager_dock_uses_live_track_selection = (
         AppShellTestCase.case_work_manager_dock_uses_live_track_selection
     )
+    test_work_manager_shows_stored_works_without_linked_track_narrowing = (
+        AppShellTestCase.case_work_manager_shows_stored_works_without_linked_track_narrowing
+    )
     test_work_manager_creates_governed_child_track_in_add_panel = (
         AppShellTestCase.case_work_manager_creates_governed_child_track_in_add_panel
     )

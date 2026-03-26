@@ -938,11 +938,33 @@ class AppShellTestCase(unittest.TestCase):
         )
         exchange_menu = exchange_action.menu()
         assert exchange_menu is not None
-        exchange_texts = [action.text() for action in exchange_menu.actions() if action.text()]
-        self.assertIn("Export Selected Exchange XML…", exchange_texts)
-        self.assertIn("Export Selected Exchange CSV…", exchange_texts)
-        self.assertIn("Export Full Exchange XML…", exchange_texts)
-        self.assertIn("Export Full Exchange ZIP Package…", exchange_texts)
+        exchange_snapshot = self._menu_snapshot(exchange_menu)
+        self.assertEqual(
+            list(exchange_snapshot.get("texts") or []),
+            ["Current Scope", "Full Catalog"],
+        )
+        exchange_scope_snapshot = self._menu_snapshot_at_path(exchange_snapshot, "Current Scope")
+        exchange_full_snapshot = self._menu_snapshot_at_path(exchange_snapshot, "Full Catalog")
+        self.assertEqual(
+            list(exchange_scope_snapshot.get("texts") or []),
+            [
+                "Export Selected Exchange XML…",
+                "Export Selected Exchange CSV…",
+                "Export Selected Exchange XLSX…",
+                "Export Selected Exchange JSON…",
+                "Export Selected Exchange ZIP Package…",
+            ],
+        )
+        self.assertEqual(
+            list(exchange_full_snapshot.get("texts") or []),
+            [
+                "Export Full Exchange XML…",
+                "Export Full Exchange CSV…",
+                "Export Full Exchange XLSX…",
+                "Export Full Exchange JSON…",
+                "Export Full Exchange ZIP Package…",
+            ],
+        )
 
         parties_action = next(
             action
@@ -951,13 +973,30 @@ class AppShellTestCase(unittest.TestCase):
         )
         parties_menu = parties_action.menu()
         assert parties_menu is not None
-        parties_texts = [action.text() for action in parties_menu.actions() if action.text()]
+        parties_snapshot = self._menu_snapshot(parties_menu)
         self.assertEqual(
-            parties_texts,
+            list(parties_snapshot.get("texts") or []),
+            [
+                "Selected Parties",
+                "Full Party Catalog",
+            ],
+        )
+        self.assertEqual(
+            list(
+                self._menu_snapshot_at_path(parties_snapshot, "Selected Parties").get("texts") or []
+            ),
             [
                 "Export Selected Parties CSV…",
                 "Export Selected Parties XLSX…",
                 "Export Selected Parties JSON…",
+            ],
+        )
+        self.assertEqual(
+            list(
+                self._menu_snapshot_at_path(parties_snapshot, "Full Party Catalog").get("texts")
+                or []
+            ),
+            [
                 "Export Full Party Catalog CSV…",
                 "Export Full Party Catalog XLSX…",
                 "Export Full Party Catalog JSON…",
@@ -1024,7 +1063,6 @@ class AppShellTestCase(unittest.TestCase):
                 "Columns",
                 "Show Profiles Ribbon",
                 "Show Action Ribbon",
-                "Show Add Track Panel",
                 "Customize Action Ribbon…",
                 "Table Layout",
             ],
@@ -1123,6 +1161,12 @@ class AppShellTestCase(unittest.TestCase):
                 side_effect=_record("quality"),
             ),
             mock.patch.object(
+                app_module.App,
+                "open_track_import_repair_queue",
+                autospec=True,
+                side_effect=_record("repair_queue"),
+            ),
+            mock.patch.object(
                 app_module.App, "open_gs1_dialog", autospec=True, side_effect=_record("gs1")
             ),
             mock.patch.object(
@@ -1150,6 +1194,7 @@ class AppShellTestCase(unittest.TestCase):
             self.window.diagnostics_action.trigger()
             self.window.application_log_action.trigger()
             self.window.quality_dashboard_action.trigger()
+            self.window.track_import_repair_queue_action.trigger()
             self.window.gs1_metadata_action.trigger()
             self._drain_events()
 
@@ -1164,6 +1209,7 @@ class AppShellTestCase(unittest.TestCase):
                 "diagnostics",
                 "application_log",
                 "quality",
+                "repair_queue",
                 "gs1",
             ],
         )
@@ -1950,6 +1996,44 @@ class AppShellTestCase(unittest.TestCase):
         self.assertTrue(panel.selection_scope_state().override_active)
         self.assertFalse(dock.isHidden())
 
+    def case_work_manager_shows_stored_works_without_linked_track_narrowing(self):
+        linked_track_id = self._create_track(index=171, title="Linked Work Track")
+        linked_work_id = self.window.work_service.create_work(
+            app_module.WorkPayload(title="Linked Work", track_ids=[linked_track_id])
+        )
+        other_work_id = self.window.work_service.create_work(
+            app_module.WorkPayload(title="Standalone Stored Work")
+        )
+        self.window.conn.commit()
+
+        self.window.open_work_manager(linked_track_id=linked_track_id)
+        self.app.processEvents()
+
+        panel = self.window.work_manager_dock.widget()
+        displayed_ids = {
+            int(panel.table.item(row, 0).text())
+            for row in range(panel.table.rowCount())
+            if panel.table.item(row, 0) is not None
+        }
+        self.assertIn(linked_work_id, displayed_ids)
+        self.assertIn(other_work_id, displayed_ids)
+        self.assertEqual(panel.selected_work_id(), linked_work_id)
+
+        panel.search_edit.setText("Standalone")
+        self.app.processEvents()
+        self.assertEqual(panel.table.rowCount(), 1)
+
+        self.window.open_work_manager()
+        self.app.processEvents()
+        self.assertEqual(panel.search_edit.text(), "")
+        displayed_ids = {
+            int(panel.table.item(row, 0).text())
+            for row in range(panel.table.rowCount())
+            if panel.table.item(row, 0) is not None
+        }
+        self.assertIn(linked_work_id, displayed_ids)
+        self.assertIn(other_work_id, displayed_ids)
+
     def case_work_manager_creates_governed_child_track_in_add_panel(self):
         work_id = self.window.work_service.create_work(
             app_module.WorkPayload(
@@ -2622,7 +2706,8 @@ class AppShellTestCase(unittest.TestCase):
         )
         catalog_quality_snapshot = self._menu_snapshot_at_path(catalog_snapshot, "Quality & Repair")
         self.assertEqual(
-            list(catalog_quality_snapshot.get("texts") or []), ["Data Quality Dashboard…"]
+            list(catalog_quality_snapshot.get("texts") or []),
+            ["Data Quality Dashboard…", "Track Import Repair Queue…"],
         )
         metadata_snapshot = self._menu_snapshot_at_path(catalog_snapshot, "Metadata & Standards")
         audio_snapshot = self._menu_snapshot_at_path(catalog_snapshot, "Audio")
@@ -2644,17 +2729,28 @@ class AppShellTestCase(unittest.TestCase):
         catalog_menu = catalog_action.menu()
         view_menu = view_action.menu()
         catalog_snapshot = self._menu_snapshot(catalog_menu)
-        workspace_texts = list(
-            self._menu_snapshot_at_path(catalog_snapshot, "Workspace").get("texts") or []
-        )
+        workspace_snapshot = self._menu_snapshot_at_path(catalog_snapshot, "Workspace")
+        workspace_texts = list(workspace_snapshot.get("texts") or [])
         view_texts = self._menu_action_texts(view_menu)
 
-        self.assertIn("Derivative Ledger…", workspace_texts)
-        self.assertIn("Contract Template Workspace…", workspace_texts)
-        self.assertIn("Show Catalog Table", workspace_texts)
-        self.assertIn("Show Add Track Panel", workspace_texts)
-        self.assertIn("Show Add Track Panel", view_texts)
+        self.assertEqual(workspace_texts, ["Open and Manage", "Panels"])
+        manage_texts = list(
+            self._menu_snapshot_at_path(workspace_snapshot, "Open and Manage").get("texts") or []
+        )
+        panel_texts = list(
+            self._menu_snapshot_at_path(workspace_snapshot, "Panels").get("texts") or []
+        )
+        quality_texts = list(
+            self._menu_snapshot_at_path(catalog_snapshot, "Quality & Repair").get("texts") or []
+        )
+
+        self.assertIn("Derivative Ledger…", manage_texts)
+        self.assertIn("Contract Template Workspace…", manage_texts)
+        self.assertIn("Show Catalog Table", panel_texts)
+        self.assertIn("Show Add Track Panel", panel_texts)
+        self.assertNotIn("Show Add Track Panel", view_texts)
         self.assertNotIn("Show Catalog Table", view_texts)
+        self.assertIn("Track Import Repair Queue…", quality_texts)
         self.assertEqual(
             self.window._action_ribbon_specs_by_id["show_add_data"]["category"], "View"
         )

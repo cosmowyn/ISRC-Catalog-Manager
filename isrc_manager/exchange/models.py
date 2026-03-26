@@ -39,3 +39,4 @@ class ExchangeImportReport:
     unknown_fields: list[str]
     created_tracks: list[int] = field(default_factory=list)
     updated_tracks: list[int] = field(default_factory=list)
+    repair_queue_entry_ids: list[int] = field(default_factory=list)

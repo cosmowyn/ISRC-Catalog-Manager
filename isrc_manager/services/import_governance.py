@@ -189,8 +189,11 @@ class GovernedImportCoordinator:
     ) -> WorkPayload:
         return WorkPayload(
             title=str(work_title or payload.track_title or "").strip(),
+            lyrics_flag=bool(str(payload.lyrics or "").strip()),
+            genre_notes=str(payload.genre or "").strip() or None,
             iswc=str(payload.iswc or "").strip() or None,
             registration_number=str(payload.buma_work_number or "").strip() or None,
+            notes=str(payload.comments or "").strip() or None,
             profile_name=clean_text(profile_name) or self.profile_name,
             contributors=self._work_contributors_from_import(
                 composer=payload.composer,

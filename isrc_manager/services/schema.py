@@ -326,6 +326,7 @@ class DatabaseSchemaService:
         self._ensure_gs1_template_storage_table()
         self._ensure_release_tables()
         self._ensure_repertoire_tables()
+        self._ensure_track_import_repair_queue_table()
         self._ensure_contract_template_tables()
         self._ensure_authenticity_tables()
         self._ensure_derivative_export_tables()
@@ -501,6 +502,9 @@ class DatabaseSchemaService:
             elif version == 32:
                 self._apply_migration(32, self._mig_32_to_33)
                 version = 33
+            elif version == 33:
+                self._apply_migration(33, self._mig_33_to_34)
+                version = 34
             else:
                 self.logger.warning("Unknown migration path from version %s", version)
                 break
@@ -928,6 +932,9 @@ class DatabaseSchemaService:
         self._backfill_track_governance_links()
         self._backfill_work_contribution_entries()
         self._ensure_unique_work_track_links()
+
+    def _mig_33_to_34(self) -> None:
+        self._ensure_track_import_repair_queue_table()
 
     def _ensure_current_custom_field_value_schema(self) -> None:
         cols = self._table_columns("CustomFieldValues")
@@ -2458,6 +2465,44 @@ class DatabaseSchemaService:
         )
         self.cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_saved_searches_name ON SavedSearches(name)"
+        )
+
+    def _ensure_track_import_repair_queue_table(self) -> None:
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS TrackImportRepairQueue (
+                id INTEGER PRIMARY KEY,
+                source_format TEXT NOT NULL,
+                source_path TEXT,
+                row_index INTEGER NOT NULL,
+                import_mode TEXT NOT NULL,
+                normalized_row_json TEXT NOT NULL,
+                mapping_json TEXT,
+                options_json TEXT,
+                failure_category TEXT NOT NULL,
+                failure_message TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+                updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+                resolved_at TEXT,
+                resolved_track_id INTEGER,
+                resolved_work_id INTEGER,
+                FOREIGN KEY (resolved_track_id) REFERENCES Tracks(id) ON DELETE SET NULL,
+                FOREIGN KEY (resolved_work_id) REFERENCES Works(id) ON DELETE SET NULL
+            )
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_track_import_repair_queue_status
+            ON TrackImportRepairQueue(status, created_at DESC, id DESC)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_track_import_repair_queue_source
+            ON TrackImportRepairQueue(source_format, source_path)
+            """
         )
 
     def _ensure_contract_template_tables(self) -> None:

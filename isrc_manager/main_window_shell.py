@@ -214,92 +214,94 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
 
     export_submenu = file_menu.addMenu("Export")
     exchange_export_menu = export_submenu.addMenu("Catalog Exchange")
+    exchange_export_scope_menu = exchange_export_menu.addMenu("Current Scope")
+    exchange_export_full_menu = exchange_export_menu.addMenu("Full Catalog")
     app.export_selected_action = app._create_action(
         "Export Selected Exchange XML…",
         slot=app.export_selected_to_xml,
         shortcuts=("Ctrl+E", "Meta+E"),
     )
-    exchange_export_menu.addAction(app.export_selected_action)
+    exchange_export_scope_menu.addAction(app.export_selected_action)
     app.export_selected_csv_action = app._create_action(
         "Export Selected Exchange CSV…",
         slot=lambda: app.export_exchange_file("csv", selected_only=True),
     )
-    exchange_export_menu.addAction(app.export_selected_csv_action)
+    exchange_export_scope_menu.addAction(app.export_selected_csv_action)
     app.export_selected_xlsx_action = app._create_action(
         "Export Selected Exchange XLSX…",
         slot=lambda: app.export_exchange_file("xlsx", selected_only=True),
     )
-    exchange_export_menu.addAction(app.export_selected_xlsx_action)
+    exchange_export_scope_menu.addAction(app.export_selected_xlsx_action)
     app.export_selected_json_action = app._create_action(
         "Export Selected Exchange JSON…",
         slot=lambda: app.export_exchange_file("json", selected_only=True),
     )
-    exchange_export_menu.addAction(app.export_selected_json_action)
+    exchange_export_scope_menu.addAction(app.export_selected_json_action)
     app.export_selected_package_action = app._create_action(
         "Export Selected Exchange ZIP Package…",
         slot=lambda: app.export_exchange_file("package", selected_only=True),
     )
-    exchange_export_menu.addAction(app.export_selected_package_action)
-    exchange_export_menu.addSeparator()
+    exchange_export_scope_menu.addAction(app.export_selected_package_action)
     app.export_all_action = app._create_action(
         "Export Full Exchange XML…",
         slot=app.export_full_to_xml,
         shortcuts=("Ctrl+Shift+E", "Meta+Shift+E"),
     )
-    exchange_export_menu.addAction(app.export_all_action)
+    exchange_export_full_menu.addAction(app.export_all_action)
     app.export_all_csv_action = app._create_action(
         "Export Full Exchange CSV…",
         slot=lambda: app.export_exchange_file("csv", selected_only=False),
     )
-    exchange_export_menu.addAction(app.export_all_csv_action)
+    exchange_export_full_menu.addAction(app.export_all_csv_action)
     app.export_all_xlsx_action = app._create_action(
         "Export Full Exchange XLSX…",
         slot=lambda: app.export_exchange_file("xlsx", selected_only=False),
     )
-    exchange_export_menu.addAction(app.export_all_xlsx_action)
+    exchange_export_full_menu.addAction(app.export_all_xlsx_action)
     app.export_all_json_action = app._create_action(
         "Export Full Exchange JSON…",
         slot=lambda: app.export_exchange_file("json", selected_only=False),
     )
-    exchange_export_menu.addAction(app.export_all_json_action)
+    exchange_export_full_menu.addAction(app.export_all_json_action)
     app.export_all_package_action = app._create_action(
         "Export Full Exchange ZIP Package…",
         slot=lambda: app.export_exchange_file("package", selected_only=False),
     )
-    exchange_export_menu.addAction(app.export_all_package_action)
+    exchange_export_full_menu.addAction(app.export_all_package_action)
 
     party_export_menu = export_submenu.addMenu("Parties")
+    party_export_selected_menu = party_export_menu.addMenu("Selected Parties")
+    party_export_full_menu = party_export_menu.addMenu("Full Party Catalog")
     app.export_selected_parties_csv_action = app._create_action(
         "Export Selected Parties CSV…",
         slot=lambda: app.export_party_exchange_file("csv", True),
     )
-    party_export_menu.addAction(app.export_selected_parties_csv_action)
+    party_export_selected_menu.addAction(app.export_selected_parties_csv_action)
     app.export_selected_parties_xlsx_action = app._create_action(
         "Export Selected Parties XLSX…",
         slot=lambda: app.export_party_exchange_file("xlsx", True),
     )
-    party_export_menu.addAction(app.export_selected_parties_xlsx_action)
+    party_export_selected_menu.addAction(app.export_selected_parties_xlsx_action)
     app.export_selected_parties_json_action = app._create_action(
         "Export Selected Parties JSON…",
         slot=lambda: app.export_party_exchange_file("json", True),
     )
-    party_export_menu.addAction(app.export_selected_parties_json_action)
-    party_export_menu.addSeparator()
+    party_export_selected_menu.addAction(app.export_selected_parties_json_action)
     app.export_all_parties_csv_action = app._create_action(
         "Export Full Party Catalog CSV…",
         slot=lambda: app.export_party_exchange_file("csv", False),
     )
-    party_export_menu.addAction(app.export_all_parties_csv_action)
+    party_export_full_menu.addAction(app.export_all_parties_csv_action)
     app.export_all_parties_xlsx_action = app._create_action(
         "Export Full Party Catalog XLSX…",
         slot=lambda: app.export_party_exchange_file("xlsx", False),
     )
-    party_export_menu.addAction(app.export_all_parties_xlsx_action)
+    party_export_full_menu.addAction(app.export_all_parties_xlsx_action)
     app.export_all_parties_json_action = app._create_action(
         "Export Full Party Catalog JSON…",
         slot=lambda: app.export_party_exchange_file("json", False),
     )
-    party_export_menu.addAction(app.export_all_parties_json_action)
+    party_export_full_menu.addAction(app.export_all_parties_json_action)
 
     repertoire_export_menu = export_submenu.addMenu("Contracts and Rights")
     app.export_repertoire_json_action = app._create_action(
@@ -361,65 +363,67 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
 
     catalog_menu = app.menu_bar.addMenu("Catalog")
     workspace_menu = catalog_menu.addMenu("Workspace")
+    workspace_manage_menu = workspace_menu.addMenu("Open and Manage")
+    workspace_panels_menu = workspace_menu.addMenu("Panels")
     app.catalog_managers_action = app._create_action(
         "Catalog Managers…",
         slot=app.open_catalog_managers_dialog,
         shortcuts=("Ctrl+Alt+G", "Meta+Alt+G"),
     )
-    workspace_menu.addAction(app.catalog_managers_action)
+    workspace_manage_menu.addAction(app.catalog_managers_action)
     app.work_manager_action = app._create_action(
         "Work Manager…",
         slot=app.open_work_manager,
         shortcuts=("Ctrl+Alt+W", "Meta+Alt+W"),
     )
-    workspace_menu.addAction(app.work_manager_action)
+    workspace_manage_menu.addAction(app.work_manager_action)
     app.release_browser_action = app._create_action(
         "Release Browser…",
         slot=app.open_release_browser,
         shortcuts=("Ctrl+Alt+Shift+R", "Meta+Alt+Shift+R"),
     )
-    workspace_menu.addAction(app.release_browser_action)
+    workspace_manage_menu.addAction(app.release_browser_action)
     app.party_manager_action = app._create_action(
         "Party Manager…",
         slot=app.open_party_manager,
         shortcuts=("Ctrl+Alt+P", "Meta+Alt+P"),
     )
-    workspace_menu.addAction(app.party_manager_action)
+    workspace_manage_menu.addAction(app.party_manager_action)
     app.contract_manager_action = app._create_action(
         "Contract Manager…",
         slot=app.open_contract_manager,
         shortcuts=("Ctrl+Alt+C", "Meta+Alt+C"),
     )
-    workspace_menu.addAction(app.contract_manager_action)
+    workspace_manage_menu.addAction(app.contract_manager_action)
     app.contract_template_workspace_action = app._create_action(
         "Contract Template Workspace…",
         slot=app.open_contract_template_workspace,
         shortcuts=("Ctrl+Alt+Shift+T", "Meta+Alt+Shift+T"),
     )
-    workspace_menu.addAction(app.contract_template_workspace_action)
+    workspace_manage_menu.addAction(app.contract_template_workspace_action)
     app.rights_matrix_action = app._create_action(
         "Rights Matrix…",
         slot=app.open_rights_matrix,
         shortcuts=("Ctrl+Alt+M", "Meta+Alt+M"),
     )
-    workspace_menu.addAction(app.rights_matrix_action)
+    workspace_manage_menu.addAction(app.rights_matrix_action)
     app.asset_registry_action = app._create_action(
         "Deliverables & Asset Versions…",
         slot=app.open_asset_registry,
         shortcuts=("Ctrl+Alt+A", "Meta+Alt+A"),
     )
-    workspace_menu.addAction(app.asset_registry_action)
+    workspace_manage_menu.addAction(app.asset_registry_action)
     app.derivative_ledger_action = app._create_action(
         "Derivative Ledger…",
         slot=app.open_derivative_ledger,
     )
-    workspace_menu.addAction(app.derivative_ledger_action)
+    workspace_manage_menu.addAction(app.derivative_ledger_action)
     app.global_search_action = app._create_action(
         "Global Search and Relationships…",
         slot=app.open_global_search,
         shortcuts=("Ctrl+Alt+F", "Meta+Alt+F"),
     )
-    workspace_menu.addAction(app.global_search_action)
+    workspace_manage_menu.addAction(app.global_search_action)
     app.add_data_action = app._create_action(
         "Show Add Track Panel",
         checkable=True,
@@ -427,8 +431,7 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         toggled_slot=app._on_toggle_add_data,
         shortcuts=("Ctrl+Shift+D", "Meta+Shift+D"),
     )
-    workspace_menu.addAction(app.add_data_action)
-    workspace_menu.addSeparator()
+    workspace_panels_menu.addAction(app.add_data_action)
 
     app.catalog_table_action = app._create_action(
         "Show Catalog Table",
@@ -437,13 +440,17 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         toggled_slot=app._on_toggle_catalog_table,
         shortcuts=("Ctrl+Shift+T", "Meta+Shift+T"),
     )
-    workspace_menu.addAction(app.catalog_table_action)
+    workspace_panels_menu.addAction(app.catalog_table_action)
     metadata_menu = catalog_menu.addMenu("Metadata & Standards")
     audio_menu = catalog_menu.addMenu("Audio")
     audio_ingest_menu = audio_menu.addMenu("Import & Attach")
     audio_export_menu = audio_menu.addMenu("Delivery & Conversion")
     authenticity_menu = audio_menu.addMenu("Authenticity & Provenance")
     quality_menu = catalog_menu.addMenu("Quality & Repair")
+    app.track_import_repair_queue_action = app._create_action(
+        "Track Import Repair Queue…",
+        slot=app.open_track_import_repair_queue,
+    )
     app.create_release_action = app._create_action(
         "Create Release from Selection…",
         slot=app.create_release_from_selection,
@@ -547,6 +554,7 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         shortcuts=("Ctrl+Shift+Q", "Meta+Shift+Q"),
     )
     quality_menu.addAction(app.quality_dashboard_action)
+    quality_menu.addAction(app.track_import_repair_queue_action)
     app.gs1_metadata_action = app._create_action(
         "GS1 Metadata…",
         slot=app.open_gs1_dialog,
@@ -615,7 +623,6 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     )
     view_menu.addAction(app.profiles_toolbar_visibility_action)
     view_menu.addAction(app.action_ribbon_visibility_action)
-    view_menu.addAction(app.add_data_action)
 
     app.customize_action_ribbon_action = app._create_action(
         "Customize Action Ribbon…",

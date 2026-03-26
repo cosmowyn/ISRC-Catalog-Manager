@@ -15,7 +15,11 @@ except ImportError as exc:  # pragma: no cover - environment-specific fallback
 else:
     QT_IMPORT_ERROR = None
 
-from isrc_manager.tasks.manager import BackgroundTaskManager, _format_progress_dialog_message
+from isrc_manager.tasks.manager import (
+    BackgroundTaskContext,
+    BackgroundTaskManager,
+    _format_progress_dialog_message,
+)
 from tests.qt_test_helpers import pump_events, wait_for
 
 
@@ -408,6 +412,18 @@ class BackgroundTaskManagerTests(unittest.TestCase):
             formatted_long,
             "Converting 1 of 1: This is a deliberate... its useful start and end",
         )
+
+    def test_background_task_context_accepts_positional_progress_message(self):
+        updates = []
+        context = BackgroundTaskContext()
+        context.bind_callbacks(progress_callback=updates.append, status_callback=lambda _msg: None)
+
+        context.report_progress(5, 10, "Reading package manifest...")
+
+        self.assertEqual(len(updates), 1)
+        self.assertEqual(updates[0].value, 5)
+        self.assertEqual(updates[0].maximum, 10)
+        self.assertEqual(updates[0].message, "Reading package manifest...")
 
     def test_progress_dialog_wraps_long_status_updates_with_bounded_height(self):
         finished = threading.Event()

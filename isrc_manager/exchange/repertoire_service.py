@@ -27,6 +27,13 @@ from isrc_manager.works import WorkContributorPayload, WorkPayload, WorkService
 REPERTOIRE_JSON_SCHEMA_VERSION = 1
 
 
+def _stage_progress(start: int, end: int, index: int, total: int) -> int:
+    if total <= 0:
+        return int(end)
+    clamped = max(0, min(index, total))
+    return int(start + ((end - start) * clamped / total))
+
+
 class RepertoireExchangeService:
     """Imports and exports the expanded repertoire knowledge model."""
 
@@ -56,6 +63,18 @@ class RepertoireExchangeService:
         self.rights_service = rights_service
         self.asset_service = asset_service
         self.data_root = Path(data_root) if data_root is not None else None
+
+    @staticmethod
+    def _report_progress(
+        progress_callback,
+        value: int,
+        message: str,
+        *,
+        maximum: int = 100,
+    ) -> None:
+        if progress_callback is None:
+            return
+        progress_callback(int(value), int(maximum), str(message or ""))
 
     def export_payload(self) -> dict[str, object]:
         return {
@@ -235,11 +254,34 @@ class RepertoireExchangeService:
                     return value
         return value
 
-    def import_json(self, path: str | Path) -> None:
-        self._import_payload(self._load_json_payload(path))
+    def import_json(
+        self,
+        path: str | Path,
+        *,
+        progress_callback=None,
+        cancel_callback=None,
+    ) -> None:
+        self._report_progress(progress_callback, 5, "Reading Contracts and Rights JSON...")
+        if cancel_callback is not None:
+            cancel_callback()
+        self._import_payload(
+            self._load_json_payload(path),
+            progress_callback=progress_callback,
+            cancel_callback=cancel_callback,
+        )
 
-    def import_xlsx(self, path: str | Path) -> None:
+    def import_xlsx(
+        self,
+        path: str | Path,
+        *,
+        progress_callback=None,
+        cancel_callback=None,
+    ) -> None:
+        self._report_progress(progress_callback, 5, "Reading Contracts and Rights workbook...")
+        if cancel_callback is not None:
+            cancel_callback()
         rows = self._rows_from_workbook(path)
+        self._report_progress(progress_callback, 20, "Parsing repertoire workbook sheets...")
         self._import_payload(
             {
                 "schema_version": REPERTOIRE_JSON_SCHEMA_VERSION,
@@ -248,11 +290,23 @@ class RepertoireExchangeService:
                 "contracts": rows.get("contracts", []),
                 "rights": rows.get("rights", []),
                 "assets": rows.get("assets", []),
-            }
+            },
+            progress_callback=progress_callback,
+            cancel_callback=cancel_callback,
         )
 
-    def import_csv_bundle(self, directory: str | Path) -> None:
+    def import_csv_bundle(
+        self,
+        directory: str | Path,
+        *,
+        progress_callback=None,
+        cancel_callback=None,
+    ) -> None:
+        self._report_progress(progress_callback, 5, "Reading Contracts and Rights CSV bundle...")
+        if cancel_callback is not None:
+            cancel_callback()
         rows = self._rows_from_csv_bundle(directory)
+        self._report_progress(progress_callback, 20, "Parsing repertoire CSV bundle...")
         self._import_payload(
             {
                 "schema_version": REPERTOIRE_JSON_SCHEMA_VERSION,
@@ -261,14 +315,25 @@ class RepertoireExchangeService:
                 "contracts": rows.get("contracts", []),
                 "rights": rows.get("rights", []),
                 "assets": rows.get("assets", []),
-            }
+            },
+            progress_callback=progress_callback,
+            cancel_callback=cancel_callback,
         )
 
-    def import_package(self, path: str | Path) -> None:
+    def import_package(
+        self,
+        path: str | Path,
+        *,
+        progress_callback=None,
+        cancel_callback=None,
+    ) -> None:
+        self._report_progress(progress_callback, 5, "Extracting Contracts and Rights package...")
         with tempfile.TemporaryDirectory(prefix="repertoire-package-") as tmpdir:
             target_dir = Path(tmpdir)
             with ZipFile(path, "r") as archive:
                 archive.extractall(target_dir)
+            if cancel_callback is not None:
+                cancel_callback()
             payload = json.loads((target_dir / "manifest.json").read_text(encoding="utf-8"))
             packaged_files = payload.get("packaged_files", {})
             if isinstance(packaged_files, dict):
@@ -283,9 +348,20 @@ class RepertoireExchangeService:
                     arcname = packaged_files.get(stored_path)
                     if arcname:
                         asset["source_path"] = str(target_dir / arcname)
-            self._import_payload(payload)
+            self._report_progress(progress_callback, 20, "Parsing repertoire package manifest...")
+            self._import_payload(
+                payload,
+                progress_callback=progress_callback,
+                cancel_callback=cancel_callback,
+            )
 
-    def _import_payload(self, payload: dict[str, object]) -> None:
+    def _import_payload(
+        self,
+        payload: dict[str, object],
+        *,
+        progress_callback=None,
+        cancel_callback=None,
+    ) -> None:
         version = int(payload.get("schema_version") or 0)
         if version != REPERTOIRE_JSON_SCHEMA_VERSION:
             raise ValueError(
@@ -296,8 +372,25 @@ class RepertoireExchangeService:
         contract_id_map: dict[int, int] = {}
         document_id_map: dict[int, int] = {}
 
+        def _check_cancel() -> None:
+            if cancel_callback is not None:
+                cancel_callback()
+
+        parties = list(payload.get("parties", []) or [])
+        works = list(payload.get("works", []) or [])
+        contracts = list(payload.get("contracts", []) or [])
+        rights = list(payload.get("rights", []) or [])
+        assets = list(payload.get("assets", []) or [])
+
         with self.conn:
-            for row in payload.get("parties", []) or []:
+            self._report_progress(progress_callback, 30, "Importing Party records...")
+            for index, row in enumerate(parties, start=1):
+                _check_cancel()
+                self._report_progress(
+                    progress_callback,
+                    _stage_progress(30, 45, index - 1, len(parties)),
+                    f"Importing Party records ({index} of {len(parties)})...",
+                )
                 source = {key: self._decode_value(value) for key, value in dict(row).items()}
                 old_id = int(source.get("id") or 0)
                 legal_name = str(source.get("legal_name") or "").strip()
@@ -350,7 +443,14 @@ class RepertoireExchangeService:
                 )
                 party_id_map[old_id] = new_id
 
-            for row in payload.get("works", []) or []:
+            self._report_progress(progress_callback, 45, "Importing Work records...")
+            for index, row in enumerate(works, start=1):
+                _check_cancel()
+                self._report_progress(
+                    progress_callback,
+                    _stage_progress(45, 60, index - 1, len(works)),
+                    f"Importing Work records ({index} of {len(works)})...",
+                )
                 source = {key: self._decode_value(value) for key, value in dict(row).items()}
                 old_id = int(source.get("id") or 0)
                 contributors = []
@@ -397,7 +497,14 @@ class RepertoireExchangeService:
                 work_id_map[old_id] = new_id
 
             contract_documents_buffer: list[tuple[int, list[dict[str, object]]]] = []
-            for row in payload.get("contracts", []) or []:
+            self._report_progress(progress_callback, 60, "Importing Contract records...")
+            for index, row in enumerate(contracts, start=1):
+                _check_cancel()
+                self._report_progress(
+                    progress_callback,
+                    _stage_progress(60, 75, index - 1, len(contracts)),
+                    f"Importing Contract records ({index} of {len(contracts)})...",
+                )
                 source = {key: self._decode_value(value) for key, value in dict(row).items()}
                 old_id = int(source.get("id") or 0)
                 party_payloads = []
@@ -491,7 +598,9 @@ class RepertoireExchangeService:
                 contract_id_map[old_id] = new_id
                 contract_documents_buffer.append((new_id, list(source.get("documents", []) or [])))
 
+            self._report_progress(progress_callback, 75, "Relinking contract document chains...")
             for new_contract_id, source_documents in contract_documents_buffer:
+                _check_cancel()
                 detail = self.contract_service.fetch_contract_detail(new_contract_id)
                 if detail is None:
                     continue
@@ -520,7 +629,14 @@ class RepertoireExchangeService:
                         ),
                     )
 
-            for row in payload.get("rights", []) or []:
+            self._report_progress(progress_callback, 78, "Importing Right records...")
+            for index, row in enumerate(rights, start=1):
+                _check_cancel()
+                self._report_progress(
+                    progress_callback,
+                    _stage_progress(78, 88, index - 1, len(rights)),
+                    f"Importing Right records ({index} of {len(rights)})...",
+                )
                 source = {key: self._decode_value(value) for key, value in dict(row).items()}
                 self.rights_service.create_right(
                     RightPayload(
@@ -568,7 +684,14 @@ class RepertoireExchangeService:
                     )
                 )
 
-            for row in payload.get("assets", []) or []:
+            self._report_progress(progress_callback, 88, "Importing Asset records...")
+            for index, row in enumerate(assets, start=1):
+                _check_cancel()
+                self._report_progress(
+                    progress_callback,
+                    _stage_progress(88, 96, index - 1, len(assets)),
+                    f"Importing Asset records ({index} of {len(assets)})...",
+                )
                 source = {key: self._decode_value(value) for key, value in dict(row).items()}
                 self.asset_service.create_asset(
                     AssetVersionPayload(
@@ -619,3 +742,5 @@ class RepertoireExchangeService:
                         ),
                     )
                 )
+        self._report_progress(progress_callback, 98, "Finalizing Contracts and Rights import...")
+        self._report_progress(progress_callback, 100, "Contracts and Rights import complete.")

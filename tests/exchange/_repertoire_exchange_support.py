@@ -654,6 +654,33 @@ class SearchAndRepertoireExchangeTestCase(unittest.TestCase):
             xlsx_conn.close()
             csv_conn.close()
 
+    def case_repertoire_import_reports_staged_progress_to_completion(self):
+        self._seed_repertoire()
+        json_path = self.data_root / "repertoire-progress.json"
+        self.exchange_service.export_json(json_path)
+
+        target_root = Path(tempfile.mkdtemp(prefix="repertoire-progress-import-"))
+        self.addCleanup(shutil.rmtree, target_root, True)
+        new_conn, new_services, _track_id, _release_id = self._prepare_import_target(target_root)
+        progress_events: list[tuple[int, int, str]] = []
+        try:
+            new_services["exchange_service"].import_json(
+                json_path,
+                progress_callback=lambda value, maximum, message: progress_events.append(
+                    (value, maximum, message)
+                ),
+            )
+            self.assertGreaterEqual(len(progress_events), 5)
+            self.assertEqual(progress_events[0][0], 5)
+            self.assertEqual(
+                progress_events[-1], (100, 100, "Contracts and Rights import complete.")
+            )
+            self.assertTrue(
+                any("Importing Work records" in message for *_rest, message in progress_events)
+            )
+        finally:
+            new_conn.close()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -279,3 +279,41 @@ class PartyExchangeServiceTests(unittest.TestCase):
         self.assertEqual(report.failed, 2)
         self.assertIsNone(self.settings_reads.load_owner_party_id())
         self.assertEqual(self.party_service.list_parties(), [])
+
+    def test_import_reports_staged_progress_to_completion(self):
+        json_path = self.data_root / "party-progress.json"
+        json_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "rows": [
+                        {
+                            "legal_name": "Progress Party B.V.",
+                            "display_name": "Progress Party",
+                            "email": "hello@progress.test",
+                        }
+                    ],
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        inspection = self.exchange_service.inspect_json(json_path)
+        progress_events: list[tuple[int, int, str]] = []
+
+        report = self.exchange_service.import_json(
+            json_path,
+            mapping=inspection.suggested_mapping,
+            options=PartyImportOptions(mode="upsert"),
+            progress_callback=lambda value, maximum, message: progress_events.append(
+                (value, maximum, message)
+            ),
+        )
+
+        self.assertEqual(report.failed, 0)
+        self.assertGreaterEqual(len(progress_events), 4)
+        self.assertEqual(progress_events[0][0], 5)
+        self.assertEqual(progress_events[-1], (100, 100, "Party import complete."))
+        self.assertTrue(
+            any("Creating and updating Parties" in message for *_rest, message in progress_events)
+        )

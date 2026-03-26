@@ -12,6 +12,7 @@ import sqlite3
 import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import asdict
 from datetime import datetime, timedelta
 from datetime import time as dt_time
 from pathlib import Path
@@ -27,6 +28,7 @@ from isrc_manager.releases import ReleasePayload, ReleaseService, ReleaseTrackPl
 from isrc_manager.services.custom_fields import CustomFieldDefinitionService
 from isrc_manager.services.import_governance import GovernedImportCoordinator
 from isrc_manager.services.imports import XMLImportService
+from isrc_manager.services.import_repair_queue import TrackImportRepairQueueService
 from isrc_manager.services.tracks import TrackCreatePayload, TrackService, TrackUpdatePayload
 from isrc_manager.works import WorkService
 
@@ -132,12 +134,14 @@ class ExchangeService:
         party_service: PartyService | None = None,
         work_service: WorkService | None = None,
         profile_name: str | None = None,
+        repair_queue_service: TrackImportRepairQueueService | None = None,
     ):
         self.conn = conn
         self.track_service = track_service
         self.release_service = release_service
         self.custom_fields = custom_fields
         self.data_root = Path(data_root) if data_root is not None else None
+        self.repair_queue_service = repair_queue_service or TrackImportRepairQueueService(conn)
         self.governed_imports = GovernedImportCoordinator(
             conn,
             track_service=track_service,
@@ -901,6 +905,7 @@ class ExchangeService:
             party_service=self.governed_imports.party_service,
             work_service=self.governed_imports.work_service,
             profile_name=self.governed_imports.profile_name,
+            repair_queue_service=self.repair_queue_service,
         )
         _inspection, exchange_inspection = xml_service.build_exchange_inspection(str(path))
         return exchange_inspection
@@ -934,6 +939,93 @@ class ExchangeService:
             targets.append(target_name)
         return targets
 
+    @staticmethod
+    def _report_progress(
+        progress_callback,
+        value: int,
+        message: str,
+        *,
+        maximum: int = 100,
+    ) -> None:
+        if progress_callback is None:
+            return
+        progress_callback(int(value), int(maximum), str(message or ""))
+
+    @staticmethod
+    def _classify_failure_category(message: str) -> str:
+        clean = str(message or "").strip().lower()
+        if any(
+            token in clean
+            for token in (
+                "work",
+                "govern",
+                "isrc validation",
+                "required",
+                "not found",
+                "unsupported",
+                "conflict",
+            )
+        ):
+            return "governance" if "work" in clean or "govern" in clean else "validation"
+        return "validation"
+
+    def _queue_failed_import_row(
+        self,
+        *,
+        source_format: str,
+        source_path: str | None,
+        row_index: int,
+        import_mode: str,
+        normalized_row: dict[str, object],
+        mapping: dict[str, str] | None,
+        options: ExchangeImportOptions,
+        failure_message: str,
+        repair_entry_id: int | None = None,
+    ) -> int:
+        failure_category = self._classify_failure_category(failure_message)
+        if repair_entry_id is not None:
+            self.repair_queue_service.update_entry(
+                int(repair_entry_id),
+                normalized_row=normalized_row,
+                failure_category=failure_category,
+                failure_message=failure_message,
+                mapping=mapping,
+                options=asdict(options),
+            )
+            return int(repair_entry_id)
+        return int(
+            self.repair_queue_service.queue_failed_row(
+                source_format=source_format,
+                source_path=source_path,
+                row_index=row_index,
+                import_mode=options.mode,
+                normalized_row=normalized_row,
+                mapping=mapping,
+                options=asdict(options),
+                failure_category=failure_category,
+                failure_message=failure_message,
+            )
+        )
+
+    @contextmanager
+    def _resolve_import_source_dir(
+        self, *, format_name: str, source_path: str | Path | None
+    ) -> Iterator[Path]:
+        if str(format_name or "").strip().lower() == "package":
+            if not source_path:
+                with tempfile.TemporaryDirectory(prefix="exchange-package-repair-") as temp_dir:
+                    yield Path(temp_dir)
+                return
+            with tempfile.TemporaryDirectory(prefix="exchange-package-repair-") as temp_dir:
+                extracted_root = Path(temp_dir)
+                self._safe_extract_zip(source_path, extracted_root)
+                yield extracted_root
+            return
+        if source_path:
+            yield Path(source_path).parent
+            return
+        yield Path.cwd()
+
     def import_csv(
         self,
         path: str | Path,
@@ -941,12 +1033,24 @@ class ExchangeService:
         mapping: dict[str, str] | None = None,
         options: ExchangeImportOptions | None = None,
         delimiter: str | None = None,
+        progress_callback=None,
+        cancel_callback=None,
     ) -> ExchangeImportReport:
         path_obj = Path(path)
+        self._report_progress(progress_callback, 5, "Reading source file...")
+        if cancel_callback is not None:
+            cancel_callback()
         with self._open_csv_dict_reader(path_obj, delimiter=delimiter) as (reader, _resolved):
             rows = [dict(row) for row in reader]
-        return self._import_rows(
-            rows, mapping=mapping, options=options, format_name="csv", source_dir=path_obj.parent
+        self._report_progress(progress_callback, 20, "Parsing CSV rows...")
+        return self.import_prepared_rows(
+            rows,
+            mapping=mapping,
+            options=options,
+            format_name="csv",
+            source_path=path_obj,
+            progress_callback=progress_callback,
+            cancel_callback=cancel_callback,
         )
 
     def import_xlsx(
@@ -955,14 +1059,26 @@ class ExchangeService:
         *,
         mapping: dict[str, str] | None = None,
         options: ExchangeImportOptions | None = None,
+        progress_callback=None,
+        cancel_callback=None,
     ) -> ExchangeImportReport:
+        self._report_progress(progress_callback, 5, "Reading workbook...")
+        if cancel_callback is not None:
+            cancel_callback()
         workbook = load_workbook(filename=str(path), read_only=True, data_only=True)
         sheet = workbook.active
         values = list(sheet.iter_rows(values_only=True))
         headers = [str(value or "").strip() for value in (values[0] if values else ())]
         rows = [{header: row[index] for index, header in enumerate(headers)} for row in values[1:]]
-        return self._import_rows(
-            rows, mapping=mapping, options=options, format_name="xlsx", source_dir=Path(path).parent
+        self._report_progress(progress_callback, 20, "Parsing workbook rows...")
+        return self.import_prepared_rows(
+            rows,
+            mapping=mapping,
+            options=options,
+            format_name="xlsx",
+            source_path=path,
+            progress_callback=progress_callback,
+            cancel_callback=cancel_callback,
         )
 
     def import_json(
@@ -971,15 +1087,23 @@ class ExchangeService:
         *,
         mapping: dict[str, str] | None = None,
         options: ExchangeImportOptions | None = None,
+        progress_callback=None,
+        cancel_callback=None,
     ) -> ExchangeImportReport:
+        self._report_progress(progress_callback, 5, "Reading JSON source...")
+        if cancel_callback is not None:
+            cancel_callback()
         payload = self._load_json_payload(path)
         rows = [dict(row) for row in payload.get("rows") or []]
-        return self._import_rows(
+        self._report_progress(progress_callback, 20, "Parsing JSON rows...")
+        return self.import_prepared_rows(
             rows,
             mapping=mapping,
             options=options,
             format_name="json",
-            source_dir=Path(path).parent,
+            source_path=path,
+            progress_callback=progress_callback,
+            cancel_callback=cancel_callback,
         )
 
     def import_package(
@@ -988,11 +1112,20 @@ class ExchangeService:
         *,
         mapping: dict[str, str] | None = None,
         options: ExchangeImportOptions | None = None,
+        progress_callback=None,
+        cancel_callback=None,
     ) -> ExchangeImportReport:
+        self._report_progress(progress_callback, 5, "Reading package manifest...")
+        if cancel_callback is not None:
+            cancel_callback()
         payload = self._load_package_payload(path)
+        self._report_progress(progress_callback, 15, "Extracting packaged media...")
         with tempfile.TemporaryDirectory(prefix="exchange-package-") as temp_dir:
             extracted_root = Path(temp_dir)
             self._safe_extract_zip(path, extracted_root)
+            if cancel_callback is not None:
+                cancel_callback()
+            self._report_progress(progress_callback, 25, "Preparing package rows...")
             rows = self._prepare_packaged_rows(payload, extracted_root=extracted_root)
             return self._import_rows(
                 rows,
@@ -1000,6 +1133,9 @@ class ExchangeService:
                 options=options,
                 format_name="package",
                 source_dir=extracted_root,
+                source_path=str(path),
+                progress_callback=progress_callback,
+                cancel_callback=cancel_callback,
             )
 
     def import_xml(
@@ -1008,7 +1144,12 @@ class ExchangeService:
         *,
         mapping: dict[str, str] | None = None,
         options: ExchangeImportOptions | None = None,
+        progress_callback=None,
+        cancel_callback=None,
     ) -> ExchangeImportReport:
+        self._report_progress(progress_callback, 5, "Reading XML source...")
+        if cancel_callback is not None:
+            cancel_callback()
         xml_service = XMLImportService(
             self.conn,
             self.track_service,
@@ -1016,8 +1157,10 @@ class ExchangeService:
             party_service=self.governed_imports.party_service,
             work_service=self.governed_imports.work_service,
             profile_name=self.governed_imports.profile_name,
+            repair_queue_service=self.repair_queue_service,
         )
         inspection = xml_service.inspect_file(str(path))
+        self._report_progress(progress_callback, 15, "Validating XML schema and fields...")
         rows = xml_service.exchange_rows_from_inspection(inspection)
         if inspection.conflicting_custom_fields:
             raise ValueError(
@@ -1056,7 +1199,39 @@ class ExchangeService:
             options=opts,
             format_name="xml",
             source_dir=Path(path).parent,
+            source_path=str(path),
+            progress_callback=progress_callback,
+            cancel_callback=cancel_callback,
         )
+
+    def import_prepared_rows(
+        self,
+        rows: list[dict[str, object]],
+        *,
+        mapping: dict[str, str] | None = None,
+        options: ExchangeImportOptions | None = None,
+        format_name: str,
+        source_path: str | Path | None = None,
+        progress_callback=None,
+        cancel_callback=None,
+        repair_entry_id: int | None = None,
+        repair_override: dict[str, object] | None = None,
+    ) -> ExchangeImportReport:
+        with self._resolve_import_source_dir(
+            format_name=format_name, source_path=source_path
+        ) as source_dir:
+            return self._import_rows(
+                rows,
+                mapping=mapping,
+                options=options,
+                format_name=format_name,
+                source_dir=source_dir,
+                source_path=str(source_path) if source_path is not None else None,
+                progress_callback=progress_callback,
+                cancel_callback=cancel_callback,
+                repair_entry_id=repair_entry_id,
+                repair_override=repair_override,
+            )
 
     def _apply_mapping(
         self, row: dict[str, object], mapping: dict[str, str] | None
@@ -1419,8 +1594,17 @@ class ExchangeService:
         options: ExchangeImportOptions | None,
         format_name: str,
         source_dir: Path,
+        source_path: str | None = None,
+        progress_callback=None,
+        cancel_callback=None,
+        repair_entry_id: int | None = None,
+        repair_override: dict[str, object] | None = None,
     ) -> ExchangeImportReport:
         opts = options or ExchangeImportOptions()
+        repair_queue_entry_ids: list[int] = []
+        self._report_progress(progress_callback, 30, "Mapping and normalizing import rows...")
+        if cancel_callback is not None:
+            cancel_callback()
         normalized_rows = [
             self._normalize_row_text_targets(self._apply_mapping(row, mapping)) for row in rows
         ]
@@ -1435,6 +1619,9 @@ class ExchangeService:
         self._ensure_custom_headers(
             normalized_rows, create_missing=opts.create_missing_custom_fields
         )
+        self._report_progress(
+            progress_callback, 36, "Preparing import validation and custom fields..."
+        )
         warnings: list[str] = []
         duplicates: list[str] = []
         passed = 0
@@ -1442,11 +1629,18 @@ class ExchangeService:
         skipped = 0
         created_tracks: list[int] = []
         updated_tracks: list[int] = []
+        total_rows = max(len(normalized_rows), 1)
         package_create_mode = format_name == "package" and opts.mode == "create"
         source_track_map: dict[str, int] = {}
         source_release_map: dict[str, int] = {}
         work_batch_cache: dict[str, int] = {}
         work_override_cache: dict[int, dict[str, str]] = {}
+        override_mode = str((repair_override or {}).get("governance_mode") or "").strip().lower()
+        override_work_id = repair_override.get("work_id") if repair_override is not None else None
+        try:
+            override_work_id = int(override_work_id) if override_work_id not in (None, "") else None
+        except Exception:
+            override_work_id = None
 
         custom_defs = {
             field["name"]: field["id"]
@@ -1477,11 +1671,33 @@ class ExchangeService:
                 )
 
         for index, row in enumerate(normalized_rows, start=1):
+            if cancel_callback is not None:
+                cancel_callback()
+            row_progress = 40 + int(((index - 1) / total_rows) * 50)
+            self._report_progress(
+                progress_callback,
+                row_progress,
+                f"Creating and updating catalog entities for row {index} of {total_rows}...",
+            )
             track_title = str(row.get("track_title") or "").strip()
             artist_name = str(row.get("artist_name") or "").strip()
             if not track_title or not artist_name:
                 failed += 1
-                warnings.append(f"Row {index}: Track Title and Artist are required.")
+                message = "Track Title and Artist are required."
+                warnings.append(f"Row {index}: {message}")
+                if opts.mode != "dry_run":
+                    queued_id = self._queue_failed_import_row(
+                        source_format=format_name,
+                        source_path=source_path,
+                        row_index=index,
+                        import_mode=opts.mode,
+                        normalized_row=row,
+                        mapping=mapping,
+                        options=opts,
+                        failure_message=message,
+                        repair_entry_id=repair_entry_id,
+                    )
+                    repair_queue_entry_ids.append(int(queued_id))
                 continue
             source_track_key = str(row.get("track_id") or "").strip() if package_create_mode else ""
             reused_package_track = bool(source_track_key) and source_track_key in source_track_map
@@ -1582,13 +1798,23 @@ class ExchangeService:
                                 f"Row {index}: no existing match was found for update mode."
                             )
                             continue
+                        if override_mode == "link_existing_work" and override_work_id is not None:
+                            payload_kwargs["work_id"] = int(override_work_id)
                         create_result = self.governed_imports.create_governed_track(
                             TrackCreatePayload(
                                 **payload_kwargs,
                             ),
                             cursor=cur,
                             batch_cache=work_batch_cache,
-                            governance_mode="match_or_create_work",
+                            governance_mode=(
+                                "link_existing_work"
+                                if override_mode == "link_existing_work" and override_work_id
+                                else (
+                                    "create_new_work"
+                                    if override_mode == "create_new_work"
+                                    else "match_or_create_work"
+                                )
+                            ),
                         )
                         track_id = int(create_result.track_id)
                         if source_track_key:
@@ -1650,16 +1876,21 @@ class ExchangeService:
                                 payload_kwargs["album_art_source_path"] or None
                             )
 
-                        payload_kwargs["work_id"] = self.governed_imports.ensure_governed_work_id(
-                            track_title=payload_kwargs["track_title"],
-                            iswc=payload_kwargs["iswc"],
-                            registration_number=payload_kwargs["buma_work_number"],
-                            composer=payload_kwargs["composer"],
-                            publisher=payload_kwargs["publisher"],
-                            cursor=cur,
-                            batch_cache=work_batch_cache,
-                            existing_work_id=snapshot.work_id,
-                        )
+                        if override_mode == "link_existing_work" and override_work_id is not None:
+                            payload_kwargs["work_id"] = int(override_work_id)
+                        else:
+                            payload_kwargs["work_id"] = (
+                                self.governed_imports.ensure_governed_work_id(
+                                    track_title=payload_kwargs["track_title"],
+                                    iswc=payload_kwargs["iswc"],
+                                    registration_number=payload_kwargs["buma_work_number"],
+                                    composer=payload_kwargs["composer"],
+                                    publisher=payload_kwargs["publisher"],
+                                    cursor=cur,
+                                    batch_cache=work_batch_cache,
+                                    existing_work_id=snapshot.work_id,
+                                )
+                            )
 
                         self._apply_governed_work_import_override(
                             payload_kwargs,
@@ -1689,9 +1920,39 @@ class ExchangeService:
                         preserve_source_release_identity=package_create_mode,
                         cursor=cur,
                     )
+                    if repair_entry_id is not None:
+                        self.repair_queue_service.mark_resolved(
+                            int(repair_entry_id),
+                            track_id=int(track_id),
+                            work_id=int(
+                                payload_kwargs.get("work_id")
+                                or (
+                                    create_result.work_id
+                                    if "create_result" in locals()
+                                    else snapshot.work_id
+                                )
+                            ),
+                        )
             except Exception as exc:
                 failed += 1
-                warnings.append(f"Row {index}: {exc}")
+                message = str(exc)
+                warnings.append(f"Row {index}: {message}")
+                if opts.mode != "dry_run":
+                    queued_id = self._queue_failed_import_row(
+                        source_format=format_name,
+                        source_path=source_path,
+                        row_index=index,
+                        import_mode=opts.mode,
+                        normalized_row=row,
+                        mapping=mapping,
+                        options=opts,
+                        failure_message=message,
+                        repair_entry_id=repair_entry_id,
+                    )
+                    repair_queue_entry_ids.append(int(queued_id))
+
+        self._report_progress(progress_callback, 96, "Finalizing import results...")
+        self._report_progress(progress_callback, 100, "Import complete.")
 
         return ExchangeImportReport(
             format_name=format_name,
@@ -1704,4 +1965,5 @@ class ExchangeService:
             unknown_fields=unknown_fields,
             created_tracks=created_tracks,
             updated_tracks=updated_tracks,
+            repair_queue_entry_ids=repair_queue_entry_ids,
         )

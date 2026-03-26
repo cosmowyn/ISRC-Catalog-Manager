@@ -14,6 +14,15 @@ class ExchangeJsonTests(ExchangeServiceTestCase):
     test_import_json_respects_mapping_when_skipping_custom_field = (
         ExchangeServiceTestCase.case_import_json_respects_mapping_when_skipping_custom_field
     )
+    test_import_json_persists_failed_rows_to_repair_queue_without_creating_live_orphans = (
+        ExchangeServiceTestCase.case_import_json_persists_failed_rows_to_repair_queue_without_creating_live_orphans
+    )
+    test_repair_queue_row_can_be_reapplied_through_governed_import_seam = (
+        ExchangeServiceTestCase.case_repair_queue_row_can_be_reapplied_through_governed_import_seam
+    )
+    test_import_json_reports_staged_progress_to_completion = (
+        ExchangeServiceTestCase.case_import_json_reports_staged_progress_to_completion
+    )
 
 
 del ExchangeServiceTestCase

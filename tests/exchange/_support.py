@@ -224,6 +224,134 @@ class ExchangeServiceTestCase(unittest.TestCase):
         self.assertEqual(report.skipped, 1)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Tracks").fetchone()[0], 0)
 
+    def case_import_json_persists_failed_rows_to_repair_queue_without_creating_live_orphans(self):
+        json_path = self.data_root / "failed-import.json"
+        json_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "rows": [
+                        {
+                            "track_title": "Queued Track",
+                            "artist_name": "",
+                            "isrc": "NL-ABC-26-09991",
+                        }
+                    ],
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        report = self.service.import_json(json_path, options=ExchangeImportOptions(mode="create"))
+
+        self.assertEqual(report.passed, 0)
+        self.assertEqual(report.failed, 1)
+        self.assertEqual(report.created_tracks, [])
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Tracks").fetchone()[0], 0)
+        self.assertEqual(len(report.repair_queue_entry_ids), 1)
+        entry = self.service.repair_queue_service.fetch_entry(report.repair_queue_entry_ids[0])
+        assert entry is not None
+        self.assertEqual(entry.status, "pending")
+        self.assertEqual(entry.source_format, "json")
+        self.assertEqual(entry.normalized_row.get("track_title"), "Queued Track")
+
+    def case_repair_queue_row_can_be_reapplied_through_governed_import_seam(self):
+        json_path = self.data_root / "repair-reapply.json"
+        json_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "rows": [
+                        {
+                            "track_title": "Repairable Track",
+                            "artist_name": "",
+                            "isrc": "NL-ABC-26-09992",
+                            "composer": "Repair Writer",
+                            "publisher": "Repair Publisher",
+                        }
+                    ],
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        initial_report = self.service.import_json(
+            json_path,
+            options=ExchangeImportOptions(mode="create"),
+        )
+        entry_id = initial_report.repair_queue_entry_ids[0]
+
+        repaired_report = self.service.import_prepared_rows(
+            [
+                {
+                    "track_title": "Repairable Track",
+                    "artist_name": "Repair Artist",
+                    "isrc": "NL-ABC-26-09992",
+                    "composer": "Repair Writer",
+                    "publisher": "Repair Publisher",
+                }
+            ],
+            options=ExchangeImportOptions(mode="create"),
+            format_name="json",
+            source_path=str(json_path),
+            repair_entry_id=entry_id,
+            repair_override={"governance_mode": "create_new_work"},
+        )
+
+        self.assertEqual(repaired_report.passed, 1)
+        self.assertEqual(repaired_report.failed, 0)
+        self.assertEqual(len(repaired_report.created_tracks), 1)
+        track_row = self.conn.execute(
+            "SELECT work_id FROM Tracks WHERE id=?",
+            (repaired_report.created_tracks[0],),
+        ).fetchone()
+        self.assertIsNotNone(track_row)
+        self.assertIsNotNone(track_row[0])
+        entry = self.service.repair_queue_service.fetch_entry(entry_id)
+        assert entry is not None
+        self.assertEqual(entry.status, "resolved")
+        self.assertEqual(self.service.repair_queue_service.pending_count(), 0)
+
+    def case_import_json_reports_staged_progress_to_completion(self):
+        json_path = self.data_root / "progress-import.json"
+        json_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "rows": [
+                        {
+                            "track_title": "Progress Track",
+                            "artist_name": "Moonwake",
+                            "isrc": "NL-ABC-26-09993",
+                        }
+                    ],
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        progress_events: list[tuple[int, int, str]] = []
+
+        report = self.service.import_json(
+            json_path,
+            options=ExchangeImportOptions(mode="create"),
+            progress_callback=lambda value, maximum, message: progress_events.append(
+                (value, maximum, message)
+            ),
+        )
+
+        self.assertEqual(report.failed, 0)
+        self.assertGreaterEqual(len(progress_events), 4)
+        self.assertEqual(progress_events[0][0], 5)
+        self.assertEqual(progress_events[-1][0], 100)
+        self.assertEqual(progress_events[-1][1], 100)
+        self.assertTrue(
+            any("Mapping and normalizing" in message for *_rest, message in progress_events)
+        )
+        self.assertEqual(progress_events[-1][2], "Import complete.")
+
     def case_import_csv_creates_track_from_multiple_columns(self):
         csv_path = self.data_root / "create-import.csv"
         csv_path.write_text(

@@ -222,6 +222,57 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
         finally:
             dialog.close()
 
+    def test_work_editor_new_contributor_rows_default_split_columns_to_100(self):
+        dialog = WorkEditorDialog(
+            work_service=object(),
+            track_title_resolver=lambda track_id: f"Track {track_id}",
+            selected_track_ids_provider=lambda: [],
+        )
+        try:
+            dialog._add_contributor_row()
+            share_item = dialog.contributors_table.item(0, 2)
+            role_share_item = dialog.contributors_table.item(0, 3)
+            assert share_item is not None
+            assert role_share_item is not None
+            self.assertEqual(share_item.text(), "100")
+            self.assertEqual(role_share_item.text(), "100")
+        finally:
+            dialog.close()
+
+    def test_work_editor_equal_split_tools_balance_share_columns(self):
+        dialog = WorkEditorDialog(
+            work_service=object(),
+            track_title_resolver=lambda track_id: f"Track {track_id}",
+            selected_track_ids_provider=lambda: [],
+        )
+        try:
+            for name in ("Writer One", "Writer Two", "Writer Three"):
+                dialog._add_contributor_row()
+                contributor_combo = dialog.contributors_table.cellWidget(
+                    dialog.contributors_table.rowCount() - 1,
+                    0,
+                )
+                self.assertIsInstance(contributor_combo, QComboBox)
+                contributor_combo.setEditText(name)
+
+            dialog.equal_split_both_button.click()
+
+            share_values = []
+            role_share_values = []
+            for row in range(dialog.contributors_table.rowCount()):
+                share_item = dialog.contributors_table.item(row, 2)
+                role_share_item = dialog.contributors_table.item(row, 3)
+                assert share_item is not None
+                assert role_share_item is not None
+                share_values.append(float(share_item.text()))
+                role_share_values.append(float(role_share_item.text()))
+            self.assertEqual(share_values, [33.33, 33.33, 33.34])
+            self.assertEqual(role_share_values, [33.33, 33.33, 33.34])
+            self.assertAlmostEqual(sum(share_values), 100.0, places=2)
+            self.assertAlmostEqual(sum(role_share_values), 100.0, places=2)
+        finally:
+            dialog.close()
+
     def test_contract_editor_uses_tabbed_sections(self):
         dialog = ContractEditorDialog(contract_service=object())
         try:

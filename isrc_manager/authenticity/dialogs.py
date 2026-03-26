@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
     QHeaderView,
+    QInputDialog,
     QLabel,
     QMessageBox,
     QPushButton,
@@ -29,9 +30,18 @@ from .service import AuthenticityKeyService
 class AuthenticityKeysDialog(QDialog):
     """Manage local signing keys and default-key selection."""
 
-    def __init__(self, *, key_service: AuthenticityKeyService, parent=None):
+    def __init__(
+        self,
+        *,
+        key_service: AuthenticityKeyService,
+        default_signer_label_provider=None,
+        signer_party_choices_provider=None,
+        parent=None,
+    ):
         super().__init__(parent)
         self.key_service = key_service
+        self.default_signer_label_provider = default_signer_label_provider
+        self.signer_party_choices_provider = signer_party_choices_provider
         self.setWindowTitle("Audio Authenticity Keys")
         self.resize(820, 520)
         _apply_standard_dialog_chrome(self, "authenticityKeysDialog")
@@ -110,8 +120,49 @@ class AuthenticityKeysDialog(QDialog):
         return item.text().strip() if item is not None else None
 
     def _generate_key(self) -> None:
+        signer_label = None
+        if callable(self.default_signer_label_provider):
+            try:
+                signer_label = str(self.default_signer_label_provider() or "").strip() or None
+            except Exception:
+                signer_label = None
+        if signer_label is None:
+            choices: list[tuple[int, str]] = []
+            if callable(self.signer_party_choices_provider):
+                try:
+                    choices = list(self.signer_party_choices_provider() or [])
+                except Exception:
+                    choices = []
+            if not choices:
+                QMessageBox.information(
+                    self,
+                    "Audio Authenticity Keys",
+                    "Create a Party first, then generate the authenticity key.",
+                )
+                return
+            labels = [
+                str(label or "").strip() for _party_id, label in choices if str(label or "").strip()
+            ]
+            if not labels:
+                QMessageBox.information(
+                    self,
+                    "Audio Authenticity Keys",
+                    "Create a Party first, then generate the authenticity key.",
+                )
+                return
+            selected_label, ok = QInputDialog.getItem(
+                self,
+                "Audio Authenticity Keys",
+                "Select the signer Party for this key:",
+                labels,
+                0,
+                False,
+            )
+            signer_label = str(selected_label or "").strip() if ok else ""
+            if not signer_label:
+                return
         try:
-            record = self.key_service.generate_keypair()
+            record = self.key_service.generate_keypair(signer_label=signer_label)
         except Exception as exc:
             QMessageBox.critical(self, "Audio Authenticity Keys", str(exc))
             return

@@ -194,7 +194,15 @@ from isrc_manager.domain.standard_fields import (
 )
 from isrc_manager.domain.timecode import hms_to_seconds, parse_hms_text, seconds_to_hms
 from isrc_manager.exchange.dialogs import ExchangeImportDialog
-from isrc_manager.exchange.models import ExchangeImportReport, ExchangeInspection
+from isrc_manager.exchange.repair_dialogs import (
+    TrackImportRepairEntryDialog,
+    TrackImportRepairQueueDialog,
+)
+from isrc_manager.exchange.models import (
+    ExchangeImportOptions,
+    ExchangeImportReport,
+    ExchangeInspection,
+)
 from isrc_manager.exchange.repertoire_service import RepertoireExchangeService
 from isrc_manager.exchange.service import ExchangeService
 from isrc_manager.file_storage import (
@@ -306,6 +314,7 @@ from isrc_manager.services import (
     RepertoireWorkflowService,
     SettingsMutationService,
     SettingsReadService,
+    TrackImportRepairQueueService,
     TrackCreatePayload,
     TrackService,
     TrackSnapshot,
@@ -8094,6 +8103,9 @@ class App(QMainWindow):
         self.catalog_service = CatalogAdminService(self.conn) if self.conn is not None else None
         self.catalog_reads = CatalogReadService(self.conn) if self.conn is not None else None
         self.profile_kv = ProfileKVService(self.conn) if self.conn is not None else None
+        self.track_import_repair_queue_service = (
+            TrackImportRepairQueueService(self.conn) if self.conn is not None else None
+        )
         self.custom_field_definitions = (
             CustomFieldDefinitionService(self.conn) if self.conn is not None else None
         )
@@ -8147,6 +8159,7 @@ class App(QMainWindow):
                 party_service=self.party_service,
                 work_service=self.work_service,
                 profile_name=self._current_profile_name(),
+                repair_queue_service=self.track_import_repair_queue_service,
             )
             if (
                 self.conn is not None
@@ -8397,6 +8410,7 @@ class App(QMainWindow):
                 party_service=self.party_service,
                 work_service=self.work_service,
                 profile_name=self._current_profile_name(),
+                repair_queue_service=self.track_import_repair_queue_service,
             )
             if (
                 self.conn is not None
@@ -10948,14 +10962,18 @@ class App(QMainWindow):
         refresh_catalog_workspace_docks(self)
 
     @staticmethod
-    def _owner_party_choice_label(record: PartyRecord) -> str:
-        primary = (
+    def _party_identity_primary_label(record: PartyRecord) -> str:
+        return (
             str(record.display_name or "").strip()
             or str(record.artist_name or "").strip()
             or str(record.company_name or "").strip()
             or str(record.legal_name or "").strip()
             or f"Party #{int(record.id)}"
         )
+
+    @classmethod
+    def _owner_party_choice_label(cls, record: PartyRecord) -> str:
+        primary = cls._party_identity_primary_label(record)
         legal_name = str(record.legal_name or "").strip()
         if legal_name and legal_name.casefold() != primary.casefold():
             return f"{primary} ({legal_name})"
@@ -10973,6 +10991,20 @@ class App(QMainWindow):
         if owner_party_id is None:
             return None
         return self.party_service.fetch_party(int(owner_party_id))
+
+    def _default_authenticity_signer_label(self) -> str | None:
+        record = self._current_owner_party_record()
+        if record is None:
+            return None
+        return self._party_identity_primary_label(record)
+
+    def _authenticity_signer_party_choices(self) -> list[tuple[int, str]]:
+        if self.party_service is None:
+            return []
+        choices: list[tuple[int, str]] = []
+        for record in self.party_service.list_parties():
+            choices.append((int(record.id), self._party_identity_primary_label(record)))
+        return choices
 
     @staticmethod
     def _legacy_owner_snapshot_has_data(snapshot: OwnerPartySettings) -> bool:
@@ -11627,6 +11659,13 @@ class App(QMainWindow):
                 "description": "Scan the profile for metadata, release, media, and integrity issues.",
                 "action": self.quality_dashboard_action,
                 "default": True,
+            },
+            {
+                "id": "track_import_repair_queue",
+                "label": "Track Import Repair Queue",
+                "category": "Catalog",
+                "description": "Review import rows that could not be governed or validated before entering the live catalog.",
+                "action": self.track_import_repair_queue_action,
             },
             {
                 "id": "gs1_metadata",
@@ -14757,23 +14796,26 @@ class App(QMainWindow):
         work_id: int | None = None,
         scope_track_ids: list[int] | None = None,
     ) -> None:
-        current_linked_track_id = getattr(panel, "linked_track_id", None)
-        if (
-            linked_track_id is not None
-            or current_linked_track_id is not None
-            or work_id is not None
-        ):
-            panel.set_linked_track_id(linked_track_id)
+        if str(panel.search_edit.text() or "").strip():
+            previous_state = panel.search_edit.blockSignals(True)
+            try:
+                panel.search_edit.clear()
+            finally:
+                panel.search_edit.blockSignals(previous_state)
+        if getattr(panel, "linked_track_id", None) is not None or linked_track_id is not None:
+            panel.set_linked_track_id(None)
         if scope_track_ids is not None:
             panel.set_selection_override_track_ids(scope_track_ids)
+        else:
+            panel.refresh()
+        if linked_track_id is not None and self.work_service is not None:
+            try:
+                linked_rows = self.work_service.list_works(linked_track_id=int(linked_track_id))
+            except Exception:
+                linked_rows = []
+            if len(linked_rows) == 1:
+                panel.focus_work(int(linked_rows[0].id))
         if work_id is not None:
-            if str(panel.search_edit.text() or "").strip():
-                previous_state = panel.search_edit.blockSignals(True)
-                try:
-                    panel.search_edit.clear()
-                finally:
-                    panel.search_edit.blockSignals(previous_state)
-                panel.refresh()
             panel.focus_work(int(work_id))
 
     def open_work_manager(
@@ -14948,41 +14990,259 @@ class App(QMainWindow):
             QMessageBox.warning(self, "Repertoire Exchange", "Open a profile first.")
             return
         normalized = str(format_name or "").strip().lower()
-        try:
-            if normalized == "json":
-                path, _ = QFileDialog.getOpenFileName(
-                    self, "Import Repertoire JSON", "", "JSON Files (*.json)"
-                )
-                if not path:
-                    return
-                self.repertoire_exchange_service.import_json(path)
-            elif normalized == "xlsx":
-                path, _ = QFileDialog.getOpenFileName(
-                    self, "Import Repertoire XLSX", "", "Excel Files (*.xlsx)"
-                )
-                if not path:
-                    return
-                self.repertoire_exchange_service.import_xlsx(path)
-            elif normalized == "csv":
-                path = QFileDialog.getExistingDirectory(self, "Import Repertoire CSV Bundle")
-                if not path:
-                    return
-                self.repertoire_exchange_service.import_csv_bundle(path)
-            elif normalized == "package":
-                path, _ = QFileDialog.getOpenFileName(
-                    self, "Import Repertoire ZIP Package", "", "ZIP Files (*.zip)"
-                )
-                if not path:
-                    return
-                self.repertoire_exchange_service.import_package(path)
-            else:
-                return
-        except Exception as exc:
-            QMessageBox.critical(self, "Repertoire Exchange", str(exc))
+        if normalized == "json":
+            path, _ = QFileDialog.getOpenFileName(
+                self, "Import Repertoire JSON", "", "JSON Files (*.json)"
+            )
+        elif normalized == "xlsx":
+            path, _ = QFileDialog.getOpenFileName(
+                self, "Import Repertoire XLSX", "", "Excel Files (*.xlsx)"
+            )
+        elif normalized == "csv":
+            path = QFileDialog.getExistingDirectory(self, "Import Repertoire CSV Bundle")
+        elif normalized == "package":
+            path, _ = QFileDialog.getOpenFileName(
+                self, "Import Repertoire ZIP Package", "", "ZIP Files (*.zip)"
+            )
+        else:
             return
-        self.refresh_table_preserve_view()
+        if not path:
+            return
+
+        def _worker(bundle, ctx):
+            ctx.report_progress(
+                value=0,
+                maximum=100,
+                message=f"Importing {normalized.upper()} Contracts and Rights data...",
+            )
+
+            def _mutation():
+                if normalized == "json":
+                    return bundle.repertoire_exchange_service.import_json(
+                        path,
+                        progress_callback=ctx.report_progress,
+                        cancel_callback=ctx.raise_if_cancelled,
+                    )
+                if normalized == "xlsx":
+                    return bundle.repertoire_exchange_service.import_xlsx(
+                        path,
+                        progress_callback=ctx.report_progress,
+                        cancel_callback=ctx.raise_if_cancelled,
+                    )
+                if normalized == "csv":
+                    return bundle.repertoire_exchange_service.import_csv_bundle(
+                        path,
+                        progress_callback=ctx.report_progress,
+                        cancel_callback=ctx.raise_if_cancelled,
+                    )
+                return bundle.repertoire_exchange_service.import_package(
+                    path,
+                    progress_callback=ctx.report_progress,
+                    cancel_callback=ctx.raise_if_cancelled,
+                )
+
+            return run_snapshot_history_action(
+                history_manager=bundle.history_manager,
+                action_label=f"Import Contracts and Rights {normalized.upper()}: {Path(path).name}",
+                action_type=f"repertoire.import.{normalized}",
+                entity_type="RepertoireImport",
+                entity_id=path,
+                payload={"path": path, "format": normalized},
+                mutation=_mutation,
+                logger=self.logger,
+            )
+
+        def _success(_result) -> None:
+            try:
+                self.conn.commit()
+            except Exception:
+                pass
+            self.refresh_table_preserve_view()
+            self.populate_all_comboboxes()
+            self._refresh_catalog_workspace_docks()
+            self._refresh_history_actions()
+            if self.statusBar() is not None:
+                self.statusBar().showMessage("Repertoire import complete.", 5000)
+
+        self._submit_background_bundle_task(
+            title=f"Import Contracts and Rights {normalized.upper()}",
+            description=f"Importing {normalized.upper()} Contracts and Rights data into the current profile...",
+            task_fn=_worker,
+            kind="write",
+            unique_key=f"repertoire.import.{normalized}",
+            on_success=_success,
+            on_error=lambda failure: self._show_background_task_error(
+                "Repertoire Exchange",
+                failure,
+                user_message="Could not complete the Contracts and Rights import:",
+            ),
+        )
+
+    def _track_import_repair_entries(self, *, include_resolved: bool = False):
+        if self.track_import_repair_queue_service is None:
+            return []
+        status = None if include_resolved else "pending"
+        return self.track_import_repair_queue_service.list_entries(status=status)
+
+    def _track_import_repair_work_choices(self) -> list[tuple[int, str]]:
+        if self.work_service is None:
+            return []
+        choices: list[tuple[int, str]] = []
+        for record in self.work_service.list_works():
+            title = str(record.title or "").strip() or f"Work #{int(record.id)}"
+            if record.iswc:
+                title = f"{title} ({record.iswc})"
+            choices.append((int(record.id), title))
+        return choices
+
+    def _refresh_track_import_repair_queue_dialog(self) -> None:
+        dialog = getattr(self, "track_import_repair_queue_dialog", None)
+        if isinstance(dialog, TrackImportRepairQueueDialog) and dialog.isVisible():
+            dialog.refresh_entries()
+
+    def _delete_track_import_repair_entries(self, entry_ids: list[int]) -> None:
+        if self.track_import_repair_queue_service is None:
+            return
+        normalized_ids = sorted({int(entry_id) for entry_id in entry_ids if int(entry_id) > 0})
+        if not normalized_ids:
+            return
+        if (
+            QMessageBox.question(
+                self,
+                "Track Import Repair Queue",
+                "Delete the selected repair queue row(s)?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            != QMessageBox.Yes
+        ):
+            return
+        deleted = self.track_import_repair_queue_service.delete_entries(normalized_ids)
+        try:
+            self.conn.commit()
+        except Exception:
+            pass
+        self._refresh_track_import_repair_queue_dialog()
         if self.statusBar() is not None:
-            self.statusBar().showMessage("Repertoire import complete.", 5000)
+            self.statusBar().showMessage(
+                f"Deleted {deleted} import repair row(s).",
+                5000,
+            )
+
+    def _repair_track_import_queue_entry(self, entry_id: int) -> None:
+        if self.track_import_repair_queue_service is None or self.exchange_service is None:
+            QMessageBox.warning(self, "Track Import Repair Queue", "Open a profile first.")
+            return
+        entry = self.track_import_repair_queue_service.fetch_entry(int(entry_id))
+        if entry is None:
+            QMessageBox.information(
+                self,
+                "Track Import Repair Queue",
+                "The selected repair row no longer exists.",
+            )
+            self._refresh_track_import_repair_queue_dialog()
+            return
+        dialog = TrackImportRepairEntryDialog(
+            entry=entry,
+            work_choices=self._track_import_repair_work_choices(),
+            parent=self,
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return
+        edited_row = dialog.edited_row()
+        repair_override = dialog.repair_override()
+        allowed_option_fields = {field.name for field in dataclass_fields(ExchangeImportOptions)}
+        option_values = {
+            key: value
+            for key, value in dict(entry.options or {}).items()
+            if key in allowed_option_fields
+        }
+        options = (
+            ExchangeImportOptions(**option_values) if option_values else ExchangeImportOptions()
+        )
+        if options.mode == "dry_run":
+            options.mode = "create"
+
+        def _worker(bundle, ctx):
+            ctx.set_status("Reapplying repaired import row...")
+            return bundle.exchange_service.import_prepared_rows(
+                [edited_row],
+                mapping=entry.mapping,
+                options=options,
+                format_name=entry.source_format,
+                source_path=entry.source_path,
+                progress_callback=ctx.report_progress,
+                cancel_callback=ctx.raise_if_cancelled,
+                repair_entry_id=int(entry.id),
+                repair_override=repair_override,
+            )
+
+        def _success(report: ExchangeImportReport) -> None:
+            try:
+                self.conn.commit()
+            except Exception:
+                pass
+            if report.created_tracks or report.updated_tracks:
+                focus_id = (report.created_tracks or report.updated_tracks)[0]
+                self.refresh_table_preserve_view(focus_id=focus_id)
+                self.populate_all_comboboxes()
+            self._refresh_track_import_repair_queue_dialog()
+            if report.passed:
+                if self.statusBar() is not None:
+                    self.statusBar().showMessage("Import repair row applied.", 5000)
+                return
+            details = (
+                "\n".join(report.warnings[:12])
+                if report.warnings
+                else "The row still needs repair."
+            )
+            QMessageBox.warning(
+                self,
+                "Track Import Repair Queue",
+                details,
+            )
+
+        self._submit_background_bundle_task(
+            title="Reapply Import Repair Row",
+            description="Repairing and reapplying the queued import row...",
+            task_fn=_worker,
+            kind="write",
+            unique_key=f"track.import.repair.{int(entry.id)}",
+            on_success=_success,
+            on_error=lambda failure: self._show_background_task_error(
+                "Track Import Repair Queue",
+                failure,
+                user_message="Could not reapply the queued import row:",
+            ),
+        )
+
+    def open_track_import_repair_queue(self, focus_entry_id: int | None = None):
+        if self.track_import_repair_queue_service is None:
+            QMessageBox.warning(self, "Track Import Repair Queue", "Open a profile first.")
+            return
+        dialog = TrackImportRepairQueueDialog(
+            entries_provider=lambda include_resolved: self._track_import_repair_entries(
+                include_resolved=include_resolved
+            ),
+            repair_selected_handler=self._repair_track_import_queue_entry,
+            delete_selected_handler=self._delete_track_import_repair_entries,
+            parent=self,
+        )
+        self.track_import_repair_queue_dialog = dialog
+        if focus_entry_id is not None:
+            dialog.refresh_entries()
+            for row in range(dialog.table.rowCount()):
+                item = dialog.table.item(row, 0)
+                if item is None:
+                    continue
+                try:
+                    current_id = int(item.text())
+                except Exception:
+                    continue
+                if current_id == int(focus_entry_id):
+                    dialog.table.selectRow(row)
+                    break
+        dialog.exec()
 
     def _selected_party_manager_ids(self) -> list[int]:
         seen_panel_ids: set[int] = set()
@@ -15071,13 +15331,29 @@ class App(QMainWindow):
             return
 
         def _inspection_worker(bundle, ctx):
-            ctx.set_status(f"Inspecting {normalized_format.upper()} Party source file...")
+            ctx.report_progress(
+                value=0,
+                maximum=100,
+                message=f"Inspecting {normalized_format.upper()} Party source file...",
+            )
             if normalized_format == "csv":
-                return bundle.party_exchange_service.inspect_csv(path)
+                return bundle.party_exchange_service.inspect_csv(
+                    path,
+                    progress_callback=ctx.report_progress,
+                    cancel_callback=ctx.raise_if_cancelled,
+                )
             if normalized_format == "xlsx":
-                return bundle.party_exchange_service.inspect_xlsx(path)
+                return bundle.party_exchange_service.inspect_xlsx(
+                    path,
+                    progress_callback=ctx.report_progress,
+                    cancel_callback=ctx.raise_if_cancelled,
+                )
             if normalized_format == "json":
-                return bundle.party_exchange_service.inspect_json(path)
+                return bundle.party_exchange_service.inspect_json(
+                    path,
+                    progress_callback=ctx.report_progress,
+                    cancel_callback=ctx.raise_if_cancelled,
+                )
             raise ValueError(f"Unsupported Party exchange format: {normalized_format}")
 
         def _inspection_success(inspection: PartyExchangeInspection):
@@ -15100,8 +15376,10 @@ class App(QMainWindow):
             selected_csv_delimiter = dlg.resolved_csv_delimiter()
 
             def _import_worker(bundle, ctx):
-                ctx.set_status(
-                    f"Importing {normalized_format.upper()} Parties into the current profile..."
+                ctx.report_progress(
+                    value=0,
+                    maximum=100,
+                    message=f"Importing {normalized_format.upper()} Parties into the current profile...",
                 )
 
                 def _mutation():
@@ -15111,17 +15389,23 @@ class App(QMainWindow):
                             mapping=mapping,
                             options=options,
                             delimiter=selected_csv_delimiter,
+                            progress_callback=ctx.report_progress,
+                            cancel_callback=ctx.raise_if_cancelled,
                         )
                     if normalized_format == "xlsx":
                         return bundle.party_exchange_service.import_xlsx(
                             path,
                             mapping=mapping,
                             options=options,
+                            progress_callback=ctx.report_progress,
+                            cancel_callback=ctx.raise_if_cancelled,
                         )
                     return bundle.party_exchange_service.import_json(
                         path,
                         mapping=mapping,
                         options=options,
+                        progress_callback=ctx.report_progress,
+                        cancel_callback=ctx.raise_if_cancelled,
                     )
 
                 if options.mode == "dry_run":
@@ -17474,6 +17758,8 @@ class App(QMainWindow):
             return
         AuthenticityKeysDialog(
             key_service=self.authenticity_key_service,
+            default_signer_label_provider=self._default_authenticity_signer_label,
+            signer_party_choices_provider=self._authenticity_signer_party_choices,
             parent=self,
         ).exec()
 
@@ -17987,27 +18273,39 @@ class App(QMainWindow):
                             mapping=mapping,
                             options=options,
                             delimiter=selected_csv_delimiter,
+                            progress_callback=ctx.report_progress,
+                            cancel_callback=ctx.raise_if_cancelled,
                         )
                     if normalized_format == "xlsx":
                         return bundle.exchange_service.import_xlsx(
-                            path, mapping=mapping, options=options
+                            path,
+                            mapping=mapping,
+                            options=options,
+                            progress_callback=ctx.report_progress,
+                            cancel_callback=ctx.raise_if_cancelled,
                         )
                     if normalized_format == "package":
                         return bundle.exchange_service.import_package(
                             path,
                             mapping=mapping,
                             options=options,
+                            progress_callback=ctx.report_progress,
+                            cancel_callback=ctx.raise_if_cancelled,
                         )
                     if normalized_format == "xml":
                         return bundle.exchange_service.import_xml(
                             path,
                             mapping=mapping,
                             options=options,
+                            progress_callback=ctx.report_progress,
+                            cancel_callback=ctx.raise_if_cancelled,
                         )
                     return bundle.exchange_service.import_json(
                         path,
                         mapping=mapping,
                         options=options,
+                        progress_callback=ctx.report_progress,
+                        cancel_callback=ctx.raise_if_cancelled,
                     )
 
                 if options.mode == "dry_run":
@@ -18055,6 +18353,7 @@ class App(QMainWindow):
                     warnings=report.warnings,
                     duplicates=report.duplicates,
                     unknown_fields=report.unknown_fields,
+                    repair_queue_entry_ids=report.repair_queue_entry_ids,
                 )
                 self._audit(
                     "IMPORT",
@@ -18062,7 +18361,8 @@ class App(QMainWindow):
                     ref_id=path,
                     details=(
                         f"mode={options.mode}; passed={report.passed}; failed={report.failed}; "
-                        f"skipped={report.skipped}; duplicates={len(report.duplicates)}"
+                        f"skipped={report.skipped}; duplicates={len(report.duplicates)}; "
+                        f"repair_queue={len(report.repair_queue_entry_ids)}"
                     ),
                 )
                 self._audit_commit()
@@ -18131,17 +18431,31 @@ class App(QMainWindow):
             )
         if report.duplicates:
             lines.append(f"Duplicates: {len(report.duplicates)}")
+        if report.repair_queue_entry_ids:
+            lines.append(f"Repair queue: {len(report.repair_queue_entry_ids)}")
         if report.unknown_fields:
             lines.append("Unknown fields: " + ", ".join(report.unknown_fields[:8]))
         if report.warnings:
             lines.append("")
             lines.append("Warnings:")
             lines.extend(f"- {warning}" for warning in report.warnings[:12])
-        QMessageBox.information(
-            self,
-            f"Import {report.format_name.upper()}",
-            "\n".join(lines) + f"\n\nSource:\n{path}",
-        )
+        message_box = QMessageBox(self)
+        message_box.setIcon(QMessageBox.Information)
+        message_box.setWindowTitle(f"Import {report.format_name.upper()}")
+        message_box.setText("\n".join(lines) + f"\n\nSource:\n{path}")
+        open_queue_button = None
+        if report.repair_queue_entry_ids:
+            open_queue_button = message_box.addButton(
+                "Open Repair Queue",
+                QMessageBox.ActionRole,
+            )
+        message_box.addButton(QMessageBox.Ok)
+        message_box.exec()
+        if open_queue_button is not None and message_box.clickedButton() is open_queue_button:
+            focus_entry_id = (
+                report.repair_queue_entry_ids[0] if report.repair_queue_entry_ids else None
+            )
+            self.open_track_import_repair_queue(focus_entry_id=focus_entry_id)
 
     def export_exchange_file(self, format_name: str, *, selected_only: bool):
         if self.exchange_service is None:

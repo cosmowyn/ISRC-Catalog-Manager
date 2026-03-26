@@ -47,6 +47,8 @@ class GovernedTrackCreationServiceTests(unittest.TestCase):
                 buma_work_number="BUMA-123",
                 composer="Alex Writer",
                 publisher="North Harbor Publishing",
+                comments="Imported governed note",
+                lyrics="Seeded lyric fragment",
             ),
             governance_mode="create_new_work",
             profile_name="governed-test.db",
@@ -66,7 +68,7 @@ class GovernedTrackCreationServiceTests(unittest.TestCase):
         ).fetchone()
         work_row = self.conn.execute(
             """
-            SELECT title, iswc, registration_number, profile_name
+            SELECT title, iswc, registration_number, profile_name, genre_notes, notes, lyrics_flag
             FROM Works
             WHERE id=?
             """,
@@ -99,6 +101,9 @@ class GovernedTrackCreationServiceTests(unittest.TestCase):
                 "T-123.456.789-0",
                 "BUMA-123",
                 "governed-test.db",
+                "Ambient",
+                "Imported governed note",
+                1,
             ),
         )
         self.assertEqual(

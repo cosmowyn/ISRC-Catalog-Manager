@@ -6,7 +6,7 @@ import json
 import re
 import sqlite3
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from isrc_manager.domain.codes import (
     is_blank,
@@ -23,6 +23,7 @@ from isrc_manager.works import WorkService
 
 from .custom_fields import CustomFieldDefinitionService
 from .import_governance import GovernedImportCoordinator
+from .import_repair_queue import TrackImportRepairQueueService
 from .tracks import TrackCreatePayload, TrackService
 
 PROMOTED_TEXT_CUSTOM_FIELDS = promoted_text_value_columns_by_label_lower()
@@ -67,6 +68,7 @@ class ImportExecutionResult:
     duplicate_count: int
     invalid_count: int
     error_count: int
+    repair_queue_entry_ids: list[int] = field(default_factory=list)
 
 
 class XMLImportService:
@@ -81,16 +83,41 @@ class XMLImportService:
         party_service: PartyService | None = None,
         work_service: WorkService | None = None,
         profile_name: str | None = None,
+        repair_queue_service: TrackImportRepairQueueService | None = None,
     ):
         self.conn = conn
         self.track_service = track_service
         self.custom_fields = custom_fields
+        self.repair_queue_service = repair_queue_service or TrackImportRepairQueueService(conn)
         self.governed_tracks = GovernedImportCoordinator(
             conn,
             track_service=track_service,
             party_service=party_service,
             work_service=work_service,
             profile_name=profile_name,
+        )
+
+    def _queue_failed_record(
+        self,
+        *,
+        file_path: str,
+        row_index: int,
+        record: ImportRecord,
+        failure_message: str,
+        import_mode: str = "create",
+        options: dict[str, object] | None = None,
+    ) -> int:
+        normalized_row = self.exchange_rows_from_inspection([record])[0]
+        return self.repair_queue_service.queue_failed_row(
+            source_format="xml",
+            source_path=file_path,
+            row_index=row_index,
+            import_mode=import_mode,
+            normalized_row=normalized_row,
+            mapping=None,
+            options=options or {},
+            failure_message=failure_message,
+            failure_category="validation",
         )
 
     def inspect_file(self, file_path: str) -> ImportInspection:
@@ -145,13 +172,46 @@ class XMLImportService:
         self, file_path: str, *, create_missing_custom_fields: bool = False
     ) -> ImportExecutionResult:
         inspection = self.inspect_file(file_path)
+        repair_queue_entry_ids: list[int] = []
         if inspection.conflicting_custom_fields:
-            raise ValueError(
-                f"Custom column type conflicts: {inspection.conflicting_custom_fields}"
-            )
+            message = f"Custom column type conflicts: {inspection.conflicting_custom_fields}"
+            for row_index, record in enumerate(inspection.records, start=1):
+                repair_queue_entry_ids.append(
+                    int(
+                        self._queue_failed_record(
+                            file_path=file_path,
+                            row_index=row_index,
+                            record=record,
+                            failure_message=message,
+                            options={
+                                "create_missing_custom_fields": bool(create_missing_custom_fields)
+                            },
+                        )
+                    )
+                )
+            self.conn.commit()
+            raise ValueError(message)
         if inspection.missing_custom_fields:
             if not create_missing_custom_fields:
-                raise ValueError(f"Missing custom columns: {inspection.missing_custom_fields}")
+                message = f"Missing custom columns: {inspection.missing_custom_fields}"
+                for row_index, record in enumerate(inspection.records, start=1):
+                    repair_queue_entry_ids.append(
+                        int(
+                            self._queue_failed_record(
+                                file_path=file_path,
+                                row_index=row_index,
+                                record=record,
+                                failure_message=message,
+                                options={
+                                    "create_missing_custom_fields": bool(
+                                        create_missing_custom_fields
+                                    )
+                                },
+                            )
+                        )
+                    )
+                self.conn.commit()
+                raise ValueError(message)
 
         inserted = 0
         duplicate_count = 0
@@ -168,7 +228,7 @@ class XMLImportService:
                 for field in self.custom_fields.list_active_fields()
             }
 
-            for record in inspection.records:
+            for row_index, record in enumerate(inspection.records, start=1):
                 if self.track_service.is_isrc_taken_normalized(record.iso_isrc):
                     duplicate_count += 1
                     continue
@@ -225,10 +285,25 @@ class XMLImportService:
 
                     self.conn.execute("RELEASE SAVEPOINT row_import")
                     inserted += 1
-                except Exception:
+                except Exception as exc:
                     self.conn.execute("ROLLBACK TO SAVEPOINT row_import")
                     self.conn.execute("RELEASE SAVEPOINT row_import")
                     error_count += 1
+                    repair_queue_entry_ids.append(
+                        int(
+                            self._queue_failed_record(
+                                file_path=file_path,
+                                row_index=row_index,
+                                record=record,
+                                failure_message=str(exc),
+                                options={
+                                    "create_missing_custom_fields": bool(
+                                        create_missing_custom_fields
+                                    )
+                                },
+                            )
+                        )
+                    )
             self.conn.commit()
         except Exception:
             self.conn.rollback()
@@ -239,6 +314,7 @@ class XMLImportService:
             duplicate_count=duplicate_count,
             invalid_count=inspection.invalid_count,
             error_count=error_count,
+            repair_queue_entry_ids=repair_queue_entry_ids,
         )
 
     @classmethod
