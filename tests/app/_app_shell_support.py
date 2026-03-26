@@ -276,12 +276,23 @@ class AppShellTestCase(unittest.TestCase):
         self.window = None
         return settings_path
 
-    def _reopen_window(self):
-        self._close_window()
-        self.window = app_module.App()
+    def _open_window(self, *, skip_background_prepare: bool = False):
+        if skip_background_prepare:
+            with mock.patch.object(
+                app_module.App,
+                "_prepare_database_for_open_blocking",
+                return_value=False,
+            ):
+                self.window = app_module.App()
+        else:
+            self.window = app_module.App()
         self.window.show()
         self._drain_events()
         return self.window
+
+    def _reopen_window(self, *, skip_background_prepare: bool = False):
+        self._close_window()
+        return self._open_window(skip_background_prepare=skip_background_prepare)
 
     def _settings_path(self) -> Path:
         return self.qt_settings_root / "AppDataLocation" / "settings.ini"
@@ -2843,7 +2854,7 @@ class AppShellTestCase(unittest.TestCase):
         self.assertFalse(self.window.toolbar.isVisible())
         self.assertFalse(self.window.settings.value("display/profiles_toolbar_visible", True, bool))
 
-        self._reopen_window()
+        self._reopen_window(skip_background_prepare=True)
         self.assertFalse(self.window.toolbar.isVisible())
 
         self.window.profiles_toolbar_visibility_action.trigger()
@@ -3096,7 +3107,7 @@ class AppShellTestCase(unittest.TestCase):
         self.window.open_global_search()
         self._drain_events()
 
-        self._reopen_window()
+        self._reopen_window(skip_background_prepare=True)
 
         tabified = set(self.window.tabifiedDockWidgets(self.window.catalog_table_dock))
         self.assertIn(self.window.release_browser_dock, tabified)
@@ -3119,7 +3130,7 @@ class AppShellTestCase(unittest.TestCase):
         self.window.release_browser_dock.raise_()
         self._drain_events()
 
-        self._reopen_window()
+        self._reopen_window(skip_background_prepare=True)
 
         self.assertEqual(
             self.window.dockWidgetArea(self.window.release_browser_dock),
@@ -3161,9 +3172,7 @@ class AppShellTestCase(unittest.TestCase):
         settings.deleteLater() if hasattr(settings, "deleteLater") else None
         self._drain_events()
 
-        self.window = app_module.App()
-        self.window.show()
-        self._drain_events()
+        self._open_window(skip_background_prepare=True)
 
         self.assertTrue(self.window.catalog_table_dock.isVisible())
         self.assertIn(
@@ -3187,9 +3196,7 @@ class AppShellTestCase(unittest.TestCase):
         settings.deleteLater() if hasattr(settings, "deleteLater") else None
         self._drain_events()
 
-        self.window = app_module.App()
-        self.window.show()
-        self._drain_events()
+        self._open_window(skip_background_prepare=True)
 
         self.assertTrue(self.window.add_data_dock.isVisible())
         self.assertTrue(self.window.catalog_table_dock.isVisible())
@@ -3199,7 +3206,7 @@ class AppShellTestCase(unittest.TestCase):
         self.window.resize(1111, 777)
         self._drain_events()
 
-        self._reopen_window()
+        self._reopen_window(skip_background_prepare=True)
 
         self.assertFalse(self.window.isMaximized())
         self.assertEqual(self.window.width(), 1111)
