@@ -152,8 +152,8 @@ from .gs1_repository import GS1MetadataRepository
 from .gs1_settings import GS1SettingsService
 from .gs1_template import GS1TemplateVerificationService
 from .gs1_validation import GS1ValidationService
-from .imports import ImportExecutionResult, ImportInspection, ImportRecord, XMLImportService
 from .import_repair_queue import TrackImportRepairEntry, TrackImportRepairQueueService
+from .imports import ImportExecutionResult, ImportInspection, ImportRecord, XMLImportService
 from .license_migration import (
     LegacyLicenseMigrationIssue,
     LegacyLicenseMigrationResult,

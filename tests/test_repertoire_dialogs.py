@@ -27,7 +27,6 @@ try:
     from isrc_manager.media.derivatives import DerivativeLedgerService
     from isrc_manager.parties import PartyPayload, PartyService
     from isrc_manager.parties.dialogs import (
-        OwnerBootstrapDialog,
         PartyEditorDialog,
         PartyManagerPanel,
     )

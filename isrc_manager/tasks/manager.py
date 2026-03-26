@@ -18,9 +18,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .models import TaskCancelledError, TaskFailure, TaskProgressUpdate
 from ..ui_common import _abbreviate_middle_text, _compose_widget_stylesheet
-
+from .models import TaskCancelledError, TaskFailure, TaskProgressUpdate
 
 _PROGRESS_DIALOG_MIN_WIDTH = 360
 _PROGRESS_DIALOG_MAX_WIDTH = 480

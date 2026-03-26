@@ -6,7 +6,7 @@ import csv
 import json
 import sqlite3
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING

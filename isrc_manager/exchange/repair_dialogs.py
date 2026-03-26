@@ -15,7 +15,6 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
-    QWidget,
 )
 
 from isrc_manager.services.import_repair_queue import TrackImportRepairEntry

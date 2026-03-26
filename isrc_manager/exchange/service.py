@@ -27,8 +27,8 @@ from isrc_manager.parties import PartyService
 from isrc_manager.releases import ReleasePayload, ReleaseService, ReleaseTrackPlacement
 from isrc_manager.services.custom_fields import CustomFieldDefinitionService
 from isrc_manager.services.import_governance import GovernedImportCoordinator
-from isrc_manager.services.imports import XMLImportService
 from isrc_manager.services.import_repair_queue import TrackImportRepairQueueService
+from isrc_manager.services.imports import XMLImportService
 from isrc_manager.services.tracks import TrackCreatePayload, TrackService, TrackUpdatePayload
 from isrc_manager.works import WorkService
 

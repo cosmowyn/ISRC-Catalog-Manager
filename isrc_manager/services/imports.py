@@ -563,15 +563,15 @@ class XMLImportService:
         for child in record:
             if cls._xml_local(child.tag) != "CustomFields":
                 continue
-            for field in child:
-                if cls._xml_local(field.tag) != "Field":
+            for field_element in child:
+                if cls._xml_local(field_element.tag) != "Field":
                     continue
-                name = (field.attrib.get("name") or "").strip()
-                field_type = (field.attrib.get("type") or "text").strip()
+                name = (field_element.attrib.get("name") or "").strip()
+                field_type = (field_element.attrib.get("type") or "text").strip()
                 value = ""
                 mime = None
                 size = None
-                for sub in field:
+                for sub in field_element:
                     tag = cls._xml_local(sub.tag).lower()
                     if tag == "value":
                         value = "" if sub.text is None else sub.text.strip()
