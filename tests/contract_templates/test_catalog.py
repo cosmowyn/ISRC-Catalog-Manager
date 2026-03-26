@@ -99,7 +99,7 @@ class ContractTemplateCatalogServiceTests(unittest.TestCase):
         self.assertEqual(party_entries["artist_aliases"].scope_policy, "party_selection_required")
         self.assertEqual(party_entries["bank_account_number"].field_type, "text")
 
-    def test_owner_namespace_exposes_settings_backed_owner_party_symbols(self):
+    def test_owner_namespace_exposes_current_owner_party_symbols(self):
         owner_entries = {entry.key: entry for entry in self.service.list_entries(namespace="owner")}
 
         expected_keys = {
@@ -126,7 +126,7 @@ class ContractTemplateCatalogServiceTests(unittest.TestCase):
         )
         self.assertEqual(owner_entries["legal_name"].scope_entity_type, "owner")
         self.assertEqual(owner_entries["legal_name"].scope_policy, "owner_settings_context")
-        self.assertEqual(owner_entries["legal_name"].source_kind, "Application Settings")
+        self.assertEqual(owner_entries["legal_name"].source_kind, "Owner Party")
 
     def test_all_generated_symbols_round_trip_through_canonical_parser(self):
         for entry in self.service.list_entries():

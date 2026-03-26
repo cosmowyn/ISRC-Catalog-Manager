@@ -125,6 +125,18 @@ class SettingsReadService:
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
 
+    @staticmethod
+    def _owner_binding_table_sql() -> str:
+        return """
+            CREATE TABLE IF NOT EXISTS ApplicationOwnerBinding (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                party_id INTEGER NOT NULL UNIQUE,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (party_id) REFERENCES Parties(id) ON DELETE RESTRICT
+            )
+        """
+
     def _read_scalar(self, query: str) -> str:
         row = self.conn.execute(query).fetchone()
         if not row or row[0] is None:
@@ -150,7 +162,25 @@ class SettingsReadService:
             return None
         return value if value > 0 else None
 
-    def _load_owner_party_snapshot(self, registration: RegistrationSettings) -> OwnerPartySettings:
+    def load_owner_party_id(self) -> int | None:
+        try:
+            self.conn.execute(self._owner_binding_table_sql())
+            row = self.conn.execute(
+                "SELECT party_id FROM ApplicationOwnerBinding WHERE id=1"
+            ).fetchone()
+        except sqlite3.OperationalError:
+            row = None
+        if row and row[0] is not None:
+            try:
+                party_id = int(row[0])
+            except Exception:
+                party_id = None
+            if party_id and party_id > 0:
+                return party_id
+        return self._read_profile_int("owner_party_id")
+
+    def load_legacy_owner_party_snapshot(self) -> OwnerPartySettings:
+        registration = self._load_legacy_registration_settings()
         return OwnerPartySettings(
             party_id=self._read_profile_int("owner_party_id"),
             legal_name=self._read_profile_value("owner_legal_name"),
@@ -186,7 +216,6 @@ class SettingsReadService:
     def _load_owner_party_from_record(
         self,
         party_id: int,
-        registration: RegistrationSettings,
     ) -> OwnerPartySettings | None:
         try:
             row = self.conn.execute(
@@ -216,7 +245,10 @@ class SettingsReadService:
                     bank_account_number,
                     chamber_of_commerce_number,
                     tax_id,
+                    vat_number,
                     pro_affiliation,
+                    pro_number,
+                    ipi_cae,
                     notes
                 FROM Parties
                 WHERE id=?
@@ -252,11 +284,11 @@ class SettingsReadService:
             bank_account_number=str(row[21] or "").strip(),
             chamber_of_commerce_number=str(row[22] or "").strip(),
             tax_id=str(row[23] or "").strip(),
-            vat_number=registration.btw_number,
-            pro_affiliation=str(row[24] or "").strip(),
-            pro_number=registration.buma_relatie_nummer,
-            ipi_cae=registration.buma_ipi,
-            notes=str(row[25] or "").strip(),
+            vat_number=str(row[24] or "").strip(),
+            pro_affiliation=str(row[25] or "").strip(),
+            pro_number=str(row[26] or "").strip(),
+            ipi_cae=str(row[27] or "").strip(),
+            notes=str(row[28] or "").strip(),
         )
 
     def load_isrc_prefix(self) -> str:
@@ -265,45 +297,53 @@ class SettingsReadService:
     def load_sena_number(self) -> str:
         return self._read_scalar("SELECT number FROM SENA WHERE id = 1")
 
-    def load_btw_number(self) -> str:
-        return self._read_scalar("SELECT nr FROM BTW WHERE id = 1")
-
-    def load_buma_relatie_nummer(self) -> str:
-        return self._read_scalar("SELECT relatie_nummer FROM BUMA_STEMRA WHERE id = 1")
-
-    def load_buma_ipi(self) -> str:
-        return self._read_scalar("SELECT ipi FROM BUMA_STEMRA WHERE id = 1")
-
-    def load_registration_settings(self) -> RegistrationSettings:
+    def _load_legacy_registration_settings(self) -> RegistrationSettings:
         row = self.conn.execute(
             "SELECT relatie_nummer, ipi FROM BUMA_STEMRA WHERE id = 1"
         ).fetchone()
         return RegistrationSettings(
             isrc_prefix=self.load_isrc_prefix(),
             sena_number=self.load_sena_number(),
-            btw_number=self.load_btw_number(),
+            btw_number=self._read_scalar("SELECT nr FROM BTW WHERE id = 1"),
             buma_relatie_nummer=str(row[0]).strip() if row and row[0] is not None else "",
             buma_ipi=str(row[1]).strip() if row and row[1] is not None else "",
         )
 
+    def load_btw_number(self) -> str:
+        owner_settings = self.load_owner_party_settings()
+        if owner_settings.party_id is not None and owner_settings.vat_number:
+            return owner_settings.vat_number
+        return self._read_scalar("SELECT nr FROM BTW WHERE id = 1")
+
+    def load_buma_relatie_nummer(self) -> str:
+        owner_settings = self.load_owner_party_settings()
+        if owner_settings.party_id is not None and owner_settings.pro_number:
+            return owner_settings.pro_number
+        return self._read_scalar("SELECT relatie_nummer FROM BUMA_STEMRA WHERE id = 1")
+
+    def load_buma_ipi(self) -> str:
+        owner_settings = self.load_owner_party_settings()
+        if owner_settings.party_id is not None and owner_settings.ipi_cae:
+            return owner_settings.ipi_cae
+        return self._read_scalar("SELECT ipi FROM BUMA_STEMRA WHERE id = 1")
+
+    def load_registration_settings(self) -> RegistrationSettings:
+        return RegistrationSettings(
+            isrc_prefix=self.load_isrc_prefix(),
+            sena_number=self.load_sena_number(),
+            btw_number=self.load_btw_number(),
+            buma_relatie_nummer=self.load_buma_relatie_nummer(),
+            buma_ipi=self.load_buma_ipi(),
+        )
+
     def load_owner_party_settings(self) -> OwnerPartySettings:
-        registration = self.load_registration_settings()
-        snapshot = self._load_owner_party_snapshot(registration)
-        if snapshot.party_id is None:
-            return snapshot
-        party_backed = self._load_owner_party_from_record(snapshot.party_id, registration)
+        party_id = self.load_owner_party_id()
+        if party_id is None:
+            return OwnerPartySettings()
+        party_backed = self._load_owner_party_from_record(party_id)
         if party_backed is not None:
             return party_backed
-        return OwnerPartySettings(
-            party_id=None,
-            **{
-                field_name: getattr(snapshot, field_name, "")
-                for field_name in OwnerPartySettings.PROFILE_FIELD_NAMES
-            },
-            vat_number=snapshot.vat_number,
-            pro_number=snapshot.pro_number,
-            ipi_cae=snapshot.ipi_cae,
-        )
+        return OwnerPartySettings()
 
     def load_auto_snapshot_enabled(self) -> bool:
         raw = self._read_profile_value("auto_snapshot_enabled")

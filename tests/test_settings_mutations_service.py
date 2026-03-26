@@ -10,6 +10,7 @@ from isrc_manager.services import OwnerPartySettings, SettingsMutationService
 
 def make_settings_conn():
     conn = sqlite3.connect(":memory:")
+    conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(
         """
         CREATE TABLE app_kv (
@@ -32,6 +33,41 @@ def make_settings_conn():
             id INTEGER PRIMARY KEY,
             relatie_nummer TEXT,
             ipi TEXT
+        );
+        CREATE TABLE Parties (
+            id INTEGER PRIMARY KEY,
+            legal_name TEXT NOT NULL,
+            display_name TEXT,
+            artist_name TEXT,
+            company_name TEXT,
+            first_name TEXT,
+            middle_name TEXT,
+            last_name TEXT,
+            party_type TEXT,
+            contact_person TEXT,
+            email TEXT,
+            alternative_email TEXT,
+            phone TEXT,
+            website TEXT,
+            street_name TEXT,
+            street_number TEXT,
+            address_line1 TEXT,
+            address_line2 TEXT,
+            city TEXT,
+            region TEXT,
+            postal_code TEXT,
+            country TEXT,
+            bank_account_number TEXT,
+            chamber_of_commerce_number TEXT,
+            tax_id TEXT,
+            vat_number TEXT,
+            pro_affiliation TEXT,
+            pro_number TEXT,
+            ipi_cae TEXT,
+            notes TEXT,
+            profile_name TEXT,
+            created_at TEXT,
+            updated_at TEXT
         );
         """
     )
@@ -132,51 +168,21 @@ class SettingsMutationServiceTests(unittest.TestCase):
             ("REL-3", "IPI-4"),
         )
 
-    def test_set_owner_party_settings_persists_profile_fields_without_touching_registration(self):
-        saved = self.service.set_owner_party_settings(
-            OwnerPartySettings(
-                legal_name="Moonwake Records B.V.",
-                display_name="Moonwake Records",
-                artist_name="Lyra Moonwake",
-                company_name="Moonwake Records",
-                first_name="Lyra",
-                last_name="Moonwake",
-                email="hello@moonwake.test",
-                alternative_email="legal@moonwake.test",
-                street_name="Forest Lane",
-                street_number="42A",
-                city="Amsterdam",
-                postal_code="1234AB",
-                country="Netherlands",
-                bank_account_number="NL91TEST0123456789",
-                chamber_of_commerce_number="CoC-556677",
-                tax_id="TAX-778899",
-                vat_number="BTW-2",
-                pro_affiliation="BUMA/STEMRA",
-                pro_number="REL-3",
-                ipi_cae="IPI-4",
-                notes="Primary owner identity",
+    def test_set_owner_party_settings_only_persists_owner_binding(self):
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO Parties(id, legal_name, display_name) VALUES (?, ?, ?)",
+                (12, "Canonical Owner B.V.", "Canonical Owner"),
             )
-        )
+            self.conn.executemany(
+                "INSERT INTO app_kv(key, value) VALUES(?, ?)",
+                [
+                    ("owner_display_name", "Legacy Owner"),
+                    ("owner_legal_name", "Legacy Owner B.V."),
+                    ("owner_email", "legacy@owner.test"),
+                ],
+            )
 
-        self.assertEqual(saved.display_name, "Moonwake Records")
-        self.assertEqual(
-            self.conn.execute("SELECT value FROM app_kv WHERE key='owner_display_name'").fetchone(),
-            ("Moonwake Records",),
-        )
-        self.assertEqual(
-            self.conn.execute("SELECT value FROM app_kv WHERE key='owner_tax_id'").fetchone(),
-            ("TAX-778899",),
-        )
-        self.assertIsNone(
-            self.conn.execute("SELECT value FROM app_kv WHERE key='owner_party_id'").fetchone()
-        )
-        self.assertIsNone(self.conn.execute("SELECT nr FROM BTW WHERE id=1").fetchone())
-        self.assertIsNone(
-            self.conn.execute("SELECT relatie_nummer, ipi FROM BUMA_STEMRA WHERE id=1").fetchone()
-        )
-
-    def test_set_owner_party_settings_persists_and_clears_owner_party_id(self):
         saved = self.service.set_owner_party_settings(
             OwnerPartySettings(
                 party_id=12,
@@ -185,23 +191,68 @@ class SettingsMutationServiceTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual(saved.party_id, 12)
+        self.assertEqual(saved, OwnerPartySettings(party_id=12))
         self.assertEqual(
-            self.conn.execute("SELECT value FROM app_kv WHERE key='owner_party_id'").fetchone(),
-            ("12",),
+            self.conn.execute("SELECT party_id FROM ApplicationOwnerBinding WHERE id=1").fetchone(),
+            (12,),
+        )
+        self.assertIsNone(
+            self.conn.execute("SELECT value FROM app_kv WHERE key='owner_display_name'").fetchone()
+        )
+        self.assertIsNone(
+            self.conn.execute("SELECT value FROM app_kv WHERE key='owner_email'").fetchone()
+        )
+
+    def test_set_owner_party_settings_clears_binding_when_party_is_removed(self):
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO Parties(id, legal_name, display_name) VALUES (?, ?, ?)",
+                (12, "Canonical Owner B.V.", "Canonical Owner"),
+            )
+        self.service.set_owner_party_settings(
+            OwnerPartySettings(party_id=12, legal_name="Canonical Owner B.V.")
         )
 
         cleared = self.service.set_owner_party_settings(
             OwnerPartySettings(
                 party_id=None,
-                legal_name="Detached Owner B.V.",
-                display_name="Detached Owner",
             )
         )
 
-        self.assertIsNone(cleared.party_id)
+        self.assertEqual(cleared, OwnerPartySettings())
         self.assertIsNone(
-            self.conn.execute("SELECT value FROM app_kv WHERE key='owner_party_id'").fetchone()
+            self.conn.execute("SELECT party_id FROM ApplicationOwnerBinding WHERE id=1").fetchone()
+        )
+
+    def test_registration_writes_update_owner_party_when_bound(self):
+        with self.conn:
+            self.conn.execute(
+                """
+                INSERT INTO Parties(id, legal_name, vat_number, pro_number, ipi_cae)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (7, "Moonwake Records B.V.", "", "", ""),
+            )
+            self.conn.execute("INSERT INTO BTW (id, nr) VALUES (1, ?)", ("LEGACY-BTW",))
+            self.conn.execute(
+                "INSERT INTO BUMA_STEMRA (id, relatie_nummer, ipi) VALUES (1, ?, ?)",
+                ("LEGACY-PRO", "LEGACY-IPI"),
+            )
+        self.service.set_owner_party_id(7)
+
+        self.service.set_btw_number("BTW-2")
+        self.service.set_buma_relatie_nummer("REL-3")
+        self.service.set_buma_ipi("IPI-4")
+
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT vat_number, pro_number, ipi_cae FROM Parties WHERE id=7"
+            ).fetchone(),
+            ("BTW-2", "REL-3", "IPI-4"),
+        )
+        self.assertIsNone(self.conn.execute("SELECT nr FROM BTW WHERE id=1").fetchone())
+        self.assertIsNone(
+            self.conn.execute("SELECT relatie_nummer, ipi FROM BUMA_STEMRA WHERE id=1").fetchone()
         )
 
 

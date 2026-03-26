@@ -42,6 +42,19 @@ class SettingsMutationService:
             """
         )
 
+    def _ensure_owner_binding_table(self) -> None:
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ApplicationOwnerBinding (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                party_id INTEGER NOT NULL UNIQUE,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (party_id) REFERENCES Parties(id) ON DELETE RESTRICT
+            )
+            """
+        )
+
     def _profile_set(self, key: str, value: object) -> None:
         with self.conn:
             self._ensure_profile_store()
@@ -67,6 +80,49 @@ class SettingsMutationService:
         except ValueError:
             return None
         return clean_value if clean_value > 0 else None
+
+    def _current_owner_party_id(self) -> int | None:
+        try:
+            self._ensure_owner_binding_table()
+            row = self.conn.execute(
+                "SELECT party_id FROM ApplicationOwnerBinding WHERE id=1"
+            ).fetchone()
+        except sqlite3.OperationalError:
+            row = None
+        if row and row[0] is not None:
+            return self._clean_party_id(row[0])
+        try:
+            row = self.conn.execute(
+                "SELECT value FROM app_kv WHERE key='owner_party_id'"
+            ).fetchone()
+        except sqlite3.OperationalError:
+            row = None
+        return self._clean_party_id(row[0] if row else None)
+
+    def _clear_legacy_owner_snapshot_locked(self) -> None:
+        self._ensure_profile_store()
+        owner_keys = [
+            f"owner_{field_name}" for field_name in OwnerPartySettings.PROFILE_FIELD_NAMES
+        ]
+        owner_keys.append("owner_party_id")
+        self.conn.executemany("DELETE FROM app_kv WHERE key=?", ((key,) for key in owner_keys))
+
+    def _write_owner_party_field(self, field_name: str, value: str) -> bool:
+        owner_party_id = self._current_owner_party_id()
+        if owner_party_id is None:
+            return False
+        row = self.conn.execute(
+            "SELECT id FROM Parties WHERE id=?",
+            (int(owner_party_id),),
+        ).fetchone()
+        if row is None:
+            return False
+        with self.conn:
+            self.conn.execute(
+                f"UPDATE Parties SET {field_name}=?, updated_at=datetime('now') WHERE id=?",
+                (self._clean_text(value), int(owner_party_id)),
+            )
+        return True
 
     def set_identity(self, *, window_title: str, icon_path: str) -> dict[str, str]:
         identity = {
@@ -144,6 +200,10 @@ class SettingsMutationService:
             )
 
     def set_btw_number(self, value: str) -> None:
+        if self._write_owner_party_field("vat_number", value):
+            with self.conn:
+                self.conn.execute("DELETE FROM BTW WHERE id=1")
+            return
         with self.conn:
             self.conn.execute(
                 "INSERT INTO BTW (id, nr) VALUES (1, ?) "
@@ -152,6 +212,10 @@ class SettingsMutationService:
             )
 
     def set_buma_relatie_nummer(self, value: str) -> None:
+        if self._write_owner_party_field("pro_number", value):
+            with self.conn:
+                self.conn.execute("DELETE FROM BUMA_STEMRA WHERE id=1")
+            return
         with self.conn:
             self.conn.execute(
                 """
@@ -163,6 +227,10 @@ class SettingsMutationService:
             )
 
     def set_buma_ipi(self, value: str) -> None:
+        if self._write_owner_party_field("ipi_cae", value):
+            with self.conn:
+                self.conn.execute("DELETE FROM BUMA_STEMRA WHERE id=1")
+            return
         with self.conn:
             self.conn.execute(
                 """
@@ -173,33 +241,26 @@ class SettingsMutationService:
                 (value,),
             )
 
-    def set_owner_party_settings(self, settings: OwnerPartySettings) -> OwnerPartySettings:
-        clean_settings = OwnerPartySettings(
-            party_id=self._clean_party_id(getattr(settings, "party_id", None)),
-            **{
-                field_name: self._clean_text(getattr(settings, field_name, ""))
-                for field_name in OwnerPartySettings.PROFILE_FIELD_NAMES
-            },
-            vat_number=self._clean_text(getattr(settings, "vat_number", "")),
-            pro_number=self._clean_text(getattr(settings, "pro_number", "")),
-            ipi_cae=self._clean_text(getattr(settings, "ipi_cae", "")),
-        )
+    def set_owner_party_id(self, party_id: int | None) -> int | None:
+        clean_party_id = self._clean_party_id(party_id)
         with self.conn:
-            self._ensure_profile_store()
-            for field_name, value in clean_settings.to_profile_payload().items():
-                if field_name == "party_id":
-                    continue
-                self.conn.execute(
-                    "INSERT INTO app_kv(key, value) VALUES(?, ?) "
-                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                    (f"owner_{field_name}", value),
-                )
-            if clean_settings.party_id is None:
-                self.conn.execute("DELETE FROM app_kv WHERE key='owner_party_id'")
+            self._ensure_owner_binding_table()
+            self._clear_legacy_owner_snapshot_locked()
+            if clean_party_id is None:
+                self.conn.execute("DELETE FROM ApplicationOwnerBinding WHERE id=1")
             else:
                 self.conn.execute(
-                    "INSERT INTO app_kv(key, value) VALUES(?, ?) "
-                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                    ("owner_party_id", str(int(clean_settings.party_id))),
+                    """
+                    INSERT INTO ApplicationOwnerBinding(id, party_id)
+                    VALUES (1, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        party_id=excluded.party_id,
+                        updated_at=datetime('now')
+                    """,
+                    (int(clean_party_id),),
                 )
-        return clean_settings
+        return clean_party_id
+
+    def set_owner_party_settings(self, settings: OwnerPartySettings) -> OwnerPartySettings:
+        clean_party_id = self.set_owner_party_id(getattr(settings, "party_id", None))
+        return OwnerPartySettings(party_id=clean_party_id)

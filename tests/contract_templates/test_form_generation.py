@@ -68,6 +68,22 @@ class ContractTemplateFormGenerationTests(unittest.TestCase):
                 artist_aliases=["Aeonium Official", "Aeonium Alias"],
             )
         )
+        self.owner_party_id = self.party_service.create_party(
+            PartyPayload(
+                legal_name="Moonwake Records B.V.",
+                display_name="Moonwake Records",
+                artist_name="Lyra Moonwake",
+                company_name="Moonwake Records",
+                email="hello@moonwake.test",
+                street_name="Forest Lane",
+                postal_code="1234AB",
+                country="Netherlands",
+                vat_number="BTW-424242",
+                pro_number="REL-OWNER",
+                ipi_cae="IPI-OWNER",
+                party_type="organization",
+            )
+        )
         self.contract_service = ContractService(
             self.conn,
             self.root,
@@ -84,22 +100,9 @@ class ContractTemplateFormGenerationTests(unittest.TestCase):
         self.catalog_service = ContractTemplateCatalogService(self.conn)
         self.template_service = ContractTemplateService(self.conn, data_root=self.root)
         with self.conn:
-            self.conn.execute("INSERT INTO BTW (id, nr) VALUES (1, ?)", ("BTW-424242",))
             self.conn.execute(
-                "INSERT INTO BUMA_STEMRA (id, relatie_nummer, ipi) VALUES (1, ?, ?)",
-                ("REL-OWNER", "IPI-OWNER"),
-            )
-            self.conn.executemany(
-                "INSERT INTO app_kv(key, value) VALUES(?, ?)",
-                [
-                    ("owner_display_name", "Moonwake Records"),
-                    ("owner_legal_name", "Moonwake Records B.V."),
-                    ("owner_artist_name", "Lyra Moonwake"),
-                    ("owner_email", "hello@moonwake.test"),
-                    ("owner_street_name", "Forest Lane"),
-                    ("owner_postal_code", "1234AB"),
-                    ("owner_country", "Netherlands"),
-                ],
+                "INSERT INTO ApplicationOwnerBinding(id, party_id) VALUES(1, ?)",
+                (self.owner_party_id,),
             )
         self.settings_reads = SettingsReadService(self.conn)
         self.form_service = ContractTemplateFormService(
@@ -293,7 +296,7 @@ class ContractTemplateFormGenerationTests(unittest.TestCase):
         self.assertGreaterEqual(len(party_selector.choices), 1)
         self.assertIn("Aeonium", party_selector.choices[0].label)
 
-    def test_owner_scope_fields_resolve_as_automatic_settings_backed_fields(self):
+    def test_owner_scope_fields_resolve_as_automatic_current_owner_party_fields(self):
         template = self._create_template()
         source_path = self.root / "owner-form-generation.docx"
         source_path.write_bytes(

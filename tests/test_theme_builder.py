@@ -314,8 +314,48 @@ class ThemeBuilderTests(unittest.TestCase):
             dialog.close()
             host.close()
 
-    def test_application_settings_dialog_exposes_owner_party_tab_and_payload(self):
+    def test_application_settings_dialog_exposes_owner_party_tab_and_party_backed_payload(self):
         host = _ThemePreviewHost()
+        host.party_service = _PartyServiceStub(
+            [
+                PartyRecord(
+                    id=1,
+                    legal_name="Moonwake Records B.V.",
+                    display_name="Moonwake Records",
+                    artist_name="Lyra Moonwake",
+                    company_name="Moonwake Records",
+                    first_name="Lyra",
+                    middle_name="",
+                    last_name="Moonwake",
+                    party_type="organization",
+                    contact_person="Licensing Desk",
+                    email="hello@moonwake.test",
+                    alternative_email="legal@moonwake.test",
+                    phone="+31-555-0101",
+                    website="https://moonwake.test",
+                    street_name="Forest Lane",
+                    street_number="42A",
+                    address_line1="",
+                    address_line2="",
+                    city="Amsterdam",
+                    region="Noord-Holland",
+                    postal_code="1234AB",
+                    country="Netherlands",
+                    bank_account_number="NL91TEST0123456789",
+                    chamber_of_commerce_number="CoC-556677",
+                    tax_id="TAX-778899",
+                    vat_number="PARTY-VAT",
+                    pro_affiliation="BUMA/STEMRA",
+                    pro_number="PARTY-PRO",
+                    ipi_cae="PARTY-IPI",
+                    notes="Primary owner identity",
+                    profile_name=None,
+                    created_at=None,
+                    updated_at=None,
+                    artist_aliases=(),
+                )
+            ]
+        )
         dialog = app_module.ApplicationSettingsDialog(
             window_title="Catalog",
             icon_path="",
@@ -340,33 +380,34 @@ class ThemeBuilderTests(unittest.TestCase):
             theme_settings={},
             stored_themes={},
             current_profile_path="",
-            owner_party_settings=app_module.OwnerPartySettings(
-                display_name="Moonwake Records",
-                legal_name="Moonwake Records B.V.",
-                email="hello@moonwake.test",
-                country="Netherlands",
-            ),
+            owner_party_settings=app_module.OwnerPartySettings(),
+            party_service=host.party_service,
             parent=host,
         )
         try:
             tab_labels = [dialog.tabs.tabText(index) for index in range(dialog.tabs.count())]
             self.assertIn("Owner Party", tab_labels)
-            dialog.owner_company_name_edit.setText("Moonwake Records")
-            dialog.owner_first_name_edit.setText("Lyra")
-            dialog.owner_last_name_edit.setText("Moonwake")
-            dialog.owner_pro_affiliation_edit.setText("BUMA/STEMRA")
+            self.assertEqual(dialog.owner_party_combo.currentData(), 1)
+            self.assertTrue(dialog.owner_company_name_edit.isReadOnly())
+            self.assertTrue(dialog.owner_email_edit.isReadOnly())
+            self.assertEqual(dialog.owner_company_name_edit.text(), "Moonwake Records")
+            self.assertEqual(dialog.owner_first_name_edit.text(), "Lyra")
+            self.assertEqual(dialog.owner_last_name_edit.text(), "Moonwake")
+            self.assertEqual(dialog.owner_pro_affiliation_edit.text(), "BUMA/STEMRA")
 
             values = dialog.values()
             owner_settings = values["owner_party_settings"]
 
+            self.assertEqual(values["owner_party_id"], 1)
+            self.assertEqual(owner_settings.party_id, 1)
             self.assertEqual(owner_settings.display_name, "Moonwake Records")
             self.assertEqual(owner_settings.company_name, "Moonwake Records")
             self.assertEqual(owner_settings.first_name, "Lyra")
             self.assertEqual(owner_settings.last_name, "Moonwake")
             self.assertEqual(owner_settings.pro_affiliation, "BUMA/STEMRA")
-            self.assertEqual(owner_settings.vat_number, "BTW-424242")
-            self.assertEqual(owner_settings.pro_number, "REL-OWNER")
-            self.assertEqual(owner_settings.ipi_cae, "IPI-OWNER")
+            self.assertEqual(owner_settings.vat_number, "PARTY-VAT")
+            self.assertEqual(owner_settings.pro_number, "PARTY-PRO")
+            self.assertEqual(owner_settings.ipi_cae, "PARTY-IPI")
         finally:
             dialog.close()
             host.close()
@@ -458,7 +499,7 @@ class ThemeBuilderTests(unittest.TestCase):
             self.assertEqual(owner_settings.legal_name, "Aeonium Holdings B.V.")
             self.assertEqual(owner_settings.display_name, "Aeonium")
             self.assertEqual(owner_settings.email, "hello@moonium.test")
-            self.assertEqual(owner_settings.vat_number, "BTW-424242")
+            self.assertEqual(owner_settings.vat_number, "PARTY-VAT")
         finally:
             dialog.close()
             host.close()

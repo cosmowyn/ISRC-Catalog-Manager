@@ -1766,6 +1766,7 @@ class DatabaseSchemaService:
         )
         self._ensure_current_party_schema()
         self._ensure_party_artist_alias_tables()
+        self._ensure_application_owner_binding_table()
         self.cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_parties_legal_name ON Parties(legal_name)"
         )
@@ -2330,6 +2331,19 @@ class DatabaseSchemaService:
             """
             CREATE INDEX IF NOT EXISTS idx_party_artist_aliases_party_id
             ON PartyArtistAliases(party_id, sort_order, id)
+            """
+        )
+
+    def _ensure_application_owner_binding_table(self) -> None:
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ApplicationOwnerBinding (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                party_id INTEGER NOT NULL UNIQUE,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (party_id) REFERENCES Parties(id) ON DELETE RESTRICT
+            )
             """
         )
 

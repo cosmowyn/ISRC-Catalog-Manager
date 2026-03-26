@@ -2784,7 +2784,7 @@ class ContractTemplateWorkspacePanel(QWidget):
     def _scope_label(entry: ContractTemplateCatalogEntry) -> str:
         mapping = {
             "track_context": "Track context",
-            "owner_settings_context": "Application owner settings",
+            "owner_settings_context": "Current owner party",
             "release_selection_required": "Needs release selection",
             "work_selection_required": "Needs work selection",
             "contract_selection_required": "Needs contract selection",

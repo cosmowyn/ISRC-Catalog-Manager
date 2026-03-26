@@ -1590,6 +1590,9 @@ class HistoryManager:
             self.settings_mutations.set_buma_relatie_nummer(str(value))
         elif key == "buma_ipi":
             self.settings_mutations.set_buma_ipi(str(value))
+        elif key == "owner_party_id":
+            owner_party_id = None if value in (None, "") else int(value)
+            self.settings_mutations.set_owner_party_id(owner_party_id)
         else:
             raise ValueError(f"Unknown setting history key: {key}")
 

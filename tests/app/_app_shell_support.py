@@ -61,6 +61,11 @@ def _fast_test_apply_theme(self, raw_values=None):
     return None
 
 
+def _skip_owner_bootstrap(self):
+    del self
+    return None
+
+
 class _DeferredMigrationMessageBox:
     Warning = object()
     Information = object()
@@ -187,6 +192,9 @@ class AppShellTestCase(unittest.TestCase):
                 app_module.App,
                 "_refresh_catalog_ui_in_background",
                 _no_catalog_background_refresh,
+            ),
+            mock.patch.object(
+                app_module.App, "_schedule_owner_party_bootstrap", _skip_owner_bootstrap
             ),
             mock.patch.object(app_module.App, "_apply_theme", _fast_test_apply_theme),
         ]
@@ -777,6 +785,40 @@ class AppShellTestCase(unittest.TestCase):
         with mock.patch.object(app_module.App, "_run_startup_message_box") as prompt_again:
             self._reopen_window()
             prompt_again.assert_not_called()
+
+    def case_owner_bootstrap_requires_assigning_a_party_before_normal_use(self):
+        created_party_id = self.window.party_service.create_party(
+            PartyPayload(
+                legal_name="Bootstrap Owner B.V.",
+                display_name="Bootstrap Owner",
+                party_type="organization",
+            )
+        )
+        dialog_calls: list[int | None] = []
+
+        class _FakeOwnerBootstrapDialog:
+            def __init__(self, *, current_owner_party_id=None, **kwargs):
+                del kwargs
+                dialog_calls.append(current_owner_party_id)
+
+            def exec(self):
+                return app_module.QDialog.Accepted
+
+            def selected_party_id(self):
+                return created_party_id
+
+        with mock.patch.object(
+            app_module,
+            "OwnerBootstrapDialog",
+            _FakeOwnerBootstrapDialog,
+        ):
+            self.window._ensure_owner_party_bootstrap()
+            self._drain_events()
+
+        self.assertEqual(dialog_calls, [None])
+        self.assertEqual(self.window.settings_reads.load_owner_party_id(), created_party_id)
+        owner_record = self.window.party_service.fetch_party(created_party_id)
+        self.assertIsNotNone(owner_record)
 
     def case_file_menu_groups_xml_import_under_import_exchange_and_preserves_wiring(self):
         file_menu = self._menu_by_text("File")

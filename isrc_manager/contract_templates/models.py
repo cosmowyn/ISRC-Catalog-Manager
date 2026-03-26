@@ -190,6 +190,8 @@ class ContractTemplateCatalogEntry:
         if self.is_custom_field:
             return "Custom Field"
         if self.is_settings_field:
+            if str(self.namespace or "").strip().lower() == "owner":
+                return "Owner Party"
             return "Application Settings"
         return "Database Field"
 

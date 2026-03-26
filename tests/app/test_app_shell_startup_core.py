@@ -20,6 +20,9 @@ class AppShellStartupCoreTests(AppShellTestCase):
     test_startup_first_launch_prompt_can_open_settings_and_clears_pending_flag = (
         AppShellTestCase.case_startup_first_launch_prompt_can_open_settings_and_clears_pending_flag
     )
+    test_owner_bootstrap_requires_assigning_a_party_before_normal_use = (
+        AppShellTestCase.case_owner_bootstrap_requires_assigning_a_party_before_normal_use
+    )
     test_file_menu_groups_xml_import_under_import_exchange_and_preserves_wiring = (
         AppShellTestCase.case_file_menu_groups_xml_import_under_import_exchange_and_preserves_wiring
     )

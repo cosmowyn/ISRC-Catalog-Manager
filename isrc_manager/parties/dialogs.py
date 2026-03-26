@@ -384,9 +384,18 @@ class PartyEditorDialog(QDialog):
 class PartyManagerPanel(QWidget):
     """Browse, edit, and merge canonical party records inside a workspace panel."""
 
-    def __init__(self, *, party_service_provider, parent=None):
+    def __init__(
+        self,
+        *,
+        party_service_provider,
+        current_owner_party_id_provider=None,
+        set_owner_party_handler=None,
+        parent=None,
+    ):
         super().__init__(parent)
         self.party_service_provider = party_service_provider
+        self.current_owner_party_id_provider = current_owner_party_id_provider
+        self.set_owner_party_handler = set_owner_party_handler
         self.setObjectName("partyManagerPanel")
         _apply_standard_widget_chrome(self, "partyManagerPanel")
 
@@ -430,6 +439,8 @@ class PartyManagerPanel(QWidget):
         add_button.clicked.connect(self.create_party)
         edit_button = QPushButton("Edit")
         edit_button.clicked.connect(self.edit_selected)
+        set_owner_button = QPushButton("Set As Owner")
+        set_owner_button.clicked.connect(self.set_selected_as_owner)
         merge_button = QPushButton("Merge Selected")
         merge_button.clicked.connect(self.merge_selected)
         delete_button = QPushButton("Delete")
@@ -438,7 +449,14 @@ class PartyManagerPanel(QWidget):
         refresh_button.clicked.connect(self.refresh)
         self.manage_actions_cluster = _create_action_button_cluster(
             self,
-            [add_button, edit_button, merge_button, delete_button, refresh_button],
+            [
+                add_button,
+                edit_button,
+                set_owner_button,
+                merge_button,
+                delete_button,
+                refresh_button,
+            ],
             columns=2,
             min_button_width=160,
             span_last_row=True,
@@ -447,12 +465,13 @@ class PartyManagerPanel(QWidget):
         controls_layout.addWidget(self.manage_actions_cluster)
         root.addWidget(controls_box)
 
-        self.table = QTableWidget(0, 7, self)
+        self.table = QTableWidget(0, 8, self)
         self.table.setHorizontalHeaderLabels(
             [
                 "ID",
                 "Primary Name",
                 "Legal / Company",
+                "Owner",
                 "Type",
                 "Email",
                 "Aliases",
@@ -531,6 +550,12 @@ class PartyManagerPanel(QWidget):
             search_text=self.search_edit.text(),
             party_type=str(self.party_type_filter_combo.currentData() or "") or None,
         )
+        current_owner_party_id = None
+        if callable(self.current_owner_party_id_provider):
+            try:
+                current_owner_party_id = self.current_owner_party_id_provider()
+            except Exception:
+                current_owner_party_id = None
         self.table.setRowCount(0)
         for record in records:
             usage = service.usage_summary(record.id)
@@ -549,6 +574,7 @@ class PartyManagerPanel(QWidget):
                 str(record.id),
                 primary_name,
                 legal_or_company,
+                "Owner" if int(record.id) == int(current_owner_party_id or 0) else "",
                 record.party_type.replace("_", " ").title(),
                 preferred_email,
                 aliases_preview,
@@ -601,6 +627,27 @@ class PartyManagerPanel(QWidget):
         self.refresh()
         self.focus_party(party.id)
 
+    def set_selected_as_owner(self) -> None:
+        if not callable(self.set_owner_party_handler):
+            QMessageBox.information(
+                self,
+                "Party Manager",
+                "Owner assignment is unavailable in this context.",
+            )
+            return
+        selected_ids = self._selected_party_ids()
+        if not selected_ids:
+            QMessageBox.information(self, "Party Manager", "Select a party first.")
+            return
+        party_id = int(selected_ids[0])
+        try:
+            self.set_owner_party_handler(party_id)
+        except Exception as exc:
+            QMessageBox.critical(self, "Party Manager", str(exc))
+            return
+        self.refresh()
+        self.focus_party(party_id)
+
     def delete_selected(self) -> None:
         service = self._party_service()
         if service is None:
@@ -643,10 +690,192 @@ class PartyManagerPanel(QWidget):
         self.focus_party(primary_id)
 
 
+class OwnerBootstrapDialog(QDialog):
+    """Force creation or selection of the current owner party before normal use."""
+
+    def __init__(
+        self,
+        *,
+        party_service: PartyService,
+        current_owner_party_id: int | None = None,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.party_service = party_service
+        self._selected_party_id = int(current_owner_party_id) if current_owner_party_id else None
+        self.setWindowTitle("Set Current Owner")
+        self.setModal(True)
+        self.resize(720, 320)
+        self.setMinimumSize(640, 280)
+        _apply_standard_dialog_chrome(self, "ownerBootstrapDialog")
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(14)
+        _add_standard_dialog_header(
+            root,
+            self,
+            title="Choose the Current Owner",
+            subtitle=(
+                "The app needs exactly one Party to act as the current Owner before normal work "
+                "can continue."
+            ),
+        )
+
+        section, section_layout = _create_standard_section(
+            self,
+            "Owner Party",
+            "Create a new Party or choose an existing one. The selected Party becomes the single owner identity used across owner-facing workflows.",
+        )
+        root.addWidget(section, 1)
+
+        picker_row = QHBoxLayout()
+        picker_row.setContentsMargins(0, 0, 0, 0)
+        picker_row.setSpacing(8)
+        self.party_combo = QComboBox(self)
+        self.party_combo.setMinimumWidth(320)
+        picker_row.addWidget(self.party_combo, 1)
+        self.new_party_button = QPushButton("New Party...", self)
+        self.new_party_button.clicked.connect(self._create_party)
+        picker_row.addWidget(self.new_party_button)
+        self.edit_party_button = QPushButton("Edit Party...", self)
+        self.edit_party_button.clicked.connect(self._edit_party)
+        picker_row.addWidget(self.edit_party_button)
+        section_layout.addLayout(picker_row)
+
+        self.hint_label = QLabel(self)
+        self.hint_label.setWordWrap(True)
+        self.hint_label.setProperty("role", "supportingText")
+        section_layout.addWidget(self.hint_label)
+
+        self.summary_label = QLabel(self)
+        self.summary_label.setWordWrap(True)
+        section_layout.addWidget(self.summary_label)
+
+        self.button_box = QDialogButtonBox(Qt.Horizontal, self)
+        self.set_owner_button = self.button_box.addButton("Set Owner", QDialogButtonBox.AcceptRole)
+        self.set_owner_button.clicked.connect(self._accept_if_valid)
+        root.addWidget(self.button_box)
+
+        self.party_combo.currentIndexChanged.connect(self._party_changed)
+        self._refresh_choices()
+
+    def selected_party_id(self) -> int | None:
+        return self._selected_party_id
+
+    def reject(self) -> None:
+        return
+
+    def _refresh_choices(self) -> None:
+        previous = self.party_combo.blockSignals(True)
+        try:
+            self.party_combo.clear()
+            records = list(self.party_service.list_parties() or [])
+            for record in records:
+                primary_name = (
+                    record.display_name
+                    or record.artist_name
+                    or record.company_name
+                    or record.legal_name
+                    or f"Party #{int(record.id)}"
+                )
+                self.party_combo.addItem(primary_name, int(record.id))
+            if self._selected_party_id is not None:
+                index = self.party_combo.findData(int(self._selected_party_id))
+                self.party_combo.setCurrentIndex(index if index >= 0 else 0)
+            elif records:
+                self._selected_party_id = int(records[0].id)
+                self.party_combo.setCurrentIndex(0)
+            elif self.party_combo.count() == 0:
+                self.party_combo.addItem("Create a Party first", None)
+                self.party_combo.setCurrentIndex(0)
+        finally:
+            self.party_combo.blockSignals(previous)
+        self._party_changed(self.party_combo.currentIndex())
+
+    def _party_changed(self, index: int) -> None:
+        party_id = self.party_combo.itemData(index)
+        if party_id in (None, ""):
+            self._selected_party_id = None
+            self.edit_party_button.setEnabled(False)
+            self.set_owner_button.setEnabled(False)
+            self.hint_label.setText(
+                "Create the first Party record, then assign it as the current Owner."
+            )
+            self.summary_label.setText("")
+            return
+        self._selected_party_id = int(party_id)
+        self.edit_party_button.setEnabled(True)
+        self.set_owner_button.setEnabled(True)
+        record = self.party_service.fetch_party(int(party_id))
+        if record is None:
+            self.hint_label.setText(f"Party #{int(party_id)} could not be loaded.")
+            self.summary_label.setText("")
+            return
+        self.hint_label.setText(
+            "This Party will become the single current Owner used throughout the app."
+        )
+        summary_parts = [
+            str(record.legal_name or "").strip(),
+            str(record.email or "").strip(),
+            str(record.country or "").strip(),
+        ]
+        self.summary_label.setText(" | ".join(part for part in summary_parts if part))
+
+    def _create_party(self) -> None:
+        dialog = PartyEditorDialog(party_service=self.party_service, parent=self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        try:
+            self._selected_party_id = int(self.party_service.create_party(dialog.payload()))
+        except Exception as exc:
+            QMessageBox.critical(self, "Current Owner", str(exc))
+            return
+        self._refresh_choices()
+
+    def _edit_party(self) -> None:
+        if self._selected_party_id is None:
+            return
+        record = self.party_service.fetch_party(int(self._selected_party_id))
+        if record is None:
+            QMessageBox.warning(
+                self,
+                "Current Owner",
+                f"Party #{int(self._selected_party_id)} could not be loaded.",
+            )
+            return
+        dialog = PartyEditorDialog(party_service=self.party_service, party=record, parent=self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        try:
+            self.party_service.update_party(int(record.id), dialog.payload())
+        except Exception as exc:
+            QMessageBox.critical(self, "Current Owner", str(exc))
+            return
+        self._refresh_choices()
+
+    def _accept_if_valid(self) -> None:
+        if self._selected_party_id is None:
+            QMessageBox.information(
+                self,
+                "Current Owner",
+                "Create or choose a Party before continuing.",
+            )
+            return
+        self.accept()
+
+
 class PartyManagerDialog(QDialog):
     """Compatibility dialog wrapper around the reusable party manager panel."""
 
-    def __init__(self, *, party_service: PartyService, parent=None):
+    def __init__(
+        self,
+        *,
+        party_service: PartyService,
+        current_owner_party_id_provider=None,
+        set_owner_party_handler=None,
+        parent=None,
+    ):
         super().__init__(parent)
         self.setWindowTitle("Party Manager")
         self.resize(900, 620)
@@ -657,6 +886,8 @@ class PartyManagerDialog(QDialog):
         root.setSpacing(0)
         self.panel = PartyManagerPanel(
             party_service_provider=lambda: party_service,
+            current_owner_party_id_provider=current_owner_party_id_provider,
+            set_owner_party_handler=set_owner_party_handler,
             parent=self,
         )
         root.addWidget(self.panel)

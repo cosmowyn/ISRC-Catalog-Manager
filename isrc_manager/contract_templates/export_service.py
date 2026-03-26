@@ -530,10 +530,7 @@ class ContractTemplateExportService:
         canonical_symbol = str(placeholder.canonical_symbol or "").strip()
         namespace = str(getattr(catalog_entry, "namespace", "") or "").strip().lower()
         if namespace == "owner":
-            return (
-                f"{label} is blank in Application Settings > Owner Party "
-                f"for {canonical_symbol}."
-            )
+            return f"{label} is blank in Current Owner Party " f"for {canonical_symbol}."
         selected_label = self._selected_record_label(
             namespace=namespace, selection_value=selection_value
         )

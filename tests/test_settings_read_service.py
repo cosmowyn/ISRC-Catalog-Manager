@@ -141,7 +141,7 @@ class SettingsReadServiceTests(unittest.TestCase):
             AutoSnapshotSettings(enabled=False, interval_minutes=45),
         )
 
-    def test_load_owner_party_settings_merges_profile_fields_with_registration_values(self):
+    def test_load_legacy_owner_party_snapshot_merges_profile_fields_with_registration_values(self):
         with self.conn:
             self.conn.execute("INSERT INTO BTW (id, nr) VALUES (1, ?)", (" BTW-2 ",))
             self.conn.execute(
@@ -171,7 +171,7 @@ class SettingsReadServiceTests(unittest.TestCase):
             )
 
         self.assertEqual(
-            self.service.load_owner_party_settings(),
+            self.service.load_legacy_owner_party_snapshot(),
             OwnerPartySettings(
                 legal_name="Moonwake Records B.V.",
                 display_name="Moonwake Records",
@@ -204,13 +204,22 @@ class SettingsReadServiceTests(unittest.TestCase):
             ),
         )
 
-    def test_load_owner_party_settings_prefers_linked_party_when_owner_party_id_exists(self):
+    def test_load_owner_party_settings_returns_blank_without_owner_binding(self):
         with self.conn:
             self.conn.execute("INSERT INTO BTW (id, nr) VALUES (1, ?)", (" BTW-2 ",))
-            self.conn.execute(
-                "INSERT INTO BUMA_STEMRA (id, relatie_nummer, ipi) VALUES (1, ?, ?)",
-                (" REL-3 ", " IPI-4 "),
+            self.conn.executemany(
+                "INSERT INTO app_kv(key, value) VALUES(?, ?)",
+                [
+                    ("owner_display_name", " Moonwake Records "),
+                    ("owner_legal_name", " Moonwake Records B.V. "),
+                    ("owner_email", " hello@moonwake.test "),
+                ],
             )
+
+        self.assertEqual(self.service.load_owner_party_settings(), OwnerPartySettings())
+
+    def test_load_owner_party_settings_prefers_linked_party_when_owner_party_binding_exists(self):
+        with self.conn:
             self.conn.execute(
                 """
                 INSERT INTO Parties(
@@ -257,14 +266,20 @@ class SettingsReadServiceTests(unittest.TestCase):
                     "Canonical owner record",
                 ),
             )
-            self.conn.executemany(
-                "INSERT INTO app_kv(key, value) VALUES(?, ?)",
-                [
-                    ("owner_party_id", "7"),
-                    ("owner_display_name", "Legacy Owner"),
-                    ("owner_legal_name", "Legacy Owner B.V."),
-                    ("owner_email", "legacy@owner.test"),
-                ],
+            self.conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS ApplicationOwnerBinding (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    party_id INTEGER NOT NULL UNIQUE,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    FOREIGN KEY (party_id) REFERENCES Parties(id) ON DELETE RESTRICT
+                )
+                """
+            )
+            self.conn.execute(
+                "INSERT INTO ApplicationOwnerBinding(id, party_id) VALUES (1, ?)",
+                (7,),
             )
 
         self.assertEqual(
@@ -294,10 +309,10 @@ class SettingsReadServiceTests(unittest.TestCase):
                 bank_account_number="NL91TEST0123456789",
                 chamber_of_commerce_number="CoC-778899",
                 tax_id="TAX-778899",
-                vat_number="BTW-2",
+                vat_number="PARTY-VAT",
                 pro_affiliation="BUMA/STEMRA",
-                pro_number="REL-3",
-                ipi_cae="IPI-4",
+                pro_number="PARTY-PRO",
+                ipi_cae="PARTY-IPI",
                 notes="Canonical owner record",
             ),
         )

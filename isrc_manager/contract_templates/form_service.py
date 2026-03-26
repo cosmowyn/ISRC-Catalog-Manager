@@ -359,19 +359,15 @@ class ContractTemplateFormService:
             or (catalog_entry.display_label if catalog_entry is not None else None)
             or _display_label_from_key(placeholder.placeholder_key)
         )
-        description = (
-            f"{display_label} resolves automatically from Application Settings > Owner Party."
-        )
+        description = f"{display_label} resolves automatically from Current Owner Party."
         if binding is not None and isinstance(binding.metadata, dict):
             override = _clean_text(binding.metadata.get("catalog_label"))
             if override:
-                description = (
-                    f"{override} resolves automatically from Application Settings > Owner Party."
-                )
+                description = f"{override} resolves automatically from Current Owner Party."
         return ContractTemplateFormAutoField(
             canonical_symbol=placeholder.canonical_symbol,
             display_label=display_label,
-            source_label="Application Settings > Owner Party",
+            source_label="Current Owner Party",
             required=placeholder.required,
             placeholder_count=placeholder.source_occurrence_count,
             description=description,
@@ -386,7 +382,7 @@ class ContractTemplateFormService:
     ) -> str | None:
         if self.settings_reads is None:
             return (
-                "Owner placeholders are present, but Application Settings reads are unavailable "
+                "Owner placeholders are present, but owner-party reads are unavailable "
                 "for preview validation."
             )
         token = parse_placeholder(placeholder.canonical_symbol)
@@ -401,7 +397,7 @@ class ContractTemplateFormService:
             or (catalog_entry.display_label if catalog_entry is not None else None)
             or placeholder.canonical_symbol
         )
-        return f"{label} is currently blank in Application Settings > Owner Party."
+        return f"{label} is currently blank in Current Owner Party."
 
     def _selector_field(
         self,

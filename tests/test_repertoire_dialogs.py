@@ -26,7 +26,11 @@ try:
     from isrc_manager.contracts.dialogs import ContractEditorDialog
     from isrc_manager.media.derivatives import DerivativeLedgerService
     from isrc_manager.parties import PartyPayload, PartyService
-    from isrc_manager.parties.dialogs import PartyEditorDialog, PartyManagerPanel
+    from isrc_manager.parties.dialogs import (
+        OwnerBootstrapDialog,
+        PartyEditorDialog,
+        PartyManagerPanel,
+    )
     from isrc_manager.releases.dialogs import ReleaseBrowserDialog, ReleaseEditorDialog
     from isrc_manager.rights.dialogs import RightEditorDialog
     from isrc_manager.search.dialogs import GlobalSearchDialog
@@ -438,6 +442,67 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
                     self.app.processEvents()
                     self.assertEqual(panel.table.rowCount(), 1)
                     self.assertEqual(panel.table.item(0, 1).text(), "North Star")
+                finally:
+                    panel.close()
+            finally:
+                conn.close()
+
+    def test_party_manager_panel_can_mark_and_switch_current_owner(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = sqlite3.connect(":memory:")
+            try:
+                schema = DatabaseSchemaService(conn, data_root=Path(tmpdir))
+                schema.init_db()
+                schema.migrate_schema()
+                party_service = PartyService(conn)
+                first_party_id = party_service.create_party(
+                    PartyPayload(
+                        legal_name="Moonwake Records B.V.",
+                        display_name="Moonwake Records",
+                        party_type="organization",
+                    )
+                )
+                second_party_id = party_service.create_party(
+                    PartyPayload(
+                        legal_name="Aeonium Holdings B.V.",
+                        display_name="Aeonium",
+                        party_type="organization",
+                    )
+                )
+                current_owner = {"id": first_party_id}
+
+                panel = PartyManagerPanel(
+                    party_service_provider=lambda: party_service,
+                    current_owner_party_id_provider=lambda: current_owner["id"],
+                    set_owner_party_handler=lambda party_id: current_owner.__setitem__(
+                        "id", party_id
+                    ),
+                )
+                try:
+
+                    def _row_for_party(party_id):
+                        for row in range(panel.table.rowCount()):
+                            item = panel.table.item(row, 0)
+                            if item is not None and int(item.text()) == int(party_id):
+                                return row
+                        return -1
+
+                    first_row = _row_for_party(first_party_id)
+                    second_row = _row_for_party(second_party_id)
+                    self.assertGreaterEqual(first_row, 0)
+                    self.assertGreaterEqual(second_row, 0)
+                    self.assertEqual(panel.table.item(first_row, 3).text(), "Owner")
+                    self.assertEqual(panel.table.item(second_row, 3).text(), "")
+
+                    panel.table.selectRow(second_row)
+                    panel.set_selected_as_owner()
+                    self.app.processEvents()
+
+                    self.assertEqual(current_owner["id"], second_party_id)
+                    first_row = _row_for_party(first_party_id)
+                    second_row = _row_for_party(second_party_id)
+                    self.assertEqual(panel.table.item(first_row, 3).text(), "")
+                    self.assertEqual(panel.table.item(second_row, 3).text(), "Owner")
                 finally:
                     panel.close()
             finally:

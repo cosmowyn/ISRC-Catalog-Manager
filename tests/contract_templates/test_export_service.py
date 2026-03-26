@@ -91,26 +91,30 @@ class ContractTemplateExportServiceTests(unittest.TestCase):
                 email="hello@moonium.test",
                 alternative_email="legal@moonium.test",
                 chamber_of_commerce_number="CoC-778899",
+                vat_number="PARTY-VAT",
                 pro_number="PRO-778899",
+                ipi_cae="PARTY-IPI",
                 artist_aliases=["Aeonium Alias", "Lyra Cosmos"],
             )
         )
-        with self.conn:
-            self.conn.execute("INSERT INTO BTW (id, nr) VALUES (1, ?)", ("BTW-OWNER",))
-            self.conn.execute(
-                "INSERT INTO BUMA_STEMRA (id, relatie_nummer, ipi) VALUES (1, ?, ?)",
-                ("REL-OWNER", "IPI-OWNER"),
+        self.owner_party_id = self.party_service.create_party(
+            PartyPayload(
+                legal_name="Moonwake Records B.V.",
+                display_name="Moonwake Records",
+                artist_name="Lyra Moonwake",
+                company_name="Moonwake Records",
+                email="hello@moonwake.test",
+                country="Netherlands",
+                vat_number="BTW-OWNER",
+                pro_number="REL-OWNER",
+                ipi_cae="IPI-OWNER",
+                party_type="organization",
             )
-            self.conn.executemany(
-                "INSERT INTO app_kv(key, value) VALUES(?, ?)",
-                [
-                    ("owner_display_name", "Moonwake Records"),
-                    ("owner_legal_name", "Moonwake Records B.V."),
-                    ("owner_artist_name", "Lyra Moonwake"),
-                    ("owner_company_name", "Moonwake Records"),
-                    ("owner_email", "hello@moonwake.test"),
-                    ("owner_country", "Netherlands"),
-                ],
+        )
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO ApplicationOwnerBinding(id, party_id) VALUES(1, ?)",
+                (self.owner_party_id,),
             )
         self.settings_reads = SettingsReadService(self.conn)
         self.catalog_service = ContractTemplateCatalogService(self.conn)
@@ -334,7 +338,7 @@ class ContractTemplateExportServiceTests(unittest.TestCase):
             (),
         )
 
-    def test_export_resolves_owner_placeholders_from_application_settings_without_selection(self):
+    def test_export_resolves_owner_placeholders_from_current_owner_party_without_selection(self):
         template = self.template_service.create_template(
             ContractTemplatePayload(
                 name="Owner Export Template",
@@ -388,19 +392,12 @@ class ContractTemplateExportServiceTests(unittest.TestCase):
     def test_export_resolves_owner_placeholders_from_linked_owner_party_without_selection(self):
         with self.conn:
             self.conn.execute(
-                "INSERT INTO app_kv(key, value) VALUES(?, ?) "
-                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                ("owner_party_id", str(self.party_id)),
-            )
-            self.conn.execute(
-                "INSERT INTO app_kv(key, value) VALUES(?, ?) "
-                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                ("owner_legal_name", "Legacy Owner B.V."),
-            )
-            self.conn.execute(
-                "INSERT INTO app_kv(key, value) VALUES(?, ?) "
-                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                ("owner_email", "legacy-owner@test"),
+                """
+                INSERT INTO ApplicationOwnerBinding(id, party_id)
+                VALUES (1, ?)
+                ON CONFLICT(id) DO UPDATE SET party_id=excluded.party_id
+                """,
+                (self.party_id,),
             )
         template = self.template_service.create_template(
             ContractTemplatePayload(
@@ -448,7 +445,7 @@ class ContractTemplateExportServiceTests(unittest.TestCase):
                 "{{db.owner.display_name}}": "Aeonium",
                 "{{db.owner.email}}": "hello@moonium.test",
                 "{{db.owner.legal_name}}": "Aeonium Holdings B.V.",
-                "{{db.owner.vat_number}}": "BTW-OWNER",
+                "{{db.owner.vat_number}}": "PARTY-VAT",
             },
         )
 
@@ -489,13 +486,16 @@ class ContractTemplateExportServiceTests(unittest.TestCase):
             )
         )
         with self.conn:
-            self.conn.execute("DELETE FROM app_kv WHERE key='owner_email'")
+            self.conn.execute(
+                "UPDATE Parties SET email='' WHERE id=?",
+                (self.owner_party_id,),
+            )
 
         with self.assertRaises(ContractTemplateExportError) as exc:
             self.export_service.export_draft_to_pdf(draft.draft_id)
 
         self.assertIn(
-            "Application Settings > Owner Party",
+            "Current Owner Party",
             str(exc.exception),
         )
         self.assertIn("{{db.owner.email}}", str(exc.exception))

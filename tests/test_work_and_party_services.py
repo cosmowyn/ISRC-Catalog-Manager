@@ -607,6 +607,57 @@ class WorkAndPartyServiceTests(unittest.TestCase):
         self.assertEqual(self.party_service.find_party_id_by_name("Signal Artist Duo"), primary_id)
         self.assertEqual(self.party_service.find_party_id_by_name("Signal Artist"), primary_id)
 
+    def test_deleting_current_owner_party_requires_reassignment_first(self):
+        owner_id = self.party_service.create_party(
+            PartyPayload(
+                legal_name="Current Owner B.V.",
+                display_name="Current Owner",
+                party_type="organization",
+            )
+        )
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO ApplicationOwnerBinding(id, party_id) VALUES (1, ?)",
+                (owner_id,),
+            )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Switch the current Owner to another Party before deleting this Party.",
+        ):
+            self.party_service.delete_party(owner_id)
+
+    def test_merging_owner_party_rebinds_current_owner_without_duplication(self):
+        primary_id = self.party_service.create_party(
+            PartyPayload(
+                legal_name="Primary Party B.V.",
+                display_name="Primary Party",
+                party_type="organization",
+            )
+        )
+        duplicate_id = self.party_service.create_party(
+            PartyPayload(
+                legal_name="Imported Artist Owner B.V.",
+                display_name="Imported Artist Owner",
+                artist_name="Imported Artist Owner",
+                party_type="artist",
+            )
+        )
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO ApplicationOwnerBinding(id, party_id) VALUES (1, ?)",
+                (duplicate_id,),
+            )
+
+        merged = self.party_service.merge_parties(primary_id, [duplicate_id])
+
+        self.assertEqual(merged.id, primary_id)
+        self.assertEqual(
+            self.conn.execute("SELECT party_id FROM ApplicationOwnerBinding WHERE id=1").fetchone(),
+            (primary_id,),
+        )
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Parties").fetchone()[0], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

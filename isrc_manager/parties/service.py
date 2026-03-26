@@ -570,8 +570,26 @@ class PartyService:
             self.conn.commit()
 
     def delete_party(self, party_id: int) -> None:
-        with self.conn:
-            self.conn.execute("DELETE FROM Parties WHERE id=?", (int(party_id),))
+        try:
+            with self.conn:
+                self.conn.execute("DELETE FROM Parties WHERE id=?", (int(party_id),))
+        except sqlite3.IntegrityError as exc:
+            try:
+                owner_binding = self.conn.execute(
+                    """
+                    SELECT party_id
+                    FROM ApplicationOwnerBinding
+                    WHERE id=1 AND party_id=?
+                    """,
+                    (int(party_id),),
+                ).fetchone()
+            except sqlite3.OperationalError:
+                owner_binding = None
+            if owner_binding is not None:
+                raise ValueError(
+                    "Switch the current Owner to another Party before deleting this Party."
+                ) from exc
+            raise
 
     def list_artist_aliases(self, party_id: int) -> list[PartyArtistAliasRecord]:
         rows = self.conn.execute(
@@ -934,6 +952,16 @@ class PartyService:
                         (primary_party_id, duplicate_id),
                     )
                 cur.execute("DELETE FROM PartyArtistAliases WHERE party_id=?", (duplicate_id,))
+                if "ApplicationOwnerBinding" in table_names:
+                    cur.execute(
+                        """
+                        UPDATE ApplicationOwnerBinding
+                        SET party_id=?,
+                            updated_at=datetime('now')
+                        WHERE party_id=?
+                        """,
+                        (primary_party_id, duplicate_id),
+                    )
                 cur.execute("DELETE FROM Parties WHERE id=?", (duplicate_id,))
             merged_payload = PartyPayload(
                 legal_name=primary_record.legal_name,
