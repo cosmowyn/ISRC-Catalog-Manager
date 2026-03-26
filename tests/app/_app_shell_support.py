@@ -244,11 +244,34 @@ class AppShellTestCase(unittest.TestCase):
             return ""
         settings_path = window.settings.fileName()
         self._cancel_background_tasks(window)
-        window.close()
-        self._drain_events()
-        window._close_database_connection()
-        window.deleteLater()
-        self._drain_events()
+        top_level_widgets = [
+            widget
+            for widget in self.app.topLevelWidgets()
+            if widget is not None and widget is not self.app.activeModalWidget()
+        ]
+        if window not in top_level_widgets:
+            top_level_widgets.append(window)
+
+        for widget in top_level_widgets:
+            try:
+                widget.close()
+            except Exception:
+                pass
+        self._drain_events(cycles=6)
+
+        try:
+            window._close_database_connection()
+        except Exception:
+            pass
+
+        for widget in reversed(top_level_widgets):
+            delete_later = getattr(widget, "deleteLater", None)
+            if callable(delete_later):
+                try:
+                    delete_later()
+                except Exception:
+                    pass
+        self._drain_events(cycles=8)
         self.window = None
         return settings_path
 
