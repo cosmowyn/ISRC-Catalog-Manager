@@ -1334,6 +1334,11 @@ class AppShellTestCase(unittest.TestCase):
 
         with (
             mock.patch.object(app_module, "QMessageBox", _DeferredMigrationMessageBox),
+            mock.patch.object(
+                app_module.App,
+                "_prepare_database_for_open_blocking",
+                return_value=False,
+            ),
             mock.patch.object(app_module.App, "migrate_schema", side_effect=RuntimeError("boom")),
         ):
             self.window = app_module.App(startup_feedback=splash)
