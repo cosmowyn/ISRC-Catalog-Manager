@@ -200,7 +200,9 @@ class WorkEditorDialog(QDialog):
         )
         contributors_actions = QHBoxLayout()
         self.add_contributor_button = QPushButton("Add Contributor")
-        self.add_contributor_button.clicked.connect(self._add_contributor_row)
+        self.add_contributor_button.clicked.connect(
+            lambda _checked=False, self=self: self._add_contributor_row()
+        )
         self.remove_contributor_button = QPushButton("Remove Highlighted")
         self.remove_contributor_button.clicked.connect(self._remove_contributor_rows)
         self.new_contributor_party_button = QPushButton("New Party...")
@@ -490,14 +492,19 @@ class WorkEditorDialog(QDialog):
                 refreshed_combo.setCurrentIndex(index)
         self._refresh_contributor_party_action_state()
 
-    def _add_contributor_row(self, contributor: WorkContributorPayload | None = None) -> None:
+    def _add_contributor_row(self, contributor: object | None = None) -> None:
+        contributor_payload = (
+            contributor if isinstance(contributor, WorkContributorPayload) else None
+        )
         row = self.contributors_table.rowCount()
         self.contributors_table.insertRow(row)
         party_combo = QComboBox(self.contributors_table)
         self._configure_contributor_party_combo(
             party_combo,
-            selected_party_id=contributor.party_id if contributor is not None else None,
-            current_text=contributor.name if contributor is not None else None,
+            selected_party_id=(
+                contributor_payload.party_id if contributor_payload is not None else None
+            ),
+            current_text=contributor_payload.name if contributor_payload is not None else None,
         )
         party_combo.currentIndexChanged.connect(
             lambda _index, self=self: self._refresh_contributor_party_action_state()
@@ -510,7 +517,7 @@ class WorkEditorDialog(QDialog):
         role_combo = QComboBox(self.contributors_table)
         role_combo.addItems([item.replace("_", " ").title() for item in WORK_CREATOR_ROLE_CHOICES])
         role_combo.setCurrentText(
-            (contributor.role if contributor is not None else "songwriter")
+            (contributor_payload.role if contributor_payload is not None else "songwriter")
             .replace("_", " ")
             .title()
         )
@@ -518,13 +525,13 @@ class WorkEditorDialog(QDialog):
 
         share_item = QTableWidgetItem(
             ""
-            if contributor is None or contributor.share_percent is None
-            else str(contributor.share_percent)
+            if contributor_payload is None or contributor_payload.share_percent is None
+            else str(contributor_payload.share_percent)
         )
         role_share_item = QTableWidgetItem(
             ""
-            if contributor is None or contributor.role_share_percent is None
-            else str(contributor.role_share_percent)
+            if contributor_payload is None or contributor_payload.role_share_percent is None
+            else str(contributor_payload.role_share_percent)
         )
         self.contributors_table.setItem(row, 2, share_item)
         self.contributors_table.setItem(row, 3, role_share_item)

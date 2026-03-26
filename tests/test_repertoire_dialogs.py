@@ -202,6 +202,22 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
         finally:
             dialog.close()
 
+    def test_work_editor_add_contributor_button_ignores_qt_checked_bool_argument(self):
+        dialog = WorkEditorDialog(
+            work_service=object(),
+            track_title_resolver=lambda track_id: f"Track {track_id}",
+            selected_track_ids_provider=lambda: [],
+        )
+        try:
+            self.assertEqual(dialog.contributors_table.rowCount(), 0)
+            dialog.add_contributor_button.click()
+            self.assertEqual(dialog.contributors_table.rowCount(), 1)
+            contributor_combo = dialog.contributors_table.cellWidget(0, 0)
+            self.assertIsInstance(contributor_combo, QComboBox)
+            self.assertIsNone(contributor_combo.currentData())
+        finally:
+            dialog.close()
+
     def test_contract_editor_uses_tabbed_sections(self):
         dialog = ContractEditorDialog(contract_service=object())
         try:

@@ -15351,20 +15351,37 @@ class App(QMainWindow):
         )
 
     def _refresh_work_manager_panel(self) -> None:
-        panel = getattr(self, "work_browser_dialog", None)
-        if panel is not None and panel.isVisible():
+        seen_panel_ids: set[int] = set()
+        for attr in ("work_manager_panel", "work_browser_dialog"):
+            panel = getattr(self, attr, None)
+            if panel is None or not panel.isVisible():
+                continue
+            panel_id = id(panel)
+            if panel_id in seen_panel_ids:
+                continue
+            seen_panel_ids.add(panel_id)
             panel.refresh()
             refresh_scope = getattr(panel, "refresh_selection_scope", None)
             if callable(refresh_scope):
                 refresh_scope()
 
-    def _create_work_record(self, payload: WorkPayload) -> int | None:
+    def _work_manager_task_owner(self) -> QWidget:
+        for attr in ("work_manager_panel", "work_browser_dialog"):
+            owner = getattr(self, attr, None)
+            if isinstance(owner, QWidget) and owner.isVisible():
+                return owner
+        return self
+
+    def create_work(self, payload: WorkPayload):
         if self.work_service is None:
             QMessageBox.warning(self, "Work Manager", "Open a profile first.")
-            return None
+            return
         payload.profile_name = payload.profile_name or self._current_profile_name()
-        try:
-            work_id = self._run_snapshot_history_action(
+
+        def _worker(bundle, ctx):
+            ctx.set_status("Saving work metadata, contributors, and linked tracks...")
+            work_id = run_snapshot_history_action(
+                history_manager=bundle.history_manager,
                 action_label=f"Create Work: {payload.title or 'Untitled Work'}",
                 action_type="work.create",
                 entity_type="Work",
@@ -15373,32 +15390,36 @@ class App(QMainWindow):
                     "title": payload.title,
                     "track_count": len(payload.track_ids),
                 },
-                mutation=lambda: self.work_service.create_work(payload),
+                mutation=lambda: bundle.work_service.create_work(payload),
+                logger=self.logger,
             )
+            return {
+                "work_id": int(work_id),
+                "title": payload.title,
+                "track_ids": list(payload.track_ids),
+            }
+
+        def _success(result: dict[str, object]) -> None:
+            work_id = int(result["work_id"])
+            track_ids = list(result.get("track_ids") or [])
+            try:
+                self.conn.commit()
+            except Exception:
+                pass
+            self._refresh_history_actions()
             self._log_event(
                 "work.create",
                 "Work created",
                 work_id=work_id,
                 title=payload.title,
-                track_ids=list(payload.track_ids),
+                track_ids=track_ids,
             )
             self._audit("CREATE", "Work", ref_id=work_id, details=f"title={payload.title}")
             self._audit_commit()
-        except Exception as exc:
-            self.conn.rollback()
-            self.logger.exception(f"Create work failed: {exc}")
-            QMessageBox.critical(self, "Work Manager", f"Could not create the work:\n{exc}")
-            return None
-        self._refresh_history_actions()
-        self._refresh_work_manager_panel()
-        self._focus_work_in_manager(work_id)
-        return int(work_id)
-
-    def create_work(self, payload: WorkPayload):
-        work_id = self._create_work_record(payload)
-        if not work_id:
-            return
-        if not list(payload.track_ids):
+            self._refresh_work_manager_panel()
+            self._focus_work_in_manager(work_id)
+            if track_ids:
+                return
             response = QMessageBox.question(
                 self,
                 "Work Manager",
@@ -15408,6 +15429,21 @@ class App(QMainWindow):
             )
             if response == QMessageBox.Yes:
                 self._begin_work_child_track_creation(work_id)
+
+        self._submit_background_bundle_task(
+            title="Save Work",
+            description="Saving work metadata, contributors, and linked tracks...",
+            task_fn=_worker,
+            kind="write",
+            unique_key=f"work.create.{str(payload.title or 'untitled').strip().casefold()}",
+            owner=self._work_manager_task_owner(),
+            on_success=_success,
+            on_error=lambda failure: self._show_background_task_error(
+                "Work Manager",
+                failure,
+                user_message="Could not create the work:",
+            ),
+        )
 
     def _open_work_creation_dialog(self) -> WorkPayload | None:
         if self.work_service is None:
@@ -15463,8 +15499,11 @@ class App(QMainWindow):
         if detail is None:
             QMessageBox.warning(self, "Work Manager", "The selected work could not be loaded.")
             return
-        try:
-            self._run_snapshot_history_action(
+
+        def _worker(bundle, ctx):
+            ctx.set_status("Updating work metadata, contributors, and linked tracks...")
+            run_snapshot_history_action(
+                history_manager=bundle.history_manager,
                 action_label=f"Update Work: {payload.title or detail.work.title}",
                 action_type="work.update",
                 entity_type="Work",
@@ -15474,24 +15513,47 @@ class App(QMainWindow):
                     "title": payload.title,
                     "track_count": len(payload.track_ids),
                 },
-                mutation=lambda: self.work_service.update_work(int(work_id), payload),
+                mutation=lambda: bundle.work_service.update_work(int(work_id), payload),
+                logger=self.logger,
             )
+            return {
+                "work_id": int(work_id),
+                "title": payload.title,
+                "track_ids": list(payload.track_ids),
+            }
+
+        def _success(result: dict[str, object]) -> None:
+            try:
+                self.conn.commit()
+            except Exception:
+                pass
+            self._refresh_history_actions()
             self._log_event(
                 "work.update",
                 "Work updated",
-                work_id=int(work_id),
+                work_id=int(result["work_id"]),
                 title=payload.title,
-                track_ids=list(payload.track_ids),
+                track_ids=list(result.get("track_ids") or []),
             )
             self._audit("UPDATE", "Work", ref_id=work_id, details=f"title={payload.title}")
             self._audit_commit()
-        except Exception as exc:
-            self.conn.rollback()
-            self.logger.exception(f"Update work failed: {exc}")
-            QMessageBox.critical(self, "Work Manager", f"Could not update the work:\n{exc}")
-            return
-        self._refresh_history_actions()
-        self._refresh_work_manager_panel()
+            self._refresh_work_manager_panel()
+            self._focus_work_in_manager(int(result["work_id"]))
+
+        self._submit_background_bundle_task(
+            title="Update Work",
+            description="Updating work metadata, contributors, and linked tracks...",
+            task_fn=_worker,
+            kind="write",
+            unique_key=f"work.update.{int(work_id)}",
+            owner=self._work_manager_task_owner(),
+            on_success=_success,
+            on_error=lambda failure: self._show_background_task_error(
+                "Work Manager",
+                failure,
+                user_message="Could not update the work:",
+            ),
+        )
 
     def duplicate_work(self, work_id: int):
         if self.work_service is None:

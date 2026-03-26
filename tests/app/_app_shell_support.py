@@ -1949,7 +1949,24 @@ class AppShellTestCase(unittest.TestCase):
         panel = self.window.open_work_manager()
         self.app.processEvents()
 
+        submitted_descriptions: list[str] = []
+
+        def _run_bundle_task_and_capture(window, **kwargs):
+            submitted_descriptions.append(str(kwargs.get("description") or ""))
+            return self._run_bundle_task_inline(window, **kwargs)
+
         with (
+            mock.patch.object(
+                app_module.App,
+                "_submit_background_bundle_task",
+                autospec=True,
+                side_effect=_run_bundle_task_and_capture,
+            ),
+            mock.patch.object(
+                self.window.work_service,
+                "create_work",
+                side_effect=AssertionError("main-thread create_work should not run"),
+            ),
             mock.patch.object(
                 app_module.WorkEditorDialog,
                 "exec",
@@ -1972,6 +1989,10 @@ class AppShellTestCase(unittest.TestCase):
             self._button_by_text(panel.manage_actions_cluster, "Create Work").click()
             self.app.processEvents()
 
+        self.assertEqual(
+            submitted_descriptions,
+            ["Saving work metadata, contributors, and linked tracks..."],
+        )
         works = [
             record
             for record in self.window.work_service.list_works(
@@ -1994,6 +2015,64 @@ class AppShellTestCase(unittest.TestCase):
         self.assertIsNotNone(context)
         assert context is not None
         self.assertEqual(context["work_id"], work_id)
+
+    def case_work_manager_update_runs_in_background_bundle_task(self):
+        work_id = self.window.work_service.create_work(
+            app_module.WorkPayload(
+                title="Background Save Work",
+                iswc="T-111.222.333-4",
+            )
+        )
+        panel = self.window.open_work_manager()
+        self.app.processEvents()
+        panel.focus_work(work_id)
+        self.app.processEvents()
+
+        submitted_descriptions: list[str] = []
+
+        def _run_bundle_task_and_capture(window, **kwargs):
+            submitted_descriptions.append(str(kwargs.get("description") or ""))
+            return self._run_bundle_task_inline(window, **kwargs)
+
+        with (
+            mock.patch.object(
+                app_module.App,
+                "_submit_background_bundle_task",
+                autospec=True,
+                side_effect=_run_bundle_task_and_capture,
+            ),
+            mock.patch.object(
+                self.window.work_service,
+                "update_work",
+                side_effect=AssertionError("main-thread update_work should not run"),
+            ),
+            mock.patch.object(
+                app_module.WorkEditorDialog,
+                "exec",
+                return_value=app_module.QDialog.Accepted,
+            ),
+            mock.patch.object(
+                app_module.WorkEditorDialog,
+                "payload",
+                return_value=app_module.WorkPayload(
+                    title="Background Save Work Updated",
+                    iswc="T-999.888.777-6",
+                ),
+            ),
+        ):
+            self._button_by_text(panel.manage_actions_cluster, "Edit").click()
+            self.app.processEvents()
+
+        self.assertEqual(
+            submitted_descriptions,
+            ["Updating work metadata, contributors, and linked tracks..."],
+        )
+        detail = self.window.work_service.fetch_work_detail(work_id)
+        self.assertIsNotNone(detail)
+        assert detail is not None
+        self.assertEqual(detail.work.title, "Background Save Work Updated")
+        self.assertEqual(detail.work.iswc, "T-999.888.777-6")
+        self.assertEqual(panel._selected_work_id(), work_id)
 
     def case_work_manager_opens_album_dialog_for_selected_work(self):
         work_id = self.window.work_service.create_work(
