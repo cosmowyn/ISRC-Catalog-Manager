@@ -8,8 +8,11 @@ import unittest
 from typing import Callable
 
 try:
+    from PySide6.QtCore import QCoreApplication, QEvent
     from PySide6.QtWidgets import QApplication
 except ImportError as exc:  # pragma: no cover - environment-specific fallback
+    QCoreApplication = None
+    QEvent = None
     QApplication = None
     QT_IMPORT_ERROR = exc
 else:
@@ -28,6 +31,9 @@ def pump_events(*, app: QApplication | None = None, cycles: int = 1) -> None:
     qt_app = app or require_qapplication()
     for _ in range(max(1, cycles)):
         qt_app.processEvents()
+        if QCoreApplication is not None and QEvent is not None:
+            QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+            qt_app.processEvents()
 
 
 def wait_for(
