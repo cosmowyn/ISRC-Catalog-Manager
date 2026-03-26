@@ -10337,7 +10337,8 @@ class App(QMainWindow):
 
     def open_database(self, path: str, *, schema_prepared: bool = False):
         """Open (or create) the SQLite DB at path; initialize schema if needed."""
-        self._close_database_connection()
+        if self.conn is not None or self.cursor is not None:
+            self._close_database_connection()
         session = self.database_session.open(path)
         self.conn = session.conn
         self.cursor = session.cursor
