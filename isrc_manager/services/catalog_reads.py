@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Callable
 
 
 class CatalogReadService:
@@ -31,9 +32,9 @@ class CatalogReadService:
 
     def fetch_rows_with_customs(
         self,
-        active_custom_fields: list[dict],
+        active_custom_fields: list[dict[str, object]],
         *,
-        progress_callback=None,
+        progress_callback: Callable[[int, int, str], None] | None = None,
     ) -> tuple[list[tuple], dict[tuple[int, int], str]]:
         work_columns = self._table_columns("Works")
         if callable(progress_callback):
