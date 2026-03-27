@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QWidget,
 )
+from shiboken6 import isValid as _qt_object_is_valid
 
 from ..ui_common import _abbreviate_middle_text, _compose_widget_stylesheet
 from .models import TaskCancelledError, TaskFailure, TaskProgressUpdate
@@ -591,33 +592,66 @@ class BackgroundTaskManager(QObject):
             _configure_progress_dialog(dialog)
             dialog.show()
 
+        ui_state: dict[str, object] = {
+            "active": True,
+            "dialog": dialog,
+        }
+
+        def _current_dialog() -> QProgressDialog | None:
+            current_dialog = ui_state.get("dialog")
+            if current_dialog is None:
+                return None
+            if not _qt_object_is_valid(current_dialog):
+                ui_state["dialog"] = None
+                return None
+            return current_dialog
+
         def _apply_progress(update: TaskProgressUpdate) -> None:
-            if dialog is not None:
+            if not bool(ui_state.get("active", False)):
+                return
+            current_dialog = _current_dialog()
+            if current_dialog is not None:
                 if update.message:
-                    dialog.setLabelText(_format_progress_dialog_message(update.message))
+                    current_dialog.setLabelText(_format_progress_dialog_message(update.message))
                 if update.maximum is not None and update.value is not None:
-                    dialog.setMaximum(max(0, int(update.maximum)))
-                    dialog.setValue(max(0, int(update.value)))
+                    current_dialog.setMaximum(max(0, int(update.maximum)))
+                    current_dialog.setValue(max(0, int(update.value)))
                 elif update.maximum is not None:
-                    dialog.setMaximum(max(0, int(update.maximum)))
+                    current_dialog.setMaximum(max(0, int(update.maximum)))
                 elif update.value is not None:
-                    dialog.setValue(max(0, int(update.value)))
-                _refresh_progress_dialog_height(dialog)
+                    current_dialog.setValue(max(0, int(update.value)))
+                _refresh_progress_dialog_height(current_dialog)
             if on_progress is not None:
                 on_progress(update)
 
         def _apply_status(message: str) -> None:
-            if dialog is not None and message:
-                dialog.setLabelText(_format_progress_dialog_message(message))
-                _refresh_progress_dialog_height(dialog)
+            if not bool(ui_state.get("active", False)):
+                return
+            current_dialog = _current_dialog()
+            if current_dialog is not None and message:
+                current_dialog.setLabelText(_format_progress_dialog_message(message))
+                _refresh_progress_dialog_height(current_dialog)
             if on_status is not None:
                 on_status(message)
 
         def _cleanup() -> None:
             current = self._tasks.pop(task_id, None)
-            if current is not None and current.dialog is not None:
-                current.dialog.close()
-                current.dialog.deleteLater()
+            ui_state["active"] = False
+            dialog_to_cleanup = _current_dialog()
+            ui_state["dialog"] = None
+            if dialog_to_cleanup is None and current is not None:
+                candidate_dialog = current.dialog
+                if candidate_dialog is not None and _qt_object_is_valid(candidate_dialog):
+                    dialog_to_cleanup = candidate_dialog
+            if dialog_to_cleanup is not None:
+                try:
+                    dialog_to_cleanup.close()
+                except Exception:
+                    pass
+                try:
+                    dialog_to_cleanup.deleteLater()
+                except Exception:
+                    pass
             thread.deleteLater()
             self.task_state_changed.emit()
 

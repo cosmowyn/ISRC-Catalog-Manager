@@ -20,6 +20,7 @@ from isrc_manager.tasks.manager import (
     BackgroundTaskManager,
     _format_progress_dialog_message,
 )
+from isrc_manager.tasks.models import TaskProgressUpdate
 from tests.qt_test_helpers import pump_events, wait_for
 
 
@@ -489,10 +490,62 @@ class BackgroundTaskManagerTests(unittest.TestCase):
         self.assertTrue(captured.get("before_dialog_visible"))
         self.assertFalse(captured.get("after_dialog_visible"))
 
+    def test_late_progress_updates_after_dialog_cleanup_are_ignored(self):
+        finished = threading.Event()
+        progress_messages: list[str] = []
+        status_messages: list[str] = []
+        relay_holder: dict[str, object] = {}
+        dialog_holder: dict[str, object] = {}
+
+        def _task(ctx):
+            ctx.report_progress(1, 3, "Importing contracts bundle...")
+            ctx.set_status("Applying inspected contract rows.")
+            return "done"
+
+        def _after_cleanup(_result):
+            dialog = dialog_holder.get("dialog")
+            self.assertFalse(bool(dialog is not None and dialog.isVisible()))
+            relay = relay_holder["relay"]
+            relay.handle_progress(
+                TaskProgressUpdate(
+                    value=3,
+                    maximum=3,
+                    message="Late worker progress after dialog cleanup.",
+                )
+            )
+            relay.handle_status("Late worker status after dialog cleanup.")
+
+        task_id = self.manager.submit(
+            title="Late Progress Guard Task",
+            description="Testing late queued progress after cleanup.",
+            task_fn=_task,
+            show_dialog=True,
+            cancellable=False,
+            on_success_after_cleanup=_after_cleanup,
+            on_finished=finished.set,
+            on_progress=lambda update: progress_messages.append(str(update.message or "")),
+            on_status=lambda message: status_messages.append(str(message or "")),
+        )
+        self.assertIsNotNone(task_id)
+        record = self.manager._tasks[str(task_id)]
+        relay_holder["relay"] = record.relay
+        dialog_holder["dialog"] = record.dialog
+
+        self._wait_for_task_completion(
+            finished.is_set,
+            description="late-progress cleanup task completion",
+        )
+        pump_events(app=self.app)
+
+        self.assertEqual(progress_messages, ["Importing contracts bundle..."])
+        self.assertEqual(status_messages, ["Applying inspected contract rows."])
+        self.assertFalse(self.manager.has_running_tasks())
+
     def test_progress_dialog_wraps_long_status_updates_with_bounded_height(self):
         finished = threading.Event()
         allow_second_update = threading.Event()
         second_update_emitted = threading.Event()
+        allow_finish = threading.Event()
 
         def _long_running(ctx):
             ctx.set_status("Starting export.")
@@ -500,6 +553,8 @@ class BackgroundTaskManagerTests(unittest.TestCase):
                 time.sleep(0.01)
             ctx.set_status("Writing metadata tags for a moderately long export status message.")
             second_update_emitted.set()
+            while not allow_finish.is_set():
+                time.sleep(0.01)
             return "done"
 
         task_id = self.manager.submit(
@@ -532,6 +587,7 @@ class BackgroundTaskManagerTests(unittest.TestCase):
         self.assertGreaterEqual(dialog.height(), first_height)
         self.assertLessEqual(dialog.height(), 220)
 
+        allow_finish.set()
         self._wait_for_task_completion(
             lambda: finished.is_set(),
             description="wrapped status dialog completion",
