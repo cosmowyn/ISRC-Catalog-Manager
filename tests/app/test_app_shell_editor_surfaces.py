@@ -24,6 +24,9 @@ class AppShellEditorSurfaceTests(AppShellTestCase):
     test_export_standard_audio_file_embeds_catalog_metadata_on_export = (
         AppShellTestCase.case_export_standard_audio_file_embeds_catalog_metadata_on_export
     )
+    test_bulk_audio_column_export_uses_background_task_and_embeds_catalog_metadata = (
+        AppShellTestCase.case_bulk_audio_column_export_uses_background_task_and_embeds_catalog_metadata
+    )
     test_album_entry_track_sections_use_internal_tabs = (
         AppShellTestCase.case_album_entry_track_sections_use_internal_tabs
     )

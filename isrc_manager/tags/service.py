@@ -63,6 +63,8 @@ from .models import (
     TaggedAudioExportResult,
 )
 
+TAGGED_AUDIO_EXPORT_STAGE_COUNT = 3
+
 
 def _first(values, default=None):
     if values is None:
@@ -114,6 +116,22 @@ def _clean_filename_title_token(value: str | None) -> str | None:
     text = re.sub(r"^\d+\s*[-._ ]+\s*", "", text)
     text = re.sub(r"\s+", " ", text).strip(" -._")
     return text or None
+
+
+def _report_tagged_export_stage(
+    progress_callback,
+    *,
+    item_index: int,
+    item_total: int,
+    stage_index: int,
+    stage_count: int,
+    message: str,
+) -> None:
+    if progress_callback is None:
+        return
+    value = ((item_index - 1) * stage_count) + stage_index
+    maximum = max(1, item_total * stage_count)
+    progress_callback(value, maximum, message)
 
 
 class AudioTagService:
@@ -873,18 +891,28 @@ class TaggedAudioExportService:
         total = len(exports)
         for index, raw_item in enumerate(exports, start=1):
             item = self._coerce_export_item(raw_item)
-            if progress_callback is not None:
-                progress_callback(
-                    index - 1,
-                    total,
-                    f"Preparing catalog audio copy {index} of {total}: {item.suggested_name}",
-                )
+            _report_tagged_export_stage(
+                progress_callback,
+                item_index=index,
+                item_total=total,
+                stage_index=0,
+                stage_count=TAGGED_AUDIO_EXPORT_STAGE_COUNT,
+                message=f"Resolving export source {index} of {total}: {item.suggested_name}",
+            )
             if is_cancelled is not None and is_cancelled():
                 raise InterruptedError("Catalog audio copy export cancelled.")
             destination = (destination_root / item.suggested_name).with_suffix(
                 self._normalize_suffix(item.source_suffix)
             )
             try:
+                _report_tagged_export_stage(
+                    progress_callback,
+                    item_index=index,
+                    item_total=total,
+                    stage_index=1,
+                    stage_count=TAGGED_AUDIO_EXPORT_STAGE_COUNT,
+                    message=f"Copying audio {index} of {total}: {item.suggested_name}",
+                )
                 if item.source_path is not None:
                     source = Path(item.source_path)
                     if not source.exists():
@@ -894,6 +922,19 @@ class TaggedAudioExportService:
                     shutil.copy2(source, destination)
                 else:
                     destination.write_bytes(bytes(item.source_bytes or b""))
+                stage_message = (
+                    f"Writing catalog metadata {index} of {total}: {item.suggested_name}"
+                    if has_exportable_catalog_tag_data(item.tag_data)
+                    else f"Finalizing audio copy {index} of {total}: {item.suggested_name}"
+                )
+                _report_tagged_export_stage(
+                    progress_callback,
+                    item_index=index,
+                    item_total=total,
+                    stage_index=2,
+                    stage_count=TAGGED_AUDIO_EXPORT_STAGE_COUNT,
+                    message=stage_message,
+                )
                 if has_exportable_catalog_tag_data(item.tag_data):
                     try:
                         self.tag_service.write_tags(destination, item.tag_data)
@@ -911,9 +952,6 @@ class TaggedAudioExportService:
                 skipped += 1
                 warnings.append(f"{destination.name}: {exc}")
                 destination.unlink(missing_ok=True)
-
-        if progress_callback is not None:
-            progress_callback(total, total, "Catalog audio copy export finished.")
 
         return TaggedAudioExportResult(
             requested=len(exports),

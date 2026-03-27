@@ -701,6 +701,85 @@ class AudioConversionPipelineTests(AuthenticityWorkflowTestCase):
         self.assertIsNone(tags.isrc)
         self.assertIsNone(tags.upc)
 
+    def test_managed_export_reports_real_progress_stages_before_terminal_completion(self):
+        track_id, _source_path = self.create_track_with_audio(
+            title="Progress Managed Source",
+            duration_seconds=30,
+            seed=24,
+            suffix=".wav",
+        )
+        progress_updates: list[tuple[int, int, str]] = []
+
+        result = self._managed_coordinator().export(
+            ManagedDerivativeExportRequest(
+                track_ids=[track_id],
+                output_dir=self.root / "managed_progress_exports",
+                output_format="flac",
+                derivative_kind=MANAGED_DERIVATIVE_KIND_WATERMARK_AUTHENTIC,
+                profile_name="Test Profile",
+            ),
+            progress_callback=lambda value, maximum, message: progress_updates.append(
+                (value, maximum, message)
+            ),
+        )
+
+        self.assertEqual(result.exported, 1)
+        self.assertTrue(progress_updates)
+        self.assertEqual(
+            [value for value, _maximum, _message in progress_updates],
+            sorted(value for value, _maximum, _message in progress_updates),
+        )
+        messages = [message for _value, _maximum, message in progress_updates]
+        self.assertIn("Resolving source audio 1 of 1: Progress Managed Source", messages)
+        self.assertIn("Converting derivative 1 of 1: Progress Managed Source", messages)
+        self.assertIn("Applying direct watermark 1 of 1: Progress Managed Source", messages)
+        self.assertIn("Writing catalog metadata 1 of 1: Progress Managed Source", messages)
+        self.assertIn("Hashing finalized derivative 1 of 1: Progress Managed Source", messages)
+        self.assertIn("Registering derivative 1 of 1: Progress Managed Source", messages)
+        self.assertIn("Staging finalized derivative 1 of 1: Progress Managed Source", messages)
+        self.assertIn("Finalizing managed derivative delivery…", messages)
+        self.assertLess(progress_updates[-1][0], progress_updates[-1][1])
+        self.assertTrue(all("finished" not in message.lower() for message in messages))
+
+    def test_external_conversion_reports_real_progress_stages_before_terminal_completion(self):
+        source = self.write_audio_fixture(
+            "external-progress.wav",
+            duration_seconds=30,
+            seed=25,
+            suffix=".wav",
+        )
+        progress_updates: list[tuple[int, int, str]] = []
+
+        result = ExternalAudioConversionCoordinator(
+            conversion_service=self.stub_conversion_service
+        ).export(
+            ExternalAudioConversionRequest(
+                input_paths=[str(source)],
+                output_dir=self.root / "external_progress_exports",
+                output_format="wav",
+            ),
+            progress_callback=lambda value, maximum, message: progress_updates.append(
+                (value, maximum, message)
+            ),
+        )
+
+        self.assertEqual(result.exported, 1)
+        self.assertEqual(
+            [value for value, _maximum, _message in progress_updates],
+            sorted(value for value, _maximum, _message in progress_updates),
+        )
+        self.assertEqual(
+            [message for _value, _maximum, message in progress_updates],
+            [
+                "Converting external audio 1 of 1: external-progress.wav",
+                "Finalizing converted output…",
+            ],
+        )
+        self.assertLess(progress_updates[-1][0], progress_updates[-1][1])
+        self.assertTrue(
+            all("finished" not in message.lower() for _value, _maximum, message in progress_updates)
+        )
+
     def test_audio_conversion_service_strip_metadata_mode_adds_ffmpeg_strip_flags(self):
         source = self.write_audio_fixture(
             "strip-metadata-source.wav",

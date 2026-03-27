@@ -4627,10 +4627,10 @@ class AppShellTestCase(unittest.TestCase):
         assert managed_snapshot is not None
         assert database_snapshot is not None
 
-        task_descriptions: list[str] = []
+        submitted_tasks: list[dict[str, object]] = []
 
         def _run_bundle_task_and_capture(window, **kwargs):
-            task_descriptions.append(str(kwargs.get("description") or ""))
+            submitted_tasks.append(dict(kwargs))
             return self._run_bundle_task_inline(window, **kwargs)
 
         with (
@@ -4666,12 +4666,24 @@ class AppShellTestCase(unittest.TestCase):
         self.assertIn("Managed Export Track", exported_tags)
         self.assertIn("Database Export Track", exported_tags)
         self.assertEqual(
-            task_descriptions,
+            [str(task.get("description") or "") for task in submitted_tasks],
             [
                 "Preparing the catalog audio copy export preview...",
                 "Copying selected catalog audio in its current source format and embedding catalog metadata when it is available...",
             ],
         )
+        self.assertEqual(len(submitted_tasks), 2)
+        self.assertIsNone(submitted_tasks[0].get("worker_completion_progress"))
+        self.assertIsNone(submitted_tasks[0].get("on_success_before_cleanup"))
+        self.assertIsNone(submitted_tasks[0].get("on_success"))
+        self.assertTrue(callable(submitted_tasks[0].get("on_success_after_cleanup")))
+        self.assertEqual(
+            submitted_tasks[1].get("worker_completion_progress"),
+            (96, "Finalizing catalog audio copy export results..."),
+        )
+        self.assertTrue(callable(submitted_tasks[1].get("on_success_before_cleanup")))
+        self.assertIsNone(submitted_tasks[1].get("on_success"))
+        self.assertTrue(callable(submitted_tasks[1].get("on_success_after_cleanup")))
         self.assertEqual(exported_tags["Managed Export Track"].isrc, managed_snapshot.isrc)
         self.assertEqual(exported_tags["Database Export Track"].isrc, database_snapshot.isrc)
         self.assertIsNotNone(exported_tags["Managed Export Track"].artwork)
@@ -4694,8 +4706,19 @@ class AppShellTestCase(unittest.TestCase):
         audio_path = self._create_wav_file("direct-export.wav")
         self.window.track_service.set_media_path(track_id, "audio_file", audio_path)
         export_path = self.root / "direct-audio-export.wav"
+        submitted_tasks: list[dict[str, object]] = []
+
+        def _run_bundle_task_and_capture(window, **kwargs):
+            submitted_tasks.append(dict(kwargs))
+            return self._run_bundle_task_inline(window, **kwargs)
 
         with (
+            mock.patch.object(
+                app_module.App,
+                "_submit_background_bundle_task",
+                autospec=True,
+                side_effect=_run_bundle_task_and_capture,
+            ),
             mock.patch.object(
                 app_module.QFileDialog,
                 "getSaveFileName",
@@ -4705,6 +4728,12 @@ class AppShellTestCase(unittest.TestCase):
         ):
             self.window._export_standard_media_for_track(track_id, "audio_file")
 
+        self.assertEqual(len(submitted_tasks), 1)
+        self.assertEqual(
+            submitted_tasks[0].get("worker_completion_progress"), (100, "Export complete.")
+        )
+        self.assertIsNone(submitted_tasks[0].get("on_success"))
+        self.assertTrue(callable(submitted_tasks[0].get("on_success_after_cleanup")))
         exported_tags = self.window.audio_tag_service.read_tags(export_path)
         snapshot = self.window.track_service.fetch_track_snapshot(track_id)
         self.assertIsNotNone(snapshot)
@@ -4713,6 +4742,85 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(exported_tags.artist, snapshot.artist_name)
         self.assertEqual(exported_tags.album, "Direct Export Album")
         self.assertEqual(exported_tags.isrc, snapshot.isrc)
+
+    def case_bulk_audio_column_export_uses_background_task_and_embeds_catalog_metadata(self):
+        managed_track = self._create_track(
+            index=198,
+            title="Bulk Managed Export Track",
+            album_title="Bulk Export Album",
+        )
+        database_track = self._create_track(
+            index=199,
+            title="Bulk Database Export Track",
+            album_title="Bulk Export Album",
+        )
+        managed_audio = self._create_wav_file("bulk-managed-export.wav")
+        database_audio = self._create_wav_file("bulk-database-export.wav")
+        self.window.track_service.set_media_path(managed_track, "audio_file", managed_audio)
+        self.window.track_service.set_media_path(
+            database_track,
+            "audio_file",
+            database_audio,
+            storage_mode=app_module.STORAGE_MODE_DATABASE,
+        )
+        output_dir = self.root / "bulk-audio-column-export"
+        output_dir.mkdir()
+        audio_col = self.window._column_index_by_header("Audio File")
+        if audio_col < 0:
+            audio_col = self.window._column_index_by_header("Audio")
+        self.assertGreaterEqual(audio_col, 0)
+        submitted_tasks: list[dict[str, object]] = []
+
+        def _run_bundle_task_and_capture(window, **kwargs):
+            submitted_tasks.append(dict(kwargs))
+            return self._run_bundle_task_inline(window, **kwargs)
+
+        with (
+            mock.patch.object(
+                app_module.App,
+                "_submit_background_bundle_task",
+                autospec=True,
+                side_effect=_run_bundle_task_and_capture,
+            ),
+            mock.patch.object(
+                app_module.QFileDialog,
+                "getExistingDirectory",
+                return_value=str(output_dir),
+            ),
+            mock.patch.object(app_module.QMessageBox, "information"),
+        ):
+            self.window._export_focused_media_column(
+                audio_col,
+                track_ids=[managed_track, database_track],
+            )
+
+        self.assertEqual(len(submitted_tasks), 1)
+        self.assertEqual(
+            submitted_tasks[0].get("worker_completion_progress"),
+            (100, "Export Audio File complete."),
+        )
+        self.assertIsNone(submitted_tasks[0].get("on_success"))
+        self.assertTrue(callable(submitted_tasks[0].get("on_success_after_cleanup")))
+        exported_paths = sorted(output_dir.glob("*.wav"))
+        self.assertEqual(len(exported_paths), 2)
+        exported_tags = {
+            self.window.audio_tag_service.read_tags(
+                path
+            ).title: self.window.audio_tag_service.read_tags(path)
+            for path in exported_paths
+        }
+        self.assertEqual(
+            {title for title in exported_tags},
+            {"Bulk Managed Export Track", "Bulk Database Export Track"},
+        )
+        self.assertEqual(
+            exported_tags["Bulk Managed Export Track"].album,
+            "Bulk Export Album",
+        )
+        self.assertEqual(
+            exported_tags["Bulk Database Export Track"].album,
+            "Bulk Export Album",
+        )
 
     def case_album_entry_track_sections_use_internal_tabs(self):
         dialog = app_module.AlbumEntryDialog(self.window)

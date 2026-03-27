@@ -33,6 +33,98 @@ class AudioAuthenticityVerificationServiceTests(AuthenticityWorkflowTestCase):
         sidecar_path = Path(result.written_sidecar_paths[0])
         return track_id, audio_path, exported_path, sidecar_path, result
 
+    def test_export_watermarked_audio_reports_real_progress_stages_before_terminal_completion(self):
+        track_id, _audio_path = self.create_track_with_audio(
+            title="Progress Authenticity Track",
+            artist_name="Moonwake",
+            album_title="Authenticity Progress",
+            duration_seconds=30,
+            seed=31,
+            suffix=".wav",
+        )
+        progress_updates: list[tuple[int, int, str]] = []
+
+        result = self.audio_service.export_watermarked_audio(
+            output_dir=self.root / "progress_exports",
+            track_ids=[track_id],
+            profile_name="Test Profile",
+            progress_callback=lambda value, maximum, message: progress_updates.append(
+                (value, maximum, message)
+            ),
+        )
+
+        self.assertEqual(result.exported, 1)
+        messages = [message for _value, _maximum, message in progress_updates]
+        self.assertIn("Authenticity export plan ready for 1 track.", messages)
+        self.assertIn(
+            "Preparing authenticity manifest 1 of 1: Progress Authenticity Track",
+            messages,
+        )
+        self.assertIn("Embedding direct watermark 1 of 1: Progress Authenticity Track", messages)
+        self.assertIn("Writing catalog metadata 1 of 1: Progress Authenticity Track", messages)
+        self.assertIn("Signing authenticity sidecar 1 of 1: Progress Authenticity Track", messages)
+        self.assertEqual(
+            [value for value, _maximum, _message in progress_updates],
+            sorted(value for value, _maximum, _message in progress_updates),
+        )
+        self.assertLess(progress_updates[-1][0], progress_updates[-1][1])
+        self.assertTrue(all("finished" not in message.lower() for message in messages))
+
+    def test_export_provenance_audio_reports_real_progress_stages_before_terminal_completion(self):
+        track_id, _master_audio, _direct_result = self.export_direct_authenticity_fixture()
+        derivative_audio = self.write_audio_fixture(
+            "lineage-progress.mp3",
+            duration_seconds=30,
+            seed=32,
+            suffix=".mp3",
+        )
+        self.track_service.set_media_path(
+            track_id,
+            "audio_file",
+            derivative_audio,
+            storage_mode="managed_file",
+        )
+        self.asset_service.create_asset(
+            AssetVersionPayload(
+                track_id=track_id,
+                asset_type="main_master",
+                source_path=str(
+                    self.write_audio_fixture(
+                        "lineage-progress-master.wav",
+                        duration_seconds=30,
+                        seed=1,
+                        suffix=".wav",
+                    )
+                ),
+                approved_for_use=True,
+                primary_flag=True,
+            )
+        )
+        progress_updates: list[tuple[int, int, str]] = []
+
+        result = self.audio_service.export_provenance_audio(
+            output_dir=self.root / "exports" / "lineage_progress",
+            track_ids=[track_id],
+            profile_name="Test Profile",
+            progress_callback=lambda value, maximum, message: progress_updates.append(
+                (value, maximum, message)
+            ),
+        )
+
+        self.assertEqual(result.exported, 1)
+        messages = [message for _value, _maximum, message in progress_updates]
+        self.assertIn("Authenticity provenance plan ready for 1 track.", messages)
+        self.assertIn("Resolving provenance source 1 of 1: Authenticity Track", messages)
+        self.assertIn("Copying provenance audio 1 of 1: Authenticity Track", messages)
+        self.assertIn("Writing catalog metadata 1 of 1: Authenticity Track", messages)
+        self.assertIn("Signing provenance sidecar 1 of 1: Authenticity Track", messages)
+        self.assertEqual(
+            [value for value, _maximum, _message in progress_updates],
+            sorted(value for value, _maximum, _message in progress_updates),
+        )
+        self.assertLess(progress_updates[-1][0], progress_updates[-1][1])
+        self.assertTrue(all("finished" not in message.lower() for message in messages))
+
     def test_verify_file_reports_verified_authentic_for_exported_copy(self):
         _track_id, _audio_path, exported_path, _sidecar_path, _result = self._export_fixture()
 

@@ -853,6 +853,14 @@ class ForensicExportCoordinator:
                             zip_filename=zip_path.name,
                         )
                     elif exported_states:
+                        _report_stage(
+                            progress_callback,
+                            item_index=len(track_ids),
+                            item_total=len(track_ids),
+                            stage_index=8,
+                            stage_count=_FORENSIC_STAGE_COUNT,
+                            message="Finalizing forensic export delivery…",
+                        )
                         final_destination = destination_root / exported_states[0].final_name
                         shutil.move(str(exported_states[0].temp_final_path), str(final_destination))
                         written_paths.append(str(final_destination))
@@ -875,12 +883,6 @@ class ForensicExportCoordinator:
             raise
 
         skipped = max(0, len(track_ids) - exported)
-        if progress_callback is not None:
-            progress_callback(
-                max(1, len(track_ids) * _FORENSIC_STAGE_COUNT),
-                max(1, len(track_ids) * _FORENSIC_STAGE_COUNT),
-                "Forensic watermark export finished.",
-            )
         return ForensicExportResult(
             requested=len(track_ids),
             exported=exported,

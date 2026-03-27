@@ -75,11 +75,33 @@ if TYPE_CHECKING:
 
 DEFAULT_KEY_ID_KV = "authenticity/default_key_id"
 PROVENANCE_LINEAGE_BASIS = "signed_derivative_of_verified_master"
+_AUTHENTICITY_PLAN_STAGE_COUNT = 1
+_AUTHENTICITY_MASTER_EXPORT_STAGE_COUNT = 4
+_AUTHENTICITY_PROVENANCE_EXPORT_STAGE_COUNT = 4
 
 
 def _clean_text(value: object | None) -> str | None:
     text = str(value or "").strip()
     return text or None
+
+
+def _report_progress_stage(
+    progress_callback,
+    *,
+    base_value: int = 0,
+    item_index: int,
+    item_total: int,
+    stage_index: int,
+    stage_count: int,
+    maximum: int | None = None,
+    message: str,
+) -> None:
+    if progress_callback is None:
+        return
+    value = int(base_value) + ((item_index - 1) * stage_count) + stage_index
+    if maximum is None:
+        maximum = int(base_value) + max(1, item_total * stage_count)
+    progress_callback(value, maximum, message)
 
 
 def _signed_document_is_valid(document: dict[str, object]) -> bool:
@@ -1268,19 +1290,25 @@ class AudioAuthenticityService:
         *,
         key_id: str | None = None,
         profile_name: str | None = None,
+        progress_callback=None,
     ) -> AuthenticityExportPlan:
+        del profile_name
         key_record = self.key_service.resolve_key(key_id)
         items: list[AuthenticityExportPlanItem] = []
         warnings: list[str] = []
-        for raw_track_id in track_ids:
+        normalized_track_ids = list(track_ids)
+        total = max(1, len(normalized_track_ids))
+        for index, raw_track_id in enumerate(normalized_track_ids, start=1):
             try:
                 track_id = int(raw_track_id)
             except Exception:
                 continue
+            track_label = f"Track {track_id}"
             snapshot = self.manifest_service.track_service.fetch_track_snapshot(track_id)
             if snapshot is None:
                 warnings.append(f"Track {track_id} no longer exists and was skipped.")
                 continue
+            track_label = str(snapshot.track_title or track_label)
             try:
                 reference = self.manifest_service.select_reference_audio(track_id)
                 items.append(
@@ -1312,6 +1340,12 @@ class AudioAuthenticityService:
                         warning=str(exc),
                     )
                 )
+            if progress_callback is not None:
+                progress_callback(
+                    index * _AUTHENTICITY_PLAN_STAGE_COUNT,
+                    total * _AUTHENTICITY_PLAN_STAGE_COUNT,
+                    f"Prepared authenticity export source {index} of {total}: {track_label}",
+                )
         return AuthenticityExportPlan(
             key_id=key_record.key_id,
             signer_label=key_record.signer_label,
@@ -1327,20 +1361,25 @@ class AudioAuthenticityService:
         *,
         key_id: str | None = None,
         profile_name: str | None = None,
+        progress_callback=None,
     ) -> AuthenticityExportPlan:
         del profile_name
         key_record = self.key_service.resolve_key(key_id)
         items: list[AuthenticityExportPlanItem] = []
         warnings: list[str] = []
-        for raw_track_id in track_ids:
+        normalized_track_ids = list(track_ids)
+        total = max(1, len(normalized_track_ids))
+        for index, raw_track_id in enumerate(normalized_track_ids, start=1):
             try:
                 track_id = int(raw_track_id)
             except Exception:
                 continue
+            track_label = f"Track {track_id}"
             snapshot = self.manifest_service.track_service.fetch_track_snapshot(track_id)
             if snapshot is None:
                 warnings.append(f"Track {track_id} no longer exists and was skipped.")
                 continue
+            track_label = str(snapshot.track_title or track_label)
             try:
                 source = self._attached_audio_source(track_id)
                 suffix = str(source["suffix"] or "")
@@ -1382,6 +1421,12 @@ class AudioAuthenticityService:
                         warning=str(exc),
                     )
                 )
+            if progress_callback is not None:
+                progress_callback(
+                    index * _AUTHENTICITY_PLAN_STAGE_COUNT,
+                    total * _AUTHENTICITY_PLAN_STAGE_COUNT,
+                    f"Prepared provenance export source {index} of {total}: {track_label}",
+                )
         return AuthenticityExportPlan(
             key_id=key_record.key_id,
             signer_label=key_record.signer_label,
@@ -1401,7 +1446,13 @@ class AudioAuthenticityService:
         progress_callback=None,
         is_cancelled=None,
     ) -> AuthenticityExportResult:
-        plan = self.build_export_plan(track_ids, key_id=key_id, profile_name=profile_name)
+        requested_track_ids = list(track_ids)
+        plan = self.build_export_plan(
+            requested_track_ids,
+            key_id=key_id,
+            profile_name=profile_name,
+            progress_callback=progress_callback,
+        )
         key_record, _private_key, watermark_key = self.key_service.signing_material(plan.key_id)
         destination_root = Path(output_dir)
         destination_root.mkdir(parents=True, exist_ok=True)
@@ -1412,16 +1463,31 @@ class AudioAuthenticityService:
         written_sidecar_paths: list[str] = []
         manifest_ids: list[str] = []
         ready_items = plan.ready_items()
+        plan_total = max(1, len(requested_track_ids) * _AUTHENTICITY_PLAN_STAGE_COUNT)
+        total_steps = max(
+            1,
+            plan_total + (len(ready_items) * _AUTHENTICITY_MASTER_EXPORT_STAGE_COUNT),
+        )
+        if progress_callback is not None:
+            progress_callback(
+                plan_total,
+                total_steps,
+                f"Authenticity export plan ready for {len(ready_items)} track{'s' if len(ready_items) != 1 else ''}.",
+            )
         total = len(ready_items)
         for index, item in enumerate(ready_items, start=1):
-            if progress_callback is not None:
-                progress_callback(
-                    index - 1,
-                    total,
-                    f"Embedding authenticity watermark {index} of {total}: {item.track_title}",
-                )
             if is_cancelled is not None and is_cancelled():
                 raise InterruptedError("Authenticity export cancelled.")
+            _report_progress_stage(
+                progress_callback,
+                base_value=plan_total,
+                item_index=index,
+                item_total=total,
+                stage_index=0,
+                stage_count=_AUTHENTICITY_MASTER_EXPORT_STAGE_COUNT,
+                maximum=total_steps,
+                message=f"Preparing authenticity manifest {index} of {total}: {item.track_title}",
+            )
             prepared = self.manifest_service.prepare_manifest(
                 track_id=item.track_id,
                 key_id=key_record.key_id,
@@ -1432,12 +1498,32 @@ class AudioAuthenticityService:
                 prepared.reference.suffix
             )
             try:
+                _report_progress_stage(
+                    progress_callback,
+                    base_value=plan_total,
+                    item_index=index,
+                    item_total=total,
+                    stage_index=1,
+                    stage_count=_AUTHENTICITY_MASTER_EXPORT_STAGE_COUNT,
+                    maximum=total_steps,
+                    message=f"Embedding direct watermark {index} of {total}: {item.track_title}",
+                )
                 embed_metrics = self.watermark_service.embed_to_path(
                     source_path=prepared.reference.source_path,
                     source_bytes=prepared.reference.source_bytes,
                     destination_path=destination,
                     watermark_key=watermark_key,
                     token=prepared.watermark_token,
+                )
+                _report_progress_stage(
+                    progress_callback,
+                    base_value=plan_total,
+                    item_index=index,
+                    item_total=total,
+                    stage_index=2,
+                    stage_count=_AUTHENTICITY_MASTER_EXPORT_STAGE_COUNT,
+                    maximum=total_steps,
+                    message=f"Writing catalog metadata {index} of {total}: {item.track_title}",
                 )
                 _metadata_embedded, metadata_warning = write_catalog_export_tags(
                     destination,
@@ -1451,6 +1537,16 @@ class AudioAuthenticityService:
                     warnings.append(
                         f"{destination.name}: metadata embedding skipped; {metadata_warning}."
                     )
+                _report_progress_stage(
+                    progress_callback,
+                    base_value=plan_total,
+                    item_index=index,
+                    item_total=total,
+                    stage_index=3,
+                    stage_count=_AUTHENTICITY_MASTER_EXPORT_STAGE_COUNT,
+                    maximum=total_steps,
+                    message=f"Signing authenticity sidecar {index} of {total}: {item.track_title}",
+                )
                 stored_manifest = self.manifest_service.save_manifest(
                     prepared,
                     embed_settings={**prepared.embed_settings, **embed_metrics},
@@ -1480,8 +1576,6 @@ class AudioAuthenticityService:
                 destination.with_suffix(destination.suffix + ".authenticity.json").unlink(
                     missing_ok=True
                 )
-        if progress_callback is not None:
-            progress_callback(total, total, "Authenticity export finished.")
         skipped += max(0, len(plan.items) - len(ready_items))
         return AuthenticityExportResult(
             requested=len(plan.items),
@@ -1503,10 +1597,12 @@ class AudioAuthenticityService:
         progress_callback=None,
         is_cancelled=None,
     ) -> AuthenticityExportResult:
+        requested_track_ids = list(track_ids)
         plan = self.build_provenance_export_plan(
-            track_ids,
+            requested_track_ids,
             key_id=key_id,
             profile_name=profile_name,
+            progress_callback=progress_callback,
         )
         key_record, private_key, _watermark_key = self.key_service.signing_material(plan.key_id)
         destination_root = Path(output_dir)
@@ -1518,28 +1614,63 @@ class AudioAuthenticityService:
         written_sidecar_paths: list[str] = []
         manifest_ids: list[str] = []
         ready_items = plan.ready_items()
+        plan_total = max(1, len(requested_track_ids) * _AUTHENTICITY_PLAN_STAGE_COUNT)
+        total_steps = max(
+            1,
+            plan_total + (len(ready_items) * _AUTHENTICITY_PROVENANCE_EXPORT_STAGE_COUNT),
+        )
+        if progress_callback is not None:
+            progress_callback(
+                plan_total,
+                total_steps,
+                f"Authenticity provenance plan ready for {len(ready_items)} track{'s' if len(ready_items) != 1 else ''}.",
+            )
         total = len(ready_items)
         for index, item in enumerate(ready_items, start=1):
-            if progress_callback is not None:
-                progress_callback(
-                    index - 1,
-                    total,
-                    f"Exporting authenticity provenance {index} of {total}: {item.track_title}",
-                )
             if is_cancelled is not None and is_cancelled():
                 raise InterruptedError("Authenticity provenance export cancelled.")
             destination = (destination_root / item.suggested_name).with_suffix(item.source_suffix)
             try:
+                _report_progress_stage(
+                    progress_callback,
+                    base_value=plan_total,
+                    item_index=index,
+                    item_total=total,
+                    stage_index=0,
+                    stage_count=_AUTHENTICITY_PROVENANCE_EXPORT_STAGE_COUNT,
+                    maximum=total_steps,
+                    message=f"Resolving provenance source {index} of {total}: {item.track_title}",
+                )
                 source = self._attached_audio_source(item.track_id)
                 parent_manifest, parent_payload, _reference = (
                     self._direct_manifest_ready_for_lineage(item.track_id)
                 )
                 parent_document = self._build_parent_direct_document(parent_manifest)
+                _report_progress_stage(
+                    progress_callback,
+                    base_value=plan_total,
+                    item_index=index,
+                    item_total=total,
+                    stage_index=1,
+                    stage_count=_AUTHENTICITY_PROVENANCE_EXPORT_STAGE_COUNT,
+                    maximum=total_steps,
+                    message=f"Copying provenance audio {index} of {total}: {item.track_title}",
+                )
                 if source["source_path"] is not None:
                     source_bytes = Path(source["source_path"]).read_bytes()
                 else:
                     source_bytes = bytes(source["source_bytes"] or b"")
                 destination.write_bytes(source_bytes)
+                _report_progress_stage(
+                    progress_callback,
+                    base_value=plan_total,
+                    item_index=index,
+                    item_total=total,
+                    stage_index=2,
+                    stage_count=_AUTHENTICITY_PROVENANCE_EXPORT_STAGE_COUNT,
+                    maximum=total_steps,
+                    message=f"Writing catalog metadata {index} of {total}: {item.track_title}",
+                )
                 _metadata_embedded, metadata_warning = write_catalog_export_tags(
                     destination,
                     track_id=item.track_id,
@@ -1552,6 +1683,16 @@ class AudioAuthenticityService:
                     warnings.append(
                         f"{destination.name}: metadata embedding skipped; {metadata_warning}."
                     )
+                _report_progress_stage(
+                    progress_callback,
+                    base_value=plan_total,
+                    item_index=index,
+                    item_total=total,
+                    stage_index=3,
+                    stage_count=_AUTHENTICITY_PROVENANCE_EXPORT_STAGE_COUNT,
+                    maximum=total_steps,
+                    message=f"Signing provenance sidecar {index} of {total}: {item.track_title}",
+                )
                 derivative_payload = self._build_provenance_payload(
                     track_id=item.track_id,
                     derivative_path=destination,
@@ -1601,8 +1742,6 @@ class AudioAuthenticityService:
                 destination.with_suffix(destination.suffix + ".authenticity.json").unlink(
                     missing_ok=True
                 )
-        if progress_callback is not None:
-            progress_callback(total, total, "Authenticity provenance export finished.")
         skipped += max(0, len(plan.items) - len(ready_items))
         return AuthenticityExportResult(
             requested=len(plan.items),

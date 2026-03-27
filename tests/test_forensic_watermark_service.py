@@ -62,6 +62,50 @@ class ForensicWatermarkServiceTests(AuthenticityWorkflowTestCase):
         ):
             self.skipTest("ffmpeg with managed forensic MP3 support is required for this test.")
 
+    def test_forensic_export_reports_real_progress_stages_before_terminal_completion(self):
+        self._require_mp3_forensic_support()
+        track_id, _source_path = self.create_track_with_audio(
+            title="Forensic Progress Source",
+            artist_name="Moonwake",
+            album_title="Forensic Progress Album",
+            duration_seconds=30,
+            seed=44,
+            suffix=".wav",
+        )
+        progress_updates: list[tuple[int, int, str]] = []
+
+        result = self.forensic_service.export(
+            ForensicExportRequest(
+                track_ids=[track_id],
+                output_dir=str(self.root / "forensic_progress_exports"),
+                output_format="mp3",
+                recipient_label="QA",
+                share_label="Progress",
+                profile_name="Test Profile",
+            ),
+            progress_callback=lambda value, maximum, message: progress_updates.append(
+                (value, maximum, message)
+            ),
+        )
+
+        self.assertEqual(result.exported, 1)
+        messages = [message for _value, _maximum, message in progress_updates]
+        self.assertIn("Resolving source 1 of 1: Forensic Progress Source", messages)
+        self.assertIn("Converting 1 of 1: Forensic Progress Source", messages)
+        self.assertIn("Preparing metadata 1 of 1: Forensic Progress Source", messages)
+        self.assertIn("Applying forensic watermark 1 of 1: Forensic Progress Source", messages)
+        self.assertIn("Hashing final output 1 of 1: Forensic Progress Source", messages)
+        self.assertIn("Registering derivative 1 of 1: Forensic Progress Source", messages)
+        self.assertIn("Registering forensic export 1 of 1: Forensic Progress Source", messages)
+        self.assertIn("Finalizing filename 1 of 1: Forensic Progress Source", messages)
+        self.assertIn("Finalizing forensic export delivery…", messages)
+        self.assertEqual(
+            [value for value, _maximum, _message in progress_updates],
+            sorted(value for value, _maximum, _message in progress_updates),
+        )
+        self.assertLess(progress_updates[-1][0], progress_updates[-1][1])
+        self.assertTrue(all("finished" not in message.lower() for message in messages))
+
     def test_single_forensic_export_writes_tags_hash_derivative_and_forensic_ledger(self):
         self._require_mp3_forensic_support()
         track_id, source_path = self.create_track_with_audio(

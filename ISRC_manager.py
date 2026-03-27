@@ -364,6 +364,7 @@ from isrc_manager.storage_migration import (
     StorageMigrationService,
 )
 from isrc_manager.tags import (
+    TAGGED_AUDIO_EXPORT_STAGE_COUNT,
     AudioTagService,
     BulkAudioAttachService,
     TaggedAudioExportService,
@@ -18332,6 +18333,7 @@ class App(QMainWindow):
             return
 
         def _worker(bundle, ctx):
+            export_progress = self._scaled_progress_callback(ctx.report_progress, start=0, end=96)
             coordinator = ManagedDerivativeExportCoordinator(
                 conn=bundle.conn,
                 track_service=bundle.track_service,
@@ -18353,15 +18355,16 @@ class App(QMainWindow):
             )
             return coordinator.export(
                 request,
-                progress_callback=lambda value, maximum, message: ctx.report_progress(
-                    value=value,
-                    maximum=maximum,
-                    message=message,
-                ),
+                progress_callback=export_progress,
                 is_cancelled=ctx.is_cancelled,
             )
 
-        def _success(result: ManagedDerivativeExportResult):
+        def _before_cleanup(result: ManagedDerivativeExportResult, ui_progress) -> None:
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=97,
+                message="Recording managed derivative export results...",
+            )
             self._log_event(
                 "audio.derivative_export",
                 "Exported managed catalog derivatives",
@@ -18385,6 +18388,14 @@ class App(QMainWindow):
                 ),
             )
             self._audit_commit()
+
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=100,
+                message="Audio derivative export complete.",
+            )
+
+        def _success(result: ManagedDerivativeExportResult):
             target_text = result.zip_path or "\n".join(result.written_paths[:3]) or output_dir
             QMessageBox.information(
                 self,
@@ -18413,7 +18424,9 @@ class App(QMainWindow):
             kind="write",
             unique_key="audio.derivative_export",
             cancellable=True,
-            on_success=_success,
+            worker_completion_progress=(96, "Finalizing managed derivative export results..."),
+            on_success_before_cleanup=_before_cleanup,
+            on_success_after_cleanup=_success,
             on_cancelled=lambda: self.statusBar().showMessage(
                 "Audio derivative export cancelled.", 5000
             ),
@@ -18495,6 +18508,7 @@ class App(QMainWindow):
             return
 
         def _worker(bundle, ctx):
+            export_progress = self._scaled_progress_callback(ctx.report_progress, start=0, end=96)
             return bundle.forensic_export_service.export(
                 ForensicExportRequest(
                     track_ids=selected_ids,
@@ -18504,15 +18518,16 @@ class App(QMainWindow):
                     share_label=share_label,
                     profile_name=self._current_profile_name(),
                 ),
-                progress_callback=lambda value, maximum, message: ctx.report_progress(
-                    value=value,
-                    maximum=maximum,
-                    message=message,
-                ),
+                progress_callback=export_progress,
                 is_cancelled=ctx.is_cancelled,
             )
 
-        def _success(result: ForensicExportResult):
+        def _before_cleanup(result: ForensicExportResult, ui_progress) -> None:
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=97,
+                message="Recording forensic watermark export results...",
+            )
             self._log_event(
                 "forensics.export_audio",
                 "Exported forensic watermarked audio copies",
@@ -18536,6 +18551,14 @@ class App(QMainWindow):
                 ),
             )
             self._audit_commit()
+
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=100,
+                message="Forensic watermark export complete.",
+            )
+
+        def _success(result: ForensicExportResult):
             target_text = result.zip_path or "\n".join(result.written_paths[:3]) or output_dir
             QMessageBox.information(
                 self,
@@ -18560,7 +18583,9 @@ class App(QMainWindow):
             kind="write",
             unique_key="forensics.export_audio",
             cancellable=True,
-            on_success=_success,
+            worker_completion_progress=(96, "Finalizing forensic watermark export results..."),
+            on_success_before_cleanup=_before_cleanup,
+            on_success_after_cleanup=_success,
             on_cancelled=lambda: self.statusBar().showMessage(
                 "Forensic watermark export cancelled.", 5000
             ),
@@ -18682,6 +18707,7 @@ class App(QMainWindow):
             return
 
         def _worker(ctx):
+            export_progress = self._scaled_progress_callback(ctx.report_progress, start=0, end=96)
             coordinator = ExternalAudioConversionCoordinator(
                 conversion_service=AudioConversionService()
             )
@@ -18692,15 +18718,16 @@ class App(QMainWindow):
             )
             return coordinator.export(
                 request,
-                progress_callback=lambda value, maximum, message: ctx.report_progress(
-                    value=value,
-                    maximum=maximum,
-                    message=message,
-                ),
+                progress_callback=export_progress,
                 is_cancelled=ctx.is_cancelled,
             )
 
-        def _success(result: ExternalAudioConversionResult):
+        def _before_cleanup(result: ExternalAudioConversionResult, ui_progress) -> None:
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=97,
+                message="Recording external audio conversion results...",
+            )
             self._log_event(
                 "audio.external_convert",
                 "Converted external audio files",
@@ -18712,6 +18739,14 @@ class App(QMainWindow):
                 zip_path=result.zip_path,
                 warnings=result.warnings,
             )
+
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=100,
+                message="External audio conversion complete.",
+            )
+
+        def _success(result: ExternalAudioConversionResult):
             target_text = result.zip_path or "\n".join(result.written_paths[:3]) or output_dir
             QMessageBox.information(
                 self,
@@ -18739,7 +18774,9 @@ class App(QMainWindow):
             unique_key="audio.external_convert",
             requires_profile=False,
             cancellable=True,
-            on_success=_success,
+            worker_completion_progress=(96, "Finalizing external audio conversion results..."),
+            on_success_before_cleanup=_before_cleanup,
+            on_success_after_cleanup=_success,
             on_cancelled=lambda: self.statusBar().showMessage(
                 "External audio conversion cancelled.", 5000
             ),
@@ -18812,12 +18849,17 @@ class App(QMainWindow):
                 return
 
             def _worker(bundle, ctx):
-                overall_total = max(1, len(prepared) * 2)
+                export_progress = self._scaled_progress_callback(
+                    ctx.report_progress, start=0, end=96
+                )
+                build_stage_total = max(1, len(prepared))
+                export_stage_total = max(1, len(prepared) * TAGGED_AUDIO_EXPORT_STAGE_COUNT)
+                overall_total = build_stage_total + export_stage_total
                 exports, prepare_warnings = self._build_tagged_audio_export_items(
                     prepared,
                     track_service=bundle.track_service,
                     release_service=bundle.release_service,
-                    progress_callback=lambda value, maximum, message: ctx.report_progress(
+                    progress_callback=lambda value, maximum, message: export_progress(
                         value=value,
                         maximum=overall_total,
                         message=message,
@@ -18827,9 +18869,9 @@ class App(QMainWindow):
                 result = bundle.tagged_audio_export_service.export_copies(
                     output_dir=output_dir,
                     exports=exports,
-                    progress_callback=lambda value, maximum, message: ctx.report_progress(
-                        value=max(0, len(prepared)) + value,
-                        maximum=max(0, len(prepared)) + maximum,
+                    progress_callback=lambda value, maximum, message: export_progress(
+                        value=build_stage_total + int(value or 0),
+                        maximum=overall_total,
                         message=message,
                     ),
                     is_cancelled=ctx.is_cancelled,
@@ -18839,13 +18881,19 @@ class App(QMainWindow):
                     "warnings": prepare_warnings,
                 }
 
-            def _success(payload: dict[str, object]):
+            def _before_cleanup(payload: dict[str, object], ui_progress) -> None:
                 export_result = payload.get("result")
                 if export_result is None:
                     raise ValueError("Catalog audio copy export did not return a result.")
                 result = export_result
                 all_warnings = (
                     warnings + list(payload.get("warnings") or []) + list(result.warnings)
+                )
+
+                self._advance_task_ui_progress(
+                    ui_progress,
+                    value=97,
+                    message="Recording catalog audio copy export results...",
                 )
                 self._log_event(
                     "audio.export_catalog_copies",
@@ -18862,6 +18910,21 @@ class App(QMainWindow):
                     details=f"exported={result.exported}; skipped={result.skipped}",
                 )
                 self._audit_commit()
+
+                self._advance_task_ui_progress(
+                    ui_progress,
+                    value=100,
+                    message="Catalog audio copy export complete.",
+                )
+
+            def _success(payload: dict[str, object]):
+                export_result = payload.get("result")
+                if export_result is None:
+                    raise ValueError("Catalog audio copy export did not return a result.")
+                result = export_result
+                all_warnings = (
+                    warnings + list(payload.get("warnings") or []) + list(result.warnings)
+                )
                 QMessageBox.information(
                     self,
                     title,
@@ -18884,7 +18947,9 @@ class App(QMainWindow):
                 kind="read",
                 unique_key="audio.export_catalog_copies",
                 cancellable=True,
-                on_success=_success,
+                worker_completion_progress=(96, "Finalizing catalog audio copy export results..."),
+                on_success_before_cleanup=_before_cleanup,
+                on_success_after_cleanup=_success,
                 on_cancelled=lambda: self.statusBar().showMessage(
                     "Catalog audio copy export cancelled.", 5000
                 ),
@@ -18902,7 +18967,7 @@ class App(QMainWindow):
             kind="read",
             unique_key="audio.export_catalog_copies.preview",
             cancellable=False,
-            on_success=_preview_success,
+            on_success_after_cleanup=_preview_success,
             on_error=lambda failure: self._show_background_task_error(
                 title,
                 failure,
@@ -18956,10 +19021,15 @@ class App(QMainWindow):
             )
             return
 
-        def _preview_worker(bundle, _ctx):
+        def _preview_worker(bundle, ctx):
             return bundle.audio_authenticity_service.build_export_plan(
                 selected_ids,
                 profile_name=self._current_profile_name(),
+                progress_callback=lambda value, maximum, message: ctx.report_progress(
+                    value=value,
+                    maximum=maximum,
+                    message=message,
+                ),
             )
 
         def _preview_success(plan):
@@ -18988,21 +19058,25 @@ class App(QMainWindow):
                 return
 
             def _worker(bundle, ctx):
+                export_progress = self._scaled_progress_callback(
+                    ctx.report_progress, start=0, end=96
+                )
                 return bundle.audio_authenticity_service.export_watermarked_audio(
                     output_dir=output_dir,
                     track_ids=[item.track_id for item in ready_items],
                     key_id=plan.key_id,
                     profile_name=self._current_profile_name(),
-                    progress_callback=lambda value, maximum, message: ctx.report_progress(
-                        value=value,
-                        maximum=maximum,
-                        message=message,
-                    ),
+                    progress_callback=export_progress,
                     is_cancelled=ctx.is_cancelled,
                 )
 
-            def _success(result):
+            def _before_cleanup(result, ui_progress) -> None:
                 all_warnings = list(result.warnings)
+                self._advance_task_ui_progress(
+                    ui_progress,
+                    value=97,
+                    message="Recording authentic master export results...",
+                )
                 self._log_event(
                     "authenticity.export_audio",
                     "Exported authenticity-watermarked audio",
@@ -19018,6 +19092,15 @@ class App(QMainWindow):
                     details=f"exported={result.exported}; skipped={result.skipped}",
                 )
                 self._audit_commit()
+
+                self._advance_task_ui_progress(
+                    ui_progress,
+                    value=100,
+                    message="Authentic master export complete.",
+                )
+
+            def _success(result):
+                all_warnings = list(result.warnings)
                 QMessageBox.information(
                     self,
                     title,
@@ -19036,7 +19119,9 @@ class App(QMainWindow):
                 kind="write",
                 unique_key="authenticity.export_audio",
                 cancellable=True,
-                on_success=_success,
+                worker_completion_progress=(96, "Finalizing authentic master export results..."),
+                on_success_before_cleanup=_before_cleanup,
+                on_success_after_cleanup=_success,
                 on_cancelled=lambda: self.statusBar().showMessage(
                     "Authentic master export cancelled.", 5000
                 ),
@@ -19053,7 +19138,7 @@ class App(QMainWindow):
             task_fn=_preview_worker,
             kind="read",
             unique_key="authenticity.export_audio.preview",
-            on_success=_preview_success,
+            on_success_after_cleanup=_preview_success,
             on_error=lambda failure: self._show_background_task_error(
                 title,
                 failure,
@@ -19086,10 +19171,15 @@ class App(QMainWindow):
             )
             return
 
-        def _preview_worker(bundle, _ctx):
+        def _preview_worker(bundle, ctx):
             return bundle.audio_authenticity_service.build_provenance_export_plan(
                 selected_ids,
                 profile_name=self._current_profile_name(),
+                progress_callback=lambda value, maximum, message: ctx.report_progress(
+                    value=value,
+                    maximum=maximum,
+                    message=message,
+                ),
             )
 
         def _preview_success(plan):
@@ -19125,21 +19215,25 @@ class App(QMainWindow):
                 return
 
             def _worker(bundle, ctx):
+                export_progress = self._scaled_progress_callback(
+                    ctx.report_progress, start=0, end=96
+                )
                 return bundle.audio_authenticity_service.export_provenance_audio(
                     output_dir=output_dir,
                     track_ids=[item.track_id for item in ready_items],
                     key_id=plan.key_id,
                     profile_name=self._current_profile_name(),
-                    progress_callback=lambda value, maximum, message: ctx.report_progress(
-                        value=value,
-                        maximum=maximum,
-                        message=message,
-                    ),
+                    progress_callback=export_progress,
                     is_cancelled=ctx.is_cancelled,
                 )
 
-            def _success(result):
+            def _before_cleanup(result, ui_progress) -> None:
                 all_warnings = list(result.warnings)
+                self._advance_task_ui_progress(
+                    ui_progress,
+                    value=97,
+                    message="Recording provenance export results...",
+                )
                 self._log_event(
                     "authenticity.export_provenance_audio",
                     "Exported authenticity provenance audio",
@@ -19155,6 +19249,15 @@ class App(QMainWindow):
                     details=f"exported={result.exported}; skipped={result.skipped}",
                 )
                 self._audit_commit()
+
+                self._advance_task_ui_progress(
+                    ui_progress,
+                    value=100,
+                    message="Provenance audio export complete.",
+                )
+
+            def _success(result):
+                all_warnings = list(result.warnings)
                 QMessageBox.information(
                     self,
                     title,
@@ -19173,7 +19276,9 @@ class App(QMainWindow):
                 kind="write",
                 unique_key="authenticity.export_provenance_audio",
                 cancellable=True,
-                on_success=_success,
+                worker_completion_progress=(96, "Finalizing provenance export results..."),
+                on_success_before_cleanup=_before_cleanup,
+                on_success_after_cleanup=_success,
                 on_cancelled=lambda: self.statusBar().showMessage(
                     "Provenance export cancelled.", 5000
                 ),
@@ -19190,7 +19295,7 @@ class App(QMainWindow):
             task_fn=_preview_worker,
             kind="read",
             unique_key="authenticity.export_provenance_audio.preview",
-            on_success=_preview_success,
+            on_success_after_cleanup=_preview_success,
             on_error=lambda failure: self._show_background_task_error(
                 title,
                 failure,
@@ -22442,9 +22547,367 @@ class App(QMainWindow):
         except Exception as e:
             QMessageBox.critical(parent_widget or self, "Export failed", str(e))
 
+    @staticmethod
+    def _coerce_export_bytes(data) -> bytes:
+        if isinstance(data, memoryview):
+            return data.tobytes()
+        if isinstance(data, bytearray):
+            return bytes(data)
+        return bytes(data)
+
+    def _submit_background_audio_file_export(
+        self,
+        *,
+        task_title: str,
+        task_description: str,
+        dialog_title: str,
+        resolved_dest_path: Path,
+        action_label: str,
+        action_type: str,
+        entity_type: str | None,
+        entity_id: str | None,
+        payload: dict | None,
+        load_source,
+        metadata_track_id: int | None = None,
+        parent_widget=None,
+    ) -> None:
+        def _worker(bundle, ctx):
+            total_steps = 4
+            ctx.report_progress(
+                value=0,
+                maximum=total_steps,
+                message=f"Loading source audio: {resolved_dest_path.name}",
+            )
+            data, _mime_type = load_source(bundle)
+            export_bytes = self._coerce_export_bytes(data)
+
+            def _mutation():
+                ctx.report_progress(
+                    value=1,
+                    maximum=total_steps,
+                    message=f"Writing exported audio: {resolved_dest_path.name}",
+                )
+                resolved_dest_path.parent.mkdir(parents=True, exist_ok=True)
+                resolved_dest_path.write_bytes(export_bytes)
+                if metadata_track_id is not None:
+                    ctx.report_progress(
+                        value=2,
+                        maximum=total_steps,
+                        message=f"Writing catalog metadata: {resolved_dest_path.name}",
+                    )
+                    _metadata_embedded, metadata_warning = write_catalog_export_tags(
+                        resolved_dest_path,
+                        track_id=int(metadata_track_id),
+                        track_service=bundle.track_service,
+                        release_service=bundle.release_service,
+                        tag_service=bundle.audio_tag_service,
+                        include_artwork_bytes=True,
+                    )
+                    return metadata_warning
+                ctx.report_progress(
+                    value=2,
+                    maximum=total_steps,
+                    message=f"Finalizing exported audio: {resolved_dest_path.name}",
+                )
+                return None
+
+            metadata_warning = run_file_history_action(
+                history_manager=bundle.history_manager,
+                action_label=action_label.format(filename=resolved_dest_path.name),
+                action_type=action_type,
+                target_path=resolved_dest_path,
+                mutation=_mutation,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                payload={"path": str(resolved_dest_path), **(payload or {})},
+                progress_callback=ctx.report_progress,
+                record_progress=(3, f"Recording export history: {resolved_dest_path.name}"),
+                logger=self.logger,
+            )
+            if bundle.history_manager is None:
+                ctx.report_progress(
+                    value=3,
+                    maximum=total_steps,
+                    message=f"Finalizing exported audio: {resolved_dest_path.name}",
+                )
+            return {
+                "path": str(resolved_dest_path),
+                "metadata_warning": metadata_warning,
+            }
+
+        def _success(result: dict[str, object]):
+            self._refresh_history_actions()
+            message = f"Saved:\n{result.get('path') or resolved_dest_path}"
+            metadata_warning = str(result.get("metadata_warning") or "").strip()
+            if metadata_warning:
+                message += f"\n\nMetadata embedding skipped: {metadata_warning}."
+            QMessageBox.information(parent_widget or self, dialog_title, message)
+
+        self._submit_background_bundle_task(
+            title=task_title,
+            description=task_description,
+            task_fn=_worker,
+            kind="read",
+            unique_key=action_type,
+            cancellable=True,
+            worker_completion_progress=(100, f"{dialog_title} complete."),
+            on_success_after_cleanup=_success,
+            on_cancelled=lambda: self.statusBar().showMessage(f"{dialog_title} cancelled.", 5000),
+            on_error=lambda failure: self._show_background_task_error(
+                dialog_title,
+                failure,
+                user_message="Could not export the selected audio:",
+            ),
+        )
+
+    def _submit_background_audio_column_export(
+        self,
+        *,
+        spec: dict[str, object],
+        track_ids: list[int],
+        output_root: Path,
+    ) -> None:
+        title = f"Export {spec['column_label']}"
+        is_standard_audio = (
+            str(spec.get("kind") or "") == "standard"
+            and str(spec.get("media_key") or "") == "audio_file"
+        )
+        column_label = str(spec.get("column_label") or "Audio")
+
+        def _worker(bundle, ctx):
+            exported = 0
+            skipped: list[str] = []
+            metadata_skipped: list[str] = []
+            track_total = len(track_ids)
+            per_item_steps = 4 if is_standard_audio else 3
+            total_steps = max(1, track_total * per_item_steps)
+            completed_steps = 0
+
+            for index, track_id in enumerate(track_ids, start=1):
+                if ctx.is_cancelled():
+                    raise InterruptedError(f"{title} cancelled.")
+                track_label = f"track_{track_id}"
+                try:
+                    track_snapshot = bundle.track_service.fetch_track_snapshot(
+                        int(track_id),
+                        include_media_blobs=False,
+                    )
+                    track_label = str(
+                        (track_snapshot.track_title if track_snapshot is not None else None)
+                        or f"track_{track_id}"
+                    ).strip()
+                    if is_standard_audio:
+                        ctx.report_progress(
+                            value=completed_steps,
+                            maximum=total_steps,
+                            message=f"Loading audio {index} of {track_total}: {track_label}",
+                        )
+                        data, mime = bundle.track_service.fetch_media_bytes(
+                            int(track_id), "audio_file"
+                        )
+                        suggested_basename = track_label or f"track_{track_id}"
+                        payload = {
+                            "track_id": int(track_id),
+                            "media_key": "audio_file",
+                            "column_label": column_label,
+                        }
+                        entity_id = str(track_id)
+                    else:
+                        field_id = int(spec["field_id"])
+                        ctx.report_progress(
+                            value=completed_steps,
+                            maximum=total_steps,
+                            message=f"Loading audio {index} of {track_total}: {track_label}",
+                        )
+                        data, mime = bundle.custom_field_values.fetch_blob(int(track_id), field_id)
+                        field_name = str(spec.get("field_name") or "").strip()
+                        suggested_basename = (
+                            f"{track_label} - {field_name}" if field_name else track_label
+                        )
+                        payload = {
+                            "track_id": int(track_id),
+                            "field_id": field_id,
+                            "column_label": column_label,
+                        }
+                        entity_id = f"{track_id}:{field_id}"
+
+                    export_bytes = self._coerce_export_bytes(data)
+                    destination = self._deduplicate_export_destination(
+                        output_root,
+                        self._default_export_filename(suggested_basename, mime or ""),
+                    )
+
+                    def _mutation():
+                        ctx.report_progress(
+                            value=completed_steps + 1,
+                            maximum=total_steps,
+                            message=f"Writing audio {index} of {track_total}: {destination.name}",
+                        )
+                        destination.parent.mkdir(parents=True, exist_ok=True)
+                        destination.write_bytes(export_bytes)
+                        if is_standard_audio:
+                            ctx.report_progress(
+                                value=completed_steps + 2,
+                                maximum=total_steps,
+                                message=(
+                                    f"Writing catalog metadata {index} of {track_total}: "
+                                    f"{destination.name}"
+                                ),
+                            )
+                            _metadata_embedded, metadata_warning = write_catalog_export_tags(
+                                destination,
+                                track_id=int(track_id),
+                                track_service=bundle.track_service,
+                                release_service=bundle.release_service,
+                                tag_service=bundle.audio_tag_service,
+                                include_artwork_bytes=True,
+                            )
+                            return metadata_warning
+                        ctx.report_progress(
+                            value=completed_steps + 2,
+                            maximum=total_steps,
+                            message=f"Finalizing audio {index} of {track_total}: {destination.name}",
+                        )
+                        return None
+
+                    metadata_warning = run_file_history_action(
+                        history_manager=bundle.history_manager,
+                        action_label=f"Export {column_label}: {destination.name}",
+                        action_type="file.export_bulk_media",
+                        target_path=destination,
+                        mutation=_mutation,
+                        entity_type="Export",
+                        entity_id=entity_id,
+                        payload={"path": str(destination), **payload},
+                        progress_callback=ctx.report_progress,
+                        record_progress=(
+                            completed_steps + per_item_steps - 1,
+                            f"Recording export history {index} of {track_total}: {destination.name}",
+                        ),
+                        logger=self.logger,
+                    )
+                    if bundle.history_manager is None:
+                        ctx.report_progress(
+                            value=completed_steps + per_item_steps - 1,
+                            maximum=total_steps,
+                            message=f"Finalizing audio {index} of {track_total}: {destination.name}",
+                        )
+                    if metadata_warning:
+                        metadata_skipped.append(f"{destination.name}: {metadata_warning}")
+                    exported += 1
+                except Exception as exc:
+                    skipped.append(f"{track_label}: {exc}")
+                finally:
+                    completed_steps += per_item_steps
+
+            return {
+                "exported": exported,
+                "skipped": skipped,
+                "metadata_skipped": metadata_skipped,
+            }
+
+        def _success(result: dict[str, object]):
+            self._refresh_history_actions()
+            exported = int(result.get("exported") or 0)
+            skipped = list(result.get("skipped") or [])
+            metadata_skipped = list(result.get("metadata_skipped") or [])
+            if not exported:
+                QMessageBox.warning(
+                    self,
+                    title,
+                    "No files were exported."
+                    + ("\n\nSkipped:\n" + "\n".join(skipped[:10]) if skipped else ""),
+                )
+                return
+            message_lines = [
+                f"Exported {exported} file{'s' if exported != 1 else ''} to:",
+                str(output_root),
+            ]
+            if skipped:
+                message_lines.append("")
+                message_lines.append(
+                    f"Skipped {len(skipped)} row{'s' if len(skipped) != 1 else ''}:"
+                )
+                message_lines.extend(skipped[:10])
+            if metadata_skipped:
+                message_lines.append("")
+                message_lines.append(
+                    "Metadata skipped for "
+                    f"{len(metadata_skipped)} export{'s' if len(metadata_skipped) != 1 else ''}:"
+                )
+                message_lines.extend(metadata_skipped[:10])
+            QMessageBox.information(self, title, "\n".join(message_lines))
+
+        self._submit_background_bundle_task(
+            title=title,
+            description=(
+                "Exporting stored audio files, writing catalog metadata when available, "
+                "and recording export history..."
+                if is_standard_audio
+                else "Exporting stored custom audio files and recording export history..."
+            ),
+            task_fn=_worker,
+            kind="read",
+            unique_key=f"audio.export_column.{str(spec.get('kind') or 'unknown')}",
+            cancellable=True,
+            worker_completion_progress=(100, f"{title} complete."),
+            on_success_after_cleanup=_success,
+            on_cancelled=lambda: self.statusBar().showMessage(f"{title} cancelled.", 5000),
+            on_error=lambda failure: self._show_background_task_error(
+                title,
+                failure,
+                user_message="Could not export the selected audio files:",
+            ),
+        )
+
     def _export_standard_media_for_track(
         self, track_id: int, media_key: str, suggested_basename: str | None = None
     ):
+        if media_key == "audio_file":
+            mime = str(self.track_media_meta(track_id, media_key).get("mime_type") or "")
+            default_basename = suggested_basename or self._media_export_basename_for_track(
+                track_id,
+                media_key,
+            )
+            default_filename = self._default_export_filename(default_basename, mime)
+            dest_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Export file",
+                default_filename,
+                "All files (*)",
+            )
+            if not dest_path:
+                return
+            try:
+                resolved_dest_path = self._resolve_file_export_target(
+                    dest_path,
+                    default_filename=default_filename,
+                )
+            except ValueError as exc:
+                QMessageBox.warning(self, "Export", str(exc))
+                return
+
+            self._submit_background_audio_file_export(
+                task_title="Export Audio File",
+                task_description=(
+                    "Exporting stored audio, writing catalog metadata, and recording export history..."
+                ),
+                dialog_title="Export",
+                resolved_dest_path=resolved_dest_path,
+                action_label=f"Export {media_key.replace('_', ' ').title()}: {{filename}}",
+                action_type=f"file.export_{media_key}",
+                entity_type="Track",
+                entity_id=str(track_id),
+                payload={"track_id": track_id, "media_key": media_key},
+                load_source=lambda bundle: bundle.track_service.fetch_media_bytes(
+                    int(track_id),
+                    media_key,
+                ),
+                metadata_track_id=int(track_id),
+                parent_widget=self,
+            )
+            return
+
         try:
             data, mime = self.track_fetch_media(track_id, media_key)
         except Exception as e:
@@ -22590,6 +23053,19 @@ class App(QMainWindow):
         if not output_dir:
             return
         output_root = Path(output_dir)
+        if (
+            str(spec.get("kind") or "") == "standard"
+            and str(spec.get("media_key") or "") == "audio_file"
+        ) or (
+            str(spec.get("kind") or "") == "custom_blob"
+            and str(spec.get("field_type") or "") == "blob_audio"
+        ):
+            self._submit_background_audio_column_export(
+                spec=spec,
+                track_ids=selected_ids,
+                output_root=output_root,
+            )
+            return
         exported = 0
         skipped: list[str] = []
         metadata_skipped: list[str] = []
@@ -22817,6 +23293,53 @@ class App(QMainWindow):
         parent_widget=None,
         suggested_basename: str | None = None,
     ):
+        if self.cf_get_field_type(field_def_id) == "blob_audio":
+            meta = self.cf_get_value_meta(
+                track_id,
+                field_def_id,
+                include_storage_details=True,
+            )
+            if suggested_basename is None:
+                suggested_basename = self.custom_field_definitions.get_field_name(field_def_id)
+            default_filename = self._default_export_filename(
+                suggested_basename,
+                str(meta.get("mime_type") or ""),
+            )
+            dest_path, _ = QFileDialog.getSaveFileName(
+                parent_widget or self,
+                "Export file",
+                default_filename,
+                "All files (*)",
+            )
+            if not dest_path:
+                return
+            try:
+                resolved_dest_path = self._resolve_file_export_target(
+                    dest_path,
+                    default_filename=default_filename,
+                )
+            except ValueError as exc:
+                QMessageBox.warning(parent_widget or self, "Export", str(exc))
+                return
+
+            self._submit_background_audio_file_export(
+                task_title="Export Audio File",
+                task_description=("Exporting stored custom audio and recording export history..."),
+                dialog_title="Export",
+                resolved_dest_path=resolved_dest_path,
+                action_label="Export Custom File: {filename}",
+                action_type="file.export_custom_blob",
+                entity_type="CustomFieldValue",
+                entity_id=f"{track_id}:{field_def_id}",
+                payload={"track_id": track_id, "field_id": field_def_id},
+                load_source=lambda bundle: bundle.custom_field_values.fetch_blob(
+                    int(track_id),
+                    int(field_def_id),
+                ),
+                parent_widget=parent_widget or self,
+            )
+            return
+
         try:
             data, mime = self.cf_fetch_blob(track_id, field_def_id)
         except Exception as e:

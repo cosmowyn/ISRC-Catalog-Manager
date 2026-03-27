@@ -306,9 +306,17 @@ class AudioTagServiceTests(unittest.TestCase):
             )
 
         self.assertEqual(result.exported, 1)
-        self.assertGreaterEqual(len(progress_updates), 2)
-        self.assertEqual(progress_updates[0][0:2], (0, 1))
-        self.assertEqual(progress_updates[-1][0:2], (1, 1))
+        self.assertEqual(
+            progress_updates,
+            [
+                (0, 3, "Resolving export source 1 of 1: orbit_export.mp3"),
+                (1, 3, "Copying audio 1 of 1: orbit_export.mp3"),
+                (2, 3, "Writing catalog metadata 1 of 1: orbit_export.mp3"),
+            ],
+        )
+        self.assertEqual([value for value, _maximum, _message in progress_updates], [0, 1, 2])
+        self.assertTrue(all(maximum == 3 for _value, maximum, _message in progress_updates))
+        self.assertLess(progress_updates[-1][0], progress_updates[-1][1])
 
     def test_tagged_audio_export_can_be_cancelled(self):
         export_service = TaggedAudioExportService(self.service)

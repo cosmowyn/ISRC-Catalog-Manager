@@ -30,9 +30,6 @@ MANAGED_DERIVATIVE_KIND_LOSSY = "lossy_derivative"
 AUTHENTICITY_BASIS_DIRECT_WATERMARK = "direct_watermark"
 AUTHENTICITY_BASIS_CATALOG_LINEAGE_ONLY = "catalog_lineage_only"
 
-_MANAGED_STAGE_COUNT = 8
-_EXTERNAL_STAGE_COUNT = 3
-
 
 @dataclass(frozen=True, slots=True)
 class ManagedDerivativeWorkflow:
@@ -188,20 +185,20 @@ def _zip_filename(batch_public_id: str) -> str:
     return f"audio-export-{batch_public_id}.zip"
 
 
-def _report_stage(
+def _report_progress(
     progress_callback,
     *,
-    item_index: int,
-    item_total: int,
-    stage_index: int,
-    stage_count: int,
+    completed_steps: int,
+    total_steps: int,
     message: str,
 ) -> None:
     if progress_callback is None:
         return
-    value = ((item_index - 1) * stage_count) + stage_index
-    maximum = max(1, item_total * stage_count)
-    progress_callback(value, maximum, message)
+    progress_callback(
+        max(0, int(completed_steps)),
+        max(1, int(total_steps)),
+        str(message or ""),
+    )
 
 
 class DerivativeLedgerService:
@@ -683,6 +680,20 @@ class ManagedDerivativeExportCoordinator:
         exported = 0
         batch_id: str | None = None
         zip_path: Path | None = None
+        planned_items: list[tuple[int, object]] = []
+
+        for track_id in track_ids:
+            if is_cancelled is not None and is_cancelled():
+                raise InterruptedError("Managed derivative export cancelled.")
+            snapshot = self.track_service.fetch_track_snapshot(track_id)
+            if snapshot is None or not self.track_service.has_media(track_id, "audio_file"):
+                warnings.append(f"Track {track_id} has no attached audio.")
+                continue
+            planned_items.append((track_id, snapshot))
+
+        item_stage_count = 7 if workflow.apply_watermark else 6
+        total_steps = 1 + (len(planned_items) * item_stage_count) + 1
+        completed_steps = 1
 
         try:
             with self.conn:
@@ -701,15 +712,10 @@ class ManagedDerivativeExportCoordinator:
                     temp_dir = Path(temp_dir_text)
                     temp_final_dir = temp_dir / "finalized"
                     temp_final_dir.mkdir(parents=True, exist_ok=True)
-                    for item_index, track_id in enumerate(track_ids, start=1):
+                    planned_total = len(planned_items)
+                    for item_index, (track_id, snapshot) in enumerate(planned_items, start=1):
                         if is_cancelled is not None and is_cancelled():
                             raise InterruptedError("Managed derivative export cancelled.")
-                        snapshot = self.track_service.fetch_track_snapshot(track_id)
-                        if snapshot is None or not self.track_service.has_media(
-                            track_id, "audio_file"
-                        ):
-                            warnings.append(f"Track {track_id} has no attached audio.")
-                            continue
                         source_handle = self.track_service.resolve_media_source(
                             track_id, "audio_file"
                         )
@@ -721,24 +727,27 @@ class ManagedDerivativeExportCoordinator:
                         source_ext = output_profile.suffixes[0]
                         converted_path = temp_dir / f"{base_name}{source_ext}"
                         watermarked_path = temp_dir / f"{base_name}.watermarked{source_ext}"
-                        _report_stage(
+                        _report_progress(
                             progress_callback,
-                            item_index=item_index,
-                            item_total=len(track_ids),
-                            stage_index=0,
-                            stage_count=_MANAGED_STAGE_COUNT,
-                            message=f"Resolving source {item_index} of {len(track_ids)}: {snapshot.track_title}",
+                            completed_steps=completed_steps,
+                            total_steps=total_steps,
+                            message=(
+                                f"Resolving source audio {item_index} of {planned_total}: "
+                                f"{snapshot.track_title}"
+                            ),
                         )
                         with source_handle.materialize_path() as materialized_source:
                             if is_cancelled is not None and is_cancelled():
                                 raise InterruptedError("Managed derivative export cancelled.")
-                            _report_stage(
+                            completed_steps += 1
+                            _report_progress(
                                 progress_callback,
-                                item_index=item_index,
-                                item_total=len(track_ids),
-                                stage_index=1,
-                                stage_count=_MANAGED_STAGE_COUNT,
-                                message=f"Converting {item_index} of {len(track_ids)}: {snapshot.track_title}",
+                                completed_steps=completed_steps,
+                                total_steps=total_steps,
+                                message=(
+                                    f"Converting derivative {item_index} of {planned_total}: "
+                                    f"{snapshot.track_title}"
+                                ),
                             )
                             self.conversion_service.transcode(
                                 source_path=materialized_source,
@@ -746,28 +755,16 @@ class ManagedDerivativeExportCoordinator:
                                 target_id=output_format,
                             )
                         metadata_embedded = False
-                        _report_stage(
-                            progress_callback,
-                            item_index=item_index,
-                            item_total=len(track_ids),
-                            stage_index=2,
-                            stage_count=_MANAGED_STAGE_COUNT,
-                            message=(
-                                f"{'Preparing' if workflow.apply_watermark else 'Writing'} metadata "
-                                f"{item_index} of {len(track_ids)}: {snapshot.track_title}"
-                            ),
-                        )
                         manifest_record = None
                         finalized_output_path = converted_path
                         if workflow.apply_watermark:
-                            _report_stage(
+                            completed_steps += 1
+                            _report_progress(
                                 progress_callback,
-                                item_index=item_index,
-                                item_total=len(track_ids),
-                                stage_index=3,
-                                stage_count=_MANAGED_STAGE_COUNT,
+                                completed_steps=completed_steps,
+                                total_steps=total_steps,
                                 message=(
-                                    f"Applying watermark {item_index} of {len(track_ids)}: "
+                                    f"Applying direct watermark {item_index} of {planned_total}: "
                                     f"{snapshot.track_title}"
                                 ),
                             )
@@ -781,7 +778,27 @@ class ManagedDerivativeExportCoordinator:
                                 )
                             )
                             finalized_output_path = watermarked_path
+                            completed_steps += 1
+                            _report_progress(
+                                progress_callback,
+                                completed_steps=completed_steps,
+                                total_steps=total_steps,
+                                message=(
+                                    f"Writing catalog metadata {item_index} of {planned_total}: "
+                                    f"{snapshot.track_title}"
+                                ),
+                            )
                         else:
+                            completed_steps += 1
+                            _report_progress(
+                                progress_callback,
+                                completed_steps=completed_steps,
+                                total_steps=total_steps,
+                                message=(
+                                    f"Writing catalog metadata {item_index} of {planned_total}: "
+                                    f"{snapshot.track_title}"
+                                ),
+                            )
                             metadata_embedded, metadata_warning = write_catalog_export_tags(
                                 converted_path,
                                 track_id=track_id,
@@ -794,17 +811,6 @@ class ManagedDerivativeExportCoordinator:
                                 warnings.append(
                                     f"{snapshot.track_title}: metadata embedding skipped; {metadata_warning}."
                                 )
-                            _report_stage(
-                                progress_callback,
-                                item_index=item_index,
-                                item_total=len(track_ids),
-                                stage_index=3,
-                                stage_count=_MANAGED_STAGE_COUNT,
-                                message=(
-                                    f"Skipping direct watermark for {item_index} of {len(track_ids)}: "
-                                    f"{snapshot.track_title}"
-                                ),
-                            )
                         if workflow.apply_watermark:
                             metadata_embedded, metadata_warning = write_catalog_export_tags(
                                 finalized_output_path,
@@ -818,25 +824,29 @@ class ManagedDerivativeExportCoordinator:
                                 warnings.append(
                                     f"{snapshot.track_title}: metadata embedding skipped; {metadata_warning}."
                                 )
-                        _report_stage(
+                        completed_steps += 1
+                        _report_progress(
                             progress_callback,
-                            item_index=item_index,
-                            item_total=len(track_ids),
-                            stage_index=4,
-                            stage_count=_MANAGED_STAGE_COUNT,
-                            message=f"Hashing final output {item_index} of {len(track_ids)}: {snapshot.track_title}",
+                            completed_steps=completed_steps,
+                            total_steps=total_steps,
+                            message=(
+                                f"Hashing finalized derivative {item_index} of {planned_total}: "
+                                f"{snapshot.track_title}"
+                            ),
                         )
                         final_sha256 = _sha256_for_file(finalized_output_path)
                         final_name = _filename_with_hash_suffix(
                             f"{base_name}{source_ext}", final_sha256
                         )
-                        _report_stage(
+                        completed_steps += 1
+                        _report_progress(
                             progress_callback,
-                            item_index=item_index,
-                            item_total=len(track_ids),
-                            stage_index=5,
-                            stage_count=_MANAGED_STAGE_COUNT,
-                            message=f"Registering derivative {item_index} of {len(track_ids)}: {snapshot.track_title}",
+                            completed_steps=completed_steps,
+                            total_steps=total_steps,
+                            message=(
+                                f"Registering derivative {item_index} of {planned_total}: "
+                                f"{snapshot.track_title}"
+                            ),
                         )
                         derivative_id = self.ledger.create_derivative(
                             source_track_id=track_id,
@@ -862,13 +872,15 @@ class ManagedDerivativeExportCoordinator:
                             ),
                         )
                         final_temp_path = temp_final_dir / final_name
-                        _report_stage(
+                        completed_steps += 1
+                        _report_progress(
                             progress_callback,
-                            item_index=item_index,
-                            item_total=len(track_ids),
-                            stage_index=6,
-                            stage_count=_MANAGED_STAGE_COUNT,
-                            message=f"Finalizing filename {item_index} of {len(track_ids)}: {snapshot.track_title}",
+                            completed_steps=completed_steps,
+                            total_steps=total_steps,
+                            message=(
+                                f"Staging finalized derivative {item_index} of {planned_total}: "
+                                f"{snapshot.track_title}"
+                            ),
                         )
                         shutil.move(str(finalized_output_path), str(final_temp_path))
                         exported_states.append(
@@ -882,16 +894,21 @@ class ManagedDerivativeExportCoordinator:
                         )
                         derivative_ids.append(derivative_id)
                         exported += 1
+                        completed_steps += 1
 
                     if exported == 0:
+                        _report_progress(
+                            progress_callback,
+                            completed_steps=completed_steps,
+                            total_steps=total_steps,
+                            message="No exportable derivatives were produced; cleaning up the batch...",
+                        )
                         self.ledger.delete_batch(batch_id)
                     elif exported > 1:
-                        _report_stage(
+                        _report_progress(
                             progress_callback,
-                            item_index=len(track_ids),
-                            item_total=len(track_ids),
-                            stage_index=7,
-                            stage_count=_MANAGED_STAGE_COUNT,
+                            completed_steps=completed_steps,
+                            total_steps=total_steps,
                             message="Packaging ZIP archive…",
                         )
                         zip_path = destination_root / _zip_filename(batch_public_id)
@@ -918,6 +935,12 @@ class ManagedDerivativeExportCoordinator:
                             zip_filename=zip_path.name,
                         )
                     elif exported_states:
+                        _report_progress(
+                            progress_callback,
+                            completed_steps=completed_steps,
+                            total_steps=total_steps,
+                            message="Finalizing managed derivative delivery…",
+                        )
                         final_destination = destination_root / exported_states[0].final_name
                         shutil.move(str(exported_states[0].temp_final_path), str(final_destination))
                         written_paths.append(str(final_destination))
@@ -935,6 +958,7 @@ class ManagedDerivativeExportCoordinator:
                             status="completed",
                             zip_filename=None,
                         )
+                    completed_steps += 1
                 if zip_path is not None:
                     written_paths.append(str(zip_path))
         except Exception:
@@ -946,12 +970,6 @@ class ManagedDerivativeExportCoordinator:
             raise
 
         skipped = max(0, len(track_ids) - exported)
-        if progress_callback is not None:
-            progress_callback(
-                max(1, len(track_ids) * _MANAGED_STAGE_COUNT),
-                max(1, len(track_ids) * _MANAGED_STAGE_COUNT),
-                f"Managed {workflow.status_label} export finished.",
-            )
         return ManagedDerivativeExportResult(
             requested=len(track_ids),
             exported=exported,
@@ -994,6 +1012,17 @@ class ExternalAudioConversionCoordinator:
         output_profile = audio_format_profile(output_format)
         if output_profile is None:
             raise ValueError(f"Unsupported output format: {output_format}")
+        valid_paths: list[Path] = []
+        for input_path in file_paths:
+            if is_cancelled is not None and is_cancelled():
+                raise InterruptedError("External audio conversion cancelled.")
+            if not input_path.exists():
+                warnings.append(f"Missing source audio: {input_path}")
+                continue
+            valid_paths.append(input_path)
+
+        total_steps = 1 + len(valid_paths) + 1
+        completed_steps = 1
 
         try:
             with tempfile.TemporaryDirectory(
@@ -1003,30 +1032,18 @@ class ExternalAudioConversionCoordinator:
                 temp_final_dir = temp_dir / "finalized"
                 temp_final_dir.mkdir(parents=True, exist_ok=True)
                 finalized_paths: list[Path] = []
-                for item_index, input_path in enumerate(file_paths, start=1):
+                valid_total = len(valid_paths)
+                for item_index, input_path in enumerate(valid_paths, start=1):
                     if is_cancelled is not None and is_cancelled():
                         raise InterruptedError("External audio conversion cancelled.")
-                    if not input_path.exists():
-                        warnings.append(f"Missing source audio: {input_path}")
-                        continue
-                    _report_stage(
+                    _report_progress(
                         progress_callback,
-                        item_index=item_index,
-                        item_total=len(file_paths),
-                        stage_index=0,
-                        stage_count=_EXTERNAL_STAGE_COUNT,
-                        message=f"Scanning {item_index} of {len(file_paths)}: {input_path.name}",
+                        completed_steps=completed_steps,
+                        total_steps=total_steps,
+                        message=f"Converting external audio {item_index} of {valid_total}: {input_path.name}",
                     )
                     base_name = sanitize_export_basename(input_path.stem or input_path.name)
                     temp_destination = temp_final_dir / f"{base_name}{output_profile.suffixes[0]}"
-                    _report_stage(
-                        progress_callback,
-                        item_index=item_index,
-                        item_total=len(file_paths),
-                        stage_index=1,
-                        stage_count=_EXTERNAL_STAGE_COUNT,
-                        message=f"Converting {item_index} of {len(file_paths)}: {input_path.name}",
-                    )
                     self.conversion_service.transcode(
                         source_path=input_path,
                         destination_path=temp_destination,
@@ -1035,13 +1052,12 @@ class ExternalAudioConversionCoordinator:
                     )
                     finalized_paths.append(temp_destination)
                     exported += 1
+                    completed_steps += 1
                 if exported > 1:
-                    _report_stage(
+                    _report_progress(
                         progress_callback,
-                        item_index=len(file_paths),
-                        item_total=len(file_paths),
-                        stage_index=2,
-                        stage_count=_EXTERNAL_STAGE_COUNT,
+                        completed_steps=completed_steps,
+                        total_steps=total_steps,
                         message="Packaging ZIP archive…",
                     )
                     zip_path = destination_root / _zip_filename(batch_public_id)
@@ -1052,9 +1068,23 @@ class ExternalAudioConversionCoordinator:
                             archive.write(finalized_path, arcname=finalized_path.name)
                     written_paths.append(str(zip_path))
                 elif finalized_paths:
+                    _report_progress(
+                        progress_callback,
+                        completed_steps=completed_steps,
+                        total_steps=total_steps,
+                        message="Finalizing converted output…",
+                    )
                     final_destination = destination_root / finalized_paths[0].name
                     shutil.move(str(finalized_paths[0]), str(final_destination))
                     written_paths.append(str(final_destination))
+                else:
+                    _report_progress(
+                        progress_callback,
+                        completed_steps=completed_steps,
+                        total_steps=total_steps,
+                        message="No external audio files were converted.",
+                    )
+                completed_steps += 1
         except Exception:
             for path_text in written_paths:
                 try:
@@ -1063,12 +1093,6 @@ class ExternalAudioConversionCoordinator:
                     pass
             raise
 
-        if progress_callback is not None:
-            progress_callback(
-                max(1, len(file_paths) * _EXTERNAL_STAGE_COUNT),
-                max(1, len(file_paths) * _EXTERNAL_STAGE_COUNT),
-                "External audio conversion finished.",
-            )
         return ExternalAudioConversionResult(
             requested=len(file_paths),
             exported=exported,

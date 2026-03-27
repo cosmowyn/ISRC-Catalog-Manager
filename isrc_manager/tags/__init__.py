@@ -25,7 +25,12 @@ from .models import (
     TaggedAudioExportPlanItem,
     TaggedAudioExportResult,
 )
-from .service import AudioTagService, BulkAudioAttachService, TaggedAudioExportService
+from .service import (
+    TAGGED_AUDIO_EXPORT_STAGE_COUNT,
+    AudioTagService,
+    BulkAudioAttachService,
+    TaggedAudioExportService,
+)
 
 __all__ = [
     "ArtworkPayload",
@@ -37,6 +42,7 @@ __all__ = [
     "BulkAudioAttachService",
     "BulkAudioAttachTrackCandidate",
     "CATALOG_EXPORT_RELEASE_POLICY",
+    "TAGGED_AUDIO_EXPORT_STAGE_COUNT",
     "build_catalog_export_tag_data",
     "build_catalog_tag_data",
     "has_exportable_catalog_tag_data",
