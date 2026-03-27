@@ -29,11 +29,20 @@ class AppShellStartupCoreTests(AppShellTestCase):
     test_owner_bootstrap_requires_assigning_a_party_before_normal_use = (
         AppShellTestCase.case_owner_bootstrap_requires_assigning_a_party_before_normal_use
     )
+    test_window_title_defaults_to_app_name_then_owner_then_manual_override = (
+        AppShellTestCase.case_window_title_defaults_to_app_name_then_owner_then_manual_override
+    )
     test_file_menu_groups_xml_import_under_import_exchange_and_preserves_wiring = (
         AppShellTestCase.case_file_menu_groups_xml_import_under_import_exchange_and_preserves_wiring
     )
+    test_file_menu_nests_profile_maintenance_under_profiles_and_removes_verify_integrity = (
+        AppShellTestCase.case_file_menu_nests_profile_maintenance_under_profiles_and_removes_verify_integrity
+    )
     test_file_menu_groups_exchange_exports_and_saved_import_reset = (
         AppShellTestCase.case_file_menu_groups_exchange_exports_and_saved_import_reset
+    )
+    test_edit_menu_exposes_catalog_table_edit_actions_and_preserves_enablement = (
+        AppShellTestCase.case_edit_menu_exposes_catalog_table_edit_actions_and_preserves_enablement
     )
     test_settings_view_history_help_menus_and_action_ribbon_context_menu_use_streamlined_structure = (
         AppShellTestCase.case_settings_view_history_help_menus_and_action_ribbon_context_menu_use_streamlined_structure

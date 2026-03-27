@@ -622,7 +622,6 @@ class AppShellTestCase(unittest.TestCase):
                 getattr(self.window, "release_browser_dock", None),
                 getattr(self.window, "work_manager_dock", None),
                 getattr(self.window, "global_search_dock", None),
-                getattr(self.window, "catalog_managers_dock", None),
             )
             if dock is not None
         }
@@ -929,6 +928,99 @@ class AppShellTestCase(unittest.TestCase):
         owner_record = self.window.party_service.fetch_party(created_party_id)
         self.assertIsNotNone(owner_record)
 
+    def case_window_title_defaults_to_app_name_then_owner_then_manual_override(self):
+        self.window.settings_mutations.set_owner_party_id(None)
+        self.window.settings.setValue("identity/window_title", "ISRC Manager")
+        self.window.settings.remove("identity/window_title_override")
+        self.window.settings.sync()
+        self.window.identity = self.window._load_identity()
+        self.window._apply_identity()
+        self.assertEqual(self.window.windowTitle(), app_module.DEFAULT_WINDOW_TITLE)
+        self.assertEqual(self.window.identity.get("window_title_override"), "")
+
+        first_owner_id = self.window.party_service.create_party(
+            PartyPayload(
+                legal_name="Moonwake Records B.V.",
+                display_name="Moonwake Records",
+                company_name="Moonwake Records",
+                party_type="organization",
+            )
+        )
+        self.window._assign_owner_party(first_owner_id, record_history=False)
+        self._drain_events()
+        self.assertEqual(self.window.windowTitle(), "Moonwake Records")
+        self.assertEqual(self.window.identity.get("window_title_override"), "")
+
+        self.window.settings_mutations.set_identity(
+            window_title_override="Custom Shell",
+            icon_path=self.window.identity.get("icon_path") or "",
+        )
+        self.window.identity = self.window._load_identity()
+        self.window._apply_identity()
+        self.assertEqual(self.window.windowTitle(), "Custom Shell")
+        self.assertEqual(self.window.identity.get("window_title_override"), "Custom Shell")
+
+        second_owner_id = self.window.party_service.create_party(
+            PartyPayload(
+                legal_name="North Star Publishing B.V.",
+                display_name="North Star Publishing",
+                company_name="North Star Publishing",
+                party_type="organization",
+            )
+        )
+        self.window._assign_owner_party(second_owner_id, record_history=False)
+        self._drain_events()
+        self.assertEqual(self.window.windowTitle(), "Custom Shell")
+
+    def case_file_menu_nests_profile_maintenance_under_profiles_and_removes_verify_integrity(self):
+        file_menu = self._menu_by_text("File")
+        file_snapshot = self._menu_snapshot(file_menu)
+        file_texts = list(file_snapshot.get("texts") or [])
+
+        self.assertNotIn("Profile Maintenance", file_texts)
+        profiles_snapshot = self._menu_snapshot_at_path(file_snapshot, "Profiles")
+        self.assertEqual(
+            list(profiles_snapshot.get("texts") or []),
+            [
+                "New Profile…",
+                "Open Profile…",
+                "Reload Profile List",
+                "Remove Selected Profile…",
+                "Profile Maintenance",
+            ],
+        )
+        maintenance_snapshot = self._menu_snapshot_at_path(profiles_snapshot, "Profile Maintenance")
+        self.assertEqual(
+            list(maintenance_snapshot.get("texts") or []),
+            [
+                "Backup Database",
+                "Restore from Backup…",
+            ],
+        )
+        self.assertNotIn("verify", self.window._action_ribbon_specs_by_id)
+
+    def case_edit_menu_exposes_catalog_table_edit_actions_and_preserves_enablement(self):
+        edit_menu = self._menu_by_text("Edit")
+        edit_actions = {
+            action.text(): action
+            for action in edit_menu.actions()
+            if action.text() and action.menu() is None
+        }
+
+        self.assertIn("GS1 Metadata…", edit_actions)
+        self.assertIs(edit_actions["GS1 Metadata…"], self.window.gs1_metadata_action)
+        self.assertTrue(self.window.gs1_metadata_action.isEnabled())
+
+        with (
+            mock.patch.object(self.window, "_selected_track_ids", return_value=[]),
+            mock.patch.object(app_module.QMessageBox, "information") as info_mock,
+        ):
+            self.window.gs1_metadata_action.trigger()
+            self._drain_events()
+
+        info_mock.assert_called_once()
+        self.assertIn("Select a catalog row first", info_mock.call_args.args[2])
+
     def case_file_menu_groups_xml_import_under_import_exchange_and_preserves_wiring(self):
         file_menu = self._menu_by_text("File")
         file_texts = [action.text() for action in file_menu.actions() if action.text()]
@@ -1123,9 +1215,16 @@ class AppShellTestCase(unittest.TestCase):
         self.assertIn("Export Contracts and Rights JSON…", contracts_texts)
         self.assertIn("Export Contracts and Rights ZIP Package…", contracts_texts)
 
-        maintenance_action = next(
+        profiles_action = next(
             action
             for action in file_menu.actions()
+            if action.menu() is not None and action.text() == "Profiles"
+        )
+        profiles_menu = profiles_action.menu()
+        assert profiles_menu is not None
+        maintenance_action = next(
+            action
+            for action in profiles_menu.actions()
             if action.menu() is not None and action.text() == "Profile Maintenance"
         )
         maintenance_menu = maintenance_action.menu()
@@ -1135,7 +1234,6 @@ class AppShellTestCase(unittest.TestCase):
             [
                 "Backup Database",
                 "Restore from Backup…",
-                "Verify Integrity",
             ],
         )
 
@@ -1160,6 +1258,7 @@ class AppShellTestCase(unittest.TestCase):
                 "Add Album…",
                 "Edit Selected…",
                 "Delete Selected Track",
+                "GS1 Metadata…",
                 "Copy",
                 "Copy with Headers",
             ],
@@ -2774,58 +2873,78 @@ class AppShellTestCase(unittest.TestCase):
         self.assertIn("Add Track to Work", cluster_texts)
         self.assertIn("Add Album to Work", cluster_texts)
 
-    def case_catalog_managers_open_as_tabified_dock_and_focus_requested_tab(self):
-        self.window.open_catalog_managers_dialog(initial_tab="albums")
-        self.app.processEvents()
-
-        panel = self._assert_tabified_workspace_dock(
-            self.window.catalog_managers_dock,
-            dock_name="catalogManagersDock",
-            panel_name="catalogManagersPanel",
-        )
-
-        self.assertEqual(panel.tabs.currentWidget(), panel.albums_tab)
-        self.assertEqual(panel.tabs.tabText(panel.tabs.currentIndex()), "Albums")
-        self.assertTrue(panel.isVisible())
-
-    def case_catalog_managers_dialog_uses_compact_size_and_consistent_tabs(self):
-        dialog = app_module.CatalogManagersDialog(
-            self.window, initial_tab="albums", parent=self.window
-        )
+    def case_diagnostics_catalog_cleanup_uses_tabs_and_focus_requested_tab(self):
+        dialog = app_module.DiagnosticsDialog(self.window)
         try:
-            dialog.show()
-            self._drain_events()
-            self.assertEqual(dialog.minimumWidth(), 920)
-            self.assertEqual(dialog.minimumHeight(), 620)
-            self.assertEqual(dialog.size().width(), 1020)
-            self.assertEqual(dialog.size().height(), 700)
             self.assertEqual(
-                [dialog.tabs.tabText(index) for index in range(dialog.tabs.count())],
+                [
+                    dialog.surface_tabs.tabText(index)
+                    for index in range(dialog.surface_tabs.count())
+                ],
+                ["Health", "Catalog Cleanup"],
+            )
+            cleanup_panel = dialog.catalog_cleanup_panel
+            self.assertIsNotNone(cleanup_panel)
+            assert cleanup_panel is not None
+            self.assertEqual(
+                [cleanup_panel.tabs.tabText(index) for index in range(cleanup_panel.tabs.count())],
                 ["Artists", "Albums"],
             )
-            self.assertIs(dialog.tabs.currentWidget(), dialog.albums_tab)
+            dialog.focus_cleanup_tab("albums")
+            self.assertIs(dialog.surface_tabs.currentWidget(), cleanup_panel)
+            self.assertIs(cleanup_panel.tabs.currentWidget(), cleanup_panel.albums_tab)
         finally:
             dialog.close()
 
-    def case_catalog_managers_tabs_keep_bottom_actions_inside_themed_scroll_surfaces(self):
-        self.window.resize(980, 620)
-        self.window.open_catalog_managers_dialog(initial_tab="artists")
-        self.app.processEvents()
+    def case_catalog_cleanup_legacy_route_opens_diagnostics_cleanup_tab(self):
+        captured_dialog = {}
 
-        panel = self.window.catalog_managers_dock.widget()
-        for pane, controls in (
-            (panel.artists_tab, (panel.artists_tab.refresh_btn, panel.artists_tab.delete_btn)),
-            (panel.albums_tab, (panel.albums_tab.refresh_btn, panel.albums_tab.delete_btn)),
-        ):
-            panel.tabs.setCurrentWidget(pane)
-            self.app.processEvents()
-            self.assertIs(panel.tabs.currentWidget(), pane)
-            self.assertEqual(pane.property("role"), "workspaceCanvas")
-            self.assertEqual(pane.scroll_area.property("role"), "workspaceCanvas")
-            self.assertEqual(pane.scroll_area.viewport().property("role"), "workspaceCanvas")
-            self.assertEqual(pane.scroll_content.property("role"), "workspaceCanvas")
-            for control in controls:
-                self.assertTrue(self._is_within_scroll_content(pane.scroll_area, control))
+        def _capture_exec(dialog):
+            captured_dialog["dialog"] = dialog
+            return app_module.QDialog.Accepted
+
+        with mock.patch.object(app_module.DiagnosticsDialog, "exec", new=_capture_exec):
+            self.window.open_catalog_managers_dialog(initial_tab="albums")
+
+        dialog = captured_dialog.get("dialog")
+        self.assertIsNotNone(dialog)
+        assert dialog is not None
+        cleanup_panel = dialog.catalog_cleanup_panel
+        self.assertIsNotNone(cleanup_panel)
+        assert cleanup_panel is not None
+        self.assertIs(dialog.surface_tabs.currentWidget(), cleanup_panel)
+        self.assertIs(cleanup_panel.tabs.currentWidget(), cleanup_panel.albums_tab)
+        dialog.close()
+
+    def case_diagnostics_catalog_cleanup_tabs_keep_bottom_actions_inside_themed_scroll_surfaces(
+        self,
+    ):
+        dialog = app_module.DiagnosticsDialog(self.window)
+        try:
+            cleanup_panel = dialog.catalog_cleanup_panel
+            self.assertIsNotNone(cleanup_panel)
+            assert cleanup_panel is not None
+            for pane, controls in (
+                (
+                    cleanup_panel.artists_tab,
+                    (cleanup_panel.artists_tab.refresh_btn, cleanup_panel.artists_tab.delete_btn),
+                ),
+                (
+                    cleanup_panel.albums_tab,
+                    (cleanup_panel.albums_tab.refresh_btn, cleanup_panel.albums_tab.delete_btn),
+                ),
+            ):
+                cleanup_panel.tabs.setCurrentWidget(pane)
+                self.app.processEvents()
+                self.assertIs(cleanup_panel.tabs.currentWidget(), pane)
+                self.assertEqual(pane.property("role"), "workspaceCanvas")
+                self.assertEqual(pane.scroll_area.property("role"), "workspaceCanvas")
+                self.assertEqual(pane.scroll_area.viewport().property("role"), "workspaceCanvas")
+                self.assertEqual(pane.scroll_content.property("role"), "workspaceCanvas")
+                for control in controls:
+                    self.assertTrue(self._is_within_scroll_content(pane.scroll_area, control))
+        finally:
+            dialog.close()
 
     def case_catalog_menu_hides_top_level_release_creation_and_removes_legacy_tools(self):
         catalog_action = next(
@@ -2895,7 +3014,6 @@ class AppShellTestCase(unittest.TestCase):
                 "Contract Manager…",
                 "Contract Template Workspace…",
                 "Rights Matrix…",
-                "Catalog Managers…",
             ],
         )
         self.assertEqual(
@@ -2910,6 +3028,8 @@ class AppShellTestCase(unittest.TestCase):
         )
         self.assertNotIn("Show Catalog Table", workspace_flat_texts)
         self.assertNotIn("Show Add Track Panel", workspace_flat_texts)
+        self.assertNotIn("Catalog Managers…", workspace_flat_texts)
+        self.assertNotIn("catalog_managers", self.window._action_ribbon_specs_by_id)
         self.assertNotIn("Show Add Track Panel", view_texts)
         self.assertNotIn("Show Catalog Table", view_texts)
         self.assertIn("Track Import Repair Queue…", quality_texts)
@@ -2933,11 +3053,11 @@ class AppShellTestCase(unittest.TestCase):
             description="add track dock to become visible",
         )
         wait_for(
-            lambda: self.window.track_title_field.hasFocus(),
+            lambda: self.window.track_title_field.isVisible(),
             timeout_ms=1000,
             interval_ms=10,
             app=self.app,
-            description="add track title field to receive focus",
+            description="add track title field to become visible",
         )
         wait_for(
             lambda: self.window.settings.value("display/add_data_panel", False, bool),
@@ -3221,16 +3341,12 @@ class AppShellTestCase(unittest.TestCase):
         self.app.processEvents()
         self.window.open_global_search()
         self.app.processEvents()
-        self.window.open_catalog_managers_dialog()
-        self.app.processEvents()
 
         peer_tabs = set(self.window.tabifiedDockWidgets(self.window.release_browser_dock))
         self.assertIn(self.window.work_manager_dock, peer_tabs)
         self.assertIn(self.window.global_search_dock, peer_tabs)
-        self.assertIn(self.window.catalog_managers_dock, peer_tabs)
         self.assertTrue(self.window.work_manager_dock.isVisible())
         self.assertTrue(self.window.global_search_dock.isVisible())
-        self.assertTrue(self.window.catalog_managers_dock.isVisible())
 
     def case_workspace_layout_round_trip_restores_tabified_non_floating_docks(self):
         self.window.open_release_browser()

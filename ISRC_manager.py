@@ -657,6 +657,8 @@ class ApplicationSettingsDialog(QDialog):
         self,
         *,
         window_title: str,
+        effective_window_title: str = DEFAULT_WINDOW_TITLE,
+        owner_company_name: str = "",
         icon_path: str,
         artist_code: str,
         auto_snapshot_enabled: bool,
@@ -850,17 +852,43 @@ class ApplicationSettingsDialog(QDialog):
         self._configure_grid(app_grid)
         general_layout.addWidget(app_box)
 
-        self.window_title_edit = QLineEdit(window_title or DEFAULT_WINDOW_TITLE)
+        resolved_window_title = str(effective_window_title or DEFAULT_WINDOW_TITLE).strip()
+        resolved_window_title = resolved_window_title or DEFAULT_WINDOW_TITLE
+        owner_company_name = str(owner_company_name or "").strip()
+
+        self.window_title_edit = QLineEdit((window_title or "").strip())
         self.window_title_edit.setClearButtonEnabled(True)
-        self.window_title_edit.setPlaceholderText(DEFAULT_WINDOW_TITLE)
+        self.window_title_edit.setPlaceholderText(resolved_window_title)
         self.window_title_edit.setMinimumWidth(320)
         self.window_title_edit.setMaximumWidth(460)
+
+        title_override_widget = QWidget(self)
+        title_override_row = QHBoxLayout(title_override_widget)
+        title_override_row.setContentsMargins(0, 0, 0, 0)
+        title_override_row.setSpacing(8)
+        title_override_row.addWidget(self.window_title_edit, 1)
+        self.window_title_auto_button = QPushButton("Use Automatic")
+        self.window_title_auto_button.setAutoDefault(False)
+        self.window_title_auto_button.clicked.connect(self.window_title_edit.clear)
+        title_override_row.addWidget(self.window_title_auto_button)
+        title_override_row.addStretch(1)
+
+        if owner_company_name:
+            window_title_hint = (
+                f"Leave blank to use the current owner company name automatically "
+                f"(currently “{owner_company_name}”), or fall back to {DEFAULT_WINDOW_TITLE}."
+            )
+        else:
+            window_title_hint = (
+                f"Leave blank to use the application name automatically "
+                f"({DEFAULT_WINDOW_TITLE}) until an owner company name is available."
+            )
         self._add_row(
             app_grid,
             0,
             "Window Title",
-            self.window_title_edit,
-            "Displayed in the main window title bar.",
+            title_override_widget,
+            window_title_hint,
         )
 
         self.icon_path_edit = QLineEdit(icon_path or "")
@@ -2430,7 +2458,7 @@ class ApplicationSettingsDialog(QDialog):
         second_layout.setSpacing(8)
         second_layout.addWidget(QLabel("Inactive workspace tab", second_page))
         second_layout.addStretch(1)
-        workspace_tabs.addTab(first_page, "Catalog Managers")
+        workspace_tabs.addTab(first_page, "Catalog Cleanup")
         workspace_tabs.addTab(second_page, "Release Browser")
         ribbon_layout.addWidget(workspace_tabs)
 
@@ -3739,7 +3767,7 @@ class ApplicationSettingsDialog(QDialog):
         theme_values = self._theme_value_payload()
         blob_icon_values = self._blob_icon_value_payload()
         return {
-            "window_title": self.window_title_edit.text().strip() or DEFAULT_WINDOW_TITLE,
+            "window_title": self.window_title_edit.text().strip(),
             "icon_path": self.icon_path_edit.text().strip(),
             "isrc_prefix": self.isrc_prefix_edit.text().strip().upper(),
             "artist_code": self.artist_code_edit.text().strip(),
@@ -5535,6 +5563,47 @@ class _CatalogAlbumsPane(_CatalogManagerPaneBase):
 
         self.reload()
         self._after_mutation()
+
+
+class DiagnosticsCatalogCleanupPanel(QWidget):
+    TAB_ORDER = ("artists", "albums")
+
+    def __init__(self, app, parent=None):
+        super().__init__(parent or app)
+        self.app = app
+        self.setObjectName("diagnosticsCatalogCleanupPanel")
+        self.setProperty("role", "workspaceCanvas")
+        _apply_standard_widget_chrome(self, "diagnosticsCatalogCleanupPanel")
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(12)
+
+        summary_label = QLabel(
+            "Review and clean stored artist and album names that are no longer referenced by the current profile."
+        )
+        summary_label.setWordWrap(True)
+        summary_label.setProperty("role", "supportingText")
+        root.addWidget(summary_label)
+
+        self.tabs = QTabWidget(self)
+        self.tabs.setDocumentMode(True)
+        self.artists_tab = _CatalogArtistsPane(app, self)
+        self.albums_tab = _CatalogAlbumsPane(app, self)
+        self.tabs.addTab(self.artists_tab, "Artists")
+        self.tabs.addTab(self.albums_tab, "Albums")
+        root.addWidget(self.tabs, 1)
+
+    def focus_tab(self, tab_name: str = "artists") -> None:
+        try:
+            index = self.TAB_ORDER.index(tab_name)
+        except ValueError:
+            index = 0
+        self.tabs.setCurrentIndex(index)
+
+    def refresh(self) -> None:
+        self.artists_tab.reload()
+        self.albums_tab.reload()
 
 
 class _CatalogLicenseesPane(_CatalogManagerPaneBase):
@@ -8247,8 +8316,11 @@ class App(QMainWindow):
     def open_application_log_dialog(self):
         ApplicationLogDialog(self, parent=self).exec()
 
-    def open_diagnostics_dialog(self):
-        DiagnosticsDialog(self, parent=self).exec()
+    def open_diagnostics_dialog(self, *, initial_cleanup_tab: str | None = None):
+        dialog = DiagnosticsDialog(self, parent=self)
+        if initial_cleanup_tab:
+            dialog.focus_cleanup_tab(initial_cleanup_tab)
+        dialog.exec()
 
     def _init_services(self):
         self.schema_service = (
@@ -8677,10 +8749,37 @@ class App(QMainWindow):
     # -------------------------------------------------------------------------
     # Identity & Profiles
     # -------------------------------------------------------------------------
+    def _stored_window_title_override(self) -> str:
+        if self.settings.contains("identity/window_title_override"):
+            return str(self.settings.value("identity/window_title_override", "", str) or "").strip()
+        legacy_title = str(self.settings.value("identity/window_title", "", str) or "").strip()
+        if legacy_title and legacy_title not in {DEFAULT_WINDOW_TITLE, "ISRC Manager"}:
+            return legacy_title
+        return ""
+
+    def _current_owner_company_name(self) -> str:
+        record = self._current_owner_party_record()
+        if record is None:
+            return ""
+        return str(record.company_name or "").strip()
+
+    def _resolve_window_title(self, override: str | None = None) -> str:
+        manual_override = str(override or "").strip()
+        if manual_override:
+            return manual_override
+        owner_company_name = self._current_owner_company_name()
+        if owner_company_name:
+            return owner_company_name
+        return DEFAULT_WINDOW_TITLE
+
     def _load_identity(self):
-        title = self.settings.value("identity/window_title", DEFAULT_WINDOW_TITLE, str)
+        window_title_override = self._stored_window_title_override()
         icon = self.settings.value("identity/icon_path", DEFAULT_ICON_PATH, str)
-        return {"window_title": title, "icon_path": icon}
+        return {
+            "window_title": self._resolve_window_title(window_title_override),
+            "window_title_override": window_title_override,
+            "icon_path": icon,
+        }
 
     def _apply_identity(self):
         self.setWindowTitle(self.identity.get("window_title") or DEFAULT_WINDOW_TITLE)
@@ -9346,8 +9445,14 @@ class App(QMainWindow):
             if self.gs1_settings_service is not None
             else ()
         )
+        owner_party_settings = (
+            self.settings_reads.load_owner_party_settings()
+            if self.settings_reads is not None
+            else None
+        )
         return {
-            "window_title": self.identity.get("window_title") or DEFAULT_WINDOW_TITLE,
+            "window_title": self.identity.get("window_title_override") or "",
+            "effective_window_title": self.identity.get("window_title") or DEFAULT_WINDOW_TITLE,
             "icon_path": self.identity.get("icon_path") or "",
             "theme_settings": dict(self.theme_settings or self._load_theme_settings()),
             "theme_library": self._load_theme_library(),
@@ -9368,7 +9473,10 @@ class App(QMainWindow):
             "buma_relatie_nummer": registration.buma_relatie_nummer,
             "buma_ipi": registration.buma_ipi,
             "owner_party_id": self.settings_reads.load_owner_party_id(),
-            "owner_party_settings": self.settings_reads.load_owner_party_settings(),
+            "owner_party_settings": owner_party_settings or OwnerPartySettings(),
+            "owner_company_name": (
+                str(getattr(owner_party_settings, "company_name", "") or "").strip()
+            ),
             "gs1_template_asset": (
                 self.gs1_settings_service.load_template_asset()
                 if self.gs1_settings_service is not None
@@ -9404,19 +9512,24 @@ class App(QMainWindow):
         history_policy_changed = False
 
         try:
-            before_identity = {
-                "window_title": before_values["window_title"],
+            before_identity_state = {
+                "window_title_override": before_values["window_title"],
                 "icon_path": before_values["icon_path"],
             }
-            after_identity = {
-                "window_title": after_values["window_title"],
+            before_identity = {
+                **before_identity_state,
+                "window_title": before_values.get("effective_window_title") or DEFAULT_WINDOW_TITLE,
+            }
+            after_identity_state = {
+                "window_title_override": after_values["window_title"],
                 "icon_path": after_values["icon_path"],
             }
-            if after_identity != before_identity:
-                self.identity = self.settings_mutations.set_identity(
-                    window_title=after_identity["window_title"],
-                    icon_path=after_identity["icon_path"],
+            if after_identity_state != before_identity_state:
+                self.settings_mutations.set_identity(
+                    window_title_override=after_identity_state["window_title_override"],
+                    icon_path=after_identity_state["icon_path"],
                 )
+                self.identity = self._load_identity()
                 self._apply_identity()
                 self.logger.info("Branding & identity updated")
                 self._audit(
@@ -9431,7 +9544,7 @@ class App(QMainWindow):
                         key="identity",
                         label="Update Branding & Identity",
                         before_value=before_identity,
-                        after_value=self.identity,
+                        after_value=dict(self.identity),
                     )
                 changed_count += 1
 
@@ -9875,6 +9988,8 @@ class App(QMainWindow):
         before_values = self._current_settings_values()
         dlg = ApplicationSettingsDialog(
             window_title=before_values["window_title"],
+            effective_window_title=before_values["effective_window_title"],
+            owner_company_name=before_values["owner_company_name"],
             icon_path=before_values["icon_path"],
             artist_code=before_values["artist_code"],
             auto_snapshot_enabled=before_values["auto_snapshot_enabled"],
@@ -10155,16 +10270,10 @@ class App(QMainWindow):
 
     def open_catalog_managers_dialog(self, *, initial_tab: str = "artists"):
         if self.catalog_service is None:
-            QMessageBox.warning(self, "Catalog Managers", "Open a profile first.")
-            return
-        panel = self._show_workspace_panel(
-            self._ensure_catalog_managers_dock,
-            panel_attr="catalog_managers_panel",
-            legacy_attr="catalog_managers_dialog",
-            configure=lambda widget: widget.focus_tab(initial_tab),
-        )
-        self.populate_all_comboboxes()
-        return panel
+            QMessageBox.warning(self, "Catalog Cleanup", "Open a profile first.")
+            return None
+        self.open_diagnostics_dialog(initial_cleanup_tab=initial_tab)
+        return None
 
     def _show_workspace_panel(
         self,
@@ -10189,10 +10298,10 @@ class App(QMainWindow):
         return panel
 
     def _manage_stored_artists(self):
-        self.open_catalog_managers_dialog(initial_tab="artists")
+        self.open_diagnostics_dialog(initial_cleanup_tab="artists")
 
     def _manage_stored_albums(self):
-        self.open_catalog_managers_dialog(initial_tab="albums")
+        self.open_diagnostics_dialog(initial_cleanup_tab="albums")
 
     def _close_database_connection(self):
         if hasattr(self, "auto_snapshot_timer"):
@@ -11109,6 +11218,13 @@ class App(QMainWindow):
         panel.open_entity_requested.connect(self._open_entity_from_relationship_search)
         return panel
 
+    def _create_diagnostics_catalog_cleanup_panel(
+        self, parent: QWidget
+    ) -> DiagnosticsCatalogCleanupPanel | None:
+        if self.catalog_service is None:
+            return None
+        return DiagnosticsCatalogCleanupPanel(self, parent=parent)
+
     def _create_catalog_managers_panel(self, parent: QWidget) -> CatalogManagersPanel:
         return CatalogManagersPanel(self, parent=parent)
 
@@ -11256,6 +11372,9 @@ class App(QMainWindow):
 
     def _refresh_catalog_workspace_docks(self) -> None:
         refresh_catalog_workspace_docks(self)
+        if hasattr(self, "identity"):
+            self.identity = self._load_identity()
+            self._apply_identity()
 
     @staticmethod
     def _party_identity_primary_label(record: PartyRecord) -> str:
@@ -11276,17 +11395,19 @@ class App(QMainWindow):
         return primary
 
     def _current_owner_party_id(self) -> int | None:
-        if self.settings_reads is None:
+        settings_reads = getattr(self, "settings_reads", None)
+        if settings_reads is None:
             return None
-        return self.settings_reads.load_owner_party_id()
+        return settings_reads.load_owner_party_id()
 
     def _current_owner_party_record(self) -> PartyRecord | None:
-        if self.party_service is None:
+        party_service = getattr(self, "party_service", None)
+        if party_service is None:
             return None
         owner_party_id = self._current_owner_party_id()
         if owner_party_id is None:
             return None
-        return self.party_service.fetch_party(int(owner_party_id))
+        return party_service.fetch_party(int(owner_party_id))
 
     def _default_authenticity_signer_label(self) -> str | None:
         record = self._current_owner_party_record()
@@ -11582,7 +11703,6 @@ class App(QMainWindow):
                 self._ensure_release_browser_dock,
                 self._ensure_work_manager_dock,
                 self._ensure_global_search_dock,
-                self._ensure_catalog_managers_dock,
                 self._ensure_party_manager_dock,
                 self._ensure_contract_manager_dock,
                 self._ensure_contract_template_workspace_dock,
@@ -11892,20 +12012,6 @@ class App(QMainWindow):
                 "category": "File",
                 "description": "Restore the current profile from a chosen backup.",
                 "action": self.restore_action,
-            },
-            {
-                "id": "verify",
-                "label": "Verify Integrity",
-                "category": "File",
-                "description": "Run integrity checks against the current profile database.",
-                "action": self.verify_action,
-            },
-            {
-                "id": "catalog_managers",
-                "label": "Catalog Managers",
-                "category": "Catalog",
-                "description": "Open the artists and albums manager dialog.",
-                "action": self.catalog_managers_action,
             },
             {
                 "id": "release_browser",

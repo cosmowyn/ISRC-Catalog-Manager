@@ -99,7 +99,8 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Profiles toolbar</strong>: switch databases, create a new profile, browse to an external profile, reload the profile list, or remove the selected entry.</li>
           <li><strong>Profiles ribbon toggle</strong>: use <strong>View &gt; Show Profiles Ribbon</strong> when you want that toolbar visible or hidden, and the choice is remembered with the rest of the workspace.</li>
           <li><strong>Dockable panes</strong>: keep the window focused on your current task by showing only the panes you need.</li>
-          <li><strong>Tabbed catalog tools</strong>: Release Browser, Work Manager, Catalog Managers, Party Manager, Contract Manager, Rights Matrix, Deliverables and Asset Versions, and Global Search open as docked tabs beside the table so you can keep using the catalog inventory while those panels remain open.</li>
+          <li><strong>Tabbed catalog tools</strong>: Release Browser, Work Manager, Party Manager, Contract Manager, Rights Matrix, Deliverables and Asset Versions, and Global Search open as docked tabs beside the table so you can keep using the catalog inventory while those panels remain open.</li>
+          <li><strong>Diagnostics cleanup tools</strong>: stored artist and album cleanup now lives with Diagnostics instead of the Catalog workspace, so integrity and cleanup follow-up stay together.</li>
           <li><strong>Saved layout</strong>: column layout, dock placement, and visibility preferences are remembered so the app opens the way you work.</li>
         </ul>
         <p>Use the menus when you need the full surface of the product, or stay inside the docked views for everyday entry and review. The window title, branding, and appearance can be customized from <strong>Settings &gt; Application Settings</strong>. When you open multiple catalog tools, the app prefers tabbed docking so the workspace stays compact and easier to navigate while the table remains usable.</p>
@@ -564,16 +565,16 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
     ),
     HelpChapter(
         chapter_id="catalog-managers",
-        title="Catalog Managers",
-        summary="Manage reusable artist and album data from one consolidated manager panel.",
+        title="Catalog Cleanup",
+        summary="Review stored artist and album names from Diagnostics and remove only data that is no longer in use.",
         keywords=("catalog managers", "artists", "albums", "purge unused", "manage"),
         content_html="""
-        <p>The consolidated <strong>Catalog Managers</strong> workspace groups artist and album maintenance into one docked panel. It is one specific cleanup surface inside the larger docked workspace, not the name of the whole tabbed workspace model.</p>
+        <p>The stored artist and album cleanup tools now live in <strong>Help &gt; Diagnostics…</strong> under the <strong>Catalog Cleanup</strong> area, because they are maintenance and integrity-adjacent tools rather than primary catalog workspaces.</p>
         <ul>
           <li><strong>Artists</strong>: inspect artist usage counts and remove or purge only artists that are no longer used.</li>
           <li><strong>Albums</strong>: inspect album usage counts and remove or purge unused albums.</li>
         </ul>
-        <p>These tools are intended for cleanup and normalization. The app prevents deletion of items that are still referenced by tracks where that would break data integrity. Because the manager is docked, you can keep it open while reviewing the main catalog table and related workspace panels.</p>
+        <p>These tools are intended for cleanup and normalization. The app prevents deletion of items that are still referenced by tracks where that would break data integrity, and keeps the actual cleanup actions alongside the rest of the diagnostics and repair surfaces.</p>
         """,
     ),
     HelpChapter(
@@ -625,11 +626,11 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         content_html="""
         <p>The Application Settings dialog brings the app's most important configuration into one organized workspace so you do not have to hunt through multiple small dialogs.</p>
         <ul>
-          <li><strong>General</strong>: current profile context, window title, app icon, core registration details, automatic snapshots, retention and safety level, automatic cleanup, and history storage budget controls.</li>
+          <li><strong>General</strong>: current profile context, an optional custom window title override, app icon, core registration details, automatic snapshots, retention and safety level, automatic cleanup, and history storage budget controls.</li>
           <li><strong>GS1</strong>: template storage mode plus profile defaults for GS1 export workflows.</li>
           <li><strong>Theme</strong>: the full visual theme builder, starter themes, hint-text and preview-pane controls, live preview, and advanced QSS.</li>
         </ul>
-        <p>Saving settings updates the current app state immediately, while supported settings changes are also recorded in history so major appearance and configuration changes remain recoverable. On first launch, the app can offer to open this dialog so you can configure registration and recovery posture early. Media badge icon choices for stored audio and image BLOBs are managed from the Theme workspace but are kept separate from reusable theme presets, and the Theme page also includes builder-only controls for hint visibility and preview-surface visibility while you edit.</p>
+        <p>If you leave the window-title field blank, the app uses the current owner Party company name automatically when one is available and otherwise falls back to the application name. Entering a custom value acts as an explicit override and is preserved until you clear it again. Saving settings updates the current app state immediately, while supported settings changes are also recorded in history so major appearance and configuration changes remain recoverable. On first launch, the app can offer to open this dialog so you can configure registration and recovery posture early. Media badge icon choices for stored audio and image BLOBs are managed from the Theme workspace but are kept separate from reusable theme presets, and the Theme page also includes builder-only controls for hint visibility and preview-surface visibility while you edit.</p>
         """,
     ),
     HelpChapter(
@@ -706,11 +707,12 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "legacy promoted field",
         ),
         content_html="""
-        <p>The Diagnostics window gives you a high-level health view of both the application environment and the active profile so you can verify that the workspace is still operating cleanly. Use it when the issue may involve storage, schema, managed files, history artifacts, or migration state rather than catalog content itself.</p>
+        <p>The Diagnostics window gives you a high-level health view of both the application environment and the active profile so you can verify that the workspace is still operating cleanly. Use it when the issue may involve storage, schema, managed files, history artifacts, migration state, or catalog cleanup follow-up rather than day-to-day track entry.</p>
         <ul>
           <li><strong>Environment</strong>: app version, schema version, profile path, data folder, log folder, snapshot count, platform, and Python version.</li>
           <li><strong>Checks</strong>: storage layout, schema validation, SQLite integrity, foreign-key integrity, custom-value integrity, managed files for path-backed records, history storage, and history storage budget pressure.</li>
           <li><strong>Details</strong>: expanded explanation for the currently selected check.</li>
+          <li><strong>Catalog Cleanup</strong>: stored artist and album maintenance tools for reviewing usage counts and removing only values that are no longer in use.</li>
           <li><strong>Repair</strong>: preview or run supported repair actions when a check reports a repairable issue, including storage-layout migration, history artifact reconciliation, and the conservative legacy promoted-field merge repair.</li>
           <li><strong>Responsive loading</strong>: heavier diagnostics reports and supported repairs run through the background task system so the window stays responsive during refresh.</li>
         </ul>

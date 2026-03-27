@@ -124,12 +124,14 @@ class SettingsMutationService:
             )
         return True
 
-    def set_identity(self, *, window_title: str, icon_path: str) -> dict[str, str]:
+    def set_identity(self, *, window_title_override: str, icon_path: str) -> dict[str, str]:
         identity = {
-            "window_title": window_title,
+            "window_title_override": window_title_override,
             "icon_path": icon_path,
         }
-        self.settings.setValue("identity/window_title", identity["window_title"])
+        self.settings.setValue("identity/window_title_override", identity["window_title_override"])
+        # Keep the legacy key aligned with the raw override so older builds still read a safe value.
+        self.settings.setValue("identity/window_title", identity["window_title_override"])
         self.settings.setValue("identity/icon_path", identity["icon_path"])
         self.settings.sync()
         return identity

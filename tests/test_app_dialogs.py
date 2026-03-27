@@ -5,12 +5,21 @@ from unittest import mock
 
 try:
     from PySide6.QtCore import Qt
-    from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QWidget
+    from PySide6.QtWidgets import (
+        QApplication,
+        QDialog,
+        QMessageBox,
+        QTabWidget,
+        QVBoxLayout,
+        QWidget,
+    )
 except ImportError as exc:  # pragma: no cover - environment-specific fallback
     Qt = None
     QApplication = None
     QDialog = None
     QMessageBox = None
+    QTabWidget = None
+    QVBoxLayout = None
     QWidget = None
     QT_IMPORT_ERROR = exc
 else:
@@ -89,6 +98,31 @@ class _DiagnosticsDialogHost(QWidget):
                 "within_budget": False,
             },
         }
+
+    def _create_diagnostics_catalog_cleanup_panel(self, parent):
+        panel = QWidget(parent)
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        tabs = QTabWidget(panel)
+        artists_tab = QWidget(tabs)
+        albums_tab = QWidget(tabs)
+        tabs.addTab(artists_tab, "Artists")
+        tabs.addTab(albums_tab, "Albums")
+        layout.addWidget(tabs)
+        panel.tabs = tabs
+        panel.artists_tab = artists_tab
+        panel.albums_tab = albums_tab
+        panel._refresh_calls = 0
+
+        def _focus_tab(tab_name="artists"):
+            tabs.setCurrentWidget(albums_tab if tab_name == "albums" else artists_tab)
+
+        def _refresh():
+            panel._refresh_calls += 1
+
+        panel.focus_tab = _focus_tab
+        panel.refresh = _refresh
+        return panel
 
     def _load_diagnostics_report_async(
         self,
@@ -258,6 +292,13 @@ class AppDialogsTests(unittest.TestCase):
         try:
             self.assertEqual(host.load_calls, 1)
             self.assertFalse(dialog.loading_panel.isVisible())
+            self.assertEqual(
+                [
+                    dialog.surface_tabs.tabText(index)
+                    for index in range(dialog.surface_tabs.count())
+                ],
+                ["Health", "Catalog Cleanup"],
+            )
             self.assertIsNotNone(dialog.body_scroll.widget())
             self.assertEqual(dialog.environment_labels["App version"].text(), "3.1.0")
             self.assertIn("1.8 GB", dialog.history_storage_summary_label.text())
@@ -271,8 +312,23 @@ class AppDialogsTests(unittest.TestCase):
             self.assertIn("Schema layout", dialog.details_edit.toPlainText())
             self.assertTrue(dialog.repair_button.isEnabled())
             self.assertEqual(dialog.repair_button.text(), "Repair Schema Layout")
+            self.assertEqual(dialog.catalog_cleanup_panel._refresh_calls, 1)
             dialog.open_cleanup_button.click()
             self.assertEqual(host.history_cleanup_open_count, 1)
+        finally:
+            dialog.close()
+            host.close()
+
+    def test_diagnostics_dialog_can_focus_catalog_cleanup_tabs(self):
+        host = _DiagnosticsDialogHost()
+        dialog = DiagnosticsDialog(host)
+        try:
+            cleanup_panel = dialog.catalog_cleanup_panel
+            self.assertIsNotNone(cleanup_panel)
+            assert cleanup_panel is not None
+            dialog.focus_cleanup_tab("albums")
+            self.assertIs(dialog.surface_tabs.currentWidget(), cleanup_panel)
+            self.assertIs(cleanup_panel.tabs.currentWidget(), cleanup_panel.albums_tab)
         finally:
             dialog.close()
             host.close()

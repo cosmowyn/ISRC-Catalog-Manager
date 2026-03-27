@@ -74,6 +74,17 @@ class HelpContentTests(unittest.TestCase):
             album_entry.content_html.lower(),
         )
 
+    def test_help_chapters_describe_diagnostics_cleanup_and_window_title_defaults(self):
+        cleanup = HELP_CHAPTERS_BY_ID["catalog-managers"]
+        diagnostics = HELP_CHAPTERS_BY_ID["diagnostics"]
+        settings = HELP_CHAPTERS_BY_ID["settings"]
+
+        self.assertEqual(cleanup.title, "Catalog Cleanup")
+        self.assertIn("Diagnostics", cleanup.content_html)
+        self.assertIn("Catalog Cleanup", diagnostics.content_html)
+        self.assertIn("owner Party company name", settings.content_html)
+        self.assertIn("custom value acts as an explicit override", settings.content_html)
+
 
 if __name__ == "__main__":
     unittest.main()

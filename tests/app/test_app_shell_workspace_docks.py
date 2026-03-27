@@ -44,14 +44,14 @@ class AppShellWorkspaceDockTests(AppShellTestCase):
     test_workspace_panels_keep_actions_and_saved_search_controls_inside_scroll_safe_surfaces = (
         AppShellTestCase.case_workspace_panels_keep_actions_and_saved_search_controls_inside_scroll_safe_surfaces
     )
-    test_catalog_managers_open_as_tabified_dock_and_focus_requested_tab = (
-        AppShellTestCase.case_catalog_managers_open_as_tabified_dock_and_focus_requested_tab
+    test_diagnostics_catalog_cleanup_uses_tabs_and_focus_requested_tab = (
+        AppShellTestCase.case_diagnostics_catalog_cleanup_uses_tabs_and_focus_requested_tab
     )
-    test_catalog_managers_dialog_uses_compact_size_and_consistent_tabs = (
-        AppShellTestCase.case_catalog_managers_dialog_uses_compact_size_and_consistent_tabs
+    test_catalog_cleanup_legacy_route_opens_diagnostics_cleanup_tab = (
+        AppShellTestCase.case_catalog_cleanup_legacy_route_opens_diagnostics_cleanup_tab
     )
-    test_catalog_managers_tabs_keep_bottom_actions_inside_themed_scroll_surfaces = (
-        AppShellTestCase.case_catalog_managers_tabs_keep_bottom_actions_inside_themed_scroll_surfaces
+    test_diagnostics_catalog_cleanup_tabs_keep_bottom_actions_inside_themed_scroll_surfaces = (
+        AppShellTestCase.case_diagnostics_catalog_cleanup_tabs_keep_bottom_actions_inside_themed_scroll_surfaces
     )
     test_hidden_catalog_table_does_not_block_workspace_dock_access_or_peer_tabifying = (
         AppShellTestCase.case_hidden_catalog_table_does_not_block_workspace_dock_access_or_peer_tabifying

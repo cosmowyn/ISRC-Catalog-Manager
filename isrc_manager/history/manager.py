@@ -1560,7 +1560,12 @@ class HistoryManager:
         value = payload["value"]
         if key == "identity":
             self.settings_mutations.set_identity(
-                window_title=value.get("window_title") or "",
+                window_title_override=(
+                    value.get("window_title_override")
+                    if "window_title_override" in value
+                    else value.get("window_title")
+                )
+                or "",
                 icon_path=value.get("icon_path") or "",
             )
         elif key == "artist_code":

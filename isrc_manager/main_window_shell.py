@@ -327,7 +327,8 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
 
     file_menu.addSeparator()
 
-    database_submenu = file_menu.addMenu("Profile Maintenance")
+    profiles_menu.addSeparator()
+    database_submenu = profiles_menu.addMenu("Profile Maintenance")
     app.backup_action = app._create_action(
         "Backup Database",
         slot=app.backup_database,
@@ -341,13 +342,6 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         shortcuts=("Ctrl+Shift+B", "Meta+Shift+B"),
     )
     database_submenu.addAction(app.restore_action)
-
-    app.verify_action = app._create_action(
-        "Verify Integrity",
-        slot=app.verify_integrity,
-        shortcuts=("Ctrl+Shift+V", "Meta+Shift+V"),
-    )
-    database_submenu.addAction(app.verify_action)
 
     edit_menu = app.menu_bar.addMenu("Edit")
     edit_menu.addAction(app.undo_action)
@@ -365,11 +359,6 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     workspace_menu = catalog_menu.addMenu("Workspace")
     workspace_create_menu = workspace_menu.addMenu("Create / Maintain")
     workspace_browse_menu = workspace_menu.addMenu("Browse / Review")
-    app.catalog_managers_action = app._create_action(
-        "Catalog Managers…",
-        slot=app.open_catalog_managers_dialog,
-        shortcuts=("Ctrl+Alt+G", "Meta+Alt+G"),
-    )
     app.work_manager_action = app._create_action(
         "Work Manager…",
         slot=app.open_work_manager,
@@ -427,7 +416,6 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         slot=app.open_add_track_workspace,
     )
     workspace_create_menu.insertAction(app.work_manager_action, app.workspace_add_track_action)
-    workspace_create_menu.addAction(app.catalog_managers_action)
     app.workspace_catalog_action = app._create_action(
         "Catalog",
         slot=app.open_catalog_workspace,
@@ -572,6 +560,7 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         slot=app.open_gs1_dialog,
         shortcuts=("Ctrl+Shift+G", "Meta+Shift+G"),
     )
+    edit_menu.insertAction(app.copy_action, app.gs1_metadata_action)
     metadata_menu.addAction(app.gs1_metadata_action)
 
     file_menu.addSeparator()

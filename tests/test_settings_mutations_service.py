@@ -89,10 +89,23 @@ class SettingsMutationServiceTests(unittest.TestCase):
         self.tmpdir.cleanup()
 
     def test_set_identity_updates_qsettings(self):
-        identity = self.service.set_identity(window_title="Catalog Pro", icon_path="/tmp/icon.ico")
+        identity = self.service.set_identity(
+            window_title_override="Catalog Pro",
+            icon_path="/tmp/icon.ico",
+        )
 
-        self.assertEqual(identity, {"window_title": "Catalog Pro", "icon_path": "/tmp/icon.ico"})
+        self.assertEqual(
+            identity,
+            {
+                "window_title_override": "Catalog Pro",
+                "icon_path": "/tmp/icon.ico",
+            },
+        )
         self.assertEqual(self.settings.value("identity/window_title", "", str), "Catalog Pro")
+        self.assertEqual(
+            self.settings.value("identity/window_title_override", "", str),
+            "Catalog Pro",
+        )
         self.assertEqual(self.settings.value("identity/icon_path", "", str), "/tmp/icon.ico")
 
     def test_singleton_tables_and_profile_values_are_written(self):

@@ -410,6 +410,91 @@ class ThemeBuilderTests(unittest.TestCase):
             dialog.close()
             host.close()
 
+    def test_application_settings_dialog_uses_automatic_window_title_placeholder(self):
+        host = _ThemePreviewHost()
+        dialog = app_module.ApplicationSettingsDialog(
+            window_title="",
+            effective_window_title=app_module.DEFAULT_WINDOW_TITLE,
+            owner_company_name="",
+            icon_path="",
+            artist_code="00",
+            auto_snapshot_enabled=True,
+            auto_snapshot_interval_minutes=30,
+            isrc_prefix="NLABC",
+            sena_number="",
+            btw_number="",
+            buma_relatie_nummer="",
+            buma_ipi="",
+            gs1_template_asset=None,
+            gs1_contracts_csv_path="",
+            gs1_contract_entries=(),
+            gs1_active_contract_number="",
+            gs1_target_market="",
+            gs1_language="",
+            gs1_brand="",
+            gs1_subbrand="",
+            gs1_packaging_type="",
+            gs1_product_classification="",
+            theme_settings={},
+            stored_themes={},
+            current_profile_path="",
+            parent=host,
+        )
+        try:
+            self.assertEqual(dialog.window_title_edit.text(), "")
+            self.assertEqual(
+                dialog.window_title_edit.placeholderText(),
+                app_module.DEFAULT_WINDOW_TITLE,
+            )
+            self.assertEqual(dialog.values()["window_title"], "")
+        finally:
+            dialog.close()
+            host.close()
+
+    def test_application_settings_dialog_uses_owner_company_name_for_window_title_hint(self):
+        host = _ThemePreviewHost()
+        dialog = app_module.ApplicationSettingsDialog(
+            window_title="",
+            effective_window_title="Moonwake Records",
+            owner_company_name="Moonwake Records",
+            icon_path="",
+            artist_code="00",
+            auto_snapshot_enabled=True,
+            auto_snapshot_interval_minutes=30,
+            isrc_prefix="NLABC",
+            sena_number="",
+            btw_number="",
+            buma_relatie_nummer="",
+            buma_ipi="",
+            gs1_template_asset=None,
+            gs1_contracts_csv_path="",
+            gs1_contract_entries=(),
+            gs1_active_contract_number="",
+            gs1_target_market="",
+            gs1_language="",
+            gs1_brand="",
+            gs1_subbrand="",
+            gs1_packaging_type="",
+            gs1_product_classification="",
+            theme_settings={},
+            stored_themes={},
+            current_profile_path="",
+            parent=host,
+        )
+        try:
+            self.assertEqual(dialog.window_title_edit.placeholderText(), "Moonwake Records")
+            hint_labels = [
+                label.text()
+                for label in dialog.findChildren(QLabel)
+                if "owner company name automatically" in (label.text() or "")
+            ]
+            self.assertTrue(hint_labels)
+            dialog.window_title_edit.setText("Custom Shell")
+            self.assertEqual(dialog.values()["window_title"], "Custom Shell")
+        finally:
+            dialog.close()
+            host.close()
+
     def test_application_settings_dialog_keeps_party_backed_owner_payload_without_owner_tab(self):
         host = _ThemePreviewHost()
         host.party_service = _PartyServiceStub(

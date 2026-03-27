@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QSplitter,
+    QTabWidget,
     QTextBrowser,
     QVBoxLayout,
     QWidget,
@@ -819,8 +820,23 @@ class DiagnosticsDialog(QDialog):
         self.loading_panel.hide()
         root.addWidget(self.loading_panel)
 
+        self.surface_tabs = QTabWidget(self)
+        self.surface_tabs.setDocumentMode(True)
+        root.addWidget(self.surface_tabs, 1)
+
         self.body_scroll, _, body_layout = _create_scrollable_dialog_content(self)
-        root.addWidget(self.body_scroll, 1)
+        self.surface_tabs.addTab(self.body_scroll, "Health")
+
+        self.catalog_cleanup_panel = None
+        build_cleanup_panel = getattr(self.app, "_create_diagnostics_catalog_cleanup_panel", None)
+        if callable(build_cleanup_panel):
+            try:
+                cleanup_panel = build_cleanup_panel(self)
+            except Exception:
+                cleanup_panel = None
+            if isinstance(cleanup_panel, QWidget):
+                self.catalog_cleanup_panel = cleanup_panel
+                self.surface_tabs.addTab(cleanup_panel, "Catalog Cleanup")
 
         self.history_storage_group = QGroupBox("History Storage")
         storage_layout = QVBoxLayout(self.history_storage_group)
@@ -1009,6 +1025,19 @@ class DiagnosticsDialog(QDialog):
         else:
             self.details_edit.setPlainText("No diagnostics are available for the current profile.")
             self._update_repair_buttons(None)
+        refresh_cleanup = getattr(self.catalog_cleanup_panel, "refresh", None)
+        if callable(refresh_cleanup):
+            refresh_cleanup()
+
+    def focus_cleanup_tab(self, tab_name: str = "artists") -> None:
+        if self.catalog_cleanup_panel is None:
+            return
+        cleanup_index = self.surface_tabs.indexOf(self.catalog_cleanup_panel)
+        if cleanup_index >= 0:
+            self.surface_tabs.setCurrentIndex(cleanup_index)
+        focus_tab = getattr(self.catalog_cleanup_panel, "focus_tab", None)
+        if callable(focus_tab):
+            focus_tab(tab_name)
 
     def _apply_history_storage_budget(self, payload: dict[str, object]) -> None:
         available = bool(payload.get("available"))
