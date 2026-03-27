@@ -1,6 +1,6 @@
 # Attachment Storage Modes
 
-Current product version: `2.0.0`
+Current product version: `3.1.0`
 
 ISRC Catalog Manager now supports two storage modes for file-backed records across the catalog.
 

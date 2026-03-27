@@ -1,6 +1,6 @@
 # GS1 Workflow Guide
 
-Current product version: `2.0.0`
+Current product version: `3.1.0`
 
 The GS1 workflow in ISRC Catalog Manager is designed for teams who need to prepare structured product data without losing the convenience of a local catalog workflow.
 

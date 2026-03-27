@@ -1,6 +1,6 @@
 # Theme Builder Guide
 
-Current product version: `2.0.0`
+Current product version: `3.1.0`
 
 ISRC Catalog Manager includes a full visual theme builder so the application can be tailored without requiring hand-written QSS for every change.
 

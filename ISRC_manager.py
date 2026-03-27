@@ -212,6 +212,8 @@ from isrc_manager.file_storage import (
     STORAGE_MODE_DATABASE,
     STORAGE_MODE_MANAGED_FILE,
     normalize_storage_mode,
+    resolve_directory_export_target,
+    resolve_file_export_target,
     sanitize_export_basename,
 )
 from isrc_manager.forensics import (
@@ -6853,7 +6855,7 @@ class App(QMainWindow):
                 continue
             except Exception:
                 break
-        return "2.0.0"
+        return "3.1.0"
 
     def _help_html(self) -> str:
         return render_help_html(
@@ -15478,27 +15480,77 @@ class App(QMainWindow):
             QMessageBox.warning(self, "Repertoire Exchange", "Open a profile first.")
             return
         normalized = str(format_name or "").strip().lower()
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         if normalized == "json":
+            default_name = f"contracts_and_rights_json_{timestamp}.json"
             path, _ = QFileDialog.getSaveFileName(
-                self, "Export Repertoire JSON", "", "JSON Files (*.json)"
+                self,
+                "Export Repertoire JSON",
+                str(self.exports_dir / default_name),
+                "JSON Files (*.json)",
             )
             if not path:
+                return
+            try:
+                resolved_path = self._resolve_file_export_target(
+                    path,
+                    default_filename=default_name,
+                )
+            except ValueError as exc:
+                QMessageBox.warning(self, "Repertoire Exchange", str(exc))
                 return
         elif normalized == "xlsx":
+            default_name = f"contracts_and_rights_xlsx_{timestamp}.xlsx"
             path, _ = QFileDialog.getSaveFileName(
-                self, "Export Repertoire XLSX", "", "Excel Files (*.xlsx)"
+                self,
+                "Export Repertoire XLSX",
+                str(self.exports_dir / default_name),
+                "Excel Files (*.xlsx)",
             )
             if not path:
+                return
+            try:
+                resolved_path = self._resolve_file_export_target(
+                    path,
+                    default_filename=default_name,
+                )
+            except ValueError as exc:
+                QMessageBox.warning(self, "Repertoire Exchange", str(exc))
                 return
         elif normalized == "csv":
-            path = QFileDialog.getExistingDirectory(self, "Export Repertoire CSV Bundle")
-            if not path:
-                return
-        elif normalized == "package":
-            path, _ = QFileDialog.getSaveFileName(
-                self, "Export Repertoire ZIP Package", "", "ZIP Files (*.zip)"
+            default_name = f"contracts_and_rights_csv_bundle_{timestamp}"
+            path = QFileDialog.getExistingDirectory(
+                self,
+                "Export Repertoire CSV Bundle",
+                str(self.exports_dir),
             )
             if not path:
+                return
+            try:
+                resolved_path = self._resolve_directory_export_target(
+                    path,
+                    default_name=default_name,
+                )
+            except ValueError as exc:
+                QMessageBox.warning(self, "Repertoire Exchange", str(exc))
+                return
+        elif normalized == "package":
+            default_name = f"contracts_and_rights_zip_{timestamp}.zip"
+            path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Export Repertoire ZIP Package",
+                str(self.exports_dir / default_name),
+                "ZIP Files (*.zip)",
+            )
+            if not path:
+                return
+            try:
+                resolved_path = self._resolve_file_export_target(
+                    path,
+                    default_filename=default_name,
+                )
+            except ValueError as exc:
+                QMessageBox.warning(self, "Repertoire Exchange", str(exc))
                 return
         else:
             return
@@ -15509,35 +15561,49 @@ class App(QMainWindow):
             def _mutation():
                 if normalized == "json":
                     bundle.repertoire_exchange_service.export_json(
-                        path,
+                        resolved_path,
                         progress_callback=export_progress,
                     )
                 elif normalized == "xlsx":
                     bundle.repertoire_exchange_service.export_xlsx(
-                        path,
+                        resolved_path,
                         progress_callback=export_progress,
                     )
                 elif normalized == "csv":
                     bundle.repertoire_exchange_service.export_csv_bundle(
-                        path,
+                        resolved_path,
                         progress_callback=export_progress,
                     )
                 else:
                     bundle.repertoire_exchange_service.export_package(
-                        path,
+                        resolved_path,
                         progress_callback=export_progress,
                     )
-                return path
+                return str(resolved_path)
 
+            if normalized == "csv":
+                return run_snapshot_history_action(
+                    history_manager=bundle.history_manager,
+                    action_label="Export Contracts and Rights CSV Bundle",
+                    action_type="repertoire.export_csv_bundle",
+                    mutation=_mutation,
+                    entity_type="RepertoireExport",
+                    entity_id=str(resolved_path),
+                    payload={"path": str(resolved_path), "format": normalized},
+                    progress_callback=ctx.report_progress,
+                    post_mutation_progress=(96, "Capturing repertoire export history..."),
+                    record_progress=(98, "Recording repertoire export history..."),
+                    logger=self.logger,
+                )
             return run_file_history_action(
                 history_manager=bundle.history_manager,
                 action_label="Export Contracts and Rights",
                 action_type=f"file.repertoire_export_{normalized}",
-                target_path=path,
+                target_path=resolved_path,
                 mutation=_mutation,
                 entity_type="RepertoireExport",
-                entity_id=path,
-                payload={"path": path, "format": normalized},
+                entity_id=str(resolved_path),
+                payload={"path": str(resolved_path), "format": normalized},
                 progress_callback=ctx.report_progress,
                 post_mutation_progress=(96, "Capturing repertoire export history..."),
                 record_progress=(98, "Recording repertoire export history..."),
@@ -16445,6 +16511,14 @@ class App(QMainWindow):
         )
         if not path:
             return
+        try:
+            resolved_path = self._resolve_file_export_target(
+                path,
+                default_filename=default_name,
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "Export Parties", str(exc))
+            return
 
         export_ids = list(selected_party_ids) if selected_only else None
 
@@ -16454,15 +16528,21 @@ class App(QMainWindow):
             def _mutation():
                 if normalized_format == "csv":
                     return bundle.party_exchange_service.export_csv(
-                        path, export_ids, progress_callback=export_progress
+                        resolved_path,
+                        export_ids,
+                        progress_callback=export_progress,
                     )
                 if normalized_format == "xlsx":
                     return bundle.party_exchange_service.export_xlsx(
-                        path, export_ids, progress_callback=export_progress
+                        resolved_path,
+                        export_ids,
+                        progress_callback=export_progress,
                     )
                 if normalized_format == "json":
                     return bundle.party_exchange_service.export_json(
-                        path, export_ids, progress_callback=export_progress
+                        resolved_path,
+                        export_ids,
+                        progress_callback=export_progress,
                     )
                 raise ValueError(f"Unsupported Party exchange format: {normalized_format}")
 
@@ -16470,12 +16550,12 @@ class App(QMainWindow):
                 history_manager=bundle.history_manager,
                 action_label=lambda count: f"Export Parties {normalized_format.upper()}: {count} rows",
                 action_type=f"file.party_export_{normalized_format}",
-                target_path=path,
+                target_path=resolved_path,
                 mutation=_mutation,
                 entity_type="PartyExport",
-                entity_id=path,
+                entity_id=str(resolved_path),
                 payload=lambda count: {
-                    "path": path,
+                    "path": str(resolved_path),
                     "format": normalized_format,
                     "selected_only": bool(selected_only),
                     "count": count,
@@ -16491,7 +16571,7 @@ class App(QMainWindow):
             self._log_event(
                 f"party.export.{normalized_format}",
                 f"Exported {normalized_format.upper()} Party data",
-                path=path,
+                path=str(resolved_path),
                 exported=exported_count,
                 selected_only=selected_only,
                 selected_party_count=len(selected_party_ids) if selected_only else None,
@@ -16499,14 +16579,14 @@ class App(QMainWindow):
             self._audit(
                 "EXPORT",
                 "Parties",
-                ref_id=path,
+                ref_id=str(resolved_path),
                 details=f"format={normalized_format}; count={exported_count}; selected_only={int(bool(selected_only))}",
             )
             self._audit_commit()
             QMessageBox.information(
                 self,
                 "Export Parties",
-                f"Exported {exported_count} Part{'ies' if exported_count != 1 else 'y'} to:\n{path}",
+                f"Exported {exported_count} Part{'ies' if exported_count != 1 else 'y'} to:\n{resolved_path}",
             )
 
         self._submit_background_bundle_task(
@@ -19599,6 +19679,11 @@ class App(QMainWindow):
         )
         if not path:
             return
+        try:
+            resolved_path = self._resolve_file_export_target(path, default_filename=default_name)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Export Exchange", str(exc))
+            return
 
         def _worker(bundle, ctx):
             export_progress = self._scaled_progress_callback(ctx.report_progress, start=0, end=94)
@@ -19606,19 +19691,19 @@ class App(QMainWindow):
             def mutation():
                 if normalized_format == "csv":
                     return bundle.exchange_service.export_csv(
-                        path, track_ids, progress_callback=export_progress
+                        resolved_path, track_ids, progress_callback=export_progress
                     )
                 if normalized_format == "xlsx":
                     return bundle.exchange_service.export_xlsx(
-                        path, track_ids, progress_callback=export_progress
+                        resolved_path, track_ids, progress_callback=export_progress
                     )
                 if normalized_format == "json":
                     return bundle.exchange_service.export_json(
-                        path, track_ids, progress_callback=export_progress
+                        resolved_path, track_ids, progress_callback=export_progress
                     )
                 if normalized_format == "package":
                     return bundle.exchange_service.export_package(
-                        path, track_ids, progress_callback=export_progress
+                        resolved_path, track_ids, progress_callback=export_progress
                     )
                 raise ValueError(f"Unsupported exchange format: {normalized_format}")
 
@@ -19626,12 +19711,12 @@ class App(QMainWindow):
                 history_manager=bundle.history_manager,
                 action_label=lambda count: f"Export {normalized_format.upper()}: {count} rows",
                 action_type=f"file.export_{normalized_format}",
-                target_path=path,
+                target_path=resolved_path,
                 mutation=mutation,
                 entity_type="Export",
-                entity_id=path,
+                entity_id=str(resolved_path),
                 payload=lambda count: {
-                    "path": path,
+                    "path": str(resolved_path),
                     "format": normalized_format,
                     "selected_only": bool(selected_only),
                     "count": count,
@@ -19647,21 +19732,21 @@ class App(QMainWindow):
             self._log_event(
                 f"export.{normalized_format}",
                 f"Exported {normalized_format.upper()} exchange data",
-                path=path,
+                path=str(resolved_path),
                 exported=exported,
                 selected_only=selected_only,
             )
             self._audit(
                 "EXPORT",
                 normalized_format.upper(),
-                ref_id=path,
+                ref_id=str(resolved_path),
                 details=f"count={exported}; selected_only={int(bool(selected_only))}",
             )
             self._audit_commit()
             QMessageBox.information(
                 self,
                 "Export Exchange",
-                f"Exported {exported} row{'s' if exported != 1 else ''} to:\n{path}",
+                f"Exported {exported} row{'s' if exported != 1 else ''} to:\n{resolved_path}",
             )
 
         self._submit_background_bundle_task(
@@ -19843,13 +19928,18 @@ class App(QMainWindow):
         )
         if not path:
             return
+        try:
+            resolved_path = self._resolve_file_export_target(path, default_filename=default_name)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Export", str(exc))
+            return
 
-        if Path(path).exists():
+        if resolved_path.exists():
             if (
                 QMessageBox.question(
                     self,
                     "Overwrite?",
-                    f"File exists:\n{path}\n\nOverwrite?",
+                    f"File exists:\n{resolved_path}\n\nOverwrite?",
                     QMessageBox.Yes | QMessageBox.No,
                 )
                 != QMessageBox.Yes
@@ -19862,14 +19952,14 @@ class App(QMainWindow):
                 history_manager=bundle.history_manager,
                 action_label=lambda count: f"Export XML: {count} tracks",
                 action_type="file.export_xml_all",
-                target_path=path,
+                target_path=resolved_path,
                 mutation=lambda: bundle.xml_export_service.export_all(
-                    path,
+                    resolved_path,
                     progress_callback=export_progress,
                 ),
                 entity_type="Export",
-                entity_id=path,
-                payload=lambda count: {"path": path, "count": count},
+                entity_id=str(resolved_path),
+                payload=lambda count: {"path": str(resolved_path), "count": count},
                 progress_callback=ctx.report_progress,
                 post_mutation_progress=(96, "Capturing XML export history..."),
                 record_progress=(98, "Recording XML export history..."),
@@ -19878,17 +19968,17 @@ class App(QMainWindow):
 
         def _success(exported):
             self._refresh_history_actions()
-            QMessageBox.information(self, "Export", f"All data exported:\n{path}")
+            QMessageBox.information(self, "Export", f"All data exported:\n{resolved_path}")
             self._log_event(
                 "export.xml.all",
                 "Exported full library to XML",
-                path=path,
+                path=str(resolved_path),
                 exported=exported,
             )
             self._audit(
                 "EXPORT",
                 "Tracks",
-                ref_id=path,
+                ref_id=str(resolved_path),
                 details=f"all rows incl. duration+customs count={exported}",
             )
             self._audit_commit()
@@ -19945,6 +20035,14 @@ class App(QMainWindow):
         )
         if not out_path:
             return
+        try:
+            resolved_out_path = self._resolve_file_export_target(
+                out_path,
+                default_filename=default_name,
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "Export Selected", str(exc))
+            return
 
         def _worker(bundle, ctx):
             export_progress = self._scaled_progress_callback(ctx.report_progress, start=0, end=94)
@@ -19952,16 +20050,20 @@ class App(QMainWindow):
                 history_manager=bundle.history_manager,
                 action_label=lambda count: f"Export Selected XML: {count} tracks",
                 action_type="file.export_xml_selected",
-                target_path=out_path,
+                target_path=resolved_out_path,
                 mutation=lambda: bundle.xml_export_service.export_selected(
-                    out_path,
+                    resolved_out_path,
                     track_ids,
                     current_db_path=str(self.current_db_path),
                     progress_callback=export_progress,
                 ),
                 entity_type="Export",
-                entity_id=out_path,
-                payload=lambda count: {"path": out_path, "count": count, "track_ids": track_ids},
+                entity_id=str(resolved_out_path),
+                payload=lambda count: {
+                    "path": str(resolved_out_path),
+                    "count": count,
+                    "track_ids": track_ids,
+                },
                 progress_callback=ctx.report_progress,
                 post_mutation_progress=(96, "Capturing XML export history..."),
                 record_progress=(98, "Recording XML export history..."),
@@ -19973,11 +20075,11 @@ class App(QMainWindow):
             self._log_event(
                 "export.xml.selected",
                 "Exported selected tracks to XML",
-                path=out_path,
+                path=str(resolved_out_path),
                 exported=exported,
                 track_ids=track_ids,
             )
-            QMessageBox.information(self, "Export Complete", f"Saved:\n{out_path}")
+            QMessageBox.information(self, "Export Complete", f"Saved:\n{resolved_out_path}")
 
         self._submit_background_bundle_task(
             title="Export Selected XML",
@@ -22159,6 +22261,14 @@ class App(QMainWindow):
         )
         if not dest_path:
             return
+        try:
+            resolved_dest_path = self._resolve_file_export_target(
+                dest_path,
+                default_filename=default_filename,
+            )
+        except ValueError as exc:
+            QMessageBox.warning(parent_widget or self, "Export", str(exc))
+            return
 
         metadata_warning: str | None = None
 
@@ -22166,23 +22276,24 @@ class App(QMainWindow):
 
             def _mutation():
                 nonlocal metadata_warning
-                Path(dest_path).write_bytes(data)
+                resolved_dest_path.parent.mkdir(parents=True, exist_ok=True)
+                resolved_dest_path.write_bytes(data)
                 if catalog_track_id is not None:
                     metadata_warning = self._attempt_catalog_audio_export_metadata(
-                        dest_path,
+                        resolved_dest_path,
                         track_id=int(catalog_track_id),
                     )
 
             self._run_file_history_action(
-                action_label=action_label.format(filename=Path(dest_path).name),
+                action_label=action_label.format(filename=resolved_dest_path.name),
                 action_type=action_type,
-                target_path=dest_path,
+                target_path=resolved_dest_path,
                 mutation=_mutation,
                 entity_type=entity_type,
                 entity_id=entity_id,
-                payload={"path": str(dest_path), **(payload or {})},
+                payload={"path": str(resolved_dest_path), **(payload or {})},
             )
-            message = f"Saved:\n{dest_path}"
+            message = f"Saved:\n{resolved_dest_path}"
             if metadata_warning:
                 message += f"\n\nMetadata embedding skipped: {metadata_warning}."
             QMessageBox.information(parent_widget or self, "Export", message)
@@ -22232,6 +22343,14 @@ class App(QMainWindow):
             f"{sanitize_export_basename(suggested_basename)}"
             f"{self._export_extension_for_mime(mime)}"
         )
+
+    @staticmethod
+    def _resolve_file_export_target(target_path: str | Path, *, default_filename: str) -> Path:
+        return resolve_file_export_target(target_path, default_name=default_filename)
+
+    @staticmethod
+    def _resolve_directory_export_target(target_path: str | Path, *, default_name: str) -> Path:
+        return resolve_directory_export_target(target_path, default_name=default_name)
 
     @staticmethod
     def _deduplicate_export_destination(output_dir: Path, filename: str) -> Path:

@@ -1,6 +1,6 @@
 # Undo, History, and Snapshots
 
-Current product version: `2.0.0`
+Current product version: `3.1.0`
 
 ISRC Catalog Manager is built for work that should be recoverable.
 
@@ -85,7 +85,7 @@ Recovery now includes profile-level policy controls, not only buttons in the His
 
 - `Settings > Application Settings > General` includes automatic snapshots, retention and safety levels, automatic cleanup, a history storage budget, automatic-snapshot retention counts, and optional aging for pre-restore safety copies.
 - The named levels `Maximum Safety`, `Balanced`, and `Lean` are preset helpers layered on top of the same conservative cleanup rules. `Custom` leaves the detailed controls in your hands.
-- Automatic cleanup is limited to safe auto-generated artifacts. Manual snapshots and other protected restore points remain protected by default.
+- Automatic cleanup is limited to safe auto-generated artifacts. Manual snapshots and other protected restore points remain protected by default, while ordinary backup rows remain cleanup-eligible and aged pre-restore safety backups can be auto-pruned when that policy is enabled.
 - If a snapshot, restore, or settings change would push the profile over budget, the app can warn first and open the cleanup workflow instead of failing silently.
 
 This keeps the recovery system usable over time without weakening restore safety.

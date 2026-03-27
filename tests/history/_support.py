@@ -1109,6 +1109,27 @@ class HistoryManagerTestCase(unittest.TestCase):
 
         self.assertFalse(export_path.exists())
 
+    def case_file_helper_rejects_directory_target_before_mutation(self):
+        export_dir = self.root / "exports"
+        export_dir.mkdir(parents=True, exist_ok=True)
+        mutation_called = False
+
+        def mutation():
+            nonlocal mutation_called
+            mutation_called = True
+            return str(export_dir / "should-not-run.txt")
+
+        with self.assertRaisesRegex(ValueError, "requires a file path, not a directory"):
+            run_file_history_action(
+                history_manager=self.history,
+                action_label="Write Helper Export",
+                action_type="file.helper_export",
+                target_path=export_dir,
+                mutation=mutation,
+            )
+
+        self.assertFalse(mutation_called)
+
     def case_repair_recovery_state_quarantines_referenced_missing_snapshot(self):
         before = self.history.capture_snapshot(kind="pre_quarantine", label="Before quarantine")
         created_track_id = self._create_track(title="Quarantine Target")

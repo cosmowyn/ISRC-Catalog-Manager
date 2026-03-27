@@ -60,7 +60,7 @@ def _app_version_text() -> str:
             continue
         except Exception:
             break
-    return "2.0.0"
+    return "3.1.0"
 
 
 @dataclass(slots=True)

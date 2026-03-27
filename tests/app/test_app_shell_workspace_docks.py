@@ -71,6 +71,12 @@ class AppShellWorkspaceDockTests(AppShellTestCase):
     test_repertoire_export_uses_background_task_instead_of_direct_sync_write = (
         AppShellTestCase.case_repertoire_export_uses_background_task_instead_of_direct_sync_write
     )
+    test_repertoire_export_resolves_directory_selection_to_file_target = (
+        AppShellTestCase.case_repertoire_export_resolves_directory_selection_to_file_target
+    )
+    test_repertoire_csv_bundle_uses_snapshot_history_for_directory_targets = (
+        AppShellTestCase.case_repertoire_csv_bundle_uses_snapshot_history_for_directory_targets
+    )
     test_party_import_write_mode_runs_dry_run_review_before_apply = (
         AppShellTestCase.case_party_import_write_mode_runs_dry_run_review_before_apply
     )

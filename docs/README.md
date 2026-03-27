@@ -12,13 +12,13 @@ Use the repository [`README.md`](../README.md) for the product overview, positio
 
 ## Import & Exchange
 
-- [Import and Merge Workflows](import-and-merge-workflows.md) covers exchange import, saved per-format choices, explicit skip targets, JSON/package mapping behavior, XML import, bulk audio attachment, audio tag import, automatic export-time metadata embedding, matching rules, merge behavior, and package round-tripping.
+- [Import and Merge Workflows](import-and-merge-workflows.md) covers the shared inspect/review/apply import contract across catalog exchange, Party import, Contracts and Rights import, XML review, bulk audio attachment, audio tag import, automatic export-time metadata embedding, matching rules, merge behavior, and package round-tripping.
 - [GS1 Workflow Guide](gs1_workflow.md) covers workbook preparation and verified export from catalog data.
 
 ## Catalog & Repertoire Workflows
 
 - [Catalog Workspace Workflows](catalog-workspace-workflows.md) explains the docked workspace model, tabbed managers, release assignment, deliverables review, the Derivative Ledger workflow, saved searches, and relationship review.
-- [Audio Authenticity Workflow](audio-authenticity-workflow.md) explains signing keys, direct master watermark exports, provenance-only derivative exports, sidecar manifests, embedded metadata tags, verification from selected catalog audio or external files, the Derivative Ledger review surface, and the feature's honest limits.
+- [Audio Authenticity Workflow](audio-authenticity-workflow.md) explains signing keys, direct master watermark exports, provenance-only derivative exports, sidecar manifests, embedded metadata tags, verification from selected catalog audio or external files, and the feature's honest limits.
 - [Repertoire Knowledge System](repertoire_knowledge_system.md) explains how tracks, releases, works, parties, contracts, rights, documents, and assets fit together.
 
 ## Operations & Recovery
@@ -42,5 +42,5 @@ Use the repository [`README.md`](../README.md) for the product overview, positio
 - Start with the product [README](../README.md).
 - Read [Import and Merge Workflows](import-and-merge-workflows.md) if external metadata intake matters to you.
 - Read [Catalog Workspace Workflows](catalog-workspace-workflows.md) and [Repertoire Knowledge System](repertoire_knowledge_system.md) for daily catalog operations.
-- Read [Audio Authenticity Workflow](audio-authenticity-workflow.md) if you need signed master-watermark exports, provenance-sidecar derivatives, want to verify audio files against the current catalog, or need to review managed export batches after delivery.
+- Read [Audio Authenticity Workflow](audio-authenticity-workflow.md) if you need signed master-watermark exports, provenance-sidecar derivatives, or want to verify audio files against the current catalog or from outside the app.
 - Read [Diagnostics and Recovery](diagnostics-and-recovery.md) and [Undo, History, and Snapshots](undo_redo_strategy.md) once you are working with larger or riskier catalog changes.

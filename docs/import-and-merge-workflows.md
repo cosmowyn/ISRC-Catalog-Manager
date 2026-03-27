@@ -1,16 +1,25 @@
 # Import and Merge Workflows
 
-This guide documents the current import surfaces in ISRC Catalog Manager as they exist today.
+This guide documents the current user-facing import surfaces in ISRC Catalog Manager as they exist today.
 
-The product has three distinct ingest paths:
+The shared application rule is now simple:
 
-- exchange import for structured catalog rows
-- XML import for supported XML exchange files
-- audio tag import for embedded metadata round-tripping, plus export-time metadata embedding on catalog-backed audio workflows
+1. choose the source
+2. inspect or parse it first
+3. review the preview or dry-run result
+4. apply only after explicit confirmation
 
-The workflows overlap in the data they can touch, but they are not the same feature. Each path has different match rules, write behavior, and limits.
+The product currently exposes these import families:
 
-## Exchange Import
+- catalog exchange import for structured track and release data
+- Party import for reusable identity and role records
+- Contracts and Rights import for repertoire, contracts, rights, assets, and linked records
+- audio tag import for embedded metadata round-tripping
+- bulk audio attachment for matching local files onto existing tracks
+
+The workflows overlap in the data they can touch, but they are not the same feature. Each path has different match rules, write behavior, and domain-specific review details.
+
+## Catalog Exchange Import
 
 Exchange import is the tabular and package-based workflow used for bringing structured catalog data into the database.
 
@@ -62,14 +71,14 @@ CSV and XLSX are still the most visible mapping workflows because they begin fro
 The exchange dialog can remember setup choices per format.
 
 - `Remember these ... import choices` stores the current mode, match options, custom-field creation preference, and CSV delimiter settings for that specific format
-- `File > Import Exchange > Reset Saved Import Choices…` clears those persisted choices when you want to start fresh
+- `File > Import & Exchange > Catalog Exchange > Reset Saved Import Choices…` clears those persisted choices when you want to start fresh
 - This is especially useful when one source family is usually merged with heuristics while another is usually create-only or validation-first
 
 This is what makes the workflow useful for structured exports from labels, catalog systems, publishers, distributors, and PRO-style export files. If a system can export to a supported format, its fields can be mapped into the catalog without a custom integration.
 
 Examples of source systems that can fit this pattern include BUMA, STEMRA, SENA, and similar metadata or reporting sources, provided the file is exported into one of the supported formats.
 
-### Import Modes
+### Import Modes And Review Contract
 
 Exchange import supports these modes:
 
@@ -87,7 +96,7 @@ Their behavior is different:
 - `merge` updates matched rows while preserving existing populated values for many core fields
 - `insert_new` creates only when no match exists and skips matched rows as duplicates
 
-The dry-run mode is useful for checking setup, mapping, and match behavior before committing changes. It is not a full semantic validation of every row.
+For normal write imports, the workflow now runs a real review pass before apply. The preview is produced by the same import seam that the apply step uses, so the proposed outcomes are truthful instead of a separate mock preview.
 
 ### Match Precedence
 
@@ -157,80 +166,69 @@ This is one of the reasons the package workflow is useful for moving a complete 
 - Import a label or PRO-style spreadsheet export, map its work reference column to `buma_work_number`, and map any local reporting columns to active `custom::<name>` fields.
 - Import a ZIP package that contains catalog rows plus bundled media, then use the package round trip to restore both the metadata and the packaged files in one pass.
 
-## Bulk Attach Audio Files
+## Party Import
 
-Bulk audio attachment is a separate catalog workflow rather than a row-oriented exchange import.
+Party import follows the same inspect, review, and apply contract as the stronger catalog exchange flows.
 
-- Open `Catalog > Bulk Attach Audio Files…` when the track rows already exist and the remaining job is to connect audio files to them
-- The workflow inspects filenames and embedded tags, suggests likely track matches, and lets you reassign or skip files before anything is written
-- You can choose whether the attached audio should be stored in the database or as managed local files
-- One optional artist value can be applied across the matched set when you are cleaning up a consistent batch
-- The final apply step is recorded as one recoverable history mutation instead of as a series of isolated row edits
+### Supported Input Types
 
-## XML Import
+- `CSV`
+- `XLSX`
+- `JSON`
 
-XML import is a separate service with separate semantics.
+### What Party Review Shows
 
-### Supported XML Shapes
+The Party workflow is tuned to Party-domain fields rather than catalog rows. Review output can include:
 
-The importer recognizes two supported document shapes:
+- mapped Party identity fields
+- create, update, merge, or duplicate-skip outcomes
+- owner-role impact where relevant
+- warnings for ambiguous or conflicting rows
 
-- `DeclarationOfSoundRecordingRightsClaimMessage` with `SoundRecording` entries
-- `Tracks` with nested `Track` entries
+That matters because Party records are the single authority for identity and owner data in the app. The preview is meant to show what will happen before the importer touches those records.
 
-If the root element does not match one of those shapes, the file is rejected.
+## Contracts And Rights Import
 
-### What XML Import Does
+Contracts and Rights import now also stops at inspection and review before apply.
 
-XML import is insert-oriented.
+### Supported Input Types
 
-- It creates new tracks for valid, non-duplicate records
-- It does not offer update or merge semantics
-- It does not offer manual row assignment
+- `JSON`
+- `XLSX`
+- `CSV bundle`
+- `ZIP package`
 
-This makes XML import a good fit for structured inbound files that are meant to become new catalog entries rather than being reconciled into existing ones.
+### What The Review Stage Covers
 
-### XML Dry Run And Commit Flow
+The repertoire review is domain-aware rather than track-oriented. It can show:
 
-XML import starts with inspection.
+- contract, right, party, work, and asset counts
+- validation issues in the incoming bundle
+- package/file readiness
+- the effect of the chosen apply mode before anything is written
 
-The inspection pass reports:
+## XML Through The Exchange Review Surface
+
+XML is no longer a separate user-facing import surface. The UI routes XML through the same catalog exchange review/apply flow as the other structured catalog formats, while keeping XML-specific inspection logic underneath.
+
+The XML inspection pass still reports:
 
 - duplicate ISRCs already present in the catalog
 - invalid rows
 - missing custom fields
 - custom-field type conflicts
 
-If the inspection looks correct, the import can then be committed.
+If the review looks correct, the import can then be committed through the same reviewed flow as the other catalog exchange formats.
 
-The workflow can also create missing custom fields when allowed. That creation path uses the field types declared by the XML file, including dropdown options when they are present.
+## Bulk Attach Audio Files
 
-### XML Field Handling
+Bulk audio attachment is a separate catalog workflow rather than a row-oriented exchange import.
 
-The XML importer recognizes supported core fields such as:
-
-- `isrc`
-- title or `track_title`
-- artist or `mainartist`
-- additional artists
-- album
-- release date, when already in ISO date form
-- `iswc`
-- `upc` or `upcean`
-- genre
-- track length
-- catalog number
-- `buma_work_number`
-- custom fields
-
-Rows with invalid or missing essential values are skipped during parsing. Duplicate ISRCs are reported separately during inspection and are not imported again.
-
-### XML Limits
-
-- XML import is not a reconciliation workflow
-- XML import does not merge into existing catalog rows
-- XML import does not expose per-row manual assignment
-- custom field type conflicts must be resolved before import
+- Open `Catalog > Audio > Import & Attach > Bulk Attach Audio Files…` when the track rows already exist and the remaining job is to connect audio files to them
+- The workflow inspects filenames and embedded tags, suggests likely track matches, and lets you reassign or skip files before anything is written
+- You can choose whether the attached audio should be stored in the database or as managed local files
+- One optional artist value can be applied across the matched set when you are cleaning up a consistent batch
+- The final apply step is recorded as one recoverable history mutation instead of as a series of isolated row edits
 
 ## Audio Tag Import And Export Metadata Behavior
 

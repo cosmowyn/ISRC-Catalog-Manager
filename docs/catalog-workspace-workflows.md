@@ -123,7 +123,7 @@ This is a small feature with a large workflow impact because it reduces the numb
 
 The catalog workflow now includes a dedicated batch media-intake path for existing tracks.
 
-- `Catalog > Bulk Attach Audio Files…` inspects selected local audio files before anything is written.
+- `Catalog > Audio > Import & Attach > Bulk Attach Audio Files…` inspects selected local audio files before anything is written.
 - The dialog can suggest matches from filenames and embedded tags, show the detected artist/title, and let you skip or manually reassign individual files.
 - You choose whether the attached audio should be stored in the database or as managed local files.
 - One optional artist value can be applied across the matched set when you are cleaning up a consistent batch.
@@ -135,23 +135,25 @@ This workflow is useful when the track rows already exist and the remaining job 
 
 The catalog menu exposes the main audio export families directly from the workspace, and the rule is consistent across them: when a workflow exports catalog-backed audio, it automatically attempts to embed trustworthy catalog metadata into the exported copy.
 
-- `Catalog > Export Audio Derivatives…` transcodes selected catalog audio into managed derivative formats, writes catalog metadata when available, hashes the final outputs, and registers them in the Derivative Ledger.
-- `Catalog > Export Catalog Audio Copies…` writes original-format catalog audio copies without touching the stored source audio, then embeds catalog metadata into those exported copies when the target container supports it.
-- `Catalog > Convert External Audio Files…` is intentionally different: it strips inherited source metadata, does not invent catalog metadata, and does not create derivative or authenticity records.
+- `Catalog > Audio > Delivery & Conversion > Export Audio Derivatives…` transcodes selected catalog audio into managed derivative formats, writes catalog metadata when available, hashes the final outputs, and registers them in the Derivative Ledger.
+- `Catalog > Audio > Delivery & Conversion > Export Catalog Audio Copies…` writes original-format catalog audio copies without touching the stored source audio, then embeds catalog metadata into those exported copies when the target container supports it.
+- `Catalog > Audio > Delivery & Conversion > Convert External Audio Files…` is intentionally different: it strips inherited source metadata, does not invent catalog metadata, and does not create derivative or authenticity records.
 
 ## Audio Authenticity From The Catalog
 
 The catalog menu also exposes the audio authenticity workflow directly from the main workspace.
 
-- `Catalog > Export Authenticity Watermarked Audio…` uses the current track selection to build signed WAV/FLAC/AIFF master export copies without changing the original canonical source audio.
+- `Catalog > Audio > Authenticity & Provenance > Export Authentic Masters…` uses the current track selection to build signed WAV/FLAC/AIFF master export copies without changing the original canonical source audio.
 - Those exported copies carry:
   - a compact keyed watermark token
   - a sibling signed manifest sidecar
   - normal embedded audio metadata tags when the catalog already has those values available
-- `Catalog > Export Authenticity Provenance Audio…` copies supported lossy derivatives as-is, writes the available metadata tags, and saves a signed lineage sidecar that points back to a previously verified watermarked master.
-- `Catalog > Verify Audio Authenticity…` can work in two ways:
+- `Catalog > Audio > Authenticity & Provenance > Export Provenance Copies…` copies supported lossy derivatives as-is, writes the available metadata tags, and saves a signed lineage sidecar that points back to a previously verified watermarked master.
+- `Catalog > Audio > Authenticity & Provenance > Verify Audio Authenticity…` can work in two ways:
   - verify the currently selected track audio when one supported direct/provenance source is selected
   - verify any external direct/provenance-supported file through the file picker
+
+These authenticity exports do not create managed `Derivative Ledger` rows. They remain direct file-and-sidecar exports, with history and audit entries capturing the operation separately from the managed derivative registry.
 
 This matters in the workspace because authenticity review is not limited to files that are already attached to the current profile. You can stay in the catalog when a track is selected, but you can also inspect an outside delivery or export copy without first importing or attaching it.
 

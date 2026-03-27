@@ -1,6 +1,6 @@
 # ISRC Catalog Manager
 
-Current product version: `2.0.0`
+Current product version: `3.1.0`
 
 ISRC Catalog Manager is a local-first desktop catalog and repertoire operations workspace for artists, labels, managers, and catalog owners who need more than a basic track list.
 
@@ -144,18 +144,18 @@ The ledger is intentionally layered for day-to-day use rather than as one long d
 The app can also produce authenticity-aware audio exports for practical ownership and provenance workflows.
 
 - `Settings > Audio Authenticity Keys…` generates local Ed25519 signing keys
-- `Catalog > Export Authenticity Watermarked Audio…` writes direct WAV, FLAC, or AIFF master copies with:
+- `Catalog > Audio > Authenticity & Provenance > Export Authentic Masters…` writes direct WAV, FLAC, or AIFF master copies with:
   - a compact keyed watermark token
   - a signed authenticity manifest sidecar
   - standard audio metadata tags populated from catalog data when available
-- `Catalog > Export Authenticity Provenance Audio…` writes signed provenance-sidecar copies for supported lossy derivatives without claiming direct watermark extraction from those files
-- `Catalog > Verify Audio Authenticity…` can verify either:
+- `Catalog > Audio > Authenticity & Provenance > Export Provenance Copies…` writes signed provenance-sidecar copies for supported lossy derivatives without claiming direct watermark extraction from those files
+- `Catalog > Audio > Authenticity & Provenance > Verify Audio Authenticity…` can verify either:
   - the selected catalog track audio, or
   - an external direct/provenance-supported file chosen through the file picker
 
 This feature is intentionally honest about scope. It is not DRM, does not claim zero waveform change, and does not treat watermarking alone as proof. The authenticity claim comes from the signed manifest; the watermark links direct master exports back to that signed record, while lossy derivatives are verified through signed lineage to a previously watermarked master.
 
-Those exports also remain reviewable after the export moment itself. The `Derivative Ledger` in the deliverables workspace keeps managed export batches searchable by batch ID, output file, format, derivative kind, and status, then layers the selected batch into `Derivatives`, `Details`, `Lineage`, and `Admin` tabs so the export history stays operational instead of archival.
+These authenticity exports stay intentionally simple and explicit: they write standalone export files plus signed sidecars to the chosen destination and record the operation in history and the audit trail, but they do not create managed `Derivative Ledger` rows.
 
 ### Quality control and operational readiness
 
@@ -184,9 +184,10 @@ The app includes a dedicated GS1 workflow for maintaining product metadata and e
 
 The import layer is designed as a rule-driven workbench rather than a generic file picker.
 
-For structured exchange import, the app can:
+For structured catalog exchange import, the app can:
 
 - inspect incoming `XML`, `CSV`, `XLSX`, `JSON`, and `ZIP package` sources before import
+- require preview, review, and explicit confirmation before a write import is applied
 - preview incoming rows and choose the CSV delimiter when needed
 - map source columns to supported catalog fields or active `custom::<name>` text fields
 - save and reload mapping presets for repeat imports
@@ -202,11 +203,13 @@ That makes the app useful for bringing in structured exports from labels, catalo
 
 The app also includes:
 
+- Party import with the same inspect, map, review, and apply contract used by the stronger catalog import workflows
+- Contracts and Rights import with inspection and review before any write is applied
 - XML import routed through the same reviewed exchange setup surface as the other catalog import formats
 - audio tag import plus catalog-backed audio exports that embed trustworthy catalog metadata automatically
 - a separate repertoire exchange workflow for works, parties, contracts, rights, assets, and their relationships
 
-For existing catalog rows that already need their audio attached, the separate `Catalog > Bulk Attach Audio Files…` workflow can inspect filenames and embedded tags, suggest track matches, let you reassign or skip files, choose the storage mode, and optionally apply one artist name across the matched set before committing one history-wrapped batch.
+For existing catalog rows that already need their audio attached, the separate `Catalog > Audio > Import & Attach > Bulk Attach Audio Files…` workflow can inspect filenames and embedded tags, suggest track matches, let you reassign or skip files, choose the storage mode, and optionally apply one artist name across the matched set before committing one history-wrapped batch.
 
 ### Trust, recovery, and maintenance
 
@@ -218,7 +221,7 @@ The app includes:
 - manual snapshots and restore paths for heavier operations
 - a dedicated Backups tab plus cleanup and trim flows for older artifacts
 - profile-scoped retention and safety settings for automatic snapshots, cleanup, storage budgets, and restore safety copies
-- milestone-based startup feedback while storage reconciliation and workspace restore finish
+- truthful task-based startup and profile-loading feedback while storage reconciliation, workspace restore, and catalog loading finish
 - a quality dashboard for operational catalog issues
 - diagnostics for schema, storage, integrity, managed files, history health, and history budget pressure
 - repair actions for supported issues such as history reconciliation, legacy promoted-field repair, and storage-layout migration

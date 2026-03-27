@@ -3576,6 +3576,84 @@ class AppShellTestCase(unittest.TestCase):
             "Export Contracts and Rights JSON",
         )
 
+    def case_repertoire_export_resolves_directory_selection_to_file_target(self):
+        export_dir = self.root / "repertoire-export-target"
+        export_dir.mkdir(parents=True, exist_ok=True)
+        captured_targets: list[Path] = []
+        original_run_file_history_action = app_module.run_file_history_action
+
+        def _capture_file_history(*args, **kwargs):
+            captured_targets.append(Path(kwargs["target_path"]))
+            return original_run_file_history_action(*args, **kwargs)
+
+        with (
+            mock.patch.object(
+                app_module.QFileDialog,
+                "getSaveFileName",
+                return_value=(str(export_dir), "JSON Files (*.json)"),
+            ),
+            mock.patch.object(
+                app_module.App,
+                "_submit_background_bundle_task",
+                autospec=True,
+                side_effect=self._run_bundle_task_inline,
+            ),
+            mock.patch.object(
+                app_module,
+                "run_file_history_action",
+                side_effect=_capture_file_history,
+            ),
+        ):
+            self.window.export_repertoire_exchange("json")
+            self.app.processEvents()
+
+        self.assertEqual(len(captured_targets), 1)
+        self.assertEqual(captured_targets[0].parent, export_dir)
+        self.assertEqual(captured_targets[0].suffix, ".json")
+        self.assertTrue(captured_targets[0].name.startswith("contracts_and_rights_json_"))
+        self.assertTrue(captured_targets[0].exists())
+
+    def case_repertoire_csv_bundle_uses_snapshot_history_for_directory_targets(self):
+        export_root = self.root / "repertoire-bundles"
+        export_root.mkdir(parents=True, exist_ok=True)
+        recorded_paths: list[str] = []
+        original_run_snapshot_history_action = app_module.run_snapshot_history_action
+
+        def _capture_snapshot_history(*args, **kwargs):
+            recorded_paths.append(str((kwargs.get("payload") or {}).get("path") or ""))
+            return original_run_snapshot_history_action(*args, **kwargs)
+
+        with (
+            mock.patch.object(
+                app_module.QFileDialog,
+                "getExistingDirectory",
+                return_value=str(export_root),
+            ),
+            mock.patch.object(
+                app_module.App,
+                "_submit_background_bundle_task",
+                autospec=True,
+                side_effect=self._run_bundle_task_inline,
+            ),
+            mock.patch.object(
+                app_module,
+                "run_file_history_action",
+                side_effect=AssertionError("CSV bundle export should not use file history"),
+            ),
+            mock.patch.object(
+                app_module,
+                "run_snapshot_history_action",
+                side_effect=_capture_snapshot_history,
+            ),
+        ):
+            self.window.export_repertoire_exchange("csv")
+            self.app.processEvents()
+
+        created_dirs = [path for path in export_root.iterdir() if path.is_dir()]
+        self.assertEqual(len(created_dirs), 1)
+        self.assertTrue(created_dirs[0].name.startswith("contracts_and_rights_csv_bundle_"))
+        self.assertEqual(recorded_paths, [str(created_dirs[0])])
+
     def case_party_import_write_mode_runs_dry_run_review_before_apply(self):
         json_path = self.root / "party-review.json"
         json_path.write_text(

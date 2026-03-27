@@ -14,6 +14,9 @@ class ContractServiceTests(ContractRightsAssetServiceTestCase):
     test_contract_document_update_preserves_storage_metadata_on_noop_save = (
         ContractRightsAssetServiceTestCase.case_contract_document_update_preserves_storage_metadata_on_noop_save
     )
+    test_contract_document_editor_resolves_directory_selection_to_suggested_filename = (
+        ContractRightsAssetServiceTestCase.case_contract_document_editor_resolves_directory_selection_to_suggested_filename
+    )
     test_contract_document_storage_mode_round_trip_via_update = (
         ContractRightsAssetServiceTestCase.case_contract_document_storage_mode_round_trip_via_update
     )

@@ -611,6 +611,58 @@ class ContractRightsAssetServiceTestCase(unittest.TestCase):
         finally:
             editor.close()
 
+    def case_contract_document_editor_resolves_directory_selection_to_suggested_filename(self):
+        if ContractDocumentEditor is None:
+            self.skipTest("Contract document editor unavailable")
+        require_qapplication()
+
+        document_path = self.data_root / "directory-export.pdf"
+        document_path.write_bytes(b"%PDF-1.4\n%directory export\n")
+        contract_id = self.contract_service.create_contract(
+            ContractPayload(
+                title="Directory Export Contract",
+                contract_type="license",
+                documents=[
+                    ContractDocumentPayload(
+                        title="Directory Export",
+                        document_type="signed_agreement",
+                        source_path=str(document_path),
+                        storage_mode="managed_file",
+                    )
+                ],
+            )
+        )
+
+        detail = self.contract_service.fetch_contract_detail(contract_id)
+        self.assertIsNotNone(detail)
+        assert detail is not None
+        editor = ContractDocumentEditor(contract_service=self.contract_service)
+        try:
+            editor.load_documents(detail.documents)
+            editor.documents_table.selectRow(0)
+            editor._load_document_into_form(0)
+            current_document = editor._current_document()[1]
+            assert current_document is not None
+            export_dir = self.data_root / "directory-export-target"
+            export_dir.mkdir(parents=True, exist_ok=True)
+
+            with (
+                mock.patch(
+                    "isrc_manager.contracts.dialogs.QFileDialog.getSaveFileName",
+                    return_value=(str(export_dir), ""),
+                ),
+                mock.patch("isrc_manager.contracts.dialogs.QMessageBox.critical") as critical_mock,
+            ):
+                editor.export_button.click()
+
+            critical_mock.assert_not_called()
+            expected_name = current_document.filename or document_path.name
+            exported_path = export_dir / expected_name
+            self.assertTrue(exported_path.exists())
+            self.assertEqual(exported_path.read_bytes(), document_path.read_bytes())
+        finally:
+            editor.close()
+
     def case_contract_editor_selector_widgets_round_trip_known_reference_ids(self):
         if ContractEditorDialog is None:
             self.skipTest("Contract editor dialog unavailable")

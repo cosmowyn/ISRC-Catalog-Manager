@@ -33,7 +33,7 @@ The default key is used for new authenticity exports.
 
 ## Export Watermarked Master Audio
 
-Use `Catalog > Export Authenticity Watermarked Audio…`.
+Use `Catalog > Audio > Authenticity & Provenance > Export Authentic Masters…`.
 
 This workflow follows the same global export rule as the rest of the catalog-backed audio pipeline: the catalog remains the only metadata source of truth, and export-time metadata embedding is automatic when trustworthy catalog values are available.
 
@@ -53,7 +53,7 @@ The export copy can therefore contain both:
 
 ## Export Provenance Audio
 
-Use `Catalog > Export Authenticity Provenance Audio…`.
+Use `Catalog > Audio > Authenticity & Provenance > Export Provenance Copies…`.
 
 This workflow is for supported lossy derivatives that should inherit authenticity by lineage rather than by direct watermark extraction.
 
@@ -69,31 +69,21 @@ The export workflow:
 
 That means lossy derivatives are verified through signed lineage back to a previously watermarked master, not by pretending the same embedded watermark check works equally on every codec.
 
-## Deliverables Workspace And Derivative Ledger
+## Export Outputs And Review Boundaries
 
-The day-to-day review surface for these exports lives in the docked `Deliverables and Asset Versions` workspace.
+These authenticity exports create standalone files plus `*.authenticity.json` sidecars in the destination you choose at export time.
 
-- `Asset Registry` keeps the approved masters, alternates, artwork variants, and asset relationships visible.
-- `Derivative Ledger` tracks managed export batches plus the registered derivative rows created from those workflows.
-- The ledger can be narrowed by search, output format, derivative kind, and status so older export history stays workable as the catalog grows.
+That means:
 
-The selected batch is intentionally layered instead of shown as one long raw dump:
+- the app records the export in history and the audit trail
+- the export remains portable on disk because the sidecar travels with the audio file
+- the workflow does not register a managed `Derivative Ledger` row for authenticity or provenance export
 
-- `Derivatives` keeps the registered outputs visible and lets you open the linked track, open the linked release, or launch authenticity verification for the selected derivative
-- `Details` keeps batch and output metadata readable as structured fields
-- `Lineage` keeps manifests, hashes, retained paths, package members, and source lineage together
-- `Admin` keeps cleanup actions separate from normal review
-
-The cleanup wording is intentionally explicit:
-
-- deleting a derivative or batch removes database records only
-- deleting retained output files removes only the listed retained files and keeps the ledger row in place
-
-That makes the ledger useful for real operational cleanup without overstating what a delete action actually changes on disk.
+This distinction is deliberate. The deliverables workspace is still used for managed derivative and asset workflows, while authenticity export remains a file-and-sidecar delivery workflow.
 
 ## Verify Audio Authenticity
 
-Use `Catalog > Verify Audio Authenticity…`.
+Use `Catalog > Audio > Authenticity & Provenance > Verify Audio Authenticity…`.
 
 If one supported catalog track audio source is selected, the app lets you choose between:
 

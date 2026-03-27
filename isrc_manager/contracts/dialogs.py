@@ -38,7 +38,9 @@ from isrc_manager.file_storage import (
     STORAGE_MODE_DATABASE,
     STORAGE_MODE_MANAGED_FILE,
     normalize_storage_mode,
+    resolve_file_export_target,
 )
+from isrc_manager.paths import EXPORTS_SUBDIR
 from isrc_manager.parties.dialogs import PartyEditorDialog
 from isrc_manager.ui_common import (
     FocusWheelComboBox,
@@ -1697,18 +1699,19 @@ class ContractDocumentEditor(QWidget):
             QMessageBox.information(self, "Export Document", "Select a document first.")
             return None
         _, document = current
+        suggested = (
+            document.filename
+            or Path(document.stored_path or document.source_path or "contract-document").name
+        )
         if path is None:
-            suggested = (
-                document.filename
-                or Path(document.stored_path or document.source_path or "contract-document").name
-            )
             chosen, _ = QFileDialog.getSaveFileName(self, "Export Contract Document", suggested)
             if not chosen:
                 return None
-            output = Path(chosen)
+            raw_output: str | Path = chosen
         else:
-            output = Path(path)
+            raw_output = path
         try:
+            output = resolve_file_export_target(raw_output, default_name=suggested)
             data, _ = self._document_bytes(document)
             output.parent.mkdir(parents=True, exist_ok=True)
             output.write_bytes(data)
@@ -2705,13 +2708,24 @@ class ContractBrowserPanel(QWidget):
         if service is None:
             QMessageBox.warning(self, "Contract Manager", "Open a profile first.")
             return
+        timestamp = date.today().strftime("%Y%m%d")
+        default_name = f"contract_deadlines_{timestamp}.csv"
+        if service.data_root is not None:
+            initial_path = str((service.data_root / EXPORTS_SUBDIR / default_name).resolve())
+        else:
+            initial_path = default_name
         path, _ = QFileDialog.getSaveFileName(
-            self, "Export Upcoming Deadlines", "", "CSV Files (*.csv)"
+            self,
+            "Export Upcoming Deadlines",
+            initial_path,
+            "CSV Files (*.csv)",
         )
         if not path:
             return
         try:
-            service.export_deadlines_csv(path)
+            resolved_path = resolve_file_export_target(path, default_name=default_name)
+            resolved_path.parent.mkdir(parents=True, exist_ok=True)
+            service.export_deadlines_csv(resolved_path)
         except Exception as exc:
             QMessageBox.critical(self, "Contract Manager", str(exc))
 

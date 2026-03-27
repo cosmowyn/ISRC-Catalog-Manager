@@ -94,6 +94,54 @@ def coalesce_filename(
     return fallback
 
 
+def resolve_file_export_target(
+    target_path: str | Path,
+    *,
+    default_name: str,
+    default_suffix: str = "",
+) -> Path:
+    """Resolve a save-dialog selection into a concrete file target."""
+
+    clean_target = str(target_path or "").strip()
+    if not clean_target:
+        raise ValueError("Export target path is required.")
+
+    target = Path(clean_target).expanduser()
+    normalized_suffix = str(default_suffix or "").strip()
+    if normalized_suffix and not normalized_suffix.startswith("."):
+        normalized_suffix = f".{normalized_suffix}"
+    default_filename = coalesce_filename(
+        default_name,
+        default_stem="export",
+        default_suffix=normalized_suffix,
+    )
+
+    if target.exists() and target.is_dir():
+        target = target / default_filename
+    elif normalized_suffix and not target.suffix:
+        target = target.with_suffix(normalized_suffix)
+
+    if target.name in {"", ".", ".."}:
+        raise ValueError("Export target must resolve to a file path.")
+    return target
+
+
+def resolve_directory_export_target(target_path: str | Path, *, default_name: str) -> Path:
+    """Resolve a directory-picker selection into a concrete export folder."""
+
+    clean_target = str(target_path or "").strip()
+    if not clean_target:
+        raise ValueError("Export target directory is required.")
+
+    target = Path(clean_target).expanduser()
+    safe_name = sanitize_export_basename(default_name, default_stem="export")
+    if target.exists() and target.is_dir():
+        target = target / safe_name
+    if target.name in {"", ".", ".."}:
+        raise ValueError("Export target must resolve to a directory path.")
+    return target
+
+
 def guess_mime_type(filename: str | None, fallback: str | None = None) -> str:
     clean_name = str(filename or "").strip()
     if clean_name:

@@ -80,7 +80,7 @@ Recovery is no longer just about creating artifacts. It also includes conservati
 - `Settings > Application Settings > General` now includes snapshot retention and safety controls for the active profile.
 - The named levels `Maximum Safety`, `Balanced`, and `Lean` provide preset cleanup behavior, while `Custom` lets you keep your own combination.
 - The profile can store a soft history storage budget, an automatic-snapshot retention count, and an optional age limit for pre-restore safety copies.
-- Automatic cleanup removes only eligible auto-generated artifacts. Manual snapshots and protected restore points stay protected by default.
+- Automatic cleanup removes only eligible auto-generated artifacts. Manual snapshots and protected restore points stay protected by default, while ordinary backup records remain cleanup-eligible and older pre-restore safety backups can be pruned by age when that policy is enabled.
 
 This keeps history growth practical without turning cleanup into a blind delete tool.
 
@@ -89,7 +89,7 @@ This keeps history growth practical without turning cleanup into a blind delete 
 Cleanup is not a blind delete operation.
 
 - The cleanup flow previews what is eligible.
-- It protects items that are still required by undo, redo, snapshot restore, backup restore, or session restore.
+- It protects items that are still required by undo, redo, snapshot restore, or session restore. Ordinary backup records can still be cleanup candidates, and aged pre-restore safety backups can also become eligible under the active policy.
 - It distinguishes between eligible and protected artifacts.
 - It now shows the current budget posture and whether the active policy can still reclaim safe space.
 - It helps keep history and storage from growing without context.

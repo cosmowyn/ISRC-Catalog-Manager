@@ -1,6 +1,6 @@
 # Repertoire Knowledge System
 
-Current product version: `2.0.0`
+Current product version: `3.1.0`
 
 ISRC Catalog Manager is no longer just a track table with a few extra fields. It is designed as a connected repertoire knowledge system for independent artists, labels, and catalog owners who need to understand not only what they have released, but what they control, how it is documented, and what is operationally ready.
 

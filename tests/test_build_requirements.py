@@ -406,7 +406,7 @@ class MainFlowTests(unittest.TestCase):
                 mock.patch.object(
                     build, "_resolve_entry_script", return_value=root / build.ENTRY_SCRIPT
                 ),
-                mock.patch.object(build, "_project_version", return_value="2.0.0"),
+                mock.patch.object(build, "_project_version", return_value="3.1.0"),
                 mock.patch.object(build, "_resolve_build_python", return_value=Path("/python")),
                 mock.patch.object(build, "_select_pyinstaller", return_value=selection),
                 mock.patch.object(
@@ -466,13 +466,13 @@ class ArtifactStagingTests(unittest.TestCase):
                 staged = build._stage_release_artifact(
                     artifact,
                     dist_dir,
-                    app_version="2.0.0",
+                    app_version="3.1.0",
                 )
 
             manifest = json.loads((dist_dir / "release_manifest.json").read_text(encoding="utf-8"))
             self.assertTrue(staged.exists())
-            self.assertEqual(staged.name, f"{build.APP_NAME}-2.0.0-windows.exe")
-            self.assertEqual(manifest["app_version"], "2.0.0")
+            self.assertEqual(staged.name, f"{build.APP_NAME}-3.1.0-windows.exe")
+            self.assertEqual(manifest["app_version"], "3.1.0")
             self.assertEqual(manifest["platform"], "windows")
             self.assertEqual(manifest["source_artifact"], str(artifact))
             self.assertEqual(manifest["release_artifact"], str(staged))

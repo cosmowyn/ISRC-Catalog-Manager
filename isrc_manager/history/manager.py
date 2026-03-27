@@ -373,6 +373,10 @@ class HistoryManager:
         companion_suffixes: tuple[str, ...] = (),
     ) -> dict:
         target = Path(target_path)
+        if target.exists() and target.is_dir():
+            raise ValueError(
+                "File history capture requires a file path, not a directory: " f"{target}"
+            )
         file_dir = self.history_root / "file_states" / self.db_path.stem
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         bundle_dir = file_dir / f"{timestamp}_{target.name}"
@@ -396,6 +400,10 @@ class HistoryManager:
 
     def restore_file_state(self, target_path: str | Path, state: dict) -> None:
         target = Path(target_path)
+        if target.exists() and target.is_dir():
+            raise ValueError(
+                "File history restore requires a file path, not a directory: " f"{target}"
+            )
         companion_suffixes = tuple(state.get("companion_suffixes", []))
         for suffix in ("", *companion_suffixes):
             self._remove_path(Path(str(target) + suffix) if suffix else target)
