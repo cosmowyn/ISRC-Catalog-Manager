@@ -323,6 +323,8 @@ Use XML, CSV, XLSX, JSON, GS1 workbook export, repertoire exchange, or ZIP packa
 
 ## Screenshots
 
+The screenshots below are regenerated from the bundled demo workspace and captured with the bundled `VS Code Dark` theme so the public docs reflect the current polished desktop presentation.
+
 ### Workspace
 
 ![Workspace overview](docs/screenshots/workspace-overview.png)

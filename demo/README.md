@@ -27,4 +27,4 @@ That creates a LOCALAPPDATA-style demo tree under `demo/.runtime/` with:
 .venv/bin/python demo/capture_demo_screenshots.py
 ```
 
-That refreshes the demo workspace and writes new screenshots to `docs/screenshots/`.
+That refreshes the demo workspace, applies the bundled `VS Code Dark` starter theme in-memory for capture, and writes new screenshots to `docs/screenshots/`.
