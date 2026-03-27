@@ -15319,6 +15319,26 @@ class App(QMainWindow):
 
         return self._normalize_track_ids(created_or_updated)
 
+    def open_add_track_workspace(self):
+        self._apply_add_data_panel_state(True)
+        field = getattr(self, "track_title_field", None)
+        if field is not None:
+            try:
+                field.setFocus()
+            except Exception:
+                pass
+        return getattr(self, "add_data_dock", None)
+
+    def open_catalog_workspace(self):
+        self._apply_catalog_table_panel_state(True)
+        table = getattr(self, "table", None)
+        if table is not None:
+            try:
+                table.setFocus()
+            except Exception:
+                pass
+        return getattr(self, "catalog_table_dock", None)
+
     def open_release_browser(self):
         if self.release_service is None:
             QMessageBox.warning(self, "Release Browser", "Open a profile first.")

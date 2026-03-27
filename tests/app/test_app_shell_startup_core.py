@@ -47,8 +47,8 @@ class AppShellStartupCoreTests(AppShellTestCase):
     test_catalog_menu_hides_top_level_release_creation_and_removes_legacy_tools = (
         AppShellTestCase.case_catalog_menu_hides_top_level_release_creation_and_removes_legacy_tools
     )
-    test_catalog_menu_hosts_panel_toggle_actions_and_preserves_existing_behavior = (
-        AppShellTestCase.case_catalog_menu_hosts_panel_toggle_actions_and_preserves_existing_behavior
+    test_catalog_workspace_menu_groups_intent_actions_and_preserves_workspace_routes = (
+        AppShellTestCase.case_catalog_workspace_menu_groups_intent_actions_and_preserves_workspace_routes
     )
     test_profiles_toolbar_visibility_persists_in_view_preferences = (
         AppShellTestCase.case_profiles_toolbar_visibility_persists_in_view_preferences

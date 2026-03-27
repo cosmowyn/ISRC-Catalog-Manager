@@ -363,67 +363,81 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
 
     catalog_menu = app.menu_bar.addMenu("Catalog")
     workspace_menu = catalog_menu.addMenu("Workspace")
-    workspace_manage_menu = workspace_menu.addMenu("Open and Manage")
-    workspace_panels_menu = workspace_menu.addMenu("Panels")
+    workspace_create_menu = workspace_menu.addMenu("Create / Maintain")
+    workspace_browse_menu = workspace_menu.addMenu("Browse / Review")
     app.catalog_managers_action = app._create_action(
         "Catalog Managers…",
         slot=app.open_catalog_managers_dialog,
         shortcuts=("Ctrl+Alt+G", "Meta+Alt+G"),
     )
-    workspace_manage_menu.addAction(app.catalog_managers_action)
     app.work_manager_action = app._create_action(
         "Work Manager…",
         slot=app.open_work_manager,
         shortcuts=("Ctrl+Alt+W", "Meta+Alt+W"),
     )
-    workspace_manage_menu.addAction(app.work_manager_action)
+    workspace_create_menu.addAction(app.work_manager_action)
     app.release_browser_action = app._create_action(
         "Release Browser…",
         slot=app.open_release_browser,
         shortcuts=("Ctrl+Alt+Shift+R", "Meta+Alt+Shift+R"),
     )
-    workspace_manage_menu.addAction(app.release_browser_action)
+    workspace_browse_menu.addAction(app.release_browser_action)
     app.party_manager_action = app._create_action(
         "Party Manager…",
         slot=app.open_party_manager,
         shortcuts=("Ctrl+Alt+P", "Meta+Alt+P"),
     )
-    workspace_manage_menu.addAction(app.party_manager_action)
+    workspace_create_menu.addAction(app.party_manager_action)
     app.contract_manager_action = app._create_action(
         "Contract Manager…",
         slot=app.open_contract_manager,
         shortcuts=("Ctrl+Alt+C", "Meta+Alt+C"),
     )
-    workspace_manage_menu.addAction(app.contract_manager_action)
+    workspace_create_menu.addAction(app.contract_manager_action)
     app.contract_template_workspace_action = app._create_action(
         "Contract Template Workspace…",
         slot=app.open_contract_template_workspace,
         shortcuts=("Ctrl+Alt+Shift+T", "Meta+Alt+Shift+T"),
     )
-    workspace_manage_menu.addAction(app.contract_template_workspace_action)
+    workspace_create_menu.addAction(app.contract_template_workspace_action)
     app.rights_matrix_action = app._create_action(
         "Rights Matrix…",
         slot=app.open_rights_matrix,
         shortcuts=("Ctrl+Alt+M", "Meta+Alt+M"),
     )
-    workspace_manage_menu.addAction(app.rights_matrix_action)
+    workspace_create_menu.addAction(app.rights_matrix_action)
     app.asset_registry_action = app._create_action(
         "Deliverables & Asset Versions…",
         slot=app.open_asset_registry,
         shortcuts=("Ctrl+Alt+A", "Meta+Alt+A"),
     )
-    workspace_manage_menu.addAction(app.asset_registry_action)
+    workspace_browse_menu.addAction(app.asset_registry_action)
     app.derivative_ledger_action = app._create_action(
         "Derivative Ledger…",
         slot=app.open_derivative_ledger,
     )
-    workspace_manage_menu.addAction(app.derivative_ledger_action)
+    workspace_browse_menu.addAction(app.derivative_ledger_action)
     app.global_search_action = app._create_action(
         "Global Search and Relationships…",
         slot=app.open_global_search,
         shortcuts=("Ctrl+Alt+F", "Meta+Alt+F"),
     )
-    workspace_manage_menu.addAction(app.global_search_action)
+    app.workspace_add_track_action = app._create_action(
+        "Add Track",
+        slot=app.open_add_track_workspace,
+    )
+    workspace_create_menu.insertAction(app.work_manager_action, app.workspace_add_track_action)
+    workspace_create_menu.addAction(app.catalog_managers_action)
+    app.workspace_catalog_action = app._create_action(
+        "Catalog",
+        slot=app.open_catalog_workspace,
+    )
+    workspace_browse_menu.insertAction(app.release_browser_action, app.workspace_catalog_action)
+    app.workspace_global_search_action = app._create_action(
+        "Global Search & Relationships…",
+        slot=app.open_global_search,
+    )
+    workspace_browse_menu.addAction(app.workspace_global_search_action)
     app.add_data_action = app._create_action(
         "Show Add Track Panel",
         checkable=True,
@@ -431,7 +445,6 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         toggled_slot=app._on_toggle_add_data,
         shortcuts=("Ctrl+Shift+D", "Meta+Shift+D"),
     )
-    workspace_panels_menu.addAction(app.add_data_action)
 
     app.catalog_table_action = app._create_action(
         "Show Catalog Table",
@@ -440,7 +453,6 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         toggled_slot=app._on_toggle_catalog_table,
         shortcuts=("Ctrl+Shift+T", "Meta+Shift+T"),
     )
-    workspace_panels_menu.addAction(app.catalog_table_action)
     metadata_menu = catalog_menu.addMenu("Metadata & Standards")
     audio_menu = catalog_menu.addMenu("Audio")
     audio_ingest_menu = audio_menu.addMenu("Import & Attach")

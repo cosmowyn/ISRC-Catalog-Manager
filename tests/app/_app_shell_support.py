@@ -2860,7 +2860,7 @@ class AppShellTestCase(unittest.TestCase):
         self.assertNotIn("create_release", self.window._action_ribbon_specs_by_id)
         self.assertNotIn("add_selected_to_release", self.window._action_ribbon_specs_by_id)
 
-    def case_catalog_menu_hosts_panel_toggle_actions_and_preserves_existing_behavior(self):
+    def case_catalog_workspace_menu_groups_intent_actions_and_preserves_workspace_routes(self):
         catalog_action = next(
             action for action in self.window.menuBar().actions() if action.text() == "Catalog"
         )
@@ -2872,23 +2872,44 @@ class AppShellTestCase(unittest.TestCase):
         catalog_snapshot = self._menu_snapshot(catalog_menu)
         workspace_snapshot = self._menu_snapshot_at_path(catalog_snapshot, "Workspace")
         workspace_texts = list(workspace_snapshot.get("texts") or [])
+        workspace_flat_texts = self._flatten_menu_snapshot(workspace_snapshot)
         view_texts = self._menu_action_texts(view_menu)
 
-        self.assertEqual(workspace_texts, ["Open and Manage", "Panels"])
-        manage_texts = list(
-            self._menu_snapshot_at_path(workspace_snapshot, "Open and Manage").get("texts") or []
+        self.assertEqual(workspace_texts, ["Create / Maintain", "Browse / Review"])
+        create_texts = list(
+            self._menu_snapshot_at_path(workspace_snapshot, "Create / Maintain").get("texts") or []
         )
-        panel_texts = list(
-            self._menu_snapshot_at_path(workspace_snapshot, "Panels").get("texts") or []
+        browse_texts = list(
+            self._menu_snapshot_at_path(workspace_snapshot, "Browse / Review").get("texts") or []
         )
         quality_texts = list(
             self._menu_snapshot_at_path(catalog_snapshot, "Quality & Repair").get("texts") or []
         )
 
-        self.assertIn("Derivative Ledger…", manage_texts)
-        self.assertIn("Contract Template Workspace…", manage_texts)
-        self.assertIn("Show Catalog Table", panel_texts)
-        self.assertIn("Show Add Track Panel", panel_texts)
+        self.assertEqual(
+            create_texts,
+            [
+                "Add Track",
+                "Work Manager…",
+                "Party Manager…",
+                "Contract Manager…",
+                "Contract Template Workspace…",
+                "Rights Matrix…",
+                "Catalog Managers…",
+            ],
+        )
+        self.assertEqual(
+            browse_texts,
+            [
+                "Catalog",
+                "Release Browser…",
+                "Deliverables & Asset Versions…",
+                "Derivative Ledger…",
+                "Global Search & Relationships…",
+            ],
+        )
+        self.assertNotIn("Show Catalog Table", workspace_flat_texts)
+        self.assertNotIn("Show Add Track Panel", workspace_flat_texts)
         self.assertNotIn("Show Add Track Panel", view_texts)
         self.assertNotIn("Show Catalog Table", view_texts)
         self.assertIn("Track Import Repair Queue…", quality_texts)
@@ -2898,15 +2919,25 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(
             self.window._action_ribbon_specs_by_id["show_catalog_table"]["category"], "Catalog"
         )
+        self.assertFalse(self.window.workspace_add_track_action.isCheckable())
+        self.assertFalse(self.window.workspace_catalog_action.isCheckable())
+        self.assertFalse(self.window.workspace_global_search_action.isCheckable())
 
         self.assertFalse(self.window.add_data_dock.isVisible())
-        self.window.add_data_action.trigger()
+        self.window.workspace_add_track_action.trigger()
         wait_for(
             lambda: self.window.add_data_dock.isVisible(),
             timeout_ms=1000,
             interval_ms=10,
             app=self.app,
             description="add track dock to become visible",
+        )
+        wait_for(
+            lambda: self.window.track_title_field.hasFocus(),
+            timeout_ms=1000,
+            interval_ms=10,
+            app=self.app,
+            description="add track title field to receive focus",
         )
         wait_for(
             lambda: self.window.settings.value("display/add_data_panel", False, bool),
@@ -2921,8 +2952,21 @@ class AppShellTestCase(unittest.TestCase):
         self.app.processEvents()
         self.assertFalse(self.window.catalog_table_dock.isVisible())
         self.assertFalse(self.window.settings.value("display/catalog_table_panel", True, bool))
-        self.window.catalog_table_action.trigger()
-        self.app.processEvents()
+        self.window.workspace_catalog_action.trigger()
+        wait_for(
+            lambda: self.window.catalog_table_dock.isVisible(),
+            timeout_ms=1000,
+            interval_ms=10,
+            app=self.app,
+            description="catalog dock to become visible",
+        )
+        wait_for(
+            lambda: self.window.table.hasFocus(),
+            timeout_ms=1000,
+            interval_ms=10,
+            app=self.app,
+            description="catalog table to receive focus",
+        )
         self.assertTrue(self.window.catalog_table_dock.isVisible())
         self.assertTrue(self.window.settings.value("display/catalog_table_panel", False, bool))
 
