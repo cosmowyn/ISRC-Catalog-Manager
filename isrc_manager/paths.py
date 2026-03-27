@@ -263,3 +263,48 @@ def DATA_DIR(
     return resolve_app_storage_layout(
         settings=settings, app_name=app_name, portable=portable
     ).data_root
+
+
+def is_repo_nonproduction_runtime_path(
+    path: str | Path | None,
+    *,
+    repo_root: str | Path | None = None,
+) -> bool:
+    """Return True when a path points into a repo-owned demo/test runtime area."""
+    if path is None:
+        return False
+    raw = str(path).strip()
+    if not raw:
+        return False
+    try:
+        candidate = Path(raw).expanduser().resolve(strict=False)
+    except Exception:
+        return False
+    try:
+        root = Path(repo_root or BIN_DIR()).resolve(strict=False)
+    except Exception:
+        return False
+    try:
+        relative = candidate.relative_to(root)
+    except ValueError:
+        return False
+    parts = relative.parts
+    if len(parts) >= 2 and parts[0] == "demo" and parts[1].startswith(".runtime"):
+        return True
+    if parts and parts[0] == "tests":
+        return True
+    return False
+
+
+def should_ignore_persisted_last_db_path(
+    path: str | Path | None,
+    *,
+    settings_path: str | Path | None = None,
+    repo_root: str | Path | None = None,
+) -> bool:
+    """Ignore repo-owned demo/test database paths for normal user settings."""
+    if not is_repo_nonproduction_runtime_path(path, repo_root=repo_root):
+        return False
+    if settings_path and is_repo_nonproduction_runtime_path(settings_path, repo_root=repo_root):
+        return False
+    return True

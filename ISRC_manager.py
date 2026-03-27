@@ -265,6 +265,7 @@ from isrc_manager.paths import (
     configure_qt_application_identity,
     resolve_app_storage_layout,
     settings_path,
+    should_ignore_persisted_last_db_path,
 )
 from isrc_manager.qss_autocomplete import QssCodeEditor
 from isrc_manager.qss_reference import (
@@ -6001,8 +6002,23 @@ class App(QMainWindow):
 
         # --- Choose DB (last used or default) ---
         last_db = self.settings.value("db/last_path", "", str)
+        existing_profiles = self.profile_store.list_profiles()
+        fallback_db = existing_profiles[0] if existing_profiles else str(DB_PATH)
+        if should_ignore_persisted_last_db_path(
+            last_db,
+            settings_path=self.settings.fileName(),
+        ):
+            self._log_event(
+                "startup.profile_path_ignored",
+                "Ignoring repo-owned demo/test database path during normal startup",
+                ignored_path=last_db,
+                fallback_path=fallback_db,
+            )
+            self.settings.setValue("db/last_path", fallback_db)
+            self.settings.sync()
+            last_db = fallback_db
         if not last_db:
-            last_db = str(DB_PATH)
+            last_db = fallback_db
         self._report_startup_progress(
             StartupPhase.OPENING_PROFILE_DB,
             value=1,

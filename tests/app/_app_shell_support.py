@@ -775,6 +775,28 @@ class AppShellTestCase(unittest.TestCase):
 
         self.assertEqual(open_calls, [True])
 
+    def case_startup_ignores_repo_demo_runtime_last_path_for_normal_settings(self):
+        self._close_window()
+        settings = self._settings()
+        preferred_root = self.qt_settings_root / "AppLocalDataLocation"
+        repo_root = Path(app_module.__file__).resolve().parent
+        demo_runtime_db = (
+            repo_root / "demo" / ".runtime" / "localappdata" / APP_NAME / "Database" / "library.db"
+        )
+        expected_default = (preferred_root / "Database" / "default.db").resolve()
+        settings.setValue("storage/active_data_root", str(preferred_root.resolve()))
+        settings.setValue("paths/database_dir", str((preferred_root / "Database").resolve()))
+        settings.setValue("db/last_path", str(demo_runtime_db.resolve()))
+        settings.sync()
+
+        self._open_window(skip_background_prepare=True)
+
+        self.assertEqual(Path(self.window.current_db_path).resolve(), expected_default)
+        self.assertEqual(
+            self.window.settings.value("db/last_path", "", str),
+            str(expected_default),
+        )
+
     def case_audio_conversion_format_prompt_uses_export_button_label(self):
         fake_capabilities = SimpleNamespace(
             managed_targets=(SimpleNamespace(id="wav", label="WAV"),),

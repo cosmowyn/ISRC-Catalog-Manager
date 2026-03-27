@@ -141,6 +141,42 @@ class PathLayoutTests(unittest.TestCase):
                     (Path(env_patch["LOCALAPPDATA"]) / APP_ORG / APP_NAME).resolve(),
                 )
 
+    def test_repo_demo_runtime_database_paths_are_ignored_for_normal_settings(self):
+        repo_demo_db = (
+            path_helpers.BIN_DIR()
+            / "demo"
+            / ".runtime"
+            / "localappdata"
+            / APP_NAME
+            / "Database"
+            / "library.db"
+        )
+        normal_settings = (
+            Path.home() / "Library" / "Application Support" / APP_ORG / APP_NAME / SETTINGS_BASENAME
+        )
+        demo_settings = (
+            path_helpers.BIN_DIR()
+            / "demo"
+            / ".runtime"
+            / "localappdata"
+            / APP_NAME
+            / SETTINGS_BASENAME
+        )
+
+        self.assertTrue(path_helpers.is_repo_nonproduction_runtime_path(repo_demo_db))
+        self.assertTrue(
+            path_helpers.should_ignore_persisted_last_db_path(
+                repo_demo_db,
+                settings_path=normal_settings,
+            )
+        )
+        self.assertFalse(
+            path_helpers.should_ignore_persisted_last_db_path(
+                repo_demo_db,
+                settings_path=demo_settings,
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

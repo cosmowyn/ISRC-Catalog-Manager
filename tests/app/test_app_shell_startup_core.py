@@ -14,6 +14,9 @@ class AppShellStartupCoreTests(AppShellTestCase):
     test_startup_prepares_database_before_live_open = (
         AppShellTestCase.case_startup_prepares_database_before_live_open
     )
+    test_startup_ignores_repo_demo_runtime_last_path_for_normal_settings = (
+        AppShellTestCase.case_startup_ignores_repo_demo_runtime_last_path_for_normal_settings
+    )
     test_trace_logging_sanitizes_reserved_logrecord_field_names = (
         AppShellTestCase.case_trace_logging_sanitizes_reserved_logrecord_field_names
     )
