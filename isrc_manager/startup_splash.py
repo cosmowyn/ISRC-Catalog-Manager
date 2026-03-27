@@ -23,6 +23,14 @@ class StartupFeedbackProtocol(Protocol):
 
     def set_status(self, message: str) -> None: ...
 
+    def report_progress(
+        self,
+        progress: int,
+        message_override: str | None = None,
+        *,
+        phase: StartupPhase | None = None,
+    ) -> None: ...
+
     def set_phase(
         self,
         phase: StartupPhase,
@@ -179,7 +187,6 @@ class StartupSplashController:
         if self._finished:
             return
         self._phase = StartupPhase(phase)
-        self._progress = int(self._phase)
         self._message = str(message_override or startup_phase_label(self._phase))
         self._render_current_state()
 
@@ -187,6 +194,24 @@ class StartupSplashController:
         if self._finished:
             return
         self._message = str(message)
+        self._render_current_state()
+
+    def report_progress(
+        self,
+        progress: int,
+        message_override: str | None = None,
+        *,
+        phase: StartupPhase | None = None,
+    ) -> None:
+        if self._finished:
+            return
+        if phase is not None:
+            self._phase = StartupPhase(phase)
+        self._progress = max(self._progress, max(0, min(100, int(progress))))
+        if message_override is not None:
+            self._message = str(message_override)
+        elif self._phase is not None and not self._message:
+            self._message = startup_phase_label(self._phase)
         self._render_current_state()
 
     def suspend(self) -> None:
@@ -212,7 +237,7 @@ class StartupSplashController:
         self._finished = True
         self._suspended = False
         self._phase = StartupPhase.READY
-        self._progress = int(StartupPhase.READY)
+        self._progress = 100
         self._message = startup_phase_label(StartupPhase.READY)
         self._render_current_state(process_events=False)
         if window is not None and hasattr(window, "windowHandle"):

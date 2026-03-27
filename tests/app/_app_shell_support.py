@@ -133,6 +133,7 @@ class _AcceptMigrationMessageBox(_DeferredMigrationMessageBox):
 class _FakeStartupSplashController:
     def __init__(self):
         self.phase_updates: list[tuple[object, str]] = []
+        self.progress_updates: list[tuple[int, object | None, str]] = []
         self.messages: list[str] = []
         self.finish_calls: list[object] = []
         self.show_calls = 0
@@ -141,6 +142,8 @@ class _FakeStartupSplashController:
         self.suspended = False
         self._finished = False
         self.current_phase = None
+        self.current_message = ""
+        self.current_progress = 0
 
     def show(self):
         self.show_calls += 1
@@ -148,11 +151,28 @@ class _FakeStartupSplashController:
     def set_phase(self, phase, message_override=None):
         self.current_phase = phase
         message = str(message_override or startup_phase_label(StartupPhase(phase)))
+        self.current_message = message
         self.phase_updates.append((phase, message))
         self.messages.append(message)
 
     def set_status(self, message):
-        self.messages.append(str(message))
+        self.current_message = str(message)
+        self.messages.append(self.current_message)
+
+    def report_progress(self, progress, message_override=None, *, phase=None):
+        if phase is not None:
+            self.current_phase = phase
+        self.current_progress = max(self.current_progress, int(progress))
+        if message_override is not None:
+            message = str(message_override)
+        elif self.current_phase is not None:
+            message = startup_phase_label(StartupPhase(self.current_phase))
+        else:
+            message = ""
+        self.current_message = message
+        self.phase_updates.append((self.current_phase, message))
+        self.progress_updates.append((self.current_progress, self.current_phase, message))
+        self.messages.append(message)
 
     def suspend(self):
         self.suspended = True
@@ -166,6 +186,9 @@ class _FakeStartupSplashController:
         if self._finished:
             return
         self._finished = True
+        self.current_phase = StartupPhase.READY
+        self.current_progress = max(self.current_progress, 100)
+        self.current_message = startup_phase_label(StartupPhase.READY)
         self.finish_calls.append(window)
 
 
@@ -647,8 +670,18 @@ class AppShellTestCase(unittest.TestCase):
 
         self.window = app_module.App(startup_feedback=splash)
 
+        ordered_bootstrap_phases = []
+        for phase, _message in splash.phase_updates:
+            if phase in {
+                StartupPhase.RESOLVING_STORAGE,
+                StartupPhase.INITIALIZING_SETTINGS,
+                StartupPhase.OPENING_PROFILE_DB,
+                StartupPhase.PREPARING_DATABASE,
+                StartupPhase.LOADING_SERVICES,
+                StartupPhase.FINALIZING_INTERFACE,
+            } and (not ordered_bootstrap_phases or ordered_bootstrap_phases[-1] != phase):
+                ordered_bootstrap_phases.append(phase)
         self.assertEqual(
-            [phase for phase, _message in splash.phase_updates],
             [
                 StartupPhase.RESOLVING_STORAGE,
                 StartupPhase.INITIALIZING_SETTINGS,
@@ -657,17 +690,23 @@ class AppShellTestCase(unittest.TestCase):
                 StartupPhase.LOADING_SERVICES,
                 StartupPhase.FINALIZING_INTERFACE,
             ],
+            ordered_bootstrap_phases[:6],
         )
         self.assertEqual(splash.finish_calls, [])
+        self.assertTrue(splash.progress_updates)
+        self.assertEqual(
+            [update[0] for update in splash.progress_updates],
+            sorted(update[0] for update in splash.progress_updates),
+        )
 
         self.window.show()
         self.assertEqual(splash.finish_calls, [])
         self._drain_events()
 
-        self.assertEqual(
-            [phase for phase, _message in splash.phase_updates[-2:]],
-            [StartupPhase.RESTORING_WORKSPACE, StartupPhase.READY],
+        self.assertIn(
+            StartupPhase.RESTORING_WORKSPACE, [phase for phase, _ in splash.phase_updates]
         )
+        self.assertEqual(splash.current_progress, 100)
         self.assertEqual(splash.finish_calls, [self.window])
 
     def case_startup_splash_waits_for_catalog_refresh_completion(self):
@@ -692,16 +731,17 @@ class AppShellTestCase(unittest.TestCase):
             self._drain_events()
 
         self.assertTrue(callable(callbacks.get("complete")))
-        self.assertEqual(
-            [phase for phase, _message in splash.phase_updates[-2:]],
-            [StartupPhase.RESTORING_WORKSPACE, StartupPhase.LOADING_CATALOG],
+        self.assertIn(
+            StartupPhase.RESTORING_WORKSPACE, [phase for phase, _ in splash.phase_updates]
         )
+        self.assertEqual(splash.current_phase, StartupPhase.LOADING_CATALOG)
         self.assertEqual(splash.finish_calls, [])
 
         callbacks["complete"]()
         self._drain_events()
 
         self.assertEqual(splash.phase_updates[-1][0], StartupPhase.READY)
+        self.assertEqual(splash.current_progress, 100)
         self.assertEqual(splash.finish_calls, [self.window])
 
     def case_startup_prepares_database_before_live_open(self):
@@ -1683,7 +1723,12 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(feedback.show_calls, 1)
         self.assertEqual(feedback.finish_calls, [])
         self.assertEqual(feedback.phase_updates[0][0], StartupPhase.OPENING_PROFILE_DB)
-        self.assertEqual(feedback.phase_updates[-1][0], StartupPhase.LOADING_CATALOG)
+        self.assertEqual(feedback.current_phase, StartupPhase.LOADING_CATALOG)
+        self.assertTrue(feedback.progress_updates)
+        self.assertEqual(
+            [update[0] for update in feedback.progress_updates],
+            sorted(update[0] for update in feedback.progress_updates),
+        )
         self.assertEqual(activated, [])
 
         refresh_callbacks["finished"]()
@@ -1691,6 +1736,7 @@ class AppShellTestCase(unittest.TestCase):
         self._drain_events()
 
         self.assertEqual(activated, [str(target_path)])
+        self.assertEqual(feedback.current_progress, 100)
         self.assertEqual(feedback.finish_calls, [self.window])
 
     def case_profile_switch_reuses_prepared_database_activation_path(self):

@@ -30,9 +30,14 @@ class CatalogReadService:
         }
 
     def fetch_rows_with_customs(
-        self, active_custom_fields: list[dict]
+        self,
+        active_custom_fields: list[dict],
+        *,
+        progress_callback=None,
     ) -> tuple[list[tuple], dict[tuple[int, int], str]]:
         work_columns = self._table_columns("Works")
+        if callable(progress_callback):
+            progress_callback(1, 4, "Inspected Work schema columns for catalog rows.")
         work_registration_sql = (
             "COALESCE(NULLIF(w.registration_number, ''), t.buma_work_number, '') AS buma_work_number"
             if "registration_number" in work_columns
@@ -74,6 +79,8 @@ class CatalogReadService:
             ORDER BY t.id
             """
         ).fetchall()
+        if callable(progress_callback):
+            progress_callback(2, 4, f"Loaded {len(base_rows)} catalog track rows.")
 
         custom_field_map: dict[tuple[int, int], str] = {}
         if active_custom_fields:
@@ -91,6 +98,17 @@ class CatalogReadService:
                 ).fetchall()
             for track_id, field_id, value in rows:
                 custom_field_map[(track_id, field_id)] = "" if value is None else str(value)
+            if callable(progress_callback):
+                progress_callback(
+                    3,
+                    4,
+                    f"Loaded {len(rows)} active custom-field values.",
+                )
+        elif callable(progress_callback):
+            progress_callback(3, 4, "No active custom-field values needed loading.")
+
+        if callable(progress_callback):
+            progress_callback(4, 4, "Prepared catalog row payload for the UI.")
 
         return base_rows, custom_field_map
 

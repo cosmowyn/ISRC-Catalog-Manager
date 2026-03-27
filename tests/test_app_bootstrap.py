@@ -103,6 +103,7 @@ class _FakeSplashController:
     def __init__(self, call_order):
         self.call_order = call_order
         self.phase_updates = []
+        self.progress_updates = []
         self.messages = []
         self.finish_calls = []
         self.suspend_calls = 0
@@ -117,6 +118,11 @@ class _FakeSplashController:
         self.phase_updates.append((phase, message))
         self.messages.append(message)
         self.call_order.append(("splash.phase", phase, message))
+
+    def report_progress(self, progress, message_override=None, *, phase=None):
+        message = str(message_override or "")
+        self.progress_updates.append((int(progress), phase, message))
+        self.call_order.append(("splash.progress", int(progress), phase, message))
 
     def suspend(self):
         self.suspend_calls += 1

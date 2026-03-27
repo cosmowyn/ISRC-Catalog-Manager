@@ -132,7 +132,7 @@ class StartupSplashHelperTests(unittest.TestCase):
         controller.finish(object())
         controller.finish(object())
         self.assertEqual(controller.current_phase, StartupPhase.READY)
-        self.assertEqual(controller.current_progress, int(StartupPhase.READY))
+        self.assertEqual(controller.current_progress, 100)
         self.assertGreaterEqual(fake_app.process_events_calls, 3)
 
     def test_suspend_resume_preserves_current_phase(self):
@@ -143,14 +143,34 @@ class StartupSplashHelperTests(unittest.TestCase):
         controller = startup_splash.StartupSplashController(fake_app, splash)
         controller.show()
         controller.set_phase(StartupPhase.RESOLVING_STORAGE, "Waiting for migration decision…")
+        controller.report_progress(
+            42,
+            "Waiting for migration decision…",
+            phase=StartupPhase.RESOLVING_STORAGE,
+        )
         controller.suspend()
         controller.resume()
         self.assertEqual(controller.current_phase, StartupPhase.RESOLVING_STORAGE)
         self.assertEqual(controller.current_message, "Waiting for migration decision…")
-        self.assertEqual(
-            controller.current_progress,
-            int(StartupPhase.RESOLVING_STORAGE),
+        self.assertEqual(controller.current_progress, 42)
+
+    def test_report_progress_is_monotonic_and_keeps_latest_phase_message(self):
+        fake_app = _FakeApplication()
+        pixmap = QPixmap(32, 18)
+        pixmap.fill(QColor("#204b6f"))
+        splash = startup_splash._ReadableSplashScreen(pixmap)
+        controller = startup_splash.StartupSplashController(fake_app, splash)
+        controller.show()
+
+        controller.set_phase(StartupPhase.LOADING_CATALOG, "Loading catalog rows…")
+        controller.report_progress(64, "Loaded catalog rows.", phase=StartupPhase.LOADING_CATALOG)
+        controller.report_progress(
+            61, "Older progress should not win.", phase=StartupPhase.LOADING_CATALOG
         )
+
+        self.assertEqual(controller.current_phase, StartupPhase.LOADING_CATALOG)
+        self.assertEqual(controller.current_progress, 64)
+        self.assertEqual(controller.current_message, "Older progress should not win.")
 
 
 if __name__ == "__main__":

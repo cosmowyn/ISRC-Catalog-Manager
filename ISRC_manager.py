@@ -341,7 +341,11 @@ from isrc_manager.starter_themes import (
     starter_theme_library,
     starter_theme_names,
 )
-from isrc_manager.startup_progress import StartupPhase, startup_phase_label
+from isrc_manager.startup_progress import (
+    StartupPhase,
+    StartupProgressTracker,
+    startup_phase_label,
+)
 from isrc_manager.startup_splash import (
     StartupFeedbackProtocol,
     create_startup_splash_controller,
@@ -5890,6 +5894,11 @@ class App(QMainWindow):
         self.setObjectName("mainWindow")
         configure_qt_application_identity(self)
         self._startup_feedback = startup_feedback
+        self._startup_progress_tracker = (
+            StartupProgressTracker.for_startup(startup_feedback)
+            if startup_feedback is not None
+            else None
+        )
         self._startup_feedback_completed = False
         self._startup_ready_emitted = False
         self._startup_catalog_refresh_complete = False
@@ -5911,7 +5920,19 @@ class App(QMainWindow):
         )
         self._report_startup_phase(StartupPhase.RESOLVING_STORAGE)
         startup_root = self._reconcile_startup_storage_root()
+        self._report_startup_progress(
+            StartupPhase.RESOLVING_STORAGE,
+            value=1,
+            maximum=2,
+            message_override="Resolved startup storage layout.",
+        )
         self._apply_storage_layout(active_data_root=startup_root)
+        self._report_startup_progress(
+            StartupPhase.RESOLVING_STORAGE,
+            value=2,
+            maximum=2,
+            message_override="Applied startup storage directories.",
+        )
 
         self.sqlite_connection_factory = SQLiteConnectionFactory()
         self.database_session = DatabaseSessionService(self.sqlite_connection_factory)
@@ -5944,14 +5965,38 @@ class App(QMainWindow):
 
         self._report_startup_phase(StartupPhase.INITIALIZING_SETTINGS)
         self.identity = self._load_identity()
+        self._report_startup_progress(
+            StartupPhase.INITIALIZING_SETTINGS,
+            value=1,
+            maximum=3,
+            message_override="Loaded application identity settings.",
+        )
         self.theme_settings = self._load_theme_settings()
+        self._report_startup_progress(
+            StartupPhase.INITIALIZING_SETTINGS,
+            value=2,
+            maximum=3,
+            message_override="Loaded theme and display preferences.",
+        )
         self.blob_icon_settings = default_blob_icon_settings()
         self._apply_identity()
+        self._report_startup_progress(
+            StartupPhase.INITIALIZING_SETTINGS,
+            value=3,
+            maximum=3,
+            message_override="Applied initial application settings.",
+        )
 
         # --- Choose DB (last used or default) ---
         last_db = self.settings.value("db/last_path", "", str)
         if not last_db:
             last_db = str(DB_PATH)
+        self._report_startup_progress(
+            StartupPhase.OPENING_PROFILE_DB,
+            value=1,
+            maximum=1,
+            message_override="Selected startup profile database.",
+        )
 
         self.conn = None
         self.cursor = None
@@ -6018,7 +6063,11 @@ class App(QMainWindow):
             title="Open Profile",
             description="Preparing profile database...",
         )
-        self.open_database(last_db, schema_prepared=startup_db_prepared)
+        self.open_database(
+            last_db,
+            schema_prepared=startup_db_prepared,
+            progress_callback=self._startup_progress_callback(StartupPhase.LOADING_SERVICES),
+        )
 
         try:
             movable = self.settings.value(
@@ -6028,13 +6077,17 @@ class App(QMainWindow):
             movable = False
 
         self._report_startup_phase(StartupPhase.FINALIZING_INTERFACE)
+        finalize_progress = self._startup_progress_callback(StartupPhase.FINALIZING_INTERFACE)
         build_main_window_shell(self, last_db=last_db, movable=bool(movable))
+        finalize_progress(1, 5, "Built the main application shell.")
         self.tabifiedDockWidgetActivated.connect(
             lambda *_args: self._schedule_main_dock_state_save()
         )
         self._ensure_persistent_workspace_dock_shells()
+        finalize_progress(2, 5, "Prepared persistent workspace dock shells.")
 
         self._apply_saved_view_preferences(apply_workspace_panel_visibility=False)
+        finalize_progress(3, 5, "Applied saved workspace visibility preferences.")
 
         self.resize(1280, 800)
         self._refresh_history_actions()
@@ -6042,10 +6095,13 @@ class App(QMainWindow):
         if app_instance is not None:
             app_instance.installEventFilter(self)
         self._ensure_widget_object_names(self)
+        finalize_progress(4, 5, "Finalized window wiring and runtime bindings.")
         self._apply_theme()
+        finalize_progress(5, 5, "Applied the current theme and scheduled catalog loading.")
         startup_task_id = self._refresh_catalog_ui_in_background(
             unique_key="catalog.ui.startup",
             on_complete=self._handle_startup_catalog_refresh_complete,
+            progress_callback=self._startup_progress_callback(StartupPhase.LOADING_CATALOG),
         )
         if startup_task_id is None:
             self._handle_startup_catalog_refresh_complete()
@@ -6055,6 +6111,10 @@ class App(QMainWindow):
         phase: StartupPhase,
         message_override: str | None = None,
     ) -> None:
+        tracker = getattr(self, "_startup_progress_tracker", None)
+        if tracker is not None:
+            tracker.set_phase(StartupPhase(phase), message_override)
+            return
         controller = getattr(self, "_startup_feedback", None)
         if controller is None or getattr(self, "_startup_feedback_completed", False):
             return
@@ -6071,6 +6131,36 @@ class App(QMainWindow):
                 set_status(str(message_override or startup_phase_label(StartupPhase(phase))))
             except Exception:
                 pass
+
+    def _report_startup_progress(
+        self,
+        phase: StartupPhase,
+        *,
+        value: int | float | None = None,
+        maximum: int | float | None = None,
+        message_override: str | None = None,
+    ) -> None:
+        tracker = getattr(self, "_startup_progress_tracker", None)
+        if tracker is not None:
+            tracker.report_progress(
+                StartupPhase(phase),
+                value=value,
+                maximum=maximum,
+                message=message_override,
+            )
+            return
+        self._report_startup_phase(phase, message_override)
+
+    def _startup_progress_callback(self, phase: StartupPhase):
+        tracker = getattr(self, "_startup_progress_tracker", None)
+        if tracker is not None:
+            return tracker.progress_callback(StartupPhase(phase))
+
+        def _fallback(value=None, maximum=None, message=None):
+            del value, maximum
+            self._report_startup_phase(phase, str(message or startup_phase_label(phase)))
+
+        return _fallback
 
     @staticmethod
     def _drain_qt_events() -> None:
@@ -6115,6 +6205,57 @@ class App(QMainWindow):
             except Exception:
                 pass
         self._set_loading_feedback_status(feedback, message_override or startup_phase_label(phase))
+
+    def _set_loading_feedback_progress(
+        self,
+        feedback: StartupFeedbackProtocol | None,
+        *,
+        progress: int,
+        phase: StartupPhase | None = None,
+        message_override: str | None = None,
+    ) -> None:
+        if feedback is None:
+            return
+        report_progress = getattr(feedback, "report_progress", None)
+        if callable(report_progress):
+            try:
+                report_progress(
+                    int(progress),
+                    str(message_override or ""),
+                    phase=StartupPhase(phase) if phase is not None else None,
+                )
+                return
+            except Exception:
+                pass
+        if phase is not None:
+            self._set_loading_feedback_phase(feedback, StartupPhase(phase), message_override)
+        elif message_override is not None:
+            self._set_loading_feedback_status(feedback, message_override)
+
+    def _loading_feedback_progress_callback(
+        self,
+        feedback: StartupFeedbackProtocol | None,
+        tracker: StartupProgressTracker | None,
+        phase: StartupPhase,
+    ):
+        if tracker is not None:
+            return tracker.progress_callback(StartupPhase(phase))
+
+        def _fallback(value=None, maximum=None, message=None):
+            numeric_progress = 0
+            if value is not None and maximum not in (None, 0):
+                try:
+                    numeric_progress = int(round((float(value) / float(maximum)) * 100.0))
+                except Exception:
+                    numeric_progress = 0
+            self._set_loading_feedback_progress(
+                feedback,
+                progress=numeric_progress,
+                phase=StartupPhase(phase),
+                message_override=str(message or startup_phase_label(phase)),
+            )
+
+        return _fallback
 
     def _set_loading_feedback_status(
         self,
@@ -6208,17 +6349,33 @@ class App(QMainWindow):
             return
         self._startup_feedback_completed = True
         try:
-            set_phase = getattr(controller, "set_phase", None)
-            if callable(set_phase):
-                try:
-                    set_phase(StartupPhase.READY)
-                except Exception:
-                    pass
+            tracker = getattr(self, "_startup_progress_tracker", None)
+            if tracker is not None:
+                tracker.finish()
+            else:
+                report_progress = getattr(controller, "report_progress", None)
+                if callable(report_progress):
+                    try:
+                        report_progress(
+                            100,
+                            startup_phase_label(StartupPhase.READY),
+                            phase=StartupPhase.READY,
+                        )
+                    except Exception:
+                        pass
+                else:
+                    set_phase = getattr(controller, "set_phase", None)
+                    if callable(set_phase):
+                        try:
+                            set_phase(StartupPhase.READY)
+                        except Exception:
+                            pass
             finish = getattr(controller, "finish", None)
             if callable(finish):
                 finish(self)
         finally:
             self._startup_feedback = None
+            self._startup_progress_tracker = None
 
     def _schedule_post_ready_startup_tasks(self) -> None:
         if self._post_ready_startup_tasks_scheduled:
@@ -10276,9 +10433,12 @@ class App(QMainWindow):
 
         return _audit
 
-    def _prepare_database_session(self, path: str) -> str:
+    def _prepare_database_session(self, path: str, *, progress_callback=None) -> str:
         target_path = str(Path(path))
+        if callable(progress_callback):
+            progress_callback(1, 4, "Opening profile database session...")
         session = self.database_session.open(target_path)
+        prepared_path = target_path
         try:
             schema_service = DatabaseSchemaService(
                 session.conn,
@@ -10287,11 +10447,17 @@ class App(QMainWindow):
                 audit_commit=session.conn.commit,
                 data_root=self.data_root,
             )
+            if callable(progress_callback):
+                progress_callback(2, 4, "Initializing required database tables...")
             schema_service.init_db()
+            if callable(progress_callback):
+                progress_callback(3, 4, "Applying schema migrations and checks...")
             schema_service.migrate_schema()
-            return target_path
         finally:
             self.database_session.close(session.conn)
+        if callable(progress_callback):
+            progress_callback(4, 4, "Profile database prepared.")
+        return prepared_path
 
     def _prepare_database_for_open_blocking(
         self,
@@ -10318,6 +10484,7 @@ class App(QMainWindow):
             on_success=lambda prepared_path: prepared.setdefault("path", str(prepared_path)),
             on_error=lambda task_failure: failure.setdefault("value", task_failure),
             on_finished=_quit_loop,
+            progress_callback=self._startup_progress_callback(StartupPhase.PREPARING_DATABASE),
         )
         if task_id is None:
             return False
@@ -10335,19 +10502,38 @@ class App(QMainWindow):
             return False
         return str(prepared.get("path") or "").strip() == target_path
 
-    def open_database(self, path: str, *, schema_prepared: bool = False):
+    def open_database(
+        self,
+        path: str,
+        *,
+        schema_prepared: bool = False,
+        progress_callback=None,
+    ):
         """Open (or create) the SQLite DB at path; initialize schema if needed."""
+        total_steps = 6 if schema_prepared else 8
+        completed_steps = 0
+
+        def _advance(message: str) -> None:
+            nonlocal completed_steps
+            completed_steps += 1
+            if callable(progress_callback):
+                progress_callback(completed_steps, total_steps, message)
+
         if self.conn is not None or self.cursor is not None:
             self._close_database_connection()
         session = self.database_session.open(path)
         self.conn = session.conn
         self.cursor = session.cursor
         self.current_db_path = path
+        _advance("Opened profile database connection.")
         self._configure_background_runtime()
+        _advance("Configured background runtime services.")
         self._report_startup_phase(StartupPhase.LOADING_SERVICES)
         self._init_services()
+        _advance("Loaded profile service layer.")
 
         self._migrate_artist_code_from_qsettings_if_needed()
+        _advance("Restored migrated profile settings.")
 
         current_code = self.load_artist_code()
 
@@ -10365,6 +10551,7 @@ class App(QMainWindow):
         if not schema_prepared:
             self._report_startup_phase(StartupPhase.PREPARING_DATABASE)
             self.init_db()
+            _advance("Ensured required database tables exist.")
 
             # Run schema migrations and then refresh caches that depend on schema
             try:
@@ -10379,11 +10566,13 @@ class App(QMainWindow):
                 # keep going; DB might still be usable
             if self.history_manager is not None:
                 self.history_manager._ensure_history_invariants()
+            _advance("Completed schema migrations and history checks.")
 
         self._migrate_legacy_owner_party_if_needed()
         self.blob_icon_settings = self._load_blob_icon_settings()
         self.active_custom_fields = self.load_active_custom_fields()
         self._refresh_catalog_workspace_docks()
+        _advance("Loaded profile metadata and refreshed workspace shells.")
 
         # now it's safe to write AuditLog
         self._audit("PROFILE", "Database", ref_id=path, details="open_database()")
@@ -10391,6 +10580,7 @@ class App(QMainWindow):
         self._refresh_history_actions()
         self._last_auto_snapshot_marker = self._current_auto_snapshot_marker()
         self._refresh_auto_snapshot_schedule()
+        _advance("Profile database ready for catalog loading.")
 
     def init_db(self):
         self.schema_service.init_db()
@@ -11365,43 +11555,88 @@ class App(QMainWindow):
         if getattr(self, "_workspace_layout_restore_complete", False):
             return
         self._report_startup_phase(StartupPhase.RESTORING_WORKSPACE)
+        restore_progress = self._startup_progress_callback(StartupPhase.RESTORING_WORKSPACE)
         self._workspace_layout_restore_scheduled = False
         previous_suspend_state = self._suspend_dock_state_sync
         previous_restore_state = self._is_restoring_workspace_layout
         self._suspend_dock_state_sync = True
         self._is_restoring_workspace_layout = True
         restored_dock_state = False
+        visible_lazy_docks = [
+            dock
+            for dock in list(getattr(self, "_catalog_workspace_docks", {}).values())
+            if isinstance(dock, QDockWidget)
+            and dock.isVisible()
+            and getattr(dock, "_panel", None) is None
+        ]
+        total_steps = 7 + max(1, len(visible_lazy_docks))
+        completed_steps = 0
+
+        def _advance(message: str) -> None:
+            nonlocal completed_steps
+            completed_steps += 1
+            restore_progress(completed_steps, total_steps, message)
+
         try:
             self._restore_main_window_geometry()
+            _advance("Restored main window geometry.")
             restored_dock_state = self._restore_main_dock_state()
+            _advance("Restored saved workspace dock layout.")
             self._apply_saved_view_preferences(
                 apply_workspace_panel_visibility=not restored_dock_state
             )
+            _advance("Applied saved workspace panel visibility.")
             self._refresh_workspace_dock_default_placement_flags()
-            self._materialize_visible_workspace_dock_panels()
+            _advance("Refreshed workspace dock placement defaults.")
+            self._materialize_visible_workspace_dock_panels(
+                progress_callback=lambda value, maximum, message: restore_progress(
+                    completed_steps + value,
+                    total_steps,
+                    message,
+                )
+            )
+            completed_steps += max(1, len(visible_lazy_docks))
         finally:
             self._restored_main_dock_state = restored_dock_state
             self._workspace_layout_restore_complete = True
             self._is_restoring_workspace_layout = previous_restore_state
             self._suspend_dock_state_sync = previous_suspend_state
         self._store_workspace_panel_visibility_preferences(sync=False)
+        _advance("Stored restored workspace visibility preferences.")
         self._schedule_main_window_geometry_save()
+        _advance("Queued startup window geometry persistence.")
         self._schedule_main_dock_state_save()
+        _advance("Queued startup dock layout persistence.")
         self._maybe_finish_startup_loading()
 
-    def _materialize_visible_workspace_dock_panels(self) -> None:
+    def _materialize_visible_workspace_dock_panels(self, *, progress_callback=None) -> None:
         registry = getattr(self, "_catalog_workspace_docks", {})
-        for dock in list(registry.values()):
-            if not isinstance(dock, QDockWidget):
-                continue
-            if not dock.isVisible() or getattr(dock, "_panel", None) is not None:
-                continue
+        docks_to_materialize = [
+            dock
+            for dock in list(registry.values())
+            if isinstance(dock, QDockWidget)
+            and dock.isVisible()
+            and getattr(dock, "_panel", None) is None
+        ]
+        total_docks = max(1, len(docks_to_materialize))
+        if not docks_to_materialize:
+            if callable(progress_callback):
+                progress_callback(1, total_docks, "No workspace panels needed restoration.")
+            return
+        for index, dock in enumerate(docks_to_materialize, start=1):
             panel_method = getattr(dock, "panel", None)
             if callable(panel_method):
                 panel_method()
             refresh_method = getattr(dock, "refresh_panel", None)
             if callable(refresh_method):
                 refresh_method()
+            if callable(progress_callback):
+                dock_title = str(dock.windowTitle() or dock.objectName() or "workspace panel")
+                progress_callback(
+                    index,
+                    total_docks,
+                    f"Restored {dock_title} workspace panel.",
+                )
 
     def _refresh_workspace_dock_default_placement_flags(self) -> None:
         registry = getattr(self, "_catalog_workspace_docks", {})
@@ -12130,12 +12365,20 @@ class App(QMainWindow):
         on_success,
         on_error=None,
         on_finished=None,
+        progress_callback=None,
     ) -> str | None:
         target_path = str(Path(path))
 
         def _worker(ctx):
             ctx.set_status(description)
-            return self._prepare_database_session(target_path)
+            return self._prepare_database_session(
+                target_path,
+                progress_callback=lambda value, maximum, message: ctx.report_progress(
+                    value=value,
+                    maximum=maximum,
+                    message=message,
+                ),
+            )
 
         def _handle_error(failure: TaskFailure) -> None:
             if on_error is not None:
@@ -12160,6 +12403,11 @@ class App(QMainWindow):
             on_success=on_success,
             on_finished=on_finished,
             on_error=_handle_error,
+            on_progress=(
+                (lambda update: progress_callback(update.value, update.maximum, update.message))
+                if callable(progress_callback)
+                else None
+            ),
         )
 
     def _activate_profile_in_background(
@@ -12178,12 +12426,24 @@ class App(QMainWindow):
                 pass
 
         loading_feedback = self._create_runtime_loading_feedback()
+        loading_progress_tracker = (
+            StartupProgressTracker.for_profile_loading(loading_feedback)
+            if loading_feedback is not None
+            else None
+        )
         if loading_feedback is not None:
-            self._set_loading_feedback_phase(
-                loading_feedback,
-                StartupPhase.OPENING_PROFILE_DB,
-                description,
-            )
+            if loading_progress_tracker is not None:
+                loading_progress_tracker.set_phase(StartupPhase.OPENING_PROFILE_DB, description)
+                loading_progress_tracker.complete_phase(
+                    StartupPhase.OPENING_PROFILE_DB,
+                    "Selected profile database for activation.",
+                )
+            else:
+                self._set_loading_feedback_phase(
+                    loading_feedback,
+                    StartupPhase.OPENING_PROFILE_DB,
+                    description,
+                )
 
         prepared = {"path": None}
 
@@ -12205,27 +12465,57 @@ class App(QMainWindow):
             if not prepared_path:
                 self._finish_loading_feedback(loading_feedback)
                 return
-            self._set_loading_feedback_phase(
-                loading_feedback,
-                StartupPhase.LOADING_SERVICES,
-                "Opening selected profile database...",
-            )
+            if loading_progress_tracker is not None:
+                loading_progress_tracker.set_phase(
+                    StartupPhase.LOADING_SERVICES,
+                    "Opening selected profile database...",
+                )
+            else:
+                self._set_loading_feedback_phase(
+                    loading_feedback,
+                    StartupPhase.LOADING_SERVICES,
+                    "Opening selected profile database...",
+                )
             if loading_feedback is not None:
                 self._drain_qt_events()
-            self.open_database(prepared_path, schema_prepared=True)
+            self.open_database(
+                prepared_path,
+                schema_prepared=True,
+                progress_callback=self._loading_feedback_progress_callback(
+                    loading_feedback,
+                    loading_progress_tracker,
+                    StartupPhase.LOADING_SERVICES,
+                ),
+            )
             with self._suspend_table_layout_history():
+                interface_progress = self._loading_feedback_progress_callback(
+                    loading_feedback,
+                    loading_progress_tracker,
+                    StartupPhase.FINALIZING_INTERFACE,
+                )
                 try:
                     self.active_custom_fields = self.load_active_custom_fields()
+                    interface_progress(
+                        1, 3, "Loaded active custom fields for the selected profile."
+                    )
                     self._rebuild_table_headers()
+                    interface_progress(2, 3, "Rebuilt catalog headers for the selected profile.")
                     self._load_header_state()
                 except Exception:
                     pass
+                interface_progress(3, 3, "Restored header state and profile selection.")
                 self._reload_profiles_list(select_path=prepared_path)
-                self._set_loading_feedback_phase(
-                    loading_feedback,
-                    StartupPhase.LOADING_CATALOG,
-                    "Loading catalog rows and workspace data...",
-                )
+                if loading_progress_tracker is not None:
+                    loading_progress_tracker.set_phase(
+                        StartupPhase.LOADING_CATALOG,
+                        "Loading catalog rows and workspace data...",
+                    )
+                else:
+                    self._set_loading_feedback_phase(
+                        loading_feedback,
+                        StartupPhase.LOADING_CATALOG,
+                        "Loading catalog rows and workspace data...",
+                    )
                 if loading_feedback is not None:
                     self._drain_qt_events()
                 task_id = self._refresh_catalog_ui_in_background(
@@ -12236,12 +12526,26 @@ class App(QMainWindow):
                         on_activated(prepared_path) if on_activated is not None else None,
                         self._schedule_owner_party_bootstrap(),
                     ),
-                    on_complete=lambda: self._finish_loading_feedback(loading_feedback),
+                    on_complete=lambda: (
+                        (
+                            loading_progress_tracker.finish()
+                            if loading_progress_tracker is not None
+                            else None
+                        ),
+                        self._finish_loading_feedback(loading_feedback),
+                    ),
+                    progress_callback=self._loading_feedback_progress_callback(
+                        loading_feedback,
+                        loading_progress_tracker,
+                        StartupPhase.LOADING_CATALOG,
+                    ),
                 )
                 if task_id is None:
+                    if loading_progress_tracker is not None:
+                        loading_progress_tracker.finish()
                     self._finish_loading_feedback(loading_feedback)
 
-        return self._prepare_profile_database_background(
+        task_id = self._prepare_profile_database_background(
             path,
             title=title,
             description=description,
@@ -12249,7 +12553,13 @@ class App(QMainWindow):
             on_success=_success,
             on_error=_error,
             on_finished=_finished,
+            progress_callback=self._loading_feedback_progress_callback(
+                loading_feedback,
+                loading_progress_tracker,
+                StartupPhase.PREPARING_DATABASE,
+            ),
         )
+        return task_id
 
     @staticmethod
     def _history_time_key(entry):
@@ -12701,7 +13011,11 @@ class App(QMainWindow):
         self._refresh_column_visibility_menu()
 
     @staticmethod
-    def _catalog_combo_values_from_connection(conn: sqlite3.Connection) -> dict[str, list[str]]:
+    def _catalog_combo_values_from_connection(
+        conn: sqlite3.Connection,
+        *,
+        progress_callback=None,
+    ) -> dict[str, list[str]]:
         def _values(query: str) -> list[str]:
             try:
                 return [
@@ -12712,56 +13026,67 @@ class App(QMainWindow):
             except sqlite3.OperationalError:
                 return []
 
-        return {
+        combo_values = {
             "artists": [
                 r[0]
                 for r in conn.execute(
                     "SELECT DISTINCT name FROM Artists WHERE name IS NOT NULL AND name != '' ORDER BY name"
                 ).fetchall()
-            ],
-            "albums": [
-                r[0]
-                for r in conn.execute(
-                    "SELECT DISTINCT title FROM Albums WHERE title IS NOT NULL AND title != '' ORDER BY title"
-                ).fetchall()
-            ],
-            "upcs": _values(
-                """
-                SELECT value
-                FROM (
-                    SELECT upc AS value
-                    FROM Tracks
-                    WHERE upc IS NOT NULL AND upc != ''
-                    UNION
-                    SELECT upc AS value
-                    FROM Releases
-                    WHERE upc IS NOT NULL AND upc != ''
-                )
-                ORDER BY value
-                """
-            ),
-            "genres": [
-                r[0]
-                for r in conn.execute(
-                    "SELECT DISTINCT genre FROM Tracks WHERE genre IS NOT NULL AND genre != '' ORDER BY genre"
-                ).fetchall()
-            ],
-            "catalog_numbers": _values(
-                """
-                SELECT value
-                FROM (
-                    SELECT catalog_number AS value
-                    FROM Tracks
-                    WHERE catalog_number IS NOT NULL AND catalog_number != ''
-                    UNION
-                    SELECT catalog_number AS value
-                    FROM Releases
-                    WHERE catalog_number IS NOT NULL AND catalog_number != ''
-                )
-                ORDER BY value
-                """
-            ),
+            ]
         }
+        if callable(progress_callback):
+            progress_callback(1, 5, "Loaded Artist lookup values.")
+        combo_values["albums"] = [
+            r[0]
+            for r in conn.execute(
+                "SELECT DISTINCT title FROM Albums WHERE title IS NOT NULL AND title != '' ORDER BY title"
+            ).fetchall()
+        ]
+        if callable(progress_callback):
+            progress_callback(2, 5, "Loaded Album lookup values.")
+        combo_values["upcs"] = _values(
+            """
+            SELECT value
+            FROM (
+                SELECT upc AS value
+                FROM Tracks
+                WHERE upc IS NOT NULL AND upc != ''
+                UNION
+                SELECT upc AS value
+                FROM Releases
+                WHERE upc IS NOT NULL AND upc != ''
+            )
+            ORDER BY value
+            """
+        )
+        if callable(progress_callback):
+            progress_callback(3, 5, "Loaded UPC lookup values.")
+        combo_values["genres"] = [
+            r[0]
+            for r in conn.execute(
+                "SELECT DISTINCT genre FROM Tracks WHERE genre IS NOT NULL AND genre != '' ORDER BY genre"
+            ).fetchall()
+        ]
+        if callable(progress_callback):
+            progress_callback(4, 5, "Loaded Genre lookup values.")
+        combo_values["catalog_numbers"] = _values(
+            """
+            SELECT value
+            FROM (
+                SELECT catalog_number AS value
+                FROM Tracks
+                WHERE catalog_number IS NOT NULL AND catalog_number != ''
+                UNION
+                SELECT catalog_number AS value
+                FROM Releases
+                WHERE catalog_number IS NOT NULL AND catalog_number != ''
+            )
+            ORDER BY value
+            """
+        )
+        if callable(progress_callback):
+            progress_callback(5, 5, "Loaded catalog number lookup values.")
+        return combo_values
 
     def _apply_catalog_combo_values(self, combo_values: dict[str, list[str]]) -> None:
         self._populate_combobox(self.artist_field, combo_values.get("artists", []))
@@ -13445,29 +13770,71 @@ class App(QMainWindow):
         custom_field_definitions: CustomFieldDefinitionService | None = None,
         catalog_reads: CatalogReadService | None = None,
         conn: sqlite3.Connection | None = None,
+        progress_callback=None,
     ) -> dict[str, object]:
         active_custom_fields = (
             custom_field_definitions.list_active_fields()
             if custom_field_definitions is not None
             else self.load_active_custom_fields()
         )
+        if callable(progress_callback):
+            progress_callback(
+                6,
+                100,
+                f"Loaded {len(active_custom_fields)} active custom fields.",
+            )
         active_catalog_reads = catalog_reads or self.catalog_reads
         active_conn = conn or self.conn
         if active_catalog_reads is None or active_conn is None:
             raise ValueError("Catalog dataset services are not available.")
-        rows, cf_map = active_catalog_reads.fetch_rows_with_customs(active_custom_fields)
+        rows, cf_map = active_catalog_reads.fetch_rows_with_customs(
+            active_custom_fields,
+            progress_callback=(
+                self._scaled_progress_callback(
+                    progress_callback,
+                    start=10,
+                    end=44,
+                )
+                if callable(progress_callback)
+                else None
+            ),
+        )
+        combo_values = self._catalog_combo_values_from_connection(
+            active_conn,
+            progress_callback=(
+                self._scaled_progress_callback(
+                    progress_callback,
+                    start=48,
+                    end=68,
+                )
+                if callable(progress_callback)
+                else None
+            ),
+        )
+        if callable(progress_callback):
+            progress_callback(72, 100, f"Prepared catalog dataset with {len(rows)} rows.")
         return {
             "active_custom_fields": active_custom_fields,
             "rows": rows,
             "cf_map": cf_map,
-            "combo_values": self._catalog_combo_values_from_connection(active_conn),
+            "combo_values": combo_values,
         }
 
     def _populate_table_from_dataset(
-        self, rows: list[tuple], cf_map: dict[tuple[int, int], str]
+        self,
+        rows: list[tuple],
+        cf_map: dict[tuple[int, int], str],
+        *,
+        progress_callback=None,
     ) -> None:
         base_cols = len(self.BASE_HEADERS)
         self.table.setRowCount(len(rows))
+        total_rows = len(rows)
+        if total_rows <= 0:
+            if callable(progress_callback):
+                progress_callback(1, 1, "No catalog rows needed to be applied.")
+            return
+        batch_size = max(1, min(100, total_rows // 20 or 1))
 
         for row_idx, row_data in enumerate(rows):
             for col_idx in range(base_cols):
@@ -13495,19 +13862,59 @@ class App(QMainWindow):
                     base_cols + offset,
                     self._make_item(base_cols + offset, val, custom_def=field),
                 )
+            if callable(progress_callback) and (
+                row_idx == total_rows - 1 or ((row_idx + 1) % batch_size) == 0
+            ):
+                progress_callback(
+                    row_idx + 1,
+                    total_rows,
+                    f"Applied {row_idx + 1} of {total_rows} catalog rows.",
+                )
 
-    def _apply_catalog_ui_dataset(self, dataset: dict[str, object]) -> None:
+    def _apply_catalog_ui_dataset(
+        self,
+        dataset: dict[str, object],
+        *,
+        progress_callback=None,
+    ) -> None:
         self.active_custom_fields = list(dataset.get("active_custom_fields") or [])
         self._rebuild_table_headers()
+        if callable(progress_callback):
+            progress_callback(76, 100, "Rebuilt catalog table headers.")
         self._populate_table_from_dataset(
             list(dataset.get("rows") or []),
             dict(dataset.get("cf_map") or {}),
+            progress_callback=(
+                self._scaled_progress_callback(
+                    progress_callback,
+                    start=78,
+                    end=90,
+                )
+                if callable(progress_callback)
+                else None
+            ),
         )
         self._apply_catalog_combo_values(dict(dataset.get("combo_values") or {}))
+        if callable(progress_callback):
+            progress_callback(91, 100, "Applied catalog lookup values.")
         self.table.resizeColumnsToContents()
+        if callable(progress_callback):
+            progress_callback(93, 100, "Resized catalog table columns.")
         self._update_count_label()
         self._update_duration_label()
-        self._apply_blob_badges()
+        if callable(progress_callback):
+            progress_callback(95, 100, "Updated catalog counts and duration.")
+        self._apply_blob_badges(
+            progress_callback=(
+                self._scaled_progress_callback(
+                    progress_callback,
+                    start=96,
+                    end=98,
+                )
+                if callable(progress_callback)
+                else None
+            ),
+        )
 
     def _refresh_catalog_ui_in_background(
         self,
@@ -13519,6 +13926,7 @@ class App(QMainWindow):
         on_complete=None,
         unique_key: str = "catalog.ui.refresh",
         retry_count: int = 0,
+        progress_callback=None,
     ) -> str | None:
         if self.conn is None:
             if on_complete is not None:
@@ -13547,16 +13955,33 @@ class App(QMainWindow):
                 custom_field_definitions=bundle.custom_field_definitions,
                 catalog_reads=bundle.catalog_reads,
                 conn=bundle.conn,
+                progress_callback=lambda value, maximum, message: ctx.report_progress(
+                    value=value,
+                    maximum=maximum,
+                    message=message,
+                ),
             )
 
-        def _success(dataset: dict[str, object]):
+        def _before_cleanup(dataset: dict[str, object], ui_progress):
             try:
                 self.conn.commit()
             except Exception:
                 pass
             with self._suspend_table_layout_history():
-                self._apply_catalog_ui_dataset(dataset)
+                self._apply_catalog_ui_dataset(
+                    dataset,
+                    progress_callback=lambda value, maximum, message: ui_progress.report_progress(
+                        value=value,
+                        maximum=maximum,
+                        message=message,
+                    ),
+                )
                 try:
+                    ui_progress.report_progress(
+                        value=99,
+                        maximum=100,
+                        message="Restoring saved catalog headers and view state...",
+                    )
                     self._load_header_state()
                 except Exception as e:
                     self.logger.warning("Failed to load header state: %s", e)
@@ -13573,11 +13998,16 @@ class App(QMainWindow):
                         pass
                 self._update_add_data_generated_fields()
                 self._refresh_history_actions()
-                try:
-                    if on_finished is not None:
-                        on_finished()
-                finally:
-                    _notify_complete()
+                ui_progress.report_progress(
+                    value=100,
+                    maximum=100,
+                    message="Catalog view fully restored and ready.",
+                )
+                if on_finished is not None:
+                    on_finished()
+
+        def _after_cleanup(_dataset: dict[str, object]) -> None:
+            _notify_complete()
 
         def _finished():
             if not sort_enabled:
@@ -13616,9 +14046,15 @@ class App(QMainWindow):
             unique_key=unique_key,
             show_dialog=show_dialog,
             owner=self,
-            on_success=_success,
+            on_success_before_cleanup=_before_cleanup,
+            on_success_after_cleanup=_after_cleanup,
             on_error=_handle_error,
             on_finished=_finished,
+            on_progress=(
+                (lambda update: progress_callback(update.value, update.maximum, update.message))
+                if callable(progress_callback)
+                else None
+            ),
         )
         if task_id is None:
             _notify_complete()
@@ -21972,10 +22408,15 @@ class App(QMainWindow):
         except Exception:
             return None
 
-    def _apply_blob_badges(self):
+    def _apply_blob_badges(self, *, progress_callback=None):
         """Deterministically compute blob badges from source, not cached meta."""
         base = len(self.BASE_HEADERS)
         total_rows = self.table.rowCount()
+        if total_rows <= 0:
+            if callable(progress_callback):
+                progress_callback(1, 1, "No media badges needed recalculation.")
+            return
+        batch_size = max(1, min(100, total_rows // 20 or 1))
         standard_media_columns = {
             header: self.BASE_HEADERS.index(header)
             for header in self._standard_media_header_map()
@@ -22080,6 +22521,14 @@ class App(QMainWindow):
                     item.setIcon(QIcon())
                     item.setToolTip("")
                 item.setData(Qt.UserRole, (pk, cf["id"]) if has_blob else None)
+            if callable(progress_callback) and (
+                row_idx == total_rows - 1 or ((row_idx + 1) % batch_size) == 0
+            ):
+                progress_callback(
+                    row_idx + 1,
+                    total_rows,
+                    f"Recomputed media badges for {row_idx + 1} of {total_rows} rows.",
+                )
 
     def _make_default_export_filename(self, track_id: int, field_def: dict, mime: str) -> str:
         # Use track title only
