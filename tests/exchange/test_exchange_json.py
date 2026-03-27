@@ -11,6 +11,9 @@ class ExchangeJsonTests(ExchangeServiceTestCase):
     test_import_json_normalizes_allowed_title_fields_and_preserves_existing_case_and_codes = (
         ExchangeServiceTestCase.case_import_json_normalizes_allowed_title_fields_and_preserves_existing_case_and_codes
     )
+    test_import_json_dry_run_is_side_effect_free_and_reports_planned_changes = (
+        ExchangeServiceTestCase.case_import_json_dry_run_is_side_effect_free_and_reports_planned_changes
+    )
     test_import_json_respects_mapping_when_skipping_custom_field = (
         ExchangeServiceTestCase.case_import_json_respects_mapping_when_skipping_custom_field
     )

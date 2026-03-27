@@ -193,6 +193,7 @@ class PartyImportOptions:
     match_by_legal_name: bool = True
     match_by_identity_keys: bool = True
     match_by_name_fields: bool = True
+    preview_apply_mode: str | None = None
 
 
 @dataclass(slots=True)
@@ -205,6 +206,10 @@ class PartyImportReport:
     warnings: list[str]
     duplicates: list[str]
     unknown_fields: list[str]
+    evaluated_mode: str | None = None
+    would_create_parties: int = 0
+    would_update_parties: int = 0
+    would_set_owner: bool = False
     created_parties: list[int] = field(default_factory=list)
     updated_parties: list[int] = field(default_factory=list)
     owner_party_id: int | None = None
@@ -483,6 +488,7 @@ class PartyExchangeService:
         cancel_callback=None,
     ) -> PartyImportReport:
         opts = options or PartyImportOptions()
+        effective_mode = str(opts.preview_apply_mode or opts.mode or "dry_run").strip().lower()
         self._report_progress(progress_callback, 30, "Mapping and normalizing Party rows...")
         if cancel_callback is not None:
             cancel_callback()
@@ -504,6 +510,9 @@ class PartyExchangeService:
         skipped = 0
         warnings: list[str] = []
         duplicates: list[str] = []
+        would_create_parties = 0
+        would_update_parties = 0
+        would_set_owner = False
         created_parties: list[int] = []
         updated_parties: list[int] = []
         owner_party_id: int | None = None
@@ -519,6 +528,7 @@ class PartyExchangeService:
                 warnings=["The selected file did not contain any importable Party rows."],
                 duplicates=[],
                 unknown_fields=unknown_fields,
+                evaluated_mode=effective_mode,
             )
 
         for index, row in enumerate(normalized_rows, start=1):
@@ -544,13 +554,19 @@ class PartyExchangeService:
                 matched_party_id = self._resolve_matching_party_id(row, options=opts)
                 action, payload = self._resolve_row_action(
                     row,
-                    mode=opts.mode,
+                    mode=effective_mode,
                     matched_party_id=matched_party_id,
                     row_index=index,
                     warnings=warnings,
                     duplicates=duplicates,
                 )
                 if opts.mode == "dry_run":
+                    if action == "create":
+                        would_create_parties += 1
+                    else:
+                        would_update_parties += 1
+                    if _parse_boolean(row.get("is_owner")):
+                        would_set_owner = True
                     passed += 1
                     continue
                 savepoint_name = f"party_import_row_{index}"
@@ -602,6 +618,10 @@ class PartyExchangeService:
             warnings=warnings,
             duplicates=duplicates,
             unknown_fields=unknown_fields,
+            evaluated_mode=effective_mode,
+            would_create_parties=would_create_parties,
+            would_update_parties=would_update_parties,
+            would_set_owner=would_set_owner,
             created_parties=created_parties,
             updated_parties=updated_parties,
             owner_party_id=owner_party_id,

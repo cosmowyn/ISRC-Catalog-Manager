@@ -17,6 +17,9 @@ class RepertoireExchangeServiceTests(SearchAndRepertoireExchangeTestCase):
     test_repertoire_exchange_xlsx_csv_and_schema_validation = (
         SearchAndRepertoireExchangeTestCase.case_repertoire_exchange_xlsx_csv_and_schema_validation
     )
+    test_repertoire_inspection_previews_counts_without_writing = (
+        SearchAndRepertoireExchangeTestCase.case_repertoire_inspection_previews_counts_without_writing
+    )
     test_repertoire_export_reports_staged_progress = (
         SearchAndRepertoireExchangeTestCase.case_repertoire_export_reports_staged_progress
     )

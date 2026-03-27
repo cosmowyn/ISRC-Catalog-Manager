@@ -1673,6 +1673,7 @@ class ExchangeService:
         repair_override: dict[str, object] | None = None,
     ) -> ExchangeImportReport:
         opts = options or ExchangeImportOptions()
+        effective_mode = str(opts.preview_apply_mode or opts.mode or "dry_run").strip().lower()
         repair_queue_entry_ids: list[int] = []
         self._report_progress(progress_callback, 30, "Mapping and normalizing import rows...")
         if cancel_callback is not None:
@@ -1688,8 +1689,9 @@ class ExchangeService:
                 if key not in self.BASE_EXPORT_COLUMNS and not str(key).startswith("custom::")
             }
         )
-        self._ensure_custom_headers(
-            normalized_rows, create_missing=opts.create_missing_custom_fields
+        missing_custom_fields = self._ensure_custom_headers(
+            normalized_rows,
+            create_missing=(opts.create_missing_custom_fields and opts.mode != "dry_run"),
         )
         self._report_progress(
             progress_callback, 36, "Preparing import validation and custom fields..."
@@ -1699,10 +1701,12 @@ class ExchangeService:
         passed = 0
         failed = 0
         skipped = 0
+        would_create_tracks = 0
+        would_update_tracks = 0
         created_tracks: list[int] = []
         updated_tracks: list[int] = []
         total_rows = max(len(normalized_rows), 1)
-        package_create_mode = format_name == "package" and opts.mode == "create"
+        package_create_mode = format_name == "package" and effective_mode == "create"
         source_track_map: dict[str, int] = {}
         source_release_map: dict[str, int] = {}
         work_batch_cache: dict[str, int] = {}
@@ -1719,6 +1723,11 @@ class ExchangeService:
             for field in self.custom_fields.list_active_fields()
             if str(field.get("field_type") or "text") not in {"blob_audio", "blob_image"}
         }
+        if missing_custom_fields and opts.mode == "dry_run" and opts.create_missing_custom_fields:
+            warnings.append(
+                "Dry run would create missing custom fields: "
+                + ", ".join(sorted(missing_custom_fields))
+            )
 
         def _apply_custom_fields(
             track_id: int,
@@ -1778,10 +1787,22 @@ class ExchangeService:
             else:
                 existing_track_id = (
                     None
-                    if opts.mode == "create"
+                    if effective_mode == "create"
                     else self._find_existing_track_id(row, options=opts)
                 )
+            if effective_mode == "update" and existing_track_id is None:
+                skipped += 1
+                warnings.append(f"Row {index}: no existing match was found for update mode.")
+                continue
+            if effective_mode == "insert_new" and existing_track_id is not None:
+                skipped += 1
+                duplicates.append(f"Row {index}: matched existing track {existing_track_id}")
+                continue
             if opts.mode == "dry_run":
+                if existing_track_id is None:
+                    would_create_tracks += 1
+                else:
+                    would_update_tracks += 1
                 passed += 1
                 continue
 
@@ -1864,12 +1885,6 @@ class ExchangeService:
                     )
 
                     if existing_track_id is None:
-                        if opts.mode == "update":
-                            skipped += 1
-                            warnings.append(
-                                f"Row {index}: no existing match was found for update mode."
-                            )
-                            continue
                         if override_mode == "link_existing_work" and override_work_id is not None:
                             payload_kwargs["work_id"] = int(override_work_id)
                         create_result = self.governed_imports.create_governed_track(
@@ -1897,12 +1912,6 @@ class ExchangeService:
                         track_id = existing_track_id
                         passed += 1
                     else:
-                        if opts.mode == "insert_new":
-                            skipped += 1
-                            duplicates.append(
-                                f"Row {index}: matched existing track {existing_track_id}"
-                            )
-                            continue
                         snapshot = self.track_service.fetch_track_snapshot(existing_track_id)
                         if snapshot is None:
                             raise ValueError(f"Track {existing_track_id} not found")
@@ -2035,6 +2044,9 @@ class ExchangeService:
             warnings=warnings,
             duplicates=duplicates,
             unknown_fields=unknown_fields,
+            evaluated_mode=effective_mode,
+            would_create_tracks=would_create_tracks,
+            would_update_tracks=would_update_tracks,
             created_tracks=created_tracks,
             updated_tracks=updated_tracks,
             repair_queue_entry_ids=repair_queue_entry_ids,

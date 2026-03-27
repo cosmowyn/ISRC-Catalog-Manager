@@ -25,6 +25,7 @@ class ExchangeImportOptions:
     heuristic_match: bool = False
     create_missing_custom_fields: bool = True
     skip_targets: list[str] = field(default_factory=list)
+    preview_apply_mode: str | None = None
 
 
 @dataclass(slots=True)
@@ -37,6 +38,9 @@ class ExchangeImportReport:
     warnings: list[str]
     duplicates: list[str]
     unknown_fields: list[str]
+    evaluated_mode: str | None = None
+    would_create_tracks: int = 0
+    would_update_tracks: int = 0
     created_tracks: list[int] = field(default_factory=list)
     updated_tracks: list[int] = field(default_factory=list)
     repair_queue_entry_ids: list[int] = field(default_factory=list)

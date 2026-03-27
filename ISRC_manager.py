@@ -203,7 +203,10 @@ from isrc_manager.exchange.models import (
     ExchangeImportReport,
     ExchangeInspection,
 )
-from isrc_manager.exchange.repertoire_service import RepertoireExchangeService
+from isrc_manager.exchange.repertoire_service import (
+    RepertoireExchangeService,
+    RepertoireImportInspection,
+)
 from isrc_manager.exchange.service import ExchangeService
 from isrc_manager.file_storage import (
     STORAGE_MODE_DATABASE,
@@ -229,6 +232,7 @@ from isrc_manager.history import (
     SessionHistoryManager,
 )
 from isrc_manager.history.dialogs import HistoryCleanupDialog, HistoryDialog
+from isrc_manager.import_review_dialog import ImportReviewDialog
 from isrc_manager.main_window_shell import build_main_window_shell
 from isrc_manager.media import AudioConversionService
 from isrc_manager.media.derivatives import (
@@ -364,6 +368,12 @@ from isrc_manager.tags import (
     merge_imported_tags,
     write_catalog_export_tags,
 )
+
+_RESERVED_TRACE_LOG_KEYS = frozenset(logging.makeLogRecord({}).__dict__) | {
+    "message",
+    "asctime",
+    "event",
+}
 from isrc_manager.tags.dialogs import BulkAudioAttachDialog, TagPreviewDialog
 from isrc_manager.tags.models import (
     ArtworkPayload,
@@ -6750,6 +6760,19 @@ class App(QMainWindow):
             return {str(key): App._normalize_log_value(val) for key, val in value.items()}
         return value
 
+    @staticmethod
+    def _safe_trace_field_name(key: str, existing_keys: set[str]) -> str:
+        clean_key = str(key or "").strip() or "field"
+        if clean_key not in _RESERVED_TRACE_LOG_KEYS and clean_key not in existing_keys:
+            return clean_key
+        base_key = f"field_{clean_key}"
+        candidate = base_key
+        suffix = 2
+        while candidate in _RESERVED_TRACE_LOG_KEYS or candidate in existing_keys:
+            candidate = f"{base_key}_{suffix}"
+            suffix += 1
+        return candidate
+
     def _trace_context(self, **fields) -> dict:
         payload = {
             "profile": (
@@ -6758,11 +6781,13 @@ class App(QMainWindow):
             "db_path": str(self.current_db_path) if getattr(self, "current_db_path", "") else None,
         }
         payload.update(fields)
-        return {
-            key: self._normalize_log_value(value)
-            for key, value in payload.items()
-            if value not in (None, "", [], {}, ())
-        }
+        normalized: dict[str, object] = {}
+        for key, value in payload.items():
+            if value in (None, "", [], {}, ()):
+                continue
+            safe_key = self._safe_trace_field_name(str(key), set(normalized))
+            normalized[safe_key] = self._normalize_log_value(value)
+        return normalized
 
     def _log_trace(
         self, event: str, *, message: str | None = None, level: int = logging.INFO, **fields
@@ -15562,95 +15587,162 @@ class App(QMainWindow):
         if not path:
             return
 
-        def _worker(bundle, ctx):
-            import_progress = self._scaled_progress_callback(ctx.report_progress, start=0, end=90)
+        def _submit_import_task() -> None:
+            def _worker(bundle, ctx):
+                import_progress = self._scaled_progress_callback(
+                    ctx.report_progress, start=0, end=90
+                )
+                ctx.report_progress(
+                    value=0,
+                    maximum=100,
+                    message=f"Importing {normalized.upper()} Contracts and Rights data...",
+                )
+
+                def _mutation():
+                    if normalized == "json":
+                        return bundle.repertoire_exchange_service.import_json(
+                            path,
+                            progress_callback=import_progress,
+                            cancel_callback=ctx.raise_if_cancelled,
+                        )
+                    if normalized == "xlsx":
+                        return bundle.repertoire_exchange_service.import_xlsx(
+                            path,
+                            progress_callback=import_progress,
+                            cancel_callback=ctx.raise_if_cancelled,
+                        )
+                    if normalized == "csv":
+                        return bundle.repertoire_exchange_service.import_csv_bundle(
+                            path,
+                            progress_callback=import_progress,
+                            cancel_callback=ctx.raise_if_cancelled,
+                        )
+                    return bundle.repertoire_exchange_service.import_package(
+                        path,
+                        progress_callback=import_progress,
+                        cancel_callback=ctx.raise_if_cancelled,
+                    )
+
+                return run_snapshot_history_action(
+                    history_manager=bundle.history_manager,
+                    action_label=f"Import Contracts and Rights {normalized.upper()}: {Path(path).name}",
+                    action_type=f"repertoire.import.{normalized}",
+                    entity_type="RepertoireImport",
+                    entity_id=path,
+                    payload={"path": path, "format": normalized},
+                    mutation=_mutation,
+                    progress_callback=ctx.report_progress,
+                    post_mutation_progress=(92, "Capturing import history snapshot..."),
+                    record_progress=(94, "Recording import history..."),
+                    logger=self.logger,
+                )
+
+            def _before_cleanup(_result, ui_progress) -> None:
+                self._advance_task_ui_progress(
+                    ui_progress,
+                    value=97,
+                    message="Applying imported Contracts and Rights changes...",
+                )
+                try:
+                    self.conn.commit()
+                except Exception:
+                    pass
+                self._advance_task_ui_progress(
+                    ui_progress,
+                    value=99,
+                    message="Refreshing catalog views and history...",
+                )
+                self.refresh_table_preserve_view()
+                self.populate_all_comboboxes()
+                self._refresh_catalog_workspace_docks()
+                self._refresh_history_actions()
+                self._advance_task_ui_progress(
+                    ui_progress,
+                    value=100,
+                    message="Contracts and Rights import complete.",
+                )
+
+            def _success(_result) -> None:
+                if self.statusBar() is not None:
+                    self.statusBar().showMessage("Repertoire import complete.", 5000)
+
+            self._submit_background_bundle_task(
+                title=f"Import Contracts and Rights {normalized.upper()}",
+                description=f"Importing {normalized.upper()} Contracts and Rights data into the current profile...",
+                task_fn=_worker,
+                kind="write",
+                unique_key=f"repertoire.import.{normalized}",
+                worker_completion_progress=(96, "Finalizing background import transaction..."),
+                on_success_before_cleanup=_before_cleanup,
+                on_success_after_cleanup=_success,
+                on_error=lambda failure: self._show_background_task_error(
+                    "Repertoire Exchange",
+                    failure,
+                    user_message="Could not complete the Contracts and Rights import:",
+                ),
+            )
+
+        def _inspection_worker(bundle, ctx):
+            inspection_progress = self._scaled_progress_callback(
+                ctx.report_progress, start=0, end=96
+            )
             ctx.report_progress(
                 value=0,
                 maximum=100,
-                message=f"Importing {normalized.upper()} Contracts and Rights data...",
+                message=f"Inspecting {normalized.upper()} Contracts and Rights source...",
             )
-
-            def _mutation():
-                if normalized == "json":
-                    return bundle.repertoire_exchange_service.import_json(
-                        path,
-                        progress_callback=import_progress,
-                        cancel_callback=ctx.raise_if_cancelled,
-                    )
-                if normalized == "xlsx":
-                    return bundle.repertoire_exchange_service.import_xlsx(
-                        path,
-                        progress_callback=import_progress,
-                        cancel_callback=ctx.raise_if_cancelled,
-                    )
-                if normalized == "csv":
-                    return bundle.repertoire_exchange_service.import_csv_bundle(
-                        path,
-                        progress_callback=import_progress,
-                        cancel_callback=ctx.raise_if_cancelled,
-                    )
-                return bundle.repertoire_exchange_service.import_package(
+            if normalized == "json":
+                return bundle.repertoire_exchange_service.inspect_json(
                     path,
-                    progress_callback=import_progress,
+                    progress_callback=inspection_progress,
                     cancel_callback=ctx.raise_if_cancelled,
                 )
-
-            return run_snapshot_history_action(
-                history_manager=bundle.history_manager,
-                action_label=f"Import Contracts and Rights {normalized.upper()}: {Path(path).name}",
-                action_type=f"repertoire.import.{normalized}",
-                entity_type="RepertoireImport",
-                entity_id=path,
-                payload={"path": path, "format": normalized},
-                mutation=_mutation,
-                progress_callback=ctx.report_progress,
-                post_mutation_progress=(92, "Capturing import history snapshot..."),
-                record_progress=(94, "Recording import history..."),
-                logger=self.logger,
+            if normalized == "xlsx":
+                return bundle.repertoire_exchange_service.inspect_xlsx(
+                    path,
+                    progress_callback=inspection_progress,
+                    cancel_callback=ctx.raise_if_cancelled,
+                )
+            if normalized == "csv":
+                return bundle.repertoire_exchange_service.inspect_csv_bundle(
+                    path,
+                    progress_callback=inspection_progress,
+                    cancel_callback=ctx.raise_if_cancelled,
+                )
+            return bundle.repertoire_exchange_service.inspect_package(
+                path,
+                progress_callback=inspection_progress,
+                cancel_callback=ctx.raise_if_cancelled,
             )
 
-        def _before_cleanup(_result, ui_progress) -> None:
-            self._advance_task_ui_progress(
-                ui_progress,
-                value=97,
-                message="Applying imported Contracts and Rights changes...",
+        def _inspection_success(inspection: RepertoireImportInspection) -> None:
+            accepted = self._open_import_review_dialog(
+                title=f"Review Contracts and Rights {normalized.upper()} Import",
+                subtitle=(
+                    "Inspection completed. Review the parsed Contracts and Rights data before anything is written to the current profile."
+                ),
+                summary_lines=self._repertoire_import_review_summary(inspection),
+                warnings=inspection.warnings,
+                preview_rows=inspection.preview_rows,
+                preview_headers=["Entity", "Action", "Label", "Notes"],
+                preview_title="Import Preview",
+                confirm_label="Apply Contracts and Rights Import",
             )
-            try:
-                self.conn.commit()
-            except Exception:
-                pass
-            self._advance_task_ui_progress(
-                ui_progress,
-                value=99,
-                message="Refreshing catalog views and history...",
-            )
-            self.refresh_table_preserve_view()
-            self.populate_all_comboboxes()
-            self._refresh_catalog_workspace_docks()
-            self._refresh_history_actions()
-            self._advance_task_ui_progress(
-                ui_progress,
-                value=100,
-                message="Contracts and Rights import complete.",
-            )
-
-        def _success(_result) -> None:
-            if self.statusBar() is not None:
-                self.statusBar().showMessage("Repertoire import complete.", 5000)
+            if accepted:
+                _submit_import_task()
 
         self._submit_background_bundle_task(
-            title=f"Import Contracts and Rights {normalized.upper()}",
-            description=f"Importing {normalized.upper()} Contracts and Rights data into the current profile...",
-            task_fn=_worker,
-            kind="write",
-            unique_key=f"repertoire.import.{normalized}",
-            worker_completion_progress=(96, "Finalizing background import transaction..."),
-            on_success_before_cleanup=_before_cleanup,
-            on_success_after_cleanup=_success,
+            title=f"Inspect Contracts and Rights {normalized.upper()}",
+            description=f"Inspecting the selected {normalized.upper()} Contracts and Rights source...",
+            task_fn=_inspection_worker,
+            kind="read",
+            unique_key=f"repertoire.inspect.{normalized}",
+            worker_completion_progress=(100, "Contracts and Rights import review ready."),
+            on_success_after_cleanup=_inspection_success,
             on_error=lambda failure: self._show_background_task_error(
                 "Repertoire Exchange",
                 failure,
-                user_message="Could not complete the Contracts and Rights import:",
+                user_message="Could not inspect the Contracts and Rights import source:",
             ),
         )
 
@@ -15876,6 +15968,87 @@ class App(QMainWindow):
                 return selected_ids
         return []
 
+    def _open_import_review_dialog(
+        self,
+        *,
+        title: str,
+        subtitle: str,
+        summary_lines: list[str],
+        warnings: list[str] | None = None,
+        preview_rows: list[dict[str, object]] | None = None,
+        preview_headers: list[str] | None = None,
+        preview_title: str = "Preview",
+        confirm_label: str = "Apply Import",
+    ) -> bool:
+        dialog = ImportReviewDialog(
+            title=title,
+            subtitle=subtitle,
+            summary_lines=summary_lines,
+            warnings=warnings,
+            preview_title=preview_title,
+            preview_rows=preview_rows,
+            preview_headers=preview_headers,
+            confirm_label=confirm_label,
+            parent=self,
+        )
+        return dialog.exec() == QDialog.Accepted
+
+    @staticmethod
+    def _party_import_review_summary(report: PartyImportReport) -> list[str]:
+        evaluated_mode = str(report.evaluated_mode or report.mode or "dry_run")
+        lines = [
+            f"Planned mode: {evaluated_mode}",
+            f"Rows ready: {report.passed}",
+            f"Rows blocked: {report.failed}",
+            f"Rows skipped: {report.skipped}",
+        ]
+        if report.would_create_parties:
+            lines.append(f"Would create Parties: {report.would_create_parties}")
+        if report.would_update_parties:
+            lines.append(f"Would update Parties: {report.would_update_parties}")
+        if report.would_set_owner:
+            lines.append("Would update the current Owner Party binding.")
+        if report.duplicates:
+            lines.append(f"Duplicate-safe skips: {len(report.duplicates)}")
+        if report.unknown_fields:
+            lines.append("Unmapped fields: " + ", ".join(report.unknown_fields[:8]))
+        return lines
+
+    @staticmethod
+    def _exchange_import_review_summary(report: ExchangeImportReport) -> list[str]:
+        evaluated_mode = str(report.evaluated_mode or report.mode or "dry_run")
+        lines = [
+            f"Planned mode: {evaluated_mode}",
+            f"Rows ready: {report.passed}",
+            f"Rows blocked: {report.failed}",
+            f"Rows skipped: {report.skipped}",
+        ]
+        if report.would_create_tracks:
+            lines.append(f"Would create tracks: {report.would_create_tracks}")
+        if report.would_update_tracks:
+            lines.append(f"Would update tracks: {report.would_update_tracks}")
+        if report.duplicates:
+            lines.append(f"Duplicate-safe skips: {len(report.duplicates)}")
+        if report.unknown_fields:
+            lines.append("Unknown fields: " + ", ".join(report.unknown_fields[:8]))
+        return lines
+
+    @staticmethod
+    def _repertoire_import_review_summary(inspection: RepertoireImportInspection) -> list[str]:
+        counts = inspection.entity_counts
+        lines = [
+            f"Parties found: {int(counts.get('parties') or 0)}",
+            f"Works found: {int(counts.get('works') or 0)}",
+            f"Contracts found: {int(counts.get('contracts') or 0)}",
+            f"Rights found: {int(counts.get('rights') or 0)}",
+            f"Assets found: {int(counts.get('assets') or 0)}",
+        ]
+        if inspection.new_parties:
+            lines.append(f"Would create Parties: {inspection.new_parties}")
+        if inspection.existing_parties:
+            lines.append(f"Would reuse existing Parties: {inspection.existing_parties}")
+        return lines
+
     def _show_party_import_report(self, path: str, report: PartyImportReport) -> None:
         lines = [
             f"Format: {report.format_name.upper()}",
@@ -15891,6 +16064,12 @@ class App(QMainWindow):
                     "No database changes were made because this run used Dry run validation mode.",
                 ]
             )
+            if report.would_create_parties:
+                lines.append(f"Would create: {report.would_create_parties}")
+            if report.would_update_parties:
+                lines.append(f"Would update: {report.would_update_parties}")
+            if report.would_set_owner:
+                lines.append("Would update the current Owner Party binding.")
         if report.created_parties:
             lines.append(f"Created: {len(report.created_parties)}")
         if report.updated_parties:
@@ -15981,150 +16160,235 @@ class App(QMainWindow):
             options: PartyImportOptions = dlg.import_options()
             selected_csv_delimiter = dlg.resolved_csv_delimiter()
 
-            def _import_worker(bundle, ctx):
-                import_progress = self._scaled_progress_callback(
-                    ctx.report_progress,
-                    start=0,
-                    end=(90 if options.mode != "dry_run" else 96),
-                )
-                ctx.report_progress(
-                    value=0,
-                    maximum=100,
-                    message=f"Importing {normalized_format.upper()} Parties into the current profile...",
+            def _submit_import_task(active_options: PartyImportOptions) -> None:
+                def _import_worker(bundle, ctx):
+                    import_progress = self._scaled_progress_callback(
+                        ctx.report_progress,
+                        start=0,
+                        end=(90 if active_options.mode != "dry_run" else 96),
+                    )
+                    ctx.report_progress(
+                        value=0,
+                        maximum=100,
+                        message=(
+                            f"Importing {normalized_format.upper()} Parties into the current profile..."
+                        ),
+                    )
+
+                    def _mutation():
+                        if normalized_format == "csv":
+                            return bundle.party_exchange_service.import_csv(
+                                path,
+                                mapping=mapping,
+                                options=active_options,
+                                delimiter=selected_csv_delimiter,
+                                progress_callback=import_progress,
+                                cancel_callback=ctx.raise_if_cancelled,
+                            )
+                        if normalized_format == "xlsx":
+                            return bundle.party_exchange_service.import_xlsx(
+                                path,
+                                mapping=mapping,
+                                options=active_options,
+                                progress_callback=import_progress,
+                                cancel_callback=ctx.raise_if_cancelled,
+                            )
+                        return bundle.party_exchange_service.import_json(
+                            path,
+                            mapping=mapping,
+                            options=active_options,
+                            progress_callback=import_progress,
+                            cancel_callback=ctx.raise_if_cancelled,
+                        )
+
+                    if active_options.mode == "dry_run":
+                        return _mutation()
+                    return run_snapshot_history_action(
+                        history_manager=bundle.history_manager,
+                        action_label=f"Import Parties {normalized_format.upper()}: {Path(path).name}",
+                        action_type=f"party.import.{normalized_format}",
+                        entity_type="PartyImport",
+                        entity_id=path,
+                        payload={"path": path, "mode": active_options.mode},
+                        mutation=_mutation,
+                        progress_callback=ctx.report_progress,
+                        post_mutation_progress=(92, "Capturing Party import history snapshot..."),
+                        record_progress=(94, "Recording Party import history..."),
+                        logger=self.logger,
+                    )
+
+                def _import_before_cleanup(report: PartyImportReport, ui_progress) -> None:
+                    changed_ids = list(report.created_parties or []) + list(
+                        report.updated_parties or []
+                    )
+                    if active_options.mode == "dry_run":
+                        self._advance_task_ui_progress(
+                            ui_progress,
+                            value=100,
+                            message="Party import validation complete.",
+                        )
+                        return
+                    self._advance_task_ui_progress(
+                        ui_progress,
+                        value=97,
+                        message="Applying imported Party changes...",
+                    )
+                    try:
+                        self.conn.commit()
+                    except Exception:
+                        pass
+                    self._advance_task_ui_progress(
+                        ui_progress,
+                        value=99,
+                        message="Refreshing Party views and history...",
+                    )
+                    self.populate_all_comboboxes()
+                    self._refresh_catalog_workspace_docks()
+                    self._refresh_history_actions()
+                    if changed_ids:
+                        focus_party_id = int(changed_ids[0])
+                        panel = getattr(self, "party_manager_panel", None)
+                        if isinstance(panel, PartyManagerPanel):
+                            panel.focus_party(focus_party_id)
+                    self._advance_task_ui_progress(
+                        ui_progress,
+                        value=100,
+                        message="Party import complete.",
+                    )
+
+                def _import_success(report: PartyImportReport):
+                    changed_ids = list(report.created_parties or []) + list(
+                        report.updated_parties or []
+                    )
+                    self._log_event(
+                        f"party.import.{normalized_format}",
+                        f"Imported {normalized_format.upper()} Party data",
+                        path=path,
+                        mode=active_options.mode,
+                        passed=report.passed,
+                        failed=report.failed,
+                        skipped=report.skipped,
+                        created=len(report.created_parties),
+                        updated=len(report.updated_parties),
+                        owner_party_id=report.owner_party_id,
+                        warnings=report.warnings,
+                        duplicates=report.duplicates,
+                        unknown_fields=report.unknown_fields,
+                    )
+                    self._audit(
+                        "IMPORT",
+                        "Parties",
+                        ref_id=path,
+                        details=(
+                            f"format={normalized_format}; mode={active_options.mode}; passed={report.passed}; "
+                            f"failed={report.failed}; skipped={report.skipped}; "
+                            f"created={len(report.created_parties)}; updated={len(report.updated_parties)}"
+                        ),
+                    )
+                    self._audit_commit()
+                    self._show_party_import_report(path, report)
+
+                self._submit_background_bundle_task(
+                    title=f"Import Parties {normalized_format.upper()}",
+                    description=f"Importing {normalized_format.upper()} Party data into the current profile...",
+                    task_fn=_import_worker,
+                    kind=("read" if active_options.mode == "dry_run" else "write"),
+                    unique_key=f"party.import.{normalized_format}",
+                    worker_completion_progress=(
+                        (96, "Finalizing background Party import...")
+                        if active_options.mode != "dry_run"
+                        else (100, "Party import validation complete.")
+                    ),
+                    on_success_before_cleanup=_import_before_cleanup,
+                    on_success_after_cleanup=_import_success,
+                    on_error=lambda failure: self._show_background_task_error(
+                        "Import Parties",
+                        failure,
+                        user_message="Could not complete the Party import:",
+                    ),
                 )
 
-                def _mutation():
+            def _run_preflight_review() -> None:
+                preview_options = PartyImportOptions(
+                    mode="dry_run",
+                    match_by_internal_id=options.match_by_internal_id,
+                    match_by_legal_name=options.match_by_legal_name,
+                    match_by_identity_keys=options.match_by_identity_keys,
+                    match_by_name_fields=options.match_by_name_fields,
+                    preview_apply_mode=options.mode,
+                )
+
+                def _preview_worker(bundle, ctx):
+                    preview_progress = self._scaled_progress_callback(
+                        ctx.report_progress,
+                        start=0,
+                        end=96,
+                    )
+                    ctx.report_progress(
+                        value=0,
+                        maximum=100,
+                        message="Running Party import dry-run review...",
+                    )
                     if normalized_format == "csv":
                         return bundle.party_exchange_service.import_csv(
                             path,
                             mapping=mapping,
-                            options=options,
+                            options=preview_options,
                             delimiter=selected_csv_delimiter,
-                            progress_callback=import_progress,
+                            progress_callback=preview_progress,
                             cancel_callback=ctx.raise_if_cancelled,
                         )
                     if normalized_format == "xlsx":
                         return bundle.party_exchange_service.import_xlsx(
                             path,
                             mapping=mapping,
-                            options=options,
-                            progress_callback=import_progress,
+                            options=preview_options,
+                            progress_callback=preview_progress,
                             cancel_callback=ctx.raise_if_cancelled,
                         )
                     return bundle.party_exchange_service.import_json(
                         path,
                         mapping=mapping,
-                        options=options,
-                        progress_callback=import_progress,
+                        options=preview_options,
+                        progress_callback=preview_progress,
                         cancel_callback=ctx.raise_if_cancelled,
                     )
 
-                if options.mode == "dry_run":
-                    return _mutation()
-                return run_snapshot_history_action(
-                    history_manager=bundle.history_manager,
-                    action_label=f"Import Parties {normalized_format.upper()}: {Path(path).name}",
-                    action_type=f"party.import.{normalized_format}",
-                    entity_type="PartyImport",
-                    entity_id=path,
-                    payload={"path": path, "mode": options.mode},
-                    mutation=_mutation,
-                    progress_callback=ctx.report_progress,
-                    post_mutation_progress=(92, "Capturing Party import history snapshot..."),
-                    record_progress=(94, "Recording Party import history..."),
-                    logger=self.logger,
-                )
-
-            def _import_before_cleanup(report: PartyImportReport, ui_progress) -> None:
-                changed_ids = list(report.created_parties or []) + list(
-                    report.updated_parties or []
-                )
-                if options.mode == "dry_run":
-                    self._advance_task_ui_progress(
-                        ui_progress,
-                        value=100,
-                        message="Party import validation complete.",
+                def _preview_success(report: PartyImportReport) -> None:
+                    accepted = self._open_import_review_dialog(
+                        title=f"Review Parties {normalized_format.upper()} Import",
+                        subtitle=(
+                            "Dry run completed. Review the planned Party changes before anything is written to the current profile."
+                        ),
+                        summary_lines=self._party_import_review_summary(report),
+                        warnings=report.warnings,
+                        preview_rows=inspection.preview_rows,
+                        preview_headers=inspection.headers,
+                        preview_title="Source Preview",
+                        confirm_label="Apply Party Import",
                     )
-                    return
-                self._advance_task_ui_progress(
-                    ui_progress,
-                    value=97,
-                    message="Applying imported Party changes...",
-                )
-                try:
-                    self.conn.commit()
-                except Exception:
-                    pass
-                self._advance_task_ui_progress(
-                    ui_progress,
-                    value=99,
-                    message="Refreshing Party views and history...",
-                )
-                self.populate_all_comboboxes()
-                self._refresh_catalog_workspace_docks()
-                self._refresh_history_actions()
-                if changed_ids:
-                    focus_party_id = int(changed_ids[0])
-                    panel = getattr(self, "party_manager_panel", None)
-                    if isinstance(panel, PartyManagerPanel):
-                        panel.focus_party(focus_party_id)
-                self._advance_task_ui_progress(
-                    ui_progress,
-                    value=100,
-                    message="Party import complete.",
-                )
+                    if accepted:
+                        _submit_import_task(options)
 
-            def _import_success(report: PartyImportReport):
-                changed_ids = list(report.created_parties or []) + list(
-                    report.updated_parties or []
-                )
-                self._log_event(
-                    f"party.import.{normalized_format}",
-                    f"Imported {normalized_format.upper()} Party data",
-                    path=path,
-                    mode=options.mode,
-                    passed=report.passed,
-                    failed=report.failed,
-                    skipped=report.skipped,
-                    created=len(report.created_parties),
-                    updated=len(report.updated_parties),
-                    owner_party_id=report.owner_party_id,
-                    warnings=report.warnings,
-                    duplicates=report.duplicates,
-                    unknown_fields=report.unknown_fields,
-                )
-                self._audit(
-                    "IMPORT",
-                    "Parties",
-                    ref_id=path,
-                    details=(
-                        f"format={normalized_format}; mode={options.mode}; passed={report.passed}; "
-                        f"failed={report.failed}; skipped={report.skipped}; "
-                        f"created={len(report.created_parties)}; updated={len(report.updated_parties)}"
+                self._submit_background_bundle_task(
+                    title=f"Review Parties {normalized_format.upper()}",
+                    description="Running a dry-run review of the selected Party import...",
+                    task_fn=_preview_worker,
+                    kind="read",
+                    unique_key=f"party.review.{normalized_format}",
+                    worker_completion_progress=(100, "Party import review ready."),
+                    on_success_after_cleanup=_preview_success,
+                    on_error=lambda failure: self._show_background_task_error(
+                        "Import Parties",
+                        failure,
+                        user_message="Could not review the Party import before apply:",
                     ),
                 )
-                self._audit_commit()
-                self._show_party_import_report(path, report)
 
-            self._submit_background_bundle_task(
-                title=f"Import Parties {normalized_format.upper()}",
-                description=f"Importing {normalized_format.upper()} Party data into the current profile...",
-                task_fn=_import_worker,
-                kind=("read" if options.mode == "dry_run" else "write"),
-                unique_key=f"party.import.{normalized_format}",
-                worker_completion_progress=(
-                    (96, "Finalizing background Party import...")
-                    if options.mode != "dry_run"
-                    else (100, "Party import validation complete.")
-                ),
-                on_success_before_cleanup=_import_before_cleanup,
-                on_success_after_cleanup=_import_success,
-                on_error=lambda failure: self._show_background_task_error(
-                    "Import Parties",
-                    failure,
-                    user_message="Could not complete the Party import:",
-                ),
-            )
+            if options.mode == "dry_run":
+                _submit_import_task(options)
+            else:
+                _run_preflight_review()
 
         self._submit_background_bundle_task(
             title=f"Inspect Parties {normalized_format.upper()}",
@@ -18973,158 +19237,257 @@ class App(QMainWindow):
             options = dlg.import_options()
             selected_csv_delimiter = dlg.resolved_csv_delimiter()
 
-            def _import_worker(bundle, ctx):
-                import_progress = self._scaled_progress_callback(
-                    ctx.report_progress,
-                    start=0,
-                    end=(90 if options.mode != "dry_run" else 96),
-                )
-                ctx.report_progress(
-                    value=0,
-                    maximum=100,
-                    message=f"Importing {normalized_format.upper()} exchange data...",
+            def _submit_import_task(active_options: ExchangeImportOptions) -> None:
+                def _import_worker(bundle, ctx):
+                    import_progress = self._scaled_progress_callback(
+                        ctx.report_progress,
+                        start=0,
+                        end=(90 if active_options.mode != "dry_run" else 96),
+                    )
+                    ctx.report_progress(
+                        value=0,
+                        maximum=100,
+                        message=f"Importing {normalized_format.upper()} exchange data...",
+                    )
+
+                    def _mutation():
+                        if normalized_format == "csv":
+                            return bundle.exchange_service.import_csv(
+                                path,
+                                mapping=mapping,
+                                options=active_options,
+                                delimiter=selected_csv_delimiter,
+                                progress_callback=import_progress,
+                                cancel_callback=ctx.raise_if_cancelled,
+                            )
+                        if normalized_format == "xlsx":
+                            return bundle.exchange_service.import_xlsx(
+                                path,
+                                mapping=mapping,
+                                options=active_options,
+                                progress_callback=import_progress,
+                                cancel_callback=ctx.raise_if_cancelled,
+                            )
+                        if normalized_format == "package":
+                            return bundle.exchange_service.import_package(
+                                path,
+                                mapping=mapping,
+                                options=active_options,
+                                progress_callback=import_progress,
+                                cancel_callback=ctx.raise_if_cancelled,
+                            )
+                        if normalized_format == "xml":
+                            return bundle.exchange_service.import_xml(
+                                path,
+                                mapping=mapping,
+                                options=active_options,
+                                progress_callback=import_progress,
+                                cancel_callback=ctx.raise_if_cancelled,
+                            )
+                        return bundle.exchange_service.import_json(
+                            path,
+                            mapping=mapping,
+                            options=active_options,
+                            progress_callback=import_progress,
+                            cancel_callback=ctx.raise_if_cancelled,
+                        )
+
+                    if active_options.mode == "dry_run":
+                        return _mutation()
+
+                    return run_snapshot_history_action(
+                        history_manager=bundle.history_manager,
+                        action_label=f"Import {normalized_format.upper()}: {Path(path).name}",
+                        action_type=f"import.{normalized_format}",
+                        entity_type="Import",
+                        entity_id=path,
+                        payload={"path": path, "mode": active_options.mode},
+                        mutation=_mutation,
+                        progress_callback=ctx.report_progress,
+                        post_mutation_progress=(92, "Capturing import history snapshot..."),
+                        record_progress=(94, "Recording import history..."),
+                        logger=self.logger,
+                    )
+
+                def _import_before_cleanup(report: ExchangeImportReport, ui_progress) -> None:
+                    if active_options.mode == "dry_run":
+                        self._advance_task_ui_progress(
+                            ui_progress,
+                            value=100,
+                            message="Exchange import validation complete.",
+                        )
+                        return
+                    self._advance_task_ui_progress(
+                        ui_progress,
+                        value=97,
+                        message="Applying imported catalog changes...",
+                    )
+                    try:
+                        self.conn.commit()
+                    except Exception:
+                        pass
+                    self._advance_task_ui_progress(
+                        ui_progress,
+                        value=99,
+                        message="Refreshing catalog views and history...",
+                    )
+                    self.refresh_table_preserve_view(
+                        focus_id=(report.created_tracks or report.updated_tracks or [None])[0]
+                    )
+                    self._refresh_history_actions()
+                    self.populate_all_comboboxes()
+                    self._advance_task_ui_progress(
+                        ui_progress,
+                        value=100,
+                        message="Exchange import complete.",
+                    )
+
+                def _import_success(report: ExchangeImportReport):
+                    self._log_event(
+                        f"import.{normalized_format}",
+                        f"Imported {normalized_format.upper()} exchange data",
+                        path=path,
+                        mode=active_options.mode,
+                        passed=report.passed,
+                        failed=report.failed,
+                        skipped=report.skipped,
+                        warnings=report.warnings,
+                        duplicates=report.duplicates,
+                        unknown_fields=report.unknown_fields,
+                        repair_queue_entry_ids=report.repair_queue_entry_ids,
+                    )
+                    self._audit(
+                        "IMPORT",
+                        normalized_format.upper(),
+                        ref_id=path,
+                        details=(
+                            f"mode={active_options.mode}; passed={report.passed}; failed={report.failed}; "
+                            f"skipped={report.skipped}; duplicates={len(report.duplicates)}; "
+                            f"repair_queue={len(report.repair_queue_entry_ids)}"
+                        ),
+                    )
+                    self._audit_commit()
+                    self._show_exchange_import_report(path, report)
+
+                self._submit_background_bundle_task(
+                    title=f"Import {normalized_format.upper()}",
+                    description=f"Importing {normalized_format.upper()} data into the current profile...",
+                    task_fn=_import_worker,
+                    kind=("read" if active_options.mode == "dry_run" else "write"),
+                    unique_key=f"exchange.import.{normalized_format}",
+                    worker_completion_progress=(
+                        (96, "Finalizing background import transaction...")
+                        if active_options.mode != "dry_run"
+                        else (100, "Exchange import validation complete.")
+                    ),
+                    on_success_before_cleanup=_import_before_cleanup,
+                    on_success_after_cleanup=_import_success,
+                    on_error=lambda failure: self._show_background_task_error(
+                        "Import Exchange",
+                        failure,
+                        user_message="Could not complete the exchange import:",
+                    ),
                 )
 
-                def _mutation():
+            def _run_preflight_review() -> None:
+                preview_options = ExchangeImportOptions(
+                    mode="dry_run",
+                    match_by_internal_id=options.match_by_internal_id,
+                    match_by_isrc=options.match_by_isrc,
+                    match_by_upc_title=options.match_by_upc_title,
+                    heuristic_match=options.heuristic_match,
+                    create_missing_custom_fields=options.create_missing_custom_fields,
+                    skip_targets=list(options.skip_targets),
+                    preview_apply_mode=options.mode,
+                )
+
+                def _preview_worker(bundle, ctx):
+                    preview_progress = self._scaled_progress_callback(
+                        ctx.report_progress,
+                        start=0,
+                        end=96,
+                    )
+                    ctx.report_progress(
+                        value=0,
+                        maximum=100,
+                        message="Running exchange import dry-run review...",
+                    )
                     if normalized_format == "csv":
                         return bundle.exchange_service.import_csv(
                             path,
                             mapping=mapping,
-                            options=options,
+                            options=preview_options,
                             delimiter=selected_csv_delimiter,
-                            progress_callback=import_progress,
+                            progress_callback=preview_progress,
                             cancel_callback=ctx.raise_if_cancelled,
                         )
                     if normalized_format == "xlsx":
                         return bundle.exchange_service.import_xlsx(
                             path,
                             mapping=mapping,
-                            options=options,
-                            progress_callback=import_progress,
+                            options=preview_options,
+                            progress_callback=preview_progress,
                             cancel_callback=ctx.raise_if_cancelled,
                         )
                     if normalized_format == "package":
                         return bundle.exchange_service.import_package(
                             path,
                             mapping=mapping,
-                            options=options,
-                            progress_callback=import_progress,
+                            options=preview_options,
+                            progress_callback=preview_progress,
                             cancel_callback=ctx.raise_if_cancelled,
                         )
                     if normalized_format == "xml":
                         return bundle.exchange_service.import_xml(
                             path,
                             mapping=mapping,
-                            options=options,
-                            progress_callback=import_progress,
+                            options=preview_options,
+                            progress_callback=preview_progress,
                             cancel_callback=ctx.raise_if_cancelled,
                         )
                     return bundle.exchange_service.import_json(
                         path,
                         mapping=mapping,
-                        options=options,
-                        progress_callback=import_progress,
+                        options=preview_options,
+                        progress_callback=preview_progress,
                         cancel_callback=ctx.raise_if_cancelled,
                     )
 
-                if options.mode == "dry_run":
-                    return _mutation()
-
-                return run_snapshot_history_action(
-                    history_manager=bundle.history_manager,
-                    action_label=f"Import {normalized_format.upper()}: {Path(path).name}",
-                    action_type=f"import.{normalized_format}",
-                    entity_type="Import",
-                    entity_id=path,
-                    payload={"path": path, "mode": options.mode},
-                    mutation=_mutation,
-                    progress_callback=ctx.report_progress,
-                    post_mutation_progress=(92, "Capturing import history snapshot..."),
-                    record_progress=(94, "Recording import history..."),
-                    logger=self.logger,
-                )
-
-            def _import_before_cleanup(report: ExchangeImportReport, ui_progress) -> None:
-                changed = bool(report.created_tracks or report.updated_tracks)
-                if options.mode == "dry_run":
-                    self._advance_task_ui_progress(
-                        ui_progress,
-                        value=100,
-                        message="Exchange import validation complete.",
+                def _preview_success(report: ExchangeImportReport) -> None:
+                    accepted = self._open_import_review_dialog(
+                        title=f"Review {normalized_format.upper()} Import",
+                        subtitle=(
+                            "Dry run completed. Review the planned catalog changes before anything is written to the current profile."
+                        ),
+                        summary_lines=self._exchange_import_review_summary(report),
+                        warnings=report.warnings,
+                        preview_rows=inspection.preview_rows,
+                        preview_headers=inspection.headers,
+                        preview_title="Source Preview",
+                        confirm_label="Apply Import",
                     )
-                    return
-                self._advance_task_ui_progress(
-                    ui_progress,
-                    value=97,
-                    message="Applying imported catalog changes...",
-                )
-                try:
-                    self.conn.commit()
-                except Exception:
-                    pass
-                self._advance_task_ui_progress(
-                    ui_progress,
-                    value=99,
-                    message="Refreshing catalog views and history...",
-                )
-                if options.mode != "dry_run":
-                    self.refresh_table_preserve_view(
-                        focus_id=(report.created_tracks or report.updated_tracks or [None])[0]
-                    )
-                    self._refresh_history_actions()
-                    self.populate_all_comboboxes()
-                self._advance_task_ui_progress(
-                    ui_progress,
-                    value=100,
-                    message="Exchange import complete.",
-                )
+                    if accepted:
+                        _submit_import_task(options)
 
-            def _import_success(report: ExchangeImportReport):
-                self._log_event(
-                    f"import.{normalized_format}",
-                    f"Imported {normalized_format.upper()} exchange data",
-                    path=path,
-                    mode=options.mode,
-                    passed=report.passed,
-                    failed=report.failed,
-                    skipped=report.skipped,
-                    warnings=report.warnings,
-                    duplicates=report.duplicates,
-                    unknown_fields=report.unknown_fields,
-                    repair_queue_entry_ids=report.repair_queue_entry_ids,
-                )
-                self._audit(
-                    "IMPORT",
-                    normalized_format.upper(),
-                    ref_id=path,
-                    details=(
-                        f"mode={options.mode}; passed={report.passed}; failed={report.failed}; "
-                        f"skipped={report.skipped}; duplicates={len(report.duplicates)}; "
-                        f"repair_queue={len(report.repair_queue_entry_ids)}"
+                self._submit_background_bundle_task(
+                    title=f"Review {normalized_format.upper()}",
+                    description="Running a dry-run review of the selected import...",
+                    task_fn=_preview_worker,
+                    kind="read",
+                    unique_key=f"exchange.review.{normalized_format}",
+                    worker_completion_progress=(100, "Import review ready."),
+                    on_success_after_cleanup=_preview_success,
+                    on_error=lambda failure: self._show_background_task_error(
+                        "Import Exchange",
+                        failure,
+                        user_message="Could not review the import before apply:",
                     ),
                 )
-                self._audit_commit()
-                self._show_exchange_import_report(path, report)
 
-            self._submit_background_bundle_task(
-                title=f"Import {normalized_format.upper()}",
-                description=f"Importing {normalized_format.upper()} data into the current profile...",
-                task_fn=_import_worker,
-                kind=("read" if options.mode == "dry_run" else "write"),
-                unique_key=f"exchange.import.{normalized_format}",
-                worker_completion_progress=(
-                    (96, "Finalizing background import transaction...")
-                    if options.mode != "dry_run"
-                    else (100, "Exchange import validation complete.")
-                ),
-                on_success_before_cleanup=_import_before_cleanup,
-                on_success_after_cleanup=_import_success,
-                on_error=lambda failure: self._show_background_task_error(
-                    "Import Exchange",
-                    failure,
-                    user_message="Could not complete the exchange import:",
-                ),
-            )
+            if options.mode == "dry_run":
+                _submit_import_task(options)
+            else:
+                _run_preflight_review()
 
         self._submit_background_bundle_task(
             title=f"Inspect {normalized_format.upper()}",
@@ -19174,6 +19537,10 @@ class App(QMainWindow):
             lines.append(
                 "No database changes were made because this run used Dry run validation mode."
             )
+            if report.would_create_tracks:
+                lines.append(f"Would create tracks: {report.would_create_tracks}")
+            if report.would_update_tracks:
+                lines.append(f"Would update tracks: {report.would_update_tracks}")
         if report.duplicates:
             lines.append(f"Duplicates: {len(report.duplicates)}")
         if report.repair_queue_entry_ids:

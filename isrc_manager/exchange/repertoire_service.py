@@ -6,6 +6,7 @@ import csv
 import json
 import sqlite3
 import tempfile
+from dataclasses import dataclass, field
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -25,6 +26,17 @@ from isrc_manager.rights import RightPayload, RightsService
 from isrc_manager.works import WorkContributorPayload, WorkPayload, WorkService
 
 REPERTOIRE_JSON_SCHEMA_VERSION = 1
+
+
+@dataclass(slots=True)
+class RepertoireImportInspection:
+    file_path: str
+    format_name: str
+    entity_counts: dict[str, int]
+    preview_rows: list[dict[str, object]]
+    warnings: list[str] = field(default_factory=list)
+    existing_parties: int = 0
+    new_parties: int = 0
 
 
 def _stage_progress(start: int, end: int, index: int, total: int) -> int:
@@ -297,6 +309,241 @@ class RepertoireExchangeService:
                 except Exception:
                     return value
         return value
+
+    def inspect_json(
+        self,
+        path: str | Path,
+        *,
+        progress_callback=None,
+        cancel_callback=None,
+    ) -> RepertoireImportInspection:
+        self._report_progress(progress_callback, 5, "Reading Contracts and Rights JSON...")
+        if cancel_callback is not None:
+            cancel_callback()
+        payload = self._load_json_payload(path)
+        self._report_progress(progress_callback, 25, "Inspecting Contracts and Rights JSON...")
+        return self._inspect_payload(
+            payload,
+            file_path=path,
+            format_name="json",
+            progress_callback=progress_callback,
+            cancel_callback=cancel_callback,
+        )
+
+    def inspect_xlsx(
+        self,
+        path: str | Path,
+        *,
+        progress_callback=None,
+        cancel_callback=None,
+    ) -> RepertoireImportInspection:
+        self._report_progress(progress_callback, 5, "Reading Contracts and Rights workbook...")
+        if cancel_callback is not None:
+            cancel_callback()
+        rows = self._rows_from_workbook(path)
+        self._report_progress(progress_callback, 20, "Parsing repertoire workbook sheets...")
+        return self._inspect_payload(
+            {
+                "schema_version": REPERTOIRE_JSON_SCHEMA_VERSION,
+                "parties": rows.get("parties", []),
+                "works": rows.get("works", []),
+                "contracts": rows.get("contracts", []),
+                "rights": rows.get("rights", []),
+                "assets": rows.get("assets", []),
+            },
+            file_path=path,
+            format_name="xlsx",
+            progress_callback=progress_callback,
+            cancel_callback=cancel_callback,
+        )
+
+    def inspect_csv_bundle(
+        self,
+        directory: str | Path,
+        *,
+        progress_callback=None,
+        cancel_callback=None,
+    ) -> RepertoireImportInspection:
+        self._report_progress(progress_callback, 5, "Reading Contracts and Rights CSV bundle...")
+        if cancel_callback is not None:
+            cancel_callback()
+        rows = self._rows_from_csv_bundle(directory)
+        self._report_progress(progress_callback, 20, "Parsing repertoire CSV bundle...")
+        return self._inspect_payload(
+            {
+                "schema_version": REPERTOIRE_JSON_SCHEMA_VERSION,
+                "parties": rows.get("parties", []),
+                "works": rows.get("works", []),
+                "contracts": rows.get("contracts", []),
+                "rights": rows.get("rights", []),
+                "assets": rows.get("assets", []),
+            },
+            file_path=directory,
+            format_name="csv",
+            progress_callback=progress_callback,
+            cancel_callback=cancel_callback,
+        )
+
+    def inspect_package(
+        self,
+        path: str | Path,
+        *,
+        progress_callback=None,
+        cancel_callback=None,
+    ) -> RepertoireImportInspection:
+        self._report_progress(progress_callback, 5, "Extracting Contracts and Rights package...")
+        warnings: list[str] = []
+        with tempfile.TemporaryDirectory(prefix="repertoire-package-") as tmpdir:
+            target_dir = Path(tmpdir)
+            with ZipFile(path, "r") as archive:
+                archive.extractall(target_dir)
+            if cancel_callback is not None:
+                cancel_callback()
+            manifest_path = target_dir / "manifest.json"
+            payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+            packaged_files = payload.get("packaged_files", {})
+            if isinstance(packaged_files, dict):
+                for contract in payload.get("contracts", []):
+                    for document in contract.get("documents", []):
+                        stored_path = str(document.get("file_path") or "").strip()
+                        arcname = packaged_files.get(stored_path)
+                        if stored_path and arcname and not (target_dir / arcname).exists():
+                            warnings.append(
+                                f"Packaged contract document is missing from the archive: {arcname}"
+                            )
+                for asset in payload.get("assets", []):
+                    stored_path = str(asset.get("stored_path") or "").strip()
+                    arcname = packaged_files.get(stored_path)
+                    if stored_path and arcname and not (target_dir / arcname).exists():
+                        warnings.append(
+                            f"Packaged asset file is missing from the archive: {arcname}"
+                        )
+            self._report_progress(progress_callback, 20, "Parsing repertoire package manifest...")
+            return self._inspect_payload(
+                payload,
+                file_path=path,
+                format_name="package",
+                progress_callback=progress_callback,
+                cancel_callback=cancel_callback,
+                warnings=warnings,
+            )
+
+    def _inspect_payload(
+        self,
+        payload: dict[str, object],
+        *,
+        file_path: str | Path,
+        format_name: str,
+        progress_callback=None,
+        cancel_callback=None,
+        warnings: list[str] | None = None,
+    ) -> RepertoireImportInspection:
+        version = int(payload.get("schema_version") or 0)
+        if version != REPERTOIRE_JSON_SCHEMA_VERSION:
+            raise ValueError(
+                f"Unsupported repertoire schema version {version}. Expected {REPERTOIRE_JSON_SCHEMA_VERSION}."
+            )
+        if cancel_callback is not None:
+            cancel_callback()
+        parties = [dict(row) for row in list(payload.get("parties", []) or [])]
+        works = [dict(row) for row in list(payload.get("works", []) or [])]
+        contracts = [dict(row) for row in list(payload.get("contracts", []) or [])]
+        rights = [dict(row) for row in list(payload.get("rights", []) or [])]
+        assets = [dict(row) for row in list(payload.get("assets", []) or [])]
+        inspection_warnings = list(warnings or [])
+        self._report_progress(
+            progress_callback, 35, "Preparing Contracts and Rights import review..."
+        )
+
+        existing_parties = 0
+        new_parties = 0
+        preview_rows: list[dict[str, object]] = []
+
+        def _append_preview(entity: str, action: str, label: str, notes: str = "") -> None:
+            if len(preview_rows) >= 16:
+                return
+            preview_rows.append(
+                {
+                    "Entity": entity,
+                    "Action": action,
+                    "Label": label,
+                    "Notes": notes,
+                }
+            )
+
+        for row in parties:
+            if cancel_callback is not None:
+                cancel_callback()
+            source = {key: self._decode_value(value) for key, value in row.items()}
+            legal_name = str(source.get("legal_name") or "").strip()
+            label = (
+                legal_name
+                or str(source.get("display_name") or "").strip()
+                or str(source.get("artist_name") or "").strip()
+                or "Unnamed Party"
+            )
+            if legal_name:
+                existing = self.conn.execute(
+                    "SELECT id FROM Parties WHERE legal_name=? ORDER BY id LIMIT 1",
+                    (legal_name,),
+                ).fetchone()
+            else:
+                existing = None
+                inspection_warnings.append(
+                    f"Party preview row '{label}' does not include a legal name and may fail on apply."
+                )
+            if existing:
+                existing_parties += 1
+                _append_preview(
+                    "Party", "Reuse Existing", label, f"Matches Party #{int(existing[0])}"
+                )
+            else:
+                new_parties += 1
+                _append_preview("Party", "Create", label)
+
+        for row in works[:4]:
+            source = {key: self._decode_value(value) for key, value in row.items()}
+            label = str(source.get("title") or "").strip() or "Untitled Work"
+            notes = str(source.get("iswc") or "").strip()
+            _append_preview("Work", "Create", label, notes)
+
+        for row in contracts[:4]:
+            source = {key: self._decode_value(value) for key, value in row.items()}
+            label = str(source.get("title") or "").strip() or "Untitled Contract"
+            notes = str(source.get("contract_type") or "").strip()
+            _append_preview("Contract", "Create", label, notes)
+
+        for row in rights[:4]:
+            source = {key: self._decode_value(value) for key, value in row.items()}
+            label = str(source.get("title") or "").strip() or "Untitled Right"
+            notes = str(source.get("right_type") or "").strip()
+            _append_preview("Right", "Create", label, notes)
+
+        for row in assets[:4]:
+            source = {key: self._decode_value(value) for key, value in row.items()}
+            label = str(source.get("filename") or "").strip() or "Unnamed Asset"
+            notes = str(source.get("asset_type") or "").strip()
+            _append_preview("Asset", "Create", label, notes)
+
+        entity_counts = {
+            "parties": len(parties),
+            "works": len(works),
+            "contracts": len(contracts),
+            "rights": len(rights),
+            "assets": len(assets),
+        }
+        if not any(entity_counts.values()):
+            inspection_warnings.append("The selected source did not contain any importable rows.")
+        self._report_progress(progress_callback, 100, "Contracts and Rights inspection complete.")
+        return RepertoireImportInspection(
+            file_path=str(file_path),
+            format_name=str(format_name),
+            entity_counts=entity_counts,
+            preview_rows=preview_rows,
+            warnings=inspection_warnings,
+            existing_parties=existing_parties,
+            new_parties=new_parties,
+        )
 
     def import_json(
         self,

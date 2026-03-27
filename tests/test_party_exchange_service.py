@@ -127,6 +127,42 @@ class PartyExchangeServiceTests(unittest.TestCase):
         self.assertEqual(party.profile_name, "TestProfile.db")
         self.assertEqual(self.settings_reads.load_owner_party_id(), party.id)
 
+    def test_dry_run_reports_planned_party_changes_without_writing_or_binding_owner(self):
+        json_path = self.data_root / "party-dry-run.json"
+        json_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "rows": [
+                        {
+                            "legal_name": "Dry Run Party B.V.",
+                            "display_name": "Dry Run Party",
+                            "email": "hello@dry-run.test",
+                            "is_owner": True,
+                        }
+                    ],
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        inspection = self.exchange_service.inspect_json(json_path)
+        report = self.exchange_service.import_json(
+            json_path,
+            mapping=inspection.suggested_mapping,
+            options=PartyImportOptions(mode="dry_run"),
+        )
+
+        self.assertEqual(report.mode, "dry_run")
+        self.assertEqual(report.failed, 0)
+        self.assertEqual(report.created_parties, [])
+        self.assertEqual(report.updated_parties, [])
+        self.assertEqual(report.would_create_parties, 1)
+        self.assertTrue(report.would_set_owner)
+        self.assertEqual(self.party_service.list_parties(), [])
+        self.assertIsNone(self.settings_reads.load_owner_party_id())
+
     def test_import_xlsx_round_trip_preserves_aliases_and_business_fields(self):
         source_party_id = self.party_service.create_party(
             PartyPayload(

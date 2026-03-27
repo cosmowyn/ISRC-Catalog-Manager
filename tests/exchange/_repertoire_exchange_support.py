@@ -654,6 +654,30 @@ class SearchAndRepertoireExchangeTestCase(unittest.TestCase):
             xlsx_conn.close()
             csv_conn.close()
 
+    def case_repertoire_inspection_previews_counts_without_writing(self):
+        self._seed_repertoire()
+        json_path = self.data_root / "repertoire-inspection.json"
+        self.exchange_service.export_json(json_path)
+
+        target_root = Path(tempfile.mkdtemp(prefix="repertoire-inspection-target-"))
+        self.addCleanup(shutil.rmtree, target_root, True)
+        new_conn, new_services, _track_id, _release_id = self._prepare_import_target(target_root)
+        try:
+            inspection = new_services["exchange_service"].inspect_json(json_path)
+            self.assertEqual(inspection.format_name, "json")
+            self.assertEqual(inspection.entity_counts["parties"], 2)
+            self.assertEqual(inspection.entity_counts["works"], 1)
+            self.assertGreaterEqual(len(inspection.preview_rows), 1)
+            self.assertEqual(new_conn.execute("SELECT COUNT(*) FROM Parties").fetchone()[0], 0)
+            self.assertEqual(new_conn.execute("SELECT COUNT(*) FROM Works").fetchone()[0], 0)
+            self.assertEqual(new_conn.execute("SELECT COUNT(*) FROM Contracts").fetchone()[0], 0)
+            self.assertEqual(
+                new_conn.execute("SELECT COUNT(*) FROM RightsRecords").fetchone()[0],
+                0,
+            )
+        finally:
+            new_conn.close()
+
     def case_repertoire_import_reports_staged_progress_to_completion(self):
         self._seed_repertoire()
         json_path = self.data_root / "repertoire-progress.json"

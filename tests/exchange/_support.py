@@ -224,6 +224,59 @@ class ExchangeServiceTestCase(unittest.TestCase):
         self.assertEqual(report.skipped, 1)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Tracks").fetchone()[0], 0)
 
+    def case_import_json_dry_run_is_side_effect_free_and_reports_planned_changes(self):
+        json_path = self.data_root / "dry-run-import.json"
+        json_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "rows": [
+                        {
+                            "Track Name": "Dry Run Orbit",
+                            "Artist": "Moonwake",
+                            "ISRC Code": "NL-ABC-26-02001",
+                            "Mood Source": "Dreamy",
+                        }
+                    ],
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        report = self.service.import_json(
+            json_path,
+            mapping={
+                "Track Name": "track_title",
+                "Artist": "artist_name",
+                "ISRC Code": "isrc",
+                "Mood Source": "custom::Mood",
+            },
+            options=ExchangeImportOptions(mode="dry_run", create_missing_custom_fields=True),
+        )
+
+        self.assertEqual(report.mode, "dry_run")
+        self.assertEqual(report.failed, 0)
+        self.assertEqual(report.created_tracks, [])
+        self.assertEqual(report.updated_tracks, [])
+        self.assertEqual(report.would_create_tracks, 1)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Tracks").fetchone()[0], 0)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Releases").fetchone()[0], 0)
+        self.assertEqual(
+            self.conn.execute("SELECT COUNT(*) FROM CustomFieldDefs").fetchone()[0],
+            0,
+        )
+        self.assertEqual(
+            self.conn.execute("SELECT COUNT(*) FROM TrackImportRepairQueue").fetchone()[0],
+            0,
+        )
+        self.assertTrue(
+            any(
+                "would create missing custom fields" in warning.casefold()
+                for warning in report.warnings
+            )
+        )
+
     def case_import_json_persists_failed_rows_to_repair_queue_without_creating_live_orphans(self):
         json_path = self.data_root / "failed-import.json"
         json_path.write_text(

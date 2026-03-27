@@ -71,6 +71,15 @@ class AppShellWorkspaceDockTests(AppShellTestCase):
     test_repertoire_export_uses_background_task_instead_of_direct_sync_write = (
         AppShellTestCase.case_repertoire_export_uses_background_task_instead_of_direct_sync_write
     )
+    test_party_import_write_mode_runs_dry_run_review_before_apply = (
+        AppShellTestCase.case_party_import_write_mode_runs_dry_run_review_before_apply
+    )
+    test_catalog_import_write_mode_runs_dry_run_review_before_apply = (
+        AppShellTestCase.case_catalog_import_write_mode_runs_dry_run_review_before_apply
+    )
+    test_repertoire_import_requires_review_before_apply = (
+        AppShellTestCase.case_repertoire_import_requires_review_before_apply
+    )
     test_contract_template_workspace_opens_as_tabified_dock = (
         AppShellTestCase.case_contract_template_workspace_opens_as_tabified_dock
     )

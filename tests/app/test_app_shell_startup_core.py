@@ -14,6 +14,9 @@ class AppShellStartupCoreTests(AppShellTestCase):
     test_startup_prepares_database_before_live_open = (
         AppShellTestCase.case_startup_prepares_database_before_live_open
     )
+    test_trace_logging_sanitizes_reserved_logrecord_field_names = (
+        AppShellTestCase.case_trace_logging_sanitizes_reserved_logrecord_field_names
+    )
     test_audio_conversion_format_prompt_uses_export_button_label = (
         AppShellTestCase.case_audio_conversion_format_prompt_uses_export_button_label
     )

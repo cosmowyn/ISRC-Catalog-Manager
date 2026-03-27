@@ -1800,6 +1800,27 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(open_calls, [True])
         self.assertEqual(self.window.current_db_path, str(target_path))
 
+    def case_trace_logging_sanitizes_reserved_logrecord_field_names(self):
+        with mock.patch.object(self.window.trace_logger, "log") as trace_log:
+            self.window._log_event(
+                "party.import.zip",
+                "Imported Party archive",
+                created=3,
+                process=12,
+                warnings=["duplicate legal name"],
+            )
+
+        trace_log.assert_called_once()
+        extra = trace_log.call_args.kwargs.get("extra")
+        self.assertIsInstance(extra, dict)
+        assert isinstance(extra, dict)
+        self.assertEqual(extra.get("event"), "party.import.zip")
+        self.assertEqual(extra.get("field_created"), 3)
+        self.assertEqual(extra.get("field_process"), 12)
+        self.assertEqual(extra.get("warnings"), ["duplicate legal name"])
+        self.assertNotIn("created", extra)
+        self.assertNotIn("process", extra)
+
     def case_prepared_database_open_skips_schema_work(self):
         target_path = self.root / "prepared-open.db"
         self._create_profile_database(target_path)
@@ -3554,6 +3575,244 @@ class AppShellTestCase(unittest.TestCase):
             submit_task.call_args.kwargs["title"],
             "Export Contracts and Rights JSON",
         )
+
+    def case_party_import_write_mode_runs_dry_run_review_before_apply(self):
+        json_path = self.root / "party-review.json"
+        json_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "rows": [
+                        {
+                            "legal_name": "Preview Party B.V.",
+                            "display_name": "Preview Party",
+                            "email": "preview@party.test",
+                        }
+                    ],
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        submitted_titles: list[str] = []
+        captured_modes: list[tuple[str, str | None]] = []
+        original_import_json = app_module.PartyExchangeService.import_json
+
+        def _run_bundle_task_and_capture(window, **kwargs):
+            submitted_titles.append(str(kwargs.get("title") or ""))
+            return self._run_bundle_task_inline(window, **kwargs)
+
+        def _capture_import(service, *args, **kwargs):
+            options = kwargs.get("options")
+            captured_modes.append(
+                (
+                    str(getattr(options, "mode", "")),
+                    getattr(options, "preview_apply_mode", None),
+                )
+            )
+            return original_import_json(service, *args, **kwargs)
+
+        with (
+            mock.patch.object(
+                app_module.QFileDialog,
+                "getOpenFileName",
+                return_value=(str(json_path), "JSON Files (*.json)"),
+            ),
+            mock.patch.object(
+                app_module.App,
+                "_submit_background_bundle_task",
+                autospec=True,
+                side_effect=_run_bundle_task_and_capture,
+            ),
+            mock.patch.object(
+                app_module.PartyImportDialog,
+                "exec",
+                return_value=app_module.QDialog.Accepted,
+            ),
+            mock.patch.object(
+                app_module.PartyImportDialog,
+                "mapping",
+                return_value={
+                    "legal_name": "legal_name",
+                    "display_name": "display_name",
+                    "email": "email",
+                },
+            ),
+            mock.patch.object(
+                app_module.PartyImportDialog,
+                "import_options",
+                return_value=app_module.PartyImportOptions(mode="upsert"),
+            ),
+            mock.patch.object(
+                app_module.PartyImportDialog,
+                "resolved_csv_delimiter",
+                return_value=None,
+            ),
+            mock.patch.object(
+                app_module.ImportReviewDialog,
+                "exec",
+                return_value=app_module.QDialog.Rejected,
+            ),
+            mock.patch.object(
+                app_module.PartyExchangeService,
+                "import_json",
+                autospec=True,
+                side_effect=_capture_import,
+            ),
+        ):
+            self.window.import_party_exchange_file("json")
+            self.app.processEvents()
+
+        self.assertEqual(submitted_titles, ["Inspect Parties JSON", "Review Parties JSON"])
+        self.assertEqual(captured_modes, [("dry_run", "upsert")])
+        self.assertEqual(self.window.party_service.list_parties(), [])
+
+    def case_catalog_import_write_mode_runs_dry_run_review_before_apply(self):
+        json_path = self.root / "catalog-review.json"
+        json_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "rows": [
+                        {
+                            "track_title": "Preview Orbit",
+                            "artist_name": "Moonwake",
+                            "isrc": "NL-TST-26-90101",
+                        }
+                    ],
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        submitted_titles: list[str] = []
+        captured_modes: list[tuple[str, str | None]] = []
+        original_import_json = app_module.ExchangeService.import_json
+
+        def _run_bundle_task_and_capture(window, **kwargs):
+            submitted_titles.append(str(kwargs.get("title") or ""))
+            return self._run_bundle_task_inline(window, **kwargs)
+
+        def _capture_import(service, *args, **kwargs):
+            options = kwargs.get("options")
+            captured_modes.append(
+                (
+                    str(getattr(options, "mode", "")),
+                    getattr(options, "preview_apply_mode", None),
+                )
+            )
+            return original_import_json(service, *args, **kwargs)
+
+        with (
+            mock.patch.object(
+                app_module.QFileDialog,
+                "getOpenFileName",
+                return_value=(str(json_path), "JSON Files (*.json)"),
+            ),
+            mock.patch.object(
+                app_module.App,
+                "_submit_background_bundle_task",
+                autospec=True,
+                side_effect=_run_bundle_task_and_capture,
+            ),
+            mock.patch.object(
+                app_module.ExchangeImportDialog,
+                "exec",
+                return_value=app_module.QDialog.Accepted,
+            ),
+            mock.patch.object(
+                app_module.ExchangeImportDialog,
+                "mapping",
+                return_value={
+                    "track_title": "track_title",
+                    "artist_name": "artist_name",
+                    "isrc": "isrc",
+                },
+            ),
+            mock.patch.object(
+                app_module.ExchangeImportDialog,
+                "import_options",
+                return_value=app_module.ExchangeImportOptions(mode="create"),
+            ),
+            mock.patch.object(
+                app_module.ExchangeImportDialog,
+                "resolved_csv_delimiter",
+                return_value=None,
+            ),
+            mock.patch.object(
+                app_module.ImportReviewDialog,
+                "exec",
+                return_value=app_module.QDialog.Rejected,
+            ),
+            mock.patch.object(
+                app_module.ExchangeService,
+                "import_json",
+                autospec=True,
+                side_effect=_capture_import,
+            ),
+        ):
+            self.window.import_exchange_file("json")
+            self.app.processEvents()
+
+        self.assertEqual(submitted_titles, ["Inspect JSON", "Review JSON"])
+        self.assertEqual(captured_modes, [("dry_run", "create")])
+        self.assertEqual(self.window.conn.execute("SELECT COUNT(*) FROM Tracks").fetchone()[0], 0)
+
+    def case_repertoire_import_requires_review_before_apply(self):
+        json_path = self.root / "repertoire-review.json"
+        json_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "parties": [{"legal_name": "Preview Label"}],
+                    "works": [],
+                    "contracts": [],
+                    "rights": [],
+                    "assets": [],
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        submitted_titles: list[str] = []
+
+        def _run_bundle_task_and_capture(window, **kwargs):
+            submitted_titles.append(str(kwargs.get("title") or ""))
+            return self._run_bundle_task_inline(window, **kwargs)
+
+        with (
+            mock.patch.object(
+                app_module.QFileDialog,
+                "getOpenFileName",
+                return_value=(str(json_path), "JSON Files (*.json)"),
+            ),
+            mock.patch.object(
+                app_module.App,
+                "_submit_background_bundle_task",
+                autospec=True,
+                side_effect=_run_bundle_task_and_capture,
+            ),
+            mock.patch.object(
+                app_module.ImportReviewDialog,
+                "exec",
+                return_value=app_module.QDialog.Rejected,
+            ),
+            mock.patch.object(
+                app_module.RepertoireExchangeService,
+                "import_json",
+                autospec=True,
+                side_effect=AssertionError(
+                    "repertoire apply should not run before review acceptance"
+                ),
+            ),
+        ):
+            self.window.import_repertoire_exchange("json")
+            self.app.processEvents()
+
+        self.assertEqual(submitted_titles, ["Inspect Contracts and Rights JSON"])
 
     def case_contract_template_workspace_opens_as_tabified_dock(self):
         self.window.open_contract_template_workspace()
