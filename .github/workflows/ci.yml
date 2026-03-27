@@ -5,7 +5,6 @@ on:
   pull_request:
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
   PYTHONFAULTHANDLER: "1"
   PYTHONUNBUFFERED: "1"
@@ -229,7 +228,7 @@ jobs:
 
       - name: Upload coverage data
         if: ${{ matrix.coverage }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-data-${{ matrix.group }}-py${{ matrix.python-version }}
           path: .coverage*
@@ -245,7 +244,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           pattern: coverage-data-*
           path: coverage-artifacts
@@ -273,7 +272,7 @@ jobs:
           python3 -m coverage xml
 
       - name: Upload coverage XML
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-xml
           path: coverage-artifacts/coverage.xml
