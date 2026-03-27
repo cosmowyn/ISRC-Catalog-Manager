@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tempfile
 from dataclasses import dataclass
+from datetime import date
 from difflib import SequenceMatcher
 from pathlib import Path
 
@@ -40,8 +41,8 @@ from isrc_manager.file_storage import (
     normalize_storage_mode,
     resolve_file_export_target,
 )
-from isrc_manager.paths import EXPORTS_SUBDIR
 from isrc_manager.parties.dialogs import PartyEditorDialog
+from isrc_manager.paths import EXPORTS_SUBDIR
 from isrc_manager.ui_common import (
     FocusWheelComboBox,
     _add_standard_dialog_header,

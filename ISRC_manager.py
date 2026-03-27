@@ -194,14 +194,14 @@ from isrc_manager.domain.standard_fields import (
 )
 from isrc_manager.domain.timecode import hms_to_seconds, parse_hms_text, seconds_to_hms
 from isrc_manager.exchange.dialogs import ExchangeImportDialog
-from isrc_manager.exchange.repair_dialogs import (
-    TrackImportRepairEntryDialog,
-    TrackImportRepairQueueDialog,
-)
 from isrc_manager.exchange.models import (
     ExchangeImportOptions,
     ExchangeImportReport,
     ExchangeInspection,
+)
+from isrc_manager.exchange.repair_dialogs import (
+    TrackImportRepairEntryDialog,
+    TrackImportRepairQueueDialog,
 )
 from isrc_manager.exchange.repertoire_service import (
     RepertoireExchangeService,
@@ -248,8 +248,8 @@ from isrc_manager.media.derivatives import (
     ManagedDerivativeExportResult,
 )
 from isrc_manager.parties import (
-    PartyExchangeService,
     PartyExchangeInspection,
+    PartyExchangeService,
     PartyImportOptions,
     PartyImportReport,
     PartyPayload,
@@ -320,8 +320,8 @@ from isrc_manager.services import (
     RepertoireWorkflowService,
     SettingsMutationService,
     SettingsReadService,
-    TrackImportRepairQueueService,
     TrackCreatePayload,
+    TrackImportRepairQueueService,
     TrackService,
     TrackSnapshot,
     TrackUpdatePayload,
