@@ -1,6 +1,7 @@
 import threading
 import time
 import unittest
+from unittest.mock import patch
 
 try:
     from PySide6.QtCore import QTimer
@@ -539,6 +540,87 @@ class BackgroundTaskManagerTests(unittest.TestCase):
 
         self.assertEqual(progress_messages, ["Importing contracts bundle..."])
         self.assertEqual(status_messages, ["Applying inspected contract rows."])
+        self.assertFalse(self.manager.has_running_tasks())
+
+    def test_progress_updates_ignore_destroyed_progress_surface_widgets(self):
+        finished = threading.Event()
+        allow_finish = threading.Event()
+        progress_messages: list[str] = []
+        status_messages: list[str] = []
+
+        def _task(ctx):
+            ctx.report_progress(1, 3, "Preparing export surface...")
+            ctx.set_status("Waiting for release.")
+            while not allow_finish.is_set():
+                time.sleep(0.01)
+            return "done"
+
+        task_id = self.manager.submit(
+            title="Destroyed Surface Guard Task",
+            description="Testing partially destroyed progress surfaces.",
+            task_fn=_task,
+            show_dialog=True,
+            cancellable=False,
+            on_finished=finished.set,
+            on_progress=lambda update: progress_messages.append(str(update.message or "")),
+            on_status=lambda message: status_messages.append(str(message or "")),
+        )
+        self.assertIsNotNone(task_id)
+        record = self.manager._tasks[str(task_id)]
+        dialog = record.dialog
+        self.assertIsNotNone(dialog)
+        assert dialog is not None
+
+        self._wait_for_task_completion(
+            lambda: dialog.isVisible(),
+            description="destroyed-surface dialog visibility",
+        )
+        pump_events(app=self.app)
+
+        labels = dialog.findChildren(QLabel)
+        progress_bars = dialog.findChildren(QProgressBar)
+        self.assertTrue(labels)
+        self.assertTrue(progress_bars)
+        label = labels[0]
+        progress_bar = progress_bars[0]
+
+        def _patched_is_valid(obj):
+            if obj is progress_bar or obj is label:
+                return False
+            return True
+
+        with patch("isrc_manager.tasks.manager._qt_object_is_valid", side_effect=_patched_is_valid):
+            record.relay.handle_progress(
+                TaskProgressUpdate(
+                    value=2,
+                    maximum=3,
+                    message="Late progress after progress bar teardown.",
+                )
+            )
+            record.relay.handle_status("Late status after label teardown.")
+        pump_events(app=self.app)
+
+        allow_finish.set()
+        self._wait_for_task_completion(
+            finished.is_set,
+            description="destroyed-surface task completion",
+        )
+        pump_events(app=self.app)
+
+        self.assertEqual(
+            progress_messages,
+            [
+                "Preparing export surface...",
+                "Late progress after progress bar teardown.",
+            ],
+        )
+        self.assertEqual(
+            status_messages,
+            [
+                "Waiting for release.",
+                "Late status after label teardown.",
+            ],
+        )
         self.assertFalse(self.manager.has_running_tasks())
 
     def test_progress_dialog_wraps_long_status_updates_with_bounded_height(self):

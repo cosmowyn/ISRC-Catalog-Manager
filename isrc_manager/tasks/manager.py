@@ -561,6 +561,8 @@ class BackgroundTaskManager(QObject):
         thread.started.connect(worker.run)
 
         dialog = None
+        dialog_label = None
+        dialog_progress = None
         if show_dialog:
             dialog_label = QLabel(_format_progress_dialog_message(description), owner)
             dialog_label.setWordWrap(True)
@@ -580,9 +582,9 @@ class BackgroundTaskManager(QObject):
             dialog.setAutoClose(False)
             dialog.setAutoReset(False)
             dialog.setMinimumDuration(0)
-            dialog.setValue(0)
             dialog.setLabel(dialog_label)
             dialog.setBar(dialog_progress)
+            dialog_progress.setValue(0)
             if not cancellable:
                 dialog.setCancelButton(None)
             else:
@@ -595,31 +597,52 @@ class BackgroundTaskManager(QObject):
         ui_state: dict[str, object] = {
             "active": True,
             "dialog": dialog,
+            "label": dialog_label,
+            "bar": dialog_progress,
         }
 
-        def _current_dialog() -> QProgressDialog | None:
+        def _clear_progress_surface() -> None:
+            ui_state["dialog"] = None
+            ui_state["label"] = None
+            ui_state["bar"] = None
+
+        def _current_progress_surface() -> tuple[QProgressDialog, QLabel, QProgressBar] | None:
             current_dialog = ui_state.get("dialog")
-            if current_dialog is None:
+            current_label = ui_state.get("label")
+            current_bar = ui_state.get("bar")
+            if current_dialog is None or current_label is None or current_bar is None:
                 return None
-            if not _qt_object_is_valid(current_dialog):
-                ui_state["dialog"] = None
+            if not (
+                _qt_object_is_valid(current_dialog)
+                and _qt_object_is_valid(current_label)
+                and _qt_object_is_valid(current_bar)
+            ):
+                _clear_progress_surface()
                 return None
-            return current_dialog
+            return current_dialog, current_label, current_bar
+
+        if dialog is not None:
+            dialog.destroyed.connect(_clear_progress_surface)
+        if dialog_label is not None:
+            dialog_label.destroyed.connect(_clear_progress_surface)
+        if dialog_progress is not None:
+            dialog_progress.destroyed.connect(_clear_progress_surface)
 
         def _apply_progress(update: TaskProgressUpdate) -> None:
             if not bool(ui_state.get("active", False)):
                 return
-            current_dialog = _current_dialog()
-            if current_dialog is not None:
+            progress_surface = _current_progress_surface()
+            if progress_surface is not None:
+                current_dialog, current_label, current_bar = progress_surface
                 if update.message:
-                    current_dialog.setLabelText(_format_progress_dialog_message(update.message))
+                    current_label.setText(_format_progress_dialog_message(update.message))
                 if update.maximum is not None and update.value is not None:
-                    current_dialog.setMaximum(max(0, int(update.maximum)))
-                    current_dialog.setValue(max(0, int(update.value)))
+                    current_bar.setMaximum(max(0, int(update.maximum)))
+                    current_bar.setValue(max(0, int(update.value)))
                 elif update.maximum is not None:
-                    current_dialog.setMaximum(max(0, int(update.maximum)))
+                    current_bar.setMaximum(max(0, int(update.maximum)))
                 elif update.value is not None:
-                    current_dialog.setValue(max(0, int(update.value)))
+                    current_bar.setValue(max(0, int(update.value)))
                 _refresh_progress_dialog_height(current_dialog)
             if on_progress is not None:
                 on_progress(update)
@@ -627,9 +650,10 @@ class BackgroundTaskManager(QObject):
         def _apply_status(message: str) -> None:
             if not bool(ui_state.get("active", False)):
                 return
-            current_dialog = _current_dialog()
-            if current_dialog is not None and message:
-                current_dialog.setLabelText(_format_progress_dialog_message(message))
+            progress_surface = _current_progress_surface()
+            if progress_surface is not None and message:
+                current_dialog, current_label, _current_bar = progress_surface
+                current_label.setText(_format_progress_dialog_message(message))
                 _refresh_progress_dialog_height(current_dialog)
             if on_status is not None:
                 on_status(message)
@@ -637,8 +661,9 @@ class BackgroundTaskManager(QObject):
         def _cleanup() -> None:
             current = self._tasks.pop(task_id, None)
             ui_state["active"] = False
-            dialog_to_cleanup = _current_dialog()
-            ui_state["dialog"] = None
+            progress_surface = _current_progress_surface()
+            dialog_to_cleanup = progress_surface[0] if progress_surface is not None else None
+            _clear_progress_surface()
             if dialog_to_cleanup is None and current is not None:
                 candidate_dialog = current.dialog
                 if candidate_dialog is not None and _qt_object_is_valid(candidate_dialog):
