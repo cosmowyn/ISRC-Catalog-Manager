@@ -138,6 +138,30 @@ class _FakeSplashController:
         self.call_order.append("splash.finish")
 
 
+class _FakeBackgroundTasks:
+    def __init__(self, titles=None):
+        self._titles = list(titles or [])
+
+    def has_running_tasks(self):
+        return bool(self._titles)
+
+    def active_task_titles(self):
+        return list(self._titles)
+
+
+class _FailingStatusLookupHost:
+    def __init__(self, titles=None):
+        self.background_tasks = _FakeBackgroundTasks(titles)
+        self.find_children_calls = []
+
+    def findChildren(self, widget_type, name=None, options=None):
+        self.find_children_calls.append((widget_type, options))
+        return []
+
+    def statusBar(self):
+        raise AssertionError("statusBar() should not be created during background task updates")
+
+
 class AppBootstrapTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -317,6 +341,18 @@ class EntryPointDelegationTests(unittest.TestCase):
         self.assertIs(kwargs["install_qt_message_filter"], app_module._install_qt_message_filter)
         self.assertIs(kwargs["enforce_single_instance"], app_module.enforce_single_instance)
         self.assertIs(kwargs["window_factory"], app_module.App)
+
+
+class AppWindowStatusTests(unittest.TestCase):
+    def test_background_task_state_change_does_not_create_status_bar_early(self):
+        if app_module is None:
+            raise unittest.SkipTest(f"ISRC_manager import unavailable: {APP_IMPORT_ERROR}")
+
+        host = _FailingStatusLookupHost(["Preparing profile database"])
+
+        app_module.App._on_background_task_state_changed(host)
+
+        self.assertEqual(len(host.find_children_calls), 1)
 
 
 if __name__ == "__main__":

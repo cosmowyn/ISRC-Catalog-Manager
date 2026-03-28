@@ -10376,7 +10376,10 @@ class App(QMainWindow):
         )
 
     def _on_background_task_state_changed(self) -> None:
-        status_bar = self.statusBar() if hasattr(self, "statusBar") else None
+        if not hasattr(self, "findChildren"):
+            return
+        status_bars = self.findChildren(QStatusBar, options=Qt.FindDirectChildrenOnly)
+        status_bar = status_bars[0] if status_bars else None
         if status_bar is None:
             return
         if self.background_tasks.has_running_tasks():
@@ -10624,40 +10627,21 @@ class App(QMainWindow):
         description: str,
     ) -> bool:
         target_path = str(Path(path))
-        prepared: dict[str, str] = {}
-        failure: dict[str, TaskFailure] = {}
-        loop = QEventLoop(self)
-
-        def _quit_loop() -> None:
-            if loop.isRunning():
-                loop.quit()
-
         self._report_startup_phase(StartupPhase.PREPARING_DATABASE)
-        task_id = self._prepare_profile_database_background(
-            target_path,
-            title=title,
-            description=description,
-            show_dialog=False,
-            on_success=lambda prepared_path: prepared.setdefault("path", str(prepared_path)),
-            on_error=lambda task_failure: failure.setdefault("value", task_failure),
-            on_finished=_quit_loop,
-            progress_callback=self._startup_progress_callback(StartupPhase.PREPARING_DATABASE),
-        )
-        if task_id is None:
-            return False
-        if "path" not in prepared and "value" not in failure:
-            loop.exec()
-        task_failure = failure.get("value")
-        if task_failure is not None:
-            self.logger.warning(
-                "Background database preparation failed for %s: %s",
+        try:
+            prepared_path = self._prepare_database_session(
                 target_path,
-                task_failure.message,
+                progress_callback=self._startup_progress_callback(StartupPhase.PREPARING_DATABASE),
             )
-            if task_failure.traceback_text:
-                self.logger.debug(task_failure.traceback_text)
+        except Exception as exc:
+            self.logger.warning(
+                "Database preparation failed for %s: %s",
+                target_path,
+                exc,
+            )
+            self.logger.debug(traceback.format_exc())
             return False
-        return str(prepared.get("path") or "").strip() == target_path
+        return str(prepared_path or "").strip() == target_path
 
     def open_database(
         self,
