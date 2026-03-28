@@ -9,8 +9,8 @@ except ImportError as exc:  # pragma: no cover - environment-specific fallback
 else:
     QT_IMPORT_ERROR = None
 
-from isrc_manager.tags.dialogs import BulkAudioAttachDialog, TagPreviewDialog
 from isrc_manager.file_storage import STORAGE_MODE_DATABASE, STORAGE_MODE_MANAGED_FILE
+from isrc_manager.tags.dialogs import BulkAudioAttachDialog, TagPreviewDialog
 
 
 class TagDialogTests(unittest.TestCase):

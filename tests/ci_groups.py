@@ -124,6 +124,7 @@ GROUP_MODULES: dict[str, tuple[str, ...]] = {
         "tests.test_dialog_controller_behaviors",
         "tests.test_exchange_dialogs",
         "tests.test_gs1_dialog",
+        "tests.test_public_docs",
         "tests.test_quality_dialogs",
         "tests.test_qss_autocomplete",
         "tests.test_qss_reference",
