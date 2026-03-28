@@ -89,6 +89,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMenuBar,
     QMessageBox,
+    QPinchGesture,
     QProgressBar,
     QPushButton,
     QRadioButton,
@@ -26748,16 +26749,28 @@ class _ImagePreviewDialog(QDialog):
         self._zoom_value_label.setProperty("role", "statusText")
         zoom_row.addWidget(self._zoom_slider, 1)
         zoom_row.addWidget(self._zoom_value_label, 0)
+        zoom_row.addSpacing(8)
+        self._export_button = QToolButton(self)
+        self._export_button.setText("Export Image…")
+        self._export_button.setObjectName("imagePreviewExportButton")
+        self._export_button.setProperty("role", "mediaExportButton")
+        self._export_button.clicked.connect(self._export_current_image)
+        zoom_row.addWidget(self._export_button, 0)
         controls_layout.addLayout(zoom_row)
         layout.addWidget(controls_box)
 
         self._image_label = QLabel(self)
         self._image_label.setAlignment(Qt.AlignCenter)
+        self._gesture_platform = platform.system().lower()
 
         self._scroll_area = QScrollArea(self)
         self._scroll_area.setWidget(self._image_label)
         self._scroll_area.setWidgetResizable(True)
         self._scroll_area.setFrameShape(QFrame.NoFrame)
+        self._image_label.setAttribute(Qt.WA_AcceptTouchEvents, True)
+        if self._gesture_platform != "darwin":
+            self._image_label.grabGesture(Qt.PinchGesture)
+        self._image_label.installEventFilter(self)
         preview_box, preview_layout = _create_standard_section(self, "Image")
         preview_layout.addWidget(self._scroll_area, 1)
         layout.addWidget(preview_box, 1)
@@ -26765,12 +26778,8 @@ class _ImagePreviewDialog(QDialog):
         button_row = QHBoxLayout()
         button_row.setSpacing(8)
         button_row.addStretch(1)
-        self._export_button = QPushButton("Export Image…", self)
-        self._export_button.setObjectName("imagePreviewExportButton")
-        self._export_button.clicked.connect(self._export_current_image)
         close_btn = QPushButton("Close", self)
         close_btn.clicked.connect(self.close)
-        button_row.addWidget(self._export_button)
         button_row.addWidget(close_btn)
         layout.addLayout(button_row)
 
@@ -26787,12 +26796,26 @@ class _ImagePreviewDialog(QDialog):
         self._base_pix = QPixmap.fromImage(image)
         self.setWindowTitle(f"Image Preview — {self._current_title}")
         self._user_zoomed = False
-        fit_percent = self._fit_percent()
-        self._zoom_slider.setValue(fit_percent)
-        self._apply_zoom(fit_percent)
+        self._reset_view_to_fit()
 
     def _mark_user_zoomed(self) -> None:
         self._user_zoomed = True
+
+    @staticmethod
+    def _zoom_steps_from_event(event) -> int:
+        pixel_delta = event.pixelDelta()
+        angle_delta = event.angleDelta()
+        if not pixel_delta.isNull():
+            dominant = (
+                pixel_delta.y() if abs(pixel_delta.y()) >= abs(pixel_delta.x()) else pixel_delta.x()
+            )
+            return int(round(dominant / 40.0))
+        if not angle_delta.isNull():
+            dominant = (
+                angle_delta.y() if abs(angle_delta.y()) >= abs(angle_delta.x()) else angle_delta.x()
+            )
+            return int(round(dominant / 120.0))
+        return 0
 
     def _fit_percent(self) -> int:
         if self._base_pix.isNull():
@@ -26802,6 +26825,74 @@ class _ImagePreviewDialog(QDialog):
         sx = avail_w / max(1, self._base_pix.width())
         sy = avail_h / max(1, self._base_pix.height())
         return int(max(10, min(100, min(sx, sy) * 100)))
+
+    def _set_zoom_percent(self, pct: int, *, user_initiated: bool = False) -> None:
+        clamped = max(10, min(400, int(round(pct))))
+        if user_initiated:
+            self._user_zoomed = True
+        if self._zoom_slider.value() != clamped:
+            self._zoom_slider.setValue(clamped)
+        else:
+            self._apply_zoom(clamped)
+
+    def _adjust_zoom_steps(self, steps: int) -> None:
+        if not steps:
+            return
+        self._set_zoom_percent(self._current_pct + (int(steps) * 10), user_initiated=True)
+
+    def _adjust_zoom_factor(self, factor: float) -> None:
+        factor = float(factor or 1.0)
+        if factor <= 0 or abs(factor - 1.0) < 0.001:
+            return
+        self._set_zoom_percent(self._current_pct * factor, user_initiated=True)
+
+    def _reset_view_to_fit(self) -> None:
+        self._user_zoomed = False
+        self._set_zoom_percent(self._fit_percent())
+
+    def _handle_zoom_wheel_event(self, event) -> bool:
+        modifiers = event.modifiers() if hasattr(event, "modifiers") else Qt.NoModifier
+        if not modifiers & (Qt.ControlModifier | Qt.MetaModifier):
+            return False
+        steps = self._zoom_steps_from_event(event)
+        if not steps:
+            return False
+        self._adjust_zoom_steps(steps)
+        event.accept()
+        return True
+
+    def _handle_native_gesture_event(self, event) -> bool:
+        gesture_type = event.gestureType() if hasattr(event, "gestureType") else None
+        if gesture_type == Qt.ZoomNativeGesture:
+            value = float(event.value() if hasattr(event, "value") else 0.0)
+            if abs(value) < 0.0001:
+                return False
+            self._adjust_zoom_factor(1.0 + value)
+            event.accept()
+            return True
+        if gesture_type == Qt.SmartZoomNativeGesture:
+            self._reset_view_to_fit()
+            event.accept()
+            return True
+        return False
+
+    def _handle_pinch_gesture_event(self, event) -> bool:
+        if not hasattr(event, "gesture"):
+            return False
+        pinch = event.gesture(Qt.PinchGesture)
+        if pinch is None:
+            return False
+        if not pinch.changeFlags() & QPinchGesture.ScaleFactorChanged:
+            return False
+        last_factor = float(pinch.lastScaleFactor() or 1.0)
+        scale_factor = float(pinch.scaleFactor() or 1.0)
+        if abs(last_factor) < 0.0001:
+            factor = scale_factor
+        else:
+            factor = scale_factor / last_factor
+        self._adjust_zoom_factor(factor)
+        event.accept()
+        return True
 
     def _apply_zoom(self, pct: int) -> None:
         self._current_pct = max(10, min(400, int(pct)))
@@ -26830,6 +26921,29 @@ class _ImagePreviewDialog(QDialog):
             payload={"title": self._current_title, "mime_type": self._current_mime},
         )
 
+    def eventFilter(self, source, event):
+        if source is self._image_label:
+            if event.type() == QEvent.MouseButtonDblClick and event.button() == Qt.LeftButton:
+                self._reset_view_to_fit()
+                event.accept()
+                return True
+            if event.type() == QEvent.Wheel and self._handle_zoom_wheel_event(event):
+                return True
+            if event.type() == QEvent.NativeGesture and self._handle_native_gesture_event(event):
+                return True
+            if (
+                self._gesture_platform != "darwin"
+                and event.type() == QEvent.Gesture
+                and self._handle_pinch_gesture_event(event)
+            ):
+                return True
+        return super().eventFilter(source, event)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self._user_zoomed and not self._base_pix.isNull():
+            QTimer.singleShot(0, self._reset_view_to_fit)
+
     def resizeEvent(self, event):
         if not self._user_zoomed and not self._base_pix.isNull():
             self._apply_zoom(self._fit_percent())
@@ -26843,6 +26957,8 @@ class _AudioPreviewDialog(QDialog):
     WAVEFORM_HEIGHT = 100
     MEDIA_ROW_HEIGHT = ARTWORK_SIZE + 24
     STATUS_SLIDER_MAX_WIDTH = 420
+    DEFAULT_WINDOW_WIDTH = 960
+    DEFAULT_WINDOW_HEIGHT = 561
 
     def __init__(self, app, parent=None):
         super().__init__(parent, Qt.Window)
@@ -26872,7 +26988,8 @@ class _AudioPreviewDialog(QDialog):
         self.setAttribute(Qt.WA_DeleteOnClose, False)
         self.setAttribute(Qt.WA_NativeWindow, True)
         self.setAttribute(Qt.WA_QuitOnClose, False)
-        self.setMinimumSize(960, 520)
+        self.setMinimumSize(self.DEFAULT_WINDOW_WIDTH, self.DEFAULT_WINDOW_HEIGHT)
+        self.resize(self.DEFAULT_WINDOW_WIDTH, self.DEFAULT_WINDOW_HEIGHT)
         _apply_standard_dialog_chrome(self, "audioPreviewDialog")
 
         if platform.system().lower() == "darwin":

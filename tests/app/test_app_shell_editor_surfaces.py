@@ -90,6 +90,9 @@ class AppShellEditorSurfaceTests(AppShellTestCase):
     test_media_preview_windows_are_singleton_top_level_windows = (
         AppShellTestCase.case_media_preview_windows_are_singleton_top_level_windows
     )
+    test_image_preview_supports_zoom_gestures_fit_reset_and_export = (
+        AppShellTestCase.case_image_preview_supports_zoom_gestures_fit_reset_and_export
+    )
 
 
 del AppShellTestCase

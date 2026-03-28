@@ -195,9 +195,18 @@ class _FakeStartupSplashController:
 
 
 class _FakeWheelEvent:
-    def __init__(self, *, angle_x: int = 0, angle_y: int = 0, pixel_x: int = 0, pixel_y: int = 0):
+    def __init__(
+        self,
+        *,
+        angle_x: int = 0,
+        angle_y: int = 0,
+        pixel_x: int = 0,
+        pixel_y: int = 0,
+        modifiers=Qt.NoModifier,
+    ):
         self._angle_delta = QPoint(angle_x, angle_y)
         self._pixel_delta = QPoint(pixel_x, pixel_y)
+        self._modifiers = modifiers
         self.accepted = False
         self.ignored = False
 
@@ -207,11 +216,51 @@ class _FakeWheelEvent:
     def pixelDelta(self):
         return self._pixel_delta
 
+    def type(self):
+        return app_module.QEvent.Wheel
+
+    def modifiers(self):
+        return self._modifiers
+
     def accept(self):
         self.accepted = True
 
     def ignore(self):
         self.ignored = True
+
+
+class _FakeNativeGestureEvent:
+    def __init__(self, gesture_type, value=0.0):
+        self._gesture_type = gesture_type
+        self._value = float(value)
+        self.accepted = False
+
+    def type(self):
+        return app_module.QEvent.NativeGesture
+
+    def gestureType(self):
+        return self._gesture_type
+
+    def value(self):
+        return self._value
+
+    def accept(self):
+        self.accepted = True
+
+
+class _FakeMouseDoubleClickEvent:
+    def __init__(self, button=Qt.LeftButton):
+        self._button = button
+        self.accepted = False
+
+    def type(self):
+        return app_module.QEvent.MouseButtonDblClick
+
+    def button(self):
+        return self._button
+
+    def accept(self):
+        self.accepted = True
 
 
 class AppShellTestCase(unittest.TestCase):
@@ -5715,6 +5764,8 @@ class AppShellTestCase(unittest.TestCase):
         self.assertIsNotNone(playback_group)
         self.assertIsNotNone(export_group)
         self.assertIs(dialog.layout().itemAt(0).widget(), metadata_group)
+        self.assertEqual(dialog.width(), dialog.DEFAULT_WINDOW_WIDTH)
+        self.assertEqual(dialog.height(), dialog.DEFAULT_WINDOW_HEIGHT)
         self.assertEqual(dialog.wave.minimumHeight(), 100)
         self.assertEqual(dialog.wave.maximumHeight(), 100)
         self.assertEqual(dialog.artwork_label.height(), 200)
@@ -6006,6 +6057,47 @@ class AppShellTestCase(unittest.TestCase):
         self.assertTrue(bool(reopened_image_dialog.windowFlags() & Qt.WindowMinimizeButtonHint))
         self.assertIsNotNone(reopened_image_dialog.windowHandle())
         self.assertIn("Singleton Two", reopened_image_dialog.windowTitle())
+
+    def case_image_preview_supports_zoom_gestures_fit_reset_and_export(self):
+        track_id = self._create_track(
+            index=9110,
+            title="Image Controls",
+            album_title="Image Controls Album",
+        )
+        self._attach_standard_media(
+            track_id,
+            album_art_path=self._create_png_file("image-controls.png", color="#8D53E2", size=320),
+        )
+
+        with mock.patch.object(self.window, "_export_bytes_with_picker") as export_mock:
+            dialog = self._open_image_preview_dialog(track_id)
+
+            fit_percent = dialog._fit_percent()
+            self.assertEqual(dialog._zoom_slider.value(), fit_percent)
+
+            wheel_event = _FakeWheelEvent(angle_y=120, modifiers=Qt.ControlModifier)
+            handled = dialog.eventFilter(dialog._image_label, wheel_event)
+            self.assertTrue(handled)
+            self.assertTrue(wheel_event.accepted)
+            self.assertGreater(dialog._zoom_slider.value(), fit_percent)
+
+            native_zoom = _FakeNativeGestureEvent(Qt.ZoomNativeGesture, 0.2)
+            handled = dialog.eventFilter(dialog._image_label, native_zoom)
+            self.assertTrue(handled)
+            self.assertTrue(native_zoom.accepted)
+            self.assertTrue(dialog._user_zoomed)
+
+            dialog._set_zoom_percent(175, user_initiated=True)
+            double_click = _FakeMouseDoubleClickEvent()
+            handled = dialog.eventFilter(dialog._image_label, double_click)
+            self.assertTrue(handled)
+            self.assertTrue(double_click.accepted)
+            self.assertEqual(dialog._zoom_slider.value(), dialog._fit_percent())
+            self.assertFalse(dialog._user_zoomed)
+
+            self.assertEqual(dialog._export_button.text(), "Export Image…")
+            dialog._export_button.click()
+            export_mock.assert_called_once()
 
 
 if __name__ == "__main__":

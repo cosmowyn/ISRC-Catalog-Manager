@@ -743,8 +743,8 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         content_html="""
         <p>The app can preview file-backed media directly from the catalog regardless of whether the underlying record is stored in the database or as a managed file.</p>
         <ul>
-          <li><strong>Image preview</strong>: zoom and inspect stored image data such as album art.</li>
-          <li><strong>Audio preview</strong>: play attached audio with waveform preview, playhead, and transport controls.</li>
+          <li><strong>Image preview</strong>: inspect stored image data such as album art, zoom with trackpad pinch or <code>Ctrl</code>/<code>Cmd</code> + scroll, double-click to reset the view to fit, and export the current image from the preview controls.</li>
+          <li><strong>Audio preview</strong>: play attached audio with waveform preview, playhead, transport controls, and in-preview export actions.</li>
           <li><strong>Standard media columns</strong>: double-click Audio File or Album Art to attach new files, or preview existing media from the table.</li>
         </ul>
         <p>Preview actions are intended to verify attached media quickly without leaving the catalog workflow.</p>
