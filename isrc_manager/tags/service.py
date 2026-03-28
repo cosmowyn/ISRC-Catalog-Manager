@@ -661,10 +661,9 @@ class BulkAudioAttachService:
         detected_title = tag_title or (title_candidates[0][0] if title_candidates else None)
         detected_artist = tag_artist or stem_artist
 
-        best_track = None
+        best_tracks: list[BulkAudioAttachTrackCandidate] = []
         best_score = 0
         best_basis = None
-        tie = False
         for track in tracks:
             score, basis = self._score_match(
                 track,
@@ -673,26 +672,26 @@ class BulkAudioAttachService:
                 tag_data=tag_data,
             )
             if score > best_score:
-                best_track = track
+                best_tracks = [track]
                 best_score = score
                 best_basis = basis
-                tie = False
-            elif score > 0 and score == best_score and best_track is not None:
-                tie = True
+            elif score > 0 and score == best_score:
+                best_tracks.append(track)
 
-        if tie and best_score > 0:
+        if len(best_tracks) > 1 and best_score > 0:
             item = BulkAudioAttachPlanItem(
                 source_path=str(path),
                 source_name=path.name,
                 detected_title=detected_title,
                 detected_artist=detected_artist,
+                candidate_track_ids=[int(track.track_id) for track in best_tracks],
                 match_basis="Ambiguous title match",
                 status="ambiguous",
                 warning=warning,
             )
             return item, 0, warning
 
-        if best_track is None:
+        if not best_tracks:
             item = BulkAudioAttachPlanItem(
                 source_path=str(path),
                 source_name=path.name,
@@ -704,6 +703,7 @@ class BulkAudioAttachService:
             )
             return item, 0, warning
 
+        best_track = best_tracks[0]
         item = BulkAudioAttachPlanItem(
             source_path=str(path),
             source_name=path.name,
@@ -795,6 +795,11 @@ class BulkAudioAttachService:
 
     @staticmethod
     def _clear_match(item: BulkAudioAttachPlanItem, reason: str) -> None:
+        if (
+            item.matched_track_id is not None
+            and int(item.matched_track_id) not in item.candidate_track_ids
+        ):
+            item.candidate_track_ids.append(int(item.matched_track_id))
         item.matched_track_id = None
         item.matched_track_title = None
         item.matched_track_artist = None

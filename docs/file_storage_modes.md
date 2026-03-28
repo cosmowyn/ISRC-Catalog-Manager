@@ -76,6 +76,8 @@ This makes managed-file mode usable without depending on the original import loc
 
 For new file-backed records, the UI now offers a storage choice at the point where a file is attached or imported.
 
+For catalog media attachment specifically, the storage mode is chosen inside the reviewed attach dialog itself. The app shows the intended target record first, then asks whether the file should be stored in `Database` or `Managed file` mode before any media write is applied.
+
 For existing records, supported editors, browser panels, and context menus can convert records between modes. The rest of the app is expected to keep behaving the same way after the conversion:
 
 - open

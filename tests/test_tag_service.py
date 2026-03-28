@@ -415,6 +415,24 @@ class BulkAudioAttachServiceTests(unittest.TestCase):
         self.assertIsNone(plan.items[1].matched_track_id)
         self.assertEqual(plan.items[1].status, "ambiguous")
 
+    def test_bulk_audio_attach_service_preserves_candidate_ids_for_ambiguous_title_ties(self):
+        service = BulkAudioAttachService(_StubAudioTagReader())
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ambiguous_path = Path(tmpdir) / "Orbit.wav"
+            ambiguous_path.write_bytes(b"")
+
+            plan = service.build_plan(
+                file_paths=[ambiguous_path],
+                tracks=[
+                    BulkAudioAttachTrackCandidate(track_id=11, title="Orbit", artist="Artist One"),
+                    BulkAudioAttachTrackCandidate(track_id=22, title="Orbit", artist="Artist Two"),
+                ],
+            )
+
+        self.assertEqual(plan.items[0].status, "ambiguous")
+        self.assertIsNone(plan.items[0].matched_track_id)
+        self.assertEqual(plan.items[0].candidate_track_ids, [11, 22])
+
 
 if __name__ == "__main__":
     unittest.main()

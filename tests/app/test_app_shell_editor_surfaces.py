@@ -66,6 +66,9 @@ class AppShellEditorSurfaceTests(AppShellTestCase):
     test_custom_blob_context_menu_groups_file_and_storage_actions = (
         AppShellTestCase.case_custom_blob_context_menu_groups_file_and_storage_actions
     )
+    test_text_custom_field_table_edit_saves_without_attachment_state = (
+        AppShellTestCase.case_text_custom_field_table_edit_saves_without_attachment_state
+    )
     test_verify_audio_authenticity_can_choose_external_file_when_track_is_selected = (
         AppShellTestCase.case_verify_audio_authenticity_can_choose_external_file_when_track_is_selected
     )
@@ -86,6 +89,21 @@ class AppShellEditorSurfaceTests(AppShellTestCase):
     )
     test_audio_preview_export_controls_route_to_existing_methods = (
         AppShellTestCase.case_audio_preview_export_controls_route_to_existing_methods
+    )
+    test_bulk_audio_attach_workflow_matches_files_updates_artists_and_records_history = (
+        AppShellTestCase.case_bulk_audio_attach_workflow_matches_files_updates_artists_and_records_history
+    )
+    test_audio_attach_unique_match_requires_confirmation_before_write = (
+        AppShellTestCase.case_audio_attach_unique_match_requires_confirmation_before_write
+    )
+    test_audio_attach_unmatched_and_ambiguous_files_open_manual_resolution_dialog = (
+        AppShellTestCase.case_audio_attach_unmatched_and_ambiguous_files_open_manual_resolution_dialog
+    )
+    test_album_art_attach_requires_confirmation_and_honors_storage_mode = (
+        AppShellTestCase.case_album_art_attach_requires_confirmation_and_honors_storage_mode
+    )
+    test_media_attach_drop_targets_and_routing_reuse_the_same_workflows = (
+        AppShellTestCase.case_media_attach_drop_targets_and_routing_reuse_the_same_workflows
     )
     test_media_preview_windows_are_singleton_top_level_windows = (
         AppShellTestCase.case_media_preview_windows_are_singleton_top_level_windows

@@ -3359,8 +3359,8 @@ class AppShellTestCase(unittest.TestCase):
                 return_value="Synth Unit",
             ),
             mock.patch.object(
-                app_module,
-                "_prompt_storage_mode_choice",
+                app_module.BulkAudioAttachDialog,
+                "selected_storage_mode",
                 return_value=app_module.STORAGE_MODE_DATABASE,
             ),
             mock.patch.object(app_module.QMessageBox, "information") as info_mock,
@@ -3386,6 +3386,250 @@ class AppShellTestCase(unittest.TestCase):
         info_mock.assert_called_once()
         self.assertIn("Attached audio to 2 track(s).", info_mock.call_args.args[2])
         self.assertIn("Updated the main artist on 2 matched track(s).", info_mock.call_args.args[2])
+
+    def case_audio_attach_unique_match_requires_confirmation_before_write(self):
+        track_id = self._create_track(index=411, title="Orbit Lines")
+        self.window.refresh_table_preserve_view(focus_id=track_id)
+        self.app.processEvents()
+
+        audio_path = self._create_wav_file("Orbit Lines.wav")
+        history_before = len(self.window.history_manager.list_entries(limit=50))
+        captured_dialog: dict[str, object] = {}
+
+        class _RejectingReviewDialog:
+            def __init__(self, *args, **kwargs):
+                del args
+                captured_dialog.update(kwargs)
+
+            def exec(self):
+                return app_module.QDialog.Rejected
+
+        with (
+            mock.patch.object(
+                app_module.App,
+                "_submit_background_bundle_task",
+                autospec=True,
+                side_effect=self._run_bundle_task_inline,
+            ),
+            mock.patch.object(app_module, "BulkAudioAttachDialog", _RejectingReviewDialog),
+        ):
+            self.window.bulk_attach_audio_files(
+                track_ids=[track_id],
+                file_paths=[str(audio_path)],
+                title="Attach Audio",
+            )
+
+        snapshot = self.window.track_service.fetch_track_snapshot(track_id)
+        self.assertIsNone(snapshot.audio_file_storage_mode)
+        self.assertFalse(self.window.track_service.has_media(track_id, "audio_file"))
+        self.assertEqual(len(self.window.history_manager.list_entries(limit=50)), history_before)
+        self.assertEqual(captured_dialog["items"][0]["status"], "matched")
+        self.assertEqual(captured_dialog["items"][0]["matched_track_id"], track_id)
+        self.assertEqual(captured_dialog["media_label"], "audio file")
+
+    def case_audio_attach_unmatched_and_ambiguous_files_open_manual_resolution_dialog(self):
+        orbit_track = self._create_track(index=412, title="Orbit")
+        echo_track = self._create_track(index=413, title="Orbit")
+        self.window.refresh_table_preserve_view(focus_id=orbit_track)
+        self.app.processEvents()
+
+        unmatched_audio = self._create_wav_file("Unknown Passage.wav")
+        ambiguous_audio = self._create_wav_file("Orbit.wav")
+        captured_dialogs: list[dict[str, object]] = []
+
+        class _CapturingReviewDialog:
+            def __init__(self, *args, **kwargs):
+                del args
+                captured_dialogs.append(kwargs)
+
+            def exec(self):
+                return app_module.QDialog.Rejected
+
+        with (
+            mock.patch.object(
+                app_module.App,
+                "_submit_background_bundle_task",
+                autospec=True,
+                side_effect=self._run_bundle_task_inline,
+            ),
+            mock.patch.object(app_module, "BulkAudioAttachDialog", _CapturingReviewDialog),
+        ):
+            self.window.bulk_attach_audio_files(
+                track_ids=[orbit_track, echo_track],
+                file_paths=[str(unmatched_audio)],
+                title="Attach Audio",
+            )
+            self.window.bulk_attach_audio_files(
+                track_ids=[orbit_track, echo_track],
+                file_paths=[str(ambiguous_audio)],
+                title="Attach Audio",
+            )
+
+        self.assertEqual(captured_dialogs[0]["items"][0]["status"], "unmatched")
+        self.assertEqual(captured_dialogs[1]["items"][0]["status"], "ambiguous")
+        self.assertCountEqual(
+            captured_dialogs[1]["items"][0]["candidate_track_ids"],
+            [orbit_track, echo_track],
+        )
+
+    def case_album_art_attach_requires_confirmation_and_honors_storage_mode(self):
+        track_id = self._create_track(index=414, title="Night Bloom", album_title="Moon Atlas")
+        self.window.refresh_table_preserve_view(focus_id=track_id)
+        self.app.processEvents()
+
+        cover_path = self._create_png_file("Moon Atlas.png")
+        rejected_dialog: dict[str, object] = {}
+
+        class _RejectingArtworkDialog:
+            def __init__(self, *args, **kwargs):
+                del args
+                rejected_dialog.update(kwargs)
+
+            def exec(self):
+                return app_module.QDialog.Rejected
+
+        with (
+            mock.patch.object(
+                app_module.App,
+                "_submit_background_bundle_task",
+                autospec=True,
+                side_effect=self._run_bundle_task_inline,
+            ),
+            mock.patch.object(app_module, "BulkAudioAttachDialog", _RejectingArtworkDialog),
+        ):
+            self.window.attach_album_art_file_to_catalog(
+                track_ids=[track_id],
+                file_paths=[str(cover_path)],
+                title="Attach Artwork",
+            )
+
+        rejected_snapshot = self.window.track_service.fetch_track_snapshot(track_id)
+        self.assertIsNone(rejected_snapshot.album_art_storage_mode)
+        self.assertFalse(self.window.track_service.has_media(track_id, "album_art"))
+        self.assertEqual(rejected_dialog["items"][0]["status"], "matched")
+        self.assertEqual(rejected_dialog["media_label"], "album art file")
+
+        class _AcceptingArtworkDialog:
+            def __init__(self, *args, **kwargs):
+                del args, kwargs
+
+            def exec(self):
+                return app_module.QDialog.Accepted
+
+            def create_track_requested(self):
+                return False
+
+            def selected_matches(self):
+                return [
+                    {
+                        "source_path": str(cover_path),
+                        "source_name": cover_path.name,
+                        "track_id": track_id,
+                        "detected_artist": "",
+                        "detected_album": "Moon Atlas",
+                    }
+                ]
+
+            def selected_storage_mode(self):
+                return app_module.STORAGE_MODE_DATABASE
+
+        with (
+            mock.patch.object(
+                app_module.App,
+                "_submit_background_bundle_task",
+                autospec=True,
+                side_effect=self._run_bundle_task_inline,
+            ),
+            mock.patch.object(app_module, "BulkAudioAttachDialog", _AcceptingArtworkDialog),
+            mock.patch.object(app_module.QMessageBox, "information"),
+        ):
+            self.window.attach_album_art_file_to_catalog(
+                track_ids=[track_id],
+                file_paths=[str(cover_path)],
+                title="Attach Artwork",
+            )
+
+        accepted_snapshot = self.window.track_service.fetch_track_snapshot(track_id)
+        self.assertEqual(accepted_snapshot.album_art_storage_mode, STORAGE_MODE_DATABASE)
+        art_bytes, _mime_type = self.window.track_service.fetch_media_bytes(track_id, "album_art")
+        self.assertEqual(art_bytes, cover_path.read_bytes())
+
+    def case_media_attach_drop_targets_and_routing_reuse_the_same_workflows(self):
+        audio_path = self._create_wav_file("Dropped Orbit.wav")
+        image_path = self._create_png_file("Dropped Cover.png")
+        image_path_two = self._create_png_file("Dropped Cover 2.png", color="#7A3AFE")
+        text_path = self._create_media_file("notes.txt", b"not supported")
+
+        self.assertTrue(self.window.acceptDrops())
+        self.assertTrue(self.window.centralWidget().acceptDrops())
+        self.assertTrue(self.window.table.acceptDrops())
+        self.assertTrue(self.window.table.viewport().acceptDrops())
+
+        with (
+            mock.patch.object(self.window, "bulk_attach_audio_files") as bulk_attach,
+            mock.patch.object(self.window, "attach_album_art_file_to_catalog") as attach_art,
+            mock.patch.object(app_module.QMessageBox, "information") as info_mock,
+        ):
+            self.assertTrue(self.window._route_dropped_media_paths([str(audio_path)]))
+            bulk_attach.assert_called_once_with(
+                file_paths=[str(audio_path)],
+                title="Attach Dropped Audio File",
+            )
+            attach_art.assert_not_called()
+            info_mock.assert_not_called()
+
+        with (
+            mock.patch.object(self.window, "bulk_attach_audio_files") as bulk_attach,
+            mock.patch.object(self.window, "attach_album_art_file_to_catalog") as attach_art,
+            mock.patch.object(app_module.QMessageBox, "information") as info_mock,
+        ):
+            self.assertTrue(self.window._route_dropped_media_paths([str(image_path)]))
+            attach_art.assert_called_once_with(
+                file_paths=[str(image_path)],
+                title="Attach Dropped Album Art",
+            )
+            bulk_attach.assert_not_called()
+            info_mock.assert_not_called()
+
+        with (
+            mock.patch.object(self.window, "bulk_attach_audio_files") as bulk_attach,
+            mock.patch.object(self.window, "attach_album_art_file_to_catalog") as attach_art,
+            mock.patch.object(app_module.QMessageBox, "information") as info_mock,
+        ):
+            dropped_paths = [str(audio_path), str(text_path), str(image_path)]
+            self.assertTrue(self.window._route_dropped_media_paths(dropped_paths))
+            bulk_attach.assert_called_once_with(
+                file_paths=dropped_paths,
+                title="Attach Dropped Audio Files",
+            )
+            attach_art.assert_not_called()
+            info_mock.assert_not_called()
+
+        with (
+            mock.patch.object(self.window, "bulk_attach_audio_files") as bulk_attach,
+            mock.patch.object(self.window, "attach_album_art_file_to_catalog") as attach_art,
+            mock.patch.object(app_module.QMessageBox, "information") as info_mock,
+        ):
+            self.assertTrue(
+                self.window._route_dropped_media_paths([str(image_path), str(image_path_two)])
+            )
+            bulk_attach.assert_not_called()
+            attach_art.assert_not_called()
+            info_mock.assert_called_once()
+            self.assertIn(
+                "Only audio files are accepted in multi-file drops.", info_mock.call_args.args[2]
+            )
+
+        with (
+            mock.patch.object(self.window, "bulk_attach_audio_files") as bulk_attach,
+            mock.patch.object(self.window, "attach_album_art_file_to_catalog") as attach_art,
+            mock.patch.object(app_module.QMessageBox, "information") as info_mock,
+        ):
+            self.assertTrue(self.window._route_dropped_media_paths([str(text_path)]))
+            bulk_attach.assert_not_called()
+            attach_art.assert_not_called()
+            info_mock.assert_called_once()
+            self.assertIn("not a supported audio or image file", info_mock.call_args.args[2])
 
     def case_history_budget_preflight_can_open_cleanup_dialog(self):
         self.window.settings_mutations.set_history_retention_mode("lean")
@@ -5533,6 +5777,54 @@ class AppShellTestCase(unittest.TestCase):
             ],
         )
         self.assertEqual(list(storage_snapshot.get("texts") or []), ["Store as Managed File"])
+
+    def case_text_custom_field_table_edit_saves_without_attachment_state(self):
+        track_id = self._create_track(index=335, title="Text Custom Track")
+        self.assertTrue(
+            self.window._apply_custom_field_configuration(
+                [
+                    {
+                        "id": None,
+                        "name": "Mood Notes",
+                        "field_type": "text",
+                        "options": None,
+                    }
+                ],
+                action_label="Add Custom Column: Mood Notes",
+                action_type="fields.add",
+            )
+        )
+        self.window.refresh_table_preserve_view(focus_id=track_id)
+        self.app.processEvents()
+
+        row = self._table_row_for_track_id(track_id)
+        col = self.window._column_index_by_header("Mood Notes")
+        history_before = len(self.window.history_manager.list_entries(limit=50))
+
+        with (
+            mock.patch.object(
+                app_module.QInputDialog,
+                "getMultiLineText",
+                return_value=("Dreamy and spacious", True),
+            ),
+            mock.patch.object(app_module.QMessageBox, "critical") as critical_mock,
+        ):
+            self.window._on_item_double_clicked(self.window.table.item(row, col))
+
+        critical_mock.assert_not_called()
+        stored = self.window.conn.execute(
+            """
+            SELECT value, blob_value, managed_file_path, storage_mode, filename, mime_type, size_bytes
+            FROM CustomFieldValues cfv
+            JOIN CustomFieldDefs cfd ON cfd.id = cfv.field_def_id
+            WHERE cfv.track_id=? AND cfd.name='Mood Notes'
+            """,
+            (track_id,),
+        ).fetchone()
+        self.assertEqual(stored, ("Dreamy and spacious", None, "", "", "", "", 0))
+        history_after = self.window.history_manager.list_entries(limit=50)
+        self.assertEqual(len(history_after), history_before + 1)
+        self.assertEqual(history_after[0].label, "Update Custom Field: Mood Notes")
 
     def case_verify_audio_authenticity_can_choose_external_file_when_track_is_selected(self):
         track_id = self._create_track(index=301, title="Catalog Verify Track", album_title="Single")

@@ -1720,7 +1720,7 @@ class HistoryManager:
                     cols_sql = ", ".join(columns)
                     self.conn.execute(
                         f"INSERT INTO {table_name} ({cols_sql}) "
-                        f"SELECT {cols_sql} FROM snapshot_restore.{table_name}"
+                        f"{self._snapshot_restore_select_sql(table_name, columns)}"
                     )
                 if update_current_entry:
                     self._set_current_entry_id_in_cursor(
@@ -1892,6 +1892,41 @@ class HistoryManager:
             for column in self._ordered_columns(table_name)
             if column in main_cols and column in snapshot_cols
         ]
+
+    def _snapshot_restore_select_sql(self, table_name: str, columns: list[str]) -> str:
+        if table_name != "CustomFieldValues" or not self._table_exists(
+            "snapshot_restore", "CustomFieldDefs"
+        ):
+            cols_sql = ", ".join(columns)
+            return f"SELECT {cols_sql} FROM snapshot_restore.{table_name}"
+
+        blob_types = "('blob_image','blob_audio')"
+
+        def _column_expr(column: str) -> str:
+            if column == "blob_value":
+                return (
+                    f"CASE WHEN COALESCE(cfd.field_type, 'text') IN {blob_types} "
+                    "THEN cfv.blob_value ELSE NULL END AS blob_value"
+                )
+            if column in {"managed_file_path", "storage_mode", "filename", "mime_type"}:
+                return (
+                    f"CASE WHEN COALESCE(cfd.field_type, 'text') IN {blob_types} "
+                    f"THEN cfv.{column} ELSE '' END AS {column}"
+                )
+            if column == "size_bytes":
+                return (
+                    f"CASE WHEN COALESCE(cfd.field_type, 'text') IN {blob_types} "
+                    "THEN COALESCE(cfv.size_bytes, 0) ELSE 0 END AS size_bytes"
+                )
+            return f"cfv.{column}"
+
+        select_parts = ", ".join(_column_expr(column) for column in columns)
+        return (
+            "SELECT "
+            f"{select_parts} "
+            "FROM snapshot_restore.CustomFieldValues cfv "
+            "LEFT JOIN snapshot_restore.CustomFieldDefs cfd ON cfd.id = cfv.field_def_id"
+        )
 
     def _ordered_columns(self, table_name: str) -> list[str]:
         rows = self.conn.execute(f"PRAGMA table_info({table_name})").fetchall()

@@ -1,3 +1,4 @@
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -491,6 +492,82 @@ class HistoryManagerTestCase(unittest.TestCase):
         self.assertEqual(draft_template.read_text(encoding="utf-8"), "draft-template-v1")
         self.assertTrue(artifact_pdf.exists())
         self.assertEqual(artifact_pdf.read_bytes(), b"%PDF-1.4\ncontract-template-artifact\n")
+
+    def case_snapshot_restore_sanitizes_legacy_text_custom_field_attachment_state(self):
+        track_id = self._create_track()
+        with self.conn:
+            self.conn.execute(
+                """
+                INSERT INTO CustomFieldDefs(id, name, active, sort_order, field_type, options)
+                VALUES (901, 'Mood Notes', 1, 1, 'text', NULL)
+                """
+            )
+            self.conn.execute(
+                """
+                INSERT INTO CustomFieldValues(
+                    track_id,
+                    field_def_id,
+                    value,
+                    blob_value,
+                    managed_file_path,
+                    storage_mode,
+                    filename,
+                    mime_type,
+                    size_bytes
+                )
+                VALUES (?, 901, ?, NULL, '', '', '', '', 0)
+                """,
+                (track_id, "Original Mood"),
+            )
+
+        snapshot = self.history.create_manual_snapshot("Before Legacy Text Custom Restore")
+
+        snapshot_conn = sqlite3.connect(snapshot.db_snapshot_path)
+        try:
+            snapshot_conn.execute("DROP TRIGGER IF EXISTS trg_cfvalues_text_enforce_ins")
+            snapshot_conn.execute("DROP TRIGGER IF EXISTS trg_cfvalues_text_enforce_upd")
+            snapshot_conn.execute(
+                """
+                UPDATE CustomFieldValues
+                SET blob_value=?,
+                    managed_file_path=?,
+                    storage_mode=?,
+                    filename=?,
+                    mime_type=?,
+                    size_bytes=?
+                WHERE track_id=? AND field_def_id=901
+                """,
+                (
+                    sqlite3.Binary(b"legacy"),
+                    "custom_field_media/legacy.bin",
+                    "database",
+                    "legacy.bin",
+                    "application/octet-stream",
+                    6,
+                    track_id,
+                ),
+            )
+            snapshot_conn.commit()
+        finally:
+            snapshot_conn.close()
+
+        with self.conn:
+            self.conn.execute(
+                "UPDATE CustomFieldValues SET value=? WHERE track_id=? AND field_def_id=901",
+                ("Updated Mood", track_id),
+            )
+
+        self.history.restore_snapshot(snapshot.snapshot_id)
+
+        restored = self.conn.execute(
+            """
+            SELECT value, blob_value, managed_file_path, storage_mode, filename, mime_type, size_bytes
+            FROM CustomFieldValues
+            WHERE track_id=? AND field_def_id=901
+            """,
+            (track_id,),
+        ).fetchone()
+        self.assertEqual(restored, ("Original Mood", None, "", "", "", "", 0))
 
     def case_registered_snapshot_can_be_restored(self):
         snapshot = self.history.create_manual_snapshot("Initial State")

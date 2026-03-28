@@ -122,6 +122,57 @@ class CustomFieldValueServiceTests(unittest.TestCase):
             self.service.get_value_meta(10, 1),
             {"value": "Calm", "has_blob": False, "size_bytes": 0, "mime_type": None},
         )
+        row = self.conn.execute(
+            """
+            SELECT blob_value, managed_file_path, storage_mode, filename, mime_type, size_bytes
+            FROM CustomFieldValues
+            WHERE track_id=? AND field_def_id=?
+            """,
+            (10, 1),
+        ).fetchone()
+        self.assertEqual(row, (None, "", "", "", "", 0))
+
+    def test_normalize_text_field_attachment_state_clears_legacy_binary_columns(self):
+        with self.conn:
+            self.conn.execute(
+                """
+                INSERT INTO CustomFieldValues (
+                    track_id,
+                    field_def_id,
+                    value,
+                    blob_value,
+                    managed_file_path,
+                    storage_mode,
+                    filename,
+                    mime_type,
+                    size_bytes
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    15,
+                    1,
+                    "Legacy Mood",
+                    sqlite3.Binary(b"bad"),
+                    "custom_field_media/legacy.bin",
+                    "database",
+                    "legacy.bin",
+                    "application/octet-stream",
+                    3,
+                ),
+            )
+
+        self.service._normalize_text_field_attachment_state()
+
+        row = self.conn.execute(
+            """
+            SELECT value, blob_value, managed_file_path, storage_mode, filename, mime_type, size_bytes
+            FROM CustomFieldValues
+            WHERE track_id=? AND field_def_id=?
+            """,
+            (15, 1),
+        ).fetchone()
+        self.assertEqual(row, ("Legacy Mood", None, "", "", "", "", 0))
 
     def test_save_blob_value_tracks_size_and_delete(self):
         blob_path = Path(self.tmpdir.name) / "cover.png"

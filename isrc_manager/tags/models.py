@@ -94,6 +94,7 @@ class BulkAudioAttachPlanItem:
     matched_track_id: int | None = None
     matched_track_title: str | None = None
     matched_track_artist: str | None = None
+    candidate_track_ids: list[int] = field(default_factory=list)
     match_basis: str | None = None
     status: str = "unmatched"
     warning: str | None = None

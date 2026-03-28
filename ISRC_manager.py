@@ -148,6 +148,8 @@ from isrc_manager.catalog_workspace import (
 )
 from isrc_manager.constants import (
     APP_NAME,
+    BLOB_AUDIO_EXTS,
+    BLOB_IMAGE_EXTS,
     DEFAULT_AUTO_SNAPSHOT_ENABLED,
     DEFAULT_AUTO_SNAPSHOT_INTERVAL_MINUTES,
     DEFAULT_BASE_HEADERS,
@@ -6183,6 +6185,7 @@ class App(QMainWindow):
         finalize_progress = self._startup_progress_callback(StartupPhase.FINALIZING_INTERFACE)
         build_main_window_shell(self, last_db=last_db, movable=bool(movable))
         finalize_progress(1, 5, "Built the main application shell.")
+        self._configure_media_attach_drop_targets()
         self.tabifiedDockWidgetActivated.connect(
             lambda *_args: self._schedule_main_dock_state_save()
         )
@@ -12027,6 +12030,13 @@ class App(QMainWindow):
                 "action": self.bulk_attach_audio_action,
             },
             {
+                "id": "attach_album_art",
+                "label": "Attach Album Art",
+                "category": "Catalog",
+                "description": "Match a single image file to an existing catalog track, confirm the target, and attach it as album art.",
+                "action": self.attach_album_art_action,
+            },
+            {
                 "id": "import_tags",
                 "label": "Import Metadata from Audio Files",
                 "category": "Catalog",
@@ -14988,7 +14998,10 @@ class App(QMainWindow):
         if selected_ids:
             return selected_ids, "current selection"
         visible_ids = self._current_visible_track_ids()
-        return visible_ids, "visible catalog rows"
+        if visible_ids:
+            return visible_ids, "visible catalog rows"
+        all_ids = [choice.track_id for choice in self._all_catalog_track_choices()]
+        return self._normalize_track_ids(all_ids), "entire catalog"
 
     def _catalog_track_choices(self) -> list[TrackChoice]:
         header_names = {
@@ -15024,6 +15037,299 @@ class App(QMainWindow):
             )
             choices.append(TrackChoice(track_id=int(track_id), title=title, subtitle=subtitle))
         return choices
+
+    def _all_catalog_track_choices(
+        self, *, conn: sqlite3.Connection | None = None
+    ) -> list[TrackChoice]:
+        active_conn = conn or self.conn
+        if active_conn is None:
+            return []
+        rows = active_conn.execute(
+            """
+            SELECT
+                t.id,
+                COALESCE(t.track_title, ''),
+                COALESCE(a.name, ''),
+                COALESCE(al.title, '')
+            FROM Tracks t
+            LEFT JOIN Artists a ON a.id = t.main_artist_id
+            LEFT JOIN Albums al ON al.id = t.album_id
+            ORDER BY t.track_title COLLATE NOCASE, t.id
+            """
+        ).fetchall()
+        choices: list[TrackChoice] = []
+        for track_id, track_title, artist_name, album_title in rows:
+            clean_title = str(track_title or "").strip() or f"Track {int(track_id)}"
+            subtitle = " / ".join(
+                part
+                for part in (
+                    str(artist_name or "").strip(),
+                    str(album_title or "").strip(),
+                )
+                if part
+            )
+            choices.append(
+                TrackChoice(track_id=int(track_id), title=clean_title, subtitle=subtitle)
+            )
+        return choices
+
+    @staticmethod
+    def _track_choice_tuple(choice: TrackChoice) -> tuple[int, str, str | None]:
+        subtitle = str(choice.subtitle or "").strip()
+        artist_name = subtitle.split(" / ", 1)[0].strip() if subtitle else None
+        label = f"{int(choice.track_id)} - {choice.title}"
+        if subtitle:
+            label = f"{label} / {subtitle}"
+        return int(choice.track_id), label, artist_name or None
+
+    def _catalog_track_choice_tuples(
+        self,
+        *,
+        include_hidden: bool = False,
+        conn: sqlite3.Connection | None = None,
+    ) -> list[tuple[int, str, str | None]]:
+        choices = (
+            self._all_catalog_track_choices(conn=conn)
+            if include_hidden
+            else self._catalog_track_choices()
+        )
+        return [self._track_choice_tuple(choice) for choice in choices]
+
+    def _media_attach_track_candidates(
+        self,
+        track_ids,
+        *,
+        track_service: TrackService | None = None,
+    ) -> list[BulkAudioAttachTrackCandidate]:
+        active_track_service = track_service or self.track_service
+        if active_track_service is None:
+            return []
+        candidates: list[BulkAudioAttachTrackCandidate] = []
+        for track_id in self._normalize_track_ids(track_ids):
+            snapshot = active_track_service.fetch_track_snapshot(int(track_id))
+            if snapshot is None:
+                continue
+            candidates.append(
+                BulkAudioAttachTrackCandidate(
+                    track_id=snapshot.track_id,
+                    title=snapshot.track_title,
+                    artist=snapshot.artist_name,
+                    album=snapshot.album_title,
+                    isrc=snapshot.isrc,
+                )
+            )
+        return candidates
+
+    def _album_art_attach_track_ids(
+        self,
+        track_ids,
+        *,
+        track_service: TrackService | None = None,
+    ) -> list[int]:
+        active_track_service = track_service or self.track_service
+        if active_track_service is None:
+            return []
+        allowed: list[int] = []
+        for track_id in self._normalize_track_ids(track_ids):
+            try:
+                state = active_track_service.describe_album_art_edit_state(int(track_id))
+            except Exception:
+                continue
+            if bool(getattr(state, "can_replace_directly", False)):
+                allowed.append(int(track_id))
+        return allowed
+
+    @staticmethod
+    def _normalize_media_attach_match_text(value: str | None) -> str:
+        return re.sub(r"[^a-z0-9]+", " ", str(value or "").casefold()).strip()
+
+    @staticmethod
+    def _is_supported_media_attach_path(path: str, media_key: str) -> bool:
+        suffix = Path(str(path or "")).suffix.lower()
+        guessed_mime = str(mimetypes.guess_type(str(path or ""))[0] or "").strip().lower()
+        if media_key == "audio_file":
+            return suffix in BLOB_AUDIO_EXTS or guessed_mime.startswith("audio/")
+        return suffix in BLOB_IMAGE_EXTS or guessed_mime.startswith("image/")
+
+    def _prepare_media_attach_paths(
+        self,
+        media_key: str,
+        raw_paths,
+        *,
+        title: str,
+        allow_multiple: bool,
+        ignored_message: str | None = None,
+    ) -> list[str]:
+        normalized_paths: list[str] = []
+        seen: set[str] = set()
+        for raw_path in raw_paths or []:
+            clean = str(raw_path or "").strip()
+            if not clean:
+                continue
+            path = str(Path(clean))
+            if path in seen:
+                continue
+            seen.add(path)
+            normalized_paths.append(path)
+        supported_paths = [
+            path
+            for path in normalized_paths
+            if Path(path).exists() and self._is_supported_media_attach_path(path, media_key)
+        ]
+        ignored_paths = [path for path in normalized_paths if path not in supported_paths]
+        if ignored_paths and ignored_message:
+            QMessageBox.information(
+                self,
+                title,
+                ignored_message
+                + "\n\nIgnored:\n- "
+                + "\n- ".join(Path(path).name for path in ignored_paths[:12]),
+            )
+        if not supported_paths:
+            QMessageBox.information(
+                self,
+                title,
+                "No supported files were selected.",
+            )
+            return []
+        if not allow_multiple and len(supported_paths) > 1:
+            QMessageBox.information(
+                self,
+                title,
+                "Only a single image file can be attached at a time.",
+            )
+            return []
+        return supported_paths
+
+    def _open_add_track_with_media_source(
+        self,
+        media_key: str,
+        source_path: str,
+    ) -> None:
+        self.open_add_track_entry()
+        if media_key == "audio_file":
+            self.audio_file_field.setText(str(source_path or ""))
+            self._refresh_line_edit_lossy_audio_warning(self.audio_file_field)
+        else:
+            self.album_art_field.setText(str(source_path or ""))
+        self.track_title_field.setFocus()
+
+    def _build_album_art_attach_plan(
+        self,
+        *,
+        file_paths: list[str],
+        tracks: list[BulkAudioAttachTrackCandidate],
+        progress_callback=None,
+    ) -> tuple[list[dict[str, object]], list[str]]:
+        items: list[dict[str, object]] = []
+        warnings: list[str] = []
+        total = len(file_paths)
+        for index, raw_path in enumerate(file_paths, start=1):
+            path = Path(raw_path)
+            if progress_callback is not None:
+                progress_callback(
+                    index - 1,
+                    total,
+                    f"Matching artwork file {index} of {total}: {path.name}",
+                )
+            item, warning = self._build_album_art_attach_item(path, tracks)
+            items.append(item)
+            if warning:
+                warnings.append(warning)
+        if progress_callback is not None:
+            progress_callback(total, total, "Album art matching finished.")
+        return items, warnings
+
+    def _build_album_art_attach_item(
+        self,
+        path: Path,
+        tracks: list[BulkAudioAttachTrackCandidate],
+    ) -> tuple[dict[str, object], str | None]:
+        title_candidates, stem_artist = BulkAudioAttachService._filename_candidates(path.stem)
+        normalized_stem_artist = self._normalize_media_attach_match_text(stem_artist)
+        best_tracks: list[BulkAudioAttachTrackCandidate] = []
+        best_score = 0
+        best_basis = ""
+        for track in tracks:
+            normalized_track_title = self._normalize_media_attach_match_text(track.title)
+            normalized_album_title = self._normalize_media_attach_match_text(track.album)
+            normalized_track_artist = self._normalize_media_attach_match_text(track.artist)
+            for candidate, basis_label in title_candidates:
+                normalized_candidate = self._normalize_media_attach_match_text(candidate)
+                if not normalized_candidate:
+                    continue
+                score = 0
+                basis = ""
+                if normalized_album_title and normalized_candidate == normalized_album_title:
+                    score = 260
+                    basis = f"{basis_label} album title"
+                elif normalized_track_title and normalized_candidate == normalized_track_title:
+                    score = 220
+                    basis = f"{basis_label} track title"
+                if (
+                    score > 0
+                    and normalized_stem_artist
+                    and normalized_track_artist
+                    and normalized_stem_artist == normalized_track_artist
+                ):
+                    score += 25
+                    basis = f"{basis} + artist"
+                if score > best_score:
+                    best_tracks = [track]
+                    best_score = score
+                    best_basis = basis
+                elif score > 0 and score == best_score:
+                    best_tracks.append(track)
+        detected_album = title_candidates[0][0] if title_candidates else None
+        if len(best_tracks) > 1 and best_score > 0:
+            return (
+                {
+                    "source_path": str(path),
+                    "source_name": path.name,
+                    "detected_title": None,
+                    "detected_artist": stem_artist,
+                    "detected_album": detected_album,
+                    "matched_track_id": None,
+                    "match_basis": "Ambiguous artwork filename match",
+                    "status": "ambiguous",
+                    "warning": "",
+                    "candidate_track_ids": [int(track.track_id) for track in best_tracks],
+                },
+                None,
+            )
+        if not best_tracks:
+            return (
+                {
+                    "source_path": str(path),
+                    "source_name": path.name,
+                    "detected_title": None,
+                    "detected_artist": stem_artist,
+                    "detected_album": detected_album,
+                    "matched_track_id": None,
+                    "match_basis": "No confident catalog match",
+                    "status": "unmatched",
+                    "warning": "",
+                    "candidate_track_ids": [],
+                },
+                None,
+            )
+        best_track = best_tracks[0]
+        return (
+            {
+                "source_path": str(path),
+                "source_name": path.name,
+                "detected_title": None,
+                "detected_artist": stem_artist,
+                "detected_album": detected_album,
+                "matched_track_id": int(best_track.track_id),
+                "matched_track_artist": best_track.artist,
+                "match_basis": best_basis,
+                "status": "matched",
+                "warning": "",
+                "candidate_track_ids": [],
+            },
+            None,
+        )
 
     def _select_track_ids_in_table(self, track_ids, *, replace: bool = True) -> None:
         normalized_ids = set(self._normalize_track_ids(track_ids))
@@ -17654,30 +17960,47 @@ class App(QMainWindow):
             if temp_artwork_path:
                 Path(temp_artwork_path).unlink(missing_ok=True)
 
-    def bulk_attach_audio_files(self, track_ids: list[int] | None = None):
+    def bulk_attach_audio_files(
+        self,
+        track_ids: list[int] | None = None,
+        *,
+        file_paths: list[str] | None = None,
+        title: str = "Bulk Attach Audio Files",
+    ):
         if self.audio_tag_service is None or self.track_service is None:
-            QMessageBox.warning(self, "Bulk Attach Audio Files", "Open a profile first.")
+            QMessageBox.warning(self, title, "Open a profile first.")
             return
 
         scope_track_ids, scope_label = self._bulk_audio_attach_scope_track_ids(track_ids)
         if not scope_track_ids:
             QMessageBox.information(
                 self,
-                "Bulk Attach Audio Files",
+                title,
                 "Select one or more tracks first, or leave the catalog rows visible so audio files can be matched against them.",
             )
             return
 
-        chosen_files, _selected_filter = QFileDialog.getOpenFileNames(
-            self,
-            "Choose Audio Files to Attach",
-            str(self.data_root),
-            (
-                "Audio Files (*.mp3 *.flac *.ogg *.oga *.opus *.m4a *.mp4 *.aac *.wav *.aif *.aiff);;"
-                "All Files (*)"
+        chosen_files = list(file_paths or [])
+        if not chosen_files:
+            chosen_files, _selected_filter = QFileDialog.getOpenFileNames(
+                self,
+                "Choose Audio Files to Attach",
+                str(self.data_root),
+                (
+                    "Audio Files (*.mp3 *.flac *.ogg *.oga *.opus *.m4a *.mp4 *.aac *.wav *.aif *.aiff);;"
+                    "All Files (*)"
+                ),
+            )
+        file_paths = self._prepare_media_attach_paths(
+            "audio_file",
+            chosen_files,
+            title=title,
+            allow_multiple=True,
+            ignored_message=(
+                "Only supported audio files can be attached in this workflow. "
+                "Unsupported dropped or selected files were ignored."
             ),
         )
-        file_paths = [str(Path(path)) for path in dict.fromkeys(chosen_files) if str(path).strip()]
         if not file_paths:
             return
 
@@ -17702,6 +18025,10 @@ class App(QMainWindow):
                     maximum=overall_total,
                     message=f"Loading track {index} of {total_tracks} for audio matching...",
                 )
+            all_track_choices = self._catalog_track_choice_tuples(
+                include_hidden=True,
+                conn=bundle.conn,
+            )
 
             matcher = BulkAudioAttachService(bundle.audio_tag_service)
             plan = matcher.build_plan(
@@ -17715,21 +18042,7 @@ class App(QMainWindow):
             )
             return {
                 "plan": plan,
-                "track_choices": [
-                    (
-                        candidate.track_id,
-                        " / ".join(
-                            part
-                            for part in (
-                                f"{candidate.track_id} - {candidate.title}",
-                                candidate.artist or "",
-                            )
-                            if part
-                        ),
-                        candidate.artist,
-                    )
-                    for candidate in track_candidates
-                ],
+                "track_choices": all_track_choices,
                 "scope_label": scope_label,
                 "scope_track_count": len(track_candidates),
             }
@@ -17737,12 +18050,32 @@ class App(QMainWindow):
         def _preview_success(result: dict[str, object]):
             plan = result.get("plan")
             track_choices = list(result.get("track_choices") or [])
-            if plan is None or not track_choices:
+            if plan is None:
                 QMessageBox.information(
                     self,
-                    "Bulk Attach Audio Files",
-                    "No track candidates were available for the current bulk-attach scope.",
+                    title,
+                    "The selected audio files could not be prepared for attachment.",
                 )
+                return
+            if not track_choices:
+                if len(file_paths) == 1 and (
+                    QMessageBox.question(
+                        self,
+                        title,
+                        "No existing catalog tracks are available for attachment.\n\n"
+                        "Open Add Track with this audio file prefilled instead?",
+                        QMessageBox.Yes | QMessageBox.No,
+                        QMessageBox.Yes,
+                    )
+                    == QMessageBox.Yes
+                ):
+                    self._open_add_track_with_media_source("audio_file", file_paths[0])
+                else:
+                    QMessageBox.information(
+                        self,
+                        title,
+                        "No existing catalog tracks are available for attachment yet.",
+                    )
                 return
 
             plan_items = list(getattr(plan, "items", []) or [])
@@ -17769,39 +18102,40 @@ class App(QMainWindow):
                         "matched_track_artist": item.matched_track_artist,
                         "match_basis": item.match_basis,
                         "status": item.status,
+                        "candidate_track_ids": list(getattr(item, "candidate_track_ids", []) or []),
                         "warning": "\n".join(warning_parts),
                     }
                 )
             dlg = BulkAudioAttachDialog(
-                title="Bulk Attach Audio Files",
+                title=title,
                 intro=(
                     f"Review {len(file_paths)} audio file(s) against "
                     f"{int(result.get('scope_track_count') or 0)} track(s) from the {result.get('scope_label') or scope_label}. "
-                    "You can reassign unmatched rows before the files are attached."
+                    "Review or reassign each file before anything is written."
                 ),
                 items=dialog_rows,
                 track_choices=track_choices,
+                media_label="audio file",
                 suggested_artist=getattr(plan, "suggested_artist", None),
+                default_storage_mode=STORAGE_MODE_MANAGED_FILE,
+                attach_button_text="Attach Audio",
+                allow_create_track=(len(file_paths) == 1),
                 parent=self,
             )
             if dlg.exec() != QDialog.Accepted:
+                return
+            if dlg.create_track_requested():
+                self._open_add_track_with_media_source("audio_file", file_paths[0])
                 return
 
             assignments = dlg.selected_matches()
             if not self._confirm_lossy_primary_audio_selection(
                 [str(item.get("source_path") or "") for item in assignments],
-                title="Bulk Attach Audio Files",
+                title=title,
                 action_label="Attaching these files",
             ):
                 return
-            storage_mode = _prompt_storage_mode_choice(
-                self,
-                title="Bulk Attach Audio Files",
-                subject="the audio files",
-                default_mode=STORAGE_MODE_MANAGED_FILE,
-            )
-            if storage_mode is None:
-                return
+            storage_mode = dlg.selected_storage_mode()
             batch_artist = dlg.selected_artist_name()
             plan_warnings = list(getattr(plan, "warnings", []) or [])
             skipped_count = max(0, len(file_paths) - len(assignments))
@@ -17939,7 +18273,7 @@ class App(QMainWindow):
                 )
                 QMessageBox.information(
                     self,
-                    "Bulk Attach Audio Files",
+                    title,
                     f"Attached audio to {len(attached_track_ids)} track(s)."
                     + (
                         f"\nUpdated the main artist on {len(artist_updated_ids)} matched track(s)."
@@ -17955,7 +18289,7 @@ class App(QMainWindow):
                 )
 
             self._submit_background_bundle_task(
-                title="Bulk Attach Audio Files",
+                title=title,
                 description="Attaching the selected audio files to matched catalog tracks...",
                 task_fn=_apply_worker,
                 kind="write",
@@ -17963,14 +18297,14 @@ class App(QMainWindow):
                 cancellable=False,
                 on_success=_apply_success,
                 on_error=lambda failure: self._show_background_task_error(
-                    "Bulk Attach Audio Files",
+                    title,
                     failure,
                     user_message="Could not attach the selected audio files:",
                 ),
             )
 
         self._submit_background_bundle_task(
-            title="Bulk Attach Audio Files",
+            title=title,
             description="Matching selected audio files to catalog tracks...",
             task_fn=_preview_worker,
             kind="read",
@@ -17978,9 +18312,249 @@ class App(QMainWindow):
             cancellable=False,
             on_success=_preview_success,
             on_error=lambda failure: self._show_background_task_error(
-                "Bulk Attach Audio Files",
+                title,
                 failure,
                 user_message="Could not prepare the bulk audio attach preview:",
+            ),
+        )
+
+    def attach_album_art_file_to_catalog(
+        self,
+        track_ids: list[int] | None = None,
+        *,
+        file_paths: list[str] | None = None,
+        title: str = "Attach Album Art File",
+    ) -> None:
+        if self.track_service is None:
+            QMessageBox.warning(self, title, "Open a profile first.")
+            return
+
+        scope_track_ids, scope_label = self._bulk_audio_attach_scope_track_ids(track_ids)
+        chosen_files = list(file_paths or [])
+        if not chosen_files:
+            chosen_path, _selected_filter = QFileDialog.getOpenFileName(
+                self,
+                "Choose Album Art File to Attach",
+                str(self.data_root),
+                self._media_file_filter("album_art"),
+            )
+            if chosen_path:
+                chosen_files = [chosen_path]
+        file_paths = self._prepare_media_attach_paths(
+            "album_art",
+            chosen_files,
+            title=title,
+            allow_multiple=False,
+        )
+        if not file_paths:
+            return
+
+        def _preview_worker(bundle, ctx):
+            attachable_scope_ids = self._album_art_attach_track_ids(
+                scope_track_ids,
+                track_service=bundle.track_service,
+            )
+            total_tracks = len(attachable_scope_ids)
+            track_candidates: list[BulkAudioAttachTrackCandidate] = []
+            for index, track_id in enumerate(attachable_scope_ids, start=1):
+                snapshot = bundle.track_service.fetch_track_snapshot(track_id)
+                if snapshot is not None:
+                    track_candidates.append(
+                        BulkAudioAttachTrackCandidate(
+                            track_id=snapshot.track_id,
+                            title=snapshot.track_title,
+                            artist=snapshot.artist_name,
+                            album=snapshot.album_title,
+                            isrc=snapshot.isrc,
+                        )
+                    )
+                ctx.report_progress(
+                    value=index,
+                    maximum=max(1, total_tracks + len(file_paths)),
+                    message=f"Loading track {index} of {total_tracks} for artwork matching...",
+                )
+            attachable_all_ids = self._album_art_attach_track_ids(
+                [choice.track_id for choice in self._all_catalog_track_choices(conn=bundle.conn)],
+                track_service=bundle.track_service,
+            )
+            all_track_choices = self._catalog_track_choice_tuples(
+                include_hidden=True,
+                conn=bundle.conn,
+            )
+            allowed_track_choice_ids = {int(track_id) for track_id in attachable_all_ids}
+            filtered_track_choices = [
+                choice for choice in all_track_choices if int(choice[0]) in allowed_track_choice_ids
+            ]
+            items, warnings = self._build_album_art_attach_plan(
+                file_paths=file_paths,
+                tracks=track_candidates,
+                progress_callback=lambda value, maximum, message: ctx.report_progress(
+                    value=total_tracks + value,
+                    maximum=max(1, total_tracks + maximum),
+                    message=message,
+                ),
+            )
+            return {
+                "items": items,
+                "warnings": warnings,
+                "track_choices": filtered_track_choices,
+                "scope_label": scope_label,
+                "scope_track_count": len(track_candidates),
+            }
+
+        def _preview_success(result: dict[str, object]) -> None:
+            dialog_items = list(result.get("items") or [])
+            track_choices = list(result.get("track_choices") or [])
+            if not track_choices:
+                if (
+                    QMessageBox.question(
+                        self,
+                        title,
+                        "No existing catalog tracks are available as direct album-art owners.\n\n"
+                        "Open Add Track with this image prefilled instead?",
+                        QMessageBox.Yes | QMessageBox.No,
+                        QMessageBox.Yes,
+                    )
+                    == QMessageBox.Yes
+                ):
+                    self._open_add_track_with_media_source("album_art", file_paths[0])
+                return
+
+            dlg = BulkAudioAttachDialog(
+                title=title,
+                intro=(
+                    f"Review the selected image against "
+                    f"{int(result.get('scope_track_count') or 0)} track(s) from the {result.get('scope_label') or scope_label}. "
+                    "Confirm or reassign the target before artwork is attached."
+                ),
+                items=dialog_items,
+                track_choices=track_choices,
+                media_label="album art file",
+                default_storage_mode=STORAGE_MODE_MANAGED_FILE,
+                attach_button_text="Attach Artwork",
+                allow_artist_name_update=False,
+                allow_create_track=(len(file_paths) == 1),
+                parent=self,
+            )
+            if dlg.exec() != QDialog.Accepted:
+                return
+            if dlg.create_track_requested():
+                self._open_add_track_with_media_source("album_art", file_paths[0])
+                return
+
+            assignments = dlg.selected_matches()
+            storage_mode = dlg.selected_storage_mode()
+            skipped_count = max(0, len(file_paths) - len(assignments))
+            plan_warnings = list(result.get("warnings") or [])
+
+            def _apply_worker(bundle, ctx):
+                total = max(1, len(assignments))
+
+                def _mutation():
+                    attached_track_ids: list[int] = []
+                    with bundle.conn:
+                        cur = bundle.conn.cursor()
+                        for index, assignment in enumerate(assignments, start=1):
+                            track_id = int(assignment["track_id"])
+                            bundle.track_service.set_media_path(
+                                track_id,
+                                "album_art",
+                                str(assignment["source_path"]),
+                                storage_mode=storage_mode,
+                                cursor=cur,
+                            )
+                            attached_track_ids.append(track_id)
+                            ctx.report_progress(
+                                value=index,
+                                maximum=total,
+                                message=f"Attaching artwork {index} of {total} to track {track_id}...",
+                            )
+                    return {"attached_track_ids": attached_track_ids}
+
+                return run_snapshot_history_action(
+                    history_manager=bundle.history_manager,
+                    action_label=f"Attach Album Art ({len(assignments)} file{'s' if len(assignments) != 1 else ''})",
+                    action_type="track.album_art.attach",
+                    entity_type="Track",
+                    entity_id="batch",
+                    payload={
+                        "track_ids": [int(item["track_id"]) for item in assignments],
+                        "storage_mode": storage_mode,
+                        "scope_label": scope_label,
+                    },
+                    mutation=_mutation,
+                    logger=self.logger,
+                )
+
+            def _apply_success(result_payload: dict[str, object]) -> None:
+                attached_track_ids = list(result_payload.get("attached_track_ids") or [])
+                warnings = plan_warnings
+                try:
+                    self.conn.commit()
+                except Exception:
+                    pass
+                self._refresh_history_actions()
+                self._log_event(
+                    "track.album_art.attach",
+                    "Attached album art files",
+                    track_ids=attached_track_ids,
+                    skipped=skipped_count,
+                    storage_mode=storage_mode,
+                    scope_label=scope_label,
+                    warnings=warnings,
+                )
+                self._audit(
+                    "UPDATE",
+                    "TrackAlbumArt",
+                    ref_id="batch",
+                    details=(
+                        f"attached={len(attached_track_ids)}; "
+                        f"skipped={skipped_count}; storage_mode={storage_mode}"
+                    ),
+                )
+                self._audit_commit()
+                self.refresh_table_preserve_view(
+                    focus_id=attached_track_ids[0] if attached_track_ids else None
+                )
+                QMessageBox.information(
+                    self,
+                    title,
+                    f"Attached artwork to {len(attached_track_ids)} track(s)."
+                    + (
+                        f"\nSkipped {skipped_count} file(s) left without a target."
+                        if skipped_count
+                        else ""
+                    )
+                    + ("\n\nWarnings:\n- " + "\n- ".join(warnings[:12]) if warnings else ""),
+                )
+
+            self._submit_background_bundle_task(
+                title=title,
+                description="Attaching the selected artwork to matched catalog tracks...",
+                task_fn=_apply_worker,
+                kind="write",
+                unique_key="track.album_art.attach",
+                cancellable=False,
+                on_success=_apply_success,
+                on_error=lambda failure: self._show_background_task_error(
+                    title,
+                    failure,
+                    user_message="Could not attach the selected artwork file:",
+                ),
+            )
+
+        self._submit_background_bundle_task(
+            title=title,
+            description="Matching the selected artwork file to catalog tracks...",
+            task_fn=_preview_worker,
+            kind="read",
+            unique_key="track.album_art.attach.preview",
+            cancellable=False,
+            on_success=_preview_success,
+            on_error=lambda failure: self._show_background_task_error(
+                title,
+                failure,
+                user_message="Could not prepare the artwork attach preview:",
             ),
         )
 
@@ -22443,6 +23017,110 @@ class App(QMainWindow):
         else:
             super().keyPressEvent(event)
 
+    def _configure_media_attach_drop_targets(self) -> None:
+        for widget in (
+            self,
+            self.centralWidget(),
+            getattr(self, "table_panel_widget", None),
+            getattr(self, "left_widget_container", None),
+            getattr(self, "table", None),
+            getattr(getattr(self, "table", None), "viewport", lambda: None)(),
+        ):
+            if isinstance(widget, QWidget):
+                widget.setAcceptDrops(True)
+                try:
+                    widget.removeEventFilter(self)
+                except Exception:
+                    pass
+                widget.installEventFilter(self)
+
+    def _drop_event_local_file_paths(self, event) -> list[str]:
+        mime_data = getattr(event, "mimeData", lambda: None)()
+        if mime_data is None:
+            return []
+        urls = getattr(mime_data, "urls", lambda: [])()
+        paths: list[str] = []
+        seen: set[str] = set()
+        for url in urls or []:
+            try:
+                is_local = bool(url.isLocalFile())
+            except Exception:
+                is_local = False
+            if not is_local:
+                continue
+            try:
+                path = str(url.toLocalFile() or "").strip()
+            except Exception:
+                path = ""
+            if not path or path in seen:
+                continue
+            seen.add(path)
+            paths.append(path)
+        return paths
+
+    def _partition_dropped_media_paths(
+        self,
+        paths: list[str],
+    ) -> tuple[list[str], list[str], list[str]]:
+        audio_paths: list[str] = []
+        image_paths: list[str] = []
+        unsupported_paths: list[str] = []
+        for path in paths:
+            if self._is_supported_media_attach_path(path, "audio_file"):
+                audio_paths.append(path)
+            elif self._is_supported_media_attach_path(path, "album_art"):
+                image_paths.append(path)
+            else:
+                unsupported_paths.append(path)
+        return audio_paths, image_paths, unsupported_paths
+
+    def _route_dropped_media_paths(self, paths: list[str]) -> bool:
+        audio_paths, image_paths, unsupported_paths = self._partition_dropped_media_paths(paths)
+        title = "Attach Dropped Media"
+        if len(paths) > 1:
+            if audio_paths:
+                self.bulk_attach_audio_files(
+                    file_paths=list(paths),
+                    title="Attach Dropped Audio Files",
+                )
+                return True
+            if image_paths:
+                QMessageBox.information(
+                    self,
+                    title,
+                    "Only audio files are accepted in multi-file drops.\n\n"
+                    "Drop a single image file when attaching album art.",
+                )
+                return True
+            if unsupported_paths:
+                QMessageBox.information(
+                    self,
+                    title,
+                    "The dropped files were not supported audio or image files.",
+                )
+                return True
+            return False
+        if audio_paths:
+            self.bulk_attach_audio_files(
+                file_paths=list(paths),
+                title="Attach Dropped Audio File",
+            )
+            return True
+        if image_paths:
+            self.attach_album_art_file_to_catalog(
+                file_paths=list(paths),
+                title="Attach Dropped Album Art",
+            )
+            return True
+        if unsupported_paths:
+            QMessageBox.information(
+                self,
+                title,
+                "The dropped file was not a supported audio or image file.",
+            )
+            return True
+        return False
+
     def eventFilter(self, source, event):
         """Ensure we return a bool. Handle table key events here."""
         if event.type() == QEvent.Show and isinstance(source, QWidget):
@@ -22451,6 +23129,21 @@ class App(QMainWindow):
                 if self._ensure_widget_object_names(root):
                     self._repolish_widget_tree(root)
             return super().eventFilter(source, event)
+
+        if isinstance(source, QWidget) and (source is self or self.isAncestorOf(source)):
+            if event.type() in (QEvent.DragEnter, QEvent.DragMove):
+                paths = self._drop_event_local_file_paths(event)
+                audio_paths, image_paths, _unsupported_paths = self._partition_dropped_media_paths(
+                    paths
+                )
+                if audio_paths or image_paths:
+                    event.acceptProposedAction()
+                    return True
+            if event.type() == QEvent.Drop:
+                paths = self._drop_event_local_file_paths(event)
+                if paths:
+                    event.acceptProposedAction()
+                    return self._route_dropped_media_paths(paths)
 
         if source is getattr(self, "table", None) and event.type() == QEvent.KeyPress:
             if event.key() == Qt.Key_Space:

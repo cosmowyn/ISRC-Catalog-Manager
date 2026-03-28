@@ -11,6 +11,9 @@ class HistorySnapshotTests(HistoryManagerTestCase):
     test_snapshot_actions_restore_contract_template_roots = (
         HistoryManagerTestCase.case_snapshot_actions_restore_contract_template_roots
     )
+    test_snapshot_restore_sanitizes_legacy_text_custom_field_attachment_state = (
+        HistoryManagerTestCase.case_snapshot_restore_sanitizes_legacy_text_custom_field_attachment_state
+    )
     test_registered_snapshot_can_be_restored = (
         HistoryManagerTestCase.case_registered_snapshot_can_be_restored
     )

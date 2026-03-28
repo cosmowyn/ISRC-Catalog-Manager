@@ -464,6 +464,11 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         slot=app.bulk_attach_audio_files,
     )
     audio_ingest_menu.addAction(app.bulk_attach_audio_action)
+    app.attach_album_art_action = app._create_action(
+        "Attach Album Art File…",
+        slot=app.attach_album_art_file_to_catalog,
+    )
+    audio_ingest_menu.addAction(app.attach_album_art_action)
     app.import_tags_action = app._create_action(
         "Import Metadata from Audio Files…",
         slot=app.import_tags_from_audio,

@@ -220,14 +220,19 @@ The XML inspection pass still reports:
 
 If the review looks correct, the import can then be committed through the same reviewed flow as the other catalog exchange formats.
 
-## Bulk Attach Audio Files
+## Catalog Media Attachment
 
-Bulk audio attachment is a separate catalog workflow rather than a row-oriented exchange import.
+Catalog media attachment is a separate catalog workflow rather than a row-oriented exchange import.
 
-- Open `Catalog > Audio > Import & Attach > Bulk Attach Audio Files…` when the track rows already exist and the remaining job is to connect audio files to them
-- The workflow inspects filenames and embedded tags, suggests likely track matches, and lets you reassign or skip files before anything is written
-- You can choose whether the attached audio should be stored in the database or as managed local files
-- One optional artist value can be applied across the matched set when you are cleaning up a consistent batch
+- Open `Catalog > Audio > Import & Attach > Bulk Attach Audio Files…` when the track rows already exist and the remaining job is to connect one or many local audio files to them
+- Open `Catalog > Audio > Import & Attach > Attach Album Art File…` when you want to connect one image file to an existing track as album art
+- Audio matching inspects filenames and embedded tags and suggests likely existing-record matches before any write is allowed
+- Artwork matching inspects the incoming filename against existing album and track titles before any write is allowed
+- Even when there is one confident match, the app still opens a confirmation dialog that shows the file, target record, and storage mode so the user must explicitly proceed or cancel
+- Unmatched and ambiguous files stay in the same review surface, where they can be reassigned to another existing track, skipped, or sent into `Add Track` with the chosen source file prefilled
+- You can choose whether attached media should be stored in the database or as managed local files
+- Audio batches can optionally apply one shared artist value across the accepted matches when you are cleaning up a consistent set
+- Drag-and-drop onto the catalog workspace reuses the exact same workflow: multi-file drops are accepted only for audio, and album art remains single-image only
 - The final apply step is recorded as one recoverable history mutation instead of as a series of isolated row edits
 
 ## Audio Tag Import And Export Metadata Behavior

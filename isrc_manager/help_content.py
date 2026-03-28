@@ -322,27 +322,29 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
     ),
     HelpChapter(
         chapter_id="bulk-audio-attach",
-        title="Bulk Audio Attach",
-        summary="Attach many local audio files to existing tracks by reviewing filename and tag matches before one batch apply.",
+        title="Catalog Media Attach",
+        summary="Attach audio or album-art files to existing tracks with match review, explicit confirmation, storage-mode choice, and catalog drag-and-drop.",
         keywords=(
             "bulk attach audio",
             "attach audio files",
+            "attach album art",
+            "drag and drop media",
             "filename matching",
             "apply artist",
             "storage mode",
             "matched tracks",
         ),
         content_html="""
-        <p><strong>Catalog &gt; Bulk Attach Audio Files…</strong> is the fastest way to connect a large batch of local audio files to tracks that already exist in the catalog.</p>
+        <p><strong>Catalog &gt; Audio &gt; Import &amp; Attach</strong> now covers both local audio attachment and single-file album-art attachment for tracks that already exist in the catalog.</p>
         <ul>
-          <li><strong>Match suggestions</strong>: the workflow inspects filenames and embedded tags to suggest likely track matches.</li>
-          <li><strong>Review before write</strong>: the dialog shows the detected title, detected artist, current matched artist, and source file so you can confirm the batch before anything is saved.</li>
-          <li><strong>Skip or reassign</strong>: any file can be skipped or manually reassigned to another track from the same review surface.</li>
-          <li><strong>Storage mode choice</strong>: attached audio can be stored in the database or as managed local files.</li>
-          <li><strong>Optional shared artist update</strong>: when the batch is consistent, one artist value can be applied across the matched tracks during the same operation.</li>
-          <li><strong>Recoverable batch</strong>: the final apply step is recorded as one history-backed mutation rather than as a chain of separate row edits.</li>
+          <li><strong>Bulk Attach Audio Files…</strong>: inspect many local audio files against existing tracks, review filename and embedded-tag matches, optionally apply one artist value across the accepted matches, and choose database or managed-file storage before anything is written.</li>
+          <li><strong>Attach Album Art File…</strong>: inspect one image file against existing tracks, review the proposed target, choose the storage mode, and confirm the attachment before any write is made.</li>
+          <li><strong>No silent attach</strong>: even when the app finds one confident match, it still opens the review dialog so you can confirm the target record or cancel safely.</li>
+          <li><strong>Manual resolution</strong>: unmatched or ambiguous files stay in the same review surface, where they can be skipped, reassigned to a different existing track, or sent into <strong>Add Track</strong> with the chosen source file prefilled.</li>
+          <li><strong>Catalog drag-and-drop</strong>: dropping files from the OS shell onto the catalog workspace reuses the exact same review workflow. Multi-file drops are accepted only for audio; album art is single-image only.</li>
+          <li><strong>Recoverable apply</strong>: the final attach step is recorded as a history-backed mutation instead of as a chain of silent one-off writes.</li>
         </ul>
-        <p>This workflow is separate from exchange import and from audio-tag import. Use it when the catalog rows already exist and you mainly need to connect the right audio files quickly and safely.</p>
+        <p>This workflow is separate from exchange import and from audio-tag import. Use it when the catalog rows already exist and you mainly need to connect the right audio or artwork files quickly, explicitly, and safely.</p>
         """,
     ),
     HelpChapter(

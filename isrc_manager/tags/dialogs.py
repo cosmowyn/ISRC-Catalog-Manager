@@ -2,20 +2,30 @@
 
 from __future__ import annotations
 
+import re
+
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QCompleter,
     QDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
 )
 
+from isrc_manager.file_storage import (
+    STORAGE_MODE_DATABASE,
+    STORAGE_MODE_MANAGED_FILE,
+    normalize_storage_mode,
+)
 from isrc_manager.ui_common import (
     _add_standard_dialog_header,
     _apply_compact_dialog_control_heights,
@@ -117,7 +127,7 @@ class TagPreviewDialog(QDialog):
 
 
 class BulkAudioAttachDialog(QDialog):
-    """Review and adjust batch audio-to-track matches before attachment."""
+    """Review catalog media matches before attachment writes are applied."""
 
     def __init__(
         self,
@@ -126,13 +136,23 @@ class BulkAudioAttachDialog(QDialog):
         intro: str,
         items: list[dict[str, object]],
         track_choices: list[tuple[int, str, str | None]],
+        media_label: str = "audio file",
         suggested_artist: str | None = None,
+        default_storage_mode: str | None = STORAGE_MODE_MANAGED_FILE,
+        attach_button_text: str = "Attach Files",
+        create_track_button_text: str = "Open Add Track Instead…",
+        allow_artist_name_update: bool = True,
+        allow_create_track: bool = False,
         parent=None,
     ):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.resize(1080, 720)
         self._items = list(items)
+        self._media_label = str(media_label or "media file")
+        self._allow_artist_name_update = bool(allow_artist_name_update)
+        self._allow_create_track = bool(allow_create_track)
+        self._create_track_requested = False
         self._track_choices = list(track_choices)
         self._track_choice_map = {
             int(track_id): {"label": label, "artist": artist}
@@ -151,32 +171,53 @@ class BulkAudioAttachDialog(QDialog):
             subtitle=intro,
         )
 
-        artist_row = QHBoxLayout()
-        artist_row.setContentsMargins(0, 0, 0, 0)
-        artist_row.setSpacing(8)
+        storage_row = QHBoxLayout()
+        storage_row.setContentsMargins(0, 0, 0, 0)
+        storage_row.setSpacing(8)
+        storage_label = QLabel("Storage mode")
+        storage_label.setProperty("role", "secondary")
+        storage_row.addWidget(storage_label)
+        self.storage_combo = QComboBox(self)
+        self.storage_combo.addItem("Managed local files", STORAGE_MODE_MANAGED_FILE)
+        self.storage_combo.addItem("Internal database storage", STORAGE_MODE_DATABASE)
+        normalized_default_mode = normalize_storage_mode(default_storage_mode, default=None)
+        index = self.storage_combo.findData(normalized_default_mode)
+        self.storage_combo.setCurrentIndex(index if index >= 0 else 0)
+        storage_row.addWidget(self.storage_combo)
+        storage_row.addStretch(1)
+        root.addLayout(storage_row)
+
         self.apply_artist_checkbox = QCheckBox("Apply artist to matched tracks")
-        self.apply_artist_checkbox.setChecked(bool(suggested_artist))
-        artist_row.addWidget(self.apply_artist_checkbox)
+        self.apply_artist_checkbox.setChecked(
+            bool(suggested_artist) and self._allow_artist_name_update
+        )
         self.artist_edit = QLineEdit()
         self.artist_edit.setPlaceholderText("Optional artist name for all matched tracks")
         self.artist_edit.setText(str(suggested_artist or ""))
         self.artist_edit.setEnabled(self.apply_artist_checkbox.isChecked())
         self.apply_artist_checkbox.toggled.connect(self.artist_edit.setEnabled)
-        artist_row.addWidget(self.artist_edit, 1)
-        root.addLayout(artist_row)
+        if self._allow_artist_name_update:
+            artist_row = QHBoxLayout()
+            artist_row.setContentsMargins(0, 0, 0, 0)
+            artist_row.setSpacing(8)
+            artist_row.addWidget(self.apply_artist_checkbox)
+            artist_row.addWidget(self.artist_edit, 1)
+            root.addLayout(artist_row)
+        else:
+            self.apply_artist_checkbox.setVisible(False)
+            self.artist_edit.setVisible(False)
 
         self.summary_label = QLabel("")
         self.summary_label.setProperty("role", "secondary")
         root.addWidget(self.summary_label)
 
-        self.table = QTableWidget(0, 7, self)
+        self.table = QTableWidget(0, 6, self)
         self.table.setHorizontalHeaderLabels(
             [
                 "Attach To Track",
                 "Match Basis",
-                "Detected Artist",
-                "Current Artist",
-                "Detected Title",
+                "Detected",
+                "Selected Target",
                 "Warning",
                 "Source File",
             ]
@@ -184,11 +225,16 @@ class BulkAudioAttachDialog(QDialog):
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         root.addWidget(self.table, 1)
 
         buttons = QHBoxLayout()
+        if self._allow_create_track and len(self._items) == 1:
+            create_track = QPushButton(create_track_button_text)
+            create_track.clicked.connect(self._request_create_track)
+            buttons.addWidget(create_track)
         buttons.addStretch(1)
-        confirm = QPushButton("Attach Files")
+        confirm = QPushButton(attach_button_text)
         confirm.setDefault(True)
         confirm.clicked.connect(self.accept)
         cancel = QPushButton("Cancel")
@@ -200,20 +246,87 @@ class BulkAudioAttachDialog(QDialog):
         self.populate_rows(self._items)
         _apply_compact_dialog_control_heights(self)
 
+    @staticmethod
+    def _display_text_for_choice(track_id: int, label: str) -> str:
+        clean_label = str(label or "").strip()
+        if clean_label and clean_label.startswith(f"{int(track_id)} - "):
+            return clean_label
+        if clean_label:
+            return f"{int(track_id)} - {clean_label}"
+        return f"{int(track_id)}"
+
+    @staticmethod
+    def _extract_track_id(text: str | None) -> int | None:
+        match = re.match(r"^\s*(\d+)\b", str(text or ""))
+        if match is None:
+            return None
+        try:
+            return int(match.group(1))
+        except (TypeError, ValueError):
+            return None
+
+    def _resolve_track_id(self, combo: QComboBox) -> int | None:
+        current_index = combo.currentIndex()
+        data = combo.currentData()
+        if current_index > 0 and data not in (None, ""):
+            if (
+                str(combo.currentText() or "").strip()
+                == str(combo.itemText(current_index) or "").strip()
+            ):
+                try:
+                    return int(data)
+                except (TypeError, ValueError):
+                    return None
+        extracted = self._extract_track_id(combo.currentText())
+        if extracted in self._track_choice_map:
+            return int(extracted)
+        return None
+
+    def _combo_for_row(self, row_index: int) -> QComboBox:
+        return self._match_combos[row_index]
+
+    def _candidate_hint_text(self, item: dict[str, object]) -> str:
+        candidate_ids = []
+        for value in item.get("candidate_track_ids") or []:
+            try:
+                candidate_ids.append(int(value))
+            except (TypeError, ValueError):
+                continue
+        if not candidate_ids:
+            return ""
+        labels: list[str] = []
+        for track_id in candidate_ids[:5]:
+            label = str(self._track_choice_map.get(track_id, {}).get("label") or f"{track_id}")
+            labels.append(label)
+        if len(candidate_ids) > 5:
+            labels.append(f"+{len(candidate_ids) - 5} more")
+        return "Possible matches: " + "; ".join(labels)
+
     def populate_rows(self, items: list[dict[str, object]]) -> None:
         self._items = list(items)
         self._match_combos = []
         self.table.setRowCount(len(items))
         for row_index, item in enumerate(items):
             combo = QComboBox(self.table)
+            combo.setEditable(True)
+            combo.setInsertPolicy(QComboBox.NoInsert)
             combo.addItem("(Skip this file)", None)
             for track_id, label, _artist in self._track_choices:
-                combo.addItem(label, int(track_id))
+                combo.addItem(self._display_text_for_choice(track_id, label), int(track_id))
+            completer = combo.completer()
+            if completer is not None:
+                completer.setCompletionMode(QCompleter.PopupCompletion)
+                completer.setFilterMode(Qt.MatchContains)
             matched_track_id = item.get("matched_track_id")
             index = combo.findData(int(matched_track_id)) if matched_track_id else 0
             combo.setCurrentIndex(index if index >= 0 else 0)
             combo.currentIndexChanged.connect(
-                lambda _index, row=row_index, source_combo=combo: self._update_row_artist(
+                lambda _index, row=row_index, source_combo=combo: self._update_row_target(
+                    row, source_combo
+                )
+            )
+            combo.currentTextChanged.connect(
+                lambda _text, row=row_index, source_combo=combo: self._update_row_target(
                     row, source_combo
                 )
             )
@@ -224,46 +337,56 @@ class BulkAudioAttachDialog(QDialog):
                 1,
                 QTableWidgetItem(str(item.get("match_basis") or item.get("status") or "")),
             )
+            detected_parts = [
+                str(item.get("detected_title") or "").strip(),
+                str(item.get("detected_artist") or "").strip(),
+                str(item.get("detected_album") or "").strip(),
+            ]
+            detected_text = " / ".join(part for part in detected_parts if part)
+            if not detected_text:
+                detected_text = str(item.get("detected_display") or "").strip()
             self.table.setItem(
                 row_index,
                 2,
-                QTableWidgetItem(str(item.get("detected_artist") or "")),
+                QTableWidgetItem(detected_text),
             )
-            self.table.setItem(
-                row_index,
-                3,
-                QTableWidgetItem(str(item.get("matched_track_artist") or "")),
-            )
-            self.table.setItem(
-                row_index,
-                4,
-                QTableWidgetItem(str(item.get("detected_title") or "")),
-            )
+            self.table.setItem(row_index, 3, QTableWidgetItem(""))
             warning_text = str(item.get("warning") or "").strip()
+            candidate_hint = self._candidate_hint_text(item)
+            if candidate_hint:
+                warning_text = (
+                    f"{warning_text}\n{candidate_hint}" if warning_text else candidate_hint
+                )
             warning_item = QTableWidgetItem(warning_text)
             if warning_text:
                 warning_item.setToolTip(warning_text)
-            self.table.setItem(row_index, 5, warning_item)
+            self.table.setItem(row_index, 4, warning_item)
             self.table.setItem(
                 row_index,
-                6,
+                5,
                 QTableWidgetItem(str(item.get("source_name") or "")),
             )
-            self._update_row_artist(row_index, combo)
+            self._update_row_target(row_index, combo)
         self._refresh_summary()
 
-    def _update_row_artist(self, row: int, combo: QComboBox) -> None:
-        track_id = combo.currentData()
-        artist_item = self.table.item(row, 3)
-        if artist_item is None:
-            artist_item = QTableWidgetItem("")
-            self.table.setItem(row, 3, artist_item)
-        if track_id in (None, ""):
-            original_artist = self._items[row].get("matched_track_artist") or ""
-            artist_item.setText(str(original_artist))
+    def _update_row_target(self, row: int, combo: QComboBox) -> None:
+        track_id = self._resolve_track_id(combo)
+        target_item = self.table.item(row, 3)
+        if target_item is None:
+            target_item = QTableWidgetItem("")
+            self.table.setItem(row, 3, target_item)
+        if track_id is None:
+            original_track_id = self._items[row].get("matched_track_id")
+            if original_track_id not in (None, ""):
+                try:
+                    track_id = int(original_track_id)
+                except (TypeError, ValueError):
+                    track_id = None
+        if track_id is None:
+            target_item.setText("")
         else:
-            artist_item.setText(
-                str(self._track_choice_map.get(int(track_id), {}).get("artist") or "")
+            target_item.setText(
+                str(self._track_choice_map.get(int(track_id), {}).get("label") or "")
             )
         if len(self._match_combos) == len(self._items):
             self._refresh_summary()
@@ -273,21 +396,26 @@ class BulkAudioAttachDialog(QDialog):
             return
         matched = len(self.selected_matches())
         total = len(self._items)
-        warning_count = sum(1 for item in self._items if str(item.get("warning") or "").strip())
-        summary = f"{matched} of {total} audio file(s) are queued for attachment."
-        if warning_count:
-            if warning_count == 1:
-                summary += " 1 row needs review."
-            else:
-                summary += f" {warning_count} rows need review."
+        unresolved_count = sum(
+            1
+            for row_index in range(total)
+            if self._resolve_track_id(self._combo_for_row(row_index)) is None
+        )
+        summary = f"{matched} of {total} {self._media_label}(s) are queued for attachment."
+        if unresolved_count:
+            summary += (
+                " 1 row still needs a target."
+                if unresolved_count == 1
+                else f" {unresolved_count} rows still need a target."
+            )
         self.summary_label.setText(summary)
 
     def selected_matches(self) -> list[dict[str, object]]:
         matches: list[dict[str, object]] = []
         for row_index, item in enumerate(self._items):
             combo = self._match_combos[row_index]
-            track_id = combo.currentData()
-            if track_id in (None, ""):
+            track_id = self._resolve_track_id(combo)
+            if track_id is None:
                 continue
             matches.append(
                 {
@@ -295,19 +423,30 @@ class BulkAudioAttachDialog(QDialog):
                     "source_name": str(item.get("source_name") or ""),
                     "track_id": int(track_id),
                     "detected_artist": str(item.get("detected_artist") or ""),
+                    "detected_album": str(item.get("detected_album") or ""),
                 }
             )
         return matches
 
     def selected_artist_name(self) -> str | None:
-        if not self.apply_artist_checkbox.isChecked():
+        if not self._allow_artist_name_update or not self.apply_artist_checkbox.isChecked():
             return None
         text = self.artist_edit.text().strip()
         return text or None
 
+    def selected_storage_mode(self) -> str:
+        return str(self.storage_combo.currentData() or STORAGE_MODE_MANAGED_FILE)
+
+    def create_track_requested(self) -> bool:
+        return bool(self._create_track_requested)
+
+    def _request_create_track(self) -> None:
+        self._create_track_requested = True
+        self.accept()
+
     def accept(self) -> None:
         matches = self.selected_matches()
-        if not matches:
+        if not matches and not self._create_track_requested:
             QMessageBox.warning(
                 self, self.windowTitle(), "Choose at least one file-to-track match."
             )

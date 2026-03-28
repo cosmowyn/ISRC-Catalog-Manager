@@ -276,9 +276,26 @@ class XMLImportService:
                             continue
                         cur.execute(
                             """
-                            INSERT INTO CustomFieldValues (track_id, field_def_id, value)
-                            VALUES (?, ?, ?)
-                            ON CONFLICT(track_id, field_def_id) DO UPDATE SET value=excluded.value
+                            INSERT INTO CustomFieldValues (
+                                track_id,
+                                field_def_id,
+                                value,
+                                blob_value,
+                                managed_file_path,
+                                storage_mode,
+                                filename,
+                                mime_type,
+                                size_bytes
+                            )
+                            VALUES (?, ?, ?, NULL, '', '', '', '', 0)
+                            ON CONFLICT(track_id, field_def_id) DO UPDATE SET
+                                value=excluded.value,
+                                blob_value=NULL,
+                                managed_file_path=excluded.managed_file_path,
+                                storage_mode=excluded.storage_mode,
+                                filename=excluded.filename,
+                                mime_type=excluded.mime_type,
+                                size_bytes=excluded.size_bytes
                             """,
                             (track_id, field_id, custom.get("value") or ""),
                         )

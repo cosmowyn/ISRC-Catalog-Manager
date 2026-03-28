@@ -535,6 +535,60 @@ class CustomFieldValueService:
                     self.conn.execute(
                         f"ALTER TABLE CustomFieldValues ADD COLUMN {column_name} {column_sql}"
                     )
+        self._normalize_text_field_attachment_state()
+
+    def _normalize_text_field_attachment_state(self) -> None:
+        rows = self.conn.execute(
+            """
+            SELECT DISTINCT
+                cfv.track_id,
+                cfv.field_def_id,
+                cfv.managed_file_path
+            FROM CustomFieldValues cfv
+            JOIN CustomFieldDefs cfd ON cfd.id = cfv.field_def_id
+            WHERE cfd.field_type NOT IN ('blob_image', 'blob_audio')
+              AND (
+                  cfv.blob_value IS NOT NULL
+                  OR COALESCE(trim(cfv.managed_file_path), '') != ''
+                  OR COALESCE(trim(cfv.storage_mode), '') != ''
+                  OR COALESCE(trim(cfv.filename), '') != ''
+                  OR COALESCE(trim(cfv.mime_type), '') != ''
+                  OR COALESCE(cfv.size_bytes, 0) != 0
+              )
+            """
+        ).fetchall()
+        if not rows:
+            return
+        stale_paths = {str(row[2] or "").strip() for row in rows if str(row[2] or "").strip()}
+        with self.conn:
+            self.conn.execute(
+                """
+                UPDATE CustomFieldValues
+                SET blob_value=NULL,
+                    managed_file_path='',
+                    storage_mode='',
+                    filename='',
+                    mime_type='',
+                    size_bytes=0
+                WHERE EXISTS (
+                    SELECT 1
+                    FROM CustomFieldDefs cfd
+                    WHERE cfd.id = CustomFieldValues.field_def_id
+                      AND cfd.field_type NOT IN ('blob_image', 'blob_audio')
+                )
+                  AND (
+                      blob_value IS NOT NULL
+                      OR COALESCE(trim(managed_file_path), '') != ''
+                      OR COALESCE(trim(storage_mode), '') != ''
+                      OR COALESCE(trim(filename), '') != ''
+                      OR COALESCE(trim(mime_type), '') != ''
+                      OR COALESCE(size_bytes, 0) != 0
+                  )
+                """
+            )
+            cleanup_cursor = self.conn.cursor()
+            for stale_path in stale_paths:
+                self._delete_managed_file_if_unreferenced(stale_path, cursor=cleanup_cursor)
 
     @staticmethod
     def _blob_subdir(field_type: str) -> str:
@@ -690,14 +744,14 @@ class CustomFieldValueService:
                     mime_type,
                     size_bytes
                 )
-                VALUES (?, ?, ?, NULL, NULL, NULL, NULL, NULL, 0)
+                VALUES (?, ?, ?, NULL, '', '', '', '', 0)
                 ON CONFLICT(track_id, field_def_id) DO UPDATE SET
                 value=excluded.value,
                 blob_value=NULL,
-                managed_file_path=NULL,
-                storage_mode=NULL,
-                filename=NULL,
-                mime_type=NULL,
+                managed_file_path=excluded.managed_file_path,
+                storage_mode=excluded.storage_mode,
+                filename=excluded.filename,
+                mime_type=excluded.mime_type,
                 size_bytes=0
                 """,
                 (int(track_id), int(field_def_id), value),
@@ -739,7 +793,7 @@ class CustomFieldValueService:
             "value": value,
             "has_blob": bool(blob_value is not None or str(managed_file_path or "").strip()),
             "size_bytes": int(size_bytes or 0) if size_bytes is not None else 0,
-            "mime_type": mime_type,
+            "mime_type": mime_type or None,
         }
         if include_storage_details:
             meta["storage_mode"] = effective_mode

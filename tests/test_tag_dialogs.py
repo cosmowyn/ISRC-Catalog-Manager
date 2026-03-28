@@ -10,6 +10,7 @@ else:
     QT_IMPORT_ERROR = None
 
 from isrc_manager.tags.dialogs import BulkAudioAttachDialog, TagPreviewDialog
+from isrc_manager.file_storage import STORAGE_MODE_DATABASE, STORAGE_MODE_MANAGED_FILE
 
 
 class TagDialogTests(unittest.TestCase):
@@ -74,16 +75,25 @@ class TagDialogTests(unittest.TestCase):
                 (2, "2 - Aurora / Artist One", "Artist One"),
             ],
             suggested_artist="Artist One",
+            allow_create_track=True,
         )
         try:
             self.assertEqual(len(dialog.selected_matches()), 1)
             self.assertEqual(dialog.selected_artist_name(), "Artist One")
-            self.assertEqual(dialog.table.columnCount(), 7)
-            self.assertEqual(dialog.table.item(0, 5).text(), "Lossy primary audio selected (MP3).")
+            self.assertEqual(dialog.selected_storage_mode(), STORAGE_MODE_MANAGED_FILE)
+            dialog.storage_combo.setCurrentIndex(
+                dialog.storage_combo.findData(STORAGE_MODE_DATABASE)
+            )
+            self.assertEqual(dialog.selected_storage_mode(), STORAGE_MODE_DATABASE)
+            self.assertEqual(dialog.table.columnCount(), 6)
+            self.assertEqual(dialog.table.item(0, 4).text(), "Lossy primary audio selected (MP3).")
+            self.assertEqual(dialog.table.item(0, 3).text(), "1 - Orbit / Artist One")
             dialog._match_combos[1].setCurrentIndex(dialog._match_combos[1].findData(2))
             self.assertEqual([item["track_id"] for item in dialog.selected_matches()], [1, 2])
             self.assertIn("2 of 2", dialog.summary_label.text())
-            self.assertIn("1 row needs review", dialog.summary_label.text())
+            self.assertNotIn("still needs a target", dialog.summary_label.text())
+            dialog._request_create_track()
+            self.assertTrue(dialog.create_track_requested())
         finally:
             dialog.close()
 

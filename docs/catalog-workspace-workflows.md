@@ -119,17 +119,19 @@ The action ribbon is a configurable quick-action strip.
 
 This is a small feature with a large workflow impact because it reduces the number of steps needed for repeat tasks.
 
-## Bulk Audio Attachment
+## Catalog Media Attachment
 
-The catalog workflow now includes a dedicated batch media-intake path for existing tracks.
+The catalog workspace now includes a dedicated media-intake path for existing tracks.
 
-- `Catalog > Audio > Import & Attach > Bulk Attach Audio Files…` inspects selected local audio files before anything is written.
-- The dialog can suggest matches from filenames and embedded tags, show the detected artist/title, and let you skip or manually reassign individual files.
-- You choose whether the attached audio should be stored in the database or as managed local files.
-- One optional artist value can be applied across the matched set when you are cleaning up a consistent batch.
-- The final attach step is recorded as one history-wrapped mutation so the batch stays recoverable.
+- `Catalog > Audio > Import & Attach > Bulk Attach Audio Files…` inspects selected or dropped local audio files before anything is written.
+- `Catalog > Audio > Import & Attach > Attach Album Art File…` uses the same reviewed attach pattern for single image files.
+- The review dialog always appears before writes, even when the app finds one confident existing-record match.
+- Unmatched or ambiguous files can be skipped, reassigned to another existing track, or sent into `Add Track` with the file path prefilled.
+- You choose whether attached audio or artwork should be stored in the database or as managed local files.
+- Multi-file drag-and-drop is accepted only for audio. Album art stays single-image only so the app does not imply unsupported bulk artwork attach behavior.
+- The final attach step is recorded as one history-wrapped mutation so the operation stays recoverable.
 
-This workflow is useful when the track rows already exist and the remaining job is to connect the right audio files quickly and safely.
+This workflow is useful when the track rows already exist and the remaining job is to connect the right audio or artwork files quickly and safely.
 
 ## Audio Export From The Catalog
 
