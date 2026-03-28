@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QTextCursor, QTextDocument
+from PySide6.QtGui import QKeySequence, QShortcut, QTextCursor, QTextDocument
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -34,7 +34,7 @@ from PySide6.QtWidgets import (
 
 from isrc_manager.blob_icons import BlobIconDialog, describe_blob_icon_spec
 from isrc_manager.constants import DEFAULT_WINDOW_TITLE, FIELD_TYPE_CHOICES
-from isrc_manager.help_content import HELP_CHAPTERS, HELP_CHAPTERS_BY_ID
+from isrc_manager.help_content import HELP_CHAPTERS_BY_ID, iter_help_sections
 from isrc_manager.ui_common import (
     FocusWheelComboBox,
     _add_standard_dialog_header,
@@ -1363,7 +1363,7 @@ class HelpContentsDialog(QDialog):
             root,
             self,
             title="Help Contents",
-            subtitle="Search the local help manual, browse indexed chapters, and jump directly to the section that matches the current window.",
+            subtitle="Browse quick-start chapters, drill into deeper reference topics, and jump directly to the section that matches the current window.",
         )
 
         self.search_field = QLineEdit(self)
@@ -1423,6 +1423,13 @@ class HelpContentsDialog(QDialog):
         self.close_button.clicked.connect(self.close)
         self.chapter_list.currentItemChanged.connect(self._on_chapter_selection_changed)
         self.browser.anchorClicked.connect(self._on_anchor_clicked)
+        self.find_shortcut = QShortcut(QKeySequence.Find, self)
+        self.find_shortcut.activated.connect(
+            lambda: (
+                self.search_field.setFocus(Qt.ShortcutFocusReason),
+                self.search_field.selectAll(),
+            )
+        )
 
         self.refresh_help_source()
 
@@ -1440,16 +1447,30 @@ class HelpContentsDialog(QDialog):
         needle = (query or "").strip().lower()
         self.chapter_list.blockSignals(True)
         self.chapter_list.clear()
-        for chapter in HELP_CHAPTERS:
-            haystack = " ".join(
-                (chapter.title, chapter.summary, " ".join(chapter.keywords))
-            ).lower()
-            if needle and needle not in haystack:
-                continue
-            item = QListWidgetItem(chapter.title)
-            item.setData(Qt.UserRole, chapter.chapter_id)
-            item.setToolTip(f"{chapter.summary}\n\nKeywords: {', '.join(chapter.keywords)}")
-            self.chapter_list.addItem(item)
+        visible_sections = []
+        for section_title, section_chapters in iter_help_sections():
+            matched_chapters = []
+            for chapter in section_chapters:
+                haystack = " ".join(
+                    (chapter.title, chapter.summary, " ".join(chapter.keywords))
+                ).lower()
+                if needle and needle not in haystack:
+                    continue
+                matched_chapters.append(chapter)
+            if matched_chapters:
+                visible_sections.append((section_title, matched_chapters))
+
+        for section_title, section_chapters in visible_sections:
+            heading = QListWidgetItem(section_title)
+            heading.setData(Qt.UserRole + 1, "sectionHeader")
+            heading.setFlags(Qt.ItemFlag.NoItemFlags)
+            heading.setToolTip(f"{section_title} chapters")
+            self.chapter_list.addItem(heading)
+            for chapter in section_chapters:
+                item = QListWidgetItem(chapter.title)
+                item.setData(Qt.UserRole, chapter.chapter_id)
+                item.setToolTip(f"{chapter.summary}\n\nKeywords: {', '.join(chapter.keywords)}")
+                self.chapter_list.addItem(item)
         self.chapter_list.blockSignals(False)
 
         if self.chapter_list.count():

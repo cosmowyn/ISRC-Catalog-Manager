@@ -1,5 +1,7 @@
 import sqlite3
+import tempfile
 import unittest
+from pathlib import Path
 
 from isrc_manager.parties import PartyService
 from isrc_manager.services import DatabaseSchemaService, TrackCreatePayload, TrackService
@@ -11,11 +13,14 @@ class GovernedTrackCreationServiceTests(unittest.TestCase):
     def setUp(self):
         self.conn = sqlite3.connect(":memory:")
         self.conn.execute("PRAGMA foreign_keys = ON")
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.data_root = Path(self.temp_dir.name)
         schema = DatabaseSchemaService(self.conn)
         schema.init_db()
         schema.migrate_schema()
         self.track_service = TrackService(
             self.conn,
+            self.data_root,
             require_governed_creation=True,
         )
         self.party_service = PartyService(self.conn)
@@ -30,6 +35,7 @@ class GovernedTrackCreationServiceTests(unittest.TestCase):
 
     def tearDown(self):
         self.conn.close()
+        self.temp_dir.cleanup()
 
     def test_create_governed_track_creates_work_and_seeds_metadata(self):
         result = self.service.create_governed_track(
@@ -173,6 +179,36 @@ class GovernedTrackCreationServiceTests(unittest.TestCase):
             self.conn.execute("SELECT COUNT(*) FROM Works").fetchone()[0],
             1,
         )
+
+    def test_create_governed_track_with_audio_creates_primary_asset_version(self):
+        audio_path = self.data_root / "governed-master.wav"
+        audio_path.write_bytes(b"RIFFgovernedmaster")
+
+        result = self.service.create_governed_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-02004",
+                track_title="Governed Asset Song",
+                artist_name="Aurora Echo",
+                additional_artists=[],
+                album_title="Governed Album",
+                release_date="2026-03-26",
+                track_length_sec=215,
+                iswc=None,
+                upc=None,
+                genre="Ambient",
+                audio_file_source_path=str(audio_path),
+                audio_file_storage_mode="database",
+            ),
+            governance_mode="create_new_work",
+        )
+
+        assets = self.track_service.asset_service.list_assets(track_id=result.track_id)
+        self.assertEqual(len(assets), 1)
+        asset = assets[0]
+        self.assertEqual(asset.asset_type, "main_master")
+        self.assertTrue(asset.primary_flag)
+        self.assertTrue(asset.approved_for_use)
+        self.assertEqual(asset.storage_mode, "database")
 
 
 if __name__ == "__main__":

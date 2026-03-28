@@ -96,6 +96,9 @@ class AppShellEditorSurfaceTests(AppShellTestCase):
     test_audio_attach_unique_match_requires_confirmation_before_write = (
         AppShellTestCase.case_audio_attach_unique_match_requires_confirmation_before_write
     )
+    test_audio_attach_creates_primary_track_asset_after_confirmation = (
+        AppShellTestCase.case_audio_attach_creates_primary_track_asset_after_confirmation
+    )
     test_audio_attach_unmatched_and_ambiguous_files_open_manual_resolution_dialog = (
         AppShellTestCase.case_audio_attach_unmatched_and_ambiguous_files_open_manual_resolution_dialog
     )

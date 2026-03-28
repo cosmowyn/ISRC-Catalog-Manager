@@ -50,6 +50,9 @@ class AppShellStartupCoreTests(AppShellTestCase):
     test_moved_and_renamed_actions_preserve_dialog_routing = (
         AppShellTestCase.case_moved_and_renamed_actions_preserve_dialog_routing
     )
+    test_main_window_shortcuts_cover_help_media_and_workspace_actions = (
+        AppShellTestCase.case_main_window_shortcuts_cover_help_media_and_workspace_actions
+    )
     test_bundled_themes_are_available_and_not_persisted_as_user_library_entries = (
         AppShellTestCase.case_bundled_themes_are_available_and_not_persisted_as_user_library_entries
     )

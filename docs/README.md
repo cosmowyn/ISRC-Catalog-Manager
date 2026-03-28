@@ -1,46 +1,41 @@
 # Documentation Hub
 
-This directory is the user-guide and deep-dive layer for ISRC Catalog Manager.
+The in-app help system is the primary user-facing manual for ISRC Catalog Manager.
 
-Use the repository [`README.md`](../README.md) for the product overview, positioning, and feature map. Use the guides here when you want the real workflow detail behind that overview.
+Use `Help > Help Contents` inside the application when you want the full guided documentation experience:
 
-## Getting Started
+- quick-start chapters for orientation
+- searchable topic pages for everyday workflows
+- deeper chapters for repertoire structure, imports, storage, authenticity, diagnostics, and recovery
 
-- [Repository README](../README.md) explains what the app is, who it is for, and why the workflow model matters.
-- On first launch, the app can optionally open `Application Settings` so you can set registration values, snapshot posture, and appearance before deeper catalog work.
-- [Catalog Workspace Workflows](catalog-workspace-workflows.md) is the best first deep dive if you want to understand how the docked desktop workspace is meant to be used day to day.
+This `docs/` directory is the repository-side companion to that help surface. It keeps concise current-state guides available for browsing on GitHub or alongside source checkouts, while the in-app help remains the integrated manual.
 
-## Import & Exchange
+## Core Product Docs
 
-- [Import and Merge Workflows](import-and-merge-workflows.md) covers the shared inspect/review/apply import contract across catalog exchange, Party import, Contracts and Rights import, XML review, bulk audio attachment, audio tag import, automatic export-time metadata embedding, matching rules, merge behavior, and package round-tripping.
-- [GS1 Workflow Guide](gs1_workflow.md) covers workbook preparation and verified export from catalog data.
+- [Repository README](../README.md): product overview, build/install guidance, and project context
+- [Catalog Workspace Workflows](catalog-workspace-workflows.md): docked workspace, catalog managers, media intake, and daily review flow
+- [Import and Merge Workflows](import-and-merge-workflows.md): exchange import, XML review, mapping, match rules, and reviewed media attachment
+- [Repertoire Knowledge System](repertoire_knowledge_system.md): tracks, releases, works, parties, contracts, rights, documents, and assets
 
-## Catalog & Repertoire Workflows
+## Operations and Delivery
 
-- [Catalog Workspace Workflows](catalog-workspace-workflows.md) explains the docked workspace model, tabbed managers, release assignment, deliverables review, the Derivative Ledger workflow, saved searches, and relationship review.
-- [Audio Authenticity Workflow](audio-authenticity-workflow.md) explains signing keys, direct master watermark exports, provenance-only derivative exports, sidecar manifests, embedded metadata tags, verification from selected catalog audio or external files, and the feature's honest limits.
-- [Repertoire Knowledge System](repertoire_knowledge_system.md) explains how tracks, releases, works, parties, contracts, rights, documents, and assets fit together.
-
-## Operations & Recovery
-
-- [Diagnostics and Recovery](diagnostics-and-recovery.md) covers quality review, async diagnostics and repairs, suggested fixes, storage migration adoption/resume behavior, history budget reporting, cleanup, trim, and logs.
-- [Attachment Storage Modes](file_storage_modes.md) explains database-backed versus managed-file-backed storage and why that matters for portability and maintenance.
-- [Undo, History, and Snapshots](undo_redo_strategy.md) explains the recovery model behind edits, imports, retention and safety levels, history storage budgets, and higher-risk workflows.
+- [Audio Authenticity Workflow](audio-authenticity-workflow.md): authentic masters, provenance copies, verification, and scope
+- [Attachment Storage Modes](file_storage_modes.md): database-backed versus managed-file-backed records
+- [GS1 Workflow Guide](gs1_workflow.md): workbook validation, grouped product editing, and export
+- [Diagnostics and Recovery](diagnostics-and-recovery.md): quality review, diagnostics, cleanup, migration, and logs
+- [Undo, History, and Snapshots](undo_redo_strategy.md): recovery model, snapshots, backups, and retention
 
 ## Customization
 
-- [Theme Builder Guide](theme_builder.md) documents the visual builder, starter themes, hint-text and preview controls, BLOB icon tooling, selector reference, and advanced QSS workflow.
+- [Theme Builder Guide](theme_builder.md): theme library, visual builder, media badge icons, preview controls, and advanced QSS
 
-## Developer / Internal Docs
+## Internal Continuity Docs
 
-- [Modularization Strategy](modularization_strategy.md) tracks internal structure and code-organization work.
-- [Implementation Handoffs](implementation_handoffs/) contains follow-up notes, implementation summaries, and audit documents.
-- [Screenshots](screenshots/) contains reference images used by the documentation set.
+- [Implementation Handoffs](implementation_handoffs/): internal implementation notes and historical continuity files
+- [Modularization Strategy](modularization_strategy.md): internal code-organization notes
 
 ## Recommended Reading Order
 
-- Start with the product [README](../README.md).
-- Read [Import and Merge Workflows](import-and-merge-workflows.md) if external metadata intake matters to you.
-- Read [Catalog Workspace Workflows](catalog-workspace-workflows.md) and [Repertoire Knowledge System](repertoire_knowledge_system.md) for daily catalog operations.
-- Read [Audio Authenticity Workflow](audio-authenticity-workflow.md) if you need signed master-watermark exports, provenance-sidecar derivatives, or want to verify audio files against the current catalog or from outside the app.
-- Read [Diagnostics and Recovery](diagnostics-and-recovery.md) and [Undo, History, and Snapshots](undo_redo_strategy.md) once you are working with larger or riskier catalog changes.
+1. Start with the product [README](../README.md).
+2. Open `Help > Help Contents` inside the app for the integrated manual.
+3. Use the topic guides here when you want a repository-side companion for a specific workflow.

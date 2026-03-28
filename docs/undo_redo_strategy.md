@@ -1,142 +1,34 @@
 # Undo, History, and Snapshots
 
-Current product version: `3.1.0`
+This guide mirrors the in-app help chapter `Undo History and Snapshots`.
 
-ISRC Catalog Manager is built for work that should be recoverable.
+Use `Help > Help Contents` for the integrated manual. This page summarizes the recovery model behind the catalog workflows.
 
-Catalog maintenance often involves high-consequence operations:
+## Recovery Layers
 
-- bulk edits
-- imports
-- document migration
-- metadata cleanup
-- profile restore
-- file-backed record changes
+The app uses a layered recovery model:
 
-This guide explains how the app approaches undo, history, and restore safety.
+- persistent undo and redo for supported reversible actions
+- manual snapshots for higher-risk points in time
+- restore paths for larger rollbacks
+- backup artifacts for broader safety coverage
+- cleanup and trim tools with explicit protection rules
 
-## What This Enables
+## Why It Matters
 
-The recovery system exists so heavier catalog workflows do not become one-way bets.
+Catalog maintenance includes imports, media attachment, settings changes, storage migration, and other actions that can affect more than one table or file. The recovery system is meant to keep those workflows usable and reversible.
 
-It gives you a safer foundation for:
+## Retention And Cleanup
 
-- imports and merge passes
-- large edits and cleanup work
-- legacy license migration
-- file-backed record changes
-- restore, cleanup, and history maintenance
-- storage-budget-aware snapshot and restore workflows
+Recovery includes policy controls as well as point-in-time commands.
 
-For the operational tools around this model, including diagnostics and logs, see [Diagnostics and Recovery](diagnostics-and-recovery.md).
+- the active profile can store retention and cleanup posture
+- cleanup previews what is eligible and what remains protected
+- trim focuses on older reversible history while preserving the active branch and dependent artifacts
+- budget-aware prompts keep history growth visible instead of silent
 
-## Why Recovery Matters In A Catalog App
+## Related In-App Help Topics
 
-Music catalog work is cumulative. A mistake is not just a typo on screen; it can become:
-
-- a broken export
-- a lost document
-- an incorrect code
-- an overwritten relationship
-- a damaged release structure
-
-That is why the application uses a layered recovery model rather than relying on a simple in-memory undo stack.
-
-## The Recovery Model
-
-The app uses a hybrid strategy built around three ideas:
-
-### 1. Reversible history for normal actions
-
-Day-to-day mutations such as edits, settings changes, and supported CRUD actions are recorded into persistent history so they can be undone and redone where appropriate.
-
-### 2. Snapshot protection for high-risk workflows
-
-Heavier operations, including restore flows, imports, and legacy license migration, are protected by snapshot-style recovery so the system can move the profile backward safely even when multiple files and tables are involved.
-
-### 3. File-aware recovery
-
-The application does not only protect database rows. Where supported, it also keeps history aware of managed files such as:
-
-- stored licenses
-- contract documents
-- asset registry files
-- release and track media
-- custom-field media
-- stored GS1 workbook templates
-
-This matters because a music catalog is not only metadata. It is metadata plus the files that prove and deliver it.
-
-## What Users Can Do
-
-From the History menu, users can:
-
-- undo the latest reversible action
-- redo the latest reversed action
-- inspect the persistent history log
-- create a manual snapshot before a risky change
-- restore a previous snapshot when necessary
-
-The goal is not just convenience. It is confidence.
-
-## Retention And Budget Controls
-
-Recovery now includes profile-level policy controls, not only buttons in the History menu.
-
-- `Settings > Application Settings > General` includes automatic snapshots, retention and safety levels, automatic cleanup, a history storage budget, automatic-snapshot retention counts, and optional aging for pre-restore safety copies.
-- The named levels `Maximum Safety`, `Balanced`, and `Lean` are preset helpers layered on top of the same conservative cleanup rules. `Custom` leaves the detailed controls in your hands.
-- Automatic cleanup is limited to safe auto-generated artifacts. Manual snapshots and other protected restore points remain protected by default, while ordinary backup rows remain cleanup-eligible and aged pre-restore safety backups can be auto-pruned when that policy is enabled.
-- If a snapshot, restore, or settings change would push the profile over budget, the app can warn first and open the cleanup workflow instead of failing silently.
-
-This keeps the recovery system usable over time without weakening restore safety.
-
-## Where This Is Especially Important
-
-### Imports and large edits
-
-When a large import or cleanup action touches many records, users need a way back if the mapping or source data was wrong.
-
-### Legacy license migration
-
-When migrating legacy license PDFs into structured contracts and documents, the app now:
-
-- creates a pre-migration restore point
-- copies and verifies document data
-- only removes legacy rows and files after verification
-- records the migration in history so it can be traced and reversed through the supported restore path
-
-### Restore workflows
-
-Database restore is inherently a full-state operation. That is why it is handled as a protected history boundary rather than a casual row-by-row undo.
-
-Snapshot coverage is also broader than it used to be. The system now captures the profile database plus the managed roots needed for newer workflows such as custom-field media and stored GS1 templates, which makes heavier restores closer to a whole-workspace recovery boundary.
-
-## Product Promise
-
-The application is designed so users can work with more confidence in heavier workflows:
-
-- imports should not feel like a gamble
-- migrations should not be one-way leaps
-- settings and theme changes should not be fragile
-- managed-file workflows should not silently destroy references
-
-That safety model is part of the product itself, not a hidden engineering detail.
-
-## Technical Direction
-
-Under the hood, the app’s history system is designed around a hybrid of:
-
-- logical inverse actions for normal reversible operations
-- snapshot-backed recovery for high-risk and high-volume workflows
-- persistent history storage instead of a session-only memory stack
-
-This is the right fit for a desktop catalog application that spans SQLite data, managed files, settings, and profile-level state.
-
-## In Practice
-
-For the user, the important result is straightforward:
-
-- you can work faster because important actions are recoverable
-- you can migrate older data with less fear
-- you can try larger cleanup passes without depending on luck
-- you can treat the app as a durable working system rather than a fragile spreadsheet replacement
+- `Undo History and Snapshots`
+- `Diagnostics`
+- `Application Settings`

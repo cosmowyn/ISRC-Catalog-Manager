@@ -100,10 +100,70 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Profiles ribbon toggle</strong>: use <strong>View &gt; Show Profiles Ribbon</strong> when you want that toolbar visible or hidden, and the choice is remembered with the rest of the workspace.</li>
           <li><strong>Dockable panes</strong>: keep the window focused on your current task by showing only the panes you need.</li>
           <li><strong>Tabbed catalog tools</strong>: Release Browser, Work Manager, Party Manager, Contract Manager, Rights Matrix, Deliverables and Asset Versions, and Global Search open as docked tabs beside the table so you can keep using the catalog inventory while those panels remain open.</li>
-          <li><strong>Diagnostics cleanup tools</strong>: stored artist and album cleanup now lives with Diagnostics instead of the Catalog workspace, so integrity and cleanup follow-up stay together.</li>
+          <li><strong>Diagnostics cleanup tools</strong>: stored artist and album cleanup lives with Diagnostics so integrity review and cleanup follow-up stay together.</li>
           <li><strong>Saved layout</strong>: column layout, dock placement, and visibility preferences are remembered so the app opens the way you work.</li>
         </ul>
         <p>Use the menus when you need the full surface of the product, or stay inside the docked views for everyday entry and review. The window title, branding, and appearance can be customized from <strong>Settings &gt; Application Settings</strong>. When you open multiple catalog tools, the app prefers tabbed docking so the workspace stays compact and easier to navigate while the table remains usable.</p>
+        """,
+    ),
+    HelpChapter(
+        chapter_id="keyboard-shortcuts",
+        title="Keyboard Shortcuts",
+        summary="The primary shortcuts for moving through the catalog, opening key workspaces, and reaching the help, history, media, and diagnostics tools quickly.",
+        keywords=(
+            "keyboard shortcuts",
+            "shortcuts",
+            "hotkeys",
+            "key bindings",
+            "help",
+            "history",
+            "bulk attach audio",
+            "album art",
+            "global search",
+            "derivative ledger",
+        ),
+        content_html="""
+        <p>The app keeps shortcuts focused on high-value actions. The goal is fast access to the main catalog workflows without turning every control into a shortcut puzzle.</p>
+        <h3>General</h3>
+        <ul>
+          <li><strong>Help Contents</strong>: <code>F1</code></li>
+          <li><strong>Application Settings</strong>: <code>Ctrl+,</code> / <code>Cmd+,</code></li>
+          <li><strong>Show Undo History</strong>: <code>Ctrl+Shift+H</code> / <code>Cmd+Shift+H</code></li>
+          <li><strong>Create Snapshot</strong>: <code>Ctrl+Alt+S</code> / <code>Cmd+Option+S</code></li>
+          <li><strong>Diagnostics</strong>: <code>Ctrl+Alt+D</code> / <code>Cmd+Option+D</code></li>
+          <li><strong>Application Log</strong>: <code>Ctrl+Alt+L</code> / <code>Cmd+Option+L</code></li>
+        </ul>
+        <h3>Catalog Creation and Review</h3>
+        <ul>
+          <li><strong>Add Track</strong>: <code>Ctrl+Alt+N</code> / <code>Cmd+Option+N</code></li>
+          <li><strong>Add Album</strong>: <code>Ctrl+Alt+Shift+N</code> / <code>Cmd+Option+Shift+N</code></li>
+          <li><strong>Work Manager</strong>: <code>Ctrl+Alt+W</code> / <code>Cmd+Option+W</code></li>
+          <li><strong>Release Browser</strong>: <code>Ctrl+Alt+Shift+R</code> / <code>Cmd+Option+Shift+R</code></li>
+          <li><strong>Global Search and Relationships</strong>: <code>Ctrl+Alt+F</code> / <code>Cmd+Option+F</code></li>
+          <li><strong>Deliverables and Asset Versions</strong>: <code>Ctrl+Alt+A</code> / <code>Cmd+Option+A</code></li>
+          <li><strong>Derivative Ledger</strong>: <code>Ctrl+Alt+Shift+A</code> / <code>Cmd+Option+Shift+A</code></li>
+          <li><strong>Data Quality Dashboard</strong>: <code>Ctrl+Shift+Q</code> / <code>Cmd+Shift+Q</code></li>
+        </ul>
+        <h3>Media and Import Tools</h3>
+        <ul>
+          <li><strong>Import XML</strong>: <code>Ctrl+Shift+I</code> / <code>Cmd+Shift+I</code></li>
+          <li><strong>Import CSV</strong>: <code>Ctrl+Alt+I</code> / <code>Cmd+Option+I</code></li>
+          <li><strong>Import Metadata from Audio Files</strong>: <code>Ctrl+Alt+T</code> / <code>Cmd+Option+T</code></li>
+          <li><strong>Bulk Attach Audio Files</strong>: <code>Ctrl+Alt+U</code> / <code>Cmd+Option+U</code></li>
+          <li><strong>Attach Album Art File</strong>: <code>Ctrl+Alt+Shift+U</code> / <code>Cmd+Option+Shift+U</code></li>
+          <li><strong>Verify Audio Authenticity</strong>: <code>Ctrl+Alt+V</code> / <code>Cmd+Option+V</code></li>
+        </ul>
+        <h3>Layout and Workspace Chrome</h3>
+        <ul>
+          <li><strong>Show Add Track Panel</strong>: <code>Ctrl+Shift+D</code> / <code>Cmd+Shift+D</code></li>
+          <li><strong>Show Catalog Table</strong>: <code>Ctrl+Shift+T</code> / <code>Cmd+Shift+T</code></li>
+          <li><strong>Show Action Ribbon</strong>: <code>Ctrl+Alt+R</code> / <code>Cmd+Option+R</code></li>
+          <li><strong>Customize Action Ribbon</strong>: <code>Ctrl+Shift+R</code> / <code>Cmd+Shift+R</code></li>
+          <li><strong>Edit Column Widths</strong>: <code>Ctrl+Alt+Shift+W</code> / <code>Cmd+Option+Shift+W</code></li>
+          <li><strong>Edit Row Heights</strong>: <code>Ctrl+Alt+H</code> / <code>Cmd+Option+H</code></li>
+          <li><strong>Manage Custom Columns</strong>: <code>Ctrl+Alt+Shift+M</code> / <code>Cmd+Option+Shift+M</code></li>
+        </ul>
+        <p>Some actions intentionally stay menu-only or context-menu-only. That usually means the action is highly local to the current selection, already has a direct manipulation gesture such as double-click, or would require a shortcut that conflicts with a more important global workflow.</p>
         """,
     ),
     HelpChapter(
@@ -145,7 +205,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "exports",
         ),
         content_html="""
-        <p>Long-running operations no longer have to compete with the interface. The app runs heavier workflows outside the UI thread so the workspace stays responsive while real work is happening.</p>
+        <p>Long-running operations run outside the UI thread so the workspace stays responsive while real work is happening.</p>
         <ul>
           <li><strong>Central task runner</strong>: imports, exports, ZIP packaging, snapshots, restores, quality scans, catalog-audio copy export, backup, and integrity checks are dispatched through one shared Qt background-task manager.</li>
           <li><strong>Main-thread UI updates only</strong>: worker threads report back through Qt signals, and dialogs, tables, messages, and status text are updated on the main thread only.</li>
@@ -317,7 +377,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Other catalog-backed audio exports</strong>: <strong>Export Audio Derivatives…</strong>, <strong>Export Authentic Masters…</strong>, <strong>Export Provenance Copies…</strong>, and <strong>Export Forensic Watermarked Audio…</strong> also embed catalog metadata automatically when trustworthy catalog values are available.</li>
           <li><strong>Plain external conversion</strong>: <strong>Convert External Audio Files…</strong> strips inherited source metadata and does not invent catalog metadata, watermarking, or derivative registration.</li>
         </ul>
-        <p>The app preserves the original stored audio when exporting copies. If catalog metadata is unavailable, ambiguous, or cannot be written safely into the target container, the export still succeeds and the metadata step is skipped with warnings instead of crashing the workflow. When the track rows already exist and the job is to attach local files in bulk, use <strong>Catalog &gt; Bulk Attach Audio Files…</strong> instead.</p>
+        <p>The app preserves the original stored audio when exporting copies. If catalog metadata is unavailable, ambiguous, or cannot be written safely into the target container, the export still succeeds and the metadata step is skipped with warnings instead of crashing the workflow. When the track rows already exist and the job is to attach local files in bulk, use <strong>Catalog &gt; Audio &gt; Import &amp; Attach &gt; Bulk Attach Audio Files…</strong> instead.</p>
         """,
     ),
     HelpChapter(
@@ -335,7 +395,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "matched tracks",
         ),
         content_html="""
-        <p><strong>Catalog &gt; Audio &gt; Import &amp; Attach</strong> now covers both local audio attachment and single-file album-art attachment for tracks that already exist in the catalog.</p>
+        <p><strong>Catalog &gt; Audio &gt; Import &amp; Attach</strong> covers both local audio attachment and single-file album-art attachment for tracks that already exist in the catalog.</p>
         <ul>
           <li><strong>Bulk Attach Audio Files…</strong>: inspect many local audio files against existing tracks, review filename and embedded-tag matches, optionally apply one artist value across the accepted matches, and choose database or managed-file storage before anything is written.</li>
           <li><strong>Attach Album Art File…</strong>: inspect one image file against existing tracks, review the proposed target, choose the storage mode, and confirm the attachment before any write is made.</li>
@@ -389,7 +449,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "relationship explorer",
         ),
         content_html="""
-        <p>The app now models more than recordings and releases. It treats the broader catalog as a connected knowledge system so operational, legal, and creative context can live in the same place.</p>
+        <p>The app models more than recordings and releases. It treats the broader catalog as a connected knowledge system so operational, legal, and creative context can live in the same place.</p>
         <ul>
           <li><strong>Works</strong>: compositions live separately from recordings. A work can store alternate titles, subtitle/version, language, lyrics/instrumental flags, genre/style notes, ISWC, local registration numbers, creator roles, shares, and notes.</li>
           <li><strong>Work creators and splits</strong>: songwriter, composer, lyricist, arranger, adaptor, publisher, and subpublisher roles can all be recorded. Split totals are validated so share mistakes are easy to spot.</li>
@@ -402,7 +462,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Assets and deliverables</strong>: tracks and releases can keep primary masters, alternates, derivatives, artwork variants, and approval state in one registry.</li>
           <li><strong>Derivative Ledger</strong>: managed export batches can be filtered by batch ID, track, output file, format, derivative kind, and status, then reviewed through layered Derivatives, Details, Lineage, and Admin tabs.</li>
           <li><strong>Global Search and Relationships…</strong>: search across the full model and inspect everything linked to the selected record from one panel.</li>
-          <li><strong>Docked managers</strong>: Work Manager, Party Manager, Contract Manager, Rights Matrix, Deliverables and Asset Versions, and Global Search now stay available as tabbed workspace panels instead of blocking dialogs.</li>
+          <li><strong>Docked managers</strong>: Work Manager, Party Manager, Contract Manager, Rights Matrix, Deliverables and Asset Versions, and Global Search stay available as tabbed workspace panels instead of blocking dialogs.</li>
         </ul>
         <p>This richer model is intentionally catalog-focused. It gives independent teams a practical way to understand what they own, what is linked, and what is ready, without turning the app into a royalty or distribution platform.</p>
         """,
@@ -424,7 +484,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "gs1 template",
         ),
         content_html="""
-        <p>The app now supports two storage modes for file-backed records across the catalog.</p>
+        <p>The app supports two storage modes for file-backed records across the catalog.</p>
         <ul>
           <li><strong>Database mode</strong>: the raw file bytes are stored directly inside the profile database.</li>
           <li><strong>Managed file mode</strong>: the app copies the file into an app-controlled local storage folder and stores the managed path in the database.</li>
@@ -466,7 +526,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Import modes</strong>: dry-run validation, create new rows, merge into existing matches, update existing matches only, or insert-new-when-duplicate-exists.</li>
           <li><strong>Matching options</strong>: internal ID, ISRC, UPC/EAN plus title, and optional title/artist heuristics.</li>
           <li><strong>JSON schema versioning</strong>: exported JSON includes an explicit schema version so future migrations stay manageable.</li>
-          <li><strong>Repertoire Exchange</strong>: a separate import/export workflow now covers parties, works, contracts, rights, asset versions, and their relationship references as JSON, XLSX, CSV bundles, or ZIP packages with managed files.</li>
+          <li><strong>Repertoire Exchange</strong>: a separate import/export workflow covers parties, works, contracts, rights, asset versions, and their relationship references as JSON, XLSX, CSV bundles, or ZIP packages with managed files.</li>
         </ul>
         <p>Binary media is referenced in plain tabular exports, while ZIP packages materialize both database-backed and managed-file-backed records into portable files and preserve the recorded storage mode on import. Import preview, mapping, packaging, export, and extraction all run in the background so larger exchange jobs stay practical. For the matching, merge, delimiter, and XML specifics, see <strong>Import and Merge Workflows</strong> in this manual.</p>
         """,
@@ -497,8 +557,8 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Exchange modes</strong>: <code>dry_run</code> checks setup without writing, <code>create</code> creates new tracks, <code>update</code> updates matched tracks only, <code>merge</code> updates matched tracks while preserving many existing populated values, and <code>insert_new</code> creates only unmatched rows and skips duplicates.</li>
           <li><strong>Exchange matching</strong>: matching can use internal ID, ISRC, UPC plus title, and optional title/artist heuristics. The importer is deterministic and does not provide a row-by-row manual assignment queue.</li>
           <li><strong>Release upsert and package restore</strong>: exchange import can update or create linked releases from supplied release fields, while ZIP package import restores packaged files and their recorded storage mode.</li>
-          <li><strong>XML import</strong>: supported catalog XML shapes now flow through the same exchange setup surface as the tabular formats. The XML parser still performs schema-aware inspection first, surfaces duplicate ISRCs and custom-field conflicts, and can create missing custom fields when allowed before the mapped import runs.</li>
-          <li><strong>Bulk audio attach</strong>: <strong>Catalog &gt; Bulk Attach Audio Files…</strong> is the better fit when track rows already exist and you need to match local files onto them in one reviewed batch.</li>
+          <li><strong>XML import</strong>: supported catalog XML shapes flow through the same exchange setup surface as the tabular formats. The XML parser still performs schema-aware inspection first, surfaces duplicate ISRCs and custom-field conflicts, and can create missing custom fields when allowed before the mapped import runs.</li>
+          <li><strong>Bulk audio attach</strong>: <strong>Catalog &gt; Audio &gt; Import &amp; Attach &gt; Bulk Attach Audio Files…</strong> is the better fit when track rows already exist and you need to match local files onto them in one reviewed batch.</li>
           <li><strong>Audio tags</strong>: read embedded tags from supported audio files and preview conflicts before writing to the catalog. Catalog-backed audio export workflows embed metadata automatically, while the plain external conversion workflow stays metadata-free.</li>
         </ul>
         <p>This workflow is useful for structured exports from labels, catalog administrators, collection societies, and PRO-style sources such as BUMA, STEMRA, SENA, and similar organizations, provided the data can be exported into a supported format. That support is format-based and mapping-based, not a direct third-party integration.</p>
@@ -571,7 +631,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         summary="Review stored artist and album names from Diagnostics and remove only data that is no longer in use.",
         keywords=("catalog managers", "artists", "albums", "purge unused", "manage"),
         content_html="""
-        <p>The stored artist and album cleanup tools now live in <strong>Help &gt; Diagnostics…</strong> under the <strong>Catalog Cleanup</strong> area, because they are maintenance and integrity-adjacent tools rather than primary catalog workspaces.</p>
+        <p>The stored artist and album cleanup tools live in <strong>Help &gt; Diagnostics…</strong> under the <strong>Catalog Cleanup</strong> area, because they are maintenance and integrity-adjacent tools rather than primary catalog workspaces.</p>
         <ul>
           <li><strong>Artists</strong>: inspect artist usage counts and remove or purge only artists that are no longer used.</li>
           <li><strong>Albums</strong>: inspect album usage counts and remove or purge unused albums.</li>
@@ -608,7 +668,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         </ul>
         <p>This feature is <strong>not DRM</strong> and does not promise forensic certainty. A watermark always changes the waveform slightly, so the goal is perceptual transparency rather than mathematical identity. The strongest in-app verification happens when the open profile still contains the original reference audio, because the app can compare the inspected export against that stored source directly.</p>
         <p>Direct embedded authenticity verification is intentionally limited to WAV, FLAC, and AIFF. Lossy formats such as MP3, OGG/OGA, Opus, and M4A/MP4/AAC are not treated as direct authenticity masters in this workflow; use provenance lineage sidecars or the separate forensic export workflow when you need lossy delivery copies.</p>
-        <p>Recipient-specific forensic watermarking for leak tracing is now a separate managed export workflow. It remains distinct from authenticity: authenticity proves signed linkage to a canonical master record, while forensic delivery exports focus on tracing shared copies and use conservative inspection semantics.</p>
+        <p>Recipient-specific forensic watermarking for leak tracing is a separate managed export workflow. It remains distinct from authenticity: authenticity proves signed linkage to a canonical master record, while forensic delivery exports focus on tracing shared copies and use conservative inspection semantics.</p>
         """,
     ),
     HelpChapter(
@@ -641,7 +701,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         summary="Use the full visual theme builder to style the entire app, then finish the rare edge cases with advanced QSS.",
         keywords=("theme", "appearance", "font", "colors", "qss", "saved themes", "style"),
         content_html="""
-        <p>The Theme page is now a full visual theme builder rather than a small color editor. It is intended to give you real control over the application’s look and feel without forcing you into handwritten stylesheets for normal customization.</p>
+        <p>The Theme page is a full visual theme builder intended to give you real control over the application’s look and feel without forcing you into handwritten stylesheets for normal customization.</p>
         <ul>
           <li><strong>Theme Library</strong>: packaged starter themes and saved custom presets can be loaded, exported, imported, reset, and managed without leaving the dialog.</li>
           <li><strong>Starter presets</strong>: the app ships with Apple Light, Apple Dark, High Visibility, Aeon Emerald Gold, Subconscious Cosmos, VS Code Dark, and Pastel Studio as bundled starting points.</li>
@@ -770,6 +830,60 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
     ),
 )
 
+HELP_SECTION_ORDER: tuple[str, ...] = (
+    "Quick Start",
+    "Daily Workflows",
+    "Deep Dives",
+    "Operations & Recovery",
+    "Settings & Reference",
+)
+
+HELP_SECTION_MAP: dict[str, str] = {
+    "overview": "Quick Start",
+    "main-window": "Quick Start",
+    "keyboard-shortcuts": "Quick Start",
+    "profiles": "Quick Start",
+    "add-data": "Daily Workflows",
+    "album-entry": "Daily Workflows",
+    "catalog-table": "Daily Workflows",
+    "custom-columns": "Daily Workflows",
+    "edit-entry": "Daily Workflows",
+    "audio-tags": "Daily Workflows",
+    "bulk-audio-attach": "Daily Workflows",
+    "releases": "Daily Workflows",
+    "media-preview": "Daily Workflows",
+    "repertoire-knowledge": "Deep Dives",
+    "storage-modes": "Deep Dives",
+    "exchange-formats": "Deep Dives",
+    "import-workflows": "Deep Dives",
+    "catalog-managers": "Deep Dives",
+    "audio-authenticity": "Deep Dives",
+    "gs1-metadata": "Deep Dives",
+    "metadata-dates": "Deep Dives",
+    "background-tasks": "Operations & Recovery",
+    "quality-dashboard": "Operations & Recovery",
+    "history": "Operations & Recovery",
+    "diagnostics": "Operations & Recovery",
+    "application-log": "Operations & Recovery",
+    "settings": "Settings & Reference",
+    "theme-settings": "Settings & Reference",
+    "about": "Settings & Reference",
+}
+
+
+def help_section_for_chapter(chapter_id: str) -> str:
+    return HELP_SECTION_MAP.get(chapter_id, "Settings & Reference")
+
+
+def iter_help_sections(chapters: tuple[HelpChapter, ...] | list[HelpChapter] | None = None):
+    section_map: dict[str, list[HelpChapter]] = {section: [] for section in HELP_SECTION_ORDER}
+    for chapter in chapters or HELP_CHAPTERS:
+        section_map.setdefault(help_section_for_chapter(chapter.chapter_id), []).append(chapter)
+    for section in HELP_SECTION_ORDER:
+        grouped = tuple(section_map.get(section, ()))
+        if grouped:
+            yield section, grouped
+
 
 HELP_CHAPTERS_BY_ID = {chapter.chapter_id: chapter for chapter in HELP_CHAPTERS}
 
@@ -784,22 +898,35 @@ def render_help_html(
     version_text: str = "",
     theme: dict[str, object] | None = None,
 ) -> str:
-    toc_items = []
+    toc_sections = []
     keyword_map: dict[str, list[HelpChapter]] = {}
     chapter_blocks = []
 
-    for chapter in HELP_CHAPTERS:
-        toc_items.append(
-            f"<li><a href='#{escape(chapter.chapter_id)}'>{escape(chapter.title)}</a> - {escape(chapter.summary)}</li>"
-        )
-        for keyword in chapter.keywords:
-            keyword_map.setdefault(keyword.lower(), []).append(chapter)
-        chapter_blocks.append(
+    for section_title, section_chapters in iter_help_sections():
+        items = []
+        for chapter in section_chapters:
+            items.append(
+                f"<li><a href='#{escape(chapter.chapter_id)}'>{escape(chapter.title)}</a> - {escape(chapter.summary)}</li>"
+            )
+            for keyword in chapter.keywords:
+                keyword_map.setdefault(keyword.lower(), []).append(chapter)
+            chapter_blocks.append(
+                f"""
+                <section class='chapter' id='{escape(chapter.chapter_id)}'>
+                  <p class='section-label'>{escape(section_title)}</p>
+                  <h2>{escape(chapter.title)}</h2>
+                  <p class='summary'>{escape(chapter.summary)}</p>
+                  {chapter.content_html}
+                </section>
+                """
+            )
+        toc_sections.append(
             f"""
-            <section class='chapter' id='{escape(chapter.chapter_id)}'>
-              <h2>{escape(chapter.title)}</h2>
-              <p class='summary'>{escape(chapter.summary)}</p>
-              {chapter.content_html}
+            <section class="toc-section">
+              <h3>{escape(section_title)}</h3>
+              <ol>
+                {"".join(items)}
+              </ol>
             </section>
             """
         )
@@ -848,6 +975,14 @@ def render_help_html(
     h1, h2, h3 {{ color: {heading_fg}; }}
     h1 {{ margin-bottom: 0.2em; }}
     .summary {{ color: {summary_fg}; }}
+    .section-label {{
+      color: {summary_fg};
+      font-size: 0.85rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      margin: 0 0 0.35rem 0;
+      text-transform: uppercase;
+    }}
     .hero, .panel, .chapter {{
       background: {panel_bg};
       border: 1px solid {panel_border};
@@ -880,20 +1015,27 @@ def render_help_html(
       text-decoration: none;
     }}
     a:hover {{ text-decoration: underline; }}
+    .toc-section + .toc-section {{
+      margin-top: 1rem;
+    }}
+    .toc-section h3 {{
+      margin-bottom: 0.35rem;
+    }}
+    .toc-section ol {{
+      margin-top: 0;
+    }}
   </style>
 </head>
 <body>
   <section class="hero">
     <h1>{escape(app_name)} Help</h1>
     {version_line}
-    <p>This manual is the in-app guide to the full product. Use the table of contents to orient yourself, the keyword index to jump to a feature quickly, and the help viewer search tools to move straight to the workflow you need.</p>
+    <p>This manual is the primary user-facing guide for the full product. Use the quick-start topics to orient yourself, move into the deep-dive chapters when you need model or workflow detail, and use search when you want to jump straight to a specific tool or concept.</p>
   </section>
 
   <section class="panel" id="contents">
     <h2>Table of Contents</h2>
-    <ol>
-      {"".join(toc_items)}
-    </ol>
+    {"".join(toc_sections)}
   </section>
 
   <section class="panel" id="index">

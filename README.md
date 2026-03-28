@@ -4,27 +4,25 @@ Current product version: `3.1.0`
 
 ISRC Catalog Manager is a local-first desktop catalog and repertoire operations workspace for artists, labels, managers, and catalog owners who need more than a basic track list.
 
-It combines recording metadata, releases, musical works, contracts, rights, parties, documents, assets, GS1 product data, import/export tooling, diagnostics, and durable history into one serious working system. Everything stays on your machine, in your files, and under your control.
+It combines recording metadata, releases, works, parties, contracts, rights, documents, assets, GS1 product data, import and export tooling, diagnostics, and durable history into one serious working system. Everything stays on your machine, in your files, and under your control.
 
 ![Workspace overview](docs/screenshots/workspace-overview.png)
 
-## What This App Is For
+## What The App Covers
 
-Most catalog tools stop at track metadata or release scheduling. ISRC Catalog Manager is built for the day-to-day operational layer that sits around a real catalog.
-
-It helps you maintain:
+The app is built for the operational layer around a real music catalog. It helps you maintain:
 
 - recordings and release metadata
 - releases as first-class product records
 - works and composition metadata
-- parties, licensees, and reusable contact entities
+- parties, counterparties, and reusable identities
 - contracts, obligations, and managed documents
 - rights positions and source-agreement links
-- deliverables, masters, artwork, and derived assets
+- assets, deliverables, masters, derivatives, and artwork variants
 - custom metadata, GS1 workbook data, and exchange-ready fields
 - diagnostics, recovery points, and managed local storage
 
-The result is a product that can answer practical questions quickly:
+That makes it practical to answer questions such as:
 
 - Which recordings belong to this release, and in what order?
 - Which work is linked to this track?
@@ -32,232 +30,123 @@ The result is a product that can answer practical questions quickly:
 - Which party granted or retained this territory?
 - Which asset is the approved master?
 - Which records are incomplete, broken, duplicated, or unsafe to export?
-- Which external metadata file can be merged into the current catalog without starting over?
 
-## What Makes It Different
+## Product Principles
 
 ### Local-first by design
 
-Your catalog lives in SQLite profile databases on your own machine. The app does not depend on a hosted backend, recurring subscriptions, or third-party platforms to remain usable.
+Catalog data lives in SQLite profile databases on your own machine. The app does not require a hosted backend or subscription service to remain usable.
+
+### Governed musical entry
+
+`Add Track` is the primary single-track creation workflow, and `Add Album` is the primary grouped entry workflow. Each new recording resolves Work governance before save, so the catalog does not accumulate orphan recording rows.
+
+### Connected repertoire model
+
+Tracks, releases, works, parties, contracts, rights, documents, and assets stay connected. The catalog remains recording-focused, while the broader repertoire layer keeps legal, creative, and operational context within the same workspace.
 
 ### Flexible attachment storage
 
-File-backed records no longer have to follow a single storage rule. The app now supports two storage modes across the catalog:
+File-backed records support two storage modes:
 
-- `Database` mode stores the raw file data directly in the profile database
-- `Managed file` mode copies the file into an app-controlled local storage folder and stores the managed path in the database
+- `Database` stores the raw file data in the profile database
+- `Managed file` copies the file into an app-controlled local storage folder and stores the managed path
 
-This applies across standard track media, release artwork, custom binary fields, license PDFs, contract documents, asset versions, and GS1 workbook templates. Existing records remain readable, and supported records can be converted between modes without changing the normal UI workflow for preview, export, replace, or delete.
+This applies across track media, artwork, custom binary fields, contract documents, asset versions, and GS1 workbook templates.
 
-### Built for real catalog operations
+### Recoverable operations
 
-This is not just a metadata sheet with a prettier front end. It is designed for recurring catalog work:
+Imports, bulk edits, restore flows, media attachment, and other higher-risk actions are designed to be reviewable, history-aware, and recoverable instead of one-way operations.
 
-- importing and reconciling external metadata into an existing catalog
-- remembering repeat import choices per format and explicitly skipping unwanted incoming fields
-- bulk-attaching local audio files by filename/tag matching with optional batch artist updates
-- matching incoming rows against existing tracks and releases
-- normalizing identifiers, dates, and durations
-- attaching files in either database or managed-file mode
-- keeping releases, works, contracts, rights, and assets connected
-- verifying readiness before export, delivery, or review
-- preserving recoverable history, snapshots, backups, and repair paths
+## Core Workspaces
 
-### A richer model than a basic release manager
+### Catalog and workspace panels
 
-The app is intentionally broader than a track/release tool and intentionally narrower than a royalty system. It is not trying to be a royalty accounting platform, distributor dashboard, payment tool, or DSP pitching system. It is focused on being an exceptional repertoire and catalog knowledge system.
-
-## Core Capabilities
-
-### Recording and release catalog
-
-Create and maintain:
-
-- governed musical creation through `Add Track`, with mandatory link-to-Work or create-new-Work decisions before save
-- grouped release entry through `Add Album`, where each populated row resolves Work governance before the batch saves
-- first-class release records with ordered track lists
-- UPC/EAN, catalog number, explicit flags, artwork, and release sequencing
-- import/export-ready track metadata with portable media attachments in database or managed-file storage
-
-The main catalog table supports fast searching, bulk selection, bulk edit, contextual actions, and direct handoff into related workflows.
-
-### A docked catalog workspace instead of popup juggling
-
-The app now treats the most track-table-dependent catalog tools as part of the main workspace rather than forcing you through a chain of blocking popups.
-
-Docked workspace panels include:
+The main catalog table supports fast searching, bulk selection, contextual actions, and direct handoff into related workflows. The most track-table-dependent tools stay available as docked workspace panels:
 
 - Release Browser
 - Work Manager
-- Catalog Managers
 - Party Manager
 - Contract Manager
 - Rights Matrix
 - Deliverables and Asset Versions
 - Global Search and Relationships
 
-These panels open as tabbed workspace surfaces alongside the main catalog table so you can keep browsing tracks, changing selections, filtering the table, opening related records, and moving between catalog tools without closing one window to use the next.
+These panels remain available beside the table so you can keep browsing and selecting records while you review related release, rights, party, contract, and asset context.
 
-Within `Deliverables and Asset Versions`, the `Asset Registry` and `Derivative Ledger` stay together as one operational surface so approved masters, export batches, derivatives, and post-export review stay in the same workspace loop.
+### Assets and deliverables
 
-### Works, rights, contracts, and parties
+Tracks and releases can carry multiple asset versions, including approved masters, alternates, artwork variants, and derivatives. The deliverables workspace combines:
 
-The app models repertoire beyond recordings:
-
-- first-class musical works with creator roles, shares, alternate titles, ISWC, and local registration numbers
-- reusable party records for writers, publishers, labels, managers, lawyers, licensees, and organizations
-- lifecycle-aware contracts with signature/effective/start/end/renewal/notice/reversion dates
-- obligations and reminders such as approvals, notice windows, and delivery requirements
-- versioned contract documents including drafts, signed finals, amendments, appendices, exhibits, and correspondence
-- rights records for master, publishing, sync, mechanical, performance, neighboring, promotional, and custom right types
-- conflict checks for overlapping exclusivity and missing source contracts
-
-This gives independent artists and labels a practical way to keep legal and operational context tied directly to the catalog.
-
-Just as importantly, those richer catalog surfaces are no longer isolated from the rest of the workflow. The managers for releases, works, parties, contracts, rights, assets, licenses, and global relationships can stay open as docked tabs while you continue working in the track table.
-
-### Asset and deliverable management
-
-Tracks and releases can carry multiple managed asset versions, including:
-
-- main masters
-- radio edits
-- instrumentals
-- clean and explicit variants
-- alternate masters
-- hi-res deliverables
-- MP3 derivatives
-- artwork variants
-- promotional assets
-
-You can track approval state, mark the primary asset, preserve derivation relationships, validate broken or duplicate asset references, and choose whether the underlying asset file lives in the database or in app-managed local storage.
-
-The docked `Deliverables and Asset Versions` workspace keeps that practical:
-
-- `Asset Registry` stays focused on approved masters, alternates, artwork variants, and primary-version control
-- `Derivative Ledger` keeps managed export batches, registered derivative rows, authenticity context, retained output paths, and explicit cleanup actions together
-
-The ledger is intentionally layered for day-to-day use rather than as one long debug dump: keep the batch list visible, review derivatives in context, open the linked track or release, inspect lineage and hashes, and use conservative cleanup actions that state clearly whether they affect only database records or the retained files on disk.
+- `Asset Registry` for primary-version control and approved-source review
+- `Derivative Ledger` for managed export batches, derivative lineage, and retained output review
 
 ### Audio authenticity and provenance
 
-The app can also produce authenticity-aware audio exports for practical ownership and provenance workflows.
+The app supports authenticity-aware audio delivery workflows:
 
-- `Settings > Audio Authenticity Keys…` generates local Ed25519 signing keys
-- `Catalog > Audio > Authenticity & Provenance > Export Authentic Masters…` writes direct WAV, FLAC, or AIFF master copies with:
-  - a compact keyed watermark token
-  - a signed authenticity manifest sidecar
-  - standard audio metadata tags populated from catalog data when available
-- `Catalog > Audio > Authenticity & Provenance > Export Provenance Copies…` writes signed provenance-sidecar copies for supported lossy derivatives without claiming direct watermark extraction from those files
-- `Catalog > Audio > Authenticity & Provenance > Verify Audio Authenticity…` can verify either:
-  - the selected catalog track audio, or
-  - an external direct/provenance-supported file chosen through the file picker
+- local Ed25519 signing keys
+- direct authentic master export for WAV, FLAC, and AIFF
+- provenance-sidecar delivery for supported lossy derivatives
+- authenticity verification from selected catalog audio or external files
 
-This feature is intentionally honest about scope. It is not DRM, does not claim zero waveform change, and does not treat watermarking alone as proof. The authenticity claim comes from the signed manifest; the watermark links direct master exports back to that signed record, while lossy derivatives are verified through signed lineage to a previously watermarked master.
+The authenticity claim comes from the signed manifest. The keyed watermark links direct master exports back to that signed record, while lossy derivatives are verified through signed lineage.
 
-These authenticity exports stay intentionally simple and explicit: they write standalone export files plus signed sidecars to the chosen destination and record the operation in history and the audit trail, but they do not create managed `Derivative Ledger` rows.
+### Import, attach, and exchange
 
-### Quality control and operational readiness
+The import layer is a reviewed workflow surface rather than a blind file picker. The app supports:
 
-The Data Quality Dashboard helps you audit the catalog before export, delivery, or review. It can flag:
+- catalog exchange import for XML, CSV, XLSX, JSON, and ZIP package sources
+- Party import
+- Contracts and Rights import
+- audio-tag import
+- reviewed bulk audio attachment and single-file album-art attachment
+- package round-tripping with preserved storage-mode behavior
 
-- missing or duplicate identifiers
-- invalid barcodes
-- missing artwork or media
-- missing works or creators
-- invalid work split totals
-- contract lifecycle gaps
-- unsigned final documents
-- rights conflicts
-- duplicate parties
-- broken asset references
-- missing approved masters
-- blocked or incomplete repertoire items
+### Quality, diagnostics, and recovery
 
-This is designed to surface action items, not abstract diagnostics.
+Operational safety is part of the product. The app includes:
 
-### GS1 workflow support
-
-The app includes a dedicated GS1 workflow for maintaining product metadata and exporting to official workbook templates. It verifies workbook structure, stores profile-specific defaults, and now lets the configured workbook template live either inside the profile database or as a managed local file so the export setup remains stable even if the original source file is moved.
-
-### Import and reconcile external metadata
-
-The import layer is designed as a rule-driven workbench rather than a generic file picker.
-
-For structured catalog exchange import, the app can:
-
-- inspect incoming `XML`, `CSV`, `XLSX`, `JSON`, and `ZIP package` sources before import
-- require preview, review, and explicit confirmation before a write import is applied
-- preview incoming rows and choose the CSV delimiter when needed
-- map source columns to supported catalog fields or active `custom::<name>` text fields
-- save and reload mapping presets for repeat imports
-- remember per-format import choices and reset them when the workflow needs a clean slate
-- explicitly skip incoming fields you want inspected but not applied
-- choose between `dry_run`, `create`, `update`, `merge`, and `insert_new`
-- match against existing data by internal ID, ISRC, UPC plus title, and optional title/artist heuristics
-- normalize names, titles, and durations where the importer supports it
-- upsert linked release data as part of the same flow
-- round-trip packaged media while preserving database-backed versus managed-file-backed storage
-
-That makes the app useful for bringing in structured exports from labels, catalog administrators, collection-society workflows, and PRO-style metadata sources such as BUMA, STEMRA, SENA, and similar organizations, as long as those exports can be delivered in one of the supported formats. The support is format-based and mapping-based, not a direct third-party integration.
-
-The app also includes:
-
-- Party import with the same inspect, map, review, and apply contract used by the stronger catalog import workflows
-- Contracts and Rights import with inspection and review before any write is applied
-- XML import routed through the same reviewed exchange setup surface as the other catalog import formats
-- audio tag import plus catalog-backed audio exports that embed trustworthy catalog metadata automatically
-- a separate repertoire exchange workflow for works, parties, contracts, rights, assets, and their relationships
-
-For existing catalog rows that already need their audio attached, the separate `Catalog > Audio > Import & Attach > Bulk Attach Audio Files…` workflow can inspect filenames and embedded tags, suggest track matches, let you reassign or skip files, choose the storage mode, and optionally apply one artist name across the matched set before committing one history-wrapped batch.
-
-### Trust, recovery, and maintenance
-
-ISRC Catalog Manager treats recovery and maintenance as product features, not hidden engineering details.
-
-The app includes:
-
-- persistent undo/redo history for supported reversible actions
-- manual snapshots and restore paths for heavier operations
-- a dedicated Backups tab plus cleanup and trim flows for older artifacts
-- profile-scoped retention and safety settings for automatic snapshots, cleanup, storage budgets, and restore safety copies
-- truthful task-based startup and profile-loading feedback while storage reconciliation, workspace restore, and catalog loading finish
-- a quality dashboard for operational catalog issues
-- diagnostics for schema, storage, integrity, managed files, history health, and history budget pressure
-- repair actions for supported issues such as history reconciliation, legacy promoted-field repair, and storage-layout migration
-- a staged app-data migration path for older storage layouts
-
-Imports, restore flows, and other higher-risk operations are designed to be recoverable rather than one-way.
+- a Data Quality Dashboard for catalog issues
+- diagnostics and guided repairs for environment, schema, storage, managed files, and history health
+- persistent undo and redo
+- manual snapshots, restore paths, and registered backups
+- retention and cleanup controls
 
 ### Theme builder and advanced QSS
 
-The app ships with a full visual theme builder covering typography, surfaces, buttons, inputs, navigation, data views, and geometry controls, plus starter themes bundled with the application:
+The visual theme builder covers typography, surfaces, buttons, inputs, navigation, data views, progress surfaces, media badge icons, and geometry controls. Advanced QSS remains available for the final edge cases that need selector-level styling.
 
-- Apple Light
-- Apple Dark
-- High Visibility
-- Aeon Emerald Gold
-- Subconscious Cosmos
-- VS Code Dark
-- Pastel Studio
+## Integrated Documentation
 
-It also includes a dedicated BLOB icon builder for stored media indicators:
+The in-app help system is the primary user-facing manual.
 
-- separate global badge icons for audio and image BLOBs
-- platform-native system icons exposed through Qt
-- standardized emoji choices for lightweight visual language
-- compressed custom-image badges stored directly in the profile database
-- per-column overrides for custom `blob_audio` and `blob_image` fields
+- Open `Help > Help Contents` for the integrated quick-start and deep-dive documentation surface.
+- Use [docs/README.md](docs/README.md) for repository-side companion guides.
+- Use the implementation handoffs only for internal continuity and engineering history.
 
-These media badge settings are intentionally kept separate from theme presets, so you can refine how stored files are represented in the catalog without changing the broader application theme.
+## Key Menus
 
-The builder also includes a practical editing surface around those theme controls:
+- `File`: profiles, exchange import and export, backups, and restore
+- `Edit`: governed track and album entry, selection editing, and clipboard actions
+- `Catalog`: workspace tools, audio workflows, GS1, quality review, and repair queues
+- `Settings`: application settings and authenticity keys
+- `View`: columns, ribbon visibility, action ribbon customization, and table layout controls
+- `History`: undo, redo, snapshots, and history review
+- `Help`: the integrated manual, diagnostics, logs, and local support surfaces
 
-- optional softer hint text while editing
-- a side-by-side preview pane you can keep visible or hide temporarily
-- optional app-wide live preview while editing, with automatic theme restore on cancel
+## Technology
 
-These controls shape the editing experience without changing the saved preset payload itself.
+The desktop application is built with:
+
+- Python
+- PySide6
+- SQLite
+- openpyxl
+- mutagen
+- pillow
+
+The architecture is local-first, desktop-native, and designed for safe background task execution with SQLite-aware threading patterns.
 
 Advanced users can go further with a selector reference and syntax-aware QSS editor that supports safe autocomplete, rule templates, pseudo-states, subcontrols, and object-name targeting.
 
@@ -270,11 +159,11 @@ Some of the strongest workflow features are easy to underestimate from a quick s
 - layout and dock state are remembered, so the app reopens as a real workstation instead of a fixed single screen
 - the action ribbon can be customized around your high-frequency commands
 - repeat imports can remember per-format choices, and unwanted incoming fields can be skipped explicitly instead of being mapped by accident
-- `Catalog > Bulk Attach Audio Files…` can match filenames and tags to existing tracks, attach them in one reviewed batch, and optionally update matched artist names
+- `Catalog > Audio > Import & Attach > Bulk Attach Audio Files…` can match filenames and tags to existing tracks, attach them in one reviewed batch, and optionally update matched artist names
 - global search and relationship browsing give the richer catalog model a usable navigation layer
 - package exchange can carry managed files and restore their recorded storage mode on import
 - audio tag import workflows can preview conflicts before writing metadata into the catalog, while catalog-backed audio exports embed metadata automatically and plain external conversion stays metadata-free
-- history settings now include retention and safety presets, storage budgets, and cleanup prompts that keep manual restore points protected by default
+- history settings include retention and safety presets, storage budgets, and cleanup prompts that keep manual restore points protected by default
 - theme tooling goes beyond colors into starter themes, optional hint text, a live preview pane, app-wide preview, BLOB badge icons, selector discovery, and QSS autocomplete
 
 ## Who It Is For
@@ -305,7 +194,7 @@ That focus is deliberate. The goal is depth and reliability in catalog maintenan
 
 ### 1. Build or import the catalog
 
-Use `Add Track` for single governed musical items, `Add Album` for batch governed entry, `Work Manager` for work governance and follow-up, exchange import when catalog data already exists elsewhere, or `Bulk Attach Audio Files` when track rows already exist but their media still needs to be attached. Incoming structured data can be previewed, mapped, skipped field-by-field, matched, merged, or inserted as new records depending on the source and the job.
+Use `Add Track` for single governed musical items, `Add Album` for batch governed entry, `Work Manager` for work governance and follow-up, exchange import when catalog data already exists elsewhere, or `Catalog > Audio > Import & Attach > Bulk Attach Audio Files…` when track rows already exist but their media still needs to be attached. Incoming structured data can be previewed, mapped, skipped field-by-field, matched, merged, or inserted as new records depending on the source and the job.
 
 ### 2. Organize the repertoire graph
 
@@ -342,7 +231,7 @@ The screenshots below are regenerated from the bundled demo workspace and captur
 ISRC Catalog Manager is built around a dockable desktop workspace rather than a fixed single-screen layout.
 
 - `Add Data` and the `Catalog Table` remain the two primary day-to-day docks.
-- Catalog tools that benefit from live track-table interaction now open as tabbed workspace panels.
+- Catalog tools that benefit from live track-table interaction open as tabbed workspace panels.
 - Related views can stay open together, which makes release assignment, work linking, rights review, contract review, license lookup, and relationship browsing much faster.
 - Layout and dock state are remembered, so the app reopens the way you work.
 
@@ -358,7 +247,7 @@ The result is a catalog environment that feels closer to a professional desktop 
 
 ## Documentation
 
-Start with the docs hub in [`docs/README.md`](docs/README.md) for the user-guide reading path.
+Start with `Help > Help Contents` inside the app for the integrated manual, then use [`docs/README.md`](docs/README.md) for repository-side companion pages.
 
 ### User Guides
 
@@ -377,7 +266,7 @@ Start with the docs hub in [`docs/README.md`](docs/README.md) for the user-guide
 - [Modularization Strategy](docs/modularization_strategy.md)
 - [Implementation Handoffs](docs/implementation_handoffs/)
 
-The application itself also includes a searchable in-app help browser that mirrors the major workflows, including import setup, history cleanup, diagnostics, and app-data migration behavior.
+The application includes a searchable in-app help browser that serves as the primary user-facing manual for workflow, reference, diagnostics, and recovery topics.
 
 ## Demo Workspace
 
@@ -393,7 +282,7 @@ Run:
 python build.py
 ```
 
-The build script now follows a deterministic release workflow:
+The build script follows a deterministic release workflow:
 
 - use the current project metadata and `ISRC_manager.py` as the fixed entrypoint
 - on Windows, prefer a repo-local `.venv\Scripts\pyinstaller.exe` when present before falling back to other PyInstaller launch methods

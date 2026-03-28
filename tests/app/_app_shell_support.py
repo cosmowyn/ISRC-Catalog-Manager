@@ -1541,6 +1541,47 @@ class AppShellTestCase(unittest.TestCase):
         )
         self.assertEqual(routed_calls[-1][1], None)
 
+    def case_main_window_shortcuts_cover_help_media_and_workspace_actions(self):
+        def _shortcut_texts(action):
+            return {
+                shortcut.toString() for shortcut in action.shortcuts() if not shortcut.isEmpty()
+            }
+
+        self.assertEqual(_shortcut_texts(self.window.help_contents_action), {"F1"})
+        self.assertEqual(
+            _shortcut_texts(self.window.derivative_ledger_action),
+            {"Ctrl+Alt+Shift+A", "Meta+Alt+Shift+A"},
+        )
+        self.assertEqual(
+            _shortcut_texts(self.window.bulk_attach_audio_action),
+            {"Ctrl+Alt+U", "Meta+Alt+U"},
+        )
+        self.assertEqual(
+            _shortcut_texts(self.window.attach_album_art_action),
+            {"Ctrl+Alt+Shift+U", "Meta+Alt+Shift+U"},
+        )
+        self.assertEqual(
+            _shortcut_texts(self.window.verify_audio_authenticity_action),
+            {"Ctrl+Alt+V", "Meta+Alt+V"},
+        )
+        self.assertEqual(
+            _shortcut_texts(self.window.authenticity_keys_action),
+            {"Ctrl+Alt+K", "Meta+Alt+K"},
+        )
+        self.assertEqual(
+            _shortcut_texts(self.window.manage_fields_action),
+            {"Ctrl+Alt+Shift+M", "Meta+Alt+Shift+M"},
+        )
+        self.assertEqual(
+            _shortcut_texts(self.window.col_width_action),
+            {"Ctrl+Alt+Shift+W", "Meta+Alt+Shift+W"},
+        )
+        self.assertEqual(
+            _shortcut_texts(self.window.global_search_action),
+            {"Ctrl+Alt+F", "Meta+Alt+F"},
+        )
+        self.assertIs(self.window.workspace_global_search_action, self.window.global_search_action)
+
     def case_startup_can_defer_legacy_storage_migration_and_keep_current_folder(self):
         self._close_window()
         splash = _FakeStartupSplashController()
@@ -3141,7 +3182,7 @@ class AppShellTestCase(unittest.TestCase):
                 "Release Browser…",
                 "Deliverables & Asset Versions…",
                 "Derivative Ledger…",
-                "Global Search & Relationships…",
+                "Global Search and Relationships…",
             ],
         )
         self.assertNotIn("Show Catalog Table", workspace_flat_texts)
@@ -3426,6 +3467,64 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(captured_dialog["items"][0]["status"], "matched")
         self.assertEqual(captured_dialog["items"][0]["matched_track_id"], track_id)
         self.assertEqual(captured_dialog["media_label"], "audio file")
+
+    def case_audio_attach_creates_primary_track_asset_after_confirmation(self):
+        track_id = self._create_track(index=415, title="Asset Orbit")
+        self.window.refresh_table_preserve_view(focus_id=track_id)
+        self.app.processEvents()
+
+        audio_path = self._create_wav_file("Asset Orbit.wav")
+
+        class _AcceptingReviewDialog:
+            def __init__(self, *args, **kwargs):
+                del args, kwargs
+
+            def exec(self):
+                return app_module.QDialog.Accepted
+
+            def create_track_requested(self):
+                return False
+
+            def selected_matches(self):
+                return [
+                    {
+                        "source_path": str(audio_path),
+                        "source_name": audio_path.name,
+                        "track_id": track_id,
+                        "detected_artist": "",
+                        "detected_album": "",
+                    }
+                ]
+
+            def selected_storage_mode(self):
+                return app_module.STORAGE_MODE_DATABASE
+
+            def selected_artist_name(self):
+                return None
+
+        with (
+            mock.patch.object(
+                app_module.App,
+                "_submit_background_bundle_task",
+                autospec=True,
+                side_effect=self._run_bundle_task_inline,
+            ),
+            mock.patch.object(app_module, "BulkAudioAttachDialog", _AcceptingReviewDialog),
+            mock.patch.object(app_module.QMessageBox, "information"),
+        ):
+            self.window.bulk_attach_audio_files(
+                track_ids=[track_id],
+                file_paths=[str(audio_path)],
+                title="Attach Audio",
+            )
+
+        assets = self.window.asset_service.list_assets(track_id=track_id)
+        self.assertEqual(len(assets), 1)
+        asset = assets[0]
+        self.assertEqual(asset.asset_type, "main_master")
+        self.assertTrue(asset.primary_flag)
+        self.assertTrue(asset.approved_for_use)
+        self.assertEqual(asset.storage_mode, app_module.STORAGE_MODE_DATABASE)
 
     def case_audio_attach_unmatched_and_ambiguous_files_open_manual_resolution_dialog(self):
         orbit_track = self._create_track(index=412, title="Orbit")

@@ -35,6 +35,8 @@ from .models import (
 class AssetService:
     """Owns deliverable/asset registry rows and managed files."""
 
+    TRACK_AUDIO_MASTER_TYPES = frozenset({"main_master", "hi_res_master", "alt_master"})
+
     def __init__(self, conn: sqlite3.Connection, data_root: str | Path | None = None):
         self.conn = conn
         self.data_root = Path(data_root) if data_root is not None else None
@@ -64,6 +66,19 @@ class AssetService:
                     self.conn.execute(
                         f"ALTER TABLE AssetVersions ADD COLUMN {column_name} {column_sql}"
                     )
+
+    def _table_exists(
+        self,
+        table_name: str,
+        *,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> bool:
+        cur = cursor or self.conn.cursor()
+        row = cur.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (str(table_name),),
+        ).fetchone()
+        return bool(row)
 
     @staticmethod
     def _clean_type(value: str | None) -> str:
@@ -103,6 +118,29 @@ class AssetService:
 
     def resolve_asset_path(self, stored_path: str | None) -> Path | None:
         return self.asset_store.resolve(stored_path)
+
+    def _delete_unreferenced_asset_file(
+        self,
+        stored_path: str | None,
+        *,
+        cursor: sqlite3.Cursor,
+    ) -> None:
+        clean_path = clean_text(stored_path)
+        if not clean_path or not self.asset_store.is_managed(clean_path):
+            return
+        row = cursor.execute(
+            "SELECT 1 FROM AssetVersions WHERE stored_path=? LIMIT 1",
+            (clean_path,),
+        ).fetchone()
+        if row:
+            return
+        resolved = self.resolve_asset_path(clean_path)
+        if resolved is None:
+            return
+        try:
+            resolved.unlink(missing_ok=True)
+        except Exception:
+            pass
 
     def _hash_file(self, path: Path) -> str:
         digest = hashlib.sha256()
@@ -310,7 +348,12 @@ class AssetService:
             errors.append("Assets require a filename or a source file.")
         return errors
 
-    def create_asset(self, payload: AssetVersionPayload) -> int:
+    def create_asset(
+        self,
+        payload: AssetVersionPayload,
+        *,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> int:
         errors = self.validate_asset_payload(payload)
         if errors:
             raise ValueError("\n".join(errors))
@@ -360,8 +403,9 @@ class AssetService:
             storage_mode = STORAGE_MODE_MANAGED_FILE if clean_text(existing_path) else None
         if not filename:
             filename = Path(existing_path or payload.source_path or "asset").name
-        with self.conn:
-            cursor = self.conn.execute(
+
+        def _create(cur: sqlite3.Cursor) -> int:
+            cur.execute(
                 """
                 INSERT INTO AssetVersions (
                     track_id,
@@ -404,16 +448,28 @@ class AssetService:
                     clean_text(payload.notes),
                 ),
             )
-            asset_id = int(cursor.lastrowid)
+            asset_id = int(cur.lastrowid)
             if payload.primary_flag:
-                self.mark_primary(asset_id)
+                self.mark_primary(asset_id, cursor=cur)
             return asset_id
 
-    def update_asset(self, asset_id: int, payload: AssetVersionPayload) -> None:
+        if cursor is not None:
+            return _create(cursor)
+
+        with self.conn:
+            return _create(self.conn.cursor())
+
+    def update_asset(
+        self,
+        asset_id: int,
+        payload: AssetVersionPayload,
+        *,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> None:
         errors = self.validate_asset_payload(payload)
         if errors:
             raise ValueError("\n".join(errors))
-        existing = self.fetch_asset(int(asset_id))
+        existing = self.fetch_asset(int(asset_id), cursor=cursor)
         if existing is None:
             raise ValueError("Asset not found.")
         stored_path = clean_text(payload.stored_path) or existing.stored_path
@@ -428,6 +484,7 @@ class AssetService:
         bit_depth = payload.bit_depth if payload.bit_depth is not None else existing.bit_depth
         storage_mode = normalize_storage_mode(payload.storage_mode, default=existing.storage_mode)
         blob_value = self._fetch_asset_blob(int(asset_id))
+        previous_stored_path = clean_text(existing.stored_path)
         if clean_text(payload.source_path):
             source = Path(str(payload.source_path).strip())
             if not source.exists():
@@ -466,8 +523,9 @@ class AssetService:
                 subdir=self._asset_subdir(filename),
             )
             blob_value = None
-        with self.conn:
-            self.conn.execute(
+
+        def _update(cur: sqlite3.Cursor) -> None:
+            cur.execute(
                 """
                 UPDATE AssetVersions
                 SET track_id=?,
@@ -512,30 +570,58 @@ class AssetService:
                 ),
             )
             if payload.primary_flag:
-                self.mark_primary(int(asset_id))
+                self.mark_primary(int(asset_id), cursor=cur)
+            if previous_stored_path and previous_stored_path != clean_text(stored_path):
+                self._delete_unreferenced_asset_file(previous_stored_path, cursor=cur)
 
-    def mark_primary(self, asset_id: int) -> None:
-        asset = self.fetch_asset(int(asset_id))
+        if cursor is not None:
+            _update(cursor)
+            return
+
+        with self.conn:
+            _update(self.conn.cursor())
+
+    def mark_primary(
+        self,
+        asset_id: int,
+        *,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> None:
+        asset = self.fetch_asset(int(asset_id), cursor=cursor)
         if asset is None:
             raise ValueError("Asset not found.")
-        with self.conn:
+
+        def _mark(cur: sqlite3.Cursor) -> None:
             if asset.track_id is not None:
-                self.conn.execute(
+                cur.execute(
                     "UPDATE AssetVersions SET primary_flag=0 WHERE track_id=?",
                     (int(asset.track_id),),
                 )
             if asset.release_id is not None:
-                self.conn.execute(
+                cur.execute(
                     "UPDATE AssetVersions SET primary_flag=0 WHERE release_id=?",
                     (int(asset.release_id),),
                 )
-            self.conn.execute(
+            cur.execute(
                 "UPDATE AssetVersions SET primary_flag=1 WHERE id=?",
                 (int(asset_id),),
             )
 
-    def fetch_asset(self, asset_id: int) -> AssetVersionRecord | None:
-        row = self.conn.execute(
+        if cursor is not None:
+            _mark(cursor)
+            return
+
+        with self.conn:
+            _mark(self.conn.cursor())
+
+    def fetch_asset(
+        self,
+        asset_id: int,
+        *,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> AssetVersionRecord | None:
+        cur = cursor or self.conn.cursor()
+        row = cur.execute(
             """
             SELECT
                 id,
@@ -571,6 +657,7 @@ class AssetService:
         track_id: int | None = None,
         release_id: int | None = None,
         search_text: str | None = None,
+        cursor: sqlite3.Cursor | None = None,
     ) -> list[AssetVersionRecord]:
         clauses: list[str] = []
         params: list[object] = []
@@ -588,7 +675,8 @@ class AssetService:
             )
             params.extend([like, like, like])
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-        rows = self.conn.execute(
+        cur = cursor or self.conn.cursor()
+        rows = cur.execute(
             f"""
             SELECT
                 id,
@@ -618,6 +706,74 @@ class AssetService:
             params,
         ).fetchall()
         return [self._row_to_record(row) for row in rows]
+
+    def sync_track_audio_attachment(
+        self,
+        *,
+        track_id: int,
+        source_path: str | Path,
+        storage_mode: str | None,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> AssetVersionRecord | None:
+        if not self._table_exists("AssetVersions", cursor=cursor):
+            return None
+        source = Path(source_path)
+        if not source.exists():
+            raise FileNotFoundError(source)
+        cur = cursor or self.conn.cursor()
+        checksum = self._hash_file(source)
+        clean_mode = normalize_storage_mode(storage_mode, default=STORAGE_MODE_MANAGED_FILE)
+        master_assets = [
+            asset
+            for asset in self.list_assets(track_id=int(track_id), cursor=cur)
+            if asset.asset_type in self.TRACK_AUDIO_MASTER_TYPES
+        ]
+        master_assets.sort(key=lambda item: (0 if item.primary_flag else 1, -int(item.id)))
+        current_primary = master_assets[0] if master_assets else None
+
+        if current_primary is not None and clean_text(current_primary.checksum_sha256) == checksum:
+            self.update_asset(
+                int(current_primary.id),
+                AssetVersionPayload(
+                    asset_type=current_primary.asset_type or "main_master",
+                    source_path=str(source),
+                    storage_mode=clean_mode,
+                    checksum_sha256=checksum,
+                    approved_for_use=bool(current_primary.approved_for_use),
+                    primary_flag=True,
+                    version_status=current_primary.version_status or "approved",
+                    notes=current_primary.notes,
+                    track_id=int(track_id),
+                    release_id=current_primary.release_id,
+                    derived_from_asset_id=current_primary.derived_from_asset_id,
+                ),
+                cursor=cur,
+            )
+            return self.fetch_asset(int(current_primary.id), cursor=cur)
+
+        asset_id = self.create_asset(
+            AssetVersionPayload(
+                asset_type=(current_primary.asset_type if current_primary else "main_master"),
+                source_path=str(source),
+                storage_mode=clean_mode,
+                checksum_sha256=checksum,
+                derived_from_asset_id=(int(current_primary.id) if current_primary else None),
+                approved_for_use=(
+                    bool(current_primary.approved_for_use) if current_primary else True
+                ),
+                primary_flag=True,
+                version_status=(
+                    (current_primary.version_status or "approved")
+                    if current_primary
+                    else "approved"
+                ),
+                notes=current_primary.notes if current_primary else None,
+                track_id=int(track_id),
+                release_id=current_primary.release_id if current_primary else None,
+            ),
+            cursor=cur,
+        )
+        return self.fetch_asset(int(asset_id), cursor=cur)
 
     def delete_asset(self, asset_id: int) -> None:
         asset = self.fetch_asset(int(asset_id))

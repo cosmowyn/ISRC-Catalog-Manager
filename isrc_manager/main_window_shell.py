@@ -404,6 +404,7 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     app.derivative_ledger_action = app._create_action(
         "Derivative Ledger…",
         slot=app.open_derivative_ledger,
+        shortcuts=("Ctrl+Alt+Shift+A", "Meta+Alt+Shift+A"),
     )
     workspace_browse_menu.addAction(app.derivative_ledger_action)
     app.global_search_action = app._create_action(
@@ -421,10 +422,7 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         slot=app.open_catalog_workspace,
     )
     workspace_browse_menu.insertAction(app.release_browser_action, app.workspace_catalog_action)
-    app.workspace_global_search_action = app._create_action(
-        "Global Search & Relationships…",
-        slot=app.open_global_search,
-    )
+    app.workspace_global_search_action = app.global_search_action
     workspace_browse_menu.addAction(app.workspace_global_search_action)
     app.add_data_action = app._create_action(
         "Show Add Track Panel",
@@ -462,11 +460,13 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     app.bulk_attach_audio_action = app._create_action(
         "Bulk Attach Audio Files…",
         slot=app.bulk_attach_audio_files,
+        shortcuts=("Ctrl+Alt+U", "Meta+Alt+U"),
     )
     audio_ingest_menu.addAction(app.bulk_attach_audio_action)
     app.attach_album_art_action = app._create_action(
         "Attach Album Art File…",
         slot=app.attach_album_art_file_to_catalog,
+        shortcuts=("Ctrl+Alt+Shift+U", "Meta+Alt+Shift+U"),
     )
     audio_ingest_menu.addAction(app.attach_album_art_action)
     app.import_tags_action = app._create_action(
@@ -551,6 +551,7 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     app.verify_audio_authenticity_action = app._create_action(
         "Verify Audio Authenticity…",
         slot=app.verify_audio_authenticity,
+        shortcuts=("Ctrl+Alt+V", "Meta+Alt+V"),
     )
     authenticity_menu.addAction(app.verify_audio_authenticity_action)
     app.quality_dashboard_action = app._create_action(
@@ -586,6 +587,7 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     app.authenticity_keys_action = app._create_action(
         "Audio Authenticity Keys…",
         slot=app.open_audio_authenticity_keys_dialog,
+        shortcuts=("Ctrl+Alt+K", "Meta+Alt+K"),
     )
     settings_menu.addAction(app.authenticity_keys_action)
 
@@ -608,7 +610,7 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     app.manage_fields_action = app._create_action(
         "Manage Custom Columns…",
         slot=app.manage_custom_columns,
-        shortcuts=("Ctrl+Alt+F", "Meta+Alt+F"),
+        shortcuts=("Ctrl+Alt+Shift+M", "Meta+Alt+Shift+M"),
     )
     app.columns_menu.addAction(app.manage_fields_action)
     app.columns_menu.addSeparator()
@@ -644,7 +646,7 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         checkable=True,
         checked=False,
         toggled_slot=app._on_toggle_col_width,
-        shortcuts=("Ctrl+Alt+W", "Meta+Alt+W"),
+        shortcuts=("Ctrl+Alt+Shift+W", "Meta+Alt+Shift+W"),
     )
     table_view_menu.addAction(app.col_width_action)
 

@@ -1,6 +1,13 @@
 import unittest
 
-from isrc_manager.help_content import HELP_CHAPTERS, HELP_CHAPTERS_BY_ID, render_help_html
+from isrc_manager.help_content import (
+    HELP_CHAPTERS,
+    HELP_CHAPTERS_BY_ID,
+    HELP_SECTION_ORDER,
+    help_section_for_chapter,
+    iter_help_sections,
+    render_help_html,
+)
 
 
 class HelpContentTests(unittest.TestCase):
@@ -13,6 +20,7 @@ class HelpContentTests(unittest.TestCase):
         self.assertIn("audio-authenticity", HELP_CHAPTERS_BY_ID)
         self.assertIn("settings", HELP_CHAPTERS_BY_ID)
         self.assertIn("history", HELP_CHAPTERS_BY_ID)
+        self.assertIn("keyboard-shortcuts", HELP_CHAPTERS_BY_ID)
 
     def test_rendered_help_contains_contents_index_and_anchors(self):
         html = render_help_html("ISRC Catalog Manager", "1.2.3")
@@ -21,6 +29,8 @@ class HelpContentTests(unittest.TestCase):
         self.assertIn("Keyword Index", html)
         self.assertIn("Version 1.2.3", html)
         self.assertNotIn("SF Pro Text", html)
+        self.assertIn("Quick Start", html)
+        self.assertIn("Deep Dives", html)
 
         for chapter in HELP_CHAPTERS:
             self.assertIn(f"id='{chapter.chapter_id}'", html)
@@ -56,6 +66,27 @@ class HelpContentTests(unittest.TestCase):
         self.assertIn("AIFF", chapter.content_html)
         self.assertIn("Provenance", chapter.content_html)
         self.assertIn("separate managed export workflow", chapter.content_html.lower())
+
+    def test_help_chapters_are_grouped_into_layered_sections(self):
+        grouped = list(iter_help_sections())
+
+        self.assertEqual(grouped[0][0], HELP_SECTION_ORDER[0])
+        grouped_ids = {
+            section: {chapter.chapter_id for chapter in chapters} for section, chapters in grouped
+        }
+        self.assertIn("overview", grouped_ids["Quick Start"])
+        self.assertIn("keyboard-shortcuts", grouped_ids["Quick Start"])
+        self.assertIn("repertoire-knowledge", grouped_ids["Deep Dives"])
+        self.assertIn("diagnostics", grouped_ids["Operations & Recovery"])
+        self.assertEqual(help_section_for_chapter("theme-settings"), "Settings & Reference")
+
+    def test_keyboard_shortcuts_chapter_lists_primary_shortcuts(self):
+        chapter = HELP_CHAPTERS_BY_ID["keyboard-shortcuts"]
+
+        self.assertIn("Bulk Attach Audio Files", chapter.content_html)
+        self.assertIn("Derivative Ledger", chapter.content_html)
+        self.assertIn("Ctrl+Alt+V", chapter.content_html)
+        self.assertIn("F1", chapter.content_html)
 
     def test_help_chapters_describe_track_first_governed_creation(self):
         overview = HELP_CHAPTERS_BY_ID["overview"]

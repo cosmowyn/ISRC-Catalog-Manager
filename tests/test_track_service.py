@@ -59,6 +59,30 @@ def make_track_conn():
             FOREIGN KEY (track_id) REFERENCES Tracks(id) ON DELETE CASCADE,
             FOREIGN KEY (artist_id) REFERENCES Artists(id) ON DELETE RESTRICT
         );
+        CREATE TABLE AssetVersions (
+            id INTEGER PRIMARY KEY,
+            track_id INTEGER,
+            release_id INTEGER,
+            asset_type TEXT NOT NULL,
+            filename TEXT NOT NULL,
+            stored_path TEXT,
+            storage_mode TEXT,
+            file_blob BLOB,
+            checksum_sha256 TEXT,
+            duration_sec INTEGER,
+            sample_rate INTEGER,
+            bit_depth INTEGER,
+            format TEXT,
+            derived_from_asset_id INTEGER,
+            approved_for_use INTEGER NOT NULL DEFAULT 0,
+            primary_flag INTEGER NOT NULL DEFAULT 0,
+            version_status TEXT,
+            notes TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (track_id) REFERENCES Tracks(id) ON DELETE CASCADE,
+            FOREIGN KEY (derived_from_asset_id) REFERENCES AssetVersions(id) ON DELETE SET NULL
+        );
         """
     )
     return conn
@@ -981,6 +1005,101 @@ class TrackServiceTests(unittest.TestCase):
         peer_bytes, _ = self.service.fetch_media_bytes(peer_track, "album_art")
         self.assertEqual(lead_bytes, b"replacement-art")
         self.assertEqual(peer_bytes, b"replacement-art")
+
+    def test_create_track_with_audio_creates_primary_asset_version(self):
+        audio_path = self._create_media_file("primary-master.wav", b"RIFFprimarymaster")
+
+        track_id = self.service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00059",
+                track_title="Asset Synced Song",
+                artist_name="Main Artist",
+                additional_artists=[],
+                album_title="Asset Album",
+                release_date="2026-03-13",
+                track_length_sec=245,
+                iswc=None,
+                upc=None,
+                genre=None,
+                audio_file_source_path=str(audio_path),
+                audio_file_storage_mode=STORAGE_MODE_DATABASE,
+            )
+        )
+
+        assets = self.service.asset_service.list_assets(track_id=track_id)
+        self.assertEqual(len(assets), 1)
+        asset = assets[0]
+        self.assertEqual(asset.asset_type, "main_master")
+        self.assertTrue(asset.primary_flag)
+        self.assertTrue(asset.approved_for_use)
+        self.assertEqual(asset.storage_mode, STORAGE_MODE_DATABASE)
+        self.assertEqual(asset.version_status, "approved")
+        asset_bytes, _mime = self.service.asset_service.fetch_asset_bytes(asset.id)
+        self.assertEqual(asset_bytes, b"RIFFprimarymaster")
+
+    def test_set_media_path_versions_existing_primary_audio_asset_when_file_changes(self):
+        track_id = self.service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00060",
+                track_title="Versioned Asset Song",
+                artist_name="Main Artist",
+                additional_artists=[],
+                album_title="Versioned Album",
+                release_date="2026-03-13",
+                track_length_sec=245,
+                iswc=None,
+                upc=None,
+                genre=None,
+            )
+        )
+        first_audio = self._create_media_file("version-one.wav", b"RIFFversionone")
+        second_audio = self._create_media_file("version-two.wav", b"RIFFversiontwo")
+
+        self.service.set_media_path(track_id, "audio_file", first_audio)
+        first_asset = self.service.asset_service.list_assets(track_id=track_id)[0]
+
+        self.service.set_media_path(track_id, "audio_file", second_audio)
+
+        assets = self.service.asset_service.list_assets(track_id=track_id)
+        self.assertEqual(len(assets), 2)
+        current_asset = next(asset for asset in assets if asset.primary_flag)
+        prior_asset = next(asset for asset in assets if not asset.primary_flag)
+        self.assertEqual(current_asset.derived_from_asset_id, first_asset.id)
+        self.assertEqual(prior_asset.id, first_asset.id)
+        current_bytes, _mime = self.service.asset_service.fetch_asset_bytes(current_asset.id)
+        prior_bytes, _mime = self.service.asset_service.fetch_asset_bytes(prior_asset.id)
+        self.assertEqual(current_bytes, b"RIFFversiontwo")
+        self.assertEqual(prior_bytes, b"RIFFversionone")
+
+    def test_convert_audio_storage_mode_updates_linked_primary_asset_without_new_version(self):
+        audio_path = self._create_media_file("mode-shift.wav", b"RIFFmodeshift")
+        track_id = self.service.create_track(
+            TrackCreatePayload(
+                isrc="NL-ABC-26-00061",
+                track_title="Storage Mode Sync",
+                artist_name="Main Artist",
+                additional_artists=[],
+                album_title="Storage Album",
+                release_date="2026-03-13",
+                track_length_sec=245,
+                iswc=None,
+                upc=None,
+                genre=None,
+                audio_file_source_path=str(audio_path),
+            )
+        )
+
+        original_asset = self.service.asset_service.list_assets(track_id=track_id)[0]
+
+        self.service.convert_media_storage_mode(track_id, "audio_file", STORAGE_MODE_DATABASE)
+
+        assets = self.service.asset_service.list_assets(track_id=track_id)
+        self.assertEqual(len(assets), 1)
+        updated_asset = assets[0]
+        self.assertEqual(updated_asset.id, original_asset.id)
+        self.assertEqual(updated_asset.storage_mode, STORAGE_MODE_DATABASE)
+        updated_bytes, _mime = self.service.asset_service.fetch_asset_bytes(updated_asset.id)
+        self.assertEqual(updated_bytes, b"RIFFmodeshift")
 
     def test_clearing_shared_album_art_allows_former_slave_to_upload_again(self):
         lead_track = self.service.create_track(

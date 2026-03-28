@@ -12,6 +12,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
 
+from isrc_manager.assets import AssetService
 from isrc_manager.domain.codes import is_blank, to_compact_isrc
 from isrc_manager.domain.standard_fields import standard_media_specs_by_key
 from isrc_manager.file_storage import (
@@ -246,6 +247,7 @@ class TrackService:
         self.data_root = Path(data_root) if data_root is not None else None
         self.media_root = self.data_root / "track_media" if self.data_root is not None else None
         self.media_store = ManagedFileStorage(data_root=data_root, relative_root="track_media")
+        self.asset_service = AssetService(self.conn, data_root)
         self.require_governed_creation = bool(require_governed_creation)
         self._ensure_storage_columns()
 
@@ -1037,6 +1039,21 @@ class TrackService:
             except Exception:
                 pass
 
+    def _sync_audio_asset_attachment(
+        self,
+        track_id: int,
+        *,
+        source_path: str | Path,
+        storage_mode: str | None,
+        cursor: sqlite3.Cursor,
+    ) -> None:
+        self.asset_service.sync_track_audio_attachment(
+            track_id=int(track_id),
+            source_path=source_path,
+            storage_mode=storage_mode,
+            cursor=cursor,
+        )
+
     @staticmethod
     def _format_album_art_owner_label(track_id: int | None, track_title: str | None) -> str:
         if track_id is None:
@@ -1230,6 +1247,15 @@ class TrackService:
             size_bytes=size_bytes,
             cursor=cur,
         )
+        if media_key == "audio_file":
+            self._sync_audio_asset_attachment(
+                track_id,
+                source_path=source_path,
+                storage_mode=normalize_storage_mode(
+                    storage_mode, default=STORAGE_MODE_MANAGED_FILE
+                ),
+                cursor=cur,
+            )
         self._delete_unreferenced_media_files([str(stale_meta.get("path") or "")], cursor=cur)
         return self._normalize_media_meta(
             rel_path,
@@ -1335,6 +1361,23 @@ class TrackService:
             )
         else:
             raise FileNotFoundError(f"{media_key} for track {track_id}")
+        if media_key == "audio_file":
+            asset_source_path = None
+            if rel_path:
+                resolved_new_path = self.resolve_media_path(rel_path)
+                if resolved_new_path is not None and resolved_new_path.exists():
+                    asset_source_path = resolved_new_path
+            if asset_source_path is None and stale_path:
+                resolved_stale_path = self.resolve_media_path(stale_path)
+                if resolved_stale_path is not None and resolved_stale_path.exists():
+                    asset_source_path = resolved_stale_path
+            if asset_source_path is not None:
+                self._sync_audio_asset_attachment(
+                    int(track_id),
+                    source_path=asset_source_path,
+                    storage_mode=clean_mode,
+                    cursor=cur,
+                )
         if stale_path and stale_path != str(rel_path or ""):
             self._delete_unreferenced_media_files([stale_path], cursor=cur)
         return self.get_media_meta(track_id, media_key, cursor=cur)

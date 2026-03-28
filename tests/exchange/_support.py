@@ -862,9 +862,13 @@ class ExchangeServiceTestCase(unittest.TestCase):
             audio_ref = new_conn.execute("SELECT audio_file_path FROM Tracks").fetchone()[0]
             track_art_meta = new_service.track_service.get_media_meta(1, "album_art")
             release_art_ref = new_conn.execute("SELECT artwork_path FROM Releases").fetchone()[0]
+            imported_assets = new_service.track_service.asset_service.list_assets(track_id=1)
             self.assertTrue(str(audio_ref or "").strip())
             self.assertTrue(str(track_art_meta.get("path") or "").strip())
             self.assertTrue(str(release_art_ref or "").strip())
+            self.assertEqual(len(imported_assets), 1)
+            self.assertEqual(imported_assets[0].asset_type, "main_master")
+            self.assertTrue(imported_assets[0].primary_flag)
         finally:
             new_conn.close()
 
