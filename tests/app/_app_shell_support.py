@@ -35,10 +35,12 @@ from tests.contract_templates._support import (
 from tests.qt_test_helpers import pump_events, require_qapplication, wait_for
 
 try:
-    from PySide6.QtCore import QDate
+    from PySide6.QtCore import QBuffer, QDate, QIODevice, QPoint, Qt
+    from PySide6.QtGui import QColor, QImage
     from PySide6.QtWidgets import QScrollArea, QTabBar
 
     import ISRC_manager as app_module
+    from isrc_manager.qss_reference import collect_qss_reference_entries
 except Exception as exc:  # pragma: no cover - environment-specific fallback
     app_module = None
     APP_IMPORT_ERROR = exc
@@ -190,6 +192,26 @@ class _FakeStartupSplashController:
         self.current_progress = max(self.current_progress, 100)
         self.current_message = startup_phase_label(StartupPhase.READY)
         self.finish_calls.append(window)
+
+
+class _FakeWheelEvent:
+    def __init__(self, *, angle_x: int = 0, angle_y: int = 0, pixel_x: int = 0, pixel_y: int = 0):
+        self._angle_delta = QPoint(angle_x, angle_y)
+        self._pixel_delta = QPoint(pixel_x, pixel_y)
+        self.accepted = False
+        self.ignored = False
+
+    def angleDelta(self):
+        return self._angle_delta
+
+    def pixelDelta(self):
+        return self._pixel_delta
+
+    def accept(self):
+        self.accepted = True
+
+    def ignore(self):
+        self.ignored = True
 
 
 class AppShellTestCase(unittest.TestCase):
@@ -423,6 +445,53 @@ class AppShellTestCase(unittest.TestCase):
             handle.setframerate(44100)
             handle.writeframes(b"\x00\x00" * frame_count)
         return self._create_media_file(name, buffer.getvalue())
+
+    def _create_png_file(self, name: str, *, color: str = "#3A7AFE", size: int = 48) -> Path:
+        image = QImage(size, size, QImage.Format_ARGB32)
+        image.fill(QColor(color))
+        buffer = QBuffer()
+        buffer.open(QIODevice.WriteOnly)
+        image.save(buffer, "PNG")
+        return self._create_media_file(name, bytes(buffer.data()))
+
+    def _attach_standard_media(
+        self,
+        track_id: int,
+        *,
+        audio_path: Path | None = None,
+        album_art_path: Path | None = None,
+        storage_mode: str = STORAGE_MODE_DATABASE,
+    ) -> None:
+        if audio_path is not None:
+            self.window.track_set_media(
+                track_id,
+                "audio_file",
+                str(audio_path),
+                storage_mode=storage_mode,
+            )
+        if album_art_path is not None:
+            self.window.track_set_media(
+                track_id,
+                "album_art",
+                str(album_art_path),
+                storage_mode=storage_mode,
+            )
+        self.window.conn.commit()
+        self.window.refresh_table_preserve_view(focus_id=track_id)
+
+    def _open_audio_preview_dialog(self, track_id: int):
+        self.window._preview_standard_media_for_track(track_id, "audio_file")
+        pump_events()
+        return self.window.audio_preview_dialog
+
+    def _open_image_preview_dialog(self, track_id: int):
+        self.window._preview_standard_media_for_track(track_id, "album_art")
+        pump_events()
+        return self.window.image_preview_dialog
+
+    @staticmethod
+    def _label_texts(widget) -> list[str]:
+        return [label.text() for label in widget.findChildren(app_module.QLabel)]
 
     def _table_row_for_track_id(self, track_id: int) -> int:
         for row in range(self.window.table.rowCount()):
@@ -5561,6 +5630,382 @@ class AppShellTestCase(unittest.TestCase):
         self.assertIsInstance(temp_path, Path)
         assert isinstance(temp_path, Path)
         self.assertFalse(temp_path.exists())
+
+    def case_audio_preview_media_layout_uses_now_playing_header_and_artwork(self):
+        primary_track = self._create_track(
+            index=9101,
+            title="Aurora Signal",
+            album_title="Preview Layout A",
+        )
+        secondary_track = self._create_track(
+            index=9102,
+            title="Bare Echo",
+            album_title="Preview Layout B",
+        )
+        self._attach_standard_media(
+            primary_track,
+            audio_path=self._create_wav_file("aurora-signal.wav"),
+            album_art_path=self._create_png_file("aurora-signal.png"),
+        )
+        self._attach_standard_media(
+            secondary_track,
+            audio_path=self._create_wav_file("bare-echo.wav"),
+        )
+
+        dialog = self._open_audio_preview_dialog(primary_track)
+
+        self.assertEqual(dialog.title_label.text(), "Aurora Signal")
+        self.assertEqual(dialog.artist_label.text(), "Moonwake")
+        self.assertEqual(dialog.album_label.text(), "Album · Preview Layout A")
+        self.assertTrue(dialog.artwork_container.isVisible())
+
+        for object_name, symbol in (
+            ("audioPreviewPreviousButton", "|◀"),
+            ("audioPreviewRewindButton", "◀◀"),
+            ("audioPreviewPlayButton", "▶"),
+            ("audioPreviewPauseButton", "▌▌"),
+            ("audioPreviewStopButton", "■"),
+            ("audioPreviewForwardButton", "▶▶"),
+            ("audioPreviewNextButton", "▶|"),
+        ):
+            button = dialog.findChild(app_module.QToolButton, object_name)
+            self.assertIsNotNone(button)
+            self.assertEqual(button.text(), symbol)
+            self.assertEqual(button.property("role"), "mediaTransportButton")
+
+        label_texts = self._label_texts(dialog)
+        for obsolete_text in (
+            "Audio Preview",
+            "Waveform Preview",
+            "Playback Controls",
+            "Listen back to the stored audio media for Aurora Signal and inspect its waveform when available.",
+            "The waveform is generated from the stored audio file when supported by the current runtime.",
+            "Use the transport buttons or the keyboard shortcuts to play, pause, stop, and scrub through the preview.",
+        ):
+            self.assertNotIn(obsolete_text, label_texts)
+
+        dialog.open_track_preview(
+            secondary_track,
+            self.window._audio_preview_source_spec_for_standard_media("audio_file"),
+            autoplay=False,
+        )
+        pump_events()
+        self.assertTrue(dialog.artwork_container.isHidden())
+
+    def case_audio_preview_layout_groups_and_theme_surfaces_are_exposed(self):
+        track_id = self._create_track(
+            index=9110,
+            title="Grouped Preview",
+            album_title="Layout Followup",
+        )
+        self._attach_standard_media(
+            track_id,
+            audio_path=self._create_wav_file("grouped-preview.wav"),
+            album_art_path=self._create_png_file("grouped-preview.png"),
+        )
+
+        dialog = self._open_audio_preview_dialog(track_id)
+        metadata_group = dialog.findChild(app_module.QGroupBox, "audioPreviewMetadataGroup")
+        waveform_panel = dialog.findChild(app_module.QFrame, "audioPreviewWaveformPanel")
+        playback_group = dialog.findChild(app_module.QGroupBox, "audioPreviewPlaybackGroup")
+        export_group = dialog.findChild(app_module.QGroupBox, "audioPreviewExportGroup")
+
+        self.assertIsNotNone(metadata_group)
+        self.assertIsNotNone(waveform_panel)
+        self.assertIsNotNone(playback_group)
+        self.assertIsNotNone(export_group)
+        self.assertIs(dialog.layout().itemAt(0).widget(), metadata_group)
+        self.assertEqual(dialog.wave.minimumHeight(), 100)
+        self.assertEqual(dialog.wave.maximumHeight(), 100)
+        self.assertEqual(dialog.artwork_label.height(), 200)
+        self.assertEqual(dialog.artwork_label.width(), 200)
+        self.assertTrue(playback_group.isAncestorOf(dialog.auto_advance_check))
+        self.assertEqual(dialog.album_label.text(), "Album · Layout Followup")
+        self.assertEqual(dialog.play_button.styleSheet(), "")
+        self.assertEqual(dialog.play_button.font().family(), dialog.font().family())
+
+        self.assertIs(dialog.layout().itemAt(2).widget(), dialog.playback_status_panel)
+        status_geom = dialog.playback_status_panel.geometry()
+        waveform_geom = waveform_panel.geometry()
+        self.assertGreaterEqual(status_geom.top(), waveform_geom.bottom())
+        self.assertEqual(dialog._label_time.parentWidget(), dialog.playback_status_panel)
+        self.assertEqual(dialog._slider.parentWidget(), dialog.playback_status_panel)
+
+        playback_layout = playback_group.layout()
+        self.assertIsNotNone(playback_layout)
+        transport_row = playback_layout.itemAt(0).layout()
+        self.assertIsNotNone(transport_row)
+        self.assertIs(transport_row.itemAt(0).widget(), dialog.previous_button)
+        footer_row = playback_layout.itemAt(1).layout()
+        self.assertIsNotNone(footer_row)
+        self.assertIs(footer_row.itemAt(0).widget(), dialog.auto_advance_check)
+
+        dialog.resize(1600, 1000)
+        pump_events()
+        self.assertLessEqual(
+            playback_group.height(),
+            playback_group.sizeHint().height() + 24,
+        )
+        self.assertLessEqual(
+            export_group.height(),
+            export_group.sizeHint().height() + 24,
+        )
+        self.assertLessEqual(
+            abs(playback_group.geometry().top() - export_group.geometry().top()),
+            2,
+        )
+        self.assertFalse(waveform_panel.geometry().intersects(playback_group.geometry()))
+        self.assertFalse(waveform_panel.geometry().intersects(export_group.geometry()))
+        self.assertFalse(dialog.artwork_container.geometry().intersects(playback_group.geometry()))
+        self.assertFalse(dialog.artwork_container.geometry().intersects(export_group.geometry()))
+        wave_center = dialog.wave.mapTo(dialog, dialog.wave.rect().center())
+        artwork_center = dialog.artwork_label.mapTo(dialog, dialog.artwork_label.rect().center())
+        self.assertLessEqual(abs(wave_center.y() - artwork_center.y()), 2)
+
+        dialog.resize(dialog.minimumWidth(), dialog.minimumHeight())
+        pump_events()
+        self.assertFalse(waveform_panel.geometry().intersects(playback_group.geometry()))
+        self.assertFalse(waveform_panel.geometry().intersects(export_group.geometry()))
+        self.assertFalse(dialog.artwork_container.geometry().intersects(playback_group.geometry()))
+        self.assertFalse(dialog.artwork_container.geometry().intersects(export_group.geometry()))
+
+        selectors = {entry.selector for entry in collect_qss_reference_entries([dialog])}
+        for selector in (
+            "#audioPreviewDialog",
+            "#audioPreviewMetadataGroup",
+            "#audioPreviewWaveformPanel",
+            "#audioPreviewPlaybackStatusPanel",
+            "#audioPreviewPlaybackGroup",
+            "#audioPreviewExportGroup",
+            "#audioPreviewArtworkContainer",
+            "#audioPreviewAlbumLabel",
+            "#audioPreviewTimeLabel",
+            "#audioPreviewAutoAdvanceCheck",
+            '[role="mediaTransportButton"]',
+            'QToolButton[role="mediaTransportButton"]',
+            '[role="mediaToggle"]',
+            'QCheckBox[role="mediaToggle"]',
+            '[role="mediaExportButton"]',
+            'QToolButton[role="mediaExportButton"]',
+        ):
+            self.assertIn(selector, selectors)
+
+    def case_audio_preview_navigation_follows_visible_catalog_order_and_auto_advance(self):
+        first_track = self._create_track(index=9103, title="Zulu Drift", album_title="Order Tests")
+        middle_track = self._create_track(index=9104, title="Echo Bloom", album_title="Order Tests")
+        last_track = self._create_track(index=9105, title="Aurora Fade", album_title="Order Tests")
+        for track_id, filename in (
+            (first_track, "zulu-drift.wav"),
+            (middle_track, "echo-bloom.wav"),
+            (last_track, "aurora-fade.wav"),
+        ):
+            self._attach_standard_media(
+                track_id,
+                audio_path=self._create_wav_file(filename),
+            )
+
+        title_column = self.window._column_index_by_header("Track Title")
+        self.window.table.sortItems(title_column, Qt.AscendingOrder)
+        pump_events()
+
+        source_spec = self.window._audio_preview_source_spec_for_standard_media("audio_file")
+        expected_order = self.window._audio_preview_navigation_track_ids(source_spec)
+        dialog = self._open_audio_preview_dialog(expected_order[1])
+
+        self.assertEqual(dialog._track_order, expected_order)
+        self.assertTrue(dialog.auto_advance_check.isChecked())
+
+        dialog._go_to_previous_track()
+        self.assertEqual(dialog._current_track_id, expected_order[0])
+        self.assertFalse(dialog.previous_button.isEnabled())
+        self.assertTrue(dialog.next_button.isEnabled())
+
+        dialog._go_to_next_track()
+        self.assertEqual(dialog._current_track_id, expected_order[1])
+
+        dialog.open_track_preview(expected_order[-1], source_spec, autoplay=False)
+        pump_events()
+        self.assertFalse(dialog.next_button.isEnabled())
+
+        end_status = getattr(
+            app_module.QMediaPlayer,
+            "MediaStatus",
+            app_module.QMediaPlayer,
+        ).EndOfMedia
+
+        dialog.open_track_preview(expected_order[1], source_spec, autoplay=False)
+        pump_events()
+        dialog._on_media_status_changed(end_status)
+        self.assertEqual(dialog._current_track_id, expected_order[2])
+
+        dialog.open_track_preview(expected_order[1], source_spec, autoplay=False)
+        dialog.auto_advance_check.setChecked(False)
+        pump_events()
+        dialog._on_media_status_changed(end_status)
+        self.assertEqual(dialog._current_track_id, expected_order[1])
+
+    def case_audio_preview_waveform_wheel_scrub_and_shortcuts_are_wired(self):
+        track_id = self._create_track(
+            index=9106,
+            title="Wheel Logic",
+            album_title="Input Tests",
+        )
+        self._attach_standard_media(
+            track_id,
+            audio_path=self._create_wav_file("wheel-logic.wav"),
+        )
+        dialog = self._open_audio_preview_dialog(track_id)
+
+        captured_deltas: list[int] = []
+        wave = app_module.WaveformWidget()
+        wave.scrubRequested.connect(captured_deltas.append)
+
+        forward_event = _FakeWheelEvent(angle_y=-120)
+        wave.wheelEvent(forward_event)
+        self.assertTrue(forward_event.accepted)
+        self.assertEqual(captured_deltas[-1], 1000)
+
+        backward_event = _FakeWheelEvent(angle_y=120)
+        wave.wheelEvent(backward_event)
+        self.assertTrue(backward_event.accepted)
+        self.assertEqual(captured_deltas[-1], -1000)
+
+        shortcut_texts = {
+            shortcut.key().toString() for shortcut in dialog.findChildren(app_module.QShortcut)
+        }
+        for expected in (
+            "Space",
+            "Left",
+            "Right",
+            "Shift+Left",
+            "Shift+Right",
+            "Meta+Left",
+            "Meta+Right",
+        ):
+            self.assertIn(expected, shortcut_texts)
+
+    def case_audio_preview_export_controls_route_to_existing_methods(self):
+        track_id = self._create_track(
+            index=9107,
+            title="Export Controls",
+            album_title="Export Controls",
+        )
+        self._attach_standard_media(
+            track_id,
+            audio_path=self._create_wav_file("export-controls.wav"),
+        )
+
+        for action_name in (
+            "write_tags_to_exported_audio_action",
+            "convert_selected_audio_action",
+            "export_authenticity_watermarked_audio_action",
+            "export_authenticity_provenance_audio_action",
+            "export_forensic_watermarked_audio_action",
+        ):
+            action = getattr(self.window, action_name, None)
+            if action is not None:
+                action.setEnabled(True)
+
+        with (
+            mock.patch.object(
+                self.window, "_export_standard_media_for_track"
+            ) as export_current_mock,
+            mock.patch.object(self.window, "export_catalog_audio_copies") as export_copies_mock,
+            mock.patch.object(self.window, "convert_selected_audio") as export_derivatives_mock,
+            mock.patch.object(
+                self.window,
+                "export_authenticity_watermarked_audio",
+            ) as authentic_mock,
+            mock.patch.object(
+                self.window,
+                "export_authenticity_provenance_audio",
+            ) as provenance_mock,
+            mock.patch.object(
+                self.window,
+                "export_forensic_watermarked_audio",
+            ) as forensic_mock,
+        ):
+            dialog = self._open_audio_preview_dialog(track_id)
+
+            actions = {action.text(): action for action in dialog.export_menu.actions()}
+            self.assertIn("Export Current Audio…", actions)
+            self.assertIn("Export Catalog Audio Copies…", actions)
+            self.assertIn("Export Audio Derivatives…", actions)
+            self.assertIn("Export Authentic Masters…", actions)
+            self.assertIn("Export Provenance Copies…", actions)
+            self.assertIn("Export Forensic Watermarked Audio…", actions)
+
+            actions["Export Current Audio…"].trigger()
+            export_current_mock.assert_called_once_with(track_id, "audio_file")
+
+            actions["Export Catalog Audio Copies…"].trigger()
+            export_copies_mock.assert_called_once_with([track_id])
+
+            actions["Export Audio Derivatives…"].trigger()
+            export_derivatives_mock.assert_called_once_with([track_id])
+
+            actions["Export Authentic Masters…"].trigger()
+            authentic_mock.assert_called_once_with([track_id])
+
+            actions["Export Provenance Copies…"].trigger()
+            provenance_mock.assert_called_once_with([track_id])
+
+            actions["Export Forensic Watermarked Audio…"].trigger()
+            forensic_mock.assert_called_once_with([track_id])
+
+    def case_media_preview_windows_are_singleton_top_level_windows(self):
+        audio_track_one = self._create_track(
+            index=9108,
+            title="Singleton One",
+            album_title="Singleton Tests One",
+        )
+        audio_track_two = self._create_track(
+            index=9109,
+            title="Singleton Two",
+            album_title="Singleton Tests Two",
+        )
+        for track_id, audio_name, art_name, color in (
+            (audio_track_one, "singleton-one.wav", "singleton-one.png", "#C75B39"),
+            (audio_track_two, "singleton-two.wav", "singleton-two.png", "#2C9A73"),
+        ):
+            self._attach_standard_media(
+                track_id,
+                audio_path=self._create_wav_file(audio_name),
+                album_art_path=self._create_png_file(art_name, color=color),
+            )
+
+        audio_dialog = self._open_audio_preview_dialog(audio_track_one)
+        audio_dialog.showMinimized()
+        pump_events()
+        reopened_audio_dialog = self._open_audio_preview_dialog(audio_track_two)
+        self.assertIs(audio_dialog, reopened_audio_dialog)
+        self.assertTrue(reopened_audio_dialog.isWindow())
+        self.assertFalse(reopened_audio_dialog.isModal())
+        self.assertIsNone(reopened_audio_dialog.parentWidget())
+        self.assertTrue(bool(reopened_audio_dialog.windowFlags() & Qt.Window))
+        self.assertTrue(bool(reopened_audio_dialog.windowFlags() & Qt.WindowMinimizeButtonHint))
+        self.assertIsNotNone(reopened_audio_dialog.windowHandle())
+        self.assertEqual(reopened_audio_dialog._current_track_id, audio_track_two)
+        self.assertEqual(reopened_audio_dialog.title_label.text(), "Singleton Two")
+
+        audio_dialog.close()
+        pump_events()
+        reopened_after_close = self._open_audio_preview_dialog(audio_track_one)
+        self.assertIs(audio_dialog, reopened_after_close)
+        self.assertFalse(reopened_after_close.isHidden())
+
+        image_dialog = self._open_image_preview_dialog(audio_track_one)
+        image_dialog.showMinimized()
+        pump_events()
+        reopened_image_dialog = self._open_image_preview_dialog(audio_track_two)
+        self.assertIs(image_dialog, reopened_image_dialog)
+        self.assertTrue(reopened_image_dialog.isWindow())
+        self.assertFalse(reopened_image_dialog.isModal())
+        self.assertIsNone(reopened_image_dialog.parentWidget())
+        self.assertTrue(bool(reopened_image_dialog.windowFlags() & Qt.Window))
+        self.assertTrue(bool(reopened_image_dialog.windowFlags() & Qt.WindowMinimizeButtonHint))
+        self.assertIsNotNone(reopened_image_dialog.windowHandle())
+        self.assertIn("Singleton Two", reopened_image_dialog.windowTitle())
 
 
 if __name__ == "__main__":

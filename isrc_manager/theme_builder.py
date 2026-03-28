@@ -2069,6 +2069,30 @@ def build_theme_stylesheet(raw_values: dict[str, object] | None = None) -> str:
         color: {theme["button_disabled_fg"]};
         border-color: {theme["button_disabled_border"]};
     }}
+    QToolButton[role="mediaTransportButton"],
+    QToolButton[role="mediaExportButton"] {{
+        color: {theme["window_fg"]};
+    }}
+    QToolButton[role="mediaTransportButton"]:hover,
+    QToolButton[role="mediaExportButton"]:hover {{
+        color: {theme["window_fg"]};
+    }}
+    QToolButton[role="mediaTransportButton"]:pressed,
+    QToolButton[role="mediaTransportButton"]:checked,
+    QToolButton[role="mediaExportButton"]:pressed,
+    QToolButton[role="mediaExportButton"]:checked {{
+        color: {theme["window_fg"]};
+    }}
+    QToolButton[role="mediaTransportButton"]:disabled,
+    QToolButton[role="mediaExportButton"]:disabled {{
+        color: {theme["secondary_text"]};
+    }}
+    QCheckBox[role="mediaToggle"] {{
+        color: {theme["window_fg"]};
+    }}
+    QCheckBox[role="mediaToggle"]:disabled {{
+        color: {theme["secondary_text"]};
+    }}
     QToolButton[role="helpButton"] {{
         min-width: {int(theme["help_button_size"])}px;
         max-width: {int(theme["help_button_size"])}px;

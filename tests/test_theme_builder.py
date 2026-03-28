@@ -197,7 +197,7 @@ class ThemeBuilderTests(unittest.TestCase):
                 "window_fg": "#F9FAFB",
                 "accent": "#F97316",
                 "button_bg": "#374151",
-                "button_fg": "#F9FAFB",
+                "button_fg": "#111827",
                 "custom_qss": "QLabel#marker { color: #123456; }",
             }
         )
@@ -224,6 +224,9 @@ class ThemeBuilderTests(unittest.TestCase):
         self.assertIn("QStatusBar", stylesheet)
         self.assertIn('QFrame[role="compactControlGroup"]', stylesheet)
         self.assertIn('QWidget[role="compactControlGroup"]', stylesheet)
+        self.assertIn('QToolButton[role="mediaTransportButton"]', stylesheet)
+        self.assertIn('QToolButton[role="mediaExportButton"]', stylesheet)
+        self.assertIn('QCheckBox[role="mediaToggle"]', stylesheet)
         self.assertIn("QComboBox::drop-down", stylesheet)
         self.assertIn("QComboBox::down-arrow", stylesheet)
         self.assertIn("QComboBox QAbstractItemView", stylesheet)

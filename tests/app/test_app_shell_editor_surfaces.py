@@ -72,6 +72,24 @@ class AppShellEditorSurfaceTests(AppShellTestCase):
     test_verify_audio_authenticity_can_use_selected_database_audio = (
         AppShellTestCase.case_verify_audio_authenticity_can_use_selected_database_audio
     )
+    test_audio_preview_media_layout_uses_now_playing_header_and_artwork = (
+        AppShellTestCase.case_audio_preview_media_layout_uses_now_playing_header_and_artwork
+    )
+    test_audio_preview_layout_groups_and_theme_surfaces_are_exposed = (
+        AppShellTestCase.case_audio_preview_layout_groups_and_theme_surfaces_are_exposed
+    )
+    test_audio_preview_navigation_follows_visible_catalog_order_and_auto_advance = (
+        AppShellTestCase.case_audio_preview_navigation_follows_visible_catalog_order_and_auto_advance
+    )
+    test_audio_preview_waveform_wheel_scrub_and_shortcuts_are_wired = (
+        AppShellTestCase.case_audio_preview_waveform_wheel_scrub_and_shortcuts_are_wired
+    )
+    test_audio_preview_export_controls_route_to_existing_methods = (
+        AppShellTestCase.case_audio_preview_export_controls_route_to_existing_methods
+    )
+    test_media_preview_windows_are_singleton_top_level_windows = (
+        AppShellTestCase.case_media_preview_windows_are_singleton_top_level_windows
+    )
 
 
 del AppShellTestCase

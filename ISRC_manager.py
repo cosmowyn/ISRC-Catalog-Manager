@@ -55,6 +55,7 @@ from PySide6.QtGui import (
     QImage,
     QKeySequence,
     QPixmap,
+    QShortcut,
     QStandardItem,
     QStandardItemModel,
 )
@@ -80,6 +81,7 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QLabel,
     QLineEdit,
+    QLayout,
     QListView,
     QListWidget,
     QListWidgetItem,
@@ -797,6 +799,7 @@ class ApplicationSettingsDialog(QDialog):
         root = QVBoxLayout(self)
         root.setContentsMargins(18, 18, 18, 18)
         root.setSpacing(14)
+        root.setSizeConstraint(QLayout.SetMinimumSize)
 
         help_row = QHBoxLayout()
         help_row.addStretch(1)
@@ -1992,13 +1995,12 @@ class ApplicationSettingsDialog(QDialog):
         self.qss_reference_table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.qss_reference_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.qss_reference_table.verticalHeader().setVisible(False)
-        self.qss_reference_table.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeToContents
-        )
-        self.qss_reference_table.horizontalHeader().setSectionResizeMode(
-            1, QHeaderView.ResizeToContents
-        )
-        self.qss_reference_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        qss_reference_header = self.qss_reference_table.horizontalHeader()
+        qss_reference_header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        # Keep the selector browser compact even as the reference catalog grows.
+        qss_reference_header.setSectionResizeMode(1, QHeaderView.Interactive)
+        qss_reference_header.setSectionResizeMode(2, QHeaderView.Stretch)
+        self.qss_reference_table.setColumnWidth(1, 320)
         self.qss_reference_table.itemSelectionChanged.connect(self._update_qss_reference_actions)
         self.qss_reference_table.doubleClicked.connect(
             lambda _index: self._insert_selected_qss_selector()
@@ -6102,6 +6104,8 @@ class App(QMainWindow):
         self.session_history_manager = SessionHistoryManager(self.history_dir)
         self.history_dialog = None
         self.help_dialog = None
+        self.audio_preview_dialog = None
+        self.image_preview_dialog = None
         self.auto_snapshot_timer = QTimer(self)
         self.auto_snapshot_timer.setSingleShot(False)
         self.auto_snapshot_timer.timeout.connect(self._on_auto_snapshot_timer)
@@ -21404,17 +21408,41 @@ class App(QMainWindow):
             if not self.cf_has_blob(track_id, field["id"]):
                 return
 
-            data = self.cf_fetch_blob(track_id, field["id"])  # must return bytes or memoryview
-            if not data:
-                QMessageBox.information(self, "Preview", "No data stored in this cell.")
-                return
-
-            # Use the actual track title for the preview dialog
+            field_type = str(field.get("field_type") or "").strip().lower()
+            field_name = ""
+            try:
+                field_name = (
+                    self.custom_field_definitions.get_field_name(field["id"])
+                    if self.custom_field_definitions is not None
+                    else ""
+                )
+            except Exception:
+                field_name = str(field.get("field_name") or field.get("name") or "").strip()
             try:
                 track_title = self._get_track_title(track_id) or f"track_{track_id}"
             except Exception:
                 track_title = f"track_{track_id}"
             title = track_title
+            if field_type == "blob_audio":
+                self._open_audio_preview_for_track(
+                    track_id,
+                    self._audio_preview_source_spec_for_custom_field(
+                        field["id"],
+                        field_name=field_name,
+                    ),
+                    autoplay=True,
+                )
+                return
+            data = self.cf_fetch_blob(track_id, field["id"])  # must return bytes or memoryview
+            if not data:
+                QMessageBox.information(self, "Preview", "No data stored in this cell.")
+                return
+            if field_type == "blob_image":
+                preview_title = f"{track_title} — {field_name}" if field_name else track_title
+                self._open_image_preview(
+                    data[0] if isinstance(data, tuple) else data, preview_title
+                )
+                return
             self._preview_blob_bytes(data, title)
         except Exception as e:
             self.conn.rollback()
@@ -21488,126 +21516,267 @@ class App(QMainWindow):
 
         return ""
 
+    def _bring_media_window_to_front(self, window: QDialog | None) -> None:
+        if window is None:
+            return
+        try:
+            if window.parentWidget() is not None:
+                window.setParent(None, window.windowFlags() | Qt.Window)
+            window.setWindowFlag(Qt.Window, True)
+            window.setWindowModality(Qt.NonModal)
+            window.setModal(False)
+        except Exception:
+            pass
+        if window.isMinimized():
+            window.showNormal()
+        else:
+            window.show()
+        try:
+            window.raise_()
+        except Exception:
+            pass
+        try:
+            window.activateWindow()
+        except Exception:
+            pass
+        handle = window.windowHandle()
+        if handle is not None:
+            try:
+                handle.requestActivate()
+            except Exception:
+                pass
+
+    @staticmethod
+    def _audio_preview_source_spec_for_standard_media(media_key: str) -> dict[str, object]:
+        return {
+            "kind": "standard",
+            "media_key": str(media_key or "").strip() or "audio_file",
+        }
+
+    @staticmethod
+    def _audio_preview_source_spec_for_custom_field(
+        field_id: int,
+        *,
+        field_name: str | None = None,
+    ) -> dict[str, object]:
+        return {
+            "kind": "custom",
+            "field_id": int(field_id),
+            "field_name": str(field_name or "").strip(),
+        }
+
+    def _audio_preview_navigation_track_ids(
+        self,
+        source_spec: dict[str, object] | None,
+    ) -> list[int]:
+        visible_ids = self._current_visible_track_ids()
+        if not visible_ids:
+            visible_ids = self._normalize_track_ids(self._selected_track_ids())
+        if not visible_ids and self.catalog_reads is not None:
+            try:
+                visible_ids = [
+                    int(track_id) for track_id, _title in self.catalog_reads.list_tracks()
+                ]
+            except Exception:
+                visible_ids = []
+        if not source_spec:
+            return self._normalize_track_ids(visible_ids)
+        kind = str(source_spec.get("kind") or "").strip().lower()
+        ordered: list[int] = []
+        for track_id in visible_ids:
+            try:
+                if kind == "custom":
+                    field_id = int(source_spec.get("field_id") or 0)
+                    if field_id <= 0 or not self.cf_has_blob(int(track_id), field_id):
+                        continue
+                else:
+                    media_key = str(source_spec.get("media_key") or "audio_file").strip()
+                    if not self.track_has_media(int(track_id), media_key):
+                        continue
+                ordered.append(int(track_id))
+            except Exception:
+                continue
+        return self._normalize_track_ids(ordered)
+
+    def _audio_preview_export_actions_for_track(
+        self,
+        track_id: int,
+        source_spec: dict[str, object] | None,
+        *,
+        parent_widget=None,
+    ) -> list[dict[str, object]]:
+        parent = parent_widget or self
+        title = self._get_track_title(int(track_id)) or f"track_{track_id}"
+        if source_spec is None:
+            return []
+        kind = str(source_spec.get("kind") or "").strip().lower()
+        if kind == "custom":
+            field_id = int(source_spec.get("field_id") or 0)
+            field_name = str(source_spec.get("field_name") or "").strip()
+            if field_id <= 0:
+                return []
+            suggested_basename = f"{title} - {field_name}" if field_name else title
+            return [
+                {
+                    "text": "Export Current Audio…",
+                    "handler": lambda _checked=False, tid=int(
+                        track_id
+                    ), fid=field_id: self.cf_export_blob(
+                        tid,
+                        fid,
+                        parent_widget=parent,
+                        suggested_basename=suggested_basename,
+                    ),
+                }
+            ]
+
+        actions = [
+            {
+                "text": "Export Current Audio…",
+                "handler": lambda _checked=False, tid=int(
+                    track_id
+                ): self._export_standard_media_for_track(
+                    tid,
+                    "audio_file",
+                ),
+            }
+        ]
+        action_specs = (
+            (
+                getattr(self, "write_tags_to_exported_audio_action", None),
+                "Export Catalog Audio Copies…",
+                lambda tid=int(track_id): self.export_catalog_audio_copies([tid]),
+            ),
+            (
+                getattr(self, "convert_selected_audio_action", None),
+                "Export Audio Derivatives…",
+                lambda tid=int(track_id): self.convert_selected_audio([tid]),
+            ),
+            (
+                getattr(self, "export_authenticity_watermarked_audio_action", None),
+                "Export Authentic Masters…",
+                lambda tid=int(track_id): self.export_authenticity_watermarked_audio([tid]),
+            ),
+            (
+                getattr(self, "export_authenticity_provenance_audio_action", None),
+                "Export Provenance Copies…",
+                lambda tid=int(track_id): self.export_authenticity_provenance_audio([tid]),
+            ),
+            (
+                getattr(self, "export_forensic_watermarked_audio_action", None),
+                "Export Forensic Watermarked Audio…",
+                lambda tid=int(track_id): self.export_forensic_watermarked_audio([tid]),
+            ),
+        )
+        for action, text, handler in action_specs:
+            if action is not None and action.isEnabled():
+                actions.append({"text": text, "handler": lambda _checked=False, fn=handler: fn()})
+        return actions
+
+    def _audio_preview_state_for_track(
+        self,
+        track_id: int,
+        source_spec: dict[str, object],
+        *,
+        parent_widget=None,
+    ) -> dict[str, object]:
+        snapshot = None
+        if self.track_service is not None:
+            try:
+                snapshot = self.track_service.fetch_track_snapshot(
+                    int(track_id),
+                    include_media_blobs=False,
+                )
+            except Exception:
+                snapshot = None
+        title = str(
+            (snapshot.track_title if snapshot is not None else None)
+            or self._get_track_title(int(track_id))
+            or f"Track {track_id}"
+        ).strip()
+        artist = str((snapshot.artist_name if snapshot is not None else None) or "").strip()
+        album = str((snapshot.album_title if snapshot is not None else None) or "").strip()
+        artwork = self._effective_artwork_payload_for_track(
+            int(track_id),
+            snapshot=snapshot,
+        )
+        kind = str(source_spec.get("kind") or "").strip().lower()
+        if kind == "custom":
+            field_id = int(source_spec.get("field_id") or 0)
+            data, mime = self.cf_fetch_blob(int(track_id), field_id)
+        else:
+            media_key = str(source_spec.get("media_key") or "audio_file").strip() or "audio_file"
+            data, mime = self.track_fetch_media(int(track_id), media_key)
+        raw_bytes = self._coerce_export_bytes(data[0] if isinstance(data, tuple) else data)
+        track_order = self._audio_preview_navigation_track_ids(source_spec)
+        if int(track_id) not in track_order:
+            track_order = [int(track_id), *track_order]
+        return {
+            "track_id": int(track_id),
+            "track_order": track_order,
+            "title": title,
+            "artist": artist,
+            "album": album,
+            "audio_bytes": raw_bytes,
+            "audio_mime": str(mime or self._detect_mime(raw_bytes) or "audio/wav"),
+            "artwork_payload": artwork,
+            "window_title": f"Audio Preview — {title}",
+            "export_actions": self._audio_preview_export_actions_for_track(
+                int(track_id),
+                source_spec,
+                parent_widget=parent_widget,
+            ),
+        }
+
+    def _audio_preview_state_for_raw_bytes(
+        self,
+        data: bytes,
+        mime: str,
+        title: str,
+        *,
+        parent_widget=None,
+    ) -> dict[str, object]:
+        parent = parent_widget or self
+        raw_bytes = self._coerce_export_bytes(data)
+        clean_mime = str(mime or self._detect_mime(raw_bytes) or "audio/wav")
+        return {
+            "track_id": None,
+            "track_order": [],
+            "title": str(title or "Audio Preview").strip() or "Audio Preview",
+            "artist": "",
+            "album": "",
+            "audio_bytes": raw_bytes,
+            "audio_mime": clean_mime,
+            "artwork_payload": None,
+            "window_title": f"Audio Preview — {title}",
+            "export_actions": [
+                {
+                    "text": "Export Current Audio…",
+                    "handler": lambda _checked=False: self._export_bytes_with_picker(
+                        raw_bytes,
+                        mime=clean_mime,
+                        suggested_basename=title,
+                        parent_widget=parent,
+                        action_label="Export Audio Preview: {filename}",
+                        action_type="file.export_audio_preview",
+                        entity_type="Preview",
+                        entity_id=self._sanitize_filename(title),
+                        payload={"title": title, "mime_type": clean_mime},
+                        dialog_title="Export Audio",
+                    ),
+                }
+            ],
+        }
+
     def _open_image_preview(self, data: bytes, title: str) -> None:
-        img = QImage.fromData(data)
-        if img.isNull():
+        if self.image_preview_dialog is None:
+            self.image_preview_dialog = _ImagePreviewDialog(self, parent=None)
+        try:
+            self.image_preview_dialog.set_preview(data, title)
+        except ValueError:
             QMessageBox.warning(self, "Preview", "Could not decode image data.")
             return
-
-        dlg = QDialog(self)
-        dlg.setWindowTitle(f"Image preview — {title}")
-        dlg.resize(1040, 780)
-        dlg.setMinimumSize(900, 680)
-        _apply_standard_dialog_chrome(dlg, "imagePreviewDialog")
-
-        layout = QVBoxLayout(dlg)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setSpacing(14)
-        _add_standard_dialog_header(
-            layout,
-            dlg,
-            title="Image Preview",
-            subtitle=f"Inspect stored artwork or image media for {title}.",
-            help_topic_id="media-preview",
-        )
-
-        zoom_slider = FocusWheelSlider(Qt.Horizontal)
-        zoom_slider.setRange(10, 400)
-        zoom_value_lbl = QLabel("")
-        zoom_value_lbl.setProperty("role", "statusText")
-        controls_box, controls_layout = _create_standard_section(
-            dlg,
-            "Preview Controls",
-            "Use the zoom slider to inspect the stored image without changing the source file.",
-        )
-        zoom_row = QHBoxLayout()
-        zoom_row.setSpacing(10)
-        zoom_row.addWidget(QLabel("Zoom"), 0)
-        zoom_row.addWidget(zoom_slider, 1)
-        zoom_row.addWidget(zoom_value_lbl, 0)
-        controls_layout.addLayout(zoom_row)
-        layout.addWidget(controls_box)
-
-        # Image area
-        lbl = QLabel()
-        lbl.setAlignment(Qt.AlignCenter)
-        base_pix = QPixmap.fromImage(img)
-
-        sc = QScrollArea()
-        sc.setWidget(lbl)
-        sc.setWidgetResizable(True)
-        sc.setFrameShape(QFrame.NoFrame)
-        preview_box, preview_layout = _create_standard_section(
-            dlg,
-            "Image",
-            "The preview scales to fit the window until you manually set a zoom level.",
-        )
-        preview_layout.addWidget(sc, 1)
-        layout.addWidget(preview_box, 1)
-
-        def fit_percent():
-            avail_w = max(1, sc.viewport().width() - 24)
-            avail_h = max(1, sc.viewport().height() - 24)
-            sx = avail_w / max(1, base_pix.width())
-            sy = avail_h / max(1, base_pix.height())
-            pct = int(max(10, min(100, (min(sx, sy) * 100))))
-            return pct
-
-        current_pct = fit_percent()
-        zoom_slider.setValue(current_pct)
-        zoom_value_lbl.setText(f"{current_pct}%")
-
-        def apply_zoom(pct: int):
-            nonlocal current_pct
-            current_pct = max(10, min(400, int(pct)))
-            zoom_value_lbl.setText(f"{current_pct}%")
-            w = max(1, int(base_pix.width() * (current_pct / 100.0)))
-            h = max(1, int(base_pix.height() * (current_pct / 100.0)))
-            lbl.setPixmap(base_pix.scaled(w, h, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-
-        apply_zoom(current_pct)
-
-        zoom_slider.valueChanged.connect(apply_zoom)
-
-        _user_zoomed = {"touched": False}
-
-        def on_slider_touched():
-            _user_zoomed["touched"] = True
-
-        zoom_slider.sliderPressed.connect(on_slider_touched)
-
-        def on_resize(e):
-            if not _user_zoomed["touched"]:
-                apply_zoom(fit_percent())
-            QDialog.resizeEvent(dlg, e)
-
-        dlg.resizeEvent = on_resize
-
-        detected_mime = self._detect_mime(data) or "image/png"
-        button_row = QHBoxLayout()
-        button_row.setSpacing(8)
-        button_row.addStretch(1)
-        export_btn = QPushButton("Export Image…")
-        export_btn.clicked.connect(
-            lambda: self._export_bytes_with_picker(
-                data,
-                mime=detected_mime,
-                suggested_basename=title,
-                parent_widget=dlg,
-                action_label="Export Image Preview: {filename}",
-                action_type="file.export_image_preview",
-                entity_type="Preview",
-                entity_id=self._sanitize_filename(title),
-                payload={"title": title, "mime_type": detected_mime},
-            )
-        )
-        close_btn = QPushButton("Close")
-        close_btn.clicked.connect(dlg.accept)
-        button_row.addWidget(export_btn)
-        button_row.addWidget(close_btn)
-        layout.addLayout(button_row)
-
-        dlg.exec()
+        self._bring_media_window_to_front(self.image_preview_dialog)
 
     # =============================================================================
     # Copy selection helper
@@ -22475,9 +22644,16 @@ class App(QMainWindow):
 
     def _preview_standard_media_for_track(self, track_id: int, media_key: str):
         try:
+            if media_key == "audio_file":
+                self._open_audio_preview_for_track(
+                    int(track_id),
+                    self._audio_preview_source_spec_for_standard_media(media_key),
+                    autoplay=True,
+                )
+                return
             data, _mime = self.track_fetch_media(track_id, media_key)
             title = self._get_track_title(track_id)
-            self._preview_blob_bytes(data, title)
+            self._open_image_preview(data, title)
         except Exception as e:
             self.conn.rollback()
             self.logger.exception(f"Preview {media_key} failed: {e}")
@@ -23692,30 +23868,42 @@ class App(QMainWindow):
             ext = ".bin"
         return base + ext
 
-    def _open_audio_preview(self, data: bytes, mime: str, title: str) -> None:
-        ext = {
-            "audio/mpeg": ".mp3",
-            "audio/wav": ".wav",
-            "audio/ogg": ".ogg",
-            "audio/opus": ".opus",
-            "audio/flac": ".flac",
-        }.get(mime, ".bin")
-
+    def _open_audio_preview_for_track(
+        self,
+        track_id: int,
+        source_spec: dict[str, object],
+        *,
+        autoplay: bool = True,
+    ) -> None:
+        if self.audio_preview_dialog is None:
+            self.audio_preview_dialog = _AudioPreviewDialog(self, parent=None)
         try:
-            tf = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
-            tf.write(data)
-            tf.flush()
-            tf.close()
-        except Exception as e:
-            QMessageBox.critical(self, "Preview", f"Could not create temp file: {e}")
+            self.audio_preview_dialog.open_track_preview(
+                int(track_id),
+                source_spec,
+                autoplay=autoplay,
+            )
+        except Exception as exc:
+            self.logger.exception("Audio preview failed: %s", exc)
+            QMessageBox.critical(self, "Preview", f"Could not open the audio preview:\n{exc}")
             return
+        self._bring_media_window_to_front(self.audio_preview_dialog)
 
-        dlg = _AudioPreviewDialog(self, tf.name, title)
-        dlg.setAttribute(Qt.WA_DeleteOnClose, True)  # cleanup on close
-        dlg.setWindowFlag(Qt.Window, True)  # make it a top-level window
-        dlg.setModal(False)  # explicitly non-modal
-        dlg.show()
-        dlg._player.play()
+    def _open_audio_preview(self, data: bytes, mime: str, title: str) -> None:
+        if self.audio_preview_dialog is None:
+            self.audio_preview_dialog = _AudioPreviewDialog(self, parent=None)
+        try:
+            self.audio_preview_dialog.open_raw_preview(
+                data,
+                mime,
+                title,
+                autoplay=True,
+            )
+        except Exception as exc:
+            self.logger.exception("Audio preview failed: %s", exc)
+            QMessageBox.critical(self, "Preview", f"Could not open the audio preview:\n{exc}")
+            return
+        self._bring_media_window_to_front(self.audio_preview_dialog)
 
     def _list_all_tracks(self):
         return self.catalog_reads.list_tracks()
@@ -26525,12 +26713,182 @@ class EditDialog(QDialog):
             QMessageBox.critical(self, "Update Error", f"Failed to update selected records:\n{e}")
 
 
+class _ImagePreviewDialog(QDialog):
+    def __init__(self, app, parent=None):
+        super().__init__(parent, Qt.Window)
+        self.app = app
+        self._base_pix = QPixmap()
+        self._current_pct = 100
+        self._current_title = ""
+        self._current_data = b""
+        self._current_mime = "image/png"
+        self._user_zoomed = False
+
+        self.setObjectName("imagePreviewDialog")
+        self.setWindowFlags(
+            Qt.Window
+            | Qt.WindowTitleHint
+            | Qt.WindowSystemMenuHint
+            | Qt.WindowCloseButtonHint
+            | Qt.WindowMinMaxButtonsHint
+        )
+        self.setModal(False)
+        self.setWindowModality(Qt.NonModal)
+        self.setAttribute(Qt.WA_DeleteOnClose, False)
+        self.setAttribute(Qt.WA_NativeWindow, True)
+        self.setAttribute(Qt.WA_QuitOnClose, False)
+        self.setWindowTitle("Image Preview")
+        self.resize(1040, 780)
+        self.setMinimumSize(900, 680)
+        _apply_standard_dialog_chrome(self, "imagePreviewDialog")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(14)
+        _add_standard_dialog_header(
+            layout,
+            self,
+            title="Image Preview",
+            subtitle="Inspect stored artwork or image media at full size or zoomed detail.",
+            help_topic_id="media-preview",
+        )
+
+        controls_box, controls_layout = _create_standard_section(self, "Preview Controls")
+        zoom_row = QHBoxLayout()
+        zoom_row.setSpacing(10)
+        zoom_row.addWidget(QLabel("Zoom"), 0)
+        self._zoom_slider = FocusWheelSlider(Qt.Horizontal)
+        self._zoom_slider.setObjectName("imagePreviewZoomSlider")
+        self._zoom_slider.setRange(10, 400)
+        self._zoom_value_label = QLabel("100%")
+        self._zoom_value_label.setProperty("role", "statusText")
+        zoom_row.addWidget(self._zoom_slider, 1)
+        zoom_row.addWidget(self._zoom_value_label, 0)
+        controls_layout.addLayout(zoom_row)
+        layout.addWidget(controls_box)
+
+        self._image_label = QLabel(self)
+        self._image_label.setAlignment(Qt.AlignCenter)
+
+        self._scroll_area = QScrollArea(self)
+        self._scroll_area.setWidget(self._image_label)
+        self._scroll_area.setWidgetResizable(True)
+        self._scroll_area.setFrameShape(QFrame.NoFrame)
+        preview_box, preview_layout = _create_standard_section(self, "Image")
+        preview_layout.addWidget(self._scroll_area, 1)
+        layout.addWidget(preview_box, 1)
+
+        button_row = QHBoxLayout()
+        button_row.setSpacing(8)
+        button_row.addStretch(1)
+        self._export_button = QPushButton("Export Image…", self)
+        self._export_button.setObjectName("imagePreviewExportButton")
+        self._export_button.clicked.connect(self._export_current_image)
+        close_btn = QPushButton("Close", self)
+        close_btn.clicked.connect(self.close)
+        button_row.addWidget(self._export_button)
+        button_row.addWidget(close_btn)
+        layout.addLayout(button_row)
+
+        self._zoom_slider.valueChanged.connect(self._apply_zoom)
+        self._zoom_slider.sliderPressed.connect(self._mark_user_zoomed)
+
+    def set_preview(self, data: bytes, title: str) -> None:
+        image = QImage.fromData(data)
+        if image.isNull():
+            raise ValueError("Could not decode image data.")
+        self._current_data = bytes(data)
+        self._current_mime = self.app._detect_mime(self._current_data) or "image/png"
+        self._current_title = str(title or "Image Preview").strip() or "Image Preview"
+        self._base_pix = QPixmap.fromImage(image)
+        self.setWindowTitle(f"Image Preview — {self._current_title}")
+        self._user_zoomed = False
+        fit_percent = self._fit_percent()
+        self._zoom_slider.setValue(fit_percent)
+        self._apply_zoom(fit_percent)
+
+    def _mark_user_zoomed(self) -> None:
+        self._user_zoomed = True
+
+    def _fit_percent(self) -> int:
+        if self._base_pix.isNull():
+            return 100
+        avail_w = max(1, self._scroll_area.viewport().width() - 24)
+        avail_h = max(1, self._scroll_area.viewport().height() - 24)
+        sx = avail_w / max(1, self._base_pix.width())
+        sy = avail_h / max(1, self._base_pix.height())
+        return int(max(10, min(100, min(sx, sy) * 100)))
+
+    def _apply_zoom(self, pct: int) -> None:
+        self._current_pct = max(10, min(400, int(pct)))
+        self._zoom_value_label.setText(f"{self._current_pct}%")
+        if self._base_pix.isNull():
+            self._image_label.clear()
+            return
+        width = max(1, int(self._base_pix.width() * (self._current_pct / 100.0)))
+        height = max(1, int(self._base_pix.height() * (self._current_pct / 100.0)))
+        self._image_label.setPixmap(
+            self._base_pix.scaled(width, height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        )
+
+    def _export_current_image(self) -> None:
+        if not self._current_data:
+            return
+        self.app._export_bytes_with_picker(
+            self._current_data,
+            mime=self._current_mime,
+            suggested_basename=self._current_title,
+            parent_widget=self,
+            action_label="Export Image Preview: {filename}",
+            action_type="file.export_image_preview",
+            entity_type="Preview",
+            entity_id=self.app._sanitize_filename(self._current_title),
+            payload={"title": self._current_title, "mime_type": self._current_mime},
+        )
+
+    def resizeEvent(self, event):
+        if not self._user_zoomed and not self._base_pix.isNull():
+            self._apply_zoom(self._fit_percent())
+        super().resizeEvent(event)
+
+
 class _AudioPreviewDialog(QDialog):
-    def __init__(self, parent, file_path: str, title: str):
-        super().__init__(parent)
-        self._tmp_path = file_path
-        self.setWindowTitle(f"Audio Preview — {title}")
-        self.setMinimumSize(760, 420)
+    SCRUB_STEP_MS = 1000
+    JUMP_STEP_MS = 10000
+    ARTWORK_SIZE = 200
+    WAVEFORM_HEIGHT = 100
+    MEDIA_ROW_HEIGHT = ARTWORK_SIZE + 24
+    STATUS_SLIDER_MAX_WIDTH = 420
+
+    def __init__(self, app, parent=None):
+        super().__init__(parent, Qt.Window)
+        self.app = app
+        self._tmp_path = None
+        self._source_spec = None
+        self._current_track_id = None
+        self._track_order = []
+        self._current_audio_bytes = b""
+        self._current_audio_mime = "audio/wav"
+        self._current_title = ""
+        self._current_artist = ""
+        self._current_album = ""
+        self._artwork_pixmap = QPixmap()
+        self._handling_end_of_media = False
+
+        self.setObjectName("audioPreviewDialog")
+        self.setWindowFlags(
+            Qt.Window
+            | Qt.WindowTitleHint
+            | Qt.WindowSystemMenuHint
+            | Qt.WindowCloseButtonHint
+            | Qt.WindowMinMaxButtonsHint
+        )
+        self.setModal(False)
+        self.setWindowModality(Qt.NonModal)
+        self.setAttribute(Qt.WA_DeleteOnClose, False)
+        self.setAttribute(Qt.WA_NativeWindow, True)
+        self.setAttribute(Qt.WA_QuitOnClose, False)
+        self.setMinimumSize(960, 520)
         _apply_standard_dialog_chrome(self, "audioPreviewDialog")
 
         if platform.system().lower() == "darwin":
@@ -26541,151 +26899,470 @@ class _AudioPreviewDialog(QDialog):
             extra = [
                 r"C:\Program Files\ffmpeg\bin",
                 r"C:\ffmpeg\bin",
-                r"C:\ProgramData\chocolatey\bin",  # choco install ffmpeg
-                os.path.expandvars(r"%USERPROFILE%\scoop\shims"),  # scoop install ffmpeg
+                r"C:\ProgramData\chocolatey\bin",
+                os.path.expandvars(r"%USERPROFILE%\scoop\shims"),
             ]
             os.environ["PATH"] = ";".join([*extra, os.environ.get("PATH", "")])
 
-        v = QVBoxLayout(self)
-        v.setContentsMargins(18, 18, 18, 18)
-        v.setSpacing(14)
-        _add_standard_dialog_header(
-            v,
-            self,
-            title="Audio Preview",
-            subtitle=f"Listen back to the stored audio media for {title} and inspect its waveform when available.",
-            help_topic_id="media-preview",
-        )
-
-        waveform_box, waveform_layout = _create_standard_section(
-            self,
-            "Waveform Preview",
-            "The waveform is generated from the stored audio file when supported by the current runtime.",
-        )
-
-        # --- waveform ---
-        self.wave = WaveformWidget(self)
-        waveform_layout.addWidget(self.wave)
-        v.addWidget(waveform_box)
-
-        # transport row
-        playback_box, playback_layout = _create_standard_section(
-            self,
-            "Playback Controls",
-            "Use the transport buttons or the keyboard shortcuts to play, pause, stop, and scrub through the preview.",
-        )
-        h = QHBoxLayout()
-        h.setSpacing(8)
-        btn_play = QPushButton("Play")
-        btn_pause = QPushButton("Pause")
-        btn_stop = QPushButton("Stop")
-        h.addWidget(btn_play)
-        h.addWidget(btn_pause)
-        h.addWidget(btn_stop)
-        h.addStretch(1)
-        playback_layout.addLayout(h)
-
-        # --- audio backend ---
         self._player = QMediaPlayer(self)
         self._audio_out = QAudioOutput(self)
         self._player.setAudioOutput(self._audio_out)
-        self._player.setSource(QUrl.fromLocalFile(file_path))
 
-        btn_play.clicked.connect(self._player.play)
-        btn_pause.clicked.connect(self._player.pause)
-        btn_stop.clicked.connect(self._player.stop)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(14)
+        root.setSizeConstraint(QLayout.SetMinimumSize)
 
-        # REMOVE: self._player.positionChanged.connect(self._on_pos)
-        self._player.durationChanged.connect(lambda d: self.wave.set_duration_ms(d))
-
-        # smooth playhead
-        self._anim_timer = QTimer(self)
-        self._anim_timer.setInterval(16)
-        self._anim_timer.timeout.connect(lambda: self.wave.set_playhead_ms(self._player.position()))
-        self._player.playbackStateChanged.connect(
-            lambda st: (
-                self._anim_timer.start()
-                if st == QMediaPlayer.PlayingState
-                else self._anim_timer.stop()
-            )
+        metadata_group, metadata_layout = _create_standard_section(self, "Now Playing")
+        metadata_group.setObjectName("audioPreviewMetadataGroup")
+        metadata_group.setProperty("role", "panel")
+        metadata_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+        header_row = QHBoxLayout()
+        header_row.setSpacing(10)
+        header_text = QVBoxLayout()
+        header_text.setSpacing(4)
+        self.title_label = QLabel("Audio Preview", metadata_group)
+        self.title_label.setObjectName("audioPreviewTitleLabel")
+        self.title_label.setProperty("role", "dialogTitle")
+        self.artist_label = QLabel("", metadata_group)
+        self.artist_label.setObjectName("audioPreviewArtistLabel")
+        self.artist_label.setProperty("role", "secondary")
+        self.artist_label.setWordWrap(True)
+        self.album_label = QLabel("", metadata_group)
+        self.album_label.setObjectName("audioPreviewAlbumLabel")
+        self.album_label.setProperty("role", "meta")
+        self.album_label.setWordWrap(True)
+        self.album_label.hide()
+        header_text.addWidget(self.title_label)
+        header_text.addWidget(self.artist_label)
+        header_text.addWidget(self.album_label)
+        header_row.addLayout(header_text, 1)
+        header_row.addWidget(
+            _create_round_help_button(metadata_group, "media-preview"),
+            0,
+            Qt.AlignTop,
         )
+        metadata_layout.addLayout(header_row)
+        root.addWidget(metadata_group)
 
-        # slider + time
-        self._slider = FocusWheelSlider(Qt.Horizontal)
-        self._label_time = QLabel("0:00 / 0:00")
+        content_row = QHBoxLayout()
+        content_row.setSpacing(16)
+        self.waveform_panel = QFrame(self)
+        self.waveform_panel.setObjectName("audioPreviewWaveformPanel")
+        self.waveform_panel.setProperty("role", "panel")
+        self.waveform_panel.setAttribute(Qt.WA_StyledBackground, True)
+        self.waveform_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.waveform_panel.setFixedHeight(self.MEDIA_ROW_HEIGHT)
+        waveform_layout = QVBoxLayout(self.waveform_panel)
+        waveform_layout.setContentsMargins(12, 12, 12, 12)
+        waveform_layout.setSpacing(6)
+        waveform_layout.addStretch(1)
+        self.wave = WaveformWidget(self.waveform_panel)
+        self.wave.setObjectName("audioPreviewWaveform")
+        self.wave.setProperty("role", "mediaWaveform")
+        self.wave.setFixedHeight(self.WAVEFORM_HEIGHT)
+        self.wave.setMinimumHeight(self.WAVEFORM_HEIGHT)
+        self.wave.setMaximumHeight(self.WAVEFORM_HEIGHT)
+        self.wave.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.wave_status_label = QLabel("Waveform unavailable", self.waveform_panel)
+        self.wave_status_label.setObjectName("audioPreviewWaveformStatusLabel")
+        self.wave_status_label.setProperty("role", "secondary")
+        self.wave_status_label.setAlignment(Qt.AlignCenter)
+        self.wave_status_label.hide()
+        waveform_layout.addWidget(self.wave, 0, Qt.AlignVCenter)
+        waveform_layout.addWidget(self.wave_status_label, 0, Qt.AlignCenter)
+        waveform_layout.addStretch(1)
+        content_row.addWidget(self.waveform_panel, 1, Qt.AlignVCenter)
+
+        self.artwork_container = QFrame(self)
+        self.artwork_container.setObjectName("audioPreviewArtworkContainer")
+        self.artwork_container.setProperty("role", "panel")
+        self.artwork_container.setAttribute(Qt.WA_StyledBackground, True)
+        self.artwork_container.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.artwork_container.setFixedHeight(self.MEDIA_ROW_HEIGHT)
+        artwork_layout = QVBoxLayout(self.artwork_container)
+        artwork_layout.setContentsMargins(12, 12, 12, 12)
+        artwork_layout.setSpacing(0)
+        self.artwork_label = QLabel(self.artwork_container)
+        self.artwork_label.setObjectName("audioPreviewArtworkLabel")
+        self.artwork_label.setProperty("role", "mediaArtwork")
+        self.artwork_label.setAlignment(Qt.AlignCenter)
+        self.artwork_label.setFixedSize(self.ARTWORK_SIZE, self.ARTWORK_SIZE)
+        artwork_layout.addWidget(self.artwork_label, 0, Qt.AlignCenter)
+        self.artwork_container.hide()
+        content_row.addWidget(self.artwork_container, 0, Qt.AlignVCenter)
+        root.addLayout(content_row)
+
+        self.playback_status_panel = QFrame(self)
+        self.playback_status_panel.setObjectName("audioPreviewPlaybackStatusPanel")
+        self.playback_status_panel.setProperty("role", "compactControlGroup")
+        self.playback_status_panel.setAttribute(Qt.WA_StyledBackground, True)
+        self.playback_status_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        playback_status_layout = QHBoxLayout(self.playback_status_panel)
+        playback_status_layout.setContentsMargins(12, 8, 12, 8)
+        playback_status_layout.setSpacing(10)
+        self._label_time = QLabel("0:00 / 0:00", self.playback_status_panel)
+        self._label_time.setObjectName("audioPreviewTimeLabel")
         self._label_time.setProperty("role", "statusText")
-        playback_layout.addWidget(self._slider)
-        playback_layout.addWidget(self._label_time)
-        v.addWidget(playback_box)
+        playback_status_layout.addWidget(self._label_time, 0, Qt.AlignLeft | Qt.AlignVCenter)
+        self._slider = FocusWheelSlider(Qt.Horizontal)
+        self._slider.setObjectName("audioPreviewTimelineSlider")
+        self._slider.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._slider.setMinimumWidth(220)
+        self._slider.setMaximumWidth(self.STATUS_SLIDER_MAX_WIDTH)
+        playback_status_layout.addWidget(self._slider, 0, Qt.AlignLeft | Qt.AlignVCenter)
+        playback_status_layout.addStretch(1)
+        root.addWidget(self.playback_status_panel)
+
+        controls_row = QHBoxLayout()
+        controls_row.setSpacing(16)
+
+        playback_group, playback_layout = _create_standard_section(self, "Playback")
+        playback_group.setObjectName("audioPreviewPlaybackGroup")
+        playback_group.setProperty("role", "panel")
+        playback_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+        playback_layout.setSpacing(12)
+
+        transport_buttons = QHBoxLayout()
+        transport_buttons.setSpacing(6)
+        self.previous_button = self._create_transport_button(
+            "|◀",
+            "Previous Track",
+            "audioPreviewPreviousButton",
+            self._go_to_previous_track,
+        )
+        self.rewind_button = self._create_transport_button(
+            "◀◀",
+            "Jump Back 10 Seconds",
+            "audioPreviewRewindButton",
+            lambda: self._jump_by_ms(-self.JUMP_STEP_MS),
+        )
+        self.play_button = self._create_transport_button(
+            "▶",
+            "Play",
+            "audioPreviewPlayButton",
+            self._player.play,
+        )
+        self.pause_button = self._create_transport_button(
+            "▌▌",
+            "Pause",
+            "audioPreviewPauseButton",
+            self._player.pause,
+        )
+        self.stop_button = self._create_transport_button(
+            "■",
+            "Stop",
+            "audioPreviewStopButton",
+            self._stop_playback,
+        )
+        self.forward_button = self._create_transport_button(
+            "▶▶",
+            "Jump Forward 10 Seconds",
+            "audioPreviewForwardButton",
+            lambda: self._jump_by_ms(self.JUMP_STEP_MS),
+        )
+        self.next_button = self._create_transport_button(
+            "▶|",
+            "Next Track",
+            "audioPreviewNextButton",
+            self._go_to_next_track,
+        )
+        for button in (
+            self.previous_button,
+            self.rewind_button,
+            self.play_button,
+            self.pause_button,
+            self.stop_button,
+            self.forward_button,
+            self.next_button,
+        ):
+            transport_buttons.addWidget(button)
+        transport_buttons.addStretch(1)
+        playback_layout.addLayout(transport_buttons)
+
+        playback_footer = QHBoxLayout()
+        playback_footer.setSpacing(10)
+        self.auto_advance_check = QCheckBox("Auto-advance", playback_group)
+        self.auto_advance_check.setObjectName("audioPreviewAutoAdvanceCheck")
+        self.auto_advance_check.setProperty("role", "mediaToggle")
+        self.auto_advance_check.setChecked(True)
+        playback_footer.addWidget(self.auto_advance_check, 0, Qt.AlignLeft)
+        playback_footer.addStretch(1)
+        playback_layout.addLayout(playback_footer)
+        controls_row.addWidget(playback_group, 1, Qt.AlignTop)
+
+        export_group, export_layout = _create_standard_section(self, "Export")
+        export_group.setObjectName("audioPreviewExportGroup")
+        export_group.setProperty("role", "panel")
+        export_group.setMinimumWidth(220)
+        export_group.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        self.export_button = QToolButton(export_group)
+        self.export_button.setObjectName("audioPreviewExportButton")
+        self.export_button.setProperty("role", "mediaExportButton")
+        self.export_button.setText("Export")
+        self.export_button.setPopupMode(QToolButton.InstantPopup)
+        self.export_button.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self.export_menu = QMenu(self.export_button)
+        self.export_button.setMenu(self.export_menu)
+        self.export_button.setEnabled(False)
+        export_layout.addWidget(self.export_button)
+        export_layout.addStretch(1)
+        controls_row.addWidget(export_group, 0, Qt.AlignTop)
+        root.addLayout(controls_row)
+        root.addStretch(1)
+
+        self._resize_timer = QTimer(self)
+        self._resize_timer.setSingleShot(True)
+        self._resize_timer.setInterval(50)
+        self._resize_timer.timeout.connect(self._reload_peaks_for_current_width)
 
         self._player.durationChanged.connect(self._on_duration_changed)
         self._player.positionChanged.connect(self._on_position_changed)
-        self._slider.sliderMoved.connect(self._on_slider_moved)
+        self._player.mediaStatusChanged.connect(self._on_media_status_changed)
+        self._slider.sliderMoved.connect(self._seek_to_ms)
+        self.wave.scrubRequested.connect(self._scrub_by_ms)
+        self.wave.seekRequested.connect(self._seek_to_ms)
+        self._install_shortcuts()
 
-        # load peaks for current width (fallback 480)
-        self._peaks_src = file_path
-        peaks = load_wav_peaks(file_path, max(self.wave.width(), 480))
-        self.wave.set_peaks(peaks)
+    def _create_transport_button(self, symbol, tooltip, object_name, slot):
+        button = QToolButton(self)
+        button.setObjectName(object_name)
+        button.setProperty("role", "mediaTransportButton")
+        button.setText(symbol)
+        button.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        button.setToolTip(tooltip)
+        button.setAutoRaise(False)
+        button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        button.setMinimumSize(52, 34)
+        button.clicked.connect(slot)
+        return button
 
-        if not peaks:
-            self.wave.hide()
-            self._peaks_src = None
-            waveform_box.setTitle("Waveform Preview Unavailable")
-            waveform_layout.itemAt(0).widget().setText(
-                "This file can still be played back, but a waveform preview could not be generated in the current environment."
-            )
-            self.resize(760, 380)
-        else:
-            self._resize_timer = QTimer(self)
-            self._resize_timer.setSingleShot(True)
-            self._resize_timer.setInterval(50)
-            self._resize_timer.timeout.connect(self._reload_peaks_for_current_width)
-            self.resize(840, 520)
+    def _install_shortcuts(self) -> None:
+        bindings = (
+            ("Space", self._toggle_play_pause),
+            ("Left", lambda: self._scrub_by_ms(-self.SCRUB_STEP_MS)),
+            ("Right", lambda: self._scrub_by_ms(self.SCRUB_STEP_MS)),
+            ("Shift+Left", lambda: self._jump_by_ms(-self.JUMP_STEP_MS)),
+            ("Shift+Right", lambda: self._jump_by_ms(self.JUMP_STEP_MS)),
+            ("Meta+Left", self._go_to_previous_track),
+            ("Meta+Right", self._go_to_next_track),
+        )
+        for sequence, handler in bindings:
+            shortcut = QShortcut(QKeySequence(sequence), self)
+            shortcut.setContext(Qt.WindowShortcut)
+            shortcut.activated.connect(handler)
 
-        button_row = QHBoxLayout()
-        button_row.setSpacing(8)
-        button_row.addStretch(1)
-        close_btn = QPushButton("Close")
-        close_btn.clicked.connect(self.accept)
-        button_row.addWidget(close_btn)
-        v.addLayout(button_row)
+    def open_track_preview(self, track_id: int, source_spec: dict[str, object], *, autoplay: bool):
+        state = self.app._audio_preview_state_for_track(
+            int(track_id),
+            source_spec,
+            parent_widget=self,
+        )
+        self._apply_preview_state(state, source_spec=source_spec, autoplay=autoplay)
 
-    def resizeEvent(self, e):
-        super().resizeEvent(e)
-        if hasattr(self, "_resize_timer"):
-            self._resize_timer.start()
+    def open_raw_preview(self, data: bytes, mime: str, title: str, *, autoplay: bool):
+        state = self.app._audio_preview_state_for_raw_bytes(
+            data,
+            mime,
+            title,
+            parent_widget=self,
+        )
+        self._apply_preview_state(state, source_spec=None, autoplay=autoplay)
 
-    def _reload_peaks_for_current_width(self):
-        if not self._peaks_src:
-            return
-        w = max(self.wave.width(), 100)
-        self.wave.set_peaks(load_wav_peaks(self._peaks_src, w))
+    def _apply_preview_state(
+        self,
+        state: dict[str, object],
+        *,
+        source_spec: dict[str, object] | None,
+        autoplay: bool,
+    ) -> None:
+        self._source_spec = source_spec
+        self._current_track_id = state.get("track_id")
+        self._track_order = list(state.get("track_order") or [])
+        self._current_audio_bytes = bytes(state.get("audio_bytes") or b"")
+        self._current_audio_mime = str(state.get("audio_mime") or "audio/wav")
+        self._current_title = str(state.get("title") or "Audio Preview").strip() or "Audio Preview"
+        self._current_artist = str(state.get("artist") or "").strip()
+        self._current_album = str(state.get("album") or "").strip()
+        self.title_label.setText(self._current_title)
+        self.artist_label.setVisible(bool(self._current_artist))
+        self.artist_label.setText(self._current_artist)
+        self.album_label.setVisible(bool(self._current_album))
+        self.album_label.setText(f"Album · {self._current_album}" if self._current_album else "")
+        self.setWindowTitle(
+            str(state.get("window_title") or f"Audio Preview — {self._current_title}")
+        )
+        self._set_export_actions(list(state.get("export_actions") or []))
+        self._apply_artwork(state.get("artwork_payload"))
+        self._load_audio_source(self._current_audio_bytes, self._current_audio_mime)
+        self._update_navigation_buttons()
+        if autoplay:
+            QTimer.singleShot(0, self._player.play)
 
-    # --- unchanged helpers ---
-    def _on_duration_changed(self, dur):
-        self._slider.setRange(0, dur)
-        self._update_time_label(self._player.position(), dur)
-
-    def _on_position_changed(self, pos):
-        if not self._slider.isSliderDown():
-            self._slider.setValue(pos)
-        self._update_time_label(pos, self._player.duration())
-
-    def _on_slider_moved(self, val):
-        self._player.setPosition(val)
-
-    def _update_time_label(self, pos, dur):
-        def fmt(ms):
-            s = ms // 1000
-            return f"{s//60}:{s%60:02d}"
-
-        self._label_time.setText(f"{fmt(pos)} / {fmt(dur)}")
-
-    # --- new: hard teardown that actually releases the backend ---
-    def _teardown_audio(self):
+    def _load_audio_source(self, data: bytes, mime: str) -> None:
+        self._reset_player_source()
+        self._cleanup_temp_file()
+        ext = {
+            "audio/mpeg": ".mp3",
+            "audio/wav": ".wav",
+            "audio/ogg": ".ogg",
+            "audio/opus": ".opus",
+            "audio/flac": ".flac",
+            "audio/aiff": ".aiff",
+            "audio/x-aiff": ".aiff",
+        }.get(str(mime or "").strip().lower(), ".bin")
         try:
-            if self._player.state() != QMediaPlayer.StoppedState:
-                self._player.stop()
+            handle = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
+            handle.write(data)
+            handle.flush()
+            handle.close()
+            self._tmp_path = handle.name
+        except Exception as exc:
+            raise RuntimeError(f"Could not create preview temp file: {exc}") from exc
+        self._player.setSource(QUrl.fromLocalFile(self._tmp_path))
+        self._load_waveform(self._tmp_path)
+        self._apply_position(0, self._player.duration())
+
+    def _load_waveform(self, path: str) -> None:
+        peaks = load_wav_peaks(path, max(self.wave.width(), 480))
+        self.wave.set_peaks(peaks)
+        has_peaks = bool(peaks)
+        self.wave.setVisible(has_peaks)
+        self.wave_status_label.setVisible(not has_peaks)
+
+    def _reload_peaks_for_current_width(self) -> None:
+        if not self._tmp_path:
+            return
+        self._load_waveform(self._tmp_path)
+        self._refresh_artwork_pixmap()
+
+    def _set_export_actions(self, actions: list[dict[str, object]]) -> None:
+        self.export_menu.clear()
+        for spec in actions:
+            text = str(spec.get("text") or "").strip()
+            handler = spec.get("handler")
+            if not text or not callable(handler):
+                continue
+            action = self.export_menu.addAction(text)
+            action.triggered.connect(handler)
+        self.export_button.setEnabled(bool(self.export_menu.actions()))
+
+    def _apply_artwork(self, artwork_payload) -> None:
+        self._artwork_pixmap = QPixmap()
+        data = getattr(artwork_payload, "data", b"") if artwork_payload is not None else b""
+        if data:
+            image = QImage.fromData(data)
+            if not image.isNull():
+                self._artwork_pixmap = QPixmap.fromImage(image)
+        has_artwork = not self._artwork_pixmap.isNull()
+        self.artwork_container.setVisible(has_artwork)
+        self._refresh_artwork_pixmap()
+
+    def _refresh_artwork_pixmap(self) -> None:
+        if self._artwork_pixmap.isNull():
+            self.artwork_label.clear()
+            return
+        target = self.artwork_label.size()
+        self.artwork_label.setPixmap(
+            self._artwork_pixmap.scaled(
+                target,
+                Qt.KeepAspectRatioByExpanding,
+                Qt.SmoothTransformation,
+            )
+        )
+
+    def _toggle_play_pause(self) -> None:
+        playing_state = getattr(QMediaPlayer, "PlaybackState", QMediaPlayer).PlayingState
+        if self._player.playbackState() == playing_state:
+            self._player.pause()
+        else:
+            self._player.play()
+
+    def _stop_playback(self) -> None:
+        self._player.stop()
+        self._seek_to_ms(0)
+
+    def _jump_by_ms(self, delta_ms: int) -> None:
+        self._seek_to_ms(self._player.position() + int(delta_ms))
+
+    def _scrub_by_ms(self, delta_ms: int) -> None:
+        self._jump_by_ms(delta_ms)
+
+    def _seek_to_ms(self, position_ms: int) -> None:
+        duration = max(0, int(self._player.duration() or 0))
+        clamped = max(0, min(int(position_ms), duration if duration else int(position_ms)))
+        self._player.setPosition(clamped)
+        self._apply_position(clamped, duration)
+
+    def _on_duration_changed(self, duration: int) -> None:
+        self._slider.setRange(0, max(0, int(duration)))
+        self.wave.set_duration_ms(duration)
+        self._apply_position(self._player.position(), duration)
+
+    def _on_position_changed(self, position: int) -> None:
+        self._apply_position(position, self._player.duration())
+
+    def _apply_position(self, position: int, duration: int) -> None:
+        if not self._slider.isSliderDown():
+            self._slider.blockSignals(True)
+            self._slider.setValue(max(0, int(position)))
+            self._slider.blockSignals(False)
+        self.wave.set_duration_ms(duration)
+        self.wave.set_playhead_ms(position)
+        self._label_time.setText(f"{self._format_time(position)} / {self._format_time(duration)}")
+
+    @staticmethod
+    def _format_time(ms: int) -> str:
+        total_seconds = max(0, int(ms or 0) // 1000)
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        if hours:
+            return f"{hours}:{minutes:02d}:{seconds:02d}"
+        return f"{minutes}:{seconds:02d}"
+
+    def _track_index(self) -> int:
+        if self._current_track_id in self._track_order:
+            return self._track_order.index(self._current_track_id)
+        return -1
+
+    def _update_navigation_buttons(self) -> None:
+        index = self._track_index()
+        self.previous_button.setEnabled(index > 0)
+        self.next_button.setEnabled(0 <= index < len(self._track_order) - 1)
+
+    def _navigate_relative(self, offset: int, *, autoplay: bool) -> None:
+        if self._source_spec is None:
+            return
+        index = self._track_index()
+        if index < 0:
+            return
+        target_index = index + int(offset)
+        if target_index < 0 or target_index >= len(self._track_order):
+            return
+        target_track_id = int(self._track_order[target_index])
+        self.open_track_preview(target_track_id, self._source_spec, autoplay=autoplay)
+
+    def _go_to_previous_track(self) -> None:
+        self._navigate_relative(-1, autoplay=True)
+
+    def _go_to_next_track(self) -> None:
+        self._navigate_relative(1, autoplay=True)
+
+    def _on_media_status_changed(self, status) -> None:
+        end_status = getattr(QMediaPlayer, "MediaStatus", QMediaPlayer).EndOfMedia
+        if status != end_status or self._handling_end_of_media:
+            return
+        self._handling_end_of_media = True
+        try:
+            self._apply_position(self._player.duration(), self._player.duration())
+            if self.auto_advance_check.isChecked():
+                self._navigate_relative(1, autoplay=True)
+        finally:
+            self._handling_end_of_media = False
+
+    def _reset_player_source(self) -> None:
+        try:
+            self._player.stop()
         except Exception:
             pass
         try:
@@ -26693,75 +27370,40 @@ class _AudioPreviewDialog(QDialog):
         except Exception:
             pass
         try:
-            # Fully detach to force backend release
-            self._player.setAudioOutput(None)
-        except Exception:
-            pass
-        try:
-            self._player.setSource(QUrl())  # clears source
+            self._player.setSource(QUrl())
         except Exception:
             pass
 
-    # Stop audio before removing tmp and closing
-    def closeEvent(self, e):
-        self._teardown_audio()
+    def _cleanup_temp_file(self) -> None:
+        if not self._tmp_path:
+            return
         try:
             os.remove(self._tmp_path)
         except Exception:
             pass
-        super().closeEvent(e)
+        self._tmp_path = None
 
-    # Also cover accept()/reject() paths
-    def accept(self):
-        self._teardown_audio()
-        super().accept()
+    def closeEvent(self, event):
+        self._reset_player_source()
+        self._cleanup_temp_file()
+        super().closeEvent(event)
 
-    def reject(self):
-        self._teardown_audio()
-        super().reject()
-
-    # --- key handling ---
-    def keyPressEvent(self, e):
-        STEP_MS = 5000  # 5 s per key press
-
-        if e.key() == Qt.Key_Space:
-            PlayingState = getattr(QMediaPlayer, "PlaybackState", QMediaPlayer).PlayingState
-            if self._player.playbackState() == PlayingState:
-                self._player.pause()
-            else:
-                self._player.play()
-            e.accept()
-            return
-
-        elif e.key() == Qt.Key_Right:
-            # Scrub forward
-            new_pos = min(self._player.duration(), self._player.position() + STEP_MS)
-            self._player.setPosition(new_pos)
-            e.accept()
-            return
-
-        elif e.key() == Qt.Key_Left:
-            # Scrub backward
-            new_pos = max(0, self._player.position() - STEP_MS)
-            self._player.setPosition(new_pos)
-            e.accept()
-            return
-
-        elif e.key() == Qt.Key_Escape:
-            self.close()
-            e.accept()
-            return
-
-        super().keyPressEvent(e)
+    def resizeEvent(self, event):
+        self._resize_timer.start()
+        super().resizeEvent(event)
 
 
 class WaveformWidget(QWidget):
+    scrubRequested = Signal(int)
+    seekRequested = Signal(int)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._peaks = []
         self._duration = 1
         self._playhead = 0
-        self.setMinimumHeight(90)
+        self.setMinimumHeight(120)
+        self.setCursor(Qt.SizeHorCursor)
 
     def set_peaks(self, peaks):
         self._peaks = peaks or []
@@ -26774,6 +27416,49 @@ class WaveformWidget(QWidget):
     def set_playhead_ms(self, ms):
         self._playhead = max(0, min(int(ms), self._duration))
         self.update()
+
+    def _position_from_x(self, x_pos: float) -> int:
+        rect = self.rect()
+        if rect.width() <= 1:
+            return 0
+        ratio = max(0.0, min(1.0, (float(x_pos) - rect.left()) / max(1, rect.width() - 1)))
+        return int(self._duration * ratio)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            x_pos = event.position().x() if hasattr(event, "position") else event.pos().x()
+            self.seekRequested.emit(self._position_from_x(x_pos))
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() & Qt.LeftButton:
+            x_pos = event.position().x() if hasattr(event, "position") else event.pos().x()
+            self.seekRequested.emit(self._position_from_x(x_pos))
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def wheelEvent(self, event):
+        pixel_delta = event.pixelDelta()
+        angle_delta = event.angleDelta()
+        delta_ms = 0
+        if not pixel_delta.isNull():
+            if abs(pixel_delta.x()) >= abs(pixel_delta.y()) and pixel_delta.x():
+                delta_ms = int(round((pixel_delta.x() / 40.0) * 1000))
+            elif pixel_delta.y():
+                delta_ms = int(round((-pixel_delta.y() / 40.0) * 1000))
+        elif not angle_delta.isNull():
+            if abs(angle_delta.x()) >= abs(angle_delta.y()) and angle_delta.x():
+                delta_ms = int(round((angle_delta.x() / 120.0) * 1000))
+            elif angle_delta.y():
+                delta_ms = int(round((-angle_delta.y() / 120.0) * 1000))
+        if delta_ms:
+            self.scrubRequested.emit(delta_ms)
+            event.accept()
+            return
+        event.ignore()
 
     def paintEvent(self, e):
         from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
