@@ -27,11 +27,14 @@ else:
 
 from isrc_manager.app_dialogs import (
     ActionRibbonDialog,
+    ApplicationStorageAdminDialog,
     CustomColumnsDialog,
     DiagnosticsDialog,
     HelpContentsDialog,
+    MasterTransferExportDialog,
 )
 from isrc_manager.help_content import HELP_CHAPTERS_BY_ID, render_help_html
+from isrc_manager.tasks.models import TaskProgressUpdate
 
 
 class _HelpDialogHost(QWidget):
@@ -59,7 +62,11 @@ class _DiagnosticsDialogHost(QWidget):
         self.load_calls = 0
         self.repair_calls = []
         self.history_cleanup_open_count = 0
+        self.application_storage_admin_open_count = 0
+        self.storage_audit_load_calls = 0
+        self.storage_cleanup_calls = []
         self.background_errors = []
+        self.progress_updates = []
         self._report = {
             "environment": {
                 "App version": "3.1.0",
@@ -97,6 +104,63 @@ class _DiagnosticsDialogHost(QWidget):
                 ),
                 "within_budget": False,
             },
+            "application_storage": {
+                "available": True,
+                "summary": (
+                    "The application is using 3.2 GB in 12 tracked storage item(s). "
+                    "5 item(s) appear reclaimable now, covering 1.1 GB."
+                ),
+                "total_text": "3.2 GB",
+                "current_profile_text": "1.4 GB",
+                "reclaimable_text": "1.1 GB",
+                "deleted_profile_text": "512.0 MB",
+                "orphaned_text": "420.0 MB",
+                "warning_text": "640.0 MB",
+            },
+        }
+        self._storage_audit_payload = {
+            "summary": {
+                "summary": (
+                    "The application is using 3.2 GB in 12 tracked storage item(s). "
+                    "5 item(s) appear reclaimable now, covering 1.1 GB."
+                ),
+                "total_text": "3.2 GB",
+                "current_profile_text": "1.4 GB",
+                "reclaimable_text": "1.1 GB",
+                "deleted_profile_text": "512.0 MB",
+                "orphaned_text": "420.0 MB",
+                "warning_text": "640.0 MB",
+            },
+            "items": [
+                {
+                    "item_key": "orphan-file",
+                    "status_label": "Orphaned / Unreferenced",
+                    "category_label": "Track / Album Media",
+                    "label": "orphan_audio.wav",
+                    "size_text": "420.0 MB",
+                    "bytes_on_disk": 420 * 1024 * 1024,
+                    "profile_name": "",
+                    "path": "/tmp/test-data/track_media/orphan_audio.wav",
+                    "reason": "No active profile references this application-managed file.",
+                    "warning_required": False,
+                    "warning": "",
+                    "references_text": "",
+                },
+                {
+                    "item_key": "in-use-file",
+                    "status_label": "In Use by Active Profile",
+                    "category_label": "Track / Album Media",
+                    "label": "live_audio.wav",
+                    "size_text": "640.0 MB",
+                    "bytes_on_disk": 640 * 1024 * 1024,
+                    "profile_name": "catalog.db",
+                    "path": "/tmp/test-data/track_media/live_audio.wav",
+                    "reason": "Referenced by active profile catalog.db.",
+                    "warning_required": True,
+                    "warning": "Deleting this file permanently removes media still referenced by active profiles.",
+                    "references_text": "Track #1 'Live Track' audio",
+                },
+            ],
         }
 
     def _create_diagnostics_catalog_cleanup_panel(self, parent):
@@ -132,14 +196,31 @@ class _DiagnosticsDialogHost(QWidget):
         on_error=None,
         on_cancelled=None,
         on_finished=None,
+        on_progress=None,
         on_status=None,
     ):
         del owner, on_error, on_cancelled
         self.load_calls += 1
         if on_status is not None:
-            on_status("Inspecting schema layout...")
+            on_status("Checking managed audio references (1/3)...")
+        if on_progress is not None:
+            update = TaskProgressUpdate(
+                value=6,
+                maximum=7,
+                message="Inspecting application-wide storage...",
+            )
+            self.progress_updates.append(update)
+            on_progress(update)
         if on_success is not None:
             on_success(self._report)
+        if on_progress is not None:
+            update = TaskProgressUpdate(
+                value=7,
+                maximum=7,
+                message="Diagnostics ready.",
+            )
+            self.progress_updates.append(update)
+            on_progress(update)
         if on_finished is not None:
             on_finished()
         return f"load-{self.load_calls}"
@@ -181,6 +262,59 @@ class _DiagnosticsDialogHost(QWidget):
 
     def open_history_cleanup_dialog(self):
         self.history_cleanup_open_count += 1
+
+    def open_application_storage_admin_dialog(self):
+        self.application_storage_admin_open_count += 1
+
+    def _load_application_storage_audit_async(
+        self,
+        *,
+        owner=None,
+        on_success=None,
+        on_error=None,
+        on_cancelled=None,
+        on_finished=None,
+        on_status=None,
+    ):
+        del owner, on_error, on_cancelled
+        self.storage_audit_load_calls += 1
+        if on_status is not None:
+            on_status("Inspecting application-wide storage...")
+        if on_success is not None:
+            on_success(self._storage_audit_payload)
+        if on_finished is not None:
+            on_finished()
+        return f"storage-audit-{self.storage_audit_load_calls}"
+
+    def _run_application_storage_cleanup_async(
+        self,
+        item_keys,
+        *,
+        allow_warning_deletes=False,
+        owner=None,
+        on_success=None,
+        on_error=None,
+        on_cancelled=None,
+        on_finished=None,
+        on_status=None,
+    ):
+        del owner, on_error, on_cancelled
+        self.storage_cleanup_calls.append((list(item_keys), bool(allow_warning_deletes)))
+        if on_status is not None:
+            on_status("Deleting selected application storage items...")
+        if on_success is not None:
+            on_success(
+                {
+                    "removed_count": len(item_keys),
+                    "removed_text": "1.1 GB",
+                    "removed_history_entry_count": 0,
+                    "removed_session_entry_count": 0,
+                    "skipped_count": 0,
+                }
+            )
+        if on_finished is not None:
+            on_finished()
+        return f"storage-cleanup-{len(self.storage_cleanup_calls)}"
 
 
 class AppDialogsTests(unittest.TestCase):
@@ -255,6 +389,92 @@ class AppDialogsTests(unittest.TestCase):
         finally:
             dialog.close()
 
+    def test_master_transfer_export_dialog_checks_all_sections_by_default(self):
+        dialog = MasterTransferExportDialog(
+            [
+                {
+                    "section_id": "catalog",
+                    "label": "Catalog Exchange Package",
+                    "description": "Tracks and packaged media.",
+                    "depends_on": [],
+                    "entity_counts": {"tracks": 2},
+                    "default_selected": True,
+                },
+                {
+                    "section_id": "repertoire",
+                    "label": "Contracts and Rights Package",
+                    "description": "Parties, works, contracts, rights, and assets.",
+                    "depends_on": ["catalog"],
+                    "entity_counts": {"contracts": 2},
+                    "default_selected": True,
+                },
+                {
+                    "section_id": "contract_templates",
+                    "label": "Contract Templates",
+                    "description": "Template families and revision sources.",
+                    "depends_on": [],
+                    "entity_counts": {"templates": 1},
+                    "default_selected": True,
+                },
+            ]
+        )
+        try:
+            self.assertEqual(
+                dialog.selected_section_ids(), ["catalog", "repertoire", "contract_templates"]
+            )
+            self.assertEqual(dialog.section_table.item(0, 0).checkState(), Qt.Checked)
+            self.assertEqual(dialog.section_table.item(1, 0).checkState(), Qt.Checked)
+            self.assertEqual(dialog.section_table.item(2, 0).checkState(), Qt.Checked)
+            self.assertTrue(dialog.export_button.isEnabled())
+        finally:
+            dialog.close()
+
+    def test_master_transfer_export_dialog_disables_dependent_sections_when_required_section_is_unchecked(
+        self,
+    ):
+        dialog = MasterTransferExportDialog(
+            [
+                {
+                    "section_id": "catalog",
+                    "label": "Catalog Exchange Package",
+                    "description": "Tracks and packaged media.",
+                    "depends_on": [],
+                    "entity_counts": {"tracks": 2},
+                    "default_selected": True,
+                },
+                {
+                    "section_id": "repertoire",
+                    "label": "Contracts and Rights Package",
+                    "description": "Parties, works, contracts, rights, and assets.",
+                    "depends_on": ["catalog"],
+                    "entity_counts": {"contracts": 2},
+                    "default_selected": True,
+                },
+                {
+                    "section_id": "licenses",
+                    "label": "License Archive",
+                    "description": "License PDFs.",
+                    "depends_on": ["catalog"],
+                    "entity_counts": {"licenses": 1},
+                    "default_selected": True,
+                },
+            ]
+        )
+        try:
+            dialog.section_table.item(0, 0).setCheckState(Qt.Unchecked)
+            self.app.processEvents()
+
+            self.assertEqual(dialog.selected_section_ids(), [])
+            self.assertEqual(dialog.section_table.item(1, 0).checkState(), Qt.Unchecked)
+            self.assertEqual(dialog.section_table.item(2, 0).checkState(), Qt.Unchecked)
+            self.assertFalse(bool(dialog.section_table.item(1, 0).flags() & Qt.ItemIsUserCheckable))
+            self.assertIn(
+                "Requires: Catalog Exchange Package", dialog.section_table.item(1, 3).text()
+            )
+            self.assertFalse(dialog.export_button.isEnabled())
+        finally:
+            dialog.close()
+
     def test_help_contents_dialog_filters_and_opens_topics(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             help_path = Path(tmpdir) / "help.html"
@@ -291,6 +511,13 @@ class AppDialogsTests(unittest.TestCase):
         dialog = DiagnosticsDialog(host)
         try:
             self.assertEqual(host.load_calls, 1)
+            self.assertEqual(
+                [update.message for update in host.progress_updates],
+                [
+                    "Inspecting application-wide storage...",
+                    "Diagnostics ready.",
+                ],
+            )
             self.assertFalse(dialog.loading_panel.isVisible())
             self.assertEqual(
                 [
@@ -302,12 +529,14 @@ class AppDialogsTests(unittest.TestCase):
             self.assertIsNotNone(dialog.body_scroll.widget())
             self.assertEqual(dialog.environment_labels["App version"].text(), "3.1.0")
             self.assertIn("1.8 GB", dialog.history_storage_summary_label.text())
+            self.assertIn("3.2 GB", dialog.application_storage_summary_label.text())
             self.assertEqual(dialog.history_storage_metric_labels["budget"].text(), "1.0 GB")
             self.assertEqual(
                 dialog.history_storage_metric_labels["over_budget"].text(),
                 "820.0 MB",
             )
             self.assertTrue(dialog.open_cleanup_button.isEnabled())
+            self.assertTrue(dialog.open_storage_admin_button.isEnabled())
             self.assertEqual(dialog.checks_list.count(), 1)
             self.assertIn("Schema layout", dialog.details_edit.toPlainText())
             self.assertTrue(dialog.repair_button.isEnabled())
@@ -315,6 +544,8 @@ class AppDialogsTests(unittest.TestCase):
             self.assertEqual(dialog.catalog_cleanup_panel._refresh_calls, 1)
             dialog.open_cleanup_button.click()
             self.assertEqual(host.history_cleanup_open_count, 1)
+            dialog.open_storage_admin_button.click()
+            self.assertEqual(host.application_storage_admin_open_count, 1)
         finally:
             dialog.close()
             host.close()
@@ -353,6 +584,63 @@ class AppDialogsTests(unittest.TestCase):
             dialog.close()
             host.close()
 
+    def test_diagnostics_dialog_busy_progress_uses_reported_work_units(self):
+        host = _DiagnosticsDialogHost()
+        dialog = DiagnosticsDialog(host)
+        try:
+            dialog._set_busy(True, "Loading diagnostics...")
+            dialog._apply_busy_progress(
+                TaskProgressUpdate(
+                    value=6,
+                    maximum=7,
+                    message="Inspecting application-wide storage...",
+                )
+            )
+
+            self.assertFalse(dialog.loading_panel.isHidden())
+            self.assertEqual(dialog.loading_bar.minimum(), 0)
+            self.assertEqual(dialog.loading_bar.maximum(), 7)
+            self.assertEqual(dialog.loading_bar.value(), 6)
+            self.assertEqual(
+                dialog.loading_status_label.text(),
+                "Inspecting application-wide storage...",
+            )
+        finally:
+            dialog.close()
+            host.close()
+
+    def test_diagnostics_dialog_reaches_completion_only_after_final_progress_update(self):
+        host = _DiagnosticsDialogHost()
+        dialog = DiagnosticsDialog(host)
+        try:
+            dialog._set_busy(True, "Loading diagnostics...")
+            dialog._apply_busy_progress(
+                TaskProgressUpdate(
+                    value=6,
+                    maximum=7,
+                    message="Inspecting application-wide storage...",
+                )
+            )
+            dialog._populate_loaded_report(host._report)
+            self.assertEqual(dialog.loading_bar.maximum(), 7)
+            self.assertEqual(dialog.loading_bar.value(), 6)
+
+            dialog._apply_busy_progress(
+                TaskProgressUpdate(
+                    value=7,
+                    maximum=7,
+                    message="Diagnostics ready.",
+                )
+            )
+            self.assertEqual(dialog.loading_bar.value(), 7)
+            self.assertEqual(dialog.loading_status_label.text(), "Diagnostics ready.")
+
+            dialog._finish_loaded_report()
+            self.assertFalse(dialog.loading_panel.isVisible())
+        finally:
+            dialog.close()
+            host.close()
+
     def test_diagnostics_dialog_loading_strip_scales_with_window_width(self):
         host = _DiagnosticsDialogHost()
         dialog = DiagnosticsDialog(host)
@@ -369,6 +657,46 @@ class AppDialogsTests(unittest.TestCase):
             self.assertGreaterEqual(dialog.loading_bar.width(), 220)
             self.assertLessEqual(dialog.loading_bar.width(), 320)
             self.assertGreaterEqual(dialog.loading_status_label.minimumWidth(), 260)
+        finally:
+            dialog.close()
+            host.close()
+
+    def test_application_storage_admin_dialog_uses_async_loader_and_strong_delete_confirmations(
+        self,
+    ):
+        host = _DiagnosticsDialogHost()
+        dialog = ApplicationStorageAdminDialog(host)
+        try:
+            self.assertEqual(host.storage_audit_load_calls, 1)
+            self.assertFalse(dialog.loading_panel.isVisible())
+            self.assertEqual(dialog.surface_tabs.tabText(0), "Cleanup Candidates")
+            self.assertEqual(dialog.surface_tabs.tabText(1), "Warnings & In Use")
+            self.assertIn("3.2 GB", dialog.summary_label.text())
+            self.assertEqual(dialog.cleanup_table.rowCount(), 1)
+            self.assertEqual(dialog.warning_table.rowCount(), 1)
+
+            dialog.surface_tabs.setCurrentWidget(dialog.warning_table)
+            dialog.warning_table.selectRow(0)
+            self.assertIn(
+                "Deleting this file permanently removes media", dialog.details_edit.toPlainText()
+            )
+
+            with (
+                mock.patch(
+                    "isrc_manager.app_dialogs.QMessageBox.question",
+                    return_value=QMessageBox.Yes,
+                ),
+                mock.patch(
+                    "isrc_manager.app_dialogs.QInputDialog.getText",
+                    return_value=("DELETE", True),
+                ),
+                mock.patch("isrc_manager.app_dialogs.QMessageBox.information") as info_mock,
+            ):
+                dialog._delete_selected()
+
+            self.assertEqual(host.storage_cleanup_calls, [(["in-use-file"], True)])
+            self.assertEqual(host.storage_audit_load_calls, 2)
+            info_mock.assert_called_once()
         finally:
             dialog.close()
             host.close()

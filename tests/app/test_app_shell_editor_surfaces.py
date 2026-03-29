@@ -21,6 +21,12 @@ class AppShellEditorSurfaceTests(AppShellTestCase):
     test_export_catalog_audio_copies_exports_managed_and_database_wav_sources = (
         AppShellTestCase.case_export_catalog_audio_copies_exports_managed_and_database_wav_sources
     )
+    test_master_transfer_export_uses_background_task = (
+        AppShellTestCase.case_master_transfer_export_uses_background_task
+    )
+    test_master_transfer_export_does_not_start_when_preview_is_cancelled = (
+        AppShellTestCase.case_master_transfer_export_does_not_start_when_preview_is_cancelled
+    )
     test_export_standard_audio_file_embeds_catalog_metadata_on_export = (
         AppShellTestCase.case_export_standard_audio_file_embeds_catalog_metadata_on_export
     )
@@ -60,11 +66,41 @@ class AppShellEditorSurfaceTests(AppShellTestCase):
     test_audioless_row_context_menu_omits_audio_submenu = (
         AppShellTestCase.case_audioless_row_context_menu_omits_audio_submenu
     )
+    test_standard_audio_badge_uses_distinct_icons_for_managed_and_database_storage = (
+        AppShellTestCase.case_standard_audio_badge_uses_distinct_icons_for_managed_and_database_storage
+    )
+    test_standard_album_art_badge_uses_distinct_icons_for_managed_and_database_storage = (
+        AppShellTestCase.case_standard_album_art_badge_uses_distinct_icons_for_managed_and_database_storage
+    )
+    test_custom_blob_image_badge_uses_distinct_icons_for_managed_and_database_storage = (
+        AppShellTestCase.case_custom_blob_image_badge_uses_distinct_icons_for_managed_and_database_storage
+    )
     test_standard_media_context_menu_groups_file_and_storage_actions = (
         AppShellTestCase.case_standard_media_context_menu_groups_file_and_storage_actions
     )
+    test_standard_media_context_menu_shows_only_store_selection_in_database_for_all_managed_selection = (
+        AppShellTestCase.case_standard_media_context_menu_shows_only_store_selection_in_database_for_all_managed_selection
+    )
+    test_standard_media_context_menu_shows_only_store_selection_as_managed_file_for_all_database_selection = (
+        AppShellTestCase.case_standard_media_context_menu_shows_only_store_selection_as_managed_file_for_all_database_selection
+    )
+    test_standard_media_context_menu_shows_both_storage_actions_for_mixed_selection = (
+        AppShellTestCase.case_standard_media_context_menu_shows_both_storage_actions_for_mixed_selection
+    )
     test_custom_blob_context_menu_groups_file_and_storage_actions = (
         AppShellTestCase.case_custom_blob_context_menu_groups_file_and_storage_actions
+    )
+    test_mixed_selection_storage_conversion_skips_already_matching_tracks_and_converts_only_needed_tracks = (
+        AppShellTestCase.case_mixed_selection_storage_conversion_skips_already_matching_tracks_and_converts_only_needed_tracks
+    )
+    test_single_track_storage_conversion_uses_background_bundle_task = (
+        AppShellTestCase.case_single_track_storage_conversion_uses_background_bundle_task
+    )
+    test_custom_blob_storage_conversion_uses_background_bundle_task = (
+        AppShellTestCase.case_custom_blob_storage_conversion_uses_background_bundle_task
+    )
+    test_storage_conversion_progress_reaches_100_only_after_final_ui_refresh = (
+        AppShellTestCase.case_storage_conversion_progress_reaches_100_only_after_final_ui_refresh
     )
     test_text_custom_field_table_edit_saves_without_attachment_state = (
         AppShellTestCase.case_text_custom_field_table_edit_saves_without_attachment_state
@@ -101,6 +137,9 @@ class AppShellEditorSurfaceTests(AppShellTestCase):
     )
     test_audio_attach_unmatched_and_ambiguous_files_open_manual_resolution_dialog = (
         AppShellTestCase.case_audio_attach_unmatched_and_ambiguous_files_open_manual_resolution_dialog
+    )
+    test_master_transfer_import_requires_review_before_apply = (
+        AppShellTestCase.case_master_transfer_import_requires_review_before_apply
     )
     test_album_art_attach_requires_confirmation_and_honors_storage_mode = (
         AppShellTestCase.case_album_art_attach_requires_confirmation_and_honors_storage_mode

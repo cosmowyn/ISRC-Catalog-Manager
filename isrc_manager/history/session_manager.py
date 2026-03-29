@@ -86,6 +86,61 @@ class SessionHistoryManager:
         entry = self.get_default_redo_entry()
         return entry.label if entry is not None else None
 
+    def snapshot_references(self) -> list[dict]:
+        references: list[dict] = []
+        for row in self._state["entries"]:
+            payload = row.get("payload") or {}
+            inverse_payload = row.get("inverse_payload") or {}
+            redo_payload = row.get("redo_payload") or {}
+            for source_name, source in (
+                ("payload", payload),
+                ("inverse_payload", inverse_payload),
+                ("redo_payload", redo_payload),
+            ):
+                snapshot_path = str(source.get("snapshot_path") or "").strip()
+                if not snapshot_path:
+                    continue
+                profile_path = (
+                    str(source.get("deleted_path") or "").strip()
+                    or str(source.get("created_path") or "").strip()
+                    or str(payload.get("created_path") or "").strip()
+                    or str(payload.get("deleted_path") or "").strip()
+                    or str(row.get("entity_id") or "").strip()
+                )
+                references.append(
+                    {
+                        "entry_id": int(row["entry_id"]),
+                        "label": str(row.get("label") or ""),
+                        "action_type": str(row.get("action_type") or ""),
+                        "snapshot_path": snapshot_path,
+                        "profile_path": profile_path,
+                        "source_name": source_name,
+                    }
+                )
+        return references
+
+    def remove_entries(self, entry_ids: list[int] | tuple[int, ...]) -> tuple[int, ...]:
+        selected = {int(entry_id) for entry_id in entry_ids}
+        if not selected:
+            return ()
+        before = len(self._state["entries"])
+        self._state["entries"] = [
+            row for row in self._state["entries"] if int(row["entry_id"]) not in selected
+        ]
+        if len(self._state["entries"]) == before:
+            return ()
+        self._ensure_invariants()
+        return tuple(sorted(selected))
+
+    def remove_entries_for_snapshot(self, snapshot_path: str | Path) -> tuple[int, ...]:
+        target = str(Path(snapshot_path))
+        entry_ids = [
+            int(reference["entry_id"])
+            for reference in self.snapshot_references()
+            if str(Path(str(reference.get("snapshot_path") or ""))) == target
+        ]
+        return self.remove_entries(entry_ids)
+
     # ------------------------------------------------------------------
     # Recording
     # ------------------------------------------------------------------

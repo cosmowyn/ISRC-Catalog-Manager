@@ -37,6 +37,12 @@ from isrc_manager.ui_common import (
 BLOB_ICON_AUDIO_KEY = "blob_icon.audio"
 BLOB_ICON_AUDIO_LOSSY_KEY = "blob_icon.audio_lossy"
 BLOB_ICON_IMAGE_KEY = "blob_icon.image"
+BLOB_ICON_AUDIO_MANAGED_KEY = "blob_icon.audio_managed"
+BLOB_ICON_AUDIO_DATABASE_KEY = "blob_icon.audio_database"
+BLOB_ICON_AUDIO_LOSSY_MANAGED_KEY = "blob_icon.audio_lossy_managed"
+BLOB_ICON_AUDIO_LOSSY_DATABASE_KEY = "blob_icon.audio_lossy_database"
+BLOB_ICON_IMAGE_MANAGED_KEY = "blob_icon.image_managed"
+BLOB_ICON_IMAGE_DATABASE_KEY = "blob_icon.image_database"
 
 
 @dataclass(frozen=True)
@@ -106,28 +112,64 @@ EMOJI_BLOB_ICON_PRESETS: dict[str, tuple[tuple[str, str], ...]] = {
     ),
 }
 
+EXACT_KIND_DEFAULT_EMOJI_LABELS: dict[str, str] = {
+    "audio": "Recommended Default",
+    "audio_managed": "Recommended Default - Managed Audio",
+    "audio_database": "Recommended Default - Database Audio",
+    "audio_lossy": "Recommended Default - Lossy Audio",
+    "audio_lossy_managed": "Recommended Default - Managed Lossy Audio",
+    "audio_lossy_database": "Recommended Default - Database Lossy Audio",
+    "image": "Recommended Default",
+    "image_managed": "Recommended Default - Managed Image",
+    "image_database": "Recommended Default - Database Image",
+}
+
+FULL_LIBRARY_EMOJI_LABELS: dict[str, str] = {
+    "🎚️": "Level Slider",
+    "📼": "Tape",
+    "💽": "Optical Disc",
+    "🗃️": "Archive Box",
+}
+
 
 def default_blob_icon_spec(kind: str) -> dict[str, object]:
     clean_kind = str(kind or "").strip().lower()
-    if clean_kind == "audio_lossy":
+    if clean_kind in {"audio_lossy", "audio_lossy_managed"}:
         return {"mode": "emoji", "emoji": "🎚️"}
+    if clean_kind == "audio_lossy_database":
+        return {"mode": "emoji", "emoji": "📼"}
+    if clean_kind == "audio_database":
+        return {"mode": "emoji", "emoji": "💽"}
     if _normalize_blob_icon_kind(clean_kind) == "audio":
         return {"mode": "emoji", "emoji": "🎵"}
+    if clean_kind == "image_database":
+        return {"mode": "emoji", "emoji": "🗃️"}
     return {"mode": "emoji", "emoji": "🖼️"}
 
 
 def default_blob_icon_settings() -> dict[str, dict[str, object]]:
     return {
-        "audio": default_blob_icon_spec("audio"),
-        "audio_lossy": default_blob_icon_spec("audio_lossy"),
-        "image": default_blob_icon_spec("image"),
+        "audio_managed": default_blob_icon_spec("audio_managed"),
+        "audio_database": default_blob_icon_spec("audio_database"),
+        "audio_lossy_managed": default_blob_icon_spec("audio_lossy_managed"),
+        "audio_lossy_database": default_blob_icon_spec("audio_lossy_database"),
+        "image_managed": default_blob_icon_spec("image_managed"),
+        "image_database": default_blob_icon_spec("image_database"),
     }
 
 
 def _normalize_blob_icon_kind(kind: str) -> str:
     clean_kind = str(kind or "").strip().lower()
-    if clean_kind == "audio_lossy":
+    if clean_kind in {
+        "audio_lossy",
+        "audio_managed",
+        "audio_database",
+        "audio_lossy_managed",
+        "audio_lossy_database",
+    }:
         return "audio"
+    if clean_kind in {"image_managed", "image_database"}:
+        return "image"
     return clean_kind
 
 
@@ -140,19 +182,107 @@ def _system_specs_for_kind(kind: str) -> tuple[SystemBlobIconSpec, ...]:
     return tuple(spec for spec in SYSTEM_BLOB_ICON_SPECS if clean_kind in spec.kinds)
 
 
+def _ordered_unique_pairs(
+    pairs: tuple[tuple[str, str], ...] | list[tuple[str, str]],
+) -> tuple[tuple[str, str], ...]:
+    ordered: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for value, label in pairs:
+        clean_value = str(value or "").strip()
+        if not clean_value or clean_value in seen:
+            continue
+        seen.add(clean_value)
+        ordered.append((clean_value, str(label or clean_value).strip() or clean_value))
+    return tuple(ordered)
+
+
+def _ordered_unique_system_specs(
+    specs: tuple[SystemBlobIconSpec, ...] | list[SystemBlobIconSpec],
+) -> tuple[SystemBlobIconSpec, ...]:
+    ordered: list[SystemBlobIconSpec] = []
+    seen: set[str] = set()
+    for spec in specs:
+        if spec.name in seen:
+            continue
+        seen.add(spec.name)
+        ordered.append(spec)
+    return tuple(ordered)
+
+
+def _default_emoji_choice(kind: str) -> tuple[str, str]:
+    clean_kind = str(kind or "").strip().lower()
+    default_emoji = str(default_blob_icon_spec(clean_kind).get("emoji") or "").strip()
+    label = EXACT_KIND_DEFAULT_EMOJI_LABELS.get(
+        clean_kind,
+        EXACT_KIND_DEFAULT_EMOJI_LABELS.get(
+            _normalize_blob_icon_kind(clean_kind),
+            "Recommended Default",
+        ),
+    )
+    return (default_emoji, label)
+
+
+def recommended_system_blob_icon_choices(kind: str) -> tuple[SystemBlobIconSpec, ...]:
+    return _system_specs_for_kind(kind)
+
+
+def available_system_blob_icon_choices() -> tuple[SystemBlobIconSpec, ...]:
+    return SYSTEM_BLOB_ICON_SPECS
+
+
 def default_system_icon_name(kind: str) -> str:
-    specs = _system_specs_for_kind(kind)
+    specs = recommended_system_blob_icon_choices(kind)
     if specs:
         return specs[0].name
     return "SP_FileIcon"
 
 
 def system_blob_icon_choices(kind: str) -> tuple[SystemBlobIconSpec, ...]:
-    return _system_specs_for_kind(kind)
+    return _ordered_unique_system_specs(
+        [
+            *recommended_system_blob_icon_choices(kind),
+            *available_system_blob_icon_choices(),
+        ]
+    )
+
+
+def recommended_emoji_blob_icon_presets(kind: str) -> tuple[tuple[str, str], ...]:
+    clean_kind = str(kind or "").strip().lower()
+    normalized_kind = _normalize_blob_icon_kind(clean_kind)
+    return _ordered_unique_pairs(
+        [
+            _default_emoji_choice(clean_kind),
+            *EMOJI_BLOB_ICON_PRESETS.get(normalized_kind, ()),
+        ]
+    )
+
+
+def available_emoji_blob_icon_presets() -> tuple[tuple[str, str], ...]:
+    ordered: list[tuple[str, str]] = []
+    for preset_group in EMOJI_BLOB_ICON_PRESETS.values():
+        ordered.extend(preset_group)
+    for kind in (
+        "audio_managed",
+        "audio_database",
+        "audio_lossy_managed",
+        "audio_lossy_database",
+        "image_managed",
+        "image_database",
+    ):
+        emoji, _label = _default_emoji_choice(kind)
+        ordered.append((emoji, FULL_LIBRARY_EMOJI_LABELS.get(emoji, emoji)))
+    return _ordered_unique_pairs(ordered)
 
 
 def emoji_blob_icon_presets(kind: str) -> tuple[tuple[str, str], ...]:
-    return EMOJI_BLOB_ICON_PRESETS.get(_normalize_blob_icon_kind(kind), ())
+    recommended = recommended_emoji_blob_icon_presets(kind)
+    recommended_values = {value for value, _label in recommended}
+    remainder = tuple(
+        (value, label)
+        for value, label in available_emoji_blob_icon_presets()
+        if value not in recommended_values
+    )
+    return recommended + remainder
 
 
 def _coerce_image_payload(raw: object) -> dict[str, object]:
@@ -228,13 +358,39 @@ def normalize_blob_icon_settings(
     settings: dict[str, object] | None,
 ) -> dict[str, dict[str, object]]:
     payload = dict(settings or {})
+
+    def _payload_value(key: str, legacy_key: str | None = None):
+        if key in payload:
+            return payload.get(key)
+        if legacy_key is not None:
+            return payload.get(legacy_key)
+        return None
+
     return {
-        "audio": normalize_blob_icon_spec(payload.get("audio"), kind="audio"),
-        "audio_lossy": normalize_blob_icon_spec(
-            payload.get("audio_lossy"),
-            kind="audio_lossy",
+        "audio_managed": normalize_blob_icon_spec(
+            _payload_value("audio_managed", "audio"),
+            kind="audio_managed",
         ),
-        "image": normalize_blob_icon_spec(payload.get("image"), kind="image"),
+        "audio_database": normalize_blob_icon_spec(
+            _payload_value("audio_database", "audio"),
+            kind="audio_database",
+        ),
+        "audio_lossy_managed": normalize_blob_icon_spec(
+            _payload_value("audio_lossy_managed", "audio_lossy"),
+            kind="audio_lossy_managed",
+        ),
+        "audio_lossy_database": normalize_blob_icon_spec(
+            _payload_value("audio_lossy_database", "audio_lossy"),
+            kind="audio_lossy_database",
+        ),
+        "image_managed": normalize_blob_icon_spec(
+            _payload_value("image_managed", "image"),
+            kind="image_managed",
+        ),
+        "image_database": normalize_blob_icon_spec(
+            _payload_value("image_database", "image"),
+            kind="image_database",
+        ),
     }
 
 
@@ -428,26 +584,83 @@ class BlobIconSettingsService:
             )
 
     def load_settings(self) -> dict[str, dict[str, object]]:
-        return {
-            "audio": blob_icon_spec_from_storage(self._read_kv(BLOB_ICON_AUDIO_KEY), kind="audio"),
-            "audio_lossy": blob_icon_spec_from_storage(
-                self._read_kv(BLOB_ICON_AUDIO_LOSSY_KEY),
-                kind="audio_lossy",
-            ),
-            "image": blob_icon_spec_from_storage(self._read_kv(BLOB_ICON_IMAGE_KEY), kind="image"),
-        }
+        return normalize_blob_icon_settings(
+            {
+                "audio": blob_icon_spec_from_storage(
+                    self._read_kv(BLOB_ICON_AUDIO_KEY),
+                    kind="audio",
+                ),
+                "audio_lossy": blob_icon_spec_from_storage(
+                    self._read_kv(BLOB_ICON_AUDIO_LOSSY_KEY),
+                    kind="audio_lossy",
+                ),
+                "image": blob_icon_spec_from_storage(
+                    self._read_kv(BLOB_ICON_IMAGE_KEY),
+                    kind="image",
+                ),
+                "audio_managed": blob_icon_spec_from_storage(
+                    self._read_kv(BLOB_ICON_AUDIO_MANAGED_KEY),
+                    kind="audio_managed",
+                ),
+                "audio_database": blob_icon_spec_from_storage(
+                    self._read_kv(BLOB_ICON_AUDIO_DATABASE_KEY),
+                    kind="audio_database",
+                ),
+                "audio_lossy_managed": blob_icon_spec_from_storage(
+                    self._read_kv(BLOB_ICON_AUDIO_LOSSY_MANAGED_KEY),
+                    kind="audio_lossy_managed",
+                ),
+                "audio_lossy_database": blob_icon_spec_from_storage(
+                    self._read_kv(BLOB_ICON_AUDIO_LOSSY_DATABASE_KEY),
+                    kind="audio_lossy_database",
+                ),
+                "image_managed": blob_icon_spec_from_storage(
+                    self._read_kv(BLOB_ICON_IMAGE_MANAGED_KEY),
+                    kind="image_managed",
+                ),
+                "image_database": blob_icon_spec_from_storage(
+                    self._read_kv(BLOB_ICON_IMAGE_DATABASE_KEY),
+                    kind="image_database",
+                ),
+            }
+        )
 
     def save_settings(self, settings: dict[str, object] | None) -> dict[str, dict[str, object]]:
         normalized = normalize_blob_icon_settings(settings)
-        persisted_audio = blob_icon_spec_to_storage(normalized.get("audio"), kind="audio")
-        persisted_audio_lossy = blob_icon_spec_to_storage(
-            normalized.get("audio_lossy"),
-            kind="audio_lossy",
+        self._write_kv(
+            BLOB_ICON_AUDIO_MANAGED_KEY,
+            blob_icon_spec_to_storage(normalized.get("audio_managed"), kind="audio_managed") or "",
         )
-        persisted_image = blob_icon_spec_to_storage(normalized.get("image"), kind="image")
-        self._write_kv(BLOB_ICON_AUDIO_KEY, persisted_audio or "")
-        self._write_kv(BLOB_ICON_AUDIO_LOSSY_KEY, persisted_audio_lossy or "")
-        self._write_kv(BLOB_ICON_IMAGE_KEY, persisted_image or "")
+        self._write_kv(
+            BLOB_ICON_AUDIO_DATABASE_KEY,
+            blob_icon_spec_to_storage(normalized.get("audio_database"), kind="audio_database")
+            or "",
+        )
+        self._write_kv(
+            BLOB_ICON_AUDIO_LOSSY_MANAGED_KEY,
+            blob_icon_spec_to_storage(
+                normalized.get("audio_lossy_managed"),
+                kind="audio_lossy_managed",
+            )
+            or "",
+        )
+        self._write_kv(
+            BLOB_ICON_AUDIO_LOSSY_DATABASE_KEY,
+            blob_icon_spec_to_storage(
+                normalized.get("audio_lossy_database"),
+                kind="audio_lossy_database",
+            )
+            or "",
+        )
+        self._write_kv(
+            BLOB_ICON_IMAGE_MANAGED_KEY,
+            blob_icon_spec_to_storage(normalized.get("image_managed"), kind="image_managed") or "",
+        )
+        self._write_kv(
+            BLOB_ICON_IMAGE_DATABASE_KEY,
+            blob_icon_spec_to_storage(normalized.get("image_database"), kind="image_database")
+            or "",
+        )
         return self.load_settings()
 
 
@@ -510,9 +723,31 @@ class BlobIconEditorWidget(QWidget):
         system_layout = QVBoxLayout(self.system_page)
         system_layout.setContentsMargins(0, 0, 0, 0)
         system_layout.setSpacing(6)
+        self.system_note_label = QLabel(
+            "Recommended platform icons appear first. Browse the full available platform icon list after the separator.",
+            self.system_page,
+        )
+        self.system_note_label.setWordWrap(True)
+        self.system_note_label.setProperty("role", "secondary")
+        system_layout.addWidget(self.system_note_label)
         self.system_combo = FocusWheelComboBox(self.system_page)
         style = QApplication.instance().style() if QApplication.instance() is not None else None
-        for choice in system_blob_icon_choices(self.kind):
+        recommended_system_choices = recommended_system_blob_icon_choices(self.kind)
+        all_system_choices = system_blob_icon_choices(self.kind)
+        recommended_system_names = {choice.name for choice in recommended_system_choices}
+        for choice in recommended_system_choices:
+            self.system_combo.addItem(choice.label, choice.name)
+            if style is not None:
+                self.system_combo.setItemIcon(
+                    self.system_combo.count() - 1,
+                    style.standardIcon(choice.standard_pixmap),
+                )
+        remaining_system_choices = tuple(
+            choice for choice in all_system_choices if choice.name not in recommended_system_names
+        )
+        if recommended_system_choices and remaining_system_choices:
+            self.system_combo.insertSeparator(self.system_combo.count())
+        for choice in remaining_system_choices:
             self.system_combo.addItem(choice.label, choice.name)
             if style is not None:
                 self.system_combo.setItemIcon(
@@ -528,15 +763,34 @@ class BlobIconEditorWidget(QWidget):
         emoji_layout.setHorizontalSpacing(10)
         emoji_layout.setVerticalSpacing(8)
         self.emoji_combo = FocusWheelComboBox(self.emoji_page)
-        for emoji, label in emoji_blob_icon_presets(self.kind):
+        recommended_emoji_choices = recommended_emoji_blob_icon_presets(self.kind)
+        all_emoji_choices = emoji_blob_icon_presets(self.kind)
+        recommended_emoji_values = {emoji for emoji, _label in recommended_emoji_choices}
+        for emoji, label in recommended_emoji_choices:
+            self.emoji_combo.addItem(f"{emoji}  {label}", emoji)
+        remaining_emoji_choices = tuple(
+            (emoji, label)
+            for emoji, label in all_emoji_choices
+            if emoji not in recommended_emoji_values
+        )
+        if recommended_emoji_choices and remaining_emoji_choices:
+            self.emoji_combo.insertSeparator(self.emoji_combo.count())
+        for emoji, label in remaining_emoji_choices:
             self.emoji_combo.addItem(f"{emoji}  {label}", emoji)
         self.emoji_edit = QLineEdit(self.emoji_page)
         self.emoji_edit.setClearButtonEnabled(True)
         self.emoji_edit.setPlaceholderText("Type or pick an emoji")
-        emoji_layout.addWidget(QLabel("Suggested"), 0, 0)
-        emoji_layout.addWidget(self.emoji_combo, 0, 1)
-        emoji_layout.addWidget(QLabel("Emoji"), 1, 0)
-        emoji_layout.addWidget(self.emoji_edit, 1, 1)
+        emoji_note = QLabel(
+            "Recommended emojis appear first. Browse the full bundled emoji set after the separator, or type any emoji below.",
+            self.emoji_page,
+        )
+        emoji_note.setWordWrap(True)
+        emoji_note.setProperty("role", "secondary")
+        emoji_layout.addWidget(emoji_note, 0, 0, 1, 2)
+        emoji_layout.addWidget(QLabel("Recommended First"), 1, 0)
+        emoji_layout.addWidget(self.emoji_combo, 1, 1)
+        emoji_layout.addWidget(QLabel("Emoji"), 2, 0)
+        emoji_layout.addWidget(self.emoji_edit, 2, 1)
         self.mode_stack.addWidget(self.emoji_page)
 
         self.image_page = QWidget(self.mode_stack)

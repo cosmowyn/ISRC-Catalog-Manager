@@ -968,6 +968,65 @@ class ExchangeServiceTestCase(unittest.TestCase):
         finally:
             new_conn.close()
 
+    def case_package_export_omits_missing_release_artwork_with_warning(self):
+        artwork_path = self.data_root / "missing-release.png"
+        artwork_path.write_bytes(
+            bytes.fromhex(
+                "89504E470D0A1A0A"
+                "0000000D49484452000000010000000108060000001F15C489"
+                "0000000D49444154789C63606060000000050001F56E27D4"
+                "0000000049454E44AE426082"
+            )
+        )
+        track_id = self._create_track(isrc="NL-ABC-26-00036", title="Broken Artwork Export")
+        release_id = self.release_service.create_release(
+            ReleasePayload(
+                title="Broken Artwork Release",
+                primary_artist="Moonwake",
+                album_artist="Moonwake",
+                release_type="album",
+                release_date="2026-03-15",
+                upc="036000291452",
+                artwork_source_path=str(artwork_path),
+                placements=[
+                    ReleaseTrackPlacement(
+                        track_id=track_id,
+                        disc_number=1,
+                        track_number=1,
+                        sequence_number=1,
+                    )
+                ],
+            )
+        )
+        release = self.release_service.fetch_release(release_id)
+        managed_path = self.release_service.resolve_artwork_path(release.artwork_path)
+        self.assertIsNotNone(managed_path)
+        managed_path.unlink()
+
+        package_path = self.data_root / "missing-release-artwork-package.zip"
+        self.service.export_package(package_path)
+        inspection = self.service.inspect_package(package_path)
+
+        with ZipFile(package_path, "r") as archive:
+            manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+            names = set(archive.namelist())
+
+        row = manifest["rows"][0]
+        self.assertEqual(row["release_artwork_path"], "")
+        self.assertEqual(row["release_artwork_storage_mode"], "")
+        self.assertFalse(any(name.startswith("media/") for name in names))
+        self.assertTrue(
+            any(
+                "omitted release artwork" in str(warning).lower()
+                for warning in manifest.get("warnings") or []
+            )
+        )
+        self.assertTrue(
+            any(
+                "omitted release artwork" in str(warning).lower() for warning in inspection.warnings
+            )
+        )
+
     def case_package_import_reuses_duplicate_track_rows_and_preserves_source_release_ids(self):
         track_id = self.track_service.create_track(
             TrackCreatePayload(

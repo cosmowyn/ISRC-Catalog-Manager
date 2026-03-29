@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
+    QHeaderView,
     QInputDialog,
     QLabel,
     QLineEdit,
@@ -26,6 +27,8 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QSplitter,
+    QTableWidget,
+    QTableWidgetItem,
     QTabWidget,
     QTextBrowser,
     QVBoxLayout,
@@ -578,6 +581,255 @@ class ActionRibbonDialog(QDialog):
         return self.show_ribbon_checkbox.isChecked()
 
 
+class MasterTransferExportDialog(QDialog):
+    """Review exportable master transfer sections before writing the ZIP package."""
+
+    def __init__(self, sections, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Export Master Catalog Transfer")
+        self.setModal(True)
+        self.resize(980, 680)
+        self.setMinimumSize(860, 560)
+        _apply_standard_dialog_chrome(self, "masterTransferExportDialog")
+
+        self._table_updating = False
+        self.sections = [self._normalize_section(section) for section in list(sections or [])]
+        self._sections_by_id = {
+            str(section["section_id"]): section
+            for section in self.sections
+            if section["section_id"]
+        }
+        self._requested_selected = {
+            str(section["section_id"]): bool(section.get("default_selected", True))
+            for section in self.sections
+            if section["section_id"]
+        }
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(14)
+        _add_standard_dialog_header(
+            layout,
+            self,
+            title="Export Master Catalog Transfer",
+            subtitle=(
+                "Review the logical sections that will be packaged into the transfer ZIP. "
+                "Everything starts selected, and dependent sections stay linked to the "
+                "sections they require."
+            ),
+        )
+
+        selection_box, selection_layout = _create_standard_section(
+            self,
+            "Section Selection",
+            "Uncheck any section you do not want to include. If a section depends on another "
+            "section, it is disabled automatically until the required section is selected again.",
+        )
+        self.section_table = QTableWidget(len(self.sections), 4, self)
+        self.section_table.setHorizontalHeaderLabels(
+            ["Include", "Section", "Contents", "Requirements"]
+        )
+        self.section_table.verticalHeader().setVisible(False)
+        self.section_table.setAlternatingRowColors(True)
+        self.section_table.setSelectionMode(QAbstractItemView.NoSelection)
+        self.section_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.section_table.horizontalHeader().setStretchLastSection(True)
+        self.section_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.section_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.section_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.section_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        selection_layout.addWidget(self.section_table, 1)
+        layout.addWidget(selection_box, 1)
+
+        self.selection_status_label = QLabel(self)
+        self.selection_status_label.setWordWrap(True)
+        self.selection_status_label.setProperty("role", "secondary")
+        layout.addWidget(self.selection_status_label)
+
+        button_row = QHBoxLayout()
+        button_row.addStretch(1)
+        self.export_button = QPushButton("Export ZIP", self)
+        self.export_button.setDefault(True)
+        self.export_button.clicked.connect(self.accept)
+        cancel_button = QPushButton("Cancel", self)
+        cancel_button.clicked.connect(self.reject)
+        button_row.addWidget(self.export_button)
+        button_row.addWidget(cancel_button)
+        layout.addLayout(button_row)
+
+        self._populate_section_table()
+        self.section_table.itemChanged.connect(self._on_item_changed)
+        self._refresh_dependency_states()
+        _apply_compact_dialog_control_heights(self)
+
+    @staticmethod
+    def _normalize_section(section) -> dict[str, object]:
+        if isinstance(section, dict):
+            payload = dict(section)
+        else:
+            payload = {
+                "section_id": getattr(section, "section_id", ""),
+                "label": getattr(section, "label", ""),
+                "description": getattr(section, "description", ""),
+                "dependency_note": getattr(section, "dependency_note", ""),
+                "depends_on": list(getattr(section, "depends_on", []) or []),
+                "entity_counts": dict(getattr(section, "entity_counts", {}) or {}),
+                "default_selected": bool(getattr(section, "default_selected", True)),
+            }
+        return {
+            "section_id": str(payload.get("section_id") or "").strip(),
+            "label": str(payload.get("label") or "").strip() or "Unnamed Section",
+            "description": str(payload.get("description") or "").strip(),
+            "dependency_note": str(payload.get("dependency_note") or "").strip(),
+            "depends_on": [
+                str(value or "").strip() for value in list(payload.get("depends_on") or [])
+            ],
+            "entity_counts": {
+                str(key): int(value or 0)
+                for key, value in dict(payload.get("entity_counts") or {}).items()
+            },
+            "default_selected": bool(payload.get("default_selected", True)),
+        }
+
+    @staticmethod
+    def _counts_text(counts: dict[str, int]) -> str:
+        visible_counts = [
+            f"{str(key).replace('_', ' ')}={int(value or 0)}"
+            for key, value in counts.items()
+            if int(value or 0) > 0
+        ]
+        return ", ".join(visible_counts) if visible_counts else "No rows found"
+
+    def _effective_selected(self, section_id: str, *, memo: dict[str, bool] | None = None) -> bool:
+        if memo is None:
+            memo = {}
+        clean_id = str(section_id or "").strip()
+        if clean_id in memo:
+            return memo[clean_id]
+        if not self._requested_selected.get(clean_id, False):
+            memo[clean_id] = False
+            return False
+        section = self._sections_by_id.get(clean_id)
+        if section is None:
+            memo[clean_id] = False
+            return False
+        for dependency_id in section.get("depends_on") or []:
+            if not self._effective_selected(str(dependency_id), memo=memo):
+                memo[clean_id] = False
+                return False
+        memo[clean_id] = True
+        return True
+
+    def _populate_section_table(self) -> None:
+        self._table_updating = True
+        try:
+            for row_index, section in enumerate(self.sections):
+                include_item = QTableWidgetItem()
+                include_item.setData(Qt.UserRole, str(section["section_id"]))
+                include_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
+                include_item.setCheckState(
+                    Qt.Checked if bool(section.get("default_selected", True)) else Qt.Unchecked
+                )
+                self.section_table.setItem(row_index, 0, include_item)
+
+                section_item = QTableWidgetItem(str(section["label"]))
+                section_item.setToolTip(str(section.get("description") or ""))
+                self.section_table.setItem(row_index, 1, section_item)
+
+                contents_item = QTableWidgetItem(
+                    self._counts_text(dict(section.get("entity_counts") or {}))
+                )
+                contents_item.setToolTip(contents_item.text())
+                self.section_table.setItem(row_index, 2, contents_item)
+
+                requirements_item = QTableWidgetItem()
+                self.section_table.setItem(row_index, 3, requirements_item)
+        finally:
+            self._table_updating = False
+
+    def _on_item_changed(self, item: QTableWidgetItem | None) -> None:
+        if item is None or self._table_updating or item.column() != 0:
+            return
+        section_id = str(item.data(Qt.UserRole) or "").strip()
+        if not section_id:
+            return
+        self._requested_selected[section_id] = item.checkState() == Qt.Checked
+        self._refresh_dependency_states()
+
+    def _refresh_dependency_states(self) -> None:
+        memo: dict[str, bool] = {}
+        effective_selection = {
+            str(section["section_id"]): self._effective_selected(
+                str(section["section_id"]),
+                memo=memo,
+            )
+            for section in self.sections
+        }
+        self._table_updating = True
+        try:
+            for row_index, section in enumerate(self.sections):
+                section_id = str(section["section_id"])
+                include_item = self.section_table.item(row_index, 0)
+                requirements_item = self.section_table.item(row_index, 3)
+                if include_item is None or requirements_item is None:
+                    continue
+
+                blocked_dependencies = [
+                    str(self._sections_by_id.get(dep, {}).get("label") or dep)
+                    for dep in list(section.get("depends_on") or [])
+                    if not effective_selection.get(str(dep), False)
+                ]
+                flags = Qt.ItemIsEnabled
+                if not blocked_dependencies:
+                    flags |= Qt.ItemIsUserCheckable
+                include_item.setFlags(flags)
+                include_item.setCheckState(
+                    Qt.Checked if effective_selection.get(section_id, False) else Qt.Unchecked
+                )
+
+                if blocked_dependencies:
+                    requirements_item.setText("Requires: " + ", ".join(blocked_dependencies))
+                elif section.get("depends_on"):
+                    requirements_item.setText(
+                        "Requires: "
+                        + ", ".join(
+                            str(self._sections_by_id.get(dep, {}).get("label") or dep)
+                            for dep in list(section.get("depends_on") or [])
+                        )
+                    )
+                else:
+                    requirements_item.setText("No prerequisites")
+                tooltip_lines = [
+                    str(section.get("description") or "").strip(),
+                    str(section.get("dependency_note") or "").strip(),
+                    requirements_item.text(),
+                ]
+                requirements_item.setToolTip("\n".join(line for line in tooltip_lines if line))
+        finally:
+            self._table_updating = False
+
+        selected_labels = [
+            str(section.get("label") or "")
+            for section in self.sections
+            if effective_selection.get(str(section["section_id"]), False)
+        ]
+        self.export_button.setEnabled(bool(selected_labels))
+        if selected_labels:
+            self.selection_status_label.setText("Selected sections: " + ", ".join(selected_labels))
+        else:
+            self.selection_status_label.setText(
+                "Select at least one section to create a master transfer package."
+            )
+
+    def selected_section_ids(self) -> list[str]:
+        memo: dict[str, bool] = {}
+        return [
+            str(section["section_id"])
+            for section in self.sections
+            if self._effective_selected(str(section["section_id"]), memo=memo)
+        ]
+
+
 class ApplicationLogDialog(QDialog):
     def __init__(self, app, parent=None):
         super().__init__(parent or app)
@@ -810,11 +1062,16 @@ class DiagnosticsDialog(QDialog):
         loading_row.setContentsMargins(0, 0, 0, 0)
         loading_row.setSpacing(10)
         self.loading_bar = QProgressBar(self)
-        self.loading_bar.setRange(0, 0)
-        self.loading_bar.setTextVisible(False)
+        self.loading_bar.setRange(0, 100)
+        self.loading_bar.setValue(0)
+        self.loading_bar.setTextVisible(True)
+        self.loading_bar.setFormat("%p%")
         self.loading_bar.setMinimumWidth(220)
         self.loading_status_label = QLabel("Loading diagnostics...")
         self.loading_status_label.setWordWrap(True)
+        self._loading_progress_value = 0
+        self._loading_progress_maximum = 100
+        self._loading_status_message = "Loading diagnostics..."
         loading_row.addWidget(self.loading_bar)
         loading_row.addWidget(self.loading_status_label, 1)
         self.loading_panel.hide()
@@ -883,6 +1140,55 @@ class DiagnosticsDialog(QDialog):
         storage_actions.addStretch(1)
         storage_layout.addLayout(storage_actions)
         body_layout.addWidget(self.history_storage_group)
+
+        self.application_storage_group = QGroupBox("Application Storage")
+        app_storage_layout = QVBoxLayout(self.application_storage_group)
+        app_storage_layout.setContentsMargins(14, 18, 14, 14)
+        app_storage_layout.setSpacing(12)
+        self.application_storage_summary_label = QLabel(self.application_storage_group)
+        self.application_storage_summary_label.setWordWrap(True)
+        self.application_storage_summary_label.setProperty("role", "supportingText")
+        app_storage_layout.addWidget(self.application_storage_summary_label)
+
+        app_metrics_layout = QGridLayout()
+        app_metrics_layout.setHorizontalSpacing(18)
+        app_metrics_layout.setVerticalSpacing(8)
+        self.application_storage_metric_labels = {}
+        for row, (metric_key, title_text) in enumerate(
+            (
+                ("total", "Total app usage"),
+                ("current_profile", "Current profile attributed"),
+                ("reclaimable", "Reclaimable now"),
+                ("deleted_profiles", "Deleted-profile residue"),
+                ("orphaned", "Orphaned / unreferenced"),
+                ("warnings", "Warning / protected"),
+            )
+        ):
+            title_label = QLabel(title_text, self.application_storage_group)
+            title_label.setAlignment(Qt.AlignRight | Qt.AlignTop)
+            value_label = QLabel("Not available", self.application_storage_group)
+            value_label.setTextInteractionFlags(
+                Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard
+            )
+            value_label.setWordWrap(True)
+            app_metrics_layout.addWidget(title_label, row, 0, alignment=Qt.AlignRight | Qt.AlignTop)
+            app_metrics_layout.addWidget(value_label, row, 1)
+            self.application_storage_metric_labels[metric_key] = value_label
+        app_metrics_layout.setColumnStretch(1, 1)
+        app_storage_layout.addLayout(app_metrics_layout)
+
+        app_storage_actions = QHBoxLayout()
+        app_storage_actions.setContentsMargins(0, 0, 0, 0)
+        app_storage_actions.setSpacing(10)
+        self.open_storage_admin_button = QPushButton(
+            "Open Application Storage Admin…",
+            self.application_storage_group,
+        )
+        self.open_storage_admin_button.clicked.connect(self._open_application_storage_admin)
+        app_storage_actions.addWidget(self.open_storage_admin_button)
+        app_storage_actions.addStretch(1)
+        app_storage_layout.addLayout(app_storage_actions)
+        body_layout.addWidget(self.application_storage_group)
 
         self.environment_group = QGroupBox("Environment")
         env_layout = QGridLayout(self.environment_group)
@@ -989,13 +1295,15 @@ class DiagnosticsDialog(QDialog):
             self._set_busy(True, "Loading diagnostics...")
             self.app._load_diagnostics_report_async(
                 owner=self,
-                on_success=self._apply_loaded_report,
+                on_success=self._populate_loaded_report,
                 on_error=lambda failure: self._handle_background_error(
                     "Diagnostics",
                     failure,
                     "Could not load diagnostics.",
                 ),
                 on_cancelled=self._handle_background_cancelled,
+                on_finished=self._finish_loaded_report,
+                on_progress=self._apply_busy_progress,
                 on_status=self._set_busy_message,
             )
             return
@@ -1003,12 +1311,16 @@ class DiagnosticsDialog(QDialog):
         self._apply_loaded_report(report)
 
     def _apply_loaded_report(self, report: dict):
-        self._set_busy(False)
+        self._populate_loaded_report(report)
+        self._finish_loaded_report()
+
+    def _populate_loaded_report(self, report: dict):
         for key, value in report["environment"].items():
             label = self.environment_labels.get(key)
             if label is not None:
                 label.setText(value)
         self._apply_history_storage_budget(report.get("history_storage_budget") or {})
+        self._apply_application_storage_summary(report.get("application_storage") or {})
         self._sync_environment_label_metrics()
 
         self._checks = list(report["checks"])
@@ -1028,6 +1340,10 @@ class DiagnosticsDialog(QDialog):
         refresh_cleanup = getattr(self.catalog_cleanup_panel, "refresh", None)
         if callable(refresh_cleanup):
             refresh_cleanup()
+
+    def _finish_loaded_report(self) -> None:
+        if self._busy:
+            self._set_busy(False)
 
     def focus_cleanup_tab(self, tab_name: str = "artists") -> None:
         if self.catalog_cleanup_panel is None:
@@ -1067,10 +1383,22 @@ class DiagnosticsDialog(QDialog):
     def _set_busy(self, busy: bool, message: str | None = None) -> None:
         self._busy = bool(busy)
         if self._busy:
+            self._loading_progress_value = 0
+            self._loading_progress_maximum = 100
+            self._loading_status_message = str(message or "Working...")
             self.loading_panel.show()
-            self._set_busy_message(message or "Working...")
+            self.loading_bar.setRange(0, self._loading_progress_maximum)
+            self.loading_bar.setValue(0)
+            self.loading_bar.setFormat("%p%")
+            self._set_busy_message(self._loading_status_message)
         else:
             self.loading_panel.hide()
+            self.loading_bar.setRange(0, 100)
+            self.loading_bar.setValue(0)
+            self.loading_bar.setFormat("%p%")
+            self._loading_progress_value = 0
+            self._loading_progress_maximum = 100
+            self._loading_status_message = ""
             self.loading_status_label.setText("")
         for widget in (
             self.refresh_button,
@@ -1081,17 +1409,38 @@ class DiagnosticsDialog(QDialog):
             self.close_button,
             self.checks_list,
             self.open_cleanup_button,
+            self.open_storage_admin_button,
         ):
             widget.setEnabled(not self._busy)
         if not self._busy:
             self.open_cleanup_button.setEnabled(
                 callable(getattr(self.app, "open_history_cleanup_dialog", None))
             )
+            self.open_storage_admin_button.setEnabled(
+                callable(getattr(self.app, "open_application_storage_admin_dialog", None))
+            )
         self._sync_loading_panel_metrics()
         self._update_repair_buttons(self._selected_check())
 
     def _set_busy_message(self, message: str) -> None:
-        self.loading_status_label.setText(str(message or "Working..."))
+        self._loading_status_message = str(message or "Working...")
+        self.loading_status_label.setText(self._loading_status_message)
+
+    def _apply_busy_progress(self, update: object) -> None:
+        value = getattr(update, "value", None)
+        maximum = getattr(update, "maximum", None)
+        message = getattr(update, "message", None)
+        if maximum not in (None, 0):
+            self._loading_progress_maximum = max(1, int(maximum))
+        if value is not None:
+            self._loading_progress_value = max(
+                0,
+                min(self._loading_progress_maximum, int(value)),
+            )
+        self.loading_bar.setRange(0, self._loading_progress_maximum)
+        self.loading_bar.setValue(self._loading_progress_value)
+        self.loading_bar.setFormat("%p%")
+        self._set_busy_message(str(message or self._loading_status_message or "Working..."))
 
     def _handle_background_cancelled(self) -> None:
         self._set_busy(False)
@@ -1142,6 +1491,31 @@ class DiagnosticsDialog(QDialog):
 
     def _open_history_cleanup(self) -> None:
         opener = getattr(self.app, "open_history_cleanup_dialog", None)
+        if callable(opener):
+            opener()
+
+    def _apply_application_storage_summary(self, payload: dict[str, object]) -> None:
+        available = bool(payload.get("available"))
+        summary = str(payload.get("summary") or "").strip()
+        if not summary and not available:
+            summary = "Application-wide storage information is not available."
+        self.application_storage_summary_label.setText(summary)
+        mapping = {
+            "total": str(payload.get("total_text") or "Not available"),
+            "current_profile": str(payload.get("current_profile_text") or "Not available"),
+            "reclaimable": str(payload.get("reclaimable_text") or "Not available"),
+            "deleted_profiles": str(payload.get("deleted_profile_text") or "Not available"),
+            "orphaned": str(payload.get("orphaned_text") or "Not available"),
+            "warnings": str(payload.get("warning_text") or "Not available"),
+        }
+        for key, label in self.application_storage_metric_labels.items():
+            label.setText(mapping.get(key, "Not available"))
+        self.open_storage_admin_button.setEnabled(
+            callable(getattr(self.app, "open_application_storage_admin_dialog", None))
+        )
+
+    def _open_application_storage_admin(self) -> None:
+        opener = getattr(self.app, "open_application_storage_admin_dialog", None)
         if callable(opener):
             opener()
 
@@ -1218,6 +1592,458 @@ class DiagnosticsDialog(QDialog):
         self._set_busy(False)
         QMessageBox.information(self, "Repair Complete", str(result_text or "Repair complete."))
         self.refresh()
+
+
+class ApplicationStorageAdminDialog(QDialog):
+    def __init__(self, app, parent=None):
+        super().__init__(parent or app)
+        self.app = app
+        self._busy = False
+        self._items_by_key: dict[str, dict[str, object]] = {}
+        self.setObjectName("applicationStorageAdminDialog")
+        self.setProperty("role", "panel")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setWindowTitle("Application Storage Admin")
+        self.resize(1220, 860)
+        self.setMinimumSize(1080, 760)
+        _apply_standard_dialog_chrome(self, "applicationStorageAdminDialog")
+        self.setStyleSheet(
+            _compose_widget_stylesheet(
+                self,
+                """
+                QDialog#applicationStorageAdminDialog QLabel#storageAdminTitle {
+                    font-size: 28px;
+                    font-weight: 700;
+                }
+                QDialog#applicationStorageAdminDialog QLabel#storageAdminSubtitle {
+                    font-size: 15px;
+                }
+                QDialog#applicationStorageAdminDialog QGroupBox {
+                    font-size: 16px;
+                    font-weight: 600;
+                    margin-top: 8px;
+                }
+                QDialog#applicationStorageAdminDialog QGroupBox::title {
+                    left: 10px;
+                    padding: 0 6px;
+                }
+                """,
+            )
+        )
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(14)
+
+        help_row = QHBoxLayout()
+        help_row.addStretch(1)
+        help_row.addWidget(_create_round_help_button(self, "diagnostics"))
+        root.addLayout(help_row)
+
+        title = QLabel("Application Storage Admin")
+        title.setObjectName("storageAdminTitle")
+        title.setProperty("role", "dialogTitle")
+        subtitle = QLabel(
+            "Inspect application-wide files across active profiles, history, backups, and generated artifacts, then permanently clean up retained data without dropping into the OS shell."
+        )
+        subtitle.setObjectName("storageAdminSubtitle")
+        subtitle.setProperty("role", "dialogSubtitle")
+        subtitle.setWordWrap(True)
+        root.addWidget(title)
+        root.addWidget(subtitle)
+
+        self.loading_panel = QWidget(self)
+        loading_row = QHBoxLayout(self.loading_panel)
+        loading_row.setContentsMargins(0, 0, 0, 0)
+        loading_row.setSpacing(10)
+        self.loading_bar = QProgressBar(self)
+        self.loading_bar.setRange(0, 0)
+        self.loading_bar.setTextVisible(False)
+        self.loading_bar.setMinimumWidth(220)
+        self.loading_status_label = QLabel("Inspecting application-wide storage...")
+        self.loading_status_label.setWordWrap(True)
+        loading_row.addWidget(self.loading_bar)
+        loading_row.addWidget(self.loading_status_label, 1)
+        self.loading_panel.hide()
+        root.addWidget(self.loading_panel)
+
+        summary_group = QGroupBox("Storage Summary")
+        summary_layout = QVBoxLayout(summary_group)
+        summary_layout.setContentsMargins(14, 18, 14, 14)
+        summary_layout.setSpacing(12)
+        self.summary_label = QLabel(summary_group)
+        self.summary_label.setWordWrap(True)
+        self.summary_label.setProperty("role", "supportingText")
+        summary_layout.addWidget(self.summary_label)
+
+        metrics_layout = QGridLayout()
+        metrics_layout.setHorizontalSpacing(18)
+        metrics_layout.setVerticalSpacing(8)
+        self.summary_metric_labels = {}
+        for row, (metric_key, title_text) in enumerate(
+            (
+                ("total", "Total app usage"),
+                ("current_profile", "Current profile attributed"),
+                ("reclaimable", "Reclaimable now"),
+                ("deleted_profiles", "Deleted-profile residue"),
+                ("orphaned", "Orphaned / unreferenced"),
+                ("warnings", "Warning / protected"),
+            )
+        ):
+            title_label = QLabel(title_text, summary_group)
+            title_label.setAlignment(Qt.AlignRight | Qt.AlignTop)
+            value_label = QLabel("Not available", summary_group)
+            value_label.setTextInteractionFlags(
+                Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard
+            )
+            value_label.setWordWrap(True)
+            metrics_layout.addWidget(title_label, row, 0, alignment=Qt.AlignRight | Qt.AlignTop)
+            metrics_layout.addWidget(value_label, row, 1)
+            self.summary_metric_labels[metric_key] = value_label
+        metrics_layout.setColumnStretch(1, 1)
+        summary_layout.addLayout(metrics_layout)
+
+        warning_label = QLabel(
+            "Final cleanup is permanent. These actions do not create new snapshots, undo records, or secondary safety copies."
+        )
+        warning_label.setWordWrap(True)
+        warning_label.setProperty("role", "supportingText")
+        summary_layout.addWidget(warning_label)
+        root.addWidget(summary_group)
+
+        self.surface_tabs = QTabWidget(self)
+        self.surface_tabs.setDocumentMode(True)
+        root.addWidget(self.surface_tabs, 1)
+
+        self.cleanup_table = self._build_items_table()
+        self.warning_table = self._build_items_table()
+        self.surface_tabs.addTab(self.cleanup_table, "Cleanup Candidates")
+        self.surface_tabs.addTab(self.warning_table, "Warnings & In Use")
+
+        details_group = QGroupBox("Details")
+        details_layout = QVBoxLayout(details_group)
+        details_layout.setContentsMargins(14, 18, 14, 14)
+        self.details_edit = QPlainTextEdit(self)
+        self.details_edit.setReadOnly(True)
+        self.details_edit.setMinimumHeight(180)
+        details_layout.addWidget(self.details_edit)
+        root.addWidget(details_group)
+
+        button_row = QHBoxLayout()
+        button_row.setSpacing(10)
+        self.refresh_button = QPushButton("Refresh")
+        self.delete_button = QPushButton("Delete Selected…")
+        self.open_data_button = QPushButton("Open Data Folder")
+        self.close_button = QPushButton("Close")
+        for button in (
+            self.refresh_button,
+            self.delete_button,
+            self.open_data_button,
+            self.close_button,
+        ):
+            button.setMinimumWidth(150)
+        button_row.addWidget(self.refresh_button)
+        button_row.addWidget(self.delete_button)
+        button_row.addWidget(self.open_data_button)
+        button_row.addStretch(1)
+        button_row.addWidget(self.close_button)
+        root.addLayout(button_row)
+
+        self.refresh_button.clicked.connect(self.refresh)
+        self.delete_button.clicked.connect(self._delete_selected)
+        self.open_data_button.clicked.connect(
+            lambda: self.app._open_local_path(self.app.data_root, "Open Data Folder")
+        )
+        self.close_button.clicked.connect(self.accept)
+        self.surface_tabs.currentChanged.connect(lambda _index: self._sync_selection_details())
+        self.cleanup_table.itemSelectionChanged.connect(self._sync_selection_details)
+        self.warning_table.itemSelectionChanged.connect(self._sync_selection_details)
+
+        self.refresh()
+        _apply_compact_dialog_control_heights(self)
+        self._sync_loading_panel_metrics()
+
+    def _build_items_table(self) -> QTableWidget:
+        table = QTableWidget(0, 6, self)
+        table.setHorizontalHeaderLabels(["Status", "Category", "Item", "Size", "Profile", "Path"])
+        table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        table.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        table.setAlternatingRowColors(True)
+        table.setSortingEnabled(False)
+        table.verticalHeader().setVisible(False)
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(5, QHeaderView.Stretch)
+        return table
+
+    def refresh(self) -> None:
+        if self._busy:
+            return
+        loader = getattr(self.app, "_load_application_storage_audit_async", None)
+        if not callable(loader):
+            self._apply_audit_payload({"summary": {}, "items": []})
+            return
+        self._set_busy(True, "Inspecting application-wide storage...")
+        loader(
+            owner=self,
+            on_success=self._apply_audit_payload,
+            on_error=lambda failure: self._handle_background_error(
+                "Application Storage Admin",
+                failure,
+                "Could not inspect application-wide storage.",
+            ),
+            on_cancelled=self._handle_background_cancelled,
+            on_status=self._set_busy_message,
+        )
+
+    def _apply_audit_payload(self, payload: dict[str, object]) -> None:
+        self._set_busy(False)
+        summary = payload.get("summary") or {}
+        self.summary_label.setText(
+            str(summary.get("summary") or "Application-wide storage information is not available.")
+        )
+        mapping = {
+            "total": str(summary.get("total_text") or "Not available"),
+            "current_profile": str(summary.get("current_profile_text") or "Not available"),
+            "reclaimable": str(summary.get("reclaimable_text") or "Not available"),
+            "deleted_profiles": str(summary.get("deleted_profile_text") or "Not available"),
+            "orphaned": str(summary.get("orphaned_text") or "Not available"),
+            "warnings": str(summary.get("warning_text") or "Not available"),
+        }
+        for key, label in self.summary_metric_labels.items():
+            label.setText(mapping.get(key, "Not available"))
+
+        raw_items = list(payload.get("items") or [])
+        self._items_by_key = {
+            str(item.get("item_key") or ""): dict(item)
+            for item in raw_items
+            if str(item.get("item_key") or "").strip()
+        }
+        cleanup_items = [item for item in raw_items if not bool(item.get("warning_required"))]
+        warning_items = [item for item in raw_items if bool(item.get("warning_required"))]
+        self._populate_items_table(self.cleanup_table, cleanup_items)
+        self._populate_items_table(self.warning_table, warning_items)
+        self.details_edit.setPlainText("")
+        self._sync_selection_details()
+
+    def _populate_items_table(self, table: QTableWidget, items: list[dict[str, object]]) -> None:
+        table.setRowCount(0)
+        for row_index, item in enumerate(items):
+            table.insertRow(row_index)
+            row_values = (
+                str(item.get("status_label") or ""),
+                str(item.get("category_label") or ""),
+                str(item.get("label") or ""),
+                str(item.get("size_text") or ""),
+                str(item.get("profile_name") or ""),
+                str(item.get("path") or ""),
+            )
+            item_key = str(item.get("item_key") or "")
+            for column, text in enumerate(row_values):
+                table_item = QTableWidgetItem(text)
+                table_item.setData(Qt.UserRole, item_key)
+                if column == 5:
+                    table_item.setToolTip(text)
+                table.setItem(row_index, column, table_item)
+        if table.rowCount() > 0:
+            table.selectRow(0)
+
+    def _selected_items(self) -> list[dict[str, object]]:
+        table = self.surface_tabs.currentWidget()
+        if not isinstance(table, QTableWidget):
+            return []
+        items: list[dict[str, object]] = []
+        seen_keys: set[str] = set()
+        for row in sorted({index.row() for index in table.selectionModel().selectedRows()}):
+            row_item = table.item(row, 0)
+            if row_item is None:
+                continue
+            item_key = str(row_item.data(Qt.UserRole) or "").strip()
+            if not item_key or item_key in seen_keys:
+                continue
+            payload = self._items_by_key.get(item_key)
+            if payload is None:
+                continue
+            seen_keys.add(item_key)
+            items.append(payload)
+        return items
+
+    def _sync_selection_details(self) -> None:
+        selected = self._selected_items()
+        if not selected:
+            self.details_edit.setPlainText("Select a storage item to inspect its cleanup impact.")
+            self.delete_button.setEnabled(False)
+            return
+        primary = selected[0]
+        lines = [
+            str(primary.get("label") or ""),
+            f"Status: {primary.get('status_label') or ''}",
+            f"Category: {primary.get('category_label') or ''}",
+            f"Path: {primary.get('path') or ''}",
+            f"Size: {primary.get('size_text') or ''}",
+        ]
+        profile_name = str(primary.get("profile_name") or "").strip()
+        if profile_name:
+            lines.append(f"Profile: {profile_name}")
+        reason = str(primary.get("reason") or "").strip()
+        if reason:
+            lines.extend(["", reason])
+        warning = str(primary.get("warning") or "").strip()
+        if warning:
+            lines.extend(["", "Warning", "", warning])
+        references_text = str(primary.get("references_text") or "").strip()
+        if references_text:
+            lines.extend(["", "Live references", "", references_text])
+        if len(selected) > 1:
+            lines.extend(["", f"{len(selected)} item(s) are currently selected."])
+        self.details_edit.setPlainText("\n".join(lines))
+        self.delete_button.setEnabled(not self._busy)
+
+    def _delete_selected(self) -> None:
+        if self._busy:
+            return
+        selected = self._selected_items()
+        if not selected:
+            return
+        total_bytes = sum(int(item.get("bytes_on_disk") or 0) for item in selected)
+        warning_items = [item for item in selected if bool(item.get("warning_required"))]
+        if (
+            QMessageBox.question(
+                self,
+                "Delete Selected Files",
+                (
+                    f"Permanently delete {len(selected)} selected storage item(s)\n"
+                    f"Estimated reclaimed space: {self._display_bytes(total_bytes)}\n\n"
+                    "This cleanup does not create undo, redo, or snapshot history. Continue?"
+                ),
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            != QMessageBox.Yes
+        ):
+            return
+        allow_warning_deletes = False
+        if warning_items:
+            warning_names = "\n".join(str(item.get("label") or "") for item in warning_items[:6])
+            typed_text, accepted = QInputDialog.getText(
+                self,
+                "Confirm Protected Cleanup",
+                (
+                    "Some selected items are still in use or still back live recovery state.\n\n"
+                    f"{warning_names}\n\n"
+                    "Type DELETE to confirm permanent cleanup."
+                ),
+            )
+            if not accepted or str(typed_text).strip() != "DELETE":
+                return
+            allow_warning_deletes = True
+
+        runner = getattr(self.app, "_run_application_storage_cleanup_async", None)
+        if not callable(runner):
+            QMessageBox.warning(
+                self,
+                "Application Storage Admin",
+                "Application-wide cleanup is not available in this build.",
+            )
+            return
+        self._set_busy(True, "Deleting selected storage items...")
+        runner(
+            [str(item.get("item_key") or "") for item in selected],
+            allow_warning_deletes=allow_warning_deletes,
+            owner=self,
+            on_success=self._handle_cleanup_success,
+            on_error=lambda failure: self._handle_background_error(
+                "Application Storage Cleanup",
+                failure,
+                "Could not complete the selected final cleanup.",
+            ),
+            on_cancelled=self._handle_background_cancelled,
+            on_status=self._set_busy_message,
+        )
+
+    def _handle_cleanup_success(self, payload: dict[str, object]) -> None:
+        self._set_busy(False)
+        removed_count = int(payload.get("removed_count") or 0)
+        removed_text = str(payload.get("removed_text") or self._display_bytes(0))
+        history_count = int(payload.get("removed_history_entry_count") or 0)
+        session_count = int(payload.get("removed_session_entry_count") or 0)
+        skipped_count = int(payload.get("skipped_count") or 0)
+        parts = [
+            f"Removed {removed_count} storage item(s) and reclaimed {removed_text}.",
+        ]
+        if history_count:
+            parts.append(
+                f"Removed {history_count} dependent history entr{'y' if history_count == 1 else 'ies'}."
+            )
+        if session_count:
+            parts.append(
+                f"Removed {session_count} dependent session-history entr{'y' if session_count == 1 else 'ies'}."
+            )
+        if skipped_count:
+            parts.append(f"Skipped {skipped_count} item(s).")
+        QMessageBox.information(self, "Cleanup Complete", "\n".join(parts))
+        self.refresh()
+
+    def _set_busy(self, busy: bool, message: str | None = None) -> None:
+        self._busy = bool(busy)
+        if self._busy:
+            self.loading_panel.show()
+            self._set_busy_message(message or "Working...")
+        else:
+            self.loading_panel.hide()
+            self.loading_status_label.setText("")
+        for widget in (
+            self.refresh_button,
+            self.delete_button,
+            self.open_data_button,
+            self.close_button,
+            self.cleanup_table,
+            self.warning_table,
+        ):
+            widget.setEnabled(not self._busy)
+        if not self._busy:
+            self._sync_selection_details()
+        self._sync_loading_panel_metrics()
+
+    def _set_busy_message(self, message: str) -> None:
+        self.loading_status_label.setText(str(message or "Working..."))
+
+    def _handle_background_cancelled(self) -> None:
+        self._set_busy(False)
+        self.details_edit.setPlainText("The application-wide storage task was cancelled.")
+
+    def _handle_background_error(self, title: str, failure, user_message: str) -> None:
+        self._set_busy(False)
+        if hasattr(self.app, "_show_background_task_error"):
+            self.app._show_background_task_error(title, failure, user_message=user_message)
+            return
+        message = str(getattr(failure, "message", failure) or "Unknown error.")
+        QMessageBox.critical(self, title, f"{user_message}\n{message}")
+
+    def _sync_loading_panel_metrics(self):
+        available_width = max(560, self.width() - 72)
+        bar_width = max(220, min(320, int(available_width * 0.24)))
+        self.loading_bar.setFixedWidth(bar_width)
+        self.loading_status_label.setMinimumWidth(max(260, available_width - bar_width - 32))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._sync_loading_panel_metrics()
+
+    @staticmethod
+    def _display_bytes(value: int) -> str:
+        total = float(max(0, int(value or 0)))
+        for unit in ("B", "KB", "MB", "GB", "TB"):
+            if total < 1024.0 or unit == "TB":
+                if unit == "B":
+                    return f"{int(total)} {unit}"
+                return f"{total:.1f} {unit}"
+            total /= 1024.0
+        return "0 B"
 
 
 class AboutDialog(QDialog):

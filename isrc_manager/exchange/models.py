@@ -26,6 +26,7 @@ class ExchangeImportOptions:
     create_missing_custom_fields: bool = True
     skip_targets: list[str] = field(default_factory=list)
     preview_apply_mode: str | None = None
+    preserve_source_package_identity: bool = False
 
 
 @dataclass(slots=True)
@@ -44,3 +45,5 @@ class ExchangeImportReport:
     created_tracks: list[int] = field(default_factory=list)
     updated_tracks: list[int] = field(default_factory=list)
     repair_queue_entry_ids: list[int] = field(default_factory=list)
+    source_track_id_map: dict[int, int] = field(default_factory=dict)
+    source_release_id_map: dict[int, int] = field(default_factory=dict)

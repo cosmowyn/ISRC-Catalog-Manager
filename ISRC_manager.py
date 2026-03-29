@@ -90,6 +90,7 @@ from PySide6.QtWidgets import (
     QMenuBar,
     QMessageBox,
     QPinchGesture,
+    QPlainTextEdit,
     QProgressBar,
     QPushButton,
     QRadioButton,
@@ -114,9 +115,11 @@ from isrc_manager.app_dialogs import (
     AboutDialog,
     ActionRibbonDialog,
     ApplicationLogDialog,
+    ApplicationStorageAdminDialog,
     CustomColumnsDialog,
     DiagnosticsDialog,
     HelpContentsDialog,
+    MasterTransferExportDialog,
 )
 from isrc_manager.assets import AssetService
 from isrc_manager.assets.dialogs import AssetBrowserPanel
@@ -199,6 +202,7 @@ from isrc_manager.domain.standard_fields import (
     standard_media_specs_by_label,
 )
 from isrc_manager.domain.timecode import hms_to_seconds, parse_hms_text, seconds_to_hms
+from isrc_manager.diagnostics_progress import DiagnosticsProgressTracker
 from isrc_manager.exchange.dialogs import ExchangeImportDialog
 from isrc_manager.exchange.models import (
     ExchangeImportOptions,
@@ -213,6 +217,7 @@ from isrc_manager.exchange.repertoire_service import (
     RepertoireExchangeService,
     RepertoireImportInspection,
 )
+from isrc_manager.exchange.master_transfer import MasterTransferService
 from isrc_manager.exchange.service import ExchangeService
 from isrc_manager.file_storage import (
     STORAGE_MODE_DATABASE,
@@ -273,7 +278,10 @@ from isrc_manager.paths import (
     settings_path,
     should_ignore_persisted_last_db_path,
 )
-from isrc_manager.qss_autocomplete import QssCodeEditor
+from isrc_manager.qss_autocomplete import (
+    QssCodeEditor,
+    validate_qss_document,
+)
 from isrc_manager.qss_reference import (
     QssReferenceEntry,
     collect_qss_reference_entries,
@@ -363,6 +371,7 @@ from isrc_manager.startup_splash import (
     StartupFeedbackProtocol,
     create_startup_splash_controller,
 )
+from isrc_manager.storage_admin import ApplicationStorageAdminService
 from isrc_manager.storage_migration import (
     PREFERRED_STATE_CONFLICT,
     PREFERRED_STATE_RESUMABLE_STAGE,
@@ -727,6 +736,10 @@ class ApplicationSettingsDialog(QDialog):
         self._blob_icon_preview_labels: dict[str, QLabel] = {}
         self._qss_reference_entries: list[QssReferenceEntry] = []
         self._qss_filtered_reference_entries: list[QssReferenceEntry] = []
+        initial_custom_qss = str(self._theme_settings.get("custom_qss") or "")
+        self._theme_last_valid_custom_qss_preview = (
+            initial_custom_qss if not validate_qss_document(initial_custom_qss) else ""
+        )
         self._theme_change_tracking_enabled = True
         self._history_retention_sync_enabled = True
         self._theme_original_values = normalize_app_theme_settings(self._theme_settings)
@@ -1857,42 +1870,49 @@ class ApplicationSettingsDialog(QDialog):
         builder_grid = QGridLayout(builder_box)
         self._configure_grid(builder_grid)
 
-        audio_editor = BlobIconEditorWidget(kind="audio", allow_inherit=False, parent=builder_box)
-        audio_editor.set_spec(self._blob_icon_settings.get("audio"))
-        self._blob_icon_editors["audio"] = audio_editor
-        self._add_row(
-            builder_grid,
-            0,
-            "Audio Blob Icon",
-            audio_editor,
-            "Shown when the Audio File column or an audio BLOB field contains stored media.",
+        editor_specs = (
+            (
+                "audio_managed",
+                "Managed Audio Icon",
+                "Shown when primary audio is stored as a managed file.",
+            ),
+            (
+                "audio_database",
+                "Database Audio Icon",
+                "Shown when primary audio is stored directly inside the database.",
+            ),
+            (
+                "audio_lossy_managed",
+                "Managed Lossy Audio Icon",
+                "Shown when a lossy primary audio source such as MP3, AAC, or OGG is stored as a managed file.",
+            ),
+            (
+                "audio_lossy_database",
+                "Database Lossy Audio Icon",
+                "Shown when a lossy primary audio source is stored directly inside the database.",
+            ),
+            (
+                "image_managed",
+                "Managed Image Icon",
+                "Shown when Album Art or an inherited image BLOB field is stored as a managed file.",
+            ),
+            (
+                "image_database",
+                "Database Image Icon",
+                "Shown when Album Art or an inherited image BLOB field is stored directly inside the database.",
+            ),
         )
-
-        audio_lossy_editor = BlobIconEditorWidget(
-            kind="audio_lossy",
-            allow_inherit=False,
-            parent=builder_box,
-        )
-        audio_lossy_editor.set_spec(self._blob_icon_settings.get("audio_lossy"))
-        self._blob_icon_editors["audio_lossy"] = audio_lossy_editor
-        self._add_row(
-            builder_grid,
-            1,
-            "Lossy Primary Audio Icon",
-            audio_lossy_editor,
-            "Shown when the Audio File column contains a lossy primary source such as MP3, AAC, or OGG.",
-        )
-
-        image_editor = BlobIconEditorWidget(kind="image", allow_inherit=False, parent=builder_box)
-        image_editor.set_spec(self._blob_icon_settings.get("image"))
-        self._blob_icon_editors["image"] = image_editor
-        self._add_row(
-            builder_grid,
-            2,
-            "Image Blob Icon",
-            image_editor,
-            "Shown when Album Art or an image BLOB field contains stored media.",
-        )
+        for row_index, (kind, label, help_text) in enumerate(editor_specs):
+            editor = BlobIconEditorWidget(kind=kind, allow_inherit=False, parent=builder_box)
+            editor.set_spec(self._blob_icon_settings.get(kind))
+            self._blob_icon_editors[kind] = editor
+            self._add_row(
+                builder_grid,
+                row_index,
+                label,
+                editor,
+                help_text,
+            )
         page_layout.addWidget(builder_box)
 
         note_box = QGroupBox("How It Works", page)
@@ -1900,11 +1920,12 @@ class ApplicationSettingsDialog(QDialog):
         note_layout.setContentsMargins(14, 18, 14, 14)
         note_layout.setSpacing(8)
         for text in (
-            "Blob icons are profile-specific and stay separate from visual theme presets.",
-            "Primary audio can use a dedicated lossy badge so MP3/AAC/OGG sources stand apart from WAV, FLAC, and AIFF masters.",
+            "Media icons are profile-specific and stay separate from visual theme presets.",
+            "Managed-file media and database-backed media can use different icons without changing the underlying storage behavior.",
+            "Primary audio can keep a dedicated lossy badge so MP3/AAC/OGG sources still stand apart from WAV, FLAC, and AIFF masters.",
             "Platform icons use the current operating system's built-in icon set through Qt.",
             "Custom images are scaled down and compressed before they are written into the database, so large source files only occupy a small amount of storage.",
-            "Custom BLOB columns can either inherit these global defaults or define their own icon override.",
+            "Custom BLOB columns can either inherit these global storage-aware defaults or define their own icon override.",
         ):
             label = QLabel(text, note_box)
             label.setWordWrap(True)
@@ -1932,7 +1953,7 @@ class ApplicationSettingsDialog(QDialog):
         qss_help = QLabel(
             "Example selectors: `QPushButton`, `QLineEdit`, `QDockWidget::title`, `#profilesToolbar QPushButton`, or `QToolBar#actionRibbonToolbar`. "
             "Press Ctrl+Space in the editor for context-aware autocomplete with selectors, pseudo-states, subcontrols, "
-            "property lines, value suggestions, and full rule templates."
+            "property lines, value suggestions, and full rule templates. Use the selector catalog to insert a complete working template, including a short note about what the selector targets, when you want to start from a full example instead of an empty block."
         )
         qss_help.setProperty("role", "hint")
         qss_help.setWordWrap(True)
@@ -1954,6 +1975,10 @@ class ApplicationSettingsDialog(QDialog):
         self.theme_custom_qss_edit.setMinimumHeight(220)
         self.theme_custom_qss_edit.setPlainText(str(self._theme_settings.get("custom_qss") or ""))
         qss_editor_layout.addWidget(self.theme_custom_qss_edit, 1)
+        self.theme_custom_qss_status_label = QLabel("", self)
+        self.theme_custom_qss_status_label.setWordWrap(True)
+        self.theme_custom_qss_status_label.setProperty("role", "secondary")
+        qss_editor_layout.addWidget(self.theme_custom_qss_status_label)
         self.theme_qss_tabs.addTab(qss_editor_page, "Editor")
 
         qss_reference_page = QWidget(self)
@@ -1965,8 +1990,7 @@ class ApplicationSettingsDialog(QDialog):
         qss_reference_note = QLabel(
             "The reference catalog is built from the currently open app windows and dialogs. "
             "Open the screen you want to style, then refresh the catalog to harvest its generated object names. "
-            "Object-name entries are inserted as references, so they append safely to an existing widget selector "
-            "instead of rewriting it."
+            "Double-click a row or use Insert Full Template when you want a complete scaffold first. Use Insert Selector Only when you explicitly want just the raw selector text."
         )
         qss_reference_note.setWordWrap(True)
         qss_reference_note.setProperty("role", "hint")
@@ -2007,7 +2031,7 @@ class ApplicationSettingsDialog(QDialog):
         self.qss_reference_table.setColumnWidth(1, 320)
         self.qss_reference_table.itemSelectionChanged.connect(self._update_qss_reference_actions)
         self.qss_reference_table.doubleClicked.connect(
-            lambda _index: self._insert_selected_qss_selector()
+            lambda _index: self._insert_selected_qss_template()
         )
         qss_reference_layout.addWidget(self.qss_reference_table, 1)
 
@@ -2018,11 +2042,17 @@ class ApplicationSettingsDialog(QDialog):
         self.qss_reference_copy_button = QPushButton("Copy Selector", self)
         self.qss_reference_copy_button.setAutoDefault(False)
         self.qss_reference_copy_button.clicked.connect(self._copy_selected_qss_selector)
-        self.qss_reference_insert_button = QPushButton("Insert Into Editor", self)
+        self.qss_reference_insert_button = QPushButton("Insert Selector Only", self)
         self.qss_reference_insert_button.setAutoDefault(False)
         self.qss_reference_insert_button.clicked.connect(self._insert_selected_qss_selector)
+        self.qss_reference_insert_template_button = QPushButton("Insert Full Template", self)
+        self.qss_reference_insert_template_button.setAutoDefault(False)
+        self.qss_reference_insert_template_button.clicked.connect(
+            self._insert_selected_qss_template
+        )
         qss_reference_button_row.addWidget(self.qss_reference_copy_button)
         qss_reference_button_row.addWidget(self.qss_reference_insert_button)
+        qss_reference_button_row.addWidget(self.qss_reference_insert_template_button)
         qss_reference_layout.addLayout(qss_reference_button_row)
         self.theme_qss_tabs.addTab(qss_reference_page, "Selector Reference")
 
@@ -2480,60 +2510,91 @@ class ApplicationSettingsDialog(QDialog):
         preview_layout = QGridLayout(preview_box)
         self._configure_grid(preview_layout)
 
-        audio_icon = QLabel(preview_box)
-        audio_icon.setFixedSize(34, 34)
-        audio_icon.setAlignment(Qt.AlignCenter)
-        audio_icon.setStyleSheet(
-            "border: 1px solid palette(mid); border-radius: 6px; background: palette(base);"
-        )
-        audio_text = QLabel("71.3 MB", preview_box)
-        audio_text.setProperty("role", "secondary")
-        audio_row = QWidget(preview_box)
-        audio_row_layout = QHBoxLayout(audio_row)
-        audio_row_layout.setContentsMargins(0, 0, 0, 0)
-        audio_row_layout.setSpacing(10)
-        audio_row_layout.addWidget(audio_icon)
-        audio_row_layout.addWidget(audio_text)
-        audio_row_layout.addStretch(1)
-        self._blob_icon_preview_labels["audio"] = audio_icon
-        self._add_row(
-            preview_layout,
-            0,
-            "Audio Column",
-            audio_row,
-            "Preview for the main Audio File column and inherited audio BLOB custom fields.",
-        )
+        def _add_preview_row(
+            row_index: int,
+            *,
+            kind: str,
+            label_text: str,
+            size_text: str,
+            help_text: str,
+        ) -> None:
+            icon_label = QLabel(preview_box)
+            icon_label.setFixedSize(34, 34)
+            icon_label.setAlignment(Qt.AlignCenter)
+            icon_label.setStyleSheet(
+                "border: 1px solid palette(mid); border-radius: 6px; background: palette(base);"
+            )
+            sample_text = QLabel(size_text, preview_box)
+            sample_text.setProperty("role", "secondary")
+            sample_row = QWidget(preview_box)
+            sample_layout = QHBoxLayout(sample_row)
+            sample_layout.setContentsMargins(0, 0, 0, 0)
+            sample_layout.setSpacing(10)
+            sample_layout.addWidget(icon_label)
+            sample_layout.addWidget(sample_text)
+            sample_layout.addStretch(1)
+            self._blob_icon_preview_labels[kind] = icon_label
+            self._add_row(
+                preview_layout,
+                row_index,
+                label_text,
+                sample_row,
+                help_text,
+            )
 
-        image_icon = QLabel(preview_box)
-        image_icon.setFixedSize(34, 34)
-        image_icon.setAlignment(Qt.AlignCenter)
-        image_icon.setStyleSheet(
-            "border: 1px solid palette(mid); border-radius: 6px; background: palette(base);"
+        preview_specs = (
+            (
+                "audio_managed",
+                "Managed Audio Column",
+                "71.3 MB",
+                "Preview for primary audio badges when the source is stored as a managed file.",
+            ),
+            (
+                "audio_database",
+                "Database Audio Column",
+                "71.3 MB",
+                "Preview for primary audio badges when the source is stored directly inside the database.",
+            ),
+            (
+                "audio_lossy_managed",
+                "Managed Lossy Audio Column",
+                "9.8 MB",
+                "Preview for lossy primary audio badges stored as a managed file.",
+            ),
+            (
+                "audio_lossy_database",
+                "Database Lossy Audio Column",
+                "9.8 MB",
+                "Preview for lossy primary audio badges stored directly inside the database.",
+            ),
+            (
+                "image_managed",
+                "Managed Image Column",
+                "2.4 MB",
+                "Preview for Album Art and inherited image BLOB fields stored as managed files.",
+            ),
+            (
+                "image_database",
+                "Database Image Column",
+                "2.4 MB",
+                "Preview for Album Art and inherited image BLOB fields stored directly inside the database.",
+            ),
         )
-        image_text = QLabel("2.4 MB", preview_box)
-        image_text.setProperty("role", "secondary")
-        image_row = QWidget(preview_box)
-        image_row_layout = QHBoxLayout(image_row)
-        image_row_layout.setContentsMargins(0, 0, 0, 0)
-        image_row_layout.setSpacing(10)
-        image_row_layout.addWidget(image_icon)
-        image_row_layout.addWidget(image_text)
-        image_row_layout.addStretch(1)
-        self._blob_icon_preview_labels["image"] = image_icon
-        self._add_row(
-            preview_layout,
-            1,
-            "Image Column",
-            image_row,
-            "Preview for Album Art and inherited image BLOB custom fields.",
-        )
+        for row_index, (kind, label_text, size_text, help_text) in enumerate(preview_specs):
+            _add_preview_row(
+                row_index,
+                kind=kind,
+                label_text=label_text,
+                size_text=size_text,
+                help_text=help_text,
+            )
 
         custom_hint_box = QGroupBox("Custom Column Override", preview_root)
         custom_hint_layout = QVBoxLayout(custom_hint_box)
         custom_hint_layout.setContentsMargins(14, 18, 14, 14)
         custom_hint_layout.setSpacing(8)
         hint = QLabel(
-            "Each custom BLOB column can stay on the global icon or store its own override with the same system-icon, emoji, and custom-image options.",
+            "Each custom BLOB column can stay on the global storage-aware icon or store its own override with the same system-icon, emoji, and custom-image options.",
             custom_hint_box,
         )
         hint.setWordWrap(True)
@@ -2605,17 +2666,24 @@ class ApplicationSettingsDialog(QDialog):
             theme_values = self._theme_value_payload()
         except Exception:
             return
-        stylesheet = build_app_theme_stylesheet(theme_values)
+        qss_issues = self._theme_qss_validation_issues(theme_values.get("custom_qss"))
+        preview_values = dict(theme_values)
+        if qss_issues:
+            preview_values["custom_qss"] = str(self._theme_last_valid_custom_qss_preview or "")
+        else:
+            self._theme_last_valid_custom_qss_preview = str(theme_values.get("custom_qss") or "")
+        stylesheet = build_app_theme_stylesheet(preview_values)
         for widget in getattr(self, "_theme_preview_roots", []):
             widget.setStyleSheet(stylesheet)
             _repolish_qss_widget_tree(widget)
         self._refresh_blob_icon_previews()
+        self._update_theme_qss_status(qss_issues)
         current_preview_name = self.theme_preview_tabs.tabText(
             self.theme_preview_tabs.currentIndex()
         )
         if self._theme_builder_page_keys[self.theme_builder_tabs.currentIndex()] == "blob_icons":
             self.theme_preview_status_label.setText(
-                "Showing the blob icons preview for the current profile draft. Audio and image media badges can use platform icons, emojis, or compressed custom images stored inside the database."
+                "Showing the media icon preview for the current profile draft. Managed-file and database-backed audio and image badges can each use platform icons, emojis, or compressed custom images stored inside the database."
             )
         else:
             self.theme_preview_status_label.setText(
@@ -2629,8 +2697,13 @@ class ApplicationSettingsDialog(QDialog):
                 )
                 + f". {len(self._theme_color_edits)} color slots and {len(self._theme_metric_spins)} geometry/typography controls are available in the builder."
             )
+        if qss_issues:
+            self.theme_preview_status_label.setText(
+                self.theme_preview_status_label.text()
+                + " Advanced QSS preview is holding the last valid stylesheet until the current editor syntax issue is fixed."
+            )
         if self.theme_live_preview_check.isChecked():
-            self._apply_live_theme_preview(theme_values)
+            self._apply_live_theme_preview(preview_values)
         elif (
             hasattr(self, "theme_preview_status_label")
             and self._theme_builder_page_keys[self.theme_builder_tabs.currentIndex()]
@@ -2640,6 +2713,27 @@ class ApplicationSettingsDialog(QDialog):
                 self.theme_preview_status_label.text()
                 + " Turn on Live Preview to apply the draft to the whole running app while you edit."
             )
+
+    @staticmethod
+    def _theme_qss_validation_issues(custom_qss: object) -> list:
+        return validate_qss_document(str(custom_qss or ""))
+
+    def _update_theme_qss_status(self, issues: list) -> None:
+        status_label = getattr(self, "theme_custom_qss_status_label", None)
+        if status_label is None:
+            return
+        if not issues:
+            status_label.setProperty("role", "secondary")
+            status_label.setText(
+                "Advanced QSS is syntactically ready. Autocomplete and Insert Full Template both generate valid starter rules you can trim down, and you can still edit the raw QSS directly."
+            )
+            return
+        first_issue = issues[0]
+        status_label.setProperty("role", "hint")
+        status_label.setText(
+            f"Advanced QSS syntax issue at line {first_issue.line}, column {first_issue.column}: {first_issue.message} "
+            "Live preview is keeping the last valid advanced QSS until this is fixed."
+        )
 
     def _refresh_blob_icon_previews(self) -> None:
         specs = self._blob_icon_value_payload()
@@ -3006,10 +3100,20 @@ class ApplicationSettingsDialog(QDialog):
         item = self.qss_reference_table.item(rows[0].row(), 1)
         return item.text().strip() if item is not None else ""
 
+    def _selected_qss_reference_entry(self) -> QssReferenceEntry | None:
+        rows = self.qss_reference_table.selectionModel().selectedRows()
+        if not rows:
+            return None
+        row = rows[0].row()
+        if row < 0 or row >= len(self._qss_filtered_reference_entries):
+            return None
+        return self._qss_filtered_reference_entries[row]
+
     def _update_qss_reference_actions(self) -> None:
         has_selection = bool(self._selected_qss_selector())
         self.qss_reference_copy_button.setEnabled(has_selection)
         self.qss_reference_insert_button.setEnabled(has_selection)
+        self.qss_reference_insert_template_button.setEnabled(has_selection)
 
     def _copy_selected_qss_selector(self) -> None:
         selector = self._selected_qss_selector()
@@ -3027,6 +3131,14 @@ class ApplicationSettingsDialog(QDialog):
         cursor = self.theme_custom_qss_edit.textCursor()
         cursor.insertText(selector)
         self.theme_custom_qss_edit.setTextCursor(cursor)
+        self.theme_custom_qss_edit.setFocus()
+
+    def _insert_selected_qss_template(self) -> None:
+        entry = self._selected_qss_reference_entry()
+        if entry is None:
+            return
+        self.theme_qss_tabs.setCurrentIndex(0)
+        self.theme_custom_qss_edit.insert_template_for_reference_entry(entry)
         self.theme_custom_qss_edit.setFocus()
 
     def _theme_value_payload(self) -> dict[str, object]:
@@ -3886,6 +3998,20 @@ class ApplicationSettingsDialog(QDialog):
                 edit.setFocus(Qt.OtherFocusReason)
                 edit.selectAll()
                 return
+        qss_issues = self._theme_qss_validation_issues(values.get("custom_qss"))
+        if qss_issues:
+            first_issue = qss_issues[0]
+            QMessageBox.warning(
+                self,
+                "Invalid Advanced QSS",
+                "Advanced QSS is not ready to apply yet.\n\n"
+                f"Line {first_issue.line}, column {first_issue.column}: {first_issue.message}\n\n"
+                "Use Ctrl+Space for completions or Insert Template from the selector catalog to start from a full working scaffold.",
+            )
+            self.tabs.setCurrentIndex(self._theme_tab_index)
+            self.theme_qss_tabs.setCurrentIndex(0)
+            self.theme_custom_qss_edit.setFocus(Qt.OtherFocusReason)
+            return
         self.accept()
 
 
@@ -7105,6 +7231,79 @@ class App(QMainWindow):
             return []
         return LegacyPromotedFieldRepairService(connection).inspect_candidates()
 
+    def _diagnostics_managed_file_scan_counts(self, conn=None) -> dict[str, int]:
+        connection = conn if conn is not None else self.conn
+        if connection is None:
+            return {
+                "audio_file_refs": 0,
+                "album_art_refs": 0,
+                "license_file_refs": 0,
+            }
+
+        def _count(query: str) -> int:
+            try:
+                row = connection.execute(query).fetchone()
+            except Exception:
+                return 0
+            return int(row[0] or 0) if row else 0
+
+        return {
+            "audio_file_refs": _count(
+                """
+                SELECT COUNT(*)
+                FROM Tracks
+                WHERE COALESCE(trim(audio_file_path), '') != ''
+                """
+            ),
+            "album_art_refs": _count(
+                """
+                SELECT COUNT(*)
+                FROM Albums
+                WHERE COALESCE(trim(album_art_path), '') != ''
+                """
+            ),
+            "license_file_refs": _count(
+                """
+                SELECT COUNT(*)
+                FROM Licenses
+                WHERE COALESCE(trim(file_path), '') != ''
+                """
+            ),
+        }
+
+    def _build_diagnostics_progress_plan(
+        self,
+        *,
+        conn=None,
+        current_db_path: str | Path | None = None,
+    ) -> dict[str, int]:
+        managed_counts = self._diagnostics_managed_file_scan_counts(conn=conn)
+        managed_file_units = sum(int(value or 0) for value in managed_counts.values()) or 1
+        core_units = 9
+        history_units = 5
+        try:
+            application_storage_units = int(
+                self._application_storage_admin_service().inspect_progress_total(
+                    current_db_path=current_db_path
+                )
+            )
+        except Exception:
+            application_storage_units = 1
+        ui_finalize_units = 1
+        worker_total_units = (
+            core_units + managed_file_units + history_units + application_storage_units
+        )
+        return {
+            **managed_counts,
+            "managed_file_units": int(managed_file_units),
+            "core_units": int(core_units),
+            "history_units": int(history_units),
+            "application_storage_units": int(application_storage_units),
+            "ui_finalize_units": int(ui_finalize_units),
+            "worker_total_units": int(worker_total_units),
+            "overall_total_units": int(worker_total_units + ui_finalize_units),
+        }
+
     def _preview_diagnostics_repair(self, repair_key: str, check: dict | None = None) -> str:
         if repair_key == "storage_layout_migrate":
             inspection = self.storage_migration_service.inspect()
@@ -7328,6 +7527,181 @@ class App(QMainWindow):
 
         raise ValueError(f"Unknown diagnostics repair: {repair_key}")
 
+    def _application_storage_admin_service(self) -> ApplicationStorageAdminService:
+        return ApplicationStorageAdminService(self.storage_layout)
+
+    def _application_storage_summary_payload(
+        self,
+        audit,
+    ) -> dict[str, object]:
+        summary = audit.summary
+        current_profile_text = (
+            f"{self._human_size(summary.current_profile_bytes)}"
+            if summary.current_profile_name
+            else "No active profile"
+        )
+        headline = (
+            f"The application is using {self._human_size(summary.total_app_bytes)} in {summary.total_items} tracked storage item(s). "
+            f"{summary.reclaimable_items} item(s) appear reclaimable now, covering {self._human_size(summary.reclaimable_bytes)}."
+        )
+        if summary.current_profile_name:
+            headline += (
+                f" The active profile {summary.current_profile_name} currently accounts for about "
+                f"{self._human_size(summary.current_profile_bytes)} across database, history, and managed files."
+            )
+        return {
+            "available": True,
+            "summary": headline,
+            "total_bytes": int(summary.total_app_bytes),
+            "current_profile_bytes": int(summary.current_profile_bytes),
+            "reclaimable_bytes": int(summary.reclaimable_bytes),
+            "deleted_profile_bytes": int(summary.deleted_profile_bytes),
+            "orphaned_bytes": int(summary.orphaned_bytes),
+            "warning_bytes": int(summary.warning_bytes),
+            "total_text": self._human_size(summary.total_app_bytes),
+            "current_profile_text": current_profile_text,
+            "reclaimable_text": self._human_size(summary.reclaimable_bytes),
+            "deleted_profile_text": self._human_size(summary.deleted_profile_bytes),
+            "orphaned_text": self._human_size(summary.orphaned_bytes),
+            "warning_text": self._human_size(summary.warning_bytes),
+            "warning_items": int(summary.warning_items),
+            "reclaimable_items": int(summary.reclaimable_items),
+            "total_items": int(summary.total_items),
+            "current_profile_name": summary.current_profile_name,
+        }
+
+    def _application_storage_item_payload(self, item) -> dict[str, object]:
+        references_text = "\n".join(reference.owner_label for reference in item.references[:8])
+        return {
+            "item_key": str(item.item_key),
+            "status_key": str(item.status_key),
+            "status_label": str(item.status_label),
+            "category_key": str(item.category_key),
+            "category_label": str(item.category_label),
+            "label": str(item.label),
+            "path": str(item.path),
+            "bytes_on_disk": int(item.bytes_on_disk or 0),
+            "size_text": self._human_size(item.bytes_on_disk),
+            "profile_name": str(item.profile_name or ""),
+            "profile_path": str(item.profile_path or ""),
+            "reason": str(item.reason or ""),
+            "recommended": bool(item.recommended),
+            "warning_required": bool(item.warning_required),
+            "warning": str(item.warning or ""),
+            "references_text": references_text,
+        }
+
+    def _build_application_storage_audit_payload(
+        self,
+        *,
+        current_db_path: str | Path | None = None,
+        status_callback=None,
+        progress_callback=None,
+    ) -> dict[str, object]:
+        audit = self._application_storage_admin_service().inspect(
+            current_db_path=(
+                current_db_path if current_db_path is not None else self.current_db_path
+            ),
+            status_callback=status_callback,
+            progress_callback=progress_callback,
+        )
+        return {
+            "summary": self._application_storage_summary_payload(audit),
+            "items": [self._application_storage_item_payload(item) for item in audit.items],
+        }
+
+    def _load_application_storage_audit_async(
+        self,
+        *,
+        owner: QWidget | None = None,
+        on_success=None,
+        on_error=None,
+        on_cancelled=None,
+        on_finished=None,
+        on_status=None,
+    ):
+        current_path = str(getattr(self, "current_db_path", "") or "").strip()
+
+        def _task(ctx):
+            ctx.set_status("Inspecting application-wide storage...")
+            return self._build_application_storage_audit_payload(
+                current_db_path=current_path or None,
+                status_callback=ctx.set_status,
+                progress_callback=lambda value, maximum, message: ctx.report_progress(
+                    value=int(value),
+                    maximum=int(maximum),
+                    message=str(message or ""),
+                ),
+            )
+
+        return self._submit_background_task(
+            title="Application Storage Admin",
+            description="Inspecting application-wide storage...",
+            task_fn=_task,
+            kind="read",
+            unique_key="storage_admin.audit",
+            requires_profile=False,
+            show_dialog=False,
+            owner=owner or self,
+            on_success=on_success,
+            on_error=on_error,
+            on_cancelled=on_cancelled,
+            on_finished=on_finished,
+            on_status=on_status,
+        )
+
+    def _run_application_storage_cleanup_async(
+        self,
+        item_keys: list[str] | tuple[str, ...],
+        *,
+        allow_warning_deletes: bool = False,
+        owner: QWidget | None = None,
+        on_success=None,
+        on_error=None,
+        on_cancelled=None,
+        on_finished=None,
+        on_status=None,
+    ):
+        current_path = str(getattr(self, "current_db_path", "") or "").strip()
+
+        def _task(ctx):
+            ctx.set_status("Deleting selected application storage items...")
+            result = self._application_storage_admin_service().cleanup_selected(
+                item_keys,
+                current_db_path=current_path or None,
+                allow_warning_deletes=allow_warning_deletes,
+                status_callback=ctx.set_status,
+                progress_callback=lambda value, maximum, message: ctx.report_progress(
+                    value=int(value),
+                    maximum=int(maximum),
+                    message=str(message or ""),
+                ),
+            )
+            return {
+                "removed_count": len(result.removed_item_keys),
+                "removed_text": self._human_size(result.removed_bytes),
+                "removed_bytes": int(result.removed_bytes),
+                "removed_history_entry_count": len(result.removed_history_entry_ids),
+                "removed_session_entry_count": len(result.removed_session_entry_ids),
+                "skipped_count": len(result.skipped_item_keys),
+            }
+
+        return self._submit_background_task(
+            title="Application Storage Cleanup",
+            description="Deleting selected application storage items...",
+            task_fn=_task,
+            kind="write",
+            unique_key="storage_admin.cleanup",
+            requires_profile=False,
+            show_dialog=True,
+            owner=owner or self,
+            on_success=on_success,
+            on_error=on_error,
+            on_cancelled=on_cancelled,
+            on_finished=on_finished,
+            on_status=on_status,
+        )
+
     def _build_diagnostics_report(
         self,
         *,
@@ -7343,6 +7717,7 @@ class App(QMainWindow):
         storage_migration_service=None,
         app_version: str | None = None,
         status_callback=None,
+        progress_callback=None,
     ) -> dict[str, object]:
         connection = conn if conn is not None else self.conn
         current_path = str(
@@ -7369,9 +7744,16 @@ class App(QMainWindow):
         if active_schema_service is None and connection is not None:
             active_schema_service = DatabaseSchemaService(connection, data_root=current_data_root)
 
-        def _set_status(message: str) -> None:
-            if callable(status_callback):
-                status_callback(str(message))
+        progress_plan = self._build_diagnostics_progress_plan(
+            conn=connection,
+            current_db_path=current_path or None,
+        )
+        progress = DiagnosticsProgressTracker(
+            total_units=int(progress_plan["overall_total_units"]),
+            progress_callback=progress_callback,
+            status_callback=status_callback,
+        )
+        progress.set_message("Collecting environment details...")
 
         db_version = 0
         schema_version_text = "Unknown"
@@ -7393,6 +7775,7 @@ class App(QMainWindow):
             "Platform": f"{platform.system()} {platform.release()}",
             "Python": platform.python_version(),
         }
+        progress.complete("Collected environment details.")
 
         checks = []
         history_storage_budget_summary: dict[str, object] = {
@@ -7406,6 +7789,16 @@ class App(QMainWindow):
             "candidate_count": 0,
             "summary": "History storage information is not available for the current profile.",
             "within_budget": True,
+        }
+        application_storage_summary: dict[str, object] = {
+            "available": False,
+            "summary": "Application-wide storage information is not available.",
+            "total_text": "Not available",
+            "current_profile_text": "Not available",
+            "reclaimable_text": "Not available",
+            "deleted_profile_text": "Not available",
+            "orphaned_text": "Not available",
+            "warning_text": "Not available",
         }
 
         def add_check(
@@ -7432,7 +7825,7 @@ class App(QMainWindow):
                 }
             )
 
-        _set_status("Inspecting storage layout...")
+        progress.set_message("Inspecting storage layout...")
         try:
             storage_inspection = active_storage_migration_service.inspect()
             active_layout = active_storage_migration_service.layout
@@ -7500,8 +7893,9 @@ class App(QMainWindow):
                 repair_key="storage_layout_migrate",
                 repair_label="Migrate App Data",
             )
+        progress.complete("Inspected storage layout.")
 
-        _set_status("Checking schema version...")
+        progress.set_message("Checking schema version...")
         if db_version == SCHEMA_TARGET:
             add_check(
                 "Schema version",
@@ -7519,9 +7913,12 @@ class App(QMainWindow):
                 repair_key="schema_migrate",
                 repair_label="Run Schema Migration",
             )
+        progress.complete("Checked schema version.")
 
-        _set_status("Inspecting schema layout...")
+        progress.set_message("Inspecting schema layout...")
+        schema_layout_start = progress.completed_units
         try:
+            progress.set_message("Checking required database tables...")
             table_names = (
                 {
                     row[0]
@@ -7548,7 +7945,9 @@ class App(QMainWindow):
                 "app_kv",
             }
             missing_tables = sorted(required_tables - table_names)
+            progress.complete("Checked required database tables.")
 
+            progress.set_message("Checking required track columns...")
             track_columns = (
                 {row[1] for row in connection.execute("PRAGMA table_info(Tracks)").fetchall()}
                 if connection is not None and "Tracks" in table_names
@@ -7577,6 +7976,7 @@ class App(QMainWindow):
                 "genre",
             }
             missing_columns = sorted(required_track_columns - track_columns)
+            progress.complete("Checked required track columns.")
 
             if not missing_tables and not missing_columns:
                 add_check(
@@ -7607,8 +8007,12 @@ class App(QMainWindow):
                 "Schema layout could not be inspected.",
                 f"An exception occurred while reading table metadata:\n{exc}",
             )
+            progress.complete(
+                "Schema layout inspection failed.",
+                units=max(0, 2 - (progress.completed_units - schema_layout_start)),
+            )
 
-        _set_status("Running SQLite integrity checks...")
+        progress.set_message("Running SQLite integrity checks...")
         try:
             if active_database_maintenance is None or not current_path:
                 raise RuntimeError("No active profile is open.")
@@ -7627,8 +8031,9 @@ class App(QMainWindow):
                 "Integrity check failed to run.",
                 f"An exception occurred while running PRAGMA integrity_check:\n{exc}",
             )
+        progress.complete("Finished SQLite integrity checks.")
 
-        _set_status("Checking foreign-key consistency...")
+        progress.set_message("Checking foreign-key consistency...")
         try:
             fk_rows = (
                 connection.execute("PRAGMA foreign_key_check").fetchall()
@@ -7660,8 +8065,9 @@ class App(QMainWindow):
                 "Foreign-key validation failed to run.",
                 f"An exception occurred while running PRAGMA foreign_key_check:\n{exc}",
             )
+        progress.complete("Checked foreign-key consistency.")
 
-        _set_status("Checking custom-value integrity...")
+        progress.set_message("Checking custom-value integrity...")
         try:
             orphan_count = self._count_orphaned_custom_values(conn=connection)
             if orphan_count == 0:
@@ -7690,8 +8096,9 @@ class App(QMainWindow):
                 repair_key="custom_value_cleanup",
                 repair_label="Delete Orphaned Custom Values",
             )
+        progress.complete("Checked custom-value integrity.")
 
-        _set_status("Checking legacy default-column custom fields...")
+        progress.set_message("Checking legacy default-column custom fields...")
         try:
             legacy_candidates = self._legacy_promoted_field_repair_candidates(conn=connection)
             if not legacy_candidates:
@@ -7739,8 +8146,11 @@ class App(QMainWindow):
                 repair_key="legacy_promoted_field_repair",
                 repair_label="Merge Into Default Columns",
             )
+        progress.complete("Checked legacy default-column custom fields.")
 
-        _set_status("Checking managed files...")
+        progress.set_message("Checking managed files...")
+        managed_file_total = int(progress_plan["managed_file_units"])
+        managed_file_completed = 0
         try:
             missing_files = []
 
@@ -7749,21 +8159,33 @@ class App(QMainWindow):
                     """
                     SELECT id, track_title, audio_file_path
                     FROM Tracks
+                    WHERE audio_file_path IS NOT NULL AND trim(audio_file_path) != ''
                     ORDER BY id
                     """
                 ).fetchall()
+                managed_file_start = progress.completed_units
                 for track_id, track_title, audio_path in media_rows:
-                    if audio_path:
-                        resolved = (
-                            active_track_service.resolve_media_path(audio_path)
-                            if active_track_service
-                            else Path(audio_path)
+                    resolved = (
+                        active_track_service.resolve_media_path(audio_path)
+                        if active_track_service
+                        else Path(audio_path)
+                    )
+                    if resolved is not None and not resolved.exists():
+                        missing_files.append(
+                            f"Track #{track_id} '{track_title}': missing audio file -> {resolved}"
                         )
-                        if resolved is not None and not resolved.exists():
-                            missing_files.append(
-                                f"Track #{track_id} '{track_title}': missing audio file -> {resolved}"
-                            )
+                    managed_file_completed += 1
+                    progress.report_nested(
+                        start_units=managed_file_start,
+                        span_units=managed_file_total,
+                        value=managed_file_completed,
+                        maximum=managed_file_total,
+                        message=(
+                            f"Checking managed audio references ({managed_file_completed}/{managed_file_total})..."
+                        ),
+                    )
 
+                progress.set_message("Checking managed album artwork references...")
                 album_art_rows = connection.execute(
                     """
                     SELECT id, title, album_art_path
@@ -7782,13 +8204,27 @@ class App(QMainWindow):
                         missing_files.append(
                             f"Album #{album_id} '{album_title or 'Untitled Album'}': missing album art -> {resolved}"
                         )
+                    managed_file_completed += 1
+                    progress.report_nested(
+                        start_units=managed_file_start,
+                        span_units=managed_file_total,
+                        value=managed_file_completed,
+                        maximum=managed_file_total,
+                        message=(
+                            f"Checking managed artwork references ({managed_file_completed}/{managed_file_total})..."
+                        ),
+                    )
 
+                progress.set_message("Checking managed license files...")
                 license_rows = connection.execute(
-                    "SELECT id, filename, file_path FROM Licenses ORDER BY id"
+                    """
+                    SELECT id, filename, file_path
+                    FROM Licenses
+                    WHERE file_path IS NOT NULL AND trim(file_path) != ''
+                    ORDER BY id
+                    """
                 ).fetchall()
                 for record_id, filename, file_path in license_rows:
-                    if not file_path:
-                        continue
                     resolved = (
                         active_license_service.resolve_path(file_path)
                         if active_license_service
@@ -7798,6 +8234,18 @@ class App(QMainWindow):
                         missing_files.append(
                             f"License #{record_id} '{filename or 'unnamed'}': missing file -> {resolved}"
                         )
+                    managed_file_completed += 1
+                    progress.report_nested(
+                        start_units=managed_file_start,
+                        span_units=managed_file_total,
+                        value=managed_file_completed,
+                        maximum=managed_file_total,
+                        message=(
+                            f"Checking managed license files ({managed_file_completed}/{managed_file_total})..."
+                        ),
+                    )
+            else:
+                progress.complete("Checked managed files.")
 
             if not missing_files:
                 add_check(
@@ -7821,12 +8269,19 @@ class App(QMainWindow):
                 "Managed file validation failed to run.",
                 f"An exception occurred while checking managed media and license files:\n{exc}",
             )
+        if connection is not None:
+            progress.complete(
+                "Checked managed files.",
+                units=max(0, managed_file_total - managed_file_completed),
+            )
 
-        _set_status("Inspecting history snapshots and backups...")
+        progress.set_message("Inspecting history snapshots and backups...")
+        history_start = progress.completed_units
         try:
             if active_history_manager is None:
                 raise RuntimeError("No active history manager")
             recovery_issues = active_history_manager.inspect_recovery_state()
+            progress.complete("Collected history recovery-state issues.")
 
             snapshot_issues = [
                 issue
@@ -7865,6 +8320,7 @@ class App(QMainWindow):
                     repair_label="Repair History Artifacts",
                     orphan_count=len(snapshot_issues),
                 )
+            progress.complete("Evaluated history snapshot artifacts.")
 
             backup_issues = [
                 issue
@@ -7898,6 +8354,7 @@ class App(QMainWindow):
                     repair_label="Repair History Artifacts",
                     orphan_count=len(backup_issues),
                 )
+            progress.complete("Evaluated backup artifacts.")
 
             invariant_issues = [
                 issue for issue in recovery_issues if issue.issue_type == "stale_current_head"
@@ -7920,6 +8377,7 @@ class App(QMainWindow):
                     repair_label="Repair History Artifacts",
                     orphan_count=len(invariant_issues),
                 )
+            progress.complete("Evaluated history invariants.")
 
             total_history_issues = len(snapshot_issues) + len(backup_issues) + len(invariant_issues)
             if total_history_issues:
@@ -8018,6 +8476,7 @@ class App(QMainWindow):
                     f"of a {self._human_size(budget_preview.budget_bytes)} budget and is over budget by "
                     f"{self._human_size(budget_preview.over_budget_bytes)}."
                 )
+            progress.complete("Evaluated history storage budget.")
         except Exception as exc:
             add_check(
                 "History snapshots",
@@ -8033,11 +8492,58 @@ class App(QMainWindow):
                 "available": False,
                 "summary": f"History storage information could not be inspected: {exc}",
             }
+            progress.complete(
+                "History diagnostics could not be completed cleanly.",
+                units=max(
+                    0,
+                    int(progress_plan["history_units"])
+                    - (progress.completed_units - history_start),
+                ),
+            )
+
+        progress.set_message("Inspecting application-wide storage...")
+        application_storage_start = progress.completed_units
+        application_storage_units = int(progress_plan["application_storage_units"])
+        try:
+            application_storage_audit = self._application_storage_admin_service().inspect(
+                current_db_path=current_path or None,
+                status_callback=None,
+                progress_callback=lambda value, maximum, message: progress.report_nested(
+                    start_units=application_storage_start,
+                    span_units=application_storage_units,
+                    value=value,
+                    maximum=maximum,
+                    message=message,
+                ),
+            )
+            application_storage_summary = self._application_storage_summary_payload(
+                application_storage_audit
+            )
+            progress.complete(
+                "Inspected application-wide storage.",
+                units=max(
+                    0,
+                    application_storage_units
+                    - (progress.completed_units - application_storage_start),
+                ),
+            )
+        except Exception as exc:
+            application_storage_summary = {
+                **application_storage_summary,
+                "available": False,
+                "summary": f"Application-wide storage information could not be inspected: {exc}",
+            }
+            progress.complete(
+                "Application-wide storage inspection failed.",
+                units=int(progress_plan["application_storage_units"]),
+            )
 
         return {
             "environment": environment,
             "checks": checks,
             "history_storage_budget": history_storage_budget_summary,
+            "application_storage": application_storage_summary,
+            "_diagnostics_progress_total": int(progress_plan["overall_total_units"]),
         }
 
     def _load_diagnostics_report_async(
@@ -8048,21 +8554,59 @@ class App(QMainWindow):
         on_error=None,
         on_cancelled=None,
         on_finished=None,
+        on_progress=None,
         on_status=None,
     ):
         current_path = str(getattr(self, "current_db_path", "") or "").strip()
-        if not current_path:
-            report = self._build_diagnostics_report()
-            if on_success is not None:
-                on_success(report)
-            if on_finished is not None:
-                on_finished()
-            return None
 
         app_version = self._app_version_text()
         data_root = self.data_root
         logs_dir = self.logs_dir
         storage_layout = self.storage_layout
+
+        def _handle_success_before_cleanup(result, ui_progress) -> None:
+            if on_success is not None:
+                on_success(result)
+            total_units = max(1, int((result or {}).get("_diagnostics_progress_total") or 1))
+            ui_progress.report_progress(total_units, total_units, "Diagnostics ready.")
+
+        if not current_path:
+
+            def _task(ctx):
+                ctx.set_status("Loading diagnostics...")
+                return self._build_diagnostics_report(
+                    current_db_path=current_path or None,
+                    data_root=data_root,
+                    logs_dir=logs_dir,
+                    storage_migration_service=StorageMigrationService(
+                        storage_layout,
+                        settings=self.settings,
+                    ),
+                    app_version=app_version,
+                    status_callback=ctx.set_status,
+                    progress_callback=lambda value, maximum, message: ctx.report_progress(
+                        value=int(value),
+                        maximum=int(maximum),
+                        message=str(message or ""),
+                    ),
+                )
+
+            return self._submit_background_task(
+                title="Diagnostics",
+                description="Loading diagnostics...",
+                task_fn=_task,
+                kind="read",
+                unique_key="diagnostics.report",
+                requires_profile=False,
+                show_dialog=False,
+                owner=owner or self,
+                on_success_before_cleanup=_handle_success_before_cleanup,
+                on_error=on_error,
+                on_cancelled=on_cancelled,
+                on_finished=on_finished,
+                on_progress=on_progress,
+                on_status=on_status,
+            )
 
         def _task(bundle, ctx):
             ctx.set_status("Loading diagnostics...")
@@ -8081,6 +8625,11 @@ class App(QMainWindow):
                 storage_migration_service=storage_service,
                 app_version=app_version,
                 status_callback=ctx.set_status,
+                progress_callback=lambda value, maximum, message: ctx.report_progress(
+                    value=int(value),
+                    maximum=int(maximum),
+                    message=str(message or ""),
+                ),
             )
 
         return self._submit_background_bundle_task(
@@ -8091,10 +8640,11 @@ class App(QMainWindow):
             unique_key="diagnostics.report",
             show_dialog=False,
             owner=owner or self,
-            on_success=on_success,
+            on_success_before_cleanup=_handle_success_before_cleanup,
             on_error=on_error,
             on_cancelled=on_cancelled,
             on_finished=on_finished,
+            on_progress=on_progress,
             on_status=on_status,
         )
 
@@ -8325,6 +8875,9 @@ class App(QMainWindow):
 
     def open_application_log_dialog(self):
         ApplicationLogDialog(self, parent=self).exec()
+
+    def open_application_storage_admin_dialog(self):
+        ApplicationStorageAdminDialog(self, parent=self).exec()
 
     def open_diagnostics_dialog(self, *, initial_cleanup_tab: str | None = None):
         dialog = DiagnosticsDialog(self, parent=self)
@@ -8812,6 +9365,13 @@ class App(QMainWindow):
     def _normalize_theme_string(value) -> str:
         return normalize_app_theme_string(value)
 
+    @staticmethod
+    def _format_theme_qss_issues(issues: list) -> str:
+        if not issues:
+            return ""
+        first_issue = issues[0]
+        return f"Line {first_issue.line}, column {first_issue.column}: {first_issue.message}"
+
     @classmethod
     def _normalize_theme_font_family(cls, value, fallback) -> str:
         return normalize_app_theme_font_family(value, fallback)
@@ -8942,20 +9502,38 @@ class App(QMainWindow):
         app = QApplication.instance()
         if app is None:
             return
-        effective = self._effective_theme_settings(raw_values)
+        normalized = self._normalize_theme_settings(raw_values)
+        effective = self._effective_theme_settings(normalized)
         font = QFont(str(effective["font_family"]))
         font.setPointSize(int(effective["font_size"]))
         app.setFont(font)
-        palette = build_app_theme_palette(raw_values or self.theme_settings)
+        palette = build_app_theme_palette(normalized)
         app.setPalette(palette)
         self.setPalette(palette)
-        app.setStyleSheet(self._build_theme_stylesheet(raw_values))
+        qss_issues = validate_qss_document(normalized.get("custom_qss"))
+        if qss_issues:
+            safe_values = dict(normalized)
+            safe_values["custom_qss"] = ""
+            if getattr(self, "logger", None) is not None:
+                self.logger.warning(
+                    "Skipping invalid advanced QSS during theme application: %s",
+                    self._format_theme_qss_issues(qss_issues),
+                )
+            app.setStyleSheet(self._build_theme_stylesheet(safe_values))
+        else:
+            app.setStyleSheet(self._build_theme_stylesheet(normalized))
         self._queue_top_chrome_boundary_refresh()
 
     def _prepare_theme_application_payload(
         self, raw_values: dict[str, object] | None = None
     ) -> dict[str, object]:
         normalized = self._normalize_theme_settings(raw_values)
+        qss_issues = validate_qss_document(normalized.get("custom_qss"))
+        if qss_issues:
+            raise ValueError(
+                "Advanced QSS is not ready to apply.\n\n"
+                + self._format_theme_qss_issues(qss_issues)
+            )
         effective = self._effective_theme_settings(normalized)
         return {
             "normalized_theme": normalized,
@@ -9620,8 +10198,30 @@ class App(QMainWindow):
                 self._log_event(
                     "settings.blob_icons",
                     "Blob icon settings updated",
-                    audio=describe_blob_icon_spec(after_blob_icons.get("audio"), kind="audio"),
-                    image=describe_blob_icon_spec(after_blob_icons.get("image"), kind="image"),
+                    audio_managed=describe_blob_icon_spec(
+                        after_blob_icons.get("audio_managed"),
+                        kind="audio_managed",
+                    ),
+                    audio_database=describe_blob_icon_spec(
+                        after_blob_icons.get("audio_database"),
+                        kind="audio_database",
+                    ),
+                    audio_lossy_managed=describe_blob_icon_spec(
+                        after_blob_icons.get("audio_lossy_managed"),
+                        kind="audio_lossy_managed",
+                    ),
+                    audio_lossy_database=describe_blob_icon_spec(
+                        after_blob_icons.get("audio_lossy_database"),
+                        kind="audio_lossy_database",
+                    ),
+                    image_managed=describe_blob_icon_spec(
+                        after_blob_icons.get("image_managed"),
+                        kind="image_managed",
+                    ),
+                    image_database=describe_blob_icon_spec(
+                        after_blob_icons.get("image_database"),
+                        kind="image_database",
+                    ),
                 )
                 if self.history_manager is not None:
                     self.history_manager.record_setting_change(
@@ -11223,8 +11823,9 @@ class App(QMainWindow):
         action_ribbon_toolbar = getattr(self, "action_ribbon_toolbar", None)
         add_data_dock = getattr(self, "add_data_dock", None)
         catalog_table_dock = getattr(self, "catalog_table_dock", None)
+        action_ribbon_snapshot = self._capture_current_action_ribbon_layout_snapshot()
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "geometry_b64": self._serialize_qbytearray_setting(self.saveGeometry()),
             "window_state": self._current_main_window_state_marker(),
             "normal_geometry": self._serialize_rect_setting(self.normalGeometry()),
@@ -11241,6 +11842,7 @@ class App(QMainWindow):
             "action_ribbon_visible": bool(
                 isinstance(action_ribbon_toolbar, QToolBar) and action_ribbon_toolbar.isVisible()
             ),
+            "action_ribbon": action_ribbon_snapshot,
         }
 
     def _save_named_main_window_layout(self, name: str) -> str | None:
@@ -11266,6 +11868,9 @@ class App(QMainWindow):
         if not isinstance(snapshot, dict):
             return False
 
+        ribbon_action_ids, ribbon_visible = self._resolve_saved_layout_action_ribbon_snapshot(
+            snapshot
+        )
         self._ensure_persistent_workspace_dock_shells()
         previous_suspend_state = self._suspend_dock_state_sync
         previous_restore_state = self._is_restoring_workspace_layout
@@ -11290,8 +11895,8 @@ class App(QMainWindow):
                 bool(snapshot.get("profiles_toolbar_visible", True))
             )
             self._apply_action_ribbon_configuration(
-                getattr(self, "_action_ribbon_action_ids", []),
-                bool(snapshot.get("action_ribbon_visible", True)),
+                ribbon_action_ids,
+                ribbon_visible,
             )
             self._refresh_workspace_dock_default_placement_flags()
             self._materialize_visible_workspace_dock_panels()
@@ -11301,6 +11906,11 @@ class App(QMainWindow):
 
         self._active_saved_main_window_layout_name = resolved_name
         self._store_workspace_panel_visibility_preferences(sync=False)
+        self._store_action_ribbon_preferences(
+            ribbon_action_ids,
+            ribbon_visible,
+            sync=False,
+        )
         self._save_main_window_geometry(sync=False)
         self._save_main_dock_state(sync=False)
         self.settings.sync()
@@ -12568,6 +13178,13 @@ class App(QMainWindow):
                 "action": self.diagnostics_action,
             },
             {
+                "id": "application_storage_admin",
+                "label": "Storage Admin",
+                "category": "Help",
+                "description": "Inspect and permanently clean up retained application-wide storage.",
+                "action": self.application_storage_admin_action,
+            },
+            {
                 "id": "application_log",
                 "label": "Application Log",
                 "category": "Help",
@@ -12588,6 +13205,10 @@ class App(QMainWindow):
             "display/action_ribbon_visible",
             "display/action_ribbon_actions_json",
         ]
+
+    def _current_action_ribbon_visibility(self) -> bool:
+        toolbar = getattr(self, "action_ribbon_toolbar", None)
+        return bool(isinstance(toolbar, QToolBar) and toolbar.isVisible())
 
     def _normalize_action_ribbon_ids(self, action_ids) -> list[str]:
         if not hasattr(self, "_action_ribbon_specs_by_id"):
@@ -12620,6 +13241,65 @@ class App(QMainWindow):
         if not normalized_ids and parsed_ids:
             return list(getattr(self, "_action_ribbon_default_ids", []))
         return normalized_ids
+
+    def _capture_current_action_ribbon_layout_snapshot(self) -> dict[str, object]:
+        action_ids = self._normalize_action_ribbon_ids(
+            getattr(self, "_action_ribbon_action_ids", [])
+        )
+        if not action_ids:
+            action_ids = list(getattr(self, "_action_ribbon_default_ids", []))
+        return {
+            "schema_version": 1,
+            "action_ids": action_ids,
+            "visible": self._current_action_ribbon_visibility(),
+        }
+
+    def _resolve_saved_layout_action_ribbon_snapshot(
+        self,
+        snapshot: dict[str, object],
+    ) -> tuple[list[str], bool]:
+        current_action_ids = self._normalize_action_ribbon_ids(
+            getattr(self, "_action_ribbon_action_ids", [])
+        )
+        if not current_action_ids:
+            current_action_ids = list(getattr(self, "_action_ribbon_default_ids", []))
+        current_visible = self._current_action_ribbon_visibility()
+
+        ribbon_snapshot = snapshot.get("action_ribbon")
+        if isinstance(ribbon_snapshot, dict):
+            action_ids = self._normalize_action_ribbon_ids(ribbon_snapshot.get("action_ids"))
+            if not action_ids:
+                action_ids = list(current_action_ids)
+            visible_value = ribbon_snapshot.get("visible")
+            if visible_value is None:
+                visible_value = snapshot.get("action_ribbon_visible", current_visible)
+            return action_ids, bool(visible_value)
+
+        legacy_visible = snapshot.get("action_ribbon_visible")
+        if legacy_visible is None:
+            legacy_visible = current_visible
+        return list(current_action_ids), bool(legacy_visible)
+
+    def _store_action_ribbon_preferences(
+        self,
+        action_ids,
+        visible: bool,
+        *,
+        sync: bool = True,
+    ) -> None:
+        normalized_ids = self._normalize_action_ribbon_ids(action_ids)
+        if not normalized_ids:
+            normalized_ids = list(getattr(self, "_action_ribbon_default_ids", []))
+        try:
+            self.settings.setValue(
+                "display/action_ribbon_actions_json",
+                json.dumps(normalized_ids),
+            )
+            self.settings.setValue("display/action_ribbon_visible", bool(visible))
+            if sync:
+                self.settings.sync()
+        except Exception as e:
+            self.logger.warning("Failed to store action ribbon preferences: %s", e)
 
     def _action_ribbon_button_tooltip(self, spec: dict) -> str:
         parts = [str(spec.get("label") or "").strip()]
@@ -16324,6 +17004,391 @@ class App(QMainWindow):
             self.open_asset_registry(int(entity_id))
             return
 
+    def _create_master_transfer_service_for_ui(self) -> MasterTransferService | None:
+        if self.exchange_service is None or self.repertoire_exchange_service is None:
+            return None
+        return MasterTransferService(
+            exchange_service=self.exchange_service,
+            repertoire_exchange_service=self.repertoire_exchange_service,
+            license_service=self.license_service,
+            contract_template_service=self.contract_template_service,
+        )
+
+    def _open_master_transfer_export_preview_dialog(self, preview) -> list[str] | None:
+        dialog = MasterTransferExportDialog(
+            list(getattr(preview, "sections", []) or []),
+            parent=self,
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return None
+        selected_section_ids = list(dialog.selected_section_ids())
+        return selected_section_ids if selected_section_ids else None
+
+    def export_master_transfer_package(self) -> None:
+        if self.exchange_service is None or self.repertoire_exchange_service is None:
+            QMessageBox.warning(self, "Master Catalog Transfer", "Open a profile first.")
+            return
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_name = f"master_catalog_transfer_{timestamp}.zip"
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Master Catalog Transfer",
+            str(self.exports_dir / default_name),
+            "ZIP Files (*.zip)",
+        )
+        if not path:
+            return
+        try:
+            resolved_path = self._resolve_file_export_target(
+                path,
+                default_filename=default_name,
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "Master Catalog Transfer", str(exc))
+            return
+        preview_service = self._create_master_transfer_service_for_ui()
+        if preview_service is None:
+            QMessageBox.warning(self, "Master Catalog Transfer", "Open a profile first.")
+            return
+        try:
+            preview = preview_service.preview_export()
+            selected_section_ids = self._open_master_transfer_export_preview_dialog(preview)
+            if not selected_section_ids:
+                return
+            selected_section_ids = preview_service.validate_export_section_selection(
+                selected_section_ids
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "Master Catalog Transfer", str(exc))
+            return
+
+        def _worker(bundle, ctx):
+            export_progress = self._scaled_progress_callback(ctx.report_progress, start=0, end=94)
+
+            def _mutation():
+                return bundle.master_transfer_service.export_package(
+                    resolved_path,
+                    include_sections=selected_section_ids,
+                    progress_callback=export_progress,
+                    cancel_callback=ctx.raise_if_cancelled,
+                )
+
+            return run_file_history_action(
+                history_manager=bundle.history_manager,
+                action_label="Export Master Catalog Transfer",
+                action_type="file.master_transfer_export",
+                target_path=resolved_path,
+                mutation=_mutation,
+                entity_type="MasterTransferExport",
+                entity_id=str(resolved_path),
+                payload=lambda result: {
+                    "path": str(resolved_path),
+                    "format": "master_transfer",
+                    "section_ids": [section.section_id for section in result.sections],
+                    "warnings": list(result.warnings),
+                },
+                progress_callback=ctx.report_progress,
+                post_mutation_progress=(96, "Capturing master transfer export history..."),
+                record_progress=(98, "Recording master transfer export history..."),
+                logger=self.logger,
+            )
+
+        def _success(result) -> None:
+            self._refresh_history_actions()
+            self._log_event(
+                "master_transfer.export",
+                "Exported master catalog transfer package",
+                path=str(resolved_path),
+                app_version=result.app_version,
+                exported_at=result.exported_at,
+                warnings=result.warnings,
+                sections={
+                    section.section_id: dict(section.entity_counts) for section in result.sections
+                },
+            )
+            self._audit(
+                "EXPORT",
+                "MasterTransfer",
+                ref_id=str(resolved_path),
+                details=(
+                    "sections="
+                    + ",".join(section.section_id for section in result.sections)
+                    + f"; warnings={len(result.warnings)}"
+                ),
+            )
+            self._audit_commit()
+            message_lines = [
+                f"Master catalog transfer package written to:\n{resolved_path}",
+                "",
+                "Included sections:",
+            ]
+            message_lines.extend(
+                f"- {section.label}: {', '.join(f'{key}={value}' for key, value in section.entity_counts.items())}"
+                for section in result.sections
+            )
+            omitted_export_sections = list(
+                (
+                    (result.manifest.get("export_selection") or {}).get("omitted_sections")
+                    if isinstance(result.manifest, dict)
+                    else []
+                )
+                or []
+            )
+            if omitted_export_sections:
+                message_lines.extend(
+                    [
+                        "",
+                        "Omitted sections:",
+                        *[
+                            "- "
+                            + (
+                                str(section.get("label") or section.get("section_id") or "").strip()
+                                or "Unnamed Section"
+                            )
+                            for section in omitted_export_sections
+                            if str(section.get("label") or section.get("section_id") or "").strip()
+                        ],
+                    ]
+                )
+            if result.warnings:
+                message_lines.extend(
+                    [
+                        "",
+                        "Warnings:",
+                        *[f"- {warning}" for warning in result.warnings[:12]],
+                    ]
+                )
+            QMessageBox.information(
+                self,
+                "Master Catalog Transfer",
+                "\n".join(message_lines),
+            )
+
+        self._submit_background_bundle_task(
+            title="Export Master Catalog Transfer",
+            description="Building a versioned logical transfer package for the current profile...",
+            task_fn=_worker,
+            kind="read",
+            unique_key="master_transfer.export",
+            worker_completion_progress=(100, "Master transfer export complete."),
+            on_success_after_cleanup=_success,
+            on_error=lambda failure: self._show_background_task_error(
+                "Master Catalog Transfer",
+                failure,
+                user_message="Could not export the master transfer package:",
+            ),
+        )
+
+    def import_master_transfer_package(self) -> None:
+        if self.exchange_service is None or self.repertoire_exchange_service is None:
+            QMessageBox.warning(self, "Master Catalog Transfer", "Open a profile first.")
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Master Catalog Transfer",
+            "",
+            "ZIP Files (*.zip)",
+        )
+        if not path:
+            return
+
+        def _submit_import_task() -> None:
+            def _worker(bundle, ctx):
+                import_progress = self._scaled_progress_callback(
+                    ctx.report_progress,
+                    start=0,
+                    end=90,
+                )
+                ctx.report_progress(
+                    value=0,
+                    maximum=100,
+                    message="Importing the master catalog transfer package...",
+                )
+
+                def _mutation():
+                    return bundle.master_transfer_service.import_package(
+                        path,
+                        progress_callback=import_progress,
+                        cancel_callback=ctx.raise_if_cancelled,
+                    )
+
+                return run_snapshot_history_action(
+                    history_manager=bundle.history_manager,
+                    action_label=f"Import Master Transfer: {Path(path).name}",
+                    action_type="master_transfer.import",
+                    entity_type="MasterTransferImport",
+                    entity_id=path,
+                    payload={"path": path, "format": "master_transfer"},
+                    mutation=_mutation,
+                    progress_callback=ctx.report_progress,
+                    post_mutation_progress=(92, "Capturing master transfer history snapshot..."),
+                    record_progress=(94, "Recording master transfer history..."),
+                    logger=self.logger,
+                )
+
+            def _before_cleanup(result, ui_progress) -> None:
+                catalog_report = getattr(result, "catalog_report", None)
+                focus_track_id = (
+                    []
+                    if catalog_report is None
+                    else (catalog_report.created_tracks or catalog_report.updated_tracks)
+                )
+                focus_track_id = (focus_track_id or [None])[0]
+                self._advance_task_ui_progress(
+                    ui_progress,
+                    value=97,
+                    message="Applying imported master transfer changes...",
+                )
+                try:
+                    self.conn.commit()
+                except Exception:
+                    pass
+                self._advance_task_ui_progress(
+                    ui_progress,
+                    value=99,
+                    message="Refreshing catalog views, workspace panels, and history...",
+                )
+                self.refresh_table_preserve_view(focus_id=focus_track_id)
+                self.populate_all_comboboxes()
+                self._refresh_catalog_workspace_docks()
+                self._refresh_history_actions()
+                self._advance_task_ui_progress(
+                    ui_progress,
+                    value=100,
+                    message="Master transfer import complete.",
+                )
+
+            def _success(result) -> None:
+                catalog_report = getattr(result, "catalog_report", None)
+                repertoire_party_phase = getattr(result, "repertoire_party_phase", None)
+                repertoire_report = getattr(result, "repertoire_report", None)
+                included_section_ids = self._master_transfer_manifest_included_section_ids(
+                    getattr(result, "manifest", {})
+                )
+                self._log_event(
+                    "master_transfer.import",
+                    "Imported master catalog transfer package",
+                    path=path,
+                    exported_at=result.exported_at,
+                    source_app_version=result.app_version,
+                    included_sections=included_section_ids,
+                    seeded_parties=(
+                        0
+                        if repertoire_party_phase is None
+                        else repertoire_party_phase.imported_parties
+                    ),
+                    reused_parties=(
+                        0
+                        if repertoire_party_phase is None
+                        else repertoire_party_phase.reused_existing_parties
+                    ),
+                    created_tracks=(
+                        0 if catalog_report is None else len(catalog_report.created_tracks)
+                    ),
+                    updated_tracks=(
+                        0 if catalog_report is None else len(catalog_report.updated_tracks)
+                    ),
+                    imported_licenses=result.imported_licenses,
+                    imported_works=(
+                        0 if repertoire_report is None else repertoire_report.imported_works
+                    ),
+                    imported_contracts=(
+                        0 if repertoire_report is None else repertoire_report.imported_contracts
+                    ),
+                    imported_rights=(
+                        0 if repertoire_report is None else repertoire_report.imported_rights
+                    ),
+                    imported_assets=(
+                        0 if repertoire_report is None else repertoire_report.imported_assets
+                    ),
+                    imported_templates=result.imported_contract_templates,
+                    imported_template_revisions=result.imported_template_revisions,
+                    warnings=result.warnings,
+                )
+                self._audit(
+                    "IMPORT",
+                    "MasterTransfer",
+                    ref_id=path,
+                    details=(
+                        f"sections={','.join(included_section_ids)}; "
+                        f"tracks_created={0 if catalog_report is None else len(catalog_report.created_tracks)}; "
+                        f"parties_seeded={0 if repertoire_party_phase is None else repertoire_party_phase.imported_parties}; "
+                        f"licenses={result.imported_licenses}; "
+                        f"works={0 if repertoire_report is None else repertoire_report.imported_works}; "
+                        f"contracts={0 if repertoire_report is None else repertoire_report.imported_contracts}; "
+                        f"rights={0 if repertoire_report is None else repertoire_report.imported_rights}; "
+                        f"assets={0 if repertoire_report is None else repertoire_report.imported_assets}; "
+                        f"templates={result.imported_contract_templates}; "
+                        f"template_revisions={result.imported_template_revisions}"
+                    ),
+                )
+                self._audit_commit()
+                self._show_master_transfer_import_report(path, result)
+
+            self._submit_background_bundle_task(
+                title="Import Master Catalog Transfer",
+                description="Rehydrating a versioned master transfer package through the app's current import logic...",
+                task_fn=_worker,
+                kind="write",
+                unique_key="master_transfer.import",
+                worker_completion_progress=(96, "Finalizing master transfer import transaction..."),
+                on_success_before_cleanup=_before_cleanup,
+                on_success_after_cleanup=_success,
+                on_error=lambda failure: self._show_background_task_error(
+                    "Master Catalog Transfer",
+                    failure,
+                    user_message="Could not import the master transfer package:",
+                ),
+            )
+
+        def _inspection_worker(bundle, ctx):
+            inspection_progress = self._scaled_progress_callback(
+                ctx.report_progress,
+                start=0,
+                end=96,
+            )
+            ctx.report_progress(
+                value=0,
+                maximum=100,
+                message="Inspecting the master catalog transfer package...",
+            )
+            return bundle.master_transfer_service.inspect_package(
+                path,
+                progress_callback=inspection_progress,
+                cancel_callback=ctx.raise_if_cancelled,
+            )
+
+        def _inspection_success(inspection) -> None:
+            accepted = self._open_import_review_dialog(
+                title="Review Master Catalog Transfer Import",
+                subtitle=(
+                    "Inspection completed. Review the staged logical transfer before anything is written to the current profile."
+                ),
+                summary_lines=self._master_transfer_review_summary(inspection),
+                warnings=inspection.warnings,
+                preview_rows=inspection.preview_rows,
+                preview_headers=["Section", "Entity", "Action", "Label", "Notes"],
+                preview_title="Transfer Preview",
+                confirm_label="Apply Master Transfer",
+            )
+            if accepted:
+                _submit_import_task()
+
+        self._submit_background_bundle_task(
+            title="Inspect Master Catalog Transfer",
+            description="Inspecting the selected master transfer package...",
+            task_fn=_inspection_worker,
+            kind="read",
+            unique_key="master_transfer.inspect",
+            worker_completion_progress=(100, "Master transfer inspection complete."),
+            on_success_after_cleanup=_inspection_success,
+            on_error=lambda failure: self._show_background_task_error(
+                "Master Catalog Transfer",
+                failure,
+                user_message="Could not inspect the master transfer package:",
+            ),
+        )
+
     def export_repertoire_exchange(self, format_name: str):
         if self.repertoire_exchange_service is None:
             QMessageBox.warning(self, "Repertoire Exchange", "Open a profile first.")
@@ -16963,6 +18028,131 @@ class App(QMainWindow):
         if inspection.existing_parties:
             lines.append(f"Would reuse existing Parties: {inspection.existing_parties}")
         return lines
+
+    @staticmethod
+    def _master_transfer_manifest_included_section_ids(manifest: dict[str, object]) -> list[str]:
+        selection = manifest.get("export_selection") if isinstance(manifest, dict) else None
+        included = []
+        seen: set[str] = set()
+        if isinstance(selection, dict):
+            for section_id in selection.get("included_section_ids") or []:
+                clean_id = str(section_id or "").strip()
+                if not clean_id or clean_id in seen:
+                    continue
+                seen.add(clean_id)
+                included.append(clean_id)
+        if included:
+            return included
+        if not isinstance(manifest, dict):
+            return []
+        return [
+            str(section.get("section_id") or "").strip()
+            for section in list(manifest.get("sections") or [])
+            if str(section.get("section_id") or "").strip()
+        ]
+
+    @staticmethod
+    def _master_transfer_manifest_omitted_section_labels(manifest: dict[str, object]) -> list[str]:
+        if not isinstance(manifest, dict):
+            return []
+        selection = manifest.get("export_selection")
+        if not isinstance(selection, dict):
+            return []
+        labels: list[str] = []
+        for raw_section in selection.get("omitted_sections") or []:
+            section = dict(raw_section)
+            label = str(section.get("label") or section.get("section_id") or "").strip()
+            if label:
+                labels.append(label)
+        return labels
+
+    @staticmethod
+    def _master_transfer_review_summary(inspection) -> list[str]:
+        lines = list(getattr(inspection, "summary_lines", []) or [])
+        catalog_dry_run = getattr(inspection, "catalog_dry_run", None)
+        if catalog_dry_run is not None:
+            lines.append(
+                "Catalog dry run: "
+                f"would create {int(getattr(catalog_dry_run, 'would_create_tracks', 0) or 0)}, "
+                f"would update {int(getattr(catalog_dry_run, 'would_update_tracks', 0) or 0)}, "
+                f"blocked {int(getattr(catalog_dry_run, 'failed', 0) or 0)}"
+            )
+        repertoire_inspection = getattr(inspection, "repertoire_inspection", None)
+        if repertoire_inspection is not None:
+            lines.append(
+                "Repertoire preview: "
+                f"would reuse {int(getattr(repertoire_inspection, 'existing_parties', 0) or 0)} "
+                "existing Parties and "
+                f"would create {int(getattr(repertoire_inspection, 'new_parties', 0) or 0)}."
+            )
+        return lines
+
+    def _show_master_transfer_import_report(self, path: str, result) -> None:
+        included_section_ids = set(
+            self._master_transfer_manifest_included_section_ids(getattr(result, "manifest", {}))
+        )
+        omitted_labels = self._master_transfer_manifest_omitted_section_labels(
+            getattr(result, "manifest", {})
+        )
+        catalog_report = getattr(result, "catalog_report", None)
+        repertoire_party_phase = getattr(result, "repertoire_party_phase", None)
+        repertoire_report = getattr(result, "repertoire_report", None)
+        lines = [
+            f"Source package: {Path(path).name}",
+            f"Source app version: {result.app_version or 'Unknown'}",
+            f"Exported at: {result.exported_at or 'Unknown'}",
+            "",
+            "Applied sections:",
+        ]
+        if "catalog" in included_section_ids:
+            lines.append(
+                "Catalog: "
+                f"created {0 if catalog_report is None else len(catalog_report.created_tracks)}, "
+                f"updated {0 if catalog_report is None else len(catalog_report.updated_tracks)}"
+            )
+        if "repertoire" in included_section_ids:
+            lines.append(
+                "Contracts and Rights Party phase: "
+                f"created {0 if repertoire_party_phase is None else int(repertoire_party_phase.imported_parties or 0)}, "
+                f"reused {0 if repertoire_party_phase is None else int(repertoire_party_phase.reused_existing_parties or 0)}"
+            )
+        if "licenses" in included_section_ids:
+            lines.append(f"License Archive: imported {int(result.imported_licenses or 0)}")
+        if "repertoire" in included_section_ids:
+            lines.append(
+                "Contracts and Rights: "
+                f"works {0 if repertoire_report is None else int(repertoire_report.imported_works or 0)}, "
+                f"contracts {0 if repertoire_report is None else int(repertoire_report.imported_contracts or 0)}, "
+                f"rights {0 if repertoire_report is None else int(repertoire_report.imported_rights or 0)}, "
+                f"assets {0 if repertoire_report is None else int(repertoire_report.imported_assets or 0)}"
+            )
+        if "contract_templates" in included_section_ids:
+            lines.append(
+                "Contract Templates: "
+                f"templates {int(result.imported_contract_templates or 0)}, "
+                f"revisions {int(result.imported_template_revisions or 0)}"
+            )
+        if omitted_labels:
+            lines.extend(
+                [
+                    "",
+                    "Intentionally omitted sections:",
+                    *[f"- {label}" for label in omitted_labels],
+                ]
+            )
+        if result.warnings:
+            lines.extend(
+                [
+                    "",
+                    "Warnings:",
+                    *[f"- {warning}" for warning in list(result.warnings)[:12]],
+                ]
+            )
+        QMessageBox.information(
+            self,
+            "Master Catalog Transfer",
+            "\n".join(lines),
+        )
 
     def _show_party_import_report(self, path: str, report: PartyImportReport) -> None:
         lines = [
@@ -21485,8 +22675,10 @@ class App(QMainWindow):
                 enabled,
             )
             self._queue_top_chrome_boundary_refresh()
-            self.settings.setValue("display/action_ribbon_visible", enabled)
-            self.settings.sync()
+            self._store_action_ribbon_preferences(
+                getattr(self, "_action_ribbon_action_ids", []),
+                enabled,
+            )
 
         self._run_setting_bundle_history_action(
             action_label="Toggle Action Ribbon",
@@ -21523,9 +22715,7 @@ class App(QMainWindow):
             return
 
         def mutation():
-            self.settings.setValue("display/action_ribbon_actions_json", json.dumps(new_action_ids))
-            self.settings.setValue("display/action_ribbon_visible", new_visible)
-            self.settings.sync()
+            self._store_action_ribbon_preferences(new_action_ids, new_visible)
             self._apply_action_ribbon_configuration(new_action_ids, new_visible)
 
         self._run_setting_bundle_history_action(
@@ -22002,7 +23192,8 @@ class App(QMainWindow):
         menu = QMenu(self)
         track_id = self._track_id_for_table_row(row)
         selected_ids = self._selected_track_ids()
-        bulk_count = len(selected_ids) if track_id is not None and track_id in selected_ids else 1
+        effective_track_ids = self._effective_context_menu_track_ids(track_id, selected_ids)
+        bulk_count = len(effective_track_ids) if effective_track_ids else 1
         edit_label = "Edit Track" if bulk_count <= 1 else f"Bulk Edit {bulk_count} Selected Tracks…"
         act_edit = QAction(edit_label, self)
         act_edit.triggered.connect(lambda: self.open_selected_editor(track_id))
@@ -22035,7 +23226,7 @@ class App(QMainWindow):
         if track_id:
             menu.addSeparator()
             if self.track_has_media(track_id, "audio_file"):
-                export_track_ids = selected_ids if track_id in selected_ids else [track_id]
+                export_track_ids = list(effective_track_ids or [track_id])
                 audio_menu = menu.addMenu("Audio")
 
                 act_import_tags = QAction("Import Metadata from Audio Files…", self)
@@ -22143,7 +23334,12 @@ class App(QMainWindow):
 
         if track_id and standard_media_key:
             standard_file_menu = ensure_file_menu()
-            if self.track_has_media(track_id, standard_media_key):
+            focused_track_has_media = self.track_has_media(track_id, standard_media_key)
+            storage_scope = self._standard_media_storage_conversion_scope(
+                effective_track_ids,
+                standard_media_key,
+            )
+            if focused_track_has_media:
                 act_prev = QAction("Preview File…", self)
                 act_prev.triggered.connect(
                     lambda: self._preview_standard_media_for_track(track_id, standard_media_key)
@@ -22156,7 +23352,7 @@ class App(QMainWindow):
             )
             standard_file_menu.addAction(act_attach_standard)
 
-            if self.track_has_media(track_id, standard_media_key):
+            if focused_track_has_media:
                 export_basename = self._media_export_basename_for_track(
                     track_id,
                     standard_media_key,
@@ -22177,29 +23373,24 @@ class App(QMainWindow):
                 )
                 standard_file_menu.addAction(act_delete_standard)
 
-                current_mode = normalize_storage_mode(
-                    str(
-                        self.track_media_meta(track_id, standard_media_key).get("storage_mode")
-                        or ""
+            for target_mode in storage_scope["allowed_targets"]:
+                action = QAction(
+                    self._storage_conversion_action_label(
+                        target_mode,
+                        selection_count=len(effective_track_ids),
                     ),
-                    default=None,
+                    self,
                 )
-                if current_mode != STORAGE_MODE_DATABASE:
-                    act_convert_standard_db = QAction("Store in Database", self)
-                    act_convert_standard_db.triggered.connect(
-                        lambda checked=False, tid=track_id, key=standard_media_key: self._convert_standard_media_for_track(
-                            tid, key, STORAGE_MODE_DATABASE
-                        )
+                action.triggered.connect(
+                    lambda checked=False, track_ids=list(
+                        effective_track_ids
+                    ), key=standard_media_key, mode=target_mode: self._convert_standard_media_for_track(
+                        track_ids,
+                        key,
+                        mode,
                     )
-                    ensure_storage_menu().addAction(act_convert_standard_db)
-                if current_mode != STORAGE_MODE_MANAGED_FILE:
-                    act_convert_standard_file = QAction("Store as Managed File", self)
-                    act_convert_standard_file.triggered.connect(
-                        lambda checked=False, tid=track_id, key=standard_media_key: self._convert_standard_media_for_track(
-                            tid, key, STORAGE_MODE_MANAGED_FILE
-                        )
-                    )
-                    ensure_storage_menu().addAction(act_convert_standard_file)
+                )
+                ensure_storage_menu().addAction(action)
 
         # Preview file action for custom blob columns
         if col >= len(self.BASE_HEADERS):
@@ -22249,6 +23440,10 @@ class App(QMainWindow):
                 track_id = int(id_item.text())
                 track_title = title_item.text() if title_item else f"track_{track_id}"
                 custom_file_menu = ensure_file_menu()
+                storage_scope = self._custom_blob_storage_conversion_scope(
+                    effective_track_ids,
+                    int(field_id),
+                )
                 act_attach = QAction("Attach/Replace File…", self)
                 act_attach.triggered.connect(
                     lambda: self._attach_blob_for_cell(
@@ -22263,32 +23458,24 @@ class App(QMainWindow):
                     lambda: self.cf_export_blob(track_id, field_id, self, track_title)
                 )
                 custom_file_menu.addAction(act_export)
-                meta = self.cf_get_value_meta(
-                    track_id,
-                    field_id,
-                    include_storage_details=True,
-                )
-                current_mode = normalize_storage_mode(meta.get("storage_mode"), default=None)
-                if current_mode != STORAGE_MODE_DATABASE:
-                    act_cf_db = QAction("Store in Database", self)
-                    act_cf_db.triggered.connect(
-                        lambda checked=False, tid=track_id, fid=field_id: self._convert_custom_blob_storage_mode(
-                            tid,
+                for target_mode in storage_scope["allowed_targets"]:
+                    action = QAction(
+                        self._storage_conversion_action_label(
+                            target_mode,
+                            selection_count=len(effective_track_ids),
+                        ),
+                        self,
+                    )
+                    action.triggered.connect(
+                        lambda checked=False, track_ids=list(effective_track_ids), fid=int(
+                            field_id
+                        ), mode=target_mode: self._convert_custom_blob_storage_mode(
+                            track_ids,
                             fid,
-                            STORAGE_MODE_DATABASE,
+                            mode,
                         )
                     )
-                    ensure_storage_menu().addAction(act_cf_db)
-                if current_mode != STORAGE_MODE_MANAGED_FILE:
-                    act_cf_file = QAction("Store as Managed File", self)
-                    act_cf_file.triggered.connect(
-                        lambda checked=False, tid=track_id, fid=field_id: self._convert_custom_blob_storage_mode(
-                            tid,
-                            fid,
-                            STORAGE_MODE_MANAGED_FILE,
-                        )
-                    )
-                    ensure_storage_menu().addAction(act_cf_file)
+                    ensure_storage_menu().addAction(action)
 
         # Delete blob action for custom blob columns
         if col >= len(self.BASE_HEADERS):
@@ -24289,6 +25476,116 @@ class App(QMainWindow):
             "field_type": field_type,
         }
 
+    def _effective_context_menu_track_ids(
+        self,
+        track_id: int | None,
+        selected_ids: list[int] | None = None,
+    ) -> list[int]:
+        normalized_selected = self._normalize_track_ids(selected_ids or [])
+        if track_id is not None and track_id in normalized_selected:
+            return normalized_selected
+        return [int(track_id)] if track_id is not None else []
+
+    @staticmethod
+    def _storage_conversion_action_label(target_mode: str, *, selection_count: int) -> str:
+        clean_target = normalize_storage_mode(target_mode)
+        if selection_count > 1:
+            if clean_target == STORAGE_MODE_DATABASE:
+                return "Store selection in database"
+            return "Store selection as managed file"
+        if clean_target == STORAGE_MODE_DATABASE:
+            return "Store in Database"
+        return "Store as Managed File"
+
+    @staticmethod
+    def _storage_conversion_target_label(target_mode: str) -> str:
+        clean_target = normalize_storage_mode(target_mode)
+        if clean_target == STORAGE_MODE_DATABASE:
+            return "database storage"
+        return "managed-file storage"
+
+    def _classify_storage_conversion_scope(self, track_ids, *, meta_loader) -> dict[str, object]:
+        normalized_ids = self._normalize_track_ids(track_ids or [])
+        target_buckets = {
+            STORAGE_MODE_DATABASE: {"convert_track_ids": [], "skip_track_ids": []},
+            STORAGE_MODE_MANAGED_FILE: {"convert_track_ids": [], "skip_track_ids": []},
+        }
+        available_track_ids: list[int] = []
+        missing_track_ids: list[int] = []
+        modes_present: set[str] = set()
+        for track_id in normalized_ids:
+            try:
+                meta = dict(meta_loader(int(track_id)) or {})
+            except Exception:
+                meta = {}
+            has_payload = bool(meta.get("has_media") or meta.get("has_blob"))
+            current_mode = normalize_storage_mode(meta.get("storage_mode"), default=None)
+            if not has_payload or current_mode is None:
+                missing_track_ids.append(int(track_id))
+                continue
+            available_track_ids.append(int(track_id))
+            modes_present.add(current_mode)
+            for target_mode, bucket in target_buckets.items():
+                bucket_key = (
+                    "skip_track_ids" if current_mode == target_mode else "convert_track_ids"
+                )
+                bucket[bucket_key].append(int(track_id))
+        if modes_present == {STORAGE_MODE_MANAGED_FILE}:
+            allowed_targets = [STORAGE_MODE_DATABASE]
+        elif modes_present == {STORAGE_MODE_DATABASE}:
+            allowed_targets = [STORAGE_MODE_MANAGED_FILE]
+        elif modes_present:
+            allowed_targets = [STORAGE_MODE_MANAGED_FILE, STORAGE_MODE_DATABASE]
+        else:
+            allowed_targets = []
+        return {
+            "scope_track_ids": normalized_ids,
+            "available_track_ids": available_track_ids,
+            "missing_track_ids": missing_track_ids,
+            "modes_present": sorted(modes_present),
+            "allowed_targets": allowed_targets,
+            "targets": target_buckets,
+        }
+
+    def _standard_media_storage_conversion_scope(
+        self,
+        track_ids,
+        media_key: str,
+        *,
+        track_service=None,
+        cursor=None,
+    ) -> dict[str, object]:
+        service = track_service or self.track_service
+        if service is None:
+            return self._classify_storage_conversion_scope([], meta_loader=lambda _track_id: {})
+        return self._classify_storage_conversion_scope(
+            track_ids,
+            meta_loader=lambda track_id: service.get_media_meta(
+                int(track_id),
+                media_key,
+                cursor=cursor,
+            ),
+        )
+
+    def _custom_blob_storage_conversion_scope(
+        self,
+        track_ids,
+        field_id: int,
+        *,
+        custom_field_values=None,
+    ) -> dict[str, object]:
+        service = custom_field_values or self.custom_field_values
+        if service is None:
+            return self._classify_storage_conversion_scope([], meta_loader=lambda _track_id: {})
+        return self._classify_storage_conversion_scope(
+            track_ids,
+            meta_loader=lambda track_id: service.get_value_meta(
+                int(track_id),
+                int(field_id),
+                include_storage_details=True,
+            ),
+        )
+
     def _export_focused_media_column(
         self,
         column: int,
@@ -24433,32 +25730,17 @@ class App(QMainWindow):
         )
 
     def _convert_standard_media_for_track(
-        self, track_id: int, media_key: str, target_mode: str
+        self, track_id: int | list[int], media_key: str, target_mode: str
     ) -> None:
-        try:
-            self._run_snapshot_history_action(
-                action_label=f"Convert {media_key.replace('_', ' ').title()} Storage",
-                action_type=f"track.{media_key}.convert_storage_mode",
-                entity_type="Track",
-                entity_id=track_id,
-                payload={
-                    "track_id": track_id,
-                    "media_key": media_key,
-                    "target_mode": target_mode,
-                },
-                mutation=lambda: self.track_convert_media_storage_mode(
-                    track_id, media_key, target_mode
-                ),
-            )
-            self.refresh_table_preserve_view(focus_id=track_id)
-        except Exception as exc:
-            self.conn.rollback()
-            self.logger.exception("Convert %s storage failed: %s", media_key, exc)
-            QMessageBox.critical(
-                self,
-                "Track Media Error",
-                f"Failed to convert storage mode:\n{exc}",
-            )
+        track_ids = track_id if isinstance(track_id, list) else [int(track_id)]
+        column_label = "Audio File" if media_key == "audio_file" else "Album Art"
+        self._submit_storage_conversion_task(
+            track_ids=track_ids,
+            target_mode=target_mode,
+            scope_kind="standard",
+            column_label=column_label,
+            media_key=media_key,
+        )
 
     # ---------------------- BLOB CF helpers (DB IO + export) ----------------------
     def cf_get_field_type(self, field_def_id: int) -> str:
@@ -24628,35 +25910,283 @@ class App(QMainWindow):
         self.custom_field_values.delete_blob(track_id, field_def_id)
 
     def _convert_custom_blob_storage_mode(
-        self, track_id: int, field_def_id: int, target_mode: str
+        self, track_id: int | list[int], field_def_id: int, target_mode: str
     ) -> None:
-        try:
-            field_name = self.custom_field_definitions.get_field_name(field_def_id)
-            self._run_snapshot_history_action(
-                action_label=f"Convert Custom File Storage: {field_name}",
-                action_type="custom_field.blob_convert_storage_mode",
-                entity_type="CustomFieldValue",
-                entity_id=f"{track_id}:{field_def_id}",
-                payload={
-                    "track_id": track_id,
-                    "field_id": field_def_id,
-                    "target_mode": target_mode,
-                },
-                mutation=lambda: self.cf_convert_blob_storage_mode(
-                    track_id,
-                    field_def_id,
-                    target_mode,
+        track_ids = track_id if isinstance(track_id, list) else [int(track_id)]
+        field_name = self.custom_field_definitions.get_field_name(field_def_id)
+        self._submit_storage_conversion_task(
+            track_ids=track_ids,
+            target_mode=target_mode,
+            scope_kind="custom_blob",
+            column_label=field_name,
+            field_id=field_def_id,
+        )
+
+    def _storage_conversion_summary_lines(self, result: dict[str, object]) -> list[str]:
+        column_label = str(result.get("column_label") or "media")
+        target_label = self._storage_conversion_target_label(str(result.get("target_mode") or ""))
+        converted_track_ids = list(result.get("converted_track_ids") or [])
+        skipped_track_ids = list(result.get("skipped_track_ids") or [])
+        missing_track_ids = list(result.get("missing_track_ids") or [])
+        failures = list(result.get("failed") or [])
+        if converted_track_ids:
+            lines = [
+                f"Converted {len(converted_track_ids)} selected track{'s' if len(converted_track_ids) != 1 else ''} to {target_label} for '{column_label}'."
+            ]
+        else:
+            lines = [f"No selected tracks required conversion for '{column_label}'."]
+        if skipped_track_ids:
+            lines.append(
+                f"Skipped {len(skipped_track_ids)} track{'s' if len(skipped_track_ids) != 1 else ''} already using {target_label}."
+            )
+        if missing_track_ids:
+            lines.append(
+                f"Skipped {len(missing_track_ids)} track{'s' if len(missing_track_ids) != 1 else ''} with no stored media in '{column_label}'."
+            )
+        if failures:
+            lines.append("")
+            lines.append(f"Failures ({len(failures)} track{'s' if len(failures) != 1 else ''}):")
+            for entry in failures[:10]:
+                label = str(entry.get("label") or f"Track {entry.get('track_id')}")
+                message = str(entry.get("message") or "Unknown error")
+                lines.append(f"- {label}: {message}")
+        return lines
+
+    def _submit_storage_conversion_task(
+        self,
+        *,
+        track_ids: list[int],
+        target_mode: str,
+        scope_kind: str,
+        column_label: str,
+        media_key: str | None = None,
+        field_id: int | None = None,
+    ) -> None:
+        normalized_track_ids = self._normalize_track_ids(track_ids)
+        if not normalized_track_ids:
+            return
+        clean_target = normalize_storage_mode(target_mode)
+        title = f"Convert {column_label} Storage"
+
+        def _worker(bundle, ctx):
+            ctx.report_progress(
+                value=0,
+                maximum=100,
+                message="Collecting the selected tracks for storage conversion...",
+            )
+            if scope_kind == "standard":
+                scope = self._standard_media_storage_conversion_scope(
+                    normalized_track_ids,
+                    str(media_key or ""),
+                    track_service=bundle.track_service,
+                    cursor=bundle.conn.cursor(),
+                )
+                action_type = (
+                    f"track.{media_key}.bulk_convert_storage_mode"
+                    if len(normalized_track_ids) > 1
+                    else f"track.{media_key}.convert_storage_mode"
+                )
+                entity_type = "Track"
+                entity_id = "batch" if len(normalized_track_ids) > 1 else normalized_track_ids[0]
+            else:
+                scope = self._custom_blob_storage_conversion_scope(
+                    normalized_track_ids,
+                    int(field_id or 0),
+                    custom_field_values=bundle.custom_field_values,
+                )
+                action_type = (
+                    "custom_field.blob_bulk_convert_storage_mode"
+                    if len(normalized_track_ids) > 1
+                    else "custom_field.blob_convert_storage_mode"
+                )
+                entity_type = "CustomFieldValue"
+                entity_id = (
+                    "batch"
+                    if len(normalized_track_ids) > 1
+                    else f"{normalized_track_ids[0]}:{int(field_id or 0)}"
+                )
+            ctx.report_progress(
+                value=6,
+                maximum=100,
+                message="Classifying current media storage modes...",
+            )
+            conversion_plan = dict(scope["targets"][clean_target])
+            result = {
+                "column_label": column_label,
+                "target_mode": clean_target,
+                "scope_track_ids": list(normalized_track_ids),
+                "converted_track_ids": [],
+                "skipped_track_ids": list(conversion_plan["skip_track_ids"]),
+                "missing_track_ids": list(scope["missing_track_ids"]),
+                "failed": [],
+            }
+            to_convert = list(conversion_plan["convert_track_ids"])
+            if not to_convert:
+                return result
+
+            progress_callback = self._scaled_progress_callback(
+                ctx.report_progress,
+                start=12,
+                end=88,
+            )
+
+            def _track_label(track_id: int, cursor) -> str:
+                snapshot = bundle.track_service.fetch_track_snapshot(int(track_id), cursor=cursor)
+                if snapshot is not None and str(snapshot.track_title or "").strip():
+                    return str(snapshot.track_title).strip()
+                return f"Track {track_id}"
+
+            def _mutation():
+                converted_track_ids: list[int] = []
+                failures: list[dict[str, object]] = []
+                total = max(1, len(to_convert))
+                with bundle.conn:
+                    cur = bundle.conn.cursor()
+                    for index, pending_track_id in enumerate(to_convert, start=1):
+                        ctx.raise_if_cancelled()
+                        try:
+                            if scope_kind == "standard":
+                                bundle.track_service.convert_media_storage_mode(
+                                    int(pending_track_id),
+                                    str(media_key or ""),
+                                    clean_target,
+                                    cursor=cur,
+                                )
+                            else:
+                                bundle.custom_field_values.convert_storage_mode(
+                                    int(pending_track_id),
+                                    int(field_id or 0),
+                                    clean_target,
+                                )
+                            converted_track_ids.append(int(pending_track_id))
+                            progress_callback(
+                                value=index,
+                                maximum=total,
+                                message=(
+                                    f"Converting '{column_label}' to "
+                                    f"{self._storage_conversion_target_label(clean_target)} "
+                                    f"for {index} of {total} tracks..."
+                                ),
+                            )
+                        except Exception as exc:
+                            failures.append(
+                                {
+                                    "track_id": int(pending_track_id),
+                                    "label": _track_label(int(pending_track_id), cur),
+                                    "message": str(exc),
+                                }
+                            )
+                            progress_callback(
+                                value=index,
+                                maximum=total,
+                                message=(
+                                    f"Processed {index} of {total} tracks while converting "
+                                    f"'{column_label}'..."
+                                ),
+                            )
+                result["converted_track_ids"] = converted_track_ids
+                result["failed"] = failures
+                return result
+
+            return run_snapshot_history_action(
+                history_manager=bundle.history_manager,
+                action_label=(
+                    f"Convert {column_label} Storage ({len(normalized_track_ids)} tracks)"
+                    if len(normalized_track_ids) > 1
+                    else f"Convert {column_label} Storage"
                 ),
+                action_type=action_type,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                payload={
+                    "track_ids": list(normalized_track_ids),
+                    "media_key": media_key,
+                    "field_id": field_id,
+                    "column_label": column_label,
+                    "target_mode": clean_target,
+                },
+                mutation=_mutation,
+                progress_callback=ctx.report_progress,
+                post_mutation_progress=(92, "Capturing storage conversion history snapshot..."),
+                record_progress=(94, "Recording storage conversion history..."),
+                logger=self.logger,
             )
-            self.refresh_table_preserve_view(focus_id=track_id)
-        except Exception as exc:
-            self.conn.rollback()
-            self.logger.exception("Convert custom blob storage failed: %s", exc)
-            QMessageBox.critical(
+
+        def _before_cleanup(result: dict[str, object], ui_progress) -> None:
+            focus_track_id = (
+                list(result.get("converted_track_ids") or [])
+                or list(result.get("scope_track_ids") or [])
+                or [None]
+            )[0]
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=97,
+                message="Applying converted storage changes...",
+            )
+            try:
+                self.conn.commit()
+            except Exception:
+                pass
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=99,
+                message="Refreshing catalog media badges and history...",
+            )
+            if list(result.get("converted_track_ids") or []):
+                self.refresh_table_preserve_view(focus_id=focus_track_id)
+            else:
+                self._refresh_history_actions()
+                if hasattr(self, "table"):
+                    self._apply_blob_badges()
+                    self.table.viewport().update()
+            self._refresh_history_actions()
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=100,
+                message="Storage conversion complete.",
+            )
+
+        def _success(result: dict[str, object]) -> None:
+            message_lines = self._storage_conversion_summary_lines(result)
+            self._log_event(
+                "storage.convert",
+                "Converted catalog media storage mode",
+                track_ids=list(result.get("scope_track_ids") or []),
+                target_mode=result.get("target_mode"),
+                column_label=result.get("column_label"),
+                converted_track_ids=list(result.get("converted_track_ids") or []),
+                skipped_track_ids=list(result.get("skipped_track_ids") or []),
+                missing_track_ids=list(result.get("missing_track_ids") or []),
+                failures=list(result.get("failed") or []),
+            )
+            dialog_fn = (
+                QMessageBox.warning if list(result.get("failed") or []) else QMessageBox.information
+            )
+            dialog_fn(
                 self,
-                "Custom Field Error",
-                f"Failed to convert storage mode:\n{exc}",
+                title,
+                "\n".join(message_lines),
             )
+
+        self._submit_background_bundle_task(
+            title=title,
+            description=(
+                f"Converting '{column_label}' to "
+                f"{self._storage_conversion_target_label(clean_target)} "
+                "for the selected tracks..."
+            ),
+            task_fn=_worker,
+            kind="write",
+            unique_key=f"storage.convert.{scope_kind}.{media_key or field_id or column_label}",
+            worker_completion_progress=(96, "Finalizing storage conversion..."),
+            on_success_before_cleanup=_before_cleanup,
+            on_success_after_cleanup=_success,
+            on_error=lambda failure: self._show_background_task_error(
+                title,
+                failure,
+                user_message="Could not convert storage mode:",
+            ),
+        )
 
     def _human_size(self, n: int) -> str:
         try:
@@ -24677,14 +26207,43 @@ class App(QMainWindow):
         return self._human_size(size_bytes)
 
     @staticmethod
+    def _storage_mode_badge_label(storage_mode: str | None) -> str:
+        clean_mode = normalize_storage_mode(storage_mode, default=STORAGE_MODE_DATABASE)
+        if clean_mode == STORAGE_MODE_MANAGED_FILE:
+            return "Managed-file storage"
+        return "Database storage"
+
+    @staticmethod
+    def _blob_icon_kind_for_storage(
+        media_kind: str,
+        *,
+        storage_mode: str | None,
+        is_lossy: bool = False,
+    ) -> str:
+        clean_mode = normalize_storage_mode(storage_mode, default=STORAGE_MODE_DATABASE)
+        storage_suffix = "managed" if clean_mode == STORAGE_MODE_MANAGED_FILE else "database"
+        if str(media_kind or "").strip().lower() == "audio":
+            prefix = "audio_lossy" if is_lossy else "audio"
+            return f"{prefix}_{storage_suffix}"
+        return f"image_{storage_suffix}"
+
+    @classmethod
     def _blob_icon_kind_for_standard_media(
+        cls,
         media_key: str,
         *,
         meta: dict[str, object] | None = None,
     ) -> str:
-        if media_key == "audio_file" and bool((meta or {}).get("is_lossy")):
-            return "audio_lossy"
-        return "audio" if media_key == "audio_file" else "image"
+        if media_key == "audio_file":
+            return cls._blob_icon_kind_for_storage(
+                "audio",
+                storage_mode=(meta or {}).get("storage_mode"),
+                is_lossy=bool((meta or {}).get("is_lossy")),
+            )
+        return cls._blob_icon_kind_for_storage(
+            "image",
+            storage_mode=(meta or {}).get("storage_mode"),
+        )
 
     def _standard_media_badge_tooltip(
         self,
@@ -24692,16 +26251,20 @@ class App(QMainWindow):
         meta: dict[str, object],
         display: str,
     ) -> str:
+        storage_label = self._storage_mode_badge_label(meta.get("storage_mode"))
         if media_key != "audio_file":
-            return f"Stored size: {display}"
+            return f"{storage_label}\nStored size: {display}"
         format_label = str(meta.get("format_label") or "").strip()
         if bool(meta.get("is_lossy")):
             if format_label:
-                return f"Lossy primary audio · {format_label}\nStored size: {display}"
-            return f"Lossy primary audio\nStored size: {display}"
+                return (
+                    f"Lossy primary audio · {format_label}\n"
+                    f"{storage_label}\nStored size: {display}"
+                )
+            return f"Lossy primary audio\n{storage_label}\nStored size: {display}"
         if format_label:
-            return f"Primary audio · {format_label}\nStored size: {display}"
-        return f"Primary audio\nStored size: {display}"
+            return f"Primary audio · {format_label}\n{storage_label}\nStored size: {display}"
+        return f"Primary audio\n{storage_label}\nStored size: {display}"
 
     def _blob_icon_spec_for_standard_media(
         self,
@@ -24715,14 +26278,26 @@ class App(QMainWindow):
         return settings[self._blob_icon_kind_for_standard_media(media_key, meta=meta)]
 
     def _blob_icon_spec_for_custom_field(self, field: dict[str, object]) -> dict[str, object]:
+        return self._blob_icon_spec_for_custom_field_with_meta(field, meta=None)
+
+    def _blob_icon_spec_for_custom_field_with_meta(
+        self,
+        field: dict[str, object],
+        *,
+        meta: dict[str, object] | None,
+    ) -> dict[str, object]:
         field_type = str(field.get("field_type") or "").strip().lower()
-        kind = "audio" if field_type == "blob_audio" else "image"
+        kind = self._blob_icon_kind_for_storage(
+            "audio" if field_type == "blob_audio" else "image",
+            storage_mode=(meta or {}).get("storage_mode"),
+        )
         override = field.get("blob_icon_payload")
         if override:
             return override
-        return self._blob_icon_spec_for_standard_media(
-            "audio_file" if kind == "audio" else "album_art"
+        settings = normalize_blob_icon_settings(
+            getattr(self, "blob_icon_settings", None) or default_blob_icon_settings()
         )
+        return settings[kind]
 
     def _resolve_blob_badge_icon(
         self,
@@ -24730,16 +26305,14 @@ class App(QMainWindow):
         spec: dict[str, object] | None,
         kind: str,
     ) -> QIcon:
-        fallback_media_key = "audio_file" if kind in ("audio", "audio_lossy") else "album_art"
-        fallback_meta = {"is_lossy": True} if kind == "audio_lossy" else None
+        settings = normalize_blob_icon_settings(
+            getattr(self, "blob_icon_settings", None) or default_blob_icon_settings()
+        )
         return icon_from_blob_icon_spec(
             spec,
             kind=kind,
             style=self.style() if hasattr(self, "style") else None,
-            fallback_spec=self._blob_icon_spec_for_standard_media(
-                fallback_media_key,
-                meta=fallback_meta,
-            ),
+            fallback_spec=settings.get(kind),
             allow_inherit=True,
             size=18,
         )
@@ -24772,7 +26345,11 @@ class App(QMainWindow):
 
     def _set_blob_indicator(self, row: int, col: int, track_id: int, field_id: int) -> None:
         try:
-            meta = self.cf_get_value_meta(track_id, field_id)
+            meta = self.cf_get_value_meta(
+                track_id,
+                field_id,
+                include_storage_details=True,
+            )
         except Exception:
             meta = {"has_blob": False, "mime_type": None, "size_bytes": 0}
         display = (
@@ -24796,15 +26373,18 @@ class App(QMainWindow):
                 None,
             )
             if field is not None:
-                kind = "audio" if field.get("field_type") == "blob_audio" else "image"
+                kind = self._blob_icon_kind_for_storage(
+                    "audio" if field.get("field_type") == "blob_audio" else "image",
+                    storage_mode=meta.get("storage_mode"),
+                )
                 item.setIcon(
                     self._resolve_blob_badge_icon(
-                        spec=self._blob_icon_spec_for_custom_field(field),
+                        spec=self._blob_icon_spec_for_custom_field_with_meta(field, meta=meta),
                         kind=kind,
                     )
                 )
                 item.setToolTip(
-                    f"{describe_blob_icon_spec(field.get('blob_icon_payload'), kind=kind, allow_inherit=True)}\nStored size: {display}"
+                    f"{describe_blob_icon_spec(field.get('blob_icon_payload'), kind=kind, allow_inherit=True)}\n{self._storage_mode_badge_label(meta.get('storage_mode'))}\nStored size: {display}"
                 )
         else:
             item.setIcon(QIcon())
@@ -24890,32 +26470,20 @@ class App(QMainWindow):
                 if ftype not in ("blob_image", "blob_audio"):
                     continue
 
-                has_blob = False
-                size_bytes = 0
-                mime = None
                 try:
-                    # First: a fast existence check
-                    has_blob = bool(self.cf_has_blob(pk, cf["id"]))
+                    meta = self.cf_get_value_meta(
+                        pk,
+                        cf["id"],
+                        include_storage_details=True,
+                    )
                 except Exception:
-                    has_blob = False
-
-                if has_blob:
-                    # Try a cheap size metadata call; else fetch once and compute
-                    try:
-                        size_bytes = int(self.cf_blob_size(pk, cf["id"]))
-                    except Exception:
-                        try:
-                            blob = self.cf_fetch_blob(pk, cf["id"])
-                            data = blob[0] if isinstance(blob, tuple) else blob
-                            if isinstance(data, memoryview):
-                                data = data.tobytes()
-                            size_bytes = len(data) if isinstance(data, (bytes, bytearray)) else 0
-                            mime = self._detect_mime(data) if size_bytes else None
-                        except Exception:
-                            size_bytes = 0
-                            mime = None
-
-                display = self._format_blob_badge(mime, size_bytes) if has_blob else "—"
+                    meta = {"has_blob": False, "mime_type": None, "size_bytes": 0}
+                has_blob = bool(meta.get("has_blob"))
+                display = (
+                    self._format_blob_badge(meta.get("mime_type"), meta.get("size_bytes", 0))
+                    if has_blob
+                    else "—"
+                )
                 item = self.table.item(row_idx, col)
                 if item is None:
                     item = QTableWidgetItem(display)
@@ -24923,15 +26491,18 @@ class App(QMainWindow):
                 else:
                     item.setText(display)
                 if has_blob:
-                    kind = "audio" if ftype == "blob_audio" else "image"
+                    kind = self._blob_icon_kind_for_storage(
+                        "audio" if ftype == "blob_audio" else "image",
+                        storage_mode=meta.get("storage_mode"),
+                    )
                     item.setIcon(
                         self._resolve_blob_badge_icon(
-                            spec=self._blob_icon_spec_for_custom_field(cf),
+                            spec=self._blob_icon_spec_for_custom_field_with_meta(cf, meta=meta),
                             kind=kind,
                         )
                     )
                     item.setToolTip(
-                        f"{describe_blob_icon_spec(cf.get('blob_icon_payload'), kind=kind, allow_inherit=True)}\nStored size: {display}"
+                        f"{describe_blob_icon_spec(cf.get('blob_icon_payload'), kind=kind, allow_inherit=True)}\n{self._storage_mode_badge_label(meta.get('storage_mode'))}\nStored size: {display}"
                     )
                 else:
                     item.setIcon(QIcon())
