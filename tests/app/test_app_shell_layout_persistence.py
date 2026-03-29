@@ -29,6 +29,15 @@ class AppShellLayoutPersistenceTests(AppShellTestCase):
     test_named_main_window_layouts_can_be_saved_applied_deleted_and_shared_between_menu_and_ribbon = (
         AppShellTestCase.case_named_main_window_layouts_can_be_saved_applied_deleted_and_shared_between_menu_and_ribbon
     )
+    test_saved_layout_switch_uses_background_task_from_selector_and_menu = (
+        AppShellTestCase.case_saved_layout_switch_uses_background_task_from_selector_and_menu
+    )
+    test_saved_layout_switch_progress_reaches_100_only_after_final_restore = (
+        AppShellTestCase.case_saved_layout_switch_progress_reaches_100_only_after_final_restore
+    )
+    test_saved_layout_switch_suspends_visible_updates_during_apply = (
+        AppShellTestCase.case_saved_layout_switch_suspends_visible_updates_during_apply
+    )
 
 
 del AppShellTestCase

@@ -11049,8 +11049,14 @@ class App(QMainWindow):
         return _report
 
     @staticmethod
-    def _advance_task_ui_progress(ui_progress, *, value: int, message: str) -> None:
-        ui_progress.report_progress(value=int(value), maximum=100, message=message)
+    def _advance_task_ui_progress(
+        ui_progress,
+        *,
+        value: int,
+        message: str,
+        maximum: int = 100,
+    ) -> None:
+        ui_progress.report_progress(value=int(value), maximum=int(maximum), message=message)
         app = QApplication.instance()
         if app is not None:
             app.processEvents()
@@ -11651,6 +11657,12 @@ class App(QMainWindow):
             self._window_geometry_save_timer = timer
         timer.start(75)
 
+    def _stop_queued_main_window_layout_persistence(self) -> None:
+        for timer_name in ("_dock_state_save_timer", "_window_geometry_save_timer"):
+            timer = getattr(self, timer_name, None)
+            if isinstance(timer, QTimer):
+                timer.stop()
+
     def _save_main_dock_state(self, *, sync: bool = True) -> None:
         if getattr(self, "_suspend_dock_state_sync", False):
             return
@@ -11859,47 +11871,193 @@ class App(QMainWindow):
         self._refresh_saved_layout_controls()
         return clean_name
 
-    def _apply_named_main_window_layout(self, name: str) -> bool:
+    def _build_named_main_window_layout_switch_request(
+        self,
+        name: str,
+    ) -> dict[str, object] | None:
         layouts = self._load_saved_main_window_layouts()
-        resolved_name = self._find_saved_main_window_layout_name(name)
+        clean_name = str(name or "").strip()
+        if not clean_name:
+            return None
+        known_action_ids = list(getattr(self, "_action_ribbon_specs_by_id", {}).keys())
+        current_action_ids = self._normalize_action_ribbon_ids(
+            getattr(self, "_action_ribbon_action_ids", [])
+        )
+        if not current_action_ids:
+            current_action_ids = list(getattr(self, "_action_ribbon_default_ids", []))
+        return {
+            "requested_name": clean_name,
+            "layouts": layouts,
+            "known_action_ids": known_action_ids,
+            "default_action_ids": list(getattr(self, "_action_ribbon_default_ids", [])),
+            "current_action_ids": current_action_ids,
+            "current_visible": self._current_action_ribbon_visibility(),
+        }
+
+    @staticmethod
+    def _prepare_named_main_window_layout_switch_request(
+        request: dict[str, object],
+    ) -> dict[str, object] | None:
+        layouts = request.get("layouts")
+        if not isinstance(layouts, dict):
+            return None
+        requested_name = str(request.get("requested_name") or "").strip()
+        if not requested_name:
+            return None
+        resolved_name = None
+        for existing_name in layouts.keys():
+            clean_existing_name = str(existing_name or "").strip()
+            if clean_existing_name.casefold() == requested_name.casefold():
+                resolved_name = clean_existing_name
+                break
         if resolved_name is None:
-            return False
+            return None
         snapshot = layouts.get(resolved_name)
         if not isinstance(snapshot, dict):
+            return None
+        known_action_ids = request.get("known_action_ids")
+        current_action_ids = request.get("current_action_ids")
+        default_action_ids = request.get("default_action_ids")
+        current_visible = bool(request.get("current_visible", True))
+        ribbon_action_ids, ribbon_visible = (
+            App._resolve_saved_layout_action_ribbon_snapshot_payload(
+                snapshot,
+                current_action_ids=current_action_ids,
+                current_visible=current_visible,
+                default_action_ids=default_action_ids,
+                known_action_ids=known_action_ids,
+            )
+        )
+        return {
+            "name": resolved_name,
+            "geometry": App._deserialize_qbytearray_setting(snapshot.get("geometry_b64")),
+            "normal_geometry": App._deserialize_rect_setting(snapshot.get("normal_geometry")),
+            "window_state_marker": str(snapshot.get("window_state") or ""),
+            "dock_state": App._deserialize_qbytearray_setting(snapshot.get("dock_state_b64")),
+            "add_data_panel": bool(snapshot.get("add_data_panel", False)),
+            "catalog_table_panel": bool(snapshot.get("catalog_table_panel", True)),
+            "profiles_toolbar_visible": bool(snapshot.get("profiles_toolbar_visible", True)),
+            "ribbon_action_ids": ribbon_action_ids,
+            "ribbon_visible": bool(ribbon_visible),
+        }
+
+    @contextmanager
+    def _suspend_saved_layout_transition_updates(self):
+        widgets: list[QWidget] = []
+        seen: set[int] = set()
+        candidates = [
+            self.centralWidget(),
+            *self.findChildren(QDockWidget),
+            *self.findChildren(QToolBar),
+        ]
+        for candidate in candidates:
+            if not isinstance(candidate, QWidget):
+                continue
+            widget_id = id(candidate)
+            if widget_id in seen:
+                continue
+            seen.add(widget_id)
+            widgets.append(candidate)
+
+        previous_update_states: list[tuple[QWidget, bool]] = []
+        for widget in widgets:
+            try:
+                previous_update_states.append((widget, widget.updatesEnabled()))
+                widget.setUpdatesEnabled(False)
+            except Exception:
+                continue
+        try:
+            yield
+        finally:
+            for widget, previous_state in previous_update_states:
+                try:
+                    widget.setUpdatesEnabled(previous_state)
+                    widget.updateGeometry()
+                    widget.update()
+                except Exception:
+                    continue
+            try:
+                self.updateGeometry()
+                self.update()
+            except Exception:
+                pass
+
+    def _apply_prepared_named_main_window_layout(
+        self,
+        prepared: dict[str, object],
+        *,
+        ui_progress=None,
+    ) -> bool:
+        resolved_name = str(prepared.get("name") or "").strip()
+        if not resolved_name:
             return False
 
-        ribbon_action_ids, ribbon_visible = self._resolve_saved_layout_action_ribbon_snapshot(
-            snapshot
-        )
+        progress_total = 9
+
+        def _advance(value: int, message: str) -> None:
+            if ui_progress is None:
+                return
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=value,
+                maximum=progress_total,
+                message=message,
+            )
+
+        ribbon_action_ids = self._normalize_action_ribbon_ids(prepared.get("ribbon_action_ids"))
+        if not ribbon_action_ids:
+            ribbon_action_ids = list(getattr(self, "_action_ribbon_default_ids", []))
+
         self._ensure_persistent_workspace_dock_shells()
+        _advance(3, f'Preparing saved layout "{resolved_name}" for restore...')
         previous_suspend_state = self._suspend_dock_state_sync
         previous_restore_state = self._is_restoring_workspace_layout
         self._suspend_dock_state_sync = True
         self._is_restoring_workspace_layout = True
         restored_dock_state = False
         try:
-            self._apply_main_window_geometry_snapshot(
-                geometry=self._deserialize_qbytearray_setting(snapshot.get("geometry_b64")),
-                normal_geometry=self._deserialize_rect_setting(snapshot.get("normal_geometry")),
-                window_state_marker=str(snapshot.get("window_state") or ""),
-            )
-            restored_dock_state = self._apply_main_dock_state_snapshot(
-                self._deserialize_qbytearray_setting(snapshot.get("dock_state_b64"))
-            )
-            if not restored_dock_state:
-                self._apply_add_data_panel_state(bool(snapshot.get("add_data_panel", False)))
-                self._apply_catalog_table_panel_state(
-                    bool(snapshot.get("catalog_table_panel", True))
+            with self._suspend_saved_layout_transition_updates():
+                self._apply_main_window_geometry_snapshot(
+                    geometry=prepared.get("geometry"),
+                    normal_geometry=prepared.get("normal_geometry"),
+                    window_state_marker=str(prepared.get("window_state_marker") or ""),
                 )
-            self._apply_profiles_toolbar_visibility(
-                bool(snapshot.get("profiles_toolbar_visible", True))
-            )
-            self._apply_action_ribbon_configuration(
-                ribbon_action_ids,
-                ribbon_visible,
-            )
-            self._refresh_workspace_dock_default_placement_flags()
-            self._materialize_visible_workspace_dock_panels()
+                _advance(4, f'Applied saved geometry for layout "{resolved_name}".')
+                restored_dock_state = self._apply_main_dock_state_snapshot(
+                    prepared.get("dock_state")
+                )
+                if not restored_dock_state:
+                    self._apply_add_data_panel_state(bool(prepared.get("add_data_panel", False)))
+                    self._apply_catalog_table_panel_state(
+                        bool(prepared.get("catalog_table_panel", True))
+                    )
+                _advance(
+                    5,
+                    (
+                        f'Restored saved dock layout for "{resolved_name}".'
+                        if restored_dock_state
+                        else f'Applied fallback panel visibility for "{resolved_name}".'
+                    ),
+                )
+                self._apply_profiles_toolbar_visibility(
+                    bool(prepared.get("profiles_toolbar_visible", True))
+                )
+                self._apply_action_ribbon_configuration(
+                    ribbon_action_ids,
+                    bool(prepared.get("ribbon_visible", True)),
+                )
+                self._refresh_workspace_dock_default_placement_flags()
+                _advance(6, f'Applied toolbar and Action Ribbon state for "{resolved_name}".')
+                self._materialize_visible_workspace_dock_panels(
+                    progress_callback=lambda value, maximum, message: (
+                        ui_progress.report_progress(
+                            value=6, maximum=progress_total, message=message
+                        )
+                        if ui_progress is not None
+                        else None
+                    )
+                )
+                _advance(7, f'Restored visible workspace panels for "{resolved_name}".')
         finally:
             self._is_restoring_workspace_layout = previous_restore_state
             self._suspend_dock_state_sync = previous_suspend_state
@@ -11908,15 +12066,90 @@ class App(QMainWindow):
         self._store_workspace_panel_visibility_preferences(sync=False)
         self._store_action_ribbon_preferences(
             ribbon_action_ids,
-            ribbon_visible,
+            bool(prepared.get("ribbon_visible", True)),
             sync=False,
         )
+        self._refresh_saved_layout_controls()
+        _advance(8, f'Persisting restored layout "{resolved_name}".')
+        self._drain_qt_events()
+        self._stop_queued_main_window_layout_persistence()
         self._save_main_window_geometry(sync=False)
         self._save_main_dock_state(sync=False)
+        self._apply_top_chrome_boundary()
         self.settings.sync()
-        self._queue_top_chrome_boundary_refresh()
-        self._refresh_saved_layout_controls()
+        _advance(9, f'Saved layout "{resolved_name}" is ready.')
         return True
+
+    def _apply_named_main_window_layout(self, name: str) -> bool:
+        request = self._build_named_main_window_layout_switch_request(name)
+        if request is None:
+            return False
+        prepared = self._prepare_named_main_window_layout_switch_request(request)
+        if prepared is None:
+            return False
+        return self._apply_prepared_named_main_window_layout(prepared)
+
+    def _start_named_main_window_layout_switch(self, name: str):
+        request = self._build_named_main_window_layout_switch_request(name)
+        if request is None:
+            self._refresh_saved_layout_controls()
+            return None
+
+        progress_total = 9
+        requested_name = str(request.get("requested_name") or "").strip()
+        apply_result: dict[str, bool] = {"applied": False}
+
+        def _task(ctx):
+            ctx.set_status(f'Resolving saved layout "{requested_name}"...')
+            prepared = self._prepare_named_main_window_layout_switch_request(request)
+            if prepared is None:
+                raise RuntimeError(f'Saved layout "{requested_name}" is no longer available.')
+            ctx.report_progress(
+                value=1,
+                maximum=progress_total,
+                message=f'Resolved saved layout "{prepared["name"]}" payload.',
+            )
+            ctx.raise_if_cancelled()
+            ctx.report_progress(
+                value=2,
+                maximum=progress_total,
+                message=f'Prepared saved layout "{prepared["name"]}" state.',
+            )
+            return prepared
+
+        def _before_cleanup(prepared, ui_progress) -> None:
+            apply_result["applied"] = self._apply_prepared_named_main_window_layout(
+                prepared,
+                ui_progress=ui_progress,
+            )
+
+        def _after_cleanup(prepared) -> None:
+            resolved_name = str(prepared.get("name") or requested_name)
+            if apply_result["applied"]:
+                self.statusBar().showMessage(f'Switched to layout "{resolved_name}".', 3000)
+            else:
+                self._refresh_saved_layout_controls()
+
+        def _handle_error(failure: TaskFailure) -> None:
+            self._refresh_saved_layout_controls()
+            self._show_background_task_error(
+                "Switch Layout",
+                failure,
+                user_message="The saved layout could not be applied.",
+            )
+
+        return self._submit_background_task(
+            title="Switch Layout",
+            description=f'Applying saved layout "{requested_name}"...',
+            task_fn=_task,
+            kind="read",
+            unique_key="saved-layout-switch",
+            requires_profile=False,
+            show_dialog=True,
+            on_success_before_cleanup=_before_cleanup,
+            on_success_after_cleanup=_after_cleanup,
+            on_error=_handle_error,
+        )
 
     def _delete_named_main_window_layout(self, name: str) -> bool:
         layouts = self._load_saved_main_window_layouts()
@@ -12000,8 +12233,13 @@ class App(QMainWindow):
         def _apply_selected_layout(item: QListWidgetItem | None) -> None:
             if item is None:
                 return
-            self._apply_named_main_window_layout(item.text())
             menu.close()
+            QTimer.singleShot(
+                0,
+                lambda layout_name=str(
+                    item.text() or ""
+                ).strip(): self._start_named_main_window_layout_switch(layout_name),
+            )
 
         layout_list.itemClicked.connect(_apply_selected_layout)
         layout_list.itemActivated.connect(_apply_selected_layout)
@@ -12079,8 +12317,12 @@ class App(QMainWindow):
         selected_name = str(selector.itemData(index) or "").strip()
         if not selected_name:
             return
-        if not self._apply_named_main_window_layout(selected_name):
-            self._refresh_saved_layout_controls()
+        QTimer.singleShot(
+            0,
+            lambda layout_name=selected_name: self._start_named_main_window_layout_switch(
+                layout_name
+            ),
+        )
 
     def _store_workspace_panel_visibility_preferences(self, *, sync: bool = True) -> None:
         try:
@@ -13210,18 +13452,28 @@ class App(QMainWindow):
         toolbar = getattr(self, "action_ribbon_toolbar", None)
         return bool(isinstance(toolbar, QToolBar) and toolbar.isVisible())
 
-    def _normalize_action_ribbon_ids(self, action_ids) -> list[str]:
-        if not hasattr(self, "_action_ribbon_specs_by_id"):
-            return []
+    @staticmethod
+    def _normalize_action_ribbon_ids_for_known_ids(action_ids, known_action_ids) -> list[str]:
+        known_ids = {
+            str(action_id or "").strip()
+            for action_id in known_action_ids or []
+            if str(action_id or "").strip()
+        }
         normalized: list[str] = []
         seen: set[str] = set()
         for action_id in action_ids or []:
             clean_id = str(action_id or "").strip()
-            if not clean_id or clean_id in seen or clean_id not in self._action_ribbon_specs_by_id:
+            if not clean_id or clean_id in seen:
+                continue
+            if known_ids and clean_id not in known_ids:
                 continue
             seen.add(clean_id)
             normalized.append(clean_id)
         return normalized
+
+    def _normalize_action_ribbon_ids(self, action_ids) -> list[str]:
+        known_action_ids = list(getattr(self, "_action_ribbon_specs_by_id", {}).keys())
+        return self._normalize_action_ribbon_ids_for_known_ids(action_ids, known_action_ids)
 
     def _load_saved_action_ribbon_action_ids(self) -> list[str]:
         setting_key = "display/action_ribbon_actions_json"
@@ -13261,15 +13513,41 @@ class App(QMainWindow):
         current_action_ids = self._normalize_action_ribbon_ids(
             getattr(self, "_action_ribbon_action_ids", [])
         )
-        if not current_action_ids:
-            current_action_ids = list(getattr(self, "_action_ribbon_default_ids", []))
-        current_visible = self._current_action_ribbon_visibility()
+        return self._resolve_saved_layout_action_ribbon_snapshot_payload(
+            snapshot,
+            current_action_ids=current_action_ids,
+            current_visible=self._current_action_ribbon_visibility(),
+            default_action_ids=list(getattr(self, "_action_ribbon_default_ids", [])),
+            known_action_ids=list(getattr(self, "_action_ribbon_specs_by_id", {}).keys()),
+        )
+
+    @staticmethod
+    def _resolve_saved_layout_action_ribbon_snapshot_payload(
+        snapshot: dict[str, object],
+        *,
+        current_action_ids,
+        current_visible: bool,
+        default_action_ids,
+        known_action_ids,
+    ) -> tuple[list[str], bool]:
+        normalized_current_action_ids = App._normalize_action_ribbon_ids_for_known_ids(
+            current_action_ids,
+            known_action_ids,
+        )
+        if not normalized_current_action_ids:
+            normalized_current_action_ids = App._normalize_action_ribbon_ids_for_known_ids(
+                default_action_ids,
+                known_action_ids,
+            )
 
         ribbon_snapshot = snapshot.get("action_ribbon")
         if isinstance(ribbon_snapshot, dict):
-            action_ids = self._normalize_action_ribbon_ids(ribbon_snapshot.get("action_ids"))
+            action_ids = App._normalize_action_ribbon_ids_for_known_ids(
+                ribbon_snapshot.get("action_ids"),
+                known_action_ids,
+            )
             if not action_ids:
-                action_ids = list(current_action_ids)
+                action_ids = list(normalized_current_action_ids)
             visible_value = ribbon_snapshot.get("visible")
             if visible_value is None:
                 visible_value = snapshot.get("action_ribbon_visible", current_visible)
@@ -13278,7 +13556,7 @@ class App(QMainWindow):
         legacy_visible = snapshot.get("action_ribbon_visible")
         if legacy_visible is None:
             legacy_visible = current_visible
-        return list(current_action_ids), bool(legacy_visible)
+        return list(normalized_current_action_ids), bool(legacy_visible)
 
     def _store_action_ribbon_preferences(
         self,

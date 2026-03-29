@@ -1,3 +1,4 @@
+import contextlib
 import io
 import json
 import os
@@ -442,6 +443,103 @@ class AppShellTestCase(unittest.TestCase):
         if callable(on_finished):
             on_finished()
         return "inline-task"
+
+    def _run_task_inline(self, window, **kwargs):
+        class _InlineTaskContext:
+            def set_status(self, _message):
+                return None
+
+            def report_progress(self, *args, **kwargs):
+                del args, kwargs
+                return None
+
+            def is_cancelled(self):
+                return False
+
+            def raise_if_cancelled(self):
+                return None
+
+        class _InlineUiProgress:
+            def set_status(self, _message):
+                return None
+
+            def report_progress(self, *args, **kwargs):
+                del args, kwargs
+                return None
+
+        result = kwargs["task_fn"](_InlineTaskContext())
+        on_success_before_cleanup = kwargs.get("on_success_before_cleanup")
+        if callable(on_success_before_cleanup):
+            on_success_before_cleanup(result, _InlineUiProgress())
+        on_success = kwargs.get("on_success")
+        if callable(on_success):
+            on_success(result)
+        on_success_after_cleanup = kwargs.get("on_success_after_cleanup")
+        if callable(on_success_after_cleanup):
+            on_success_after_cleanup(result)
+        on_finished = kwargs.get("on_finished")
+        if callable(on_finished):
+            on_finished()
+        return "inline-task"
+
+    def _run_task_with_progress_capture(self, window, **kwargs):
+        worker_progress: list[tuple[int | None, int | None, str]] = []
+        ui_progress: list[tuple[int | None, int | None, str]] = []
+
+        class _CapturingTaskContext:
+            def set_status(self, message):
+                worker_progress.append((None, None, str(message or "")))
+
+            def report_progress(self, *args, **kwargs):
+                value = kwargs.get("value")
+                maximum = kwargs.get("maximum")
+                message = kwargs.get("message")
+                if args:
+                    value = args[0]
+                if len(args) > 1:
+                    maximum = args[1]
+                worker_progress.append((value, maximum, str(message or "")))
+
+            def is_cancelled(self):
+                return False
+
+            def raise_if_cancelled(self):
+                return None
+
+        class _CapturingUiProgress:
+            def set_status(self, message):
+                ui_progress.append((None, None, str(message or "")))
+
+            def report_progress(self, *args, **kwargs):
+                value = kwargs.get("value")
+                maximum = kwargs.get("maximum")
+                message = kwargs.get("message")
+                if args:
+                    value = args[0]
+                if len(args) > 1:
+                    maximum = args[1]
+                ui_progress.append((value, maximum, str(message or "")))
+
+        task_ctx = _CapturingTaskContext()
+        ui_ctx = _CapturingUiProgress()
+        result = kwargs["task_fn"](task_ctx)
+        on_success_before_cleanup = kwargs.get("on_success_before_cleanup")
+        if callable(on_success_before_cleanup):
+            on_success_before_cleanup(result, ui_ctx)
+        on_success = kwargs.get("on_success")
+        if callable(on_success):
+            on_success(result)
+        on_success_after_cleanup = kwargs.get("on_success_after_cleanup")
+        if callable(on_success_after_cleanup):
+            on_success_after_cleanup(result)
+        on_finished = kwargs.get("on_finished")
+        if callable(on_finished):
+            on_finished()
+        return {
+            "result": result,
+            "worker_progress": worker_progress,
+            "ui_progress": ui_progress,
+        }
 
     def _run_bundle_task_with_progress_capture(self, window, **kwargs):
         worker_progress: list[tuple[int | None, int | None, str]] = []
@@ -1647,9 +1745,15 @@ class AppShellTestCase(unittest.TestCase):
 
         saved_index = selector.findData("Writer Desk")
         self.assertGreater(saved_index, 0)
-        selector.setCurrentIndex(saved_index)
-        self.window._on_saved_layout_selected(saved_index)
-        self._drain_events()
+        with mock.patch.object(
+            app_module.App,
+            "_submit_background_task",
+            autospec=True,
+            side_effect=self._run_task_inline,
+        ):
+            selector.setCurrentIndex(saved_index)
+            self.window._on_saved_layout_selected(saved_index)
+            self._drain_events()
         selector = self._saved_layout_selector_widget()
 
         self.assertEqual(
@@ -1801,6 +1905,122 @@ class AppShellTestCase(unittest.TestCase):
                 "visible": False,
             },
         )
+
+    def case_saved_layout_switch_uses_background_task_from_selector_and_menu(self):
+        self.window._save_named_main_window_layout("Writer Desk")
+        self._drain_events()
+        submitted: list[dict[str, object]] = []
+
+        def _capture_submit(_window, **kwargs):
+            submitted.append(kwargs)
+            return "captured-task"
+
+        selector = self._saved_layout_selector_widget()
+        saved_index = selector.findData("Writer Desk")
+        self.assertGreater(saved_index, 0)
+
+        with mock.patch.object(
+            app_module.App,
+            "_submit_background_task",
+            autospec=True,
+            side_effect=_capture_submit,
+        ):
+            selector.setCurrentIndex(saved_index)
+            self.window._on_saved_layout_selected(saved_index)
+            self._drain_events()
+
+            menu_list = self._saved_layouts_menu_list_widget()
+            menu_list.itemActivated.emit(menu_list.item(0))
+            self._drain_events()
+
+        self.assertEqual(len(submitted), 2)
+        for call in submitted:
+            self.assertEqual(call["title"], "Switch Layout")
+            self.assertEqual(call["unique_key"], "saved-layout-switch")
+            self.assertFalse(call["requires_profile"])
+            self.assertTrue(call["show_dialog"])
+            self.assertTrue(call["description"].startswith('Applying saved layout "Writer Desk"'))
+            self.assertTrue(callable(call["on_success_before_cleanup"]))
+
+    def case_saved_layout_switch_progress_reaches_100_only_after_final_restore(self):
+        self.window.add_data_action.trigger()
+        self.window.open_release_browser()
+        self._drain_events()
+        self.window._save_named_main_window_layout("Writer Desk")
+        self._drain_events()
+        submitted: dict[str, object] = {}
+
+        def _capture_submit(_window, **kwargs):
+            submitted.update(kwargs)
+            return "captured-task"
+
+        with mock.patch.object(
+            app_module.App,
+            "_submit_background_task",
+            autospec=True,
+            side_effect=_capture_submit,
+        ):
+            self.window._start_named_main_window_layout_switch("Writer Desk")
+
+        progress = self._run_task_with_progress_capture(self.window, **submitted)
+        worker_values = [
+            int(value)
+            for value, _maximum, _message in progress["worker_progress"]
+            if value is not None
+        ]
+        ui_values = [
+            int(value) for value, _maximum, _message in progress["ui_progress"] if value is not None
+        ]
+        progress_messages = [
+            message
+            for _value, _maximum, message in progress["worker_progress"] + progress["ui_progress"]
+            if message
+        ]
+
+        self.assertEqual(worker_values[:2], [1, 2])
+        self.assertTrue(ui_values)
+        self.assertEqual(ui_values[-1], 9)
+        self.assertEqual(max(worker_values), 2)
+        self.assertIn(3, ui_values)
+        self.assertIn(7, ui_values)
+        self.assertIn(8, ui_values)
+        self.assertIn(9, ui_values)
+        self.assertTrue(
+            any("Applied saved geometry" in message for message in progress_messages),
+            progress_messages,
+        )
+        self.assertTrue(
+            any("Action Ribbon state" in message for message in progress_messages),
+            progress_messages,
+        )
+        self.assertTrue(
+            any("workspace panel" in message for message in progress_messages),
+            progress_messages,
+        )
+        self.assertIn('Saved layout "Writer Desk" is ready.', progress_messages)
+
+    def case_saved_layout_switch_suspends_visible_updates_during_apply(self):
+        self.window._save_named_main_window_layout("Writer Desk")
+        self._drain_events()
+        transition_events: list[str] = []
+        original = self.window._suspend_saved_layout_transition_updates
+
+        @contextlib.contextmanager
+        def _recording_transition():
+            transition_events.append("enter")
+            with original():
+                transition_events.append("active")
+                yield
+            transition_events.append("exit")
+
+        with mock.patch.object(
+            self.window,
+            "_suspend_saved_layout_transition_updates",
+            side_effect=_recording_transition,
+        ):
+            self.assertTrue(self.window._apply_named_main_window_layout("Writer Desk"))
+
+        self.assertEqual(transition_events, ["enter", "active", "exit"])
 
     def case_moved_and_renamed_actions_preserve_dialog_routing(self):
         self._close_window()
