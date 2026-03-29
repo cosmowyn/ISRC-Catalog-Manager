@@ -357,7 +357,7 @@ class MasterTransferServiceTests(unittest.TestCase):
             manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
             self.assertEqual(manifest["document_type"], "master_transfer_package")
             self.assertEqual(manifest["package_format"], "logical_catalog_transfer")
-            self.assertEqual(manifest["package_format_version"], 1)
+            self.assertEqual(manifest["package_format_version"], 2)
             self.assertEqual(
                 {section["section_id"] for section in manifest["sections"]},
                 {
@@ -367,6 +367,11 @@ class MasterTransferServiceTests(unittest.TestCase):
                     "contract_templates",
                 },
             )
+            self.assertEqual(
+                manifest["export_selection"]["included_section_ids"],
+                ["catalog", "repertoire", "licenses", "contract_templates"],
+            )
+            self.assertEqual(manifest["export_selection"]["omitted_sections"], [])
             file_paths = {entry["path"] for entry in manifest["files"]}
             self.assertIn("sections/catalog/package.zip", file_paths)
             self.assertIn("sections/repertoire/package.zip", file_paths)
@@ -376,6 +381,47 @@ class MasterTransferServiceTests(unittest.TestCase):
             self.assertTrue(
                 any(path.startswith("sections/contract_templates/files/") for path in file_paths)
             )
+
+    def test_master_transfer_exportable_sections_are_listed_for_preview(self):
+        options = self.source["master_transfer_service"].exportable_sections()
+
+        self.assertEqual(
+            [option.section_id for option in options],
+            ["catalog", "repertoire", "licenses", "contract_templates"],
+        )
+        self.assertTrue(all(option.default_selected for option in options))
+        self.assertEqual(options[1].depends_on, ["catalog"])
+        self.assertEqual(options[2].depends_on, ["catalog"])
+
+    def test_master_transfer_export_can_omit_deselected_sections_and_record_manifest(self):
+        package_path = self.root / "master-transfer-selective.zip"
+        result = self.source["master_transfer_service"].export_package(
+            package_path,
+            include_sections=["catalog", "contract_templates"],
+        )
+
+        self.assertEqual(
+            [section.section_id for section in result.sections],
+            ["catalog", "contract_templates"],
+        )
+        with ZipFile(package_path, "r") as archive:
+            manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+            self.assertEqual(
+                manifest["export_selection"]["included_section_ids"],
+                ["catalog", "contract_templates"],
+            )
+            self.assertEqual(
+                {
+                    section["section_id"]
+                    for section in manifest["export_selection"]["omitted_sections"]
+                },
+                {"repertoire", "licenses"},
+            )
+            file_paths = {entry["path"] for entry in manifest["files"]}
+            self.assertIn("sections/catalog/package.zip", file_paths)
+            self.assertIn("sections/contract_templates/templates.json", file_paths)
+            self.assertNotIn("sections/repertoire/package.zip", file_paths)
+            self.assertNotIn("sections/licenses/licenses.json", file_paths)
 
     def test_master_transfer_inspection_previews_contents_without_writing(self):
         package_path = self.root / "master-transfer.zip"
@@ -395,6 +441,25 @@ class MasterTransferServiceTests(unittest.TestCase):
         self.assertEqual(self._count(target, "Contracts"), 0)
         self.assertEqual(self._count(target, "Licenses"), 0)
         self.assertEqual(self._count(target, "ContractTemplates"), 0)
+
+    def test_master_transfer_inspection_handles_selective_packages(self):
+        package_path = self.root / "master-transfer-selective.zip"
+        self.source["master_transfer_service"].export_package(
+            package_path,
+            include_sections=["catalog", "contract_templates"],
+        )
+        target = self._build_context(self.root / "inspect-selective-target")
+
+        inspection = target["master_transfer_service"].inspect_package(package_path)
+
+        preview_sections = {str(row.get("Section") or "") for row in inspection.preview_rows}
+        self.assertEqual(preview_sections, {"Catalog", "Contract Templates"})
+        self.assertTrue(
+            any("Intentionally omitted sections:" in line for line in inspection.summary_lines)
+        )
+        self.assertFalse(
+            any("Omitted from this package: licenses" in warning for warning in inspection.warnings)
+        )
 
     def test_master_transfer_export_surfaces_missing_release_artwork_as_warning(self):
         artwork_path = self.root / "source" / "broken-master-release.png"
@@ -568,6 +633,141 @@ class MasterTransferServiceTests(unittest.TestCase):
         self.assertEqual(result.imported_licenses, 1)
         self.assertEqual(result.imported_contract_templates, 1)
         self.assertEqual(result.imported_template_revisions, 1)
+
+    def test_master_transfer_import_handles_selective_packages(self):
+        package_path = self.root / "master-transfer-selective.zip"
+        self.source["master_transfer_service"].export_package(
+            package_path,
+            include_sections=["catalog", "contract_templates"],
+        )
+        target = self._build_context(self.root / "import-selective-target")
+
+        result = target["master_transfer_service"].import_package(package_path)
+
+        self.assertIsNotNone(result.catalog_report)
+        self.assertIsNone(result.repertoire_party_phase)
+        self.assertIsNone(result.repertoire_report)
+        self.assertEqual(self._count(target, "Tracks"), 1)
+        self.assertEqual(self._count(target, "Works"), 1)
+        self.assertEqual(self._count(target, "Contracts"), 0)
+        self.assertEqual(self._count(target, "RightsRecords"), 0)
+        self.assertEqual(self._count(target, "AssetVersions"), 0)
+        self.assertEqual(self._count(target, "Licenses"), 0)
+        self.assertEqual(self._count(target, "ContractTemplates"), 1)
+        self.assertEqual(result.imported_licenses, 0)
+        self.assertEqual(result.imported_contract_templates, 1)
+        self.assertEqual(result.imported_template_revisions, 1)
+
+    def test_master_transfer_legacy_manifest_without_export_selection_still_loads(self):
+        package_path = self.root / "master-transfer-legacy.zip"
+        self.source["master_transfer_service"].export_package(package_path)
+
+        def _rewrite_legacy_manifest(extracted_root: Path) -> None:
+            manifest_path = extracted_root / "manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["package_format_version"] = 1
+            manifest.pop("export_selection", None)
+            manifest["sections"] = [
+                section
+                for section in manifest["sections"]
+                if section.get("section_id") == "catalog"
+            ]
+            manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+        legacy_path = self._rewrite_package(package_path, mutate_root=_rewrite_legacy_manifest)
+        target = self._build_context(self.root / "legacy-import-target")
+
+        inspection = target["master_transfer_service"].inspect_package(legacy_path)
+        self.assertEqual(
+            {str(row.get("Section") or "") for row in inspection.preview_rows},
+            {"Catalog"},
+        )
+        self.assertFalse(
+            any(
+                "does not declare whether section" in warning.lower()
+                for warning in inspection.warnings
+            )
+        )
+
+        result = target["master_transfer_service"].import_package(legacy_path)
+        self.assertIsNotNone(result.catalog_report)
+        self.assertIsNone(result.repertoire_party_phase)
+        self.assertIsNone(result.repertoire_report)
+        self.assertEqual(self._count(target, "Tracks"), 1)
+        self.assertEqual(self._count(target, "ContractTemplates"), 0)
+        self.assertEqual(result.imported_licenses, 0)
+        self.assertEqual(result.imported_contract_templates, 0)
+        self.assertEqual(result.imported_template_revisions, 0)
+
+    def test_master_transfer_warns_and_partially_imports_packages_with_missing_dependencies(self):
+        package_path = self.root / "master-transfer.zip"
+        self.source["master_transfer_service"].export_package(package_path)
+
+        def _strip_catalog_from_manifest(extracted_root: Path) -> None:
+            manifest_path = extracted_root / "manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["sections"] = [
+                section
+                for section in manifest["sections"]
+                if section.get("section_id") != "catalog"
+            ]
+            manifest["export_selection"]["included_section_ids"] = ["repertoire"]
+            manifest["export_selection"]["omitted_sections"] = [
+                {
+                    "section_id": "catalog",
+                    "label": "Catalog Exchange Package",
+                    "depends_on": [],
+                    "reason": "Excluded by export selection.",
+                    "omission_kind": "user_excluded",
+                    "entity_counts": {},
+                },
+                {
+                    "section_id": "licenses",
+                    "label": "License Archive",
+                    "depends_on": ["catalog"],
+                    "reason": "Excluded by export selection.",
+                    "omission_kind": "user_excluded",
+                    "entity_counts": {},
+                },
+                {
+                    "section_id": "contract_templates",
+                    "label": "Contract Templates",
+                    "depends_on": [],
+                    "reason": "Excluded by export selection.",
+                    "omission_kind": "user_excluded",
+                    "entity_counts": {},
+                },
+            ]
+            manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+        broken_path = self._rewrite_package(package_path, mutate_root=_strip_catalog_from_manifest)
+        inspection = self.source["master_transfer_service"].inspect_package(broken_path)
+        self.assertTrue(
+            any(
+                "without catalog" in warning.lower()
+                or "cannot attach them because" in warning.lower()
+                for warning in inspection.warnings
+            )
+        )
+
+        target = self._build_context(self.root / "dependency-warning-target")
+        result = target["master_transfer_service"].import_package(broken_path)
+        self.assertIsNotNone(result.repertoire_party_phase)
+        self.assertIsNone(result.catalog_report)
+        self.assertIsNone(result.repertoire_report)
+        self.assertEqual(self._count(target, "Parties"), 2)
+        self.assertEqual(self._count(target, "Works"), 0)
+        self.assertEqual(self._count(target, "Contracts"), 0)
+        self.assertEqual(self._count(target, "RightsRecords"), 0)
+        self.assertEqual(self._count(target, "AssetVersions"), 0)
+        self.assertEqual(self._count(target, "Licenses"), 0)
+        self.assertTrue(
+            any(
+                "party identities only" in warning.lower()
+                or "cannot be rehydrated because" in warning.lower()
+                for warning in result.warnings
+            )
+        )
 
     def test_master_transfer_detects_checksum_mismatch(self):
         package_path = self.root / "master-transfer.zip"

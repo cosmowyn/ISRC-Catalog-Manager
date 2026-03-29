@@ -24,6 +24,9 @@ class AppShellEditorSurfaceTests(AppShellTestCase):
     test_master_transfer_export_uses_background_task = (
         AppShellTestCase.case_master_transfer_export_uses_background_task
     )
+    test_master_transfer_export_does_not_start_when_preview_is_cancelled = (
+        AppShellTestCase.case_master_transfer_export_does_not_start_when_preview_is_cancelled
+    )
     test_export_standard_audio_file_embeds_catalog_metadata_on_export = (
         AppShellTestCase.case_export_standard_audio_file_embeds_catalog_metadata_on_export
     )

@@ -581,6 +581,255 @@ class ActionRibbonDialog(QDialog):
         return self.show_ribbon_checkbox.isChecked()
 
 
+class MasterTransferExportDialog(QDialog):
+    """Review exportable master transfer sections before writing the ZIP package."""
+
+    def __init__(self, sections, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Export Master Catalog Transfer")
+        self.setModal(True)
+        self.resize(980, 680)
+        self.setMinimumSize(860, 560)
+        _apply_standard_dialog_chrome(self, "masterTransferExportDialog")
+
+        self._table_updating = False
+        self.sections = [self._normalize_section(section) for section in list(sections or [])]
+        self._sections_by_id = {
+            str(section["section_id"]): section
+            for section in self.sections
+            if section["section_id"]
+        }
+        self._requested_selected = {
+            str(section["section_id"]): bool(section.get("default_selected", True))
+            for section in self.sections
+            if section["section_id"]
+        }
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(14)
+        _add_standard_dialog_header(
+            layout,
+            self,
+            title="Export Master Catalog Transfer",
+            subtitle=(
+                "Review the logical sections that will be packaged into the transfer ZIP. "
+                "Everything starts selected, and dependent sections stay linked to the "
+                "sections they require."
+            ),
+        )
+
+        selection_box, selection_layout = _create_standard_section(
+            self,
+            "Section Selection",
+            "Uncheck any section you do not want to include. If a section depends on another "
+            "section, it is disabled automatically until the required section is selected again.",
+        )
+        self.section_table = QTableWidget(len(self.sections), 4, self)
+        self.section_table.setHorizontalHeaderLabels(
+            ["Include", "Section", "Contents", "Requirements"]
+        )
+        self.section_table.verticalHeader().setVisible(False)
+        self.section_table.setAlternatingRowColors(True)
+        self.section_table.setSelectionMode(QAbstractItemView.NoSelection)
+        self.section_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.section_table.horizontalHeader().setStretchLastSection(True)
+        self.section_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.section_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.section_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.section_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        selection_layout.addWidget(self.section_table, 1)
+        layout.addWidget(selection_box, 1)
+
+        self.selection_status_label = QLabel(self)
+        self.selection_status_label.setWordWrap(True)
+        self.selection_status_label.setProperty("role", "secondary")
+        layout.addWidget(self.selection_status_label)
+
+        button_row = QHBoxLayout()
+        button_row.addStretch(1)
+        self.export_button = QPushButton("Export ZIP", self)
+        self.export_button.setDefault(True)
+        self.export_button.clicked.connect(self.accept)
+        cancel_button = QPushButton("Cancel", self)
+        cancel_button.clicked.connect(self.reject)
+        button_row.addWidget(self.export_button)
+        button_row.addWidget(cancel_button)
+        layout.addLayout(button_row)
+
+        self._populate_section_table()
+        self.section_table.itemChanged.connect(self._on_item_changed)
+        self._refresh_dependency_states()
+        _apply_compact_dialog_control_heights(self)
+
+    @staticmethod
+    def _normalize_section(section) -> dict[str, object]:
+        if isinstance(section, dict):
+            payload = dict(section)
+        else:
+            payload = {
+                "section_id": getattr(section, "section_id", ""),
+                "label": getattr(section, "label", ""),
+                "description": getattr(section, "description", ""),
+                "dependency_note": getattr(section, "dependency_note", ""),
+                "depends_on": list(getattr(section, "depends_on", []) or []),
+                "entity_counts": dict(getattr(section, "entity_counts", {}) or {}),
+                "default_selected": bool(getattr(section, "default_selected", True)),
+            }
+        return {
+            "section_id": str(payload.get("section_id") or "").strip(),
+            "label": str(payload.get("label") or "").strip() or "Unnamed Section",
+            "description": str(payload.get("description") or "").strip(),
+            "dependency_note": str(payload.get("dependency_note") or "").strip(),
+            "depends_on": [
+                str(value or "").strip() for value in list(payload.get("depends_on") or [])
+            ],
+            "entity_counts": {
+                str(key): int(value or 0)
+                for key, value in dict(payload.get("entity_counts") or {}).items()
+            },
+            "default_selected": bool(payload.get("default_selected", True)),
+        }
+
+    @staticmethod
+    def _counts_text(counts: dict[str, int]) -> str:
+        visible_counts = [
+            f"{str(key).replace('_', ' ')}={int(value or 0)}"
+            for key, value in counts.items()
+            if int(value or 0) > 0
+        ]
+        return ", ".join(visible_counts) if visible_counts else "No rows found"
+
+    def _effective_selected(self, section_id: str, *, memo: dict[str, bool] | None = None) -> bool:
+        if memo is None:
+            memo = {}
+        clean_id = str(section_id or "").strip()
+        if clean_id in memo:
+            return memo[clean_id]
+        if not self._requested_selected.get(clean_id, False):
+            memo[clean_id] = False
+            return False
+        section = self._sections_by_id.get(clean_id)
+        if section is None:
+            memo[clean_id] = False
+            return False
+        for dependency_id in section.get("depends_on") or []:
+            if not self._effective_selected(str(dependency_id), memo=memo):
+                memo[clean_id] = False
+                return False
+        memo[clean_id] = True
+        return True
+
+    def _populate_section_table(self) -> None:
+        self._table_updating = True
+        try:
+            for row_index, section in enumerate(self.sections):
+                include_item = QTableWidgetItem()
+                include_item.setData(Qt.UserRole, str(section["section_id"]))
+                include_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
+                include_item.setCheckState(
+                    Qt.Checked if bool(section.get("default_selected", True)) else Qt.Unchecked
+                )
+                self.section_table.setItem(row_index, 0, include_item)
+
+                section_item = QTableWidgetItem(str(section["label"]))
+                section_item.setToolTip(str(section.get("description") or ""))
+                self.section_table.setItem(row_index, 1, section_item)
+
+                contents_item = QTableWidgetItem(
+                    self._counts_text(dict(section.get("entity_counts") or {}))
+                )
+                contents_item.setToolTip(contents_item.text())
+                self.section_table.setItem(row_index, 2, contents_item)
+
+                requirements_item = QTableWidgetItem()
+                self.section_table.setItem(row_index, 3, requirements_item)
+        finally:
+            self._table_updating = False
+
+    def _on_item_changed(self, item: QTableWidgetItem | None) -> None:
+        if item is None or self._table_updating or item.column() != 0:
+            return
+        section_id = str(item.data(Qt.UserRole) or "").strip()
+        if not section_id:
+            return
+        self._requested_selected[section_id] = item.checkState() == Qt.Checked
+        self._refresh_dependency_states()
+
+    def _refresh_dependency_states(self) -> None:
+        memo: dict[str, bool] = {}
+        effective_selection = {
+            str(section["section_id"]): self._effective_selected(
+                str(section["section_id"]),
+                memo=memo,
+            )
+            for section in self.sections
+        }
+        self._table_updating = True
+        try:
+            for row_index, section in enumerate(self.sections):
+                section_id = str(section["section_id"])
+                include_item = self.section_table.item(row_index, 0)
+                requirements_item = self.section_table.item(row_index, 3)
+                if include_item is None or requirements_item is None:
+                    continue
+
+                blocked_dependencies = [
+                    str(self._sections_by_id.get(dep, {}).get("label") or dep)
+                    for dep in list(section.get("depends_on") or [])
+                    if not effective_selection.get(str(dep), False)
+                ]
+                flags = Qt.ItemIsEnabled
+                if not blocked_dependencies:
+                    flags |= Qt.ItemIsUserCheckable
+                include_item.setFlags(flags)
+                include_item.setCheckState(
+                    Qt.Checked if effective_selection.get(section_id, False) else Qt.Unchecked
+                )
+
+                if blocked_dependencies:
+                    requirements_item.setText("Requires: " + ", ".join(blocked_dependencies))
+                elif section.get("depends_on"):
+                    requirements_item.setText(
+                        "Requires: "
+                        + ", ".join(
+                            str(self._sections_by_id.get(dep, {}).get("label") or dep)
+                            for dep in list(section.get("depends_on") or [])
+                        )
+                    )
+                else:
+                    requirements_item.setText("No prerequisites")
+                tooltip_lines = [
+                    str(section.get("description") or "").strip(),
+                    str(section.get("dependency_note") or "").strip(),
+                    requirements_item.text(),
+                ]
+                requirements_item.setToolTip("\n".join(line for line in tooltip_lines if line))
+        finally:
+            self._table_updating = False
+
+        selected_labels = [
+            str(section.get("label") or "")
+            for section in self.sections
+            if effective_selection.get(str(section["section_id"]), False)
+        ]
+        self.export_button.setEnabled(bool(selected_labels))
+        if selected_labels:
+            self.selection_status_label.setText("Selected sections: " + ", ".join(selected_labels))
+        else:
+            self.selection_status_label.setText(
+                "Select at least one section to create a master transfer package."
+            )
+
+    def selected_section_ids(self) -> list[str]:
+        memo: dict[str, bool] = {}
+        return [
+            str(section["section_id"])
+            for section in self.sections
+            if self._effective_selected(str(section["section_id"]), memo=memo)
+        ]
+
+
 class ApplicationLogDialog(QDialog):
     def __init__(self, app, parent=None):
         super().__init__(parent or app)

@@ -31,6 +31,7 @@ from isrc_manager.app_dialogs import (
     CustomColumnsDialog,
     DiagnosticsDialog,
     HelpContentsDialog,
+    MasterTransferExportDialog,
 )
 from isrc_manager.help_content import HELP_CHAPTERS_BY_ID, render_help_html
 from isrc_manager.tasks.models import TaskProgressUpdate
@@ -385,6 +386,92 @@ class AppDialogsTests(unittest.TestCase):
             ):
                 dialog._edit_blob_icon()
             self.assertEqual(dialog.get_fields()[0]["blob_icon_payload"]["emoji"], "🖼️")
+        finally:
+            dialog.close()
+
+    def test_master_transfer_export_dialog_checks_all_sections_by_default(self):
+        dialog = MasterTransferExportDialog(
+            [
+                {
+                    "section_id": "catalog",
+                    "label": "Catalog Exchange Package",
+                    "description": "Tracks and packaged media.",
+                    "depends_on": [],
+                    "entity_counts": {"tracks": 2},
+                    "default_selected": True,
+                },
+                {
+                    "section_id": "repertoire",
+                    "label": "Contracts and Rights Package",
+                    "description": "Parties, works, contracts, rights, and assets.",
+                    "depends_on": ["catalog"],
+                    "entity_counts": {"contracts": 2},
+                    "default_selected": True,
+                },
+                {
+                    "section_id": "contract_templates",
+                    "label": "Contract Templates",
+                    "description": "Template families and revision sources.",
+                    "depends_on": [],
+                    "entity_counts": {"templates": 1},
+                    "default_selected": True,
+                },
+            ]
+        )
+        try:
+            self.assertEqual(
+                dialog.selected_section_ids(), ["catalog", "repertoire", "contract_templates"]
+            )
+            self.assertEqual(dialog.section_table.item(0, 0).checkState(), Qt.Checked)
+            self.assertEqual(dialog.section_table.item(1, 0).checkState(), Qt.Checked)
+            self.assertEqual(dialog.section_table.item(2, 0).checkState(), Qt.Checked)
+            self.assertTrue(dialog.export_button.isEnabled())
+        finally:
+            dialog.close()
+
+    def test_master_transfer_export_dialog_disables_dependent_sections_when_required_section_is_unchecked(
+        self,
+    ):
+        dialog = MasterTransferExportDialog(
+            [
+                {
+                    "section_id": "catalog",
+                    "label": "Catalog Exchange Package",
+                    "description": "Tracks and packaged media.",
+                    "depends_on": [],
+                    "entity_counts": {"tracks": 2},
+                    "default_selected": True,
+                },
+                {
+                    "section_id": "repertoire",
+                    "label": "Contracts and Rights Package",
+                    "description": "Parties, works, contracts, rights, and assets.",
+                    "depends_on": ["catalog"],
+                    "entity_counts": {"contracts": 2},
+                    "default_selected": True,
+                },
+                {
+                    "section_id": "licenses",
+                    "label": "License Archive",
+                    "description": "License PDFs.",
+                    "depends_on": ["catalog"],
+                    "entity_counts": {"licenses": 1},
+                    "default_selected": True,
+                },
+            ]
+        )
+        try:
+            dialog.section_table.item(0, 0).setCheckState(Qt.Unchecked)
+            self.app.processEvents()
+
+            self.assertEqual(dialog.selected_section_ids(), [])
+            self.assertEqual(dialog.section_table.item(1, 0).checkState(), Qt.Unchecked)
+            self.assertEqual(dialog.section_table.item(2, 0).checkState(), Qt.Unchecked)
+            self.assertFalse(bool(dialog.section_table.item(1, 0).flags() & Qt.ItemIsUserCheckable))
+            self.assertIn(
+                "Requires: Catalog Exchange Package", dialog.section_table.item(1, 3).text()
+            )
+            self.assertFalse(dialog.export_button.isEnabled())
         finally:
             dialog.close()
 

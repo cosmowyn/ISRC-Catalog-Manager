@@ -826,6 +826,20 @@ class AppShellTestCase(unittest.TestCase):
                 return widget
         raise AssertionError("Saved layouts menu list widget not found")
 
+    def _current_action_ribbon_state(self) -> dict[str, object]:
+        return {
+            "action_ids": self.window._normalize_action_ribbon_ids(
+                getattr(self.window, "_action_ribbon_action_ids", [])
+            ),
+            "visible": bool(
+                getattr(self.window, "action_ribbon_toolbar", None) is not None
+                and self.window.action_ribbon_toolbar.isVisible()
+            ),
+        }
+
+    def _saved_main_window_layout_payloads(self) -> dict[str, dict[str, object]]:
+        return self.window._load_saved_main_window_layouts()
+
     def _workspace_dock_tab_bar(self) -> QTabBar:
         expected_titles = {
             dock.windowTitle()
@@ -1685,6 +1699,107 @@ class AppShellTestCase(unittest.TestCase):
         self.assertLess(
             menu_list.height(),
             (row_height * menu_list.count()) + (menu_list.frameWidth() * 2),
+        )
+
+    def case_saved_layouts_capture_and_restore_distinct_action_ribbon_configurations(self):
+        writer_ribbon_ids = ["add_track", "settings", "show_history"]
+        review_ribbon_ids = ["release_browser", "work_manager"]
+
+        self.window._apply_action_ribbon_configuration(writer_ribbon_ids, True)
+        self.window._save_named_main_window_layout("Writer Desk")
+        self._drain_events()
+
+        layouts = self._saved_main_window_layout_payloads()
+        self.assertEqual(
+            layouts["Writer Desk"].get("action_ribbon"),
+            {
+                "schema_version": 1,
+                "action_ids": writer_ribbon_ids,
+                "visible": True,
+            },
+        )
+
+        self.window._apply_action_ribbon_configuration(review_ribbon_ids, False)
+        self.window._save_named_main_window_layout("Review Desk")
+        self._drain_events()
+
+        layouts = self._saved_main_window_layout_payloads()
+        self.assertEqual(
+            layouts["Review Desk"].get("action_ribbon"),
+            {
+                "schema_version": 1,
+                "action_ids": review_ribbon_ids,
+                "visible": False,
+            },
+        )
+
+        self.window._apply_action_ribbon_configuration(["quality_dashboard"], True)
+        self._drain_events()
+
+        self.assertTrue(self.window._apply_named_main_window_layout("Writer Desk"))
+        self._drain_events()
+        self.assertEqual(
+            self._current_action_ribbon_state(),
+            {
+                "action_ids": writer_ribbon_ids,
+                "visible": True,
+            },
+        )
+
+        self.assertEqual(
+            json.loads(self._settings().value("display/action_ribbon_actions_json", "[]")),
+            writer_ribbon_ids,
+        )
+        self.assertTrue(self._settings().value("display/action_ribbon_visible", False, bool))
+
+        self.assertTrue(self.window._apply_named_main_window_layout("Review Desk"))
+        self._drain_events()
+        self.assertEqual(
+            self._current_action_ribbon_state(),
+            {
+                "action_ids": review_ribbon_ids,
+                "visible": False,
+            },
+        )
+        self.assertEqual(
+            json.loads(self._settings().value("display/action_ribbon_actions_json", "[]")),
+            review_ribbon_ids,
+        )
+        self.assertFalse(self._settings().value("display/action_ribbon_visible", True, bool))
+
+    def case_deleting_saved_layout_removes_associated_action_ribbon_payload(self):
+        self.window._apply_action_ribbon_configuration(["add_track", "show_history"], True)
+        self.window._save_named_main_window_layout("Writer Desk")
+        self._drain_events()
+
+        layouts = self._saved_main_window_layout_payloads()
+        self.assertIn("action_ribbon", layouts["Writer Desk"])
+
+        self.assertTrue(self.window._delete_named_main_window_layout("Writer Desk"))
+        self._drain_events()
+
+        self.assertEqual(self._saved_main_window_layout_payloads(), {})
+
+    def case_legacy_saved_layouts_without_action_ribbon_state_load_safely(self):
+        legacy_snapshot = self.window._capture_current_main_window_layout_snapshot()
+        legacy_snapshot.pop("action_ribbon", None)
+        legacy_snapshot["schema_version"] = 1
+        legacy_snapshot["action_ribbon_visible"] = False
+        self.window._write_saved_main_window_layouts({"Legacy Desk": legacy_snapshot})
+
+        current_ribbon_ids = ["settings", "show_history"]
+        self.window._apply_action_ribbon_configuration(current_ribbon_ids, True)
+        self._drain_events()
+
+        self.assertTrue(self.window._apply_named_main_window_layout("Legacy Desk"))
+        self._drain_events()
+
+        self.assertEqual(
+            self._current_action_ribbon_state(),
+            {
+                "action_ids": current_ribbon_ids,
+                "visible": False,
+            },
         )
 
     def case_moved_and_renamed_actions_preserve_dialog_routing(self):
@@ -4514,17 +4629,45 @@ class AppShellTestCase(unittest.TestCase):
                 "getSaveFileName",
                 return_value=(str(export_path), "ZIP Files (*.zip)"),
             ) as get_save_file_name,
+            mock.patch.object(
+                self.window,
+                "_open_master_transfer_export_preview_dialog",
+                return_value=["catalog", "contract_templates"],
+            ) as open_preview,
             mock.patch.object(self.window, "_submit_background_bundle_task") as submit_task,
         ):
             self.window.export_master_transfer_package()
             self.app.processEvents()
 
         get_save_file_name.assert_called_once()
+        open_preview.assert_called_once()
         submit_task.assert_called_once()
         self.assertEqual(
             submit_task.call_args.kwargs["title"],
             "Export Master Catalog Transfer",
         )
+
+    def case_master_transfer_export_does_not_start_when_preview_is_cancelled(self):
+        export_path = self.root / "master-transfer.zip"
+
+        with (
+            mock.patch.object(
+                app_module.QFileDialog,
+                "getSaveFileName",
+                return_value=(str(export_path), "ZIP Files (*.zip)"),
+            ),
+            mock.patch.object(
+                self.window,
+                "_open_master_transfer_export_preview_dialog",
+                return_value=None,
+            ) as open_preview,
+            mock.patch.object(self.window, "_submit_background_bundle_task") as submit_task,
+        ):
+            self.window.export_master_transfer_package()
+            self.app.processEvents()
+
+        open_preview.assert_called_once()
+        submit_task.assert_not_called()
 
     def case_repertoire_export_resolves_directory_selection_to_file_target(self):
         export_dir = self.root / "repertoire-export-target"

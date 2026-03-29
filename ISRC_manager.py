@@ -119,6 +119,7 @@ from isrc_manager.app_dialogs import (
     CustomColumnsDialog,
     DiagnosticsDialog,
     HelpContentsDialog,
+    MasterTransferExportDialog,
 )
 from isrc_manager.assets import AssetService
 from isrc_manager.assets.dialogs import AssetBrowserPanel
@@ -216,6 +217,7 @@ from isrc_manager.exchange.repertoire_service import (
     RepertoireExchangeService,
     RepertoireImportInspection,
 )
+from isrc_manager.exchange.master_transfer import MasterTransferService
 from isrc_manager.exchange.service import ExchangeService
 from isrc_manager.file_storage import (
     STORAGE_MODE_DATABASE,
@@ -736,9 +738,7 @@ class ApplicationSettingsDialog(QDialog):
         self._qss_filtered_reference_entries: list[QssReferenceEntry] = []
         initial_custom_qss = str(self._theme_settings.get("custom_qss") or "")
         self._theme_last_valid_custom_qss_preview = (
-            initial_custom_qss
-            if not validate_qss_document(initial_custom_qss)
-            else ""
+            initial_custom_qss if not validate_qss_document(initial_custom_qss) else ""
         )
         self._theme_change_tracking_enabled = True
         self._history_retention_sync_enabled = True
@@ -2047,7 +2047,9 @@ class ApplicationSettingsDialog(QDialog):
         self.qss_reference_insert_button.clicked.connect(self._insert_selected_qss_selector)
         self.qss_reference_insert_template_button = QPushButton("Insert Full Template", self)
         self.qss_reference_insert_template_button.setAutoDefault(False)
-        self.qss_reference_insert_template_button.clicked.connect(self._insert_selected_qss_template)
+        self.qss_reference_insert_template_button.clicked.connect(
+            self._insert_selected_qss_template
+        )
         qss_reference_button_row.addWidget(self.qss_reference_copy_button)
         qss_reference_button_row.addWidget(self.qss_reference_insert_button)
         qss_reference_button_row.addWidget(self.qss_reference_insert_template_button)
@@ -2669,9 +2671,7 @@ class ApplicationSettingsDialog(QDialog):
         if qss_issues:
             preview_values["custom_qss"] = str(self._theme_last_valid_custom_qss_preview or "")
         else:
-            self._theme_last_valid_custom_qss_preview = str(
-                theme_values.get("custom_qss") or ""
-            )
+            self._theme_last_valid_custom_qss_preview = str(theme_values.get("custom_qss") or "")
         stylesheet = build_app_theme_stylesheet(preview_values)
         for widget in getattr(self, "_theme_preview_roots", []):
             widget.setStyleSheet(stylesheet)
@@ -11823,8 +11823,9 @@ class App(QMainWindow):
         action_ribbon_toolbar = getattr(self, "action_ribbon_toolbar", None)
         add_data_dock = getattr(self, "add_data_dock", None)
         catalog_table_dock = getattr(self, "catalog_table_dock", None)
+        action_ribbon_snapshot = self._capture_current_action_ribbon_layout_snapshot()
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "geometry_b64": self._serialize_qbytearray_setting(self.saveGeometry()),
             "window_state": self._current_main_window_state_marker(),
             "normal_geometry": self._serialize_rect_setting(self.normalGeometry()),
@@ -11841,6 +11842,7 @@ class App(QMainWindow):
             "action_ribbon_visible": bool(
                 isinstance(action_ribbon_toolbar, QToolBar) and action_ribbon_toolbar.isVisible()
             ),
+            "action_ribbon": action_ribbon_snapshot,
         }
 
     def _save_named_main_window_layout(self, name: str) -> str | None:
@@ -11866,6 +11868,9 @@ class App(QMainWindow):
         if not isinstance(snapshot, dict):
             return False
 
+        ribbon_action_ids, ribbon_visible = self._resolve_saved_layout_action_ribbon_snapshot(
+            snapshot
+        )
         self._ensure_persistent_workspace_dock_shells()
         previous_suspend_state = self._suspend_dock_state_sync
         previous_restore_state = self._is_restoring_workspace_layout
@@ -11890,8 +11895,8 @@ class App(QMainWindow):
                 bool(snapshot.get("profiles_toolbar_visible", True))
             )
             self._apply_action_ribbon_configuration(
-                getattr(self, "_action_ribbon_action_ids", []),
-                bool(snapshot.get("action_ribbon_visible", True)),
+                ribbon_action_ids,
+                ribbon_visible,
             )
             self._refresh_workspace_dock_default_placement_flags()
             self._materialize_visible_workspace_dock_panels()
@@ -11901,6 +11906,11 @@ class App(QMainWindow):
 
         self._active_saved_main_window_layout_name = resolved_name
         self._store_workspace_panel_visibility_preferences(sync=False)
+        self._store_action_ribbon_preferences(
+            ribbon_action_ids,
+            ribbon_visible,
+            sync=False,
+        )
         self._save_main_window_geometry(sync=False)
         self._save_main_dock_state(sync=False)
         self.settings.sync()
@@ -13196,6 +13206,10 @@ class App(QMainWindow):
             "display/action_ribbon_actions_json",
         ]
 
+    def _current_action_ribbon_visibility(self) -> bool:
+        toolbar = getattr(self, "action_ribbon_toolbar", None)
+        return bool(isinstance(toolbar, QToolBar) and toolbar.isVisible())
+
     def _normalize_action_ribbon_ids(self, action_ids) -> list[str]:
         if not hasattr(self, "_action_ribbon_specs_by_id"):
             return []
@@ -13227,6 +13241,65 @@ class App(QMainWindow):
         if not normalized_ids and parsed_ids:
             return list(getattr(self, "_action_ribbon_default_ids", []))
         return normalized_ids
+
+    def _capture_current_action_ribbon_layout_snapshot(self) -> dict[str, object]:
+        action_ids = self._normalize_action_ribbon_ids(
+            getattr(self, "_action_ribbon_action_ids", [])
+        )
+        if not action_ids:
+            action_ids = list(getattr(self, "_action_ribbon_default_ids", []))
+        return {
+            "schema_version": 1,
+            "action_ids": action_ids,
+            "visible": self._current_action_ribbon_visibility(),
+        }
+
+    def _resolve_saved_layout_action_ribbon_snapshot(
+        self,
+        snapshot: dict[str, object],
+    ) -> tuple[list[str], bool]:
+        current_action_ids = self._normalize_action_ribbon_ids(
+            getattr(self, "_action_ribbon_action_ids", [])
+        )
+        if not current_action_ids:
+            current_action_ids = list(getattr(self, "_action_ribbon_default_ids", []))
+        current_visible = self._current_action_ribbon_visibility()
+
+        ribbon_snapshot = snapshot.get("action_ribbon")
+        if isinstance(ribbon_snapshot, dict):
+            action_ids = self._normalize_action_ribbon_ids(ribbon_snapshot.get("action_ids"))
+            if not action_ids:
+                action_ids = list(current_action_ids)
+            visible_value = ribbon_snapshot.get("visible")
+            if visible_value is None:
+                visible_value = snapshot.get("action_ribbon_visible", current_visible)
+            return action_ids, bool(visible_value)
+
+        legacy_visible = snapshot.get("action_ribbon_visible")
+        if legacy_visible is None:
+            legacy_visible = current_visible
+        return list(current_action_ids), bool(legacy_visible)
+
+    def _store_action_ribbon_preferences(
+        self,
+        action_ids,
+        visible: bool,
+        *,
+        sync: bool = True,
+    ) -> None:
+        normalized_ids = self._normalize_action_ribbon_ids(action_ids)
+        if not normalized_ids:
+            normalized_ids = list(getattr(self, "_action_ribbon_default_ids", []))
+        try:
+            self.settings.setValue(
+                "display/action_ribbon_actions_json",
+                json.dumps(normalized_ids),
+            )
+            self.settings.setValue("display/action_ribbon_visible", bool(visible))
+            if sync:
+                self.settings.sync()
+        except Exception as e:
+            self.logger.warning("Failed to store action ribbon preferences: %s", e)
 
     def _action_ribbon_button_tooltip(self, spec: dict) -> str:
         parts = [str(spec.get("label") or "").strip()]
@@ -16931,6 +17004,26 @@ class App(QMainWindow):
             self.open_asset_registry(int(entity_id))
             return
 
+    def _create_master_transfer_service_for_ui(self) -> MasterTransferService | None:
+        if self.exchange_service is None or self.repertoire_exchange_service is None:
+            return None
+        return MasterTransferService(
+            exchange_service=self.exchange_service,
+            repertoire_exchange_service=self.repertoire_exchange_service,
+            license_service=self.license_service,
+            contract_template_service=self.contract_template_service,
+        )
+
+    def _open_master_transfer_export_preview_dialog(self, preview) -> list[str] | None:
+        dialog = MasterTransferExportDialog(
+            list(getattr(preview, "sections", []) or []),
+            parent=self,
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return None
+        selected_section_ids = list(dialog.selected_section_ids())
+        return selected_section_ids if selected_section_ids else None
+
     def export_master_transfer_package(self) -> None:
         if self.exchange_service is None or self.repertoire_exchange_service is None:
             QMessageBox.warning(self, "Master Catalog Transfer", "Open a profile first.")
@@ -16953,6 +17046,21 @@ class App(QMainWindow):
         except ValueError as exc:
             QMessageBox.warning(self, "Master Catalog Transfer", str(exc))
             return
+        preview_service = self._create_master_transfer_service_for_ui()
+        if preview_service is None:
+            QMessageBox.warning(self, "Master Catalog Transfer", "Open a profile first.")
+            return
+        try:
+            preview = preview_service.preview_export()
+            selected_section_ids = self._open_master_transfer_export_preview_dialog(preview)
+            if not selected_section_ids:
+                return
+            selected_section_ids = preview_service.validate_export_section_selection(
+                selected_section_ids
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "Master Catalog Transfer", str(exc))
+            return
 
         def _worker(bundle, ctx):
             export_progress = self._scaled_progress_callback(ctx.report_progress, start=0, end=94)
@@ -16960,6 +17068,7 @@ class App(QMainWindow):
             def _mutation():
                 return bundle.master_transfer_service.export_package(
                     resolved_path,
+                    include_sections=selected_section_ids,
                     progress_callback=export_progress,
                     cancel_callback=ctx.raise_if_cancelled,
                 )
@@ -17017,6 +17126,30 @@ class App(QMainWindow):
                 f"- {section.label}: {', '.join(f'{key}={value}' for key, value in section.entity_counts.items())}"
                 for section in result.sections
             )
+            omitted_export_sections = list(
+                (
+                    (result.manifest.get("export_selection") or {}).get("omitted_sections")
+                    if isinstance(result.manifest, dict)
+                    else []
+                )
+                or []
+            )
+            if omitted_export_sections:
+                message_lines.extend(
+                    [
+                        "",
+                        "Omitted sections:",
+                        *[
+                            "- "
+                            + (
+                                str(section.get("label") or section.get("section_id") or "").strip()
+                                or "Unnamed Section"
+                            )
+                            for section in omitted_export_sections
+                            if str(section.get("label") or section.get("section_id") or "").strip()
+                        ],
+                    ]
+                )
             if result.warnings:
                 message_lines.extend(
                     [
@@ -17094,11 +17227,13 @@ class App(QMainWindow):
                 )
 
             def _before_cleanup(result, ui_progress) -> None:
+                catalog_report = getattr(result, "catalog_report", None)
                 focus_track_id = (
-                    result.catalog_report.created_tracks
-                    or result.catalog_report.updated_tracks
-                    or [None]
-                )[0]
+                    []
+                    if catalog_report is None
+                    else (catalog_report.created_tracks or catalog_report.updated_tracks)
+                )
+                focus_track_id = (focus_track_id or [None])[0]
                 self._advance_task_ui_progress(
                     ui_progress,
                     value=97,
@@ -17124,21 +17259,48 @@ class App(QMainWindow):
                 )
 
             def _success(result) -> None:
+                catalog_report = getattr(result, "catalog_report", None)
+                repertoire_party_phase = getattr(result, "repertoire_party_phase", None)
+                repertoire_report = getattr(result, "repertoire_report", None)
+                included_section_ids = self._master_transfer_manifest_included_section_ids(
+                    getattr(result, "manifest", {})
+                )
                 self._log_event(
                     "master_transfer.import",
                     "Imported master catalog transfer package",
                     path=path,
                     exported_at=result.exported_at,
                     source_app_version=result.app_version,
-                    seeded_parties=result.repertoire_party_phase.imported_parties,
-                    reused_parties=result.repertoire_party_phase.reused_existing_parties,
-                    created_tracks=len(result.catalog_report.created_tracks),
-                    updated_tracks=len(result.catalog_report.updated_tracks),
+                    included_sections=included_section_ids,
+                    seeded_parties=(
+                        0
+                        if repertoire_party_phase is None
+                        else repertoire_party_phase.imported_parties
+                    ),
+                    reused_parties=(
+                        0
+                        if repertoire_party_phase is None
+                        else repertoire_party_phase.reused_existing_parties
+                    ),
+                    created_tracks=(
+                        0 if catalog_report is None else len(catalog_report.created_tracks)
+                    ),
+                    updated_tracks=(
+                        0 if catalog_report is None else len(catalog_report.updated_tracks)
+                    ),
                     imported_licenses=result.imported_licenses,
-                    imported_works=result.repertoire_report.imported_works,
-                    imported_contracts=result.repertoire_report.imported_contracts,
-                    imported_rights=result.repertoire_report.imported_rights,
-                    imported_assets=result.repertoire_report.imported_assets,
+                    imported_works=(
+                        0 if repertoire_report is None else repertoire_report.imported_works
+                    ),
+                    imported_contracts=(
+                        0 if repertoire_report is None else repertoire_report.imported_contracts
+                    ),
+                    imported_rights=(
+                        0 if repertoire_report is None else repertoire_report.imported_rights
+                    ),
+                    imported_assets=(
+                        0 if repertoire_report is None else repertoire_report.imported_assets
+                    ),
                     imported_templates=result.imported_contract_templates,
                     imported_template_revisions=result.imported_template_revisions,
                     warnings=result.warnings,
@@ -17148,13 +17310,14 @@ class App(QMainWindow):
                     "MasterTransfer",
                     ref_id=path,
                     details=(
-                        f"tracks_created={len(result.catalog_report.created_tracks)}; "
-                        f"parties_seeded={result.repertoire_party_phase.imported_parties}; "
+                        f"sections={','.join(included_section_ids)}; "
+                        f"tracks_created={0 if catalog_report is None else len(catalog_report.created_tracks)}; "
+                        f"parties_seeded={0 if repertoire_party_phase is None else repertoire_party_phase.imported_parties}; "
                         f"licenses={result.imported_licenses}; "
-                        f"works={result.repertoire_report.imported_works}; "
-                        f"contracts={result.repertoire_report.imported_contracts}; "
-                        f"rights={result.repertoire_report.imported_rights}; "
-                        f"assets={result.repertoire_report.imported_assets}; "
+                        f"works={0 if repertoire_report is None else repertoire_report.imported_works}; "
+                        f"contracts={0 if repertoire_report is None else repertoire_report.imported_contracts}; "
+                        f"rights={0 if repertoire_report is None else repertoire_report.imported_rights}; "
+                        f"assets={0 if repertoire_report is None else repertoire_report.imported_assets}; "
                         f"templates={result.imported_contract_templates}; "
                         f"template_revisions={result.imported_template_revisions}"
                     ),
@@ -17867,6 +18030,43 @@ class App(QMainWindow):
         return lines
 
     @staticmethod
+    def _master_transfer_manifest_included_section_ids(manifest: dict[str, object]) -> list[str]:
+        selection = manifest.get("export_selection") if isinstance(manifest, dict) else None
+        included = []
+        seen: set[str] = set()
+        if isinstance(selection, dict):
+            for section_id in selection.get("included_section_ids") or []:
+                clean_id = str(section_id or "").strip()
+                if not clean_id or clean_id in seen:
+                    continue
+                seen.add(clean_id)
+                included.append(clean_id)
+        if included:
+            return included
+        if not isinstance(manifest, dict):
+            return []
+        return [
+            str(section.get("section_id") or "").strip()
+            for section in list(manifest.get("sections") or [])
+            if str(section.get("section_id") or "").strip()
+        ]
+
+    @staticmethod
+    def _master_transfer_manifest_omitted_section_labels(manifest: dict[str, object]) -> list[str]:
+        if not isinstance(manifest, dict):
+            return []
+        selection = manifest.get("export_selection")
+        if not isinstance(selection, dict):
+            return []
+        labels: list[str] = []
+        for raw_section in selection.get("omitted_sections") or []:
+            section = dict(raw_section)
+            label = str(section.get("label") or section.get("section_id") or "").strip()
+            if label:
+                labels.append(label)
+        return labels
+
+    @staticmethod
     def _master_transfer_review_summary(inspection) -> list[str]:
         lines = list(getattr(inspection, "summary_lines", []) or [])
         catalog_dry_run = getattr(inspection, "catalog_dry_run", None)
@@ -17888,36 +18088,58 @@ class App(QMainWindow):
         return lines
 
     def _show_master_transfer_import_report(self, path: str, result) -> None:
+        included_section_ids = set(
+            self._master_transfer_manifest_included_section_ids(getattr(result, "manifest", {}))
+        )
+        omitted_labels = self._master_transfer_manifest_omitted_section_labels(
+            getattr(result, "manifest", {})
+        )
+        catalog_report = getattr(result, "catalog_report", None)
+        repertoire_party_phase = getattr(result, "repertoire_party_phase", None)
+        repertoire_report = getattr(result, "repertoire_report", None)
         lines = [
             f"Source package: {Path(path).name}",
             f"Source app version: {result.app_version or 'Unknown'}",
             f"Exported at: {result.exported_at or 'Unknown'}",
             "",
             "Applied sections:",
-            (
+        ]
+        if "catalog" in included_section_ids:
+            lines.append(
                 "Catalog: "
-                f"created {len(result.catalog_report.created_tracks)}, "
-                f"updated {len(result.catalog_report.updated_tracks)}"
-            ),
-            (
+                f"created {0 if catalog_report is None else len(catalog_report.created_tracks)}, "
+                f"updated {0 if catalog_report is None else len(catalog_report.updated_tracks)}"
+            )
+        if "repertoire" in included_section_ids:
+            lines.append(
                 "Contracts and Rights Party phase: "
-                f"created {int(result.repertoire_party_phase.imported_parties or 0)}, "
-                f"reused {int(result.repertoire_party_phase.reused_existing_parties or 0)}"
-            ),
-            f"License Archive: imported {int(result.imported_licenses or 0)}",
-            (
+                f"created {0 if repertoire_party_phase is None else int(repertoire_party_phase.imported_parties or 0)}, "
+                f"reused {0 if repertoire_party_phase is None else int(repertoire_party_phase.reused_existing_parties or 0)}"
+            )
+        if "licenses" in included_section_ids:
+            lines.append(f"License Archive: imported {int(result.imported_licenses or 0)}")
+        if "repertoire" in included_section_ids:
+            lines.append(
                 "Contracts and Rights: "
-                f"works {int(result.repertoire_report.imported_works or 0)}, "
-                f"contracts {int(result.repertoire_report.imported_contracts or 0)}, "
-                f"rights {int(result.repertoire_report.imported_rights or 0)}, "
-                f"assets {int(result.repertoire_report.imported_assets or 0)}"
-            ),
-            (
+                f"works {0 if repertoire_report is None else int(repertoire_report.imported_works or 0)}, "
+                f"contracts {0 if repertoire_report is None else int(repertoire_report.imported_contracts or 0)}, "
+                f"rights {0 if repertoire_report is None else int(repertoire_report.imported_rights or 0)}, "
+                f"assets {0 if repertoire_report is None else int(repertoire_report.imported_assets or 0)}"
+            )
+        if "contract_templates" in included_section_ids:
+            lines.append(
                 "Contract Templates: "
                 f"templates {int(result.imported_contract_templates or 0)}, "
                 f"revisions {int(result.imported_template_revisions or 0)}"
-            ),
-        ]
+            )
+        if omitted_labels:
+            lines.extend(
+                [
+                    "",
+                    "Intentionally omitted sections:",
+                    *[f"- {label}" for label in omitted_labels],
+                ]
+            )
         if result.warnings:
             lines.extend(
                 [
@@ -22453,8 +22675,10 @@ class App(QMainWindow):
                 enabled,
             )
             self._queue_top_chrome_boundary_refresh()
-            self.settings.setValue("display/action_ribbon_visible", enabled)
-            self.settings.sync()
+            self._store_action_ribbon_preferences(
+                getattr(self, "_action_ribbon_action_ids", []),
+                enabled,
+            )
 
         self._run_setting_bundle_history_action(
             action_label="Toggle Action Ribbon",
@@ -22491,9 +22715,7 @@ class App(QMainWindow):
             return
 
         def mutation():
-            self.settings.setValue("display/action_ribbon_actions_json", json.dumps(new_action_ids))
-            self.settings.setValue("display/action_ribbon_visible", new_visible)
-            self.settings.sync()
+            self._store_action_ribbon_preferences(new_action_ids, new_visible)
             self._apply_action_ribbon_configuration(new_action_ids, new_visible)
 
         self._run_setting_bundle_history_action(

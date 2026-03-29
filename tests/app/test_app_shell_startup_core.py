@@ -50,6 +50,18 @@ class AppShellStartupCoreTests(AppShellTestCase):
     test_saved_layouts_menu_uses_scrollable_picker_widget_when_needed = (
         AppShellTestCase.case_saved_layouts_menu_uses_scrollable_picker_widget_when_needed
     )
+    test_named_main_window_layouts_can_be_saved_applied_deleted_and_shared_between_menu_and_ribbon = (
+        AppShellTestCase.case_named_main_window_layouts_can_be_saved_applied_deleted_and_shared_between_menu_and_ribbon
+    )
+    test_saved_layouts_capture_and_restore_distinct_action_ribbon_configurations = (
+        AppShellTestCase.case_saved_layouts_capture_and_restore_distinct_action_ribbon_configurations
+    )
+    test_deleting_saved_layout_removes_associated_action_ribbon_payload = (
+        AppShellTestCase.case_deleting_saved_layout_removes_associated_action_ribbon_payload
+    )
+    test_legacy_saved_layouts_without_action_ribbon_state_load_safely = (
+        AppShellTestCase.case_legacy_saved_layouts_without_action_ribbon_state_load_safely
+    )
     test_moved_and_renamed_actions_preserve_dialog_routing = (
         AppShellTestCase.case_moved_and_renamed_actions_preserve_dialog_routing
     )
@@ -70,6 +82,12 @@ class AppShellStartupCoreTests(AppShellTestCase):
     )
     test_album_art_export_uses_album_title_and_bulk_export_stays_on_focused_column = (
         AppShellTestCase.case_album_art_export_uses_album_title_and_bulk_export_stays_on_focused_column
+    )
+    test_master_transfer_export_uses_background_task = (
+        AppShellTestCase.case_master_transfer_export_uses_background_task
+    )
+    test_master_transfer_export_does_not_start_when_preview_is_cancelled = (
+        AppShellTestCase.case_master_transfer_export_does_not_start_when_preview_is_cancelled
     )
     test_bulk_audio_attach_workflow_matches_files_updates_artists_and_records_history = (
         AppShellTestCase.case_bulk_audio_attach_workflow_matches_files_updates_artists_and_records_history

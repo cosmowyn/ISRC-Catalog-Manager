@@ -32,7 +32,7 @@ from .service import ExchangeService
 
 MASTER_TRANSFER_DOCUMENT_TYPE = "master_transfer_package"
 MASTER_TRANSFER_PACKAGE_FORMAT = "logical_catalog_transfer"
-MASTER_TRANSFER_FORMAT_VERSION = 1
+MASTER_TRANSFER_FORMAT_VERSION = 2
 MASTER_TRANSFER_MANIFEST = "manifest.json"
 MASTER_TRANSFER_APP_NAME = "ISRC Catalog Manager"
 LICENSE_SECTION_SCHEMA_VERSION = 1
@@ -48,6 +48,31 @@ KNOWN_SECTION_IDS = {
     REPERTOIRE_SECTION_ID,
     LICENSES_SECTION_ID,
     CONTRACT_TEMPLATES_SECTION_ID,
+}
+
+SECTION_LABELS = {
+    CATALOG_SECTION_ID: "Catalog Exchange Package",
+    REPERTOIRE_SECTION_ID: "Contracts and Rights Package",
+    LICENSES_SECTION_ID: "License Archive",
+    CONTRACT_TEMPLATES_SECTION_ID: "Contract Templates",
+}
+
+SECTION_DEPENDENCIES = {
+    CATALOG_SECTION_ID: [],
+    REPERTOIRE_SECTION_ID: [CATALOG_SECTION_ID],
+    LICENSES_SECTION_ID: [CATALOG_SECTION_ID],
+    CONTRACT_TEMPLATES_SECTION_ID: [],
+}
+
+SECTION_DEPENDENCY_NOTES = {
+    REPERTOIRE_SECTION_ID: (
+        "If Catalog is omitted, import can seed Parties only and will skip Works, Contracts, "
+        "Rights, and Assets because track/release remapping requires Catalog."
+    ),
+    LICENSES_SECTION_ID: (
+        "If Catalog is omitted, license files remain in the package but will be skipped on "
+        "import because track remapping requires Catalog."
+    ),
 }
 
 
@@ -86,6 +111,25 @@ class MasterTransferSection:
 
 
 @dataclass(slots=True)
+class MasterTransferExportOption:
+    section_id: str
+    label: str
+    description: str
+    depends_on: list[str]
+    entity_counts: dict[str, int]
+    default_selected: bool = True
+    dependency_note: str = ""
+
+
+@dataclass(slots=True)
+class MasterTransferExportPreview:
+    app_version: str
+    sections: list[MasterTransferExportOption]
+    summary_lines: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class MasterTransferExportResult:
     path: str
     app_version: str
@@ -105,9 +149,11 @@ class MasterTransferInspection:
     summary_lines: list[str]
     preview_rows: list[dict[str, object]]
     manifest: dict[str, object]
-    catalog_inspection: ExchangeInspection
-    catalog_dry_run: ExchangeImportReport
-    repertoire_inspection: RepertoireImportInspection
+    catalog_inspection: ExchangeInspection | None
+    catalog_dry_run: ExchangeImportReport | None
+    repertoire_inspection: RepertoireImportInspection | None
+    importable_section_ids: list[str] = field(default_factory=list)
+    blocked_sections: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -117,9 +163,11 @@ class MasterTransferImportResult:
     exported_at: str
     warnings: list[str]
     manifest: dict[str, object]
-    repertoire_party_phase: RepertoireImportResult
-    catalog_report: ExchangeImportReport
-    repertoire_report: RepertoireImportResult
+    applied_section_ids: list[str] = field(default_factory=list)
+    skipped_sections: dict[str, str] = field(default_factory=dict)
+    repertoire_party_phase: RepertoireImportResult | None = None
+    catalog_report: ExchangeImportReport | None = None
+    repertoire_report: RepertoireImportResult | None = None
     imported_licenses: int = 0
     imported_contract_templates: int = 0
     imported_template_revisions: int = 0
@@ -166,91 +214,319 @@ class MasterTransferService:
 
         return _callback
 
+    @staticmethod
+    def _section_definition_rows() -> list[dict[str, object]]:
+        return [
+            {
+                "section_id": CATALOG_SECTION_ID,
+                "label": SECTION_LABELS[CATALOG_SECTION_ID],
+                "description": (
+                    "Tracks, releases, and packaged managed media exported through the catalog "
+                    "exchange package."
+                ),
+                "depends_on": list(SECTION_DEPENDENCIES[CATALOG_SECTION_ID]),
+                "dependency_note": str(SECTION_DEPENDENCY_NOTES.get(CATALOG_SECTION_ID) or ""),
+            },
+            {
+                "section_id": REPERTOIRE_SECTION_ID,
+                "label": SECTION_LABELS[REPERTOIRE_SECTION_ID],
+                "description": (
+                    "Parties, Works, Contracts, Rights, and Assets exported through the "
+                    "repertoire transfer surface."
+                ),
+                "depends_on": list(SECTION_DEPENDENCIES[REPERTOIRE_SECTION_ID]),
+                "dependency_note": str(SECTION_DEPENDENCY_NOTES.get(REPERTOIRE_SECTION_ID) or ""),
+            },
+            {
+                "section_id": LICENSES_SECTION_ID,
+                "label": SECTION_LABELS[LICENSES_SECTION_ID],
+                "description": "License PDFs and related metadata linked to imported tracks.",
+                "depends_on": list(SECTION_DEPENDENCIES[LICENSES_SECTION_ID]),
+                "dependency_note": str(SECTION_DEPENDENCY_NOTES.get(LICENSES_SECTION_ID) or ""),
+            },
+            {
+                "section_id": CONTRACT_TEMPLATES_SECTION_ID,
+                "label": SECTION_LABELS[CONTRACT_TEMPLATES_SECTION_ID],
+                "description": (
+                    "Contract template families and revision source files imported through the "
+                    "template service."
+                ),
+                "depends_on": list(SECTION_DEPENDENCIES[CONTRACT_TEMPLATES_SECTION_ID]),
+                "dependency_note": str(
+                    SECTION_DEPENDENCY_NOTES.get(CONTRACT_TEMPLATES_SECTION_ID) or ""
+                ),
+            },
+        ]
+
+    def exportable_sections(self) -> list[MasterTransferExportOption]:
+        counts = {
+            CATALOG_SECTION_ID: {
+                "tracks": self._table_row_count("Tracks"),
+                "releases": self._table_row_count("Releases"),
+            },
+            REPERTOIRE_SECTION_ID: {
+                "parties": self._table_row_count("Parties"),
+                "works": self._table_row_count("Works"),
+                "contracts": self._table_row_count("Contracts"),
+                "rights": self._table_row_count("RightsRecords"),
+                "assets": self._table_row_count("AssetVersions"),
+            },
+            LICENSES_SECTION_ID: {
+                "licenses": self._table_row_count("Licenses"),
+            },
+            CONTRACT_TEMPLATES_SECTION_ID: {
+                "templates": self._table_row_count("ContractTemplates"),
+                "revisions": self._table_row_count("ContractTemplateRevisions"),
+            },
+        }
+        return [
+            MasterTransferExportOption(
+                section_id=str(entry["section_id"]),
+                label=str(entry["label"]),
+                description=str(entry["description"]),
+                depends_on=[str(value) for value in list(entry["depends_on"])],
+                entity_counts=dict(counts.get(str(entry["section_id"]), {})),
+                default_selected=True,
+                dependency_note=str(entry.get("dependency_note") or ""),
+            )
+            for entry in self._section_definition_rows()
+        ]
+
+    def preview_export(self) -> MasterTransferExportPreview:
+        sections = self.exportable_sections()
+        summary_lines = [
+            "Select the logical sections to include in the master transfer package.",
+            "All sections are selected by default, and omitted sections are recorded explicitly in the manifest.",
+        ]
+        return MasterTransferExportPreview(
+            app_version=self.app_version,
+            sections=sections,
+            summary_lines=summary_lines,
+            warnings=[],
+        )
+
+    def _default_export_section_ids(self) -> list[str]:
+        return [section.section_id for section in self.exportable_sections()]
+
+    def _normalize_selected_section_ids(self, section_ids) -> list[str]:
+        definitions = self.exportable_sections()
+        known_ids = [section.section_id for section in definitions]
+        known_set = set(known_ids)
+        if section_ids is None:
+            selected_ids = list(known_ids)
+        else:
+            selected_ids = []
+            seen: set[str] = set()
+            for section_id in section_ids or []:
+                clean_id = str(section_id or "").strip()
+                if not clean_id or clean_id in seen or clean_id not in known_set:
+                    continue
+                seen.add(clean_id)
+                selected_ids.append(clean_id)
+        if not selected_ids:
+            raise ValueError("Select at least one master transfer section to export.")
+        return selected_ids
+
+    def validate_export_section_selection(self, selected_section_ids) -> list[str]:
+        selected_ids = self._normalize_selected_section_ids(selected_section_ids)
+        dependency_warnings = self.selection_dependency_warnings(selected_ids)
+        if dependency_warnings:
+            raise ValueError(" ".join(dependency_warnings))
+        return selected_ids
+
+    def selection_dependency_warnings(self, selected_section_ids) -> list[str]:
+        selected_ids = self._normalize_selected_section_ids(selected_section_ids)
+        selected_set = set(selected_ids)
+        definitions = {section.section_id: section for section in self.exportable_sections()}
+        warnings: list[str] = []
+        for section in definitions.values():
+            if section.section_id not in selected_set:
+                continue
+            missing = [dep for dep in section.depends_on if dep not in selected_set]
+            if not missing:
+                continue
+            missing_labels = ", ".join(SECTION_LABELS.get(dep, dep) for dep in missing)
+            warnings.append(
+                f"{section.label} requires {missing_labels}. Keep the dependency selected "
+                f"or exclude {section.label}."
+            )
+        return warnings
+
+    @staticmethod
+    def _progress_ranges(
+        stage_count: int,
+        *,
+        start: int,
+        end: int,
+    ) -> list[tuple[int, int]]:
+        if stage_count <= 0:
+            return []
+        span = max(0, end - start)
+        ranges: list[tuple[int, int]] = []
+        for index in range(stage_count):
+            stage_start = int(round(start + ((span * index) / stage_count)))
+            stage_end = int(round(start + ((span * (index + 1)) / stage_count)))
+            ranges.append((stage_start, max(stage_start, stage_end)))
+        return ranges
+
     def export_package(
         self,
         path: str | Path,
         *,
+        include_sections=None,
         progress_callback=None,
         cancel_callback=None,
     ) -> MasterTransferExportResult:
         output_path = Path(path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         exported_at = _utc_timestamp()
+        selected_section_ids = self.validate_export_section_selection(include_sections)
+        selected_section_set = set(selected_section_ids)
+        stage_ranges = self._progress_ranges(len(selected_section_ids) + 2, start=4, end=95)
+        stage_index = 0
 
         with tempfile.TemporaryDirectory(prefix="master-transfer-export-") as temp_dir:
             root = Path(temp_dir)
             sections_dir = root / "sections"
             sections_dir.mkdir(parents=True, exist_ok=True)
+            sections: list[MasterTransferSection] = []
+            catalog_path: Path | None = None
+            repertoire_path: Path | None = None
 
-            self._report_progress(progress_callback, 4, "Building catalog exchange section...")
-            catalog_path = sections_dir / CATALOG_SECTION_ID / "package.zip"
-            catalog_path.parent.mkdir(parents=True, exist_ok=True)
-            self.exchange_service.export_package(
-                catalog_path,
-                progress_callback=self._scaled_progress(progress_callback, start=4, end=34),
-            )
-            if cancel_callback is not None:
-                cancel_callback()
+            if CATALOG_SECTION_ID in selected_section_set:
+                stage_start, stage_end = stage_ranges[stage_index]
+                stage_index += 1
+                self._report_progress(
+                    progress_callback, stage_start, "Building catalog exchange section..."
+                )
+                catalog_path = sections_dir / CATALOG_SECTION_ID / "package.zip"
+                catalog_path.parent.mkdir(parents=True, exist_ok=True)
+                self.exchange_service.export_package(
+                    catalog_path,
+                    progress_callback=self._scaled_progress(
+                        progress_callback,
+                        start=stage_start,
+                        end=stage_end,
+                    ),
+                )
+                sections.append(self._build_catalog_section(catalog_path))
+                if cancel_callback is not None:
+                    cancel_callback()
 
-            self._report_progress(progress_callback, 34, "Building Contracts and Rights section...")
-            repertoire_path = sections_dir / REPERTOIRE_SECTION_ID / "package.zip"
-            repertoire_path.parent.mkdir(parents=True, exist_ok=True)
-            self.repertoire_exchange_service.export_package(
-                repertoire_path,
-                progress_callback=self._scaled_progress(progress_callback, start=34, end=62),
-            )
-            if cancel_callback is not None:
-                cancel_callback()
+            if REPERTOIRE_SECTION_ID in selected_section_set:
+                stage_start, stage_end = stage_ranges[stage_index]
+                stage_index += 1
+                self._report_progress(
+                    progress_callback,
+                    stage_start,
+                    "Building Contracts and Rights section...",
+                )
+                repertoire_path = sections_dir / REPERTOIRE_SECTION_ID / "package.zip"
+                repertoire_path.parent.mkdir(parents=True, exist_ok=True)
+                self.repertoire_exchange_service.export_package(
+                    repertoire_path,
+                    progress_callback=self._scaled_progress(
+                        progress_callback,
+                        start=stage_start,
+                        end=stage_end,
+                    ),
+                )
+                sections.append(self._build_repertoire_section(repertoire_path))
+                if cancel_callback is not None:
+                    cancel_callback()
 
-            self._report_progress(progress_callback, 62, "Building license transfer section...")
-            licenses_payload_path = sections_dir / LICENSES_SECTION_ID / "licenses.json"
-            licenses_payload_path.parent.mkdir(parents=True, exist_ok=True)
-            license_rows = self._write_license_section(
-                licenses_payload_path,
-                progress_callback=self._scaled_progress(progress_callback, start=62, end=76),
-            )
-            if cancel_callback is not None:
-                cancel_callback()
+            if LICENSES_SECTION_ID in selected_section_set:
+                stage_start, stage_end = stage_ranges[stage_index]
+                stage_index += 1
+                self._report_progress(
+                    progress_callback,
+                    stage_start,
+                    "Building license transfer section...",
+                )
+                licenses_payload_path = sections_dir / LICENSES_SECTION_ID / "licenses.json"
+                licenses_payload_path.parent.mkdir(parents=True, exist_ok=True)
+                license_rows = self._write_license_section(
+                    licenses_payload_path,
+                    progress_callback=self._scaled_progress(
+                        progress_callback,
+                        start=stage_start,
+                        end=stage_end,
+                    ),
+                )
+                sections.append(
+                    self._build_license_section_summary(licenses_payload_path, license_rows)
+                )
+                if cancel_callback is not None:
+                    cancel_callback()
 
-            self._report_progress(
-                progress_callback, 76, "Building contract template transfer section..."
-            )
-            template_payload_path = sections_dir / CONTRACT_TEMPLATES_SECTION_ID / "templates.json"
-            template_payload_path.parent.mkdir(parents=True, exist_ok=True)
-            template_counts = self._write_contract_template_section(
-                template_payload_path,
-                progress_callback=self._scaled_progress(progress_callback, start=76, end=88),
-            )
-
-            sections = [
-                self._build_catalog_section(catalog_path),
-                self._build_repertoire_section(repertoire_path),
-                self._build_license_section_summary(licenses_payload_path, license_rows),
-                self._build_contract_template_section_summary(
+            if CONTRACT_TEMPLATES_SECTION_ID in selected_section_set:
+                stage_start, stage_end = stage_ranges[stage_index]
+                stage_index += 1
+                self._report_progress(
+                    progress_callback,
+                    stage_start,
+                    "Building contract template transfer section...",
+                )
+                template_payload_path = (
+                    sections_dir / CONTRACT_TEMPLATES_SECTION_ID / "templates.json"
+                )
+                template_payload_path.parent.mkdir(parents=True, exist_ok=True)
+                template_counts = self._write_contract_template_section(
                     template_payload_path,
-                    template_counts=template_counts,
-                ),
-            ]
-            omitted_sections = self._omitted_sections()
+                    progress_callback=self._scaled_progress(
+                        progress_callback,
+                        start=stage_start,
+                        end=stage_end,
+                    ),
+                )
+                sections.append(
+                    self._build_contract_template_section_summary(
+                        template_payload_path,
+                        template_counts=template_counts,
+                    )
+                )
+
+            format_omitted_sections = self._omitted_sections()
+            export_selection = self._build_export_selection(selected_section_ids)
             export_warnings = self._dedupe_preserve_order(
                 [
-                    *self._section_manifest_warnings(catalog_path),
-                    *self._section_manifest_warnings(repertoire_path),
+                    *(
+                        self._section_manifest_warnings(catalog_path)
+                        if isinstance(catalog_path, Path)
+                        else []
+                    ),
+                    *(
+                        self._section_manifest_warnings(repertoire_path)
+                        if isinstance(repertoire_path, Path)
+                        else []
+                    ),
                 ]
             )
+            manifest_stage_start, _manifest_stage_end = stage_ranges[stage_index]
+            stage_index += 1
             manifest = self._build_manifest(
                 exported_at=exported_at,
                 sections=sections,
                 files=self._build_file_manifest(root),
-                omitted_sections=omitted_sections,
+                omitted_sections=format_omitted_sections,
+                export_selection=export_selection,
                 warnings=export_warnings,
             )
 
-            self._report_progress(progress_callback, 90, "Writing master transfer manifest...")
+            self._report_progress(
+                progress_callback,
+                manifest_stage_start,
+                "Writing master transfer manifest...",
+            )
             manifest_path = root / MASTER_TRANSFER_MANIFEST
             manifest_path.write_text(_json_dumps(manifest), encoding="utf-8")
 
-            self._report_progress(progress_callback, 95, "Assembling master transfer package...")
+            assemble_stage_start, _assemble_stage_end = stage_ranges[stage_index]
+            self._report_progress(
+                progress_callback,
+                assemble_stage_start,
+                "Assembling master transfer package...",
+            )
             with ZipFile(output_path, "w", compression=ZIP_DEFLATED) as archive:
                 for file_path in sorted(path for path in root.rglob("*") if path.is_file()):
                     archive.write(file_path, arcname=file_path.relative_to(root).as_posix())
@@ -280,62 +556,131 @@ class MasterTransferService:
             manifest = self._load_manifest_from_root(root)
             self._verify_manifest_files(manifest, root)
             sections = self._manifest_sections(manifest)
+            self._validate_manifest_export_coverage(manifest, sections)
+            included_ids = set(self._manifest_included_section_ids(manifest))
+            blocked_sections = self._blocked_manifest_sections(manifest, sections)
+            importable_ids = {
+                section_id for section_id in included_ids if section_id not in blocked_sections
+            }
+            stage_count = 0
+            if CATALOG_SECTION_ID in importable_ids:
+                stage_count += 2
+            if REPERTOIRE_SECTION_ID in importable_ids:
+                stage_count += 1
+            if LICENSES_SECTION_ID in importable_ids:
+                stage_count += 1
+            if CONTRACT_TEMPLATES_SECTION_ID in importable_ids:
+                stage_count += 1
+            stage_ranges = self._progress_ranges(stage_count, start=12, end=96)
+            stage_index = 0
 
-            self._report_progress(progress_callback, 12, "Inspecting catalog section...")
-            catalog_path = root / self._section_artifact_path(manifest, CATALOG_SECTION_ID)
-            catalog_inspection = self.exchange_service.inspect_package(
-                catalog_path,
-                progress_callback=self._scaled_progress(progress_callback, start=12, end=26),
-                cancel_callback=cancel_callback,
-            )
+            catalog_inspection: ExchangeInspection | None = None
+            catalog_dry_run: ExchangeImportReport | None = None
+            repertoire_inspection: RepertoireImportInspection | None = None
+            license_rows: list[dict[str, object]] = []
+            template_payload: dict[str, object] = {"templates": []}
 
-            self._report_progress(progress_callback, 26, "Running catalog dry-run review...")
-            catalog_dry_run = self.exchange_service.import_package(
-                catalog_path,
-                options=ExchangeImportOptions(
-                    mode="dry_run",
-                    create_missing_custom_fields=True,
-                    preview_apply_mode="create",
-                ),
-                progress_callback=self._scaled_progress(progress_callback, start=26, end=46),
-                cancel_callback=cancel_callback,
-            )
+            if CATALOG_SECTION_ID in importable_ids:
+                stage_start, stage_end = stage_ranges[stage_index]
+                stage_index += 1
+                self._report_progress(
+                    progress_callback, stage_start, "Inspecting catalog section..."
+                )
+                catalog_path = root / self._section_artifact_path(manifest, CATALOG_SECTION_ID)
+                catalog_inspection = self.exchange_service.inspect_package(
+                    catalog_path,
+                    progress_callback=self._scaled_progress(
+                        progress_callback,
+                        start=stage_start,
+                        end=stage_end,
+                    ),
+                    cancel_callback=cancel_callback,
+                )
 
-            self._report_progress(
-                progress_callback, 46, "Inspecting Contracts and Rights section..."
-            )
-            repertoire_path = root / self._section_artifact_path(manifest, REPERTOIRE_SECTION_ID)
-            repertoire_inspection = self.repertoire_exchange_service.inspect_package(
-                repertoire_path,
-                progress_callback=self._scaled_progress(progress_callback, start=46, end=68),
-                cancel_callback=cancel_callback,
-            )
+                stage_start, stage_end = stage_ranges[stage_index]
+                stage_index += 1
+                self._report_progress(
+                    progress_callback,
+                    stage_start,
+                    "Running catalog dry-run review...",
+                )
+                catalog_dry_run = self.exchange_service.import_package(
+                    catalog_path,
+                    options=ExchangeImportOptions(
+                        mode="dry_run",
+                        create_missing_custom_fields=True,
+                        preview_apply_mode="create",
+                    ),
+                    progress_callback=self._scaled_progress(
+                        progress_callback,
+                        start=stage_start,
+                        end=stage_end,
+                    ),
+                    cancel_callback=cancel_callback,
+                )
 
-            self._report_progress(progress_callback, 68, "Inspecting license transfer section...")
-            license_rows = self._read_license_rows(
-                root / self._section_artifact_path(manifest, LICENSES_SECTION_ID)
-            )
+            if REPERTOIRE_SECTION_ID in importable_ids:
+                stage_start, stage_end = stage_ranges[stage_index]
+                stage_index += 1
+                self._report_progress(
+                    progress_callback,
+                    stage_start,
+                    "Inspecting Contracts and Rights section...",
+                )
+                repertoire_path = root / self._section_artifact_path(
+                    manifest, REPERTOIRE_SECTION_ID
+                )
+                repertoire_inspection = self.repertoire_exchange_service.inspect_package(
+                    repertoire_path,
+                    progress_callback=self._scaled_progress(
+                        progress_callback,
+                        start=stage_start,
+                        end=stage_end,
+                    ),
+                    cancel_callback=cancel_callback,
+                )
 
-            self._report_progress(
-                progress_callback,
-                78,
-                "Inspecting contract template transfer section...",
-            )
-            template_payload = self._read_json_object(
-                root / self._section_artifact_path(manifest, CONTRACT_TEMPLATES_SECTION_ID)
-            )
+            if LICENSES_SECTION_ID in importable_ids:
+                stage_start, _stage_end = stage_ranges[stage_index]
+                stage_index += 1
+                self._report_progress(
+                    progress_callback,
+                    stage_start,
+                    "Inspecting license transfer section...",
+                )
+                license_rows = self._read_license_rows(
+                    root / self._section_artifact_path(manifest, LICENSES_SECTION_ID)
+                )
+
+            if CONTRACT_TEMPLATES_SECTION_ID in importable_ids:
+                stage_start, _stage_end = stage_ranges[stage_index]
+                stage_index += 1
+                self._report_progress(
+                    progress_callback,
+                    stage_start,
+                    "Inspecting contract template transfer section...",
+                )
+                template_payload = self._read_json_object(
+                    root / self._section_artifact_path(manifest, CONTRACT_TEMPLATES_SECTION_ID)
+                )
 
         warnings = self._dedupe_preserve_order(
             [
                 *self._manifest_warnings(manifest),
                 *self._unknown_section_warnings(manifest),
+                *self._manifest_dependency_warnings(manifest, sections),
                 *self._target_population_warnings(),
-                *catalog_inspection.warnings,
-                *catalog_dry_run.warnings,
-                *repertoire_inspection.warnings,
+                *([] if catalog_inspection is None else catalog_inspection.warnings),
+                *([] if catalog_dry_run is None else catalog_dry_run.warnings),
+                *([] if repertoire_inspection is None else repertoire_inspection.warnings),
             ]
         )
-        summary_lines = self._inspection_summary_lines(manifest, sections)
+        summary_lines = self._inspection_summary_lines(
+            manifest,
+            sections,
+            importable_section_ids=sorted(importable_ids),
+            blocked_sections=blocked_sections,
+        )
         preview_rows = self._build_preview_rows(
             catalog_inspection=catalog_inspection,
             repertoire_inspection=repertoire_inspection,
@@ -355,6 +700,8 @@ class MasterTransferService:
             catalog_inspection=catalog_inspection,
             catalog_dry_run=catalog_dry_run,
             repertoire_inspection=repertoire_inspection,
+            importable_section_ids=sorted(importable_ids),
+            blocked_sections=blocked_sections,
         )
 
     def import_package(
@@ -370,73 +717,178 @@ class MasterTransferService:
             self._safe_extract_zip(path, root)
             manifest = self._load_manifest_from_root(root)
             self._verify_manifest_files(manifest, root)
+            sections = self._manifest_sections(manifest)
+            self._validate_manifest_export_coverage(manifest, sections)
+            included_ids = set(self._manifest_included_section_ids(manifest))
+            has_catalog_section = CATALOG_SECTION_ID in included_ids
 
-            self._report_progress(
-                progress_callback,
-                8,
-                "Seeding Party references from Contracts and Rights...",
-            )
-            repertoire_path = root / self._section_artifact_path(manifest, REPERTOIRE_SECTION_ID)
-            repertoire_party_phase = self.repertoire_exchange_service.import_package(
-                repertoire_path,
-                options=RepertoireImportOptions(phase="parties_only"),
-                progress_callback=self._scaled_progress(progress_callback, start=8, end=22),
-                cancel_callback=cancel_callback,
-            )
+            stage_count = 0
+            if REPERTOIRE_SECTION_ID in included_ids:
+                stage_count += 1
+            if has_catalog_section:
+                stage_count += 1
+            if LICENSES_SECTION_ID in included_ids and has_catalog_section:
+                stage_count += 1
+            if REPERTOIRE_SECTION_ID in included_ids and has_catalog_section:
+                stage_count += 1
+            if CONTRACT_TEMPLATES_SECTION_ID in included_ids:
+                stage_count += 1
+            stage_ranges = self._progress_ranges(stage_count, start=8, end=98)
+            stage_index = 0
 
-            if cancel_callback is not None:
-                cancel_callback()
-            self._report_progress(progress_callback, 22, "Importing catalog section...")
-            catalog_path = root / self._section_artifact_path(manifest, CATALOG_SECTION_ID)
-            catalog_report = self.exchange_service.import_package(
-                catalog_path,
-                options=ExchangeImportOptions(
-                    mode="create",
-                    create_missing_custom_fields=True,
-                ),
-                progress_callback=self._scaled_progress(progress_callback, start=22, end=58),
-                cancel_callback=cancel_callback,
-            )
-            self._raise_for_catalog_failures(catalog_report)
+            repertoire_party_phase: RepertoireImportResult | None = None
+            catalog_report: ExchangeImportReport | None = None
+            repertoire_report: RepertoireImportResult | None = None
+            imported_licenses = 0
+            imported_template_counts = {"templates": 0, "revisions": 0}
+            repertoire_path: Path | None = None
+            dependency_warnings = self._manifest_dependency_warnings(manifest, sections)
+            skipped_stage_warnings: list[str] = []
+            skipped_sections: dict[str, str] = {}
 
-            if cancel_callback is not None:
-                cancel_callback()
-            self._report_progress(progress_callback, 58, "Importing license section...")
-            imported_licenses = self._import_license_section(
-                root / self._section_artifact_path(manifest, LICENSES_SECTION_ID),
-                track_id_map=catalog_report.source_track_id_map,
-                progress_callback=self._scaled_progress(progress_callback, start=58, end=70),
-                cancel_callback=cancel_callback,
-            )
+            if REPERTOIRE_SECTION_ID in included_ids:
+                stage_start, stage_end = stage_ranges[stage_index]
+                stage_index += 1
+                self._report_progress(
+                    progress_callback,
+                    stage_start,
+                    "Seeding Party references from Contracts and Rights...",
+                )
+                repertoire_path = root / self._section_artifact_path(
+                    manifest, REPERTOIRE_SECTION_ID
+                )
+                repertoire_party_phase = self.repertoire_exchange_service.import_package(
+                    repertoire_path,
+                    options=RepertoireImportOptions(phase="parties_only"),
+                    progress_callback=self._scaled_progress(
+                        progress_callback,
+                        start=stage_start,
+                        end=stage_end,
+                    ),
+                    cancel_callback=cancel_callback,
+                )
 
-            if cancel_callback is not None:
-                cancel_callback()
-            self._report_progress(progress_callback, 70, "Rehydrating repertoire relationships...")
-            repertoire_report = self.repertoire_exchange_service.import_package(
-                repertoire_path,
-                options=RepertoireImportOptions(
-                    phase="remaining",
-                    source_party_id_map=repertoire_party_phase.source_party_id_map,
-                    source_track_id_map=catalog_report.source_track_id_map,
-                    source_release_id_map=catalog_report.source_release_id_map,
-                ),
-                progress_callback=self._scaled_progress(progress_callback, start=70, end=90),
-                cancel_callback=cancel_callback,
-            )
+            if has_catalog_section:
+                if cancel_callback is not None:
+                    cancel_callback()
+                stage_start, stage_end = stage_ranges[stage_index]
+                stage_index += 1
+                self._report_progress(
+                    progress_callback, stage_start, "Importing catalog section..."
+                )
+                catalog_path = root / self._section_artifact_path(manifest, CATALOG_SECTION_ID)
+                catalog_report = self.exchange_service.import_package(
+                    catalog_path,
+                    options=ExchangeImportOptions(
+                        mode="create",
+                        create_missing_custom_fields=True,
+                    ),
+                    progress_callback=self._scaled_progress(
+                        progress_callback,
+                        start=stage_start,
+                        end=stage_end,
+                    ),
+                    cancel_callback=cancel_callback,
+                )
+                self._raise_for_catalog_failures(catalog_report)
 
-            if cancel_callback is not None:
-                cancel_callback()
-            self._report_progress(progress_callback, 90, "Importing contract templates...")
-            imported_template_counts = self._import_contract_template_section(
-                root / self._section_artifact_path(manifest, CONTRACT_TEMPLATES_SECTION_ID),
-                progress_callback=self._scaled_progress(progress_callback, start=90, end=98),
-                cancel_callback=cancel_callback,
-            )
+            if LICENSES_SECTION_ID in included_ids and has_catalog_section:
+                if cancel_callback is not None:
+                    cancel_callback()
+                stage_start, stage_end = stage_ranges[stage_index]
+                stage_index += 1
+                self._report_progress(
+                    progress_callback, stage_start, "Importing license section..."
+                )
+                imported_licenses = self._import_license_section(
+                    root / self._section_artifact_path(manifest, LICENSES_SECTION_ID),
+                    track_id_map=(
+                        {} if catalog_report is None else catalog_report.source_track_id_map
+                    ),
+                    progress_callback=self._scaled_progress(
+                        progress_callback,
+                        start=stage_start,
+                        end=stage_end,
+                    ),
+                    cancel_callback=cancel_callback,
+                )
+            elif LICENSES_SECTION_ID in included_ids:
+                skipped_sections[LICENSES_SECTION_ID] = (
+                    "Skipped because the package omitted Catalog and license track remapping "
+                    "requires Catalog."
+                )
+                skipped_stage_warnings.append(
+                    f"{SECTION_LABELS[LICENSES_SECTION_ID]}: "
+                    + skipped_sections[LICENSES_SECTION_ID]
+                )
+
+            if REPERTOIRE_SECTION_ID in included_ids and has_catalog_section:
+                if cancel_callback is not None:
+                    cancel_callback()
+                stage_start, stage_end = stage_ranges[stage_index]
+                stage_index += 1
+                self._report_progress(
+                    progress_callback,
+                    stage_start,
+                    "Rehydrating repertoire relationships...",
+                )
+                repertoire_report = self.repertoire_exchange_service.import_package(
+                    root / self._section_artifact_path(manifest, REPERTOIRE_SECTION_ID),
+                    options=RepertoireImportOptions(
+                        phase="remaining",
+                        source_party_id_map=(
+                            {}
+                            if repertoire_party_phase is None
+                            else repertoire_party_phase.source_party_id_map
+                        ),
+                        source_track_id_map=(
+                            {} if catalog_report is None else catalog_report.source_track_id_map
+                        ),
+                        source_release_id_map=(
+                            {} if catalog_report is None else catalog_report.source_release_id_map
+                        ),
+                    ),
+                    progress_callback=self._scaled_progress(
+                        progress_callback,
+                        start=stage_start,
+                        end=stage_end,
+                    ),
+                    cancel_callback=cancel_callback,
+                )
+            elif REPERTOIRE_SECTION_ID in included_ids:
+                skipped_sections[REPERTOIRE_SECTION_ID] = (
+                    "Imported Party identities only. Works, Contracts, Rights, and Assets were "
+                    "skipped because the package omitted Catalog."
+                )
+                skipped_stage_warnings.append(
+                    f"{SECTION_LABELS[REPERTOIRE_SECTION_ID]}: "
+                    + skipped_sections[REPERTOIRE_SECTION_ID]
+                )
+
+            if CONTRACT_TEMPLATES_SECTION_ID in included_ids:
+                if cancel_callback is not None:
+                    cancel_callback()
+                stage_start, stage_end = stage_ranges[stage_index]
+                stage_index += 1
+                self._report_progress(
+                    progress_callback, stage_start, "Importing contract templates..."
+                )
+                imported_template_counts = self._import_contract_template_section(
+                    root / self._section_artifact_path(manifest, CONTRACT_TEMPLATES_SECTION_ID),
+                    progress_callback=self._scaled_progress(
+                        progress_callback,
+                        start=stage_start,
+                        end=stage_end,
+                    ),
+                    cancel_callback=cancel_callback,
+                )
 
         warnings = self._dedupe_preserve_order(
             [
                 *self._manifest_warnings(manifest),
-                *catalog_report.warnings,
+                *dependency_warnings,
+                *skipped_stage_warnings,
+                *([] if catalog_report is None else catalog_report.warnings),
             ]
         )
         self._report_progress(progress_callback, 100, "Master transfer import complete.")
@@ -446,6 +898,16 @@ class MasterTransferService:
             exported_at=str(manifest.get("exported_at") or ""),
             warnings=warnings,
             manifest=manifest,
+            applied_section_ids=[
+                section.section_id
+                for section in sections
+                if section.section_id not in skipped_sections
+                or (
+                    section.section_id == REPERTOIRE_SECTION_ID
+                    and repertoire_party_phase is not None
+                )
+            ],
+            skipped_sections=skipped_sections,
             repertoire_party_phase=repertoire_party_phase,
             catalog_report=catalog_report,
             repertoire_report=repertoire_report,
@@ -461,6 +923,7 @@ class MasterTransferService:
         sections: list[MasterTransferSection],
         files: list[dict[str, object]],
         omitted_sections: list[dict[str, str]],
+        export_selection: dict[str, object],
         warnings: list[str] | None = None,
     ) -> dict[str, object]:
         return {
@@ -471,7 +934,7 @@ class MasterTransferService:
             "app_version": self.app_version,
             "exported_at": exported_at,
             "compatibility": {
-                "minimum_reader_manifest_version": 1,
+                "minimum_reader_manifest_version": 2,
                 "unknown_fields_policy": "ignore",
                 "unknown_optional_sections_policy": "warn_skip",
                 "unknown_required_sections_policy": "error",
@@ -479,45 +942,12 @@ class MasterTransferService:
             "import_guidance": {
                 "requires_preview": True,
                 "requires_explicit_confirmation": True,
-                "section_order": [
-                    CATALOG_SECTION_ID,
-                    LICENSES_SECTION_ID,
-                    REPERTOIRE_SECTION_ID,
-                    CONTRACT_TEMPLATES_SECTION_ID,
-                ],
-                "stages": [
-                    {
-                        "stage_id": "repertoire_parties",
-                        "section_id": REPERTOIRE_SECTION_ID,
-                        "phase": "parties_only",
-                        "description": "Seed Party identities before catalog and repertoire links.",
-                    },
-                    {
-                        "stage_id": "catalog",
-                        "section_id": CATALOG_SECTION_ID,
-                        "phase": "full",
-                        "mode": "create",
-                        "description": "Import the catalog package through the governed catalog importer.",
-                    },
-                    {
-                        "stage_id": "licenses",
-                        "section_id": LICENSES_SECTION_ID,
-                        "phase": "full",
-                        "description": "Reattach license PDFs through the license service.",
-                    },
-                    {
-                        "stage_id": "repertoire_remaining",
-                        "section_id": REPERTOIRE_SECTION_ID,
-                        "phase": "remaining",
-                        "description": "Import Works, Contracts, Rights, and Assets with remapped ids.",
-                    },
-                    {
-                        "stage_id": "contract_templates",
-                        "section_id": CONTRACT_TEMPLATES_SECTION_ID,
-                        "phase": "full",
-                        "description": "Recreate template families and import revision source files.",
-                    },
-                ],
+                "section_order": self._import_guidance_section_order(
+                    [section.section_id for section in sections]
+                ),
+                "stages": self._import_guidance_stages(
+                    [section.section_id for section in sections]
+                ),
                 "reuses_current_import_logic": {
                     CATALOG_SECTION_ID: "exchange_service.import_package",
                     REPERTOIRE_SECTION_ID: "repertoire_exchange_service.import_package",
@@ -544,10 +974,110 @@ class MasterTransferService:
                 }
                 for section in sections
             ],
+            "export_selection": export_selection,
             "files": files,
             "warnings": list(warnings or []),
             "omitted_sections": omitted_sections,
         }
+
+    def _build_export_selection(self, included_section_ids: list[str]) -> dict[str, object]:
+        included_set = set(included_section_ids)
+        options = self.exportable_sections()
+        return {
+            "available_sections": [
+                {
+                    "section_id": option.section_id,
+                    "label": option.label,
+                    "description": option.description,
+                    "depends_on": list(option.depends_on),
+                    "default_selected": bool(option.default_selected),
+                    "entity_counts": dict(option.entity_counts),
+                    "dependency_note": option.dependency_note,
+                }
+                for option in options
+            ],
+            "included_section_ids": list(included_section_ids),
+            "omitted_section_ids": [
+                option.section_id for option in options if option.section_id not in included_set
+            ],
+            "omitted_sections": [
+                {
+                    "section_id": option.section_id,
+                    "label": option.label,
+                    "description": option.description,
+                    "depends_on": list(option.depends_on),
+                    "reason": "Excluded by export selection.",
+                    "omission_kind": "user_excluded",
+                    "entity_counts": dict(option.entity_counts),
+                    "dependency_note": option.dependency_note,
+                }
+                for option in options
+                if option.section_id not in included_set
+            ],
+        }
+
+    @staticmethod
+    def _import_guidance_section_order(included_section_ids: list[str]) -> list[str]:
+        included_set = set(included_section_ids)
+        canonical_order = [
+            CATALOG_SECTION_ID,
+            LICENSES_SECTION_ID,
+            REPERTOIRE_SECTION_ID,
+            CONTRACT_TEMPLATES_SECTION_ID,
+        ]
+        return [section_id for section_id in canonical_order if section_id in included_set]
+
+    @staticmethod
+    def _import_guidance_stages(included_section_ids: list[str]) -> list[dict[str, str]]:
+        included_set = set(included_section_ids)
+        stages: list[dict[str, str]] = []
+        if REPERTOIRE_SECTION_ID in included_set:
+            stages.append(
+                {
+                    "stage_id": "repertoire_parties",
+                    "section_id": REPERTOIRE_SECTION_ID,
+                    "phase": "parties_only",
+                    "description": "Seed Party identities before catalog and repertoire links.",
+                }
+            )
+        if CATALOG_SECTION_ID in included_set:
+            stages.append(
+                {
+                    "stage_id": "catalog",
+                    "section_id": CATALOG_SECTION_ID,
+                    "phase": "full",
+                    "mode": "create",
+                    "description": "Import the catalog package through the governed catalog importer.",
+                }
+            )
+        if LICENSES_SECTION_ID in included_set and CATALOG_SECTION_ID in included_set:
+            stages.append(
+                {
+                    "stage_id": "licenses",
+                    "section_id": LICENSES_SECTION_ID,
+                    "phase": "full",
+                    "description": "Reattach license PDFs through the license service.",
+                }
+            )
+        if REPERTOIRE_SECTION_ID in included_set and CATALOG_SECTION_ID in included_set:
+            stages.append(
+                {
+                    "stage_id": "repertoire_remaining",
+                    "section_id": REPERTOIRE_SECTION_ID,
+                    "phase": "remaining",
+                    "description": "Import Works, Contracts, Rights, and Assets with remapped ids.",
+                }
+            )
+        if CONTRACT_TEMPLATES_SECTION_ID in included_set:
+            stages.append(
+                {
+                    "stage_id": "contract_templates",
+                    "section_id": CONTRACT_TEMPLATES_SECTION_ID,
+                    "phase": "full",
+                    "description": "Recreate template families and import revision source files.",
+                }
+            )
+        return stages
 
     def _build_catalog_section(self, package_path: Path) -> MasterTransferSection:
         payload = self._read_zip_json(package_path, "manifest.json")
@@ -580,7 +1110,7 @@ class MasterTransferService:
             section_format="repertoire_package",
             schema_version=int(payload.get("schema_version") or 0),
             required=True,
-            depends_on=[CATALOG_SECTION_ID],
+            depends_on=[],
             entity_counts={
                 "parties": len(payload.get("parties") or []),
                 "works": len(payload.get("works") or []),
@@ -986,6 +1516,147 @@ class MasterTransferService:
                 break
         raise ValueError(f"Master transfer manifest does not include section '{section_id}'.")
 
+    def _manifest_export_selection(self, manifest: dict[str, object]) -> dict[str, object]:
+        selection = manifest.get("export_selection")
+        if isinstance(selection, dict):
+            return dict(selection)
+        included_section_ids = [
+            str(section.get("section_id") or "").strip()
+            for section in list(manifest.get("sections") or [])
+            if str(section.get("section_id") or "").strip()
+        ]
+        return {
+            "available_sections": [
+                {
+                    "section_id": str(entry["section_id"]),
+                    "label": str(entry["label"]),
+                    "description": str(entry["description"]),
+                    "depends_on": [str(value) for value in list(entry["depends_on"])],
+                    "default_selected": True,
+                    "entity_counts": {},
+                    "dependency_note": str(entry.get("dependency_note") or ""),
+                }
+                for entry in self._section_definition_rows()
+            ],
+            "included_section_ids": included_section_ids,
+            "omitted_section_ids": [],
+            "omitted_sections": [],
+        }
+
+    def _manifest_included_section_ids(self, manifest: dict[str, object]) -> list[str]:
+        selection = self._manifest_export_selection(manifest)
+        included_ids = []
+        seen: set[str] = set()
+        for section_id in selection.get("included_section_ids") or []:
+            clean_id = str(section_id or "").strip()
+            if not clean_id or clean_id in seen:
+                continue
+            seen.add(clean_id)
+            included_ids.append(clean_id)
+        if included_ids:
+            return included_ids
+        return [
+            str(section.get("section_id") or "").strip()
+            for section in list(manifest.get("sections") or [])
+            if str(section.get("section_id") or "").strip()
+        ]
+
+    def _manifest_omitted_export_sections(
+        self,
+        manifest: dict[str, object],
+    ) -> list[dict[str, object]]:
+        selection = self._manifest_export_selection(manifest)
+        omitted_sections: list[dict[str, object]] = []
+        for raw_section in selection.get("omitted_sections") or []:
+            section = dict(raw_section)
+            section_id = str(section.get("section_id") or "").strip()
+            if not section_id:
+                continue
+            omitted_sections.append(section)
+        return omitted_sections
+
+    def _validate_manifest_export_coverage(
+        self,
+        manifest: dict[str, object],
+        sections: list[MasterTransferSection],
+    ) -> None:
+        exportable_ids = [section.section_id for section in self.exportable_sections()]
+        manifest_ids = set(self._manifest_included_section_ids(manifest))
+        omitted_ids = {
+            str(section.get("section_id") or "").strip()
+            for section in self._manifest_omitted_export_sections(manifest)
+            if str(section.get("section_id") or "").strip()
+        }
+        described_ids = {section.section_id for section in sections}
+        if not manifest_ids:
+            raise ValueError("Master transfer package does not include any exportable sections.")
+        missing_ids = sorted(
+            section_id for section_id in manifest_ids if section_id not in described_ids
+        )
+        if missing_ids:
+            raise ValueError(
+                "Master transfer manifest marks section(s) as included without payload metadata: "
+                + ", ".join(missing_ids)
+            )
+        expects_explicit_selection = (
+            isinstance(manifest.get("export_selection"), dict)
+            or int(manifest.get("package_format_version") or 0) >= 2
+        )
+        if not expects_explicit_selection:
+            return
+        undeclared_ids = sorted(
+            section_id
+            for section_id in exportable_ids
+            if section_id not in manifest_ids and section_id not in omitted_ids
+        )
+        if undeclared_ids:
+            raise ValueError(
+                "Master transfer manifest does not declare whether section(s) were included or "
+                "intentionally omitted: " + ", ".join(undeclared_ids)
+            )
+
+    def _blocked_manifest_sections(
+        self,
+        manifest: dict[str, object],
+        sections: list[MasterTransferSection],
+    ) -> dict[str, str]:
+        del manifest
+        included_ids = {section.section_id for section in sections}
+        blocked: dict[str, str] = {}
+        for section in sections:
+            missing = [dep for dep in section.depends_on if dep not in included_ids]
+            if not missing:
+                continue
+            missing_labels = ", ".join(SECTION_LABELS.get(dep, dep) for dep in missing)
+            if section.section_id == REPERTOIRE_SECTION_ID:
+                continue
+            if section.section_id == LICENSES_SECTION_ID:
+                blocked[section.section_id] = (
+                    "License Archive was exported without Catalog. License files stay previewable "
+                    f"in the package, but import cannot attach them because {missing_labels} is "
+                    "omitted."
+                )
+                continue
+            blocked[section.section_id] = (
+                f"{section.label} is included without required section(s): {missing_labels}."
+            )
+        return blocked
+
+    def _manifest_dependency_warnings(
+        self,
+        manifest: dict[str, object],
+        sections: list[MasterTransferSection],
+    ) -> list[str]:
+        warnings = list(self._blocked_manifest_sections(manifest, sections).values())
+        included_ids = {section.section_id for section in sections}
+        if REPERTOIRE_SECTION_ID in included_ids and CATALOG_SECTION_ID not in included_ids:
+            warnings.append(
+                "Contracts and Rights was exported without Catalog. Import can still seed "
+                "Parties, but Works, Contracts, Rights, and Assets cannot be rehydrated until "
+                "Catalog is included."
+            )
+        return warnings
+
     @staticmethod
     def _manifest_sections(manifest: dict[str, object]) -> list[MasterTransferSection]:
         sections: list[MasterTransferSection] = []
@@ -1027,7 +1698,16 @@ class MasterTransferService:
         self,
         manifest: dict[str, object],
         sections: list[MasterTransferSection],
+        *,
+        importable_section_ids: list[str] | None = None,
+        blocked_sections: dict[str, str] | None = None,
     ) -> list[str]:
+        omitted_export_sections = self._manifest_omitted_export_sections(manifest)
+        importable_set = (
+            None
+            if importable_section_ids is None
+            else {str(section_id) for section_id in importable_section_ids}
+        )
         lines = [
             f"Package format version: {int(manifest.get('package_format_version') or 0)}",
             f"Created by app version: {str(manifest.get('app_version') or '').strip() or 'Unknown'}",
@@ -1035,6 +1715,29 @@ class MasterTransferService:
             "Included sections: "
             + ", ".join(section.label for section in sections if section.label),
         ]
+        if importable_set is not None:
+            lines.append(
+                "Will import sections: "
+                + ", ".join(
+                    section.label
+                    for section in sections
+                    if section.label and section.section_id in importable_set
+                )
+            )
+        if omitted_export_sections:
+            lines.append(
+                "Intentionally omitted sections: "
+                + ", ".join(
+                    str(section.get("label") or section.get("section_id") or "").strip()
+                    for section in omitted_export_sections
+                    if str(section.get("label") or section.get("section_id") or "").strip()
+                )
+            )
+        if blocked_sections:
+            for reason in blocked_sections.values():
+                clean_reason = str(reason or "").strip()
+                if clean_reason:
+                    lines.append(clean_reason)
         for section in sections:
             if not section.entity_counts:
                 continue
@@ -1053,42 +1756,44 @@ class MasterTransferService:
     def _build_preview_rows(
         self,
         *,
-        catalog_inspection: ExchangeInspection,
-        repertoire_inspection: RepertoireImportInspection,
+        catalog_inspection: ExchangeInspection | None,
+        repertoire_inspection: RepertoireImportInspection | None,
         license_rows: list[dict[str, object]],
         template_payload: dict[str, object],
     ) -> list[dict[str, object]]:
         rows: list[dict[str, object]] = []
-        for row in catalog_inspection.preview_rows[:6]:
-            title = str(row.get("track_title") or "").strip() or "Untitled Track"
-            details = [
-                value
-                for value in (
-                    str(row.get("isrc") or "").strip(),
-                    str(row.get("artist_name") or "").strip(),
-                    str(row.get("release_title") or row.get("album_title") or "").strip(),
+        if catalog_inspection is not None:
+            for row in catalog_inspection.preview_rows[:6]:
+                title = str(row.get("track_title") or "").strip() or "Untitled Track"
+                details = [
+                    value
+                    for value in (
+                        str(row.get("isrc") or "").strip(),
+                        str(row.get("artist_name") or "").strip(),
+                        str(row.get("release_title") or row.get("album_title") or "").strip(),
+                    )
+                    if value
+                ]
+                rows.append(
+                    {
+                        "Section": "Catalog",
+                        "Entity": "Track",
+                        "Action": "Import",
+                        "Label": title,
+                        "Notes": " / ".join(details),
+                    }
                 )
-                if value
-            ]
-            rows.append(
-                {
-                    "Section": "Catalog",
-                    "Entity": "Track",
-                    "Action": "Import",
-                    "Label": title,
-                    "Notes": " / ".join(details),
-                }
-            )
-        for row in repertoire_inspection.preview_rows[:10]:
-            rows.append(
-                {
-                    "Section": "Contracts and Rights",
-                    "Entity": row.get("Entity"),
-                    "Action": row.get("Action"),
-                    "Label": row.get("Label"),
-                    "Notes": row.get("Notes"),
-                }
-            )
+        if repertoire_inspection is not None:
+            for row in repertoire_inspection.preview_rows[:10]:
+                rows.append(
+                    {
+                        "Section": "Contracts and Rights",
+                        "Entity": row.get("Entity"),
+                        "Action": row.get("Action"),
+                        "Label": row.get("Label"),
+                        "Notes": row.get("Notes"),
+                    }
+                )
         for row in license_rows[:4]:
             rows.append(
                 {
@@ -1120,6 +1825,8 @@ class MasterTransferService:
                 warnings.append(clean_warning)
         for item in manifest.get("omitted_sections") or []:
             section = dict(item)
+            if str(section.get("omission_kind") or "").strip() == "user_excluded":
+                continue
             section_id = str(section.get("section_id") or "").strip()
             reason = str(section.get("reason") or "").strip()
             if section_id and reason:
@@ -1222,25 +1929,31 @@ class MasterTransferService:
             )
         return int(mapped_id)
 
-    def _omitted_sections(self) -> list[dict[str, str]]:
-        omitted = [
+    def _omitted_sections(self) -> list[dict[str, object]]:
+        omitted: list[dict[str, object]] = [
             {
                 "section_id": "history_snapshots",
+                "label": "History Snapshots",
                 "reason": "History snapshots are operational rollback state, not logical catalog data.",
+                "omission_kind": "not_in_format",
             },
             {
                 "section_id": "authenticity_and_derivative_ledgers",
+                "label": "Authenticity and Derivative Ledgers",
                 "reason": (
                     "Authenticity manifests, forensic exports, and derivative ledgers are runtime "
                     "artifacts rather than the authoritative logical catalog dataset."
                 ),
+                "omission_kind": "not_in_format",
             },
             {
                 "section_id": "contract_template_runtime_artifacts",
+                "label": "Contract Template Runtime Artifacts",
                 "reason": (
                     "Contract template drafts, resolved snapshots, and generated output artifacts "
-                    "are not included in master transfer format v1."
+                    "are not included in master transfer format v2."
                 ),
+                "omission_kind": "not_in_format",
             },
         ]
         if (
@@ -1250,10 +1963,12 @@ class MasterTransferService:
             omitted.append(
                 {
                     "section_id": "ownership_interests",
+                    "label": "Ownership Interests",
                     "reason": (
                         "Work and recording ownership interests do not yet have a dedicated logical "
-                        "transfer surface in format v1."
+                        "transfer surface in format v2."
                     ),
+                    "omission_kind": "not_in_format",
                 }
             )
         return omitted
