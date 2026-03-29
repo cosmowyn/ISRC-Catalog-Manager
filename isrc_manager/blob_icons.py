@@ -547,8 +547,7 @@ class BlobIconSettingsService:
         )
         self._write_kv(
             BLOB_ICON_IMAGE_MANAGED_KEY,
-            blob_icon_spec_to_storage(normalized.get("image_managed"), kind="image_managed")
-            or "",
+            blob_icon_spec_to_storage(normalized.get("image_managed"), kind="image_managed") or "",
         )
         self._write_kv(
             BLOB_ICON_IMAGE_DATABASE_KEY,

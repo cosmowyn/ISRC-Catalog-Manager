@@ -6583,9 +6583,7 @@ class AppShellTestCase(unittest.TestCase):
             if value is not None
         ]
         ui_values = [
-            int(value)
-            for value, _maximum, _message in progress["ui_progress"]
-            if value is not None
+            int(value) for value, _maximum, _message in progress["ui_progress"] if value is not None
         ]
         self.assertTrue(worker_values)
         self.assertTrue(ui_values)
