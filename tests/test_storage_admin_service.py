@@ -148,9 +148,7 @@ class StorageAdminServiceTests(unittest.TestCase):
         orphan_item = items_by_path[str(self.orphan_audio_path)]
         deleted_tree_item = items_by_path[str(self.deleted_history_dir)]
         backup_item = items_by_path[str(self.orphan_backup_path)]
-        session_item = next(
-            item for item in audit.items if item.category_key == "session_snapshot"
-        )
+        session_item = next(item for item in audit.items if item.category_key == "session_snapshot")
         protected_snapshot_item = next(
             item
             for item in audit.items
@@ -183,9 +181,9 @@ class StorageAdminServiceTests(unittest.TestCase):
 
         result = self.service.cleanup_selected(orphan_keys, current_db_path=self.db_path)
 
-        history_entries_after = self.conn.execute(
-            "SELECT COUNT(*) FROM HistoryEntries"
-        ).fetchone()[0]
+        history_entries_after = self.conn.execute("SELECT COUNT(*) FROM HistoryEntries").fetchone()[
+            0
+        ]
         session_entries_after = len(SessionHistoryManager(self.layout.history_dir).list_entries())
 
         self.assertEqual(len(result.removed_item_keys), 2)
@@ -212,9 +210,9 @@ class StorageAdminServiceTests(unittest.TestCase):
             allow_warning_deletes=True,
         )
 
-        history_entries_after = self.conn.execute(
-            "SELECT COUNT(*) FROM HistoryEntries"
-        ).fetchone()[0]
+        history_entries_after = self.conn.execute("SELECT COUNT(*) FROM HistoryEntries").fetchone()[
+            0
+        ]
         self.assertGreaterEqual(len(result.removed_history_entry_ids), 1)
         self.assertLess(history_entries_after, history_entries_before)
         self.assertFalse(Path(self.protected_snapshot.db_snapshot_path).exists())
@@ -222,9 +220,7 @@ class StorageAdminServiceTests(unittest.TestCase):
 
     def test_cleanup_of_deleted_profile_session_snapshot_prunes_session_history(self):
         audit = self.service.inspect(current_db_path=self.db_path)
-        session_item = next(
-            item for item in audit.items if item.category_key == "session_snapshot"
-        )
+        session_item = next(item for item in audit.items if item.category_key == "session_snapshot")
         session_history = SessionHistoryManager(self.layout.history_dir)
         session_entries_before = len(session_history.list_entries())
 

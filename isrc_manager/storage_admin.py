@@ -259,8 +259,12 @@ class ApplicationStorageAdminService:
 
         for index, profile_path in enumerate(active_profiles, start=1):
             if status_callback is not None:
-                status_callback(f"Collecting managed-file references from {Path(profile_path).name}...")
-            self._report(progress_callback, 2, 6, f"Inspecting profile {index} of {len(active_profiles)}...")
+                status_callback(
+                    f"Collecting managed-file references from {Path(profile_path).name}..."
+                )
+            self._report(
+                progress_callback, 2, 6, f"Inspecting profile {index} of {len(active_profiles)}..."
+            )
             self._collect_profile_references(profile_path, references_by_stored_path)
 
         items: list[StorageAdminItem] = []
@@ -345,7 +349,9 @@ class ApplicationStorageAdminService:
         removed_session_entry_ids: set[int] = set()
         removed_bytes = 0
         skipped_keys: list[str] = []
-        history_contexts: dict[str, tuple[sqlite3.Connection, HistoryManager, HistoryStorageCleanupService]] = {}
+        history_contexts: dict[
+            str, tuple[sqlite3.Connection, HistoryManager, HistoryStorageCleanupService]
+        ] = {}
         session_manager = SessionHistoryManager(self.layout.history_dir)
 
         total_items = max(1, len(selected_items))
@@ -612,7 +618,15 @@ class ApplicationStorageAdminService:
         protected_snapshot_ids: set[int] = set()
         live_archive_paths: set[Path] = set()
         live_file_state_paths: set[Path] = set()
-        for entry_id, parent_id, payload_json, inverse_json, redo_json, before_id, after_id in entry_rows:
+        for (
+            entry_id,
+            parent_id,
+            payload_json,
+            inverse_json,
+            redo_json,
+            before_id,
+            after_id,
+        ) in entry_rows:
             del entry_id, parent_id
             if before_id is not None:
                 protected_snapshot_ids.add(int(before_id))
@@ -681,7 +695,9 @@ class ApplicationStorageAdminService:
                     item_key=f"history:{profile_path}:snapshot_record:{int(snapshot_id)}",
                     status_key=STATUS_IN_USE if protected else STATUS_RECOVERABILITY,
                     status_label=(
-                        "In Use by Active Profile" if protected else "Recoverability / History Artifact"
+                        "In Use by Active Profile"
+                        if protected
+                        else "Recoverability / History Artifact"
                     ),
                     category_key="history_snapshot",
                     category_label="History Snapshot",
@@ -711,7 +727,15 @@ class ApplicationStorageAdminService:
                 )
             )
 
-        for backup_id, created_at, kind, label, backup_path, source_db_path, metadata_json in backup_rows:
+        for (
+            backup_id,
+            created_at,
+            kind,
+            label,
+            backup_path,
+            source_db_path,
+            metadata_json,
+        ) in backup_rows:
             del created_at, kind, source_db_path, metadata_json
             backup_file = Path(str(backup_path))
             items.append(
@@ -724,7 +748,8 @@ class ApplicationStorageAdminService:
                     label=str(label or backup_file.name),
                     path=str(backup_file),
                     bytes_on_disk=(
-                        self._path_size(backup_file) + self._path_size(self._backup_sidecar_path(backup_file))
+                        self._path_size(backup_file)
+                        + self._path_size(self._backup_sidecar_path(backup_file))
                     ),
                     profile_name=profile_name,
                     profile_path=profile_path,
@@ -741,7 +766,11 @@ class ApplicationStorageAdminService:
             )
 
         if snapshot_root.exists():
-            for path in sorted(path for path in snapshot_root.glob("*.db") if str(path) not in registered_snapshot_paths):
+            for path in sorted(
+                path
+                for path in snapshot_root.glob("*.db")
+                if str(path) not in registered_snapshot_paths
+            ):
                 items.append(
                     StorageAdminItem(
                         item_key=f"history:{profile_path}:orphan_snapshot_file:{path}",
@@ -771,14 +800,18 @@ class ApplicationStorageAdminService:
                 )
 
         if archive_root.exists():
-            for archive_path in sorted(path for path in archive_root.glob("*.db") if path.is_file()):
+            for archive_path in sorted(
+                path for path in archive_root.glob("*.db") if path.is_file()
+            ):
                 protected = self._path_is_referenced(archive_path, live_archive_paths)
                 items.append(
                     StorageAdminItem(
                         item_key=f"history:{profile_path}:snapshot_archive:{archive_path}",
                         status_key=STATUS_IN_USE if protected else STATUS_RECOVERABILITY,
                         status_label=(
-                            "In Use by Active Profile" if protected else "Recoverability / History Artifact"
+                            "In Use by Active Profile"
+                            if protected
+                            else "Recoverability / History Artifact"
                         ),
                         category_key="snapshot_archive",
                         category_label="Snapshot Archive",
@@ -820,7 +853,9 @@ class ApplicationStorageAdminService:
                         item_key=f"history:{profile_path}:file_state_bundle:{bundle_path}",
                         status_key=STATUS_IN_USE if protected else STATUS_RECOVERABILITY,
                         status_label=(
-                            "In Use by Active Profile" if protected else "Recoverability / History Artifact"
+                            "In Use by Active Profile"
+                            if protected
+                            else "Recoverability / History Artifact"
                         ),
                         category_key="file_state_bundle",
                         category_label="Stored File-State Bundle",
@@ -852,7 +887,9 @@ class ApplicationStorageAdminService:
 
         return items
 
-    def _deleted_profile_history_residue_items(self, active_stems: set[str]) -> list[StorageAdminItem]:
+    def _deleted_profile_history_residue_items(
+        self, active_stems: set[str]
+    ) -> list[StorageAdminItem]:
         items: list[StorageAdminItem] = []
         for root_name, category_key, category_label in (
             ("snapshots", "deleted_profile_snapshots", "Deleted-Profile Snapshot Storage"),
@@ -926,7 +963,8 @@ class ApplicationStorageAdminService:
                     category_label="Database Copy",
                     label=path.name,
                     path=str(path),
-                    bytes_on_disk=self._path_size(path) + self._path_size(self._backup_sidecar_path(path)),
+                    bytes_on_disk=self._path_size(path)
+                    + self._path_size(self._backup_sidecar_path(path)),
                     profile_name=Path(source_db_path).name if source_db_path else None,
                     profile_path=source_db_path,
                     reason=reason,
@@ -946,9 +984,10 @@ class ApplicationStorageAdminService:
         references = history.snapshot_references()
         refs_by_snapshot: dict[str, list[dict[str, object]]] = defaultdict(list)
         for reference in references:
-            snapshot_path = self._normalize_existing_path(reference.get("snapshot_path")) or str(
-                reference.get("snapshot_path") or ""
-            ).strip()
+            snapshot_path = (
+                self._normalize_existing_path(reference.get("snapshot_path"))
+                or str(reference.get("snapshot_path") or "").strip()
+            )
             if snapshot_path:
                 refs_by_snapshot[snapshot_path].append(reference)
 
@@ -956,28 +995,27 @@ class ApplicationStorageAdminService:
             normalized = str(path)
             refs = refs_by_snapshot.get(normalized, [])
             associated_profile_paths = {
-                self._normalize_existing_path(reference.get("profile_path")) or str(reference.get("profile_path") or "").strip()
+                self._normalize_existing_path(reference.get("profile_path"))
+                or str(reference.get("profile_path") or "").strip()
                 for reference in refs
                 if str(reference.get("profile_path") or "").strip()
             }
             associated_active = any(path in active_profile_set for path in associated_profile_paths)
-            associated_missing = any(path not in active_profile_set for path in associated_profile_paths)
+            associated_missing = any(
+                path not in active_profile_set for path in associated_profile_paths
+            )
             warning_required = bool(refs)
             if refs and associated_active:
                 status_key = STATUS_IN_USE
                 status_label = "In Use by Active Profile"
                 reason = "Session undo/redo still references this stored profile snapshot for an active profile."
-                warning = (
-                    "Deleting this session snapshot also removes the retained session-history entries that still depend on it."
-                )
+                warning = "Deleting this session snapshot also removes the retained session-history entries that still depend on it."
                 recommended = False
             elif refs and associated_missing:
                 status_key = STATUS_DELETED_PROFILE
                 status_label = "Deleted / Missing Profile Residue"
                 reason = "Session history still keeps this recoverability snapshot for a deleted or missing profile."
-                warning = (
-                    "Deleting this session snapshot also removes the retained session-history entries that still depend on it."
-                )
+                warning = "Deleting this session snapshot also removes the retained session-history entries that still depend on it."
                 recommended = True
             else:
                 status_key = STATUS_ORPHANED
@@ -1081,7 +1119,9 @@ class ApplicationStorageAdminService:
             current_profile_bytes=current_profile_bytes,
             reclaimable_bytes=sum(int(item.bytes_on_disk or 0) for item in reclaimable_items),
             deleted_profile_bytes=sum(
-                int(item.bytes_on_disk or 0) for item in items if item.status_key == STATUS_DELETED_PROFILE
+                int(item.bytes_on_disk or 0)
+                for item in items
+                if item.status_key == STATUS_DELETED_PROFILE
             ),
             orphaned_bytes=sum(
                 int(item.bytes_on_disk or 0) for item in items if item.status_key == STATUS_ORPHANED
@@ -1091,7 +1131,9 @@ class ApplicationStorageAdminService:
                 int(item.bytes_on_disk or 0) for item in items if item.status_key == STATUS_IN_USE
             ),
             recoverability_bytes=sum(
-                int(item.bytes_on_disk or 0) for item in items if item.status_key == STATUS_RECOVERABILITY
+                int(item.bytes_on_disk or 0)
+                for item in items
+                if item.status_key == STATUS_RECOVERABILITY
             ),
             other_bytes=sum(
                 int(item.bytes_on_disk or 0) for item in items if item.status_key == STATUS_OTHER
@@ -1107,7 +1149,9 @@ class ApplicationStorageAdminService:
         item: StorageAdminItem,
         *,
         session_manager: SessionHistoryManager,
-        history_contexts: dict[str, tuple[sqlite3.Connection, HistoryManager, HistoryStorageCleanupService]],
+        history_contexts: dict[
+            str, tuple[sqlite3.Connection, HistoryManager, HistoryStorageCleanupService]
+        ],
         removed_history_entry_ids: set[int],
         removed_session_entry_ids: set[int],
     ) -> list[str]:
@@ -1132,7 +1176,9 @@ class ApplicationStorageAdminService:
         if cleanup_kind == "history_item":
             profile_path = str(item.metadata.get("profile_path") or item.profile_path or "").strip()
             if not profile_path:
-                raise ValueError(f"History cleanup item is missing its profile path: {item.item_key}")
+                raise ValueError(
+                    f"History cleanup item is missing its profile path: {item.item_key}"
+                )
             conn, manager, cleanup_service = self._history_context(profile_path, history_contexts)
             history_item_type = str(item.metadata.get("history_item_type") or "")
             if item.warning_required:
@@ -1145,12 +1191,16 @@ class ApplicationStorageAdminService:
             record_id = item.metadata.get("record_id")
             if history_item_type == "snapshot_record":
                 if record_id is None:
-                    raise ValueError(f"Snapshot cleanup item is missing its record id: {item.item_key}")
+                    raise ValueError(
+                        f"Snapshot cleanup item is missing its record id: {item.item_key}"
+                    )
                 cleanup_service.cleanup_selected([f"snapshot_record:{int(record_id)}"])
                 return [item.path]
             if history_item_type == "backup_record":
                 if record_id is None:
-                    raise ValueError(f"Backup cleanup item is missing its record id: {item.item_key}")
+                    raise ValueError(
+                        f"Backup cleanup item is missing its record id: {item.item_key}"
+                    )
                 cleanup_service.cleanup_selected([f"backup_record:{int(record_id)}"])
                 return [item.path]
             if history_item_type == "orphan_snapshot_file":
@@ -1173,7 +1223,9 @@ class ApplicationStorageAdminService:
     def _history_context(
         self,
         profile_path: str,
-        history_contexts: dict[str, tuple[sqlite3.Connection, HistoryManager, HistoryStorageCleanupService]],
+        history_contexts: dict[
+            str, tuple[sqlite3.Connection, HistoryManager, HistoryStorageCleanupService]
+        ],
     ) -> tuple[sqlite3.Connection, HistoryManager, HistoryStorageCleanupService]:
         cached = history_contexts.get(profile_path)
         if cached is not None:
@@ -1295,13 +1347,17 @@ class ApplicationStorageAdminService:
         return detail_template.format(row_id=int(row_id), name=clean_name or "Untitled")
 
     def _format_reference_reason(self, references: tuple[StorageAdminReference, ...]) -> str:
-        unique_profiles = sorted({reference.profile_name for reference in references if reference.profile_name})
+        unique_profiles = sorted(
+            {reference.profile_name for reference in references if reference.profile_name}
+        )
         summary = (
             f"Referenced by {len(unique_profiles)} active profile(s)."
             if len(unique_profiles) > 1
-            else f"Referenced by active profile {unique_profiles[0]}."
-            if unique_profiles
-            else "Referenced by an active profile."
+            else (
+                f"Referenced by active profile {unique_profiles[0]}."
+                if unique_profiles
+                else "Referenced by an active profile."
+            )
         )
         owners = [reference.owner_label for reference in references[:5] if reference.owner_label]
         if not owners:
@@ -1312,7 +1368,9 @@ class ApplicationStorageAdminService:
     def _profile_name_from_references(
         self, references: tuple[StorageAdminReference, ...]
     ) -> str | None:
-        unique_names = sorted({reference.profile_name for reference in references if reference.profile_name})
+        unique_names = sorted(
+            {reference.profile_name for reference in references if reference.profile_name}
+        )
         if not unique_names:
             return None
         if len(unique_names) == 1:
@@ -1322,7 +1380,9 @@ class ApplicationStorageAdminService:
     def _profile_path_from_references(
         self, references: tuple[StorageAdminReference, ...]
     ) -> str | None:
-        unique_paths = sorted({reference.profile_path for reference in references if reference.profile_path})
+        unique_paths = sorted(
+            {reference.profile_path for reference in references if reference.profile_path}
+        )
         if len(unique_paths) == 1:
             return unique_paths[0]
         return None
@@ -1379,7 +1439,9 @@ class ApplicationStorageAdminService:
                         values.add(int(payload_value))
                     except Exception:
                         pass
-                values.update(ApplicationStorageAdminService._collect_int_values(payload_value, key))
+                values.update(
+                    ApplicationStorageAdminService._collect_int_values(payload_value, key)
+                )
             return values
         if isinstance(payload, list):
             for item in payload:
@@ -1451,7 +1513,9 @@ class ApplicationStorageAdminService:
 
     @staticmethod
     def _snapshot_sidecar_path(snapshot_path: Path) -> Path:
-        return snapshot_path.with_suffix(snapshot_path.suffix + HistoryManager.SNAPSHOT_SIDECAR_SUFFIX)
+        return snapshot_path.with_suffix(
+            snapshot_path.suffix + HistoryManager.SNAPSHOT_SIDECAR_SUFFIX
+        )
 
     @staticmethod
     def _backup_sidecar_path(backup_path: Path) -> Path:
@@ -1509,12 +1573,8 @@ class ApplicationStorageAdminService:
     @staticmethod
     def _profile_bundle_size(profile_path: Path) -> int:
         total = ApplicationStorageAdminService._path_size(profile_path)
-        total += ApplicationStorageAdminService._path_size(
-            Path(str(profile_path) + ".wal")
-        )
-        total += ApplicationStorageAdminService._path_size(
-            Path(str(profile_path) + ".shm")
-        )
+        total += ApplicationStorageAdminService._path_size(Path(str(profile_path) + ".wal"))
+        total += ApplicationStorageAdminService._path_size(Path(str(profile_path) + ".shm"))
         return total
 
     @staticmethod

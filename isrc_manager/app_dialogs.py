@@ -1473,9 +1473,7 @@ class ApplicationStorageAdminDialog(QDialog):
 
     def _build_items_table(self) -> QTableWidget:
         table = QTableWidget(0, 6, self)
-        table.setHorizontalHeaderLabels(
-            ["Status", "Category", "Item", "Size", "Profile", "Path"]
-        )
+        table.setHorizontalHeaderLabels(["Status", "Category", "Item", "Size", "Profile", "Path"])
         table.setSelectionBehavior(QAbstractItemView.SelectRows)
         table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -1686,7 +1684,9 @@ class ApplicationStorageAdminDialog(QDialog):
             f"Removed {removed_count} storage item(s) and reclaimed {removed_text}.",
         ]
         if history_count:
-            parts.append(f"Removed {history_count} dependent history entr{'y' if history_count == 1 else 'ies'}.")
+            parts.append(
+                f"Removed {history_count} dependent history entr{'y' if history_count == 1 else 'ies'}."
+            )
         if session_count:
             parts.append(
                 f"Removed {session_count} dependent session-history entr{'y' if session_count == 1 else 'ies'}."

@@ -491,7 +491,9 @@ class AppDialogsTests(unittest.TestCase):
             dialog.close()
             host.close()
 
-    def test_application_storage_admin_dialog_uses_async_loader_and_strong_delete_confirmations(self):
+    def test_application_storage_admin_dialog_uses_async_loader_and_strong_delete_confirmations(
+        self,
+    ):
         host = _DiagnosticsDialogHost()
         dialog = ApplicationStorageAdminDialog(host)
         try:
@@ -505,7 +507,9 @@ class AppDialogsTests(unittest.TestCase):
 
             dialog.surface_tabs.setCurrentWidget(dialog.warning_table)
             dialog.warning_table.selectRow(0)
-            self.assertIn("Deleting this file permanently removes media", dialog.details_edit.toPlainText())
+            self.assertIn(
+                "Deleting this file permanently removes media", dialog.details_edit.toPlainText()
+            )
 
             with (
                 mock.patch(
