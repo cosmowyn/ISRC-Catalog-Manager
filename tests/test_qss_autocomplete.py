@@ -378,8 +378,7 @@ class QssAutocompleteTests(unittest.TestCase):
             target_row = next(
                 row
                 for row in range(dialog.qss_reference_table.rowCount())
-                if dialog.qss_reference_table.item(row, 1).text().strip()
-                == "#theme_save_button"
+                if dialog.qss_reference_table.item(row, 1).text().strip() == "#theme_save_button"
             )
             dialog.qss_reference_table.selectRow(target_row)
             dialog.theme_custom_qss_edit.clear()
