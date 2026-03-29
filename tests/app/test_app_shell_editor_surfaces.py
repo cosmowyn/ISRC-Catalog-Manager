@@ -21,6 +21,9 @@ class AppShellEditorSurfaceTests(AppShellTestCase):
     test_export_catalog_audio_copies_exports_managed_and_database_wav_sources = (
         AppShellTestCase.case_export_catalog_audio_copies_exports_managed_and_database_wav_sources
     )
+    test_master_transfer_export_uses_background_task = (
+        AppShellTestCase.case_master_transfer_export_uses_background_task
+    )
     test_export_standard_audio_file_embeds_catalog_metadata_on_export = (
         AppShellTestCase.case_export_standard_audio_file_embeds_catalog_metadata_on_export
     )
@@ -101,6 +104,9 @@ class AppShellEditorSurfaceTests(AppShellTestCase):
     )
     test_audio_attach_unmatched_and_ambiguous_files_open_manual_resolution_dialog = (
         AppShellTestCase.case_audio_attach_unmatched_and_ambiguous_files_open_manual_resolution_dialog
+    )
+    test_master_transfer_import_requires_review_before_apply = (
+        AppShellTestCase.case_master_transfer_import_requires_review_before_apply
     )
     test_album_art_attach_requires_confirmation_and_honors_storage_mode = (
         AppShellTestCase.case_album_art_attach_requires_confirmation_and_honors_storage_mode

@@ -18,6 +18,8 @@ from isrc_manager.authenticity import (
     AuthenticityManifestService,
 )
 from isrc_manager.contracts import ContractService
+from isrc_manager.contract_templates import ContractTemplateService
+from isrc_manager.exchange import MasterTransferService
 from isrc_manager.exchange.repertoire_service import RepertoireExchangeService
 from isrc_manager.exchange.service import ExchangeService
 from isrc_manager.forensics import ForensicExportCoordinator, ForensicWatermarkService
@@ -78,6 +80,7 @@ class BackgroundAppServiceBundle:
     exchange_service: ExchangeService
     repertoire_exchange_service: RepertoireExchangeService
     party_exchange_service: PartyExchangeService
+    master_transfer_service: MasterTransferService
     quality_service: QualityDashboardService
     party_service: PartyService
     work_service: WorkService
@@ -204,6 +207,7 @@ class BackgroundAppServiceFactory:
         party_service = PartyService(conn)
         work_service = WorkService(conn, party_service=party_service)
         contract_service = ContractService(conn, self.data_root, party_service=party_service)
+        contract_template_service = ContractTemplateService(conn, self.data_root)
         license_migration_service = LegacyLicenseMigrationService(
             conn,
             license_service=license_service,
@@ -219,6 +223,42 @@ class BackgroundAppServiceFactory:
         relationship_explorer_service = RelationshipExplorerService(conn)
         profile_kv = ProfileKVService(conn)
         track_import_repair_queue = TrackImportRepairQueueService(conn)
+        xml_export_service = XMLExportService(conn)
+        xml_import_service = XMLImportService(
+            conn,
+            track_service,
+            custom_field_definitions,
+            party_service=party_service,
+            work_service=work_service,
+            profile_name=Path(self.db_path).name,
+            repair_queue_service=track_import_repair_queue,
+        )
+        exchange_service = ExchangeService(
+            conn,
+            track_service,
+            release_service,
+            custom_field_definitions,
+            self.data_root,
+            party_service=party_service,
+            work_service=work_service,
+            profile_name=Path(self.db_path).name,
+            repair_queue_service=track_import_repair_queue,
+        )
+        repertoire_exchange_service = RepertoireExchangeService(
+            conn,
+            party_service=party_service,
+            work_service=work_service,
+            contract_service=contract_service,
+            rights_service=rights_service,
+            asset_service=asset_service,
+            data_root=self.data_root,
+        )
+        party_exchange_service = PartyExchangeService(
+            conn,
+            party_service=party_service,
+            settings_mutations=settings_mutations,
+            profile_name=Path(self.db_path).name,
+        )
         if AUTHENTICITY_FEATURE_AVAILABLE:
             authenticity_key_service = AuthenticityKeyService(
                 conn,
@@ -270,41 +310,17 @@ class BackgroundAppServiceFactory:
             catalog_reads=catalog_reads,
             custom_field_definitions=custom_field_definitions,
             custom_field_values=custom_field_values,
-            xml_export_service=XMLExportService(conn),
-            xml_import_service=XMLImportService(
-                conn,
-                track_service,
-                custom_field_definitions,
-                party_service=party_service,
-                work_service=work_service,
-                profile_name=Path(self.db_path).name,
-                repair_queue_service=track_import_repair_queue,
-            ),
-            exchange_service=ExchangeService(
-                conn,
-                track_service,
-                release_service,
-                custom_field_definitions,
-                self.data_root,
-                party_service=party_service,
-                work_service=work_service,
-                profile_name=Path(self.db_path).name,
-                repair_queue_service=track_import_repair_queue,
-            ),
-            repertoire_exchange_service=RepertoireExchangeService(
-                conn,
-                party_service=party_service,
-                work_service=work_service,
-                contract_service=contract_service,
-                rights_service=rights_service,
-                asset_service=asset_service,
-                data_root=self.data_root,
-            ),
-            party_exchange_service=PartyExchangeService(
-                conn,
-                party_service=party_service,
-                settings_mutations=settings_mutations,
-                profile_name=Path(self.db_path).name,
+            xml_export_service=xml_export_service,
+            xml_import_service=xml_import_service,
+            exchange_service=exchange_service,
+            repertoire_exchange_service=repertoire_exchange_service,
+            party_exchange_service=party_exchange_service,
+            master_transfer_service=MasterTransferService(
+                exchange_service=exchange_service,
+                repertoire_exchange_service=repertoire_exchange_service,
+                license_service=license_service,
+                contract_template_service=contract_template_service,
+                app_version=_app_version_text(),
             ),
             quality_service=QualityDashboardService(
                 conn,

@@ -1706,7 +1706,9 @@ class ExchangeService:
         created_tracks: list[int] = []
         updated_tracks: list[int] = []
         total_rows = max(len(normalized_rows), 1)
-        package_create_mode = format_name == "package" and effective_mode == "create"
+        package_create_mode = format_name == "package" and (
+            effective_mode == "create" or opts.preserve_source_package_identity
+        )
         source_track_map: dict[str, int] = {}
         source_release_map: dict[str, int] = {}
         work_batch_cache: dict[str, int] = {}
@@ -1927,6 +1929,8 @@ class ExchangeService:
                         passed += 1
                     elif package_create_mode and reused_package_track:
                         track_id = existing_track_id
+                        if source_track_key:
+                            source_track_map[source_track_key] = track_id
                         passed += 1
                     else:
                         snapshot = self.track_service.fetch_track_snapshot(existing_track_id)
@@ -2008,6 +2012,8 @@ class ExchangeService:
                         updated_tracks.append(existing_track_id)
                         passed += 1
                         track_id = existing_track_id
+                        if source_track_key:
+                            source_track_map[source_track_key] = int(track_id)
 
                     _apply_custom_fields(track_id, row, cursor=cur)
                     self._upsert_release_from_row(
@@ -2067,4 +2073,14 @@ class ExchangeService:
             created_tracks=created_tracks,
             updated_tracks=updated_tracks,
             repair_queue_entry_ids=repair_queue_entry_ids,
+            source_track_id_map={
+                int(key): int(value)
+                for key, value in source_track_map.items()
+                if str(key).strip().isdigit()
+            },
+            source_release_id_map={
+                int(key): int(value)
+                for key, value in source_release_map.items()
+                if str(key).strip().isdigit()
+            },
         )

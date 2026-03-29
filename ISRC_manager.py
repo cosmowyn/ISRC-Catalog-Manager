@@ -16324,6 +16324,301 @@ class App(QMainWindow):
             self.open_asset_registry(int(entity_id))
             return
 
+    def export_master_transfer_package(self) -> None:
+        if self.exchange_service is None or self.repertoire_exchange_service is None:
+            QMessageBox.warning(self, "Master Catalog Transfer", "Open a profile first.")
+            return
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_name = f"master_catalog_transfer_{timestamp}.zip"
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Master Catalog Transfer",
+            str(self.exports_dir / default_name),
+            "ZIP Files (*.zip)",
+        )
+        if not path:
+            return
+        try:
+            resolved_path = self._resolve_file_export_target(
+                path,
+                default_filename=default_name,
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "Master Catalog Transfer", str(exc))
+            return
+
+        def _worker(bundle, ctx):
+            export_progress = self._scaled_progress_callback(ctx.report_progress, start=0, end=94)
+
+            def _mutation():
+                return bundle.master_transfer_service.export_package(
+                    resolved_path,
+                    progress_callback=export_progress,
+                    cancel_callback=ctx.raise_if_cancelled,
+                )
+
+            return run_file_history_action(
+                history_manager=bundle.history_manager,
+                action_label="Export Master Catalog Transfer",
+                action_type="file.master_transfer_export",
+                target_path=resolved_path,
+                mutation=_mutation,
+                entity_type="MasterTransferExport",
+                entity_id=str(resolved_path),
+                payload=lambda result: {
+                    "path": str(resolved_path),
+                    "format": "master_transfer",
+                    "section_ids": [section.section_id for section in result.sections],
+                    "warnings": list(result.warnings),
+                },
+                progress_callback=ctx.report_progress,
+                post_mutation_progress=(96, "Capturing master transfer export history..."),
+                record_progress=(98, "Recording master transfer export history..."),
+                logger=self.logger,
+            )
+
+        def _success(result) -> None:
+            self._refresh_history_actions()
+            self._log_event(
+                "master_transfer.export",
+                "Exported master catalog transfer package",
+                path=str(resolved_path),
+                app_version=result.app_version,
+                exported_at=result.exported_at,
+                warnings=result.warnings,
+                sections={
+                    section.section_id: dict(section.entity_counts) for section in result.sections
+                },
+            )
+            self._audit(
+                "EXPORT",
+                "MasterTransfer",
+                ref_id=str(resolved_path),
+                details=(
+                    "sections="
+                    + ",".join(section.section_id for section in result.sections)
+                    + f"; warnings={len(result.warnings)}"
+                ),
+            )
+            self._audit_commit()
+            message_lines = [
+                f"Master catalog transfer package written to:\n{resolved_path}",
+                "",
+                "Included sections:",
+            ]
+            message_lines.extend(
+                f"- {section.label}: {', '.join(f'{key}={value}' for key, value in section.entity_counts.items())}"
+                for section in result.sections
+            )
+            if result.warnings:
+                message_lines.extend(
+                    [
+                        "",
+                        "Warnings:",
+                        *[f"- {warning}" for warning in result.warnings[:12]],
+                    ]
+                )
+            QMessageBox.information(
+                self,
+                "Master Catalog Transfer",
+                "\n".join(message_lines),
+            )
+
+        self._submit_background_bundle_task(
+            title="Export Master Catalog Transfer",
+            description="Building a versioned logical transfer package for the current profile...",
+            task_fn=_worker,
+            kind="read",
+            unique_key="master_transfer.export",
+            worker_completion_progress=(100, "Master transfer export complete."),
+            on_success_after_cleanup=_success,
+            on_error=lambda failure: self._show_background_task_error(
+                "Master Catalog Transfer",
+                failure,
+                user_message="Could not export the master transfer package:",
+            ),
+        )
+
+    def import_master_transfer_package(self) -> None:
+        if self.exchange_service is None or self.repertoire_exchange_service is None:
+            QMessageBox.warning(self, "Master Catalog Transfer", "Open a profile first.")
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Master Catalog Transfer",
+            "",
+            "ZIP Files (*.zip)",
+        )
+        if not path:
+            return
+
+        def _submit_import_task() -> None:
+            def _worker(bundle, ctx):
+                import_progress = self._scaled_progress_callback(
+                    ctx.report_progress,
+                    start=0,
+                    end=90,
+                )
+                ctx.report_progress(
+                    value=0,
+                    maximum=100,
+                    message="Importing the master catalog transfer package...",
+                )
+
+                def _mutation():
+                    return bundle.master_transfer_service.import_package(
+                        path,
+                        progress_callback=import_progress,
+                        cancel_callback=ctx.raise_if_cancelled,
+                    )
+
+                return run_snapshot_history_action(
+                    history_manager=bundle.history_manager,
+                    action_label=f"Import Master Transfer: {Path(path).name}",
+                    action_type="master_transfer.import",
+                    entity_type="MasterTransferImport",
+                    entity_id=path,
+                    payload={"path": path, "format": "master_transfer"},
+                    mutation=_mutation,
+                    progress_callback=ctx.report_progress,
+                    post_mutation_progress=(92, "Capturing master transfer history snapshot..."),
+                    record_progress=(94, "Recording master transfer history..."),
+                    logger=self.logger,
+                )
+
+            def _before_cleanup(result, ui_progress) -> None:
+                focus_track_id = (
+                    result.catalog_report.created_tracks
+                    or result.catalog_report.updated_tracks
+                    or [None]
+                )[0]
+                self._advance_task_ui_progress(
+                    ui_progress,
+                    value=97,
+                    message="Applying imported master transfer changes...",
+                )
+                try:
+                    self.conn.commit()
+                except Exception:
+                    pass
+                self._advance_task_ui_progress(
+                    ui_progress,
+                    value=99,
+                    message="Refreshing catalog views, workspace panels, and history...",
+                )
+                self.refresh_table_preserve_view(focus_id=focus_track_id)
+                self.populate_all_comboboxes()
+                self._refresh_catalog_workspace_docks()
+                self._refresh_history_actions()
+                self._advance_task_ui_progress(
+                    ui_progress,
+                    value=100,
+                    message="Master transfer import complete.",
+                )
+
+            def _success(result) -> None:
+                self._log_event(
+                    "master_transfer.import",
+                    "Imported master catalog transfer package",
+                    path=path,
+                    exported_at=result.exported_at,
+                    source_app_version=result.app_version,
+                    seeded_parties=result.repertoire_party_phase.imported_parties,
+                    reused_parties=result.repertoire_party_phase.reused_existing_parties,
+                    created_tracks=len(result.catalog_report.created_tracks),
+                    updated_tracks=len(result.catalog_report.updated_tracks),
+                    imported_licenses=result.imported_licenses,
+                    imported_works=result.repertoire_report.imported_works,
+                    imported_contracts=result.repertoire_report.imported_contracts,
+                    imported_rights=result.repertoire_report.imported_rights,
+                    imported_assets=result.repertoire_report.imported_assets,
+                    imported_templates=result.imported_contract_templates,
+                    imported_template_revisions=result.imported_template_revisions,
+                    warnings=result.warnings,
+                )
+                self._audit(
+                    "IMPORT",
+                    "MasterTransfer",
+                    ref_id=path,
+                    details=(
+                        f"tracks_created={len(result.catalog_report.created_tracks)}; "
+                        f"parties_seeded={result.repertoire_party_phase.imported_parties}; "
+                        f"licenses={result.imported_licenses}; "
+                        f"works={result.repertoire_report.imported_works}; "
+                        f"contracts={result.repertoire_report.imported_contracts}; "
+                        f"rights={result.repertoire_report.imported_rights}; "
+                        f"assets={result.repertoire_report.imported_assets}; "
+                        f"templates={result.imported_contract_templates}; "
+                        f"template_revisions={result.imported_template_revisions}"
+                    ),
+                )
+                self._audit_commit()
+                self._show_master_transfer_import_report(path, result)
+
+            self._submit_background_bundle_task(
+                title="Import Master Catalog Transfer",
+                description="Rehydrating a versioned master transfer package through the app's current import logic...",
+                task_fn=_worker,
+                kind="write",
+                unique_key="master_transfer.import",
+                worker_completion_progress=(96, "Finalizing master transfer import transaction..."),
+                on_success_before_cleanup=_before_cleanup,
+                on_success_after_cleanup=_success,
+                on_error=lambda failure: self._show_background_task_error(
+                    "Master Catalog Transfer",
+                    failure,
+                    user_message="Could not import the master transfer package:",
+                ),
+            )
+
+        def _inspection_worker(bundle, ctx):
+            inspection_progress = self._scaled_progress_callback(
+                ctx.report_progress,
+                start=0,
+                end=96,
+            )
+            ctx.report_progress(
+                value=0,
+                maximum=100,
+                message="Inspecting the master catalog transfer package...",
+            )
+            return bundle.master_transfer_service.inspect_package(
+                path,
+                progress_callback=inspection_progress,
+                cancel_callback=ctx.raise_if_cancelled,
+            )
+
+        def _inspection_success(inspection) -> None:
+            accepted = self._open_import_review_dialog(
+                title="Review Master Catalog Transfer Import",
+                subtitle=(
+                    "Inspection completed. Review the staged logical transfer before anything is written to the current profile."
+                ),
+                summary_lines=self._master_transfer_review_summary(inspection),
+                warnings=inspection.warnings,
+                preview_rows=inspection.preview_rows,
+                preview_headers=["Section", "Entity", "Action", "Label", "Notes"],
+                preview_title="Transfer Preview",
+                confirm_label="Apply Master Transfer",
+            )
+            if accepted:
+                _submit_import_task()
+
+        self._submit_background_bundle_task(
+            title="Inspect Master Catalog Transfer",
+            description="Inspecting the selected master transfer package...",
+            task_fn=_inspection_worker,
+            kind="read",
+            unique_key="master_transfer.inspect",
+            worker_completion_progress=(100, "Master transfer inspection complete."),
+            on_success_after_cleanup=_inspection_success,
+            on_error=lambda failure: self._show_background_task_error(
+                "Master Catalog Transfer",
+                failure,
+                user_message="Could not inspect the master transfer package:",
+            ),
+        )
+
     def export_repertoire_exchange(self, format_name: str):
         if self.repertoire_exchange_service is None:
             QMessageBox.warning(self, "Repertoire Exchange", "Open a profile first.")
@@ -16963,6 +17258,72 @@ class App(QMainWindow):
         if inspection.existing_parties:
             lines.append(f"Would reuse existing Parties: {inspection.existing_parties}")
         return lines
+
+    @staticmethod
+    def _master_transfer_review_summary(inspection) -> list[str]:
+        lines = list(getattr(inspection, "summary_lines", []) or [])
+        catalog_dry_run = getattr(inspection, "catalog_dry_run", None)
+        if catalog_dry_run is not None:
+            lines.append(
+                "Catalog dry run: "
+                f"would create {int(getattr(catalog_dry_run, 'would_create_tracks', 0) or 0)}, "
+                f"would update {int(getattr(catalog_dry_run, 'would_update_tracks', 0) or 0)}, "
+                f"blocked {int(getattr(catalog_dry_run, 'failed', 0) or 0)}"
+            )
+        repertoire_inspection = getattr(inspection, "repertoire_inspection", None)
+        if repertoire_inspection is not None:
+            lines.append(
+                "Repertoire preview: "
+                f"would reuse {int(getattr(repertoire_inspection, 'existing_parties', 0) or 0)} "
+                "existing Parties and "
+                f"would create {int(getattr(repertoire_inspection, 'new_parties', 0) or 0)}."
+            )
+        return lines
+
+    def _show_master_transfer_import_report(self, path: str, result) -> None:
+        lines = [
+            f"Source package: {Path(path).name}",
+            f"Source app version: {result.app_version or 'Unknown'}",
+            f"Exported at: {result.exported_at or 'Unknown'}",
+            "",
+            "Applied sections:",
+            (
+                "Catalog: "
+                f"created {len(result.catalog_report.created_tracks)}, "
+                f"updated {len(result.catalog_report.updated_tracks)}"
+            ),
+            (
+                "Contracts and Rights Party phase: "
+                f"created {int(result.repertoire_party_phase.imported_parties or 0)}, "
+                f"reused {int(result.repertoire_party_phase.reused_existing_parties or 0)}"
+            ),
+            f"License Archive: imported {int(result.imported_licenses or 0)}",
+            (
+                "Contracts and Rights: "
+                f"works {int(result.repertoire_report.imported_works or 0)}, "
+                f"contracts {int(result.repertoire_report.imported_contracts or 0)}, "
+                f"rights {int(result.repertoire_report.imported_rights or 0)}, "
+                f"assets {int(result.repertoire_report.imported_assets or 0)}"
+            ),
+            (
+                "Contract Templates: "
+                f"templates {int(result.imported_contract_templates or 0)}, "
+                f"revisions {int(result.imported_template_revisions or 0)}"
+            ),
+        ]
+        if result.warnings:
+            lines.extend(
+                [
+                    "",
+                    "Warnings:",
+                    *[f"- {warning}" for warning in list(result.warnings)[:12]],
+                ]
+            )
+        QMessageBox.information(
+            self,
+            "Master Catalog Transfer",
+            "\n".join(lines),
+        )
 
     def _show_party_import_report(self, path: str, report: PartyImportReport) -> None:
         lines = [

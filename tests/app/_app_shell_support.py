@@ -1173,14 +1173,24 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(
             list(import_snapshot.get("texts") or []),
             [
+                "Master Catalog Transfer",
                 "Catalog Exchange",
                 "Parties",
                 "Contracts and Rights",
             ],
         )
+        master_transfer_menu = self._menu_snapshot_at_path(
+            import_snapshot, "Master Catalog Transfer"
+        )
         import_exchange_menu = self._menu_snapshot_at_path(import_snapshot, "Catalog Exchange")
         parties_menu = self._menu_snapshot_at_path(import_snapshot, "Parties")
         contracts_menu = self._menu_snapshot_at_path(import_snapshot, "Contracts and Rights")
+        self.assertEqual(
+            list(master_transfer_menu.get("texts") or []),
+            [
+                "Import Master Transfer ZIP…",
+            ],
+        )
         self.assertEqual(
             list(import_exchange_menu.get("texts") or []),
             [
@@ -1260,10 +1270,23 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(
             export_texts,
             [
+                "Master Catalog Transfer",
                 "Catalog Exchange",
                 "Parties",
                 "Contracts and Rights",
             ],
+        )
+
+        master_transfer_action = next(
+            action
+            for action in export_menu.actions()
+            if action.menu() is not None and action.text() == "Master Catalog Transfer"
+        )
+        master_transfer_menu = master_transfer_action.menu()
+        assert master_transfer_menu is not None
+        self.assertEqual(
+            [action.text() for action in master_transfer_menu.actions() if action.text()],
+            ["Export Master Transfer ZIP…"],
         )
 
         exchange_action = next(
@@ -4395,6 +4418,27 @@ class AppShellTestCase(unittest.TestCase):
             "Export Contracts and Rights JSON",
         )
 
+    def case_master_transfer_export_uses_background_task(self):
+        export_path = self.root / "master-transfer.zip"
+
+        with (
+            mock.patch.object(
+                app_module.QFileDialog,
+                "getSaveFileName",
+                return_value=(str(export_path), "ZIP Files (*.zip)"),
+            ) as get_save_file_name,
+            mock.patch.object(self.window, "_submit_background_bundle_task") as submit_task,
+        ):
+            self.window.export_master_transfer_package()
+            self.app.processEvents()
+
+        get_save_file_name.assert_called_once()
+        submit_task.assert_called_once()
+        self.assertEqual(
+            submit_task.call_args.kwargs["title"],
+            "Export Master Catalog Transfer",
+        )
+
     def case_repertoire_export_resolves_directory_selection_to_file_target(self):
         export_dir = self.root / "repertoire-export-target"
         export_dir.mkdir(parents=True, exist_ok=True)
@@ -4710,6 +4754,57 @@ class AppShellTestCase(unittest.TestCase):
             self.app.processEvents()
 
         self.assertEqual(submitted_titles, ["Inspect Contracts and Rights JSON"])
+
+    def case_master_transfer_import_requires_review_before_apply(self):
+        package_path = self.root / "master-transfer.zip"
+        package_path.write_bytes(b"placeholder")
+
+        submitted_titles: list[str] = []
+
+        def _capture_submission(_window, **kwargs):
+            submitted_titles.append(str(kwargs.get("title") or ""))
+            if str(kwargs.get("title") or "") == "Inspect Master Catalog Transfer":
+                kwargs["on_success_after_cleanup"](
+                    SimpleNamespace(
+                        summary_lines=["Package format version: 1"],
+                        warnings=[],
+                        preview_rows=[],
+                        catalog_dry_run=SimpleNamespace(
+                            would_create_tracks=1,
+                            would_update_tracks=0,
+                            failed=0,
+                        ),
+                        repertoire_inspection=SimpleNamespace(
+                            existing_parties=0,
+                            new_parties=1,
+                        ),
+                    )
+                )
+                return None
+            raise AssertionError("master transfer apply should not run before review acceptance")
+
+        with (
+            mock.patch.object(
+                app_module.QFileDialog,
+                "getOpenFileName",
+                return_value=(str(package_path), "ZIP Files (*.zip)"),
+            ),
+            mock.patch.object(
+                app_module.App,
+                "_submit_background_bundle_task",
+                autospec=True,
+                side_effect=_capture_submission,
+            ),
+            mock.patch.object(
+                app_module.ImportReviewDialog,
+                "exec",
+                return_value=app_module.QDialog.Rejected,
+            ),
+        ):
+            self.window.import_master_transfer_package()
+            self.app.processEvents()
+
+        self.assertEqual(submitted_titles, ["Inspect Master Catalog Transfer"])
 
     def case_contract_template_workspace_opens_as_tabified_dock(self):
         self.window.open_contract_template_workspace()

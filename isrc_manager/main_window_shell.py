@@ -141,6 +141,13 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
 
     import_menu = file_menu.addMenu("Import & Exchange")
 
+    master_transfer_import_menu = import_menu.addMenu("Master Catalog Transfer")
+    app.import_master_transfer_action = app._create_action(
+        "Import Master Transfer ZIP…",
+        slot=app.import_master_transfer_package,
+    )
+    master_transfer_import_menu.addAction(app.import_master_transfer_action)
+
     import_exchange_menu = import_menu.addMenu("Catalog Exchange")
     app.import_xml_action = app._create_action(
         "Import XML…",
@@ -216,6 +223,14 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     repertoire_import_menu.addAction(app.import_repertoire_package_action)
 
     export_submenu = file_menu.addMenu("Export")
+
+    master_transfer_export_menu = export_submenu.addMenu("Master Catalog Transfer")
+    app.export_master_transfer_action = app._create_action(
+        "Export Master Transfer ZIP…",
+        slot=app.export_master_transfer_package,
+    )
+    master_transfer_export_menu.addAction(app.export_master_transfer_action)
+
     exchange_export_menu = export_submenu.addMenu("Catalog Exchange")
     exchange_export_scope_menu = exchange_export_menu.addMenu("Current Scope")
     exchange_export_full_menu = exchange_export_menu.addMenu("Full Catalog")

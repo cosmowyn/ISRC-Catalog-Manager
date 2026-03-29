@@ -39,6 +39,30 @@ class RepertoireImportInspection:
     new_parties: int = 0
 
 
+@dataclass(slots=True)
+class RepertoireImportOptions:
+    phase: str = "full"
+    source_party_id_map: dict[int, int] = field(default_factory=dict)
+    source_track_id_map: dict[int, int] = field(default_factory=dict)
+    source_release_id_map: dict[int, int] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class RepertoireImportResult:
+    phase: str
+    imported_parties: int = 0
+    reused_existing_parties: int = 0
+    imported_works: int = 0
+    imported_contracts: int = 0
+    imported_rights: int = 0
+    imported_assets: int = 0
+    source_party_id_map: dict[str, int] = field(default_factory=dict)
+    source_work_id_map: dict[str, int] = field(default_factory=dict)
+    source_contract_id_map: dict[str, int] = field(default_factory=dict)
+    source_right_id_map: dict[str, int] = field(default_factory=dict)
+    source_asset_id_map: dict[str, int] = field(default_factory=dict)
+
+
 def _stage_progress(start: int, end: int, index: int, total: int) -> int:
     if total <= 0:
         return int(end)
@@ -198,28 +222,34 @@ class RepertoireExchangeService:
                 for document in contract.get("documents", []):
                     stored_path = str(document.get("file_path") or "").strip()
                     document_id = int(document.get("id") or 0)
+                    filename = coalesce_filename(
+                        document.get("filename"),
+                        default_stem=f"contract-document-{document_id or contract_id or 'file'}",
+                    )
+                    arcname = (
+                        f"files/contracts/{document_id or contract_id or 'contract'}_{filename}"
+                    )
                     abs_path = self.contract_service.resolve_document_path(stored_path)
                     if stored_path and abs_path is not None and abs_path.exists():
                         package_key = stored_path
-                        arcname = f"files/contracts/{Path(stored_path).name}"
                         if arcname not in packaged_files.values():
                             archive.write(abs_path, arcname=arcname)
                         packaged_files[package_key] = arcname
                         continue
                     if document_id <= 0:
-                        continue
+                        raise ValueError(
+                            "Contract document export could not resolve a file-backed source for "
+                            f"contract {contract_id or 'unknown'} document '{filename}'."
+                        )
                     try:
                         data, _ = self.contract_service.fetch_document_bytes(document_id)
-                    except Exception:
-                        continue
-                    filename = coalesce_filename(
-                        document.get("filename"),
-                        default_stem=f"contract-document-{document_id or contract_id or 'file'}",
-                    )
+                    except Exception as exc:
+                        raise ValueError(
+                            f"Contract document {document_id} could not be packaged: {exc}"
+                        ) from exc
                     package_key = (
                         f"embedded/contracts/{contract_id or 'contract'}/{document_id}/{filename}"
                     )
-                    arcname = f"files/contracts/{document_id}_{filename}"
                     if arcname not in packaged_files.values():
                         archive.writestr(arcname, data)
                     document["file_path"] = package_key
@@ -234,26 +264,28 @@ class RepertoireExchangeService:
                 )
                 stored_path = str(asset.get("stored_path") or "").strip()
                 asset_id = int(asset.get("id") or 0)
+                filename = coalesce_filename(
+                    asset.get("filename"),
+                    default_stem=f"asset-{asset_id or 'file'}",
+                )
+                arcname = f"files/assets/{asset_id or 'asset'}_{filename}"
                 abs_path = self.asset_service.resolve_asset_path(stored_path)
                 if stored_path and abs_path is not None and abs_path.exists():
                     package_key = stored_path
-                    arcname = f"files/assets/{Path(stored_path).name}"
                     if arcname not in packaged_files.values():
                         archive.write(abs_path, arcname=arcname)
                     packaged_files[package_key] = arcname
                     continue
                 if asset_id <= 0:
-                    continue
+                    raise ValueError(
+                        "Asset export could not resolve a file-backed source for an asset row "
+                        f"without a persisted id ('{filename}')."
+                    )
                 try:
                     data, _ = self.asset_service.fetch_asset_bytes(asset_id)
-                except Exception:
-                    continue
-                filename = coalesce_filename(
-                    asset.get("filename"),
-                    default_stem=f"asset-{asset_id}",
-                )
+                except Exception as exc:
+                    raise ValueError(f"Asset {asset_id} could not be packaged: {exc}") from exc
                 package_key = f"embedded/assets/{asset_id}/{filename}"
-                arcname = f"files/assets/{asset_id}_{filename}"
                 if arcname not in packaged_files.values():
                     archive.writestr(arcname, data)
                 asset["stored_path"] = package_key
@@ -309,6 +341,87 @@ class RepertoireExchangeService:
                 except Exception:
                     return value
         return value
+
+    @staticmethod
+    def _normalize_source_id_map(raw_mapping: dict[object, object] | None) -> dict[int, int]:
+        normalized: dict[int, int] = {}
+        for raw_key, raw_value in dict(raw_mapping or {}).items():
+            try:
+                source_id = int(raw_key)
+                target_id = int(raw_value)
+            except Exception:
+                continue
+            if source_id > 0 and target_id > 0:
+                normalized[source_id] = target_id
+        return normalized
+
+    def _resolve_mapped_entity_id(
+        self,
+        raw_source_id: object,
+        *,
+        mapped_ids: dict[int, int] | None,
+        table_name: str,
+    ) -> int | None:
+        try:
+            source_id = int(raw_source_id or 0)
+        except Exception:
+            source_id = 0
+        if source_id <= 0:
+            return None
+        if mapped_ids and source_id in mapped_ids:
+            return int(mapped_ids[source_id])
+        row = self.conn.execute(
+            f"SELECT 1 FROM {table_name} WHERE id=?",
+            (int(source_id),),
+        ).fetchone()
+        if row is None:
+            return None
+        return int(source_id)
+
+    @staticmethod
+    def _normalized_id_map(source_map: dict[str, int] | None) -> dict[int, int]:
+        normalized: dict[int, int] = {}
+        for raw_key, raw_value in dict(source_map or {}).items():
+            try:
+                key = int(raw_key)
+                value = int(raw_value)
+            except Exception:
+                continue
+            if key > 0 and value > 0:
+                normalized[key] = value
+        return normalized
+
+    def _resolve_seeded_entity_id(
+        self,
+        raw_value: object,
+        *,
+        mapping: dict[int, int],
+        table_name: str,
+        strict: bool,
+        entity_label: str,
+    ) -> int | None:
+        if raw_value in (None, ""):
+            return None
+        try:
+            source_id = int(raw_value)
+        except Exception:
+            raise ValueError(f"Invalid source {entity_label} id: {raw_value!r}") from None
+        if source_id <= 0:
+            return None
+        mapped_id = mapping.get(source_id)
+        if mapped_id is not None:
+            return int(mapped_id)
+        existing = self.conn.execute(
+            f"SELECT id FROM {table_name} WHERE id=?",
+            (int(source_id),),
+        ).fetchone()
+        if existing:
+            return int(existing[0])
+        if strict:
+            raise ValueError(
+                f"{entity_label.title()} reference {source_id} could not be resolved in the current profile."
+            )
+        return None
 
     def inspect_json(
         self,
@@ -549,14 +662,16 @@ class RepertoireExchangeService:
         self,
         path: str | Path,
         *,
+        options: RepertoireImportOptions | None = None,
         progress_callback=None,
         cancel_callback=None,
-    ) -> None:
+    ) -> RepertoireImportResult:
         self._report_progress(progress_callback, 5, "Reading Contracts and Rights JSON...")
         if cancel_callback is not None:
             cancel_callback()
-        self._import_payload(
+        return self._import_payload(
             self._load_json_payload(path),
+            options=options,
             progress_callback=progress_callback,
             cancel_callback=cancel_callback,
         )
@@ -565,15 +680,16 @@ class RepertoireExchangeService:
         self,
         path: str | Path,
         *,
+        options: RepertoireImportOptions | None = None,
         progress_callback=None,
         cancel_callback=None,
-    ) -> None:
+    ) -> RepertoireImportResult:
         self._report_progress(progress_callback, 5, "Reading Contracts and Rights workbook...")
         if cancel_callback is not None:
             cancel_callback()
         rows = self._rows_from_workbook(path)
         self._report_progress(progress_callback, 20, "Parsing repertoire workbook sheets...")
-        self._import_payload(
+        return self._import_payload(
             {
                 "schema_version": REPERTOIRE_JSON_SCHEMA_VERSION,
                 "parties": rows.get("parties", []),
@@ -582,6 +698,7 @@ class RepertoireExchangeService:
                 "rights": rows.get("rights", []),
                 "assets": rows.get("assets", []),
             },
+            options=options,
             progress_callback=progress_callback,
             cancel_callback=cancel_callback,
         )
@@ -590,15 +707,16 @@ class RepertoireExchangeService:
         self,
         directory: str | Path,
         *,
+        options: RepertoireImportOptions | None = None,
         progress_callback=None,
         cancel_callback=None,
-    ) -> None:
+    ) -> RepertoireImportResult:
         self._report_progress(progress_callback, 5, "Reading Contracts and Rights CSV bundle...")
         if cancel_callback is not None:
             cancel_callback()
         rows = self._rows_from_csv_bundle(directory)
         self._report_progress(progress_callback, 20, "Parsing repertoire CSV bundle...")
-        self._import_payload(
+        return self._import_payload(
             {
                 "schema_version": REPERTOIRE_JSON_SCHEMA_VERSION,
                 "parties": rows.get("parties", []),
@@ -607,6 +725,7 @@ class RepertoireExchangeService:
                 "rights": rows.get("rights", []),
                 "assets": rows.get("assets", []),
             },
+            options=options,
             progress_callback=progress_callback,
             cancel_callback=cancel_callback,
         )
@@ -615,9 +734,10 @@ class RepertoireExchangeService:
         self,
         path: str | Path,
         *,
+        options: RepertoireImportOptions | None = None,
         progress_callback=None,
         cancel_callback=None,
-    ) -> None:
+    ) -> RepertoireImportResult:
         self._report_progress(progress_callback, 5, "Extracting Contracts and Rights package...")
         with tempfile.TemporaryDirectory(prefix="repertoire-package-") as tmpdir:
             target_dir = Path(tmpdir)
@@ -640,8 +760,9 @@ class RepertoireExchangeService:
                     if arcname:
                         asset["source_path"] = str(target_dir / arcname)
             self._report_progress(progress_callback, 20, "Parsing repertoire package manifest...")
-            self._import_payload(
+            return self._import_payload(
                 payload,
+                options=options,
                 progress_callback=progress_callback,
                 cancel_callback=cancel_callback,
             )
@@ -650,22 +771,94 @@ class RepertoireExchangeService:
         self,
         payload: dict[str, object],
         *,
+        options: RepertoireImportOptions | None = None,
         progress_callback=None,
         cancel_callback=None,
-    ) -> None:
+    ) -> RepertoireImportResult:
         version = int(payload.get("schema_version") or 0)
         if version != REPERTOIRE_JSON_SCHEMA_VERSION:
             raise ValueError(
                 f"Unsupported repertoire schema version {version}. Expected {REPERTOIRE_JSON_SCHEMA_VERSION}."
             )
-        party_id_map: dict[int, int] = {}
+        opts = options or RepertoireImportOptions()
+        phase = str(opts.phase or "full").strip().lower()
+        if phase not in {"full", "parties_only", "remaining"}:
+            raise ValueError(f"Unsupported repertoire import phase: {phase}")
+
+        import_parties = phase in {"full", "parties_only"}
+        import_remaining = phase in {"full", "remaining"}
+
+        party_id_map = self._normalized_id_map(opts.source_party_id_map)
+        track_id_map = self._normalized_id_map(opts.source_track_id_map)
+        release_id_map = self._normalized_id_map(opts.source_release_id_map)
         work_id_map: dict[int, int] = {}
         contract_id_map: dict[int, int] = {}
         document_id_map: dict[int, int] = {}
+        contract_link_updates: list[tuple[int, int | None, int | None]] = []
+        asset_lineage_updates: list[tuple[int, int | None]] = []
+        result = RepertoireImportResult(phase=phase)
 
         def _check_cancel() -> None:
             if cancel_callback is not None:
                 cancel_callback()
+
+        def _resolve_party_reference(raw_value: object) -> int | None:
+            return self._resolve_seeded_entity_id(
+                raw_value,
+                mapping=party_id_map,
+                table_name="Parties",
+                strict=(phase == "remaining"),
+                entity_label="party",
+            )
+
+        def _resolve_track_reference(raw_value: object) -> int | None:
+            return self._resolve_seeded_entity_id(
+                raw_value,
+                mapping=track_id_map,
+                table_name="Tracks",
+                strict=(phase == "remaining"),
+                entity_label="track",
+            )
+
+        def _resolve_release_reference(raw_value: object) -> int | None:
+            return self._resolve_seeded_entity_id(
+                raw_value,
+                mapping=release_id_map,
+                table_name="Releases",
+                strict=(phase == "remaining"),
+                entity_label="release",
+            )
+
+        def _find_existing_work_id(
+            *,
+            title: object,
+            iswc: object,
+            registration_number: object,
+            linked_track_ids: list[int],
+        ) -> int | None:
+            source_title = str(title or "").strip()
+            source_iswc = str(iswc or "").strip()
+            source_registration = str(registration_number or "").strip()
+            seen_work_ids: set[int] = set()
+            candidates = []
+            for linked_track_id in linked_track_ids:
+                for record in self.work_service.list_works(linked_track_id=int(linked_track_id)):
+                    if int(record.id) in seen_work_ids:
+                        continue
+                    seen_work_ids.add(int(record.id))
+                    candidates.append(record)
+            for record in candidates:
+                if source_iswc and str(record.iswc or "").strip() == source_iswc:
+                    return int(record.id)
+            for record in candidates:
+                if source_registration and (
+                    str(record.registration_number or "").strip() == source_registration
+                ):
+                    return int(record.id)
+            for record in candidates:
+                if source_title and str(record.title or "").strip() == source_title:
+                    return int(record.id)
+            return None
 
         parties = list(payload.get("parties", []) or [])
         works = list(payload.get("works", []) or [])
@@ -674,68 +867,89 @@ class RepertoireExchangeService:
         assets = list(payload.get("assets", []) or [])
 
         with self.conn:
-            self._report_progress(progress_callback, 30, "Importing Party records...")
-            for index, row in enumerate(parties, start=1):
-                _check_cancel()
+            if import_parties:
+                self._report_progress(progress_callback, 30, "Importing Party records...")
+                for index, row in enumerate(parties, start=1):
+                    _check_cancel()
+                    self._report_progress(
+                        progress_callback,
+                        _stage_progress(30, 45, index - 1, len(parties)),
+                        f"Importing Party records ({index} of {len(parties)})...",
+                    )
+                    source = {key: self._decode_value(value) for key, value in dict(row).items()}
+                    old_id = int(source.get("id") or 0)
+                    legal_name = str(source.get("legal_name") or "").strip()
+                    existing = self.conn.execute(
+                        "SELECT id FROM Parties WHERE legal_name=? ORDER BY id LIMIT 1",
+                        (legal_name,),
+                    ).fetchone()
+                    if existing:
+                        if old_id > 0:
+                            party_id_map[old_id] = int(existing[0])
+                        result.reused_existing_parties += 1
+                        continue
+                    new_id = self.party_service.create_party(
+                        PartyPayload(
+                            legal_name=legal_name,
+                            display_name=source.get("display_name"),
+                            artist_name=source.get("artist_name"),
+                            company_name=source.get("company_name"),
+                            first_name=source.get("first_name"),
+                            middle_name=source.get("middle_name"),
+                            last_name=source.get("last_name"),
+                            party_type=source.get("party_type") or "organization",
+                            contact_person=source.get("contact_person"),
+                            email=source.get("email"),
+                            alternative_email=source.get("alternative_email"),
+                            phone=source.get("phone"),
+                            website=source.get("website"),
+                            street_name=source.get("street_name"),
+                            street_number=source.get("street_number"),
+                            address_line1=source.get("address_line1"),
+                            address_line2=source.get("address_line2"),
+                            city=source.get("city"),
+                            region=source.get("region"),
+                            postal_code=source.get("postal_code"),
+                            country=source.get("country"),
+                            bank_account_number=source.get("bank_account_number"),
+                            chamber_of_commerce_number=source.get("chamber_of_commerce_number"),
+                            tax_id=source.get("tax_id"),
+                            vat_number=source.get("vat_number"),
+                            pro_affiliation=source.get("pro_affiliation"),
+                            pro_number=source.get("pro_number"),
+                            ipi_cae=source.get("ipi_cae"),
+                            notes=source.get("notes"),
+                            profile_name=source.get("profile_name"),
+                            artist_aliases=[
+                                str(item).strip()
+                                for item in list(source.get("artist_aliases", []) or [])
+                                if str(item).strip()
+                            ],
+                        ),
+                        cursor=self.conn.cursor(),
+                    )
+                    if old_id > 0:
+                        party_id_map[old_id] = new_id
+                    result.imported_parties += 1
+                if phase == "parties_only":
+                    self._report_progress(progress_callback, 98, "Finalizing Party import phase...")
+                    self._report_progress(
+                        progress_callback,
+                        100,
+                        "Contracts and Rights Party phase complete.",
+                    )
+                    result.source_party_id_map = {
+                        str(key): int(value) for key, value in party_id_map.items()
+                    }
+                    return result
+            else:
+                self._report_progress(progress_callback, 30, "Reusing seeded Party references...")
                 self._report_progress(
-                    progress_callback,
-                    _stage_progress(30, 45, index - 1, len(parties)),
-                    f"Importing Party records ({index} of {len(parties)})...",
+                    progress_callback, 45, "Starting repertoire link rehydration..."
                 )
-                source = {key: self._decode_value(value) for key, value in dict(row).items()}
-                old_id = int(source.get("id") or 0)
-                legal_name = str(source.get("legal_name") or "").strip()
-                existing = self.conn.execute(
-                    "SELECT id FROM Parties WHERE legal_name=? ORDER BY id LIMIT 1",
-                    (legal_name,),
-                ).fetchone()
-                if existing:
-                    party_id_map[old_id] = int(existing[0])
-                    continue
-                new_id = self.party_service.create_party(
-                    PartyPayload(
-                        legal_name=legal_name,
-                        display_name=source.get("display_name"),
-                        artist_name=source.get("artist_name"),
-                        company_name=source.get("company_name"),
-                        first_name=source.get("first_name"),
-                        middle_name=source.get("middle_name"),
-                        last_name=source.get("last_name"),
-                        party_type=source.get("party_type") or "organization",
-                        contact_person=source.get("contact_person"),
-                        email=source.get("email"),
-                        alternative_email=source.get("alternative_email"),
-                        phone=source.get("phone"),
-                        website=source.get("website"),
-                        street_name=source.get("street_name"),
-                        street_number=source.get("street_number"),
-                        address_line1=source.get("address_line1"),
-                        address_line2=source.get("address_line2"),
-                        city=source.get("city"),
-                        region=source.get("region"),
-                        postal_code=source.get("postal_code"),
-                        country=source.get("country"),
-                        bank_account_number=source.get("bank_account_number"),
-                        chamber_of_commerce_number=source.get("chamber_of_commerce_number"),
-                        tax_id=source.get("tax_id"),
-                        vat_number=source.get("vat_number"),
-                        pro_affiliation=source.get("pro_affiliation"),
-                        pro_number=source.get("pro_number"),
-                        ipi_cae=source.get("ipi_cae"),
-                        notes=source.get("notes"),
-                        profile_name=source.get("profile_name"),
-                        artist_aliases=[
-                            str(item).strip()
-                            for item in list(source.get("artist_aliases", []) or [])
-                            if str(item).strip()
-                        ],
-                    ),
-                    cursor=self.conn.cursor(),
-                )
-                party_id_map[old_id] = new_id
 
             self._report_progress(progress_callback, 45, "Importing Work records...")
-            for index, row in enumerate(works, start=1):
+            for index, row in enumerate(works if import_remaining else [], start=1):
                 _check_cancel()
                 self._report_progress(
                     progress_callback,
@@ -746,50 +960,69 @@ class RepertoireExchangeService:
                 old_id = int(source.get("id") or 0)
                 contributors = []
                 for contributor in source.get("contributors", []) or []:
+                    party_id = _resolve_party_reference(contributor.get("party_id"))
                     contributors.append(
                         WorkContributorPayload(
                             role=contributor.get("role") or "songwriter",
                             name=contributor.get("display_name") or "",
                             share_percent=contributor.get("share_percent"),
                             role_share_percent=contributor.get("role_share_percent"),
-                            party_id=party_id_map.get(int(contributor.get("party_id") or 0)),
+                            party_id=party_id,
                             notes=contributor.get("notes"),
                         )
                     )
                 track_ids = [
-                    int(track_id)
+                    resolved_track_id
                     for track_id in source.get("track_ids", []) or []
-                    if self.conn.execute(
-                        "SELECT 1 FROM Tracks WHERE id=?", (int(track_id),)
-                    ).fetchone()
+                    if (resolved_track_id := _resolve_track_reference(track_id)) is not None
                 ]
-                new_id = self.work_service.create_work(
-                    WorkPayload(
-                        title=source.get("title") or "",
-                        alternate_titles=list(source.get("alternate_titles", []) or []),
-                        version_subtitle=source.get("version_subtitle"),
-                        language=source.get("language"),
-                        lyrics_flag=bool(source.get("lyrics_flag")),
-                        instrumental_flag=bool(source.get("instrumental_flag")),
-                        genre_notes=source.get("genre_notes"),
+                work_payload = WorkPayload(
+                    title=source.get("title") or "",
+                    alternate_titles=list(source.get("alternate_titles", []) or []),
+                    version_subtitle=source.get("version_subtitle"),
+                    language=source.get("language"),
+                    lyrics_flag=bool(source.get("lyrics_flag")),
+                    instrumental_flag=bool(source.get("instrumental_flag")),
+                    genre_notes=source.get("genre_notes"),
+                    iswc=source.get("iswc"),
+                    registration_number=source.get("registration_number"),
+                    work_status=source.get("work_status"),
+                    metadata_complete=bool(source.get("metadata_complete")),
+                    contract_signed=bool(source.get("contract_signed")),
+                    rights_verified=bool(source.get("rights_verified")),
+                    notes=source.get("notes"),
+                    profile_name=source.get("profile_name"),
+                    contributors=contributors,
+                    track_ids=track_ids,
+                )
+                existing_work_id = (
+                    _find_existing_work_id(
+                        title=source.get("title"),
                         iswc=source.get("iswc"),
                         registration_number=source.get("registration_number"),
-                        work_status=source.get("work_status"),
-                        metadata_complete=bool(source.get("metadata_complete")),
-                        contract_signed=bool(source.get("contract_signed")),
-                        rights_verified=bool(source.get("rights_verified")),
-                        notes=source.get("notes"),
-                        profile_name=source.get("profile_name"),
-                        contributors=contributors,
-                        track_ids=track_ids,
-                    ),
-                    cursor=self.conn.cursor(),
+                        linked_track_ids=track_ids,
+                    )
+                    if phase == "remaining"
+                    else None
                 )
+                if existing_work_id is not None:
+                    self.work_service.update_work(
+                        existing_work_id,
+                        work_payload,
+                        cursor=self.conn.cursor(),
+                    )
+                    new_id = int(existing_work_id)
+                else:
+                    new_id = self.work_service.create_work(
+                        work_payload,
+                        cursor=self.conn.cursor(),
+                    )
                 work_id_map[old_id] = new_id
+                result.imported_works += 1
 
             contract_documents_buffer: list[tuple[int, list[dict[str, object]]]] = []
             self._report_progress(progress_callback, 60, "Importing Contract records...")
-            for index, row in enumerate(contracts, start=1):
+            for index, row in enumerate(contracts if import_remaining else [], start=1):
                 _check_cancel()
                 self._report_progress(
                     progress_callback,
@@ -800,7 +1033,7 @@ class RepertoireExchangeService:
                 old_id = int(source.get("id") or 0)
                 party_payloads = []
                 for party in source.get("parties", []) or []:
-                    mapped_party_id = party_id_map.get(int(party.get("party_id") or 0))
+                    mapped_party_id = _resolve_party_reference(party.get("party_id"))
                     if not mapped_party_id:
                         continue
                     party_payloads.append(
@@ -844,20 +1077,26 @@ class RepertoireExchangeService:
                             notes=item.get("notes"),
                         )
                     )
-                work_ids = [
-                    work_id_map.get(int(item), 0) for item in source.get("work_ids", []) or []
-                ]
+                work_ids: list[int] = []
+                for item in source.get("work_ids", []) or []:
+                    old_work_id = int(item or 0)
+                    mapped_work_id = work_id_map.get(old_work_id)
+                    if mapped_work_id:
+                        work_ids.append(int(mapped_work_id))
+                        continue
+                    if old_work_id > 0:
+                        raise ValueError(
+                            f"Work reference {old_work_id} could not be resolved during repertoire import."
+                        )
                 track_ids = [
-                    int(item)
+                    resolved_track_id
                     for item in source.get("track_ids", []) or []
-                    if self.conn.execute("SELECT 1 FROM Tracks WHERE id=?", (int(item),)).fetchone()
+                    if (resolved_track_id := _resolve_track_reference(item)) is not None
                 ]
                 release_ids = [
-                    int(item)
+                    resolved_release_id
                     for item in source.get("release_ids", []) or []
-                    if self.conn.execute(
-                        "SELECT 1 FROM Releases WHERE id=?", (int(item),)
-                    ).fetchone()
+                    if (resolved_release_id := _resolve_release_reference(item)) is not None
                 ]
                 new_id = self.contract_service.create_contract(
                     ContractPayload(
@@ -874,6 +1113,8 @@ class RepertoireExchangeService:
                         reversion_date=source.get("reversion_date"),
                         termination_date=source.get("termination_date"),
                         status=source.get("status") or "draft",
+                        supersedes_contract_id=None,
+                        superseded_by_contract_id=None,
                         summary=source.get("summary"),
                         notes=source.get("notes"),
                         profile_name=source.get("profile_name"),
@@ -887,7 +1128,23 @@ class RepertoireExchangeService:
                     cursor=self.conn.cursor(),
                 )
                 contract_id_map[old_id] = new_id
+                contract_link_updates.append(
+                    (
+                        int(new_id),
+                        (
+                            int(source.get("supersedes_contract_id") or 0)
+                            if source.get("supersedes_contract_id") not in (None, "")
+                            else None
+                        ),
+                        (
+                            int(source.get("superseded_by_contract_id") or 0)
+                            if source.get("superseded_by_contract_id") not in (None, "")
+                            else None
+                        ),
+                    )
+                )
                 contract_documents_buffer.append((new_id, list(source.get("documents", []) or [])))
+                result.imported_contracts += 1
 
             self._report_progress(progress_callback, 75, "Relinking contract document chains...")
             for new_contract_id, source_documents in contract_documents_buffer:
@@ -920,8 +1177,45 @@ class RepertoireExchangeService:
                         ),
                     )
 
+            for (
+                new_contract_id,
+                source_supersedes_contract_id,
+                source_superseded_by_contract_id,
+            ) in contract_link_updates:
+                supersedes_contract_id = None
+                if source_supersedes_contract_id:
+                    supersedes_contract_id = contract_id_map.get(source_supersedes_contract_id)
+                    if supersedes_contract_id is None:
+                        raise ValueError(
+                            "Contract supersession reference "
+                            f"{source_supersedes_contract_id} could not be resolved during repertoire import."
+                        )
+                superseded_by_contract_id = None
+                if source_superseded_by_contract_id:
+                    superseded_by_contract_id = contract_id_map.get(
+                        source_superseded_by_contract_id
+                    )
+                    if superseded_by_contract_id is None:
+                        raise ValueError(
+                            "Contract supersession reference "
+                            f"{source_superseded_by_contract_id} could not be resolved during repertoire import."
+                        )
+                self.conn.execute(
+                    """
+                    UPDATE Contracts
+                    SET supersedes_contract_id=?,
+                        superseded_by_contract_id=?
+                    WHERE id=?
+                    """,
+                    (
+                        supersedes_contract_id,
+                        superseded_by_contract_id,
+                        int(new_contract_id),
+                    ),
+                )
+
             self._report_progress(progress_callback, 78, "Importing Right records...")
-            for index, row in enumerate(rights, start=1):
+            for index, row in enumerate(rights if import_remaining else [], start=1):
                 _check_cancel()
                 self._report_progress(
                     progress_callback,
@@ -929,6 +1223,22 @@ class RepertoireExchangeService:
                     f"Importing Right records ({index} of {len(rights)})...",
                 )
                 source = {key: self._decode_value(value) for key, value in dict(row).items()}
+                source_contract_id = None
+                work_id = None
+                if source.get("source_contract_id") not in (None, ""):
+                    old_contract_id = int(source.get("source_contract_id") or 0)
+                    source_contract_id = contract_id_map.get(old_contract_id)
+                    if source_contract_id is None and old_contract_id > 0:
+                        raise ValueError(
+                            f"Contract reference {old_contract_id} could not be resolved during repertoire import."
+                        )
+                if source.get("work_id") not in (None, ""):
+                    old_work_id = int(source.get("work_id") or 0)
+                    work_id = work_id_map.get(old_work_id)
+                    if work_id is None and old_work_id > 0:
+                        raise ValueError(
+                            f"Work reference {old_work_id} could not be resolved during repertoire import."
+                        )
                 self.rights_service.create_right(
                     RightPayload(
                         title=source.get("title"),
@@ -939,44 +1249,27 @@ class RepertoireExchangeService:
                         start_date=source.get("start_date"),
                         end_date=source.get("end_date"),
                         perpetual_flag=bool(source.get("perpetual_flag")),
-                        granted_by_party_id=party_id_map.get(
-                            int(source.get("granted_by_party_id") or 0)
+                        granted_by_party_id=_resolve_party_reference(
+                            source.get("granted_by_party_id")
                         ),
-                        granted_to_party_id=party_id_map.get(
-                            int(source.get("granted_to_party_id") or 0)
+                        granted_to_party_id=_resolve_party_reference(
+                            source.get("granted_to_party_id")
                         ),
-                        retained_by_party_id=party_id_map.get(
-                            int(source.get("retained_by_party_id") or 0)
+                        retained_by_party_id=_resolve_party_reference(
+                            source.get("retained_by_party_id")
                         ),
-                        source_contract_id=contract_id_map.get(
-                            int(source.get("source_contract_id") or 0)
-                        ),
-                        work_id=work_id_map.get(int(source.get("work_id") or 0)),
-                        track_id=(
-                            int(source.get("track_id"))
-                            if source.get("track_id")
-                            and self.conn.execute(
-                                "SELECT 1 FROM Tracks WHERE id=?",
-                                (int(source.get("track_id")),),
-                            ).fetchone()
-                            else None
-                        ),
-                        release_id=(
-                            int(source.get("release_id"))
-                            if source.get("release_id")
-                            and self.conn.execute(
-                                "SELECT 1 FROM Releases WHERE id=?",
-                                (int(source.get("release_id")),),
-                            ).fetchone()
-                            else None
-                        ),
+                        source_contract_id=source_contract_id,
+                        work_id=work_id,
+                        track_id=_resolve_track_reference(source.get("track_id")),
+                        release_id=_resolve_release_reference(source.get("release_id")),
                         notes=source.get("notes"),
                         profile_name=source.get("profile_name"),
                     )
                 )
+                result.imported_rights += 1
 
             self._report_progress(progress_callback, 88, "Importing Asset records...")
-            for index, row in enumerate(assets, start=1):
+            for index, row in enumerate(assets if import_remaining else [], start=1):
                 _check_cancel()
                 self._report_progress(
                     progress_callback,
@@ -984,7 +1277,7 @@ class RepertoireExchangeService:
                     f"Importing Asset records ({index} of {len(assets)})...",
                 )
                 source = {key: self._decode_value(value) for key, value in dict(row).items()}
-                self.asset_service.create_asset(
+                new_asset_id = self.asset_service.create_asset(
                     AssetVersionPayload(
                         asset_type=source.get("asset_type") or "other",
                         filename=source.get("filename"),
@@ -1013,25 +1306,48 @@ class RepertoireExchangeService:
                         primary_flag=bool(source.get("primary_flag")),
                         version_status=source.get("version_status"),
                         notes=source.get("notes"),
-                        track_id=(
-                            int(source.get("track_id"))
-                            if source.get("track_id")
-                            and self.conn.execute(
-                                "SELECT 1 FROM Tracks WHERE id=?",
-                                (int(source.get("track_id")),),
-                            ).fetchone()
-                            else None
-                        ),
-                        release_id=(
-                            int(source.get("release_id"))
-                            if source.get("release_id")
-                            and self.conn.execute(
-                                "SELECT 1 FROM Releases WHERE id=?",
-                                (int(source.get("release_id")),),
-                            ).fetchone()
-                            else None
-                        ),
+                        track_id=_resolve_track_reference(source.get("track_id")),
+                        release_id=_resolve_release_reference(source.get("release_id")),
                     )
+                )
+                old_asset_id = int(source.get("id") or 0)
+                if old_asset_id > 0:
+                    result.source_asset_id_map[str(old_asset_id)] = int(new_asset_id)
+                derived_from_asset_source_id = (
+                    int(source.get("derived_from_asset_id") or 0)
+                    if source.get("derived_from_asset_id") not in (None, "")
+                    else None
+                )
+                asset_lineage_updates.append((int(new_asset_id), derived_from_asset_source_id))
+                result.imported_assets += 1
+
+            for new_asset_id, derived_from_asset_source_id in asset_lineage_updates:
+                if not derived_from_asset_source_id:
+                    continue
+                mapped_derived_asset_id = result.source_asset_id_map.get(
+                    str(derived_from_asset_source_id)
+                )
+                if mapped_derived_asset_id is None:
+                    raise ValueError(
+                        "Asset derivation reference "
+                        f"{derived_from_asset_source_id} could not be resolved during repertoire import."
+                    )
+                self.conn.execute(
+                    """
+                    UPDATE AssetVersions
+                    SET derived_from_asset_id=?
+                    WHERE id=?
+                    """,
+                    (
+                        int(mapped_derived_asset_id),
+                        int(new_asset_id),
+                    ),
                 )
         self._report_progress(progress_callback, 98, "Finalizing Contracts and Rights import...")
         self._report_progress(progress_callback, 100, "Contracts and Rights import complete.")
+        result.source_party_id_map = {str(key): int(value) for key, value in party_id_map.items()}
+        result.source_work_id_map = {str(key): int(value) for key, value in work_id_map.items()}
+        result.source_contract_id_map = {
+            str(key): int(value) for key, value in contract_id_map.items()
+        }
+        return result
