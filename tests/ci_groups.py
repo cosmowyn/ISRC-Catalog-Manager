@@ -104,6 +104,7 @@ GROUP_MODULES: dict[str, tuple[str, ...]] = {
         "tests.test_settings_mutations_service",
         "tests.test_settings_read_service",
         "tests.test_sqlite_utils",
+        "tests.test_storage_admin_service",
         "tests.test_storage_migration_service",
     ),
     "ui-app-workflows": (

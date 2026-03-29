@@ -27,6 +27,7 @@ else:
 
 from isrc_manager.app_dialogs import (
     ActionRibbonDialog,
+    ApplicationStorageAdminDialog,
     CustomColumnsDialog,
     DiagnosticsDialog,
     HelpContentsDialog,
@@ -59,6 +60,9 @@ class _DiagnosticsDialogHost(QWidget):
         self.load_calls = 0
         self.repair_calls = []
         self.history_cleanup_open_count = 0
+        self.application_storage_admin_open_count = 0
+        self.storage_audit_load_calls = 0
+        self.storage_cleanup_calls = []
         self.background_errors = []
         self._report = {
             "environment": {
@@ -97,6 +101,63 @@ class _DiagnosticsDialogHost(QWidget):
                 ),
                 "within_budget": False,
             },
+            "application_storage": {
+                "available": True,
+                "summary": (
+                    "The application is using 3.2 GB in 12 tracked storage item(s). "
+                    "5 item(s) appear reclaimable now, covering 1.1 GB."
+                ),
+                "total_text": "3.2 GB",
+                "current_profile_text": "1.4 GB",
+                "reclaimable_text": "1.1 GB",
+                "deleted_profile_text": "512.0 MB",
+                "orphaned_text": "420.0 MB",
+                "warning_text": "640.0 MB",
+            },
+        }
+        self._storage_audit_payload = {
+            "summary": {
+                "summary": (
+                    "The application is using 3.2 GB in 12 tracked storage item(s). "
+                    "5 item(s) appear reclaimable now, covering 1.1 GB."
+                ),
+                "total_text": "3.2 GB",
+                "current_profile_text": "1.4 GB",
+                "reclaimable_text": "1.1 GB",
+                "deleted_profile_text": "512.0 MB",
+                "orphaned_text": "420.0 MB",
+                "warning_text": "640.0 MB",
+            },
+            "items": [
+                {
+                    "item_key": "orphan-file",
+                    "status_label": "Orphaned / Unreferenced",
+                    "category_label": "Track / Album Media",
+                    "label": "orphan_audio.wav",
+                    "size_text": "420.0 MB",
+                    "bytes_on_disk": 420 * 1024 * 1024,
+                    "profile_name": "",
+                    "path": "/tmp/test-data/track_media/orphan_audio.wav",
+                    "reason": "No active profile references this application-managed file.",
+                    "warning_required": False,
+                    "warning": "",
+                    "references_text": "",
+                },
+                {
+                    "item_key": "in-use-file",
+                    "status_label": "In Use by Active Profile",
+                    "category_label": "Track / Album Media",
+                    "label": "live_audio.wav",
+                    "size_text": "640.0 MB",
+                    "bytes_on_disk": 640 * 1024 * 1024,
+                    "profile_name": "catalog.db",
+                    "path": "/tmp/test-data/track_media/live_audio.wav",
+                    "reason": "Referenced by active profile catalog.db.",
+                    "warning_required": True,
+                    "warning": "Deleting this file permanently removes media still referenced by active profiles.",
+                    "references_text": "Track #1 'Live Track' audio",
+                },
+            ],
         }
 
     def _create_diagnostics_catalog_cleanup_panel(self, parent):
@@ -181,6 +242,59 @@ class _DiagnosticsDialogHost(QWidget):
 
     def open_history_cleanup_dialog(self):
         self.history_cleanup_open_count += 1
+
+    def open_application_storage_admin_dialog(self):
+        self.application_storage_admin_open_count += 1
+
+    def _load_application_storage_audit_async(
+        self,
+        *,
+        owner=None,
+        on_success=None,
+        on_error=None,
+        on_cancelled=None,
+        on_finished=None,
+        on_status=None,
+    ):
+        del owner, on_error, on_cancelled
+        self.storage_audit_load_calls += 1
+        if on_status is not None:
+            on_status("Inspecting application-wide storage...")
+        if on_success is not None:
+            on_success(self._storage_audit_payload)
+        if on_finished is not None:
+            on_finished()
+        return f"storage-audit-{self.storage_audit_load_calls}"
+
+    def _run_application_storage_cleanup_async(
+        self,
+        item_keys,
+        *,
+        allow_warning_deletes=False,
+        owner=None,
+        on_success=None,
+        on_error=None,
+        on_cancelled=None,
+        on_finished=None,
+        on_status=None,
+    ):
+        del owner, on_error, on_cancelled
+        self.storage_cleanup_calls.append((list(item_keys), bool(allow_warning_deletes)))
+        if on_status is not None:
+            on_status("Deleting selected application storage items...")
+        if on_success is not None:
+            on_success(
+                {
+                    "removed_count": len(item_keys),
+                    "removed_text": "1.1 GB",
+                    "removed_history_entry_count": 0,
+                    "removed_session_entry_count": 0,
+                    "skipped_count": 0,
+                }
+            )
+        if on_finished is not None:
+            on_finished()
+        return f"storage-cleanup-{len(self.storage_cleanup_calls)}"
 
 
 class AppDialogsTests(unittest.TestCase):
@@ -302,12 +416,14 @@ class AppDialogsTests(unittest.TestCase):
             self.assertIsNotNone(dialog.body_scroll.widget())
             self.assertEqual(dialog.environment_labels["App version"].text(), "3.1.0")
             self.assertIn("1.8 GB", dialog.history_storage_summary_label.text())
+            self.assertIn("3.2 GB", dialog.application_storage_summary_label.text())
             self.assertEqual(dialog.history_storage_metric_labels["budget"].text(), "1.0 GB")
             self.assertEqual(
                 dialog.history_storage_metric_labels["over_budget"].text(),
                 "820.0 MB",
             )
             self.assertTrue(dialog.open_cleanup_button.isEnabled())
+            self.assertTrue(dialog.open_storage_admin_button.isEnabled())
             self.assertEqual(dialog.checks_list.count(), 1)
             self.assertIn("Schema layout", dialog.details_edit.toPlainText())
             self.assertTrue(dialog.repair_button.isEnabled())
@@ -315,6 +431,8 @@ class AppDialogsTests(unittest.TestCase):
             self.assertEqual(dialog.catalog_cleanup_panel._refresh_calls, 1)
             dialog.open_cleanup_button.click()
             self.assertEqual(host.history_cleanup_open_count, 1)
+            dialog.open_storage_admin_button.click()
+            self.assertEqual(host.application_storage_admin_open_count, 1)
         finally:
             dialog.close()
             host.close()
@@ -369,6 +487,42 @@ class AppDialogsTests(unittest.TestCase):
             self.assertGreaterEqual(dialog.loading_bar.width(), 220)
             self.assertLessEqual(dialog.loading_bar.width(), 320)
             self.assertGreaterEqual(dialog.loading_status_label.minimumWidth(), 260)
+        finally:
+            dialog.close()
+            host.close()
+
+    def test_application_storage_admin_dialog_uses_async_loader_and_strong_delete_confirmations(self):
+        host = _DiagnosticsDialogHost()
+        dialog = ApplicationStorageAdminDialog(host)
+        try:
+            self.assertEqual(host.storage_audit_load_calls, 1)
+            self.assertFalse(dialog.loading_panel.isVisible())
+            self.assertEqual(dialog.surface_tabs.tabText(0), "Cleanup Candidates")
+            self.assertEqual(dialog.surface_tabs.tabText(1), "Warnings & In Use")
+            self.assertIn("3.2 GB", dialog.summary_label.text())
+            self.assertEqual(dialog.cleanup_table.rowCount(), 1)
+            self.assertEqual(dialog.warning_table.rowCount(), 1)
+
+            dialog.surface_tabs.setCurrentWidget(dialog.warning_table)
+            dialog.warning_table.selectRow(0)
+            self.assertIn("Deleting this file permanently removes media", dialog.details_edit.toPlainText())
+
+            with (
+                mock.patch(
+                    "isrc_manager.app_dialogs.QMessageBox.question",
+                    return_value=QMessageBox.Yes,
+                ),
+                mock.patch(
+                    "isrc_manager.app_dialogs.QInputDialog.getText",
+                    return_value=("DELETE", True),
+                ),
+                mock.patch("isrc_manager.app_dialogs.QMessageBox.information") as info_mock,
+            ):
+                dialog._delete_selected()
+
+            self.assertEqual(host.storage_cleanup_calls, [(["in-use-file"], True)])
+            self.assertEqual(host.storage_audit_load_calls, 2)
+            info_mock.assert_called_once()
         finally:
             dialog.close()
             host.close()

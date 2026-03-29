@@ -736,6 +736,13 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     )
     help_menu.addAction(app.diagnostics_action)
 
+    app.application_storage_admin_action = app._create_action(
+        "Application Storage Admin…",
+        slot=app.open_application_storage_admin_dialog,
+        shortcuts=("Ctrl+Alt+Shift+D", "Meta+Alt+Shift+D"),
+    )
+    help_menu.addAction(app.application_storage_admin_action)
+
     app.application_log_action = app._create_action(
         "Application Log…",
         slot=app.open_application_log_dialog,

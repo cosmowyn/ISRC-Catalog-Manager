@@ -1546,6 +1546,7 @@ class AppShellTestCase(unittest.TestCase):
                 "Help Contents…",
                 "About ISRC Catalog Manager…",
                 "Diagnostics…",
+                "Application Storage Admin…",
                 "Application Log…",
                 "Open Logs Folder…",
                 "Open Data Folder…",
@@ -1718,6 +1719,12 @@ class AppShellTestCase(unittest.TestCase):
             ),
             mock.patch.object(
                 app_module.App,
+                "open_application_storage_admin_dialog",
+                autospec=True,
+                side_effect=_record("storage_admin"),
+            ),
+            mock.patch.object(
+                app_module.App,
                 "open_application_log_dialog",
                 autospec=True,
                 side_effect=_record("application_log"),
@@ -1760,6 +1767,7 @@ class AppShellTestCase(unittest.TestCase):
             self.window.show_history_action.trigger()
             self.window.help_contents_action.trigger()
             self.window.diagnostics_action.trigger()
+            self.window.application_storage_admin_action.trigger()
             self.window.application_log_action.trigger()
             self.window.quality_dashboard_action.trigger()
             self.window.track_import_repair_queue_action.trigger()
@@ -1775,6 +1783,7 @@ class AppShellTestCase(unittest.TestCase):
                 "history",
                 "help",
                 "diagnostics",
+                "storage_admin",
                 "application_log",
                 "quality",
                 "repair_queue",

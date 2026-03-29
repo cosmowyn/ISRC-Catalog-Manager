@@ -114,6 +114,7 @@ from isrc_manager.app_dialogs import (
     AboutDialog,
     ActionRibbonDialog,
     ApplicationLogDialog,
+    ApplicationStorageAdminDialog,
     CustomColumnsDialog,
     DiagnosticsDialog,
     HelpContentsDialog,
@@ -363,6 +364,7 @@ from isrc_manager.startup_splash import (
     StartupFeedbackProtocol,
     create_startup_splash_controller,
 )
+from isrc_manager.storage_admin import ApplicationStorageAdminService
 from isrc_manager.storage_migration import (
     PREFERRED_STATE_CONFLICT,
     PREFERRED_STATE_RESUMABLE_STAGE,
@@ -7367,6 +7369,179 @@ class App(QMainWindow):
 
         raise ValueError(f"Unknown diagnostics repair: {repair_key}")
 
+    def _application_storage_admin_service(self) -> ApplicationStorageAdminService:
+        return ApplicationStorageAdminService(self.storage_layout)
+
+    def _application_storage_summary_payload(
+        self,
+        audit,
+    ) -> dict[str, object]:
+        summary = audit.summary
+        current_profile_text = (
+            f"{self._human_size(summary.current_profile_bytes)}"
+            if summary.current_profile_name
+            else "No active profile"
+        )
+        headline = (
+            f"The application is using {self._human_size(summary.total_app_bytes)} in {summary.total_items} tracked storage item(s). "
+            f"{summary.reclaimable_items} item(s) appear reclaimable now, covering {self._human_size(summary.reclaimable_bytes)}."
+        )
+        if summary.current_profile_name:
+            headline += (
+                f" The active profile {summary.current_profile_name} currently accounts for about "
+                f"{self._human_size(summary.current_profile_bytes)} across database, history, and managed files."
+            )
+        return {
+            "available": True,
+            "summary": headline,
+            "total_bytes": int(summary.total_app_bytes),
+            "current_profile_bytes": int(summary.current_profile_bytes),
+            "reclaimable_bytes": int(summary.reclaimable_bytes),
+            "deleted_profile_bytes": int(summary.deleted_profile_bytes),
+            "orphaned_bytes": int(summary.orphaned_bytes),
+            "warning_bytes": int(summary.warning_bytes),
+            "total_text": self._human_size(summary.total_app_bytes),
+            "current_profile_text": current_profile_text,
+            "reclaimable_text": self._human_size(summary.reclaimable_bytes),
+            "deleted_profile_text": self._human_size(summary.deleted_profile_bytes),
+            "orphaned_text": self._human_size(summary.orphaned_bytes),
+            "warning_text": self._human_size(summary.warning_bytes),
+            "warning_items": int(summary.warning_items),
+            "reclaimable_items": int(summary.reclaimable_items),
+            "total_items": int(summary.total_items),
+            "current_profile_name": summary.current_profile_name,
+        }
+
+    def _application_storage_item_payload(self, item) -> dict[str, object]:
+        references_text = "\n".join(reference.owner_label for reference in item.references[:8])
+        return {
+            "item_key": str(item.item_key),
+            "status_key": str(item.status_key),
+            "status_label": str(item.status_label),
+            "category_key": str(item.category_key),
+            "category_label": str(item.category_label),
+            "label": str(item.label),
+            "path": str(item.path),
+            "bytes_on_disk": int(item.bytes_on_disk or 0),
+            "size_text": self._human_size(item.bytes_on_disk),
+            "profile_name": str(item.profile_name or ""),
+            "profile_path": str(item.profile_path or ""),
+            "reason": str(item.reason or ""),
+            "recommended": bool(item.recommended),
+            "warning_required": bool(item.warning_required),
+            "warning": str(item.warning or ""),
+            "references_text": references_text,
+        }
+
+    def _build_application_storage_audit_payload(
+        self,
+        *,
+        current_db_path: str | Path | None = None,
+        status_callback=None,
+        progress_callback=None,
+    ) -> dict[str, object]:
+        audit = self._application_storage_admin_service().inspect(
+            current_db_path=current_db_path if current_db_path is not None else self.current_db_path,
+            status_callback=status_callback,
+            progress_callback=progress_callback,
+        )
+        return {
+            "summary": self._application_storage_summary_payload(audit),
+            "items": [self._application_storage_item_payload(item) for item in audit.items],
+        }
+
+    def _load_application_storage_audit_async(
+        self,
+        *,
+        owner: QWidget | None = None,
+        on_success=None,
+        on_error=None,
+        on_cancelled=None,
+        on_finished=None,
+        on_status=None,
+    ):
+        current_path = str(getattr(self, "current_db_path", "") or "").strip()
+
+        def _task(ctx):
+            ctx.set_status("Inspecting application-wide storage...")
+            return self._build_application_storage_audit_payload(
+                current_db_path=current_path or None,
+                status_callback=ctx.set_status,
+                progress_callback=lambda value, maximum, message: ctx.report_progress(
+                    value=int(value),
+                    maximum=int(maximum),
+                    message=str(message or ""),
+                ),
+            )
+
+        return self._submit_background_task(
+            title="Application Storage Admin",
+            description="Inspecting application-wide storage...",
+            task_fn=_task,
+            kind="read",
+            unique_key="storage_admin.audit",
+            requires_profile=False,
+            show_dialog=False,
+            owner=owner or self,
+            on_success=on_success,
+            on_error=on_error,
+            on_cancelled=on_cancelled,
+            on_finished=on_finished,
+            on_status=on_status,
+        )
+
+    def _run_application_storage_cleanup_async(
+        self,
+        item_keys: list[str] | tuple[str, ...],
+        *,
+        allow_warning_deletes: bool = False,
+        owner: QWidget | None = None,
+        on_success=None,
+        on_error=None,
+        on_cancelled=None,
+        on_finished=None,
+        on_status=None,
+    ):
+        current_path = str(getattr(self, "current_db_path", "") or "").strip()
+
+        def _task(ctx):
+            ctx.set_status("Deleting selected application storage items...")
+            result = self._application_storage_admin_service().cleanup_selected(
+                item_keys,
+                current_db_path=current_path or None,
+                allow_warning_deletes=allow_warning_deletes,
+                status_callback=ctx.set_status,
+                progress_callback=lambda value, maximum, message: ctx.report_progress(
+                    value=int(value),
+                    maximum=int(maximum),
+                    message=str(message or ""),
+                ),
+            )
+            return {
+                "removed_count": len(result.removed_item_keys),
+                "removed_text": self._human_size(result.removed_bytes),
+                "removed_bytes": int(result.removed_bytes),
+                "removed_history_entry_count": len(result.removed_history_entry_ids),
+                "removed_session_entry_count": len(result.removed_session_entry_ids),
+                "skipped_count": len(result.skipped_item_keys),
+            }
+
+        return self._submit_background_task(
+            title="Application Storage Cleanup",
+            description="Deleting selected application storage items...",
+            task_fn=_task,
+            kind="write",
+            unique_key="storage_admin.cleanup",
+            requires_profile=False,
+            show_dialog=True,
+            owner=owner or self,
+            on_success=on_success,
+            on_error=on_error,
+            on_cancelled=on_cancelled,
+            on_finished=on_finished,
+            on_status=on_status,
+        )
+
     def _build_diagnostics_report(
         self,
         *,
@@ -7445,6 +7620,16 @@ class App(QMainWindow):
             "candidate_count": 0,
             "summary": "History storage information is not available for the current profile.",
             "within_budget": True,
+        }
+        application_storage_summary: dict[str, object] = {
+            "available": False,
+            "summary": "Application-wide storage information is not available.",
+            "total_text": "Not available",
+            "current_profile_text": "Not available",
+            "reclaimable_text": "Not available",
+            "deleted_profile_text": "Not available",
+            "orphaned_text": "Not available",
+            "warning_text": "Not available",
         }
 
         def add_check(
@@ -8073,10 +8258,27 @@ class App(QMainWindow):
                 "summary": f"History storage information could not be inspected: {exc}",
             }
 
+        _set_status("Inspecting application-wide storage...")
+        try:
+            application_storage_audit = self._application_storage_admin_service().inspect(
+                current_db_path=current_path or None,
+                status_callback=status_callback,
+            )
+            application_storage_summary = self._application_storage_summary_payload(
+                application_storage_audit
+            )
+        except Exception as exc:
+            application_storage_summary = {
+                **application_storage_summary,
+                "available": False,
+                "summary": f"Application-wide storage information could not be inspected: {exc}",
+            }
+
         return {
             "environment": environment,
             "checks": checks,
             "history_storage_budget": history_storage_budget_summary,
+            "application_storage": application_storage_summary,
         }
 
     def _load_diagnostics_report_async(
@@ -8364,6 +8566,9 @@ class App(QMainWindow):
 
     def open_application_log_dialog(self):
         ApplicationLogDialog(self, parent=self).exec()
+
+    def open_application_storage_admin_dialog(self):
+        ApplicationStorageAdminDialog(self, parent=self).exec()
 
     def open_diagnostics_dialog(self, *, initial_cleanup_tab: str | None = None):
         dialog = DiagnosticsDialog(self, parent=self)
@@ -12627,6 +12832,13 @@ class App(QMainWindow):
                 "category": "Help",
                 "description": "Open diagnostics and repair information for the current profile.",
                 "action": self.diagnostics_action,
+            },
+            {
+                "id": "application_storage_admin",
+                "label": "Storage Admin",
+                "category": "Help",
+                "description": "Inspect and permanently clean up retained application-wide storage.",
+                "action": self.application_storage_admin_action,
             },
             {
                 "id": "application_log",
