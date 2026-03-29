@@ -37,6 +37,12 @@ from isrc_manager.ui_common import (
 BLOB_ICON_AUDIO_KEY = "blob_icon.audio"
 BLOB_ICON_AUDIO_LOSSY_KEY = "blob_icon.audio_lossy"
 BLOB_ICON_IMAGE_KEY = "blob_icon.image"
+BLOB_ICON_AUDIO_MANAGED_KEY = "blob_icon.audio_managed"
+BLOB_ICON_AUDIO_DATABASE_KEY = "blob_icon.audio_database"
+BLOB_ICON_AUDIO_LOSSY_MANAGED_KEY = "blob_icon.audio_lossy_managed"
+BLOB_ICON_AUDIO_LOSSY_DATABASE_KEY = "blob_icon.audio_lossy_database"
+BLOB_ICON_IMAGE_MANAGED_KEY = "blob_icon.image_managed"
+BLOB_ICON_IMAGE_DATABASE_KEY = "blob_icon.image_database"
 
 
 @dataclass(frozen=True)
@@ -109,25 +115,42 @@ EMOJI_BLOB_ICON_PRESETS: dict[str, tuple[tuple[str, str], ...]] = {
 
 def default_blob_icon_spec(kind: str) -> dict[str, object]:
     clean_kind = str(kind or "").strip().lower()
-    if clean_kind == "audio_lossy":
+    if clean_kind in {"audio_lossy", "audio_lossy_managed"}:
         return {"mode": "emoji", "emoji": "🎚️"}
+    if clean_kind == "audio_lossy_database":
+        return {"mode": "emoji", "emoji": "📼"}
+    if clean_kind == "audio_database":
+        return {"mode": "emoji", "emoji": "💽"}
     if _normalize_blob_icon_kind(clean_kind) == "audio":
         return {"mode": "emoji", "emoji": "🎵"}
+    if clean_kind == "image_database":
+        return {"mode": "emoji", "emoji": "🗃️"}
     return {"mode": "emoji", "emoji": "🖼️"}
 
 
 def default_blob_icon_settings() -> dict[str, dict[str, object]]:
     return {
-        "audio": default_blob_icon_spec("audio"),
-        "audio_lossy": default_blob_icon_spec("audio_lossy"),
-        "image": default_blob_icon_spec("image"),
+        "audio_managed": default_blob_icon_spec("audio_managed"),
+        "audio_database": default_blob_icon_spec("audio_database"),
+        "audio_lossy_managed": default_blob_icon_spec("audio_lossy_managed"),
+        "audio_lossy_database": default_blob_icon_spec("audio_lossy_database"),
+        "image_managed": default_blob_icon_spec("image_managed"),
+        "image_database": default_blob_icon_spec("image_database"),
     }
 
 
 def _normalize_blob_icon_kind(kind: str) -> str:
     clean_kind = str(kind or "").strip().lower()
-    if clean_kind == "audio_lossy":
+    if clean_kind in {
+        "audio_lossy",
+        "audio_managed",
+        "audio_database",
+        "audio_lossy_managed",
+        "audio_lossy_database",
+    }:
         return "audio"
+    if clean_kind in {"image_managed", "image_database"}:
+        return "image"
     return clean_kind
 
 
@@ -228,13 +251,39 @@ def normalize_blob_icon_settings(
     settings: dict[str, object] | None,
 ) -> dict[str, dict[str, object]]:
     payload = dict(settings or {})
+
+    def _payload_value(key: str, legacy_key: str | None = None):
+        if key in payload:
+            return payload.get(key)
+        if legacy_key is not None:
+            return payload.get(legacy_key)
+        return None
+
     return {
-        "audio": normalize_blob_icon_spec(payload.get("audio"), kind="audio"),
-        "audio_lossy": normalize_blob_icon_spec(
-            payload.get("audio_lossy"),
-            kind="audio_lossy",
+        "audio_managed": normalize_blob_icon_spec(
+            _payload_value("audio_managed", "audio"),
+            kind="audio_managed",
         ),
-        "image": normalize_blob_icon_spec(payload.get("image"), kind="image"),
+        "audio_database": normalize_blob_icon_spec(
+            _payload_value("audio_database", "audio"),
+            kind="audio_database",
+        ),
+        "audio_lossy_managed": normalize_blob_icon_spec(
+            _payload_value("audio_lossy_managed", "audio_lossy"),
+            kind="audio_lossy_managed",
+        ),
+        "audio_lossy_database": normalize_blob_icon_spec(
+            _payload_value("audio_lossy_database", "audio_lossy"),
+            kind="audio_lossy_database",
+        ),
+        "image_managed": normalize_blob_icon_spec(
+            _payload_value("image_managed", "image"),
+            kind="image_managed",
+        ),
+        "image_database": normalize_blob_icon_spec(
+            _payload_value("image_database", "image"),
+            kind="image_database",
+        ),
     }
 
 
@@ -428,26 +477,84 @@ class BlobIconSettingsService:
             )
 
     def load_settings(self) -> dict[str, dict[str, object]]:
-        return {
-            "audio": blob_icon_spec_from_storage(self._read_kv(BLOB_ICON_AUDIO_KEY), kind="audio"),
-            "audio_lossy": blob_icon_spec_from_storage(
-                self._read_kv(BLOB_ICON_AUDIO_LOSSY_KEY),
-                kind="audio_lossy",
-            ),
-            "image": blob_icon_spec_from_storage(self._read_kv(BLOB_ICON_IMAGE_KEY), kind="image"),
-        }
+        return normalize_blob_icon_settings(
+            {
+                "audio": blob_icon_spec_from_storage(
+                    self._read_kv(BLOB_ICON_AUDIO_KEY),
+                    kind="audio",
+                ),
+                "audio_lossy": blob_icon_spec_from_storage(
+                    self._read_kv(BLOB_ICON_AUDIO_LOSSY_KEY),
+                    kind="audio_lossy",
+                ),
+                "image": blob_icon_spec_from_storage(
+                    self._read_kv(BLOB_ICON_IMAGE_KEY),
+                    kind="image",
+                ),
+                "audio_managed": blob_icon_spec_from_storage(
+                    self._read_kv(BLOB_ICON_AUDIO_MANAGED_KEY),
+                    kind="audio_managed",
+                ),
+                "audio_database": blob_icon_spec_from_storage(
+                    self._read_kv(BLOB_ICON_AUDIO_DATABASE_KEY),
+                    kind="audio_database",
+                ),
+                "audio_lossy_managed": blob_icon_spec_from_storage(
+                    self._read_kv(BLOB_ICON_AUDIO_LOSSY_MANAGED_KEY),
+                    kind="audio_lossy_managed",
+                ),
+                "audio_lossy_database": blob_icon_spec_from_storage(
+                    self._read_kv(BLOB_ICON_AUDIO_LOSSY_DATABASE_KEY),
+                    kind="audio_lossy_database",
+                ),
+                "image_managed": blob_icon_spec_from_storage(
+                    self._read_kv(BLOB_ICON_IMAGE_MANAGED_KEY),
+                    kind="image_managed",
+                ),
+                "image_database": blob_icon_spec_from_storage(
+                    self._read_kv(BLOB_ICON_IMAGE_DATABASE_KEY),
+                    kind="image_database",
+                ),
+            }
+        )
 
     def save_settings(self, settings: dict[str, object] | None) -> dict[str, dict[str, object]]:
         normalized = normalize_blob_icon_settings(settings)
-        persisted_audio = blob_icon_spec_to_storage(normalized.get("audio"), kind="audio")
-        persisted_audio_lossy = blob_icon_spec_to_storage(
-            normalized.get("audio_lossy"),
-            kind="audio_lossy",
+        self._write_kv(
+            BLOB_ICON_AUDIO_MANAGED_KEY,
+            blob_icon_spec_to_storage(normalized.get("audio_managed"), kind="audio_managed") or "",
         )
-        persisted_image = blob_icon_spec_to_storage(normalized.get("image"), kind="image")
-        self._write_kv(BLOB_ICON_AUDIO_KEY, persisted_audio or "")
-        self._write_kv(BLOB_ICON_AUDIO_LOSSY_KEY, persisted_audio_lossy or "")
-        self._write_kv(BLOB_ICON_IMAGE_KEY, persisted_image or "")
+        self._write_kv(
+            BLOB_ICON_AUDIO_DATABASE_KEY,
+            blob_icon_spec_to_storage(normalized.get("audio_database"), kind="audio_database")
+            or "",
+        )
+        self._write_kv(
+            BLOB_ICON_AUDIO_LOSSY_MANAGED_KEY,
+            blob_icon_spec_to_storage(
+                normalized.get("audio_lossy_managed"),
+                kind="audio_lossy_managed",
+            )
+            or "",
+        )
+        self._write_kv(
+            BLOB_ICON_AUDIO_LOSSY_DATABASE_KEY,
+            blob_icon_spec_to_storage(
+                normalized.get("audio_lossy_database"),
+                kind="audio_lossy_database",
+            )
+            or "",
+        )
+        self._write_kv(
+            BLOB_ICON_IMAGE_MANAGED_KEY,
+            blob_icon_spec_to_storage(normalized.get("image_managed"), kind="image_managed")
+            or "",
+        )
+        self._write_kv(
+            BLOB_ICON_IMAGE_DATABASE_KEY,
+            blob_icon_spec_to_storage(normalized.get("image_database"), kind="image_database")
+            or "",
+        )
         return self.load_settings()
 
 

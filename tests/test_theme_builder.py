@@ -299,8 +299,10 @@ class ThemeBuilderTests(unittest.TestCase):
             dialog._theme_color_edits["tab_pane_bg"].setText("#0F172A")
             dialog._theme_metric_spins["menu_radius"].setValue(14)
             dialog._theme_metric_spins["dialog_title_font_size"].setValue(22)
-            dialog._blob_icon_editors["audio"].emoji_edit.setText("🎧")
-            dialog._blob_icon_editors["audio_lossy"].emoji_edit.setText("📼")
+            dialog._blob_icon_editors["audio_managed"].emoji_edit.setText("🎧")
+            dialog._blob_icon_editors["audio_database"].emoji_edit.setText("💾")
+            dialog._blob_icon_editors["audio_lossy_database"].emoji_edit.setText("📼")
+            dialog._blob_icon_editors["image_database"].emoji_edit.setText("🗂️")
             values = dialog.values()
 
             self.assertEqual(values["theme_settings"]["button_hover_bg"], "#224488")
@@ -310,9 +312,21 @@ class ThemeBuilderTests(unittest.TestCase):
             self.assertEqual(values["theme_settings"]["tab_pane_bg"], "#0F172A")
             self.assertEqual(values["theme_settings"]["menu_radius"], 14)
             self.assertEqual(values["theme_settings"]["dialog_title_font_size"], 22)
-            self.assertEqual(values["blob_icon_settings"]["audio"]["emoji"], "🎧")
-            self.assertEqual(values["blob_icon_settings"]["audio_lossy"]["emoji"], "📼")
-            self.assertEqual(sorted(dialog._blob_icon_editors), ["audio", "audio_lossy", "image"])
+            self.assertEqual(values["blob_icon_settings"]["audio_managed"]["emoji"], "🎧")
+            self.assertEqual(values["blob_icon_settings"]["audio_database"]["emoji"], "💾")
+            self.assertEqual(values["blob_icon_settings"]["audio_lossy_database"]["emoji"], "📼")
+            self.assertEqual(values["blob_icon_settings"]["image_database"]["emoji"], "🗂️")
+            self.assertEqual(
+                sorted(dialog._blob_icon_editors),
+                [
+                    "audio_database",
+                    "audio_lossy_database",
+                    "audio_lossy_managed",
+                    "audio_managed",
+                    "image_database",
+                    "image_managed",
+                ],
+            )
         finally:
             dialog.close()
             host.close()
@@ -953,6 +967,17 @@ class ThemeBuilderTests(unittest.TestCase):
             self.assertEqual(
                 dialog.theme_preview_tabs.tabText(dialog.theme_preview_tabs.currentIndex()),
                 "Blob Icons",
+            )
+            self.assertEqual(
+                sorted(dialog._blob_icon_preview_labels),
+                [
+                    "audio_database",
+                    "audio_lossy_database",
+                    "audio_lossy_managed",
+                    "audio_managed",
+                    "image_database",
+                    "image_managed",
+                ],
             )
         finally:
             dialog.close()

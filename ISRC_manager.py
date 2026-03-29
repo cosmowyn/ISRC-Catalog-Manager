@@ -1857,42 +1857,49 @@ class ApplicationSettingsDialog(QDialog):
         builder_grid = QGridLayout(builder_box)
         self._configure_grid(builder_grid)
 
-        audio_editor = BlobIconEditorWidget(kind="audio", allow_inherit=False, parent=builder_box)
-        audio_editor.set_spec(self._blob_icon_settings.get("audio"))
-        self._blob_icon_editors["audio"] = audio_editor
-        self._add_row(
-            builder_grid,
-            0,
-            "Audio Blob Icon",
-            audio_editor,
-            "Shown when the Audio File column or an audio BLOB field contains stored media.",
+        editor_specs = (
+            (
+                "audio_managed",
+                "Managed Audio Icon",
+                "Shown when primary audio is stored as a managed file.",
+            ),
+            (
+                "audio_database",
+                "Database Audio Icon",
+                "Shown when primary audio is stored directly inside the database.",
+            ),
+            (
+                "audio_lossy_managed",
+                "Managed Lossy Audio Icon",
+                "Shown when a lossy primary audio source such as MP3, AAC, or OGG is stored as a managed file.",
+            ),
+            (
+                "audio_lossy_database",
+                "Database Lossy Audio Icon",
+                "Shown when a lossy primary audio source is stored directly inside the database.",
+            ),
+            (
+                "image_managed",
+                "Managed Image Icon",
+                "Shown when Album Art or an inherited image BLOB field is stored as a managed file.",
+            ),
+            (
+                "image_database",
+                "Database Image Icon",
+                "Shown when Album Art or an inherited image BLOB field is stored directly inside the database.",
+            ),
         )
-
-        audio_lossy_editor = BlobIconEditorWidget(
-            kind="audio_lossy",
-            allow_inherit=False,
-            parent=builder_box,
-        )
-        audio_lossy_editor.set_spec(self._blob_icon_settings.get("audio_lossy"))
-        self._blob_icon_editors["audio_lossy"] = audio_lossy_editor
-        self._add_row(
-            builder_grid,
-            1,
-            "Lossy Primary Audio Icon",
-            audio_lossy_editor,
-            "Shown when the Audio File column contains a lossy primary source such as MP3, AAC, or OGG.",
-        )
-
-        image_editor = BlobIconEditorWidget(kind="image", allow_inherit=False, parent=builder_box)
-        image_editor.set_spec(self._blob_icon_settings.get("image"))
-        self._blob_icon_editors["image"] = image_editor
-        self._add_row(
-            builder_grid,
-            2,
-            "Image Blob Icon",
-            image_editor,
-            "Shown when Album Art or an image BLOB field contains stored media.",
-        )
+        for row_index, (kind, label, help_text) in enumerate(editor_specs):
+            editor = BlobIconEditorWidget(kind=kind, allow_inherit=False, parent=builder_box)
+            editor.set_spec(self._blob_icon_settings.get(kind))
+            self._blob_icon_editors[kind] = editor
+            self._add_row(
+                builder_grid,
+                row_index,
+                label,
+                editor,
+                help_text,
+            )
         page_layout.addWidget(builder_box)
 
         note_box = QGroupBox("How It Works", page)
@@ -1900,11 +1907,12 @@ class ApplicationSettingsDialog(QDialog):
         note_layout.setContentsMargins(14, 18, 14, 14)
         note_layout.setSpacing(8)
         for text in (
-            "Blob icons are profile-specific and stay separate from visual theme presets.",
-            "Primary audio can use a dedicated lossy badge so MP3/AAC/OGG sources stand apart from WAV, FLAC, and AIFF masters.",
+            "Media icons are profile-specific and stay separate from visual theme presets.",
+            "Managed-file media and database-backed media can use different icons without changing the underlying storage behavior.",
+            "Primary audio can keep a dedicated lossy badge so MP3/AAC/OGG sources still stand apart from WAV, FLAC, and AIFF masters.",
             "Platform icons use the current operating system's built-in icon set through Qt.",
             "Custom images are scaled down and compressed before they are written into the database, so large source files only occupy a small amount of storage.",
-            "Custom BLOB columns can either inherit these global defaults or define their own icon override.",
+            "Custom BLOB columns can either inherit these global storage-aware defaults or define their own icon override.",
         ):
             label = QLabel(text, note_box)
             label.setWordWrap(True)
@@ -2480,60 +2488,91 @@ class ApplicationSettingsDialog(QDialog):
         preview_layout = QGridLayout(preview_box)
         self._configure_grid(preview_layout)
 
-        audio_icon = QLabel(preview_box)
-        audio_icon.setFixedSize(34, 34)
-        audio_icon.setAlignment(Qt.AlignCenter)
-        audio_icon.setStyleSheet(
-            "border: 1px solid palette(mid); border-radius: 6px; background: palette(base);"
-        )
-        audio_text = QLabel("71.3 MB", preview_box)
-        audio_text.setProperty("role", "secondary")
-        audio_row = QWidget(preview_box)
-        audio_row_layout = QHBoxLayout(audio_row)
-        audio_row_layout.setContentsMargins(0, 0, 0, 0)
-        audio_row_layout.setSpacing(10)
-        audio_row_layout.addWidget(audio_icon)
-        audio_row_layout.addWidget(audio_text)
-        audio_row_layout.addStretch(1)
-        self._blob_icon_preview_labels["audio"] = audio_icon
-        self._add_row(
-            preview_layout,
-            0,
-            "Audio Column",
-            audio_row,
-            "Preview for the main Audio File column and inherited audio BLOB custom fields.",
-        )
+        def _add_preview_row(
+            row_index: int,
+            *,
+            kind: str,
+            label_text: str,
+            size_text: str,
+            help_text: str,
+        ) -> None:
+            icon_label = QLabel(preview_box)
+            icon_label.setFixedSize(34, 34)
+            icon_label.setAlignment(Qt.AlignCenter)
+            icon_label.setStyleSheet(
+                "border: 1px solid palette(mid); border-radius: 6px; background: palette(base);"
+            )
+            sample_text = QLabel(size_text, preview_box)
+            sample_text.setProperty("role", "secondary")
+            sample_row = QWidget(preview_box)
+            sample_layout = QHBoxLayout(sample_row)
+            sample_layout.setContentsMargins(0, 0, 0, 0)
+            sample_layout.setSpacing(10)
+            sample_layout.addWidget(icon_label)
+            sample_layout.addWidget(sample_text)
+            sample_layout.addStretch(1)
+            self._blob_icon_preview_labels[kind] = icon_label
+            self._add_row(
+                preview_layout,
+                row_index,
+                label_text,
+                sample_row,
+                help_text,
+            )
 
-        image_icon = QLabel(preview_box)
-        image_icon.setFixedSize(34, 34)
-        image_icon.setAlignment(Qt.AlignCenter)
-        image_icon.setStyleSheet(
-            "border: 1px solid palette(mid); border-radius: 6px; background: palette(base);"
+        preview_specs = (
+            (
+                "audio_managed",
+                "Managed Audio Column",
+                "71.3 MB",
+                "Preview for primary audio badges when the source is stored as a managed file.",
+            ),
+            (
+                "audio_database",
+                "Database Audio Column",
+                "71.3 MB",
+                "Preview for primary audio badges when the source is stored directly inside the database.",
+            ),
+            (
+                "audio_lossy_managed",
+                "Managed Lossy Audio Column",
+                "9.8 MB",
+                "Preview for lossy primary audio badges stored as a managed file.",
+            ),
+            (
+                "audio_lossy_database",
+                "Database Lossy Audio Column",
+                "9.8 MB",
+                "Preview for lossy primary audio badges stored directly inside the database.",
+            ),
+            (
+                "image_managed",
+                "Managed Image Column",
+                "2.4 MB",
+                "Preview for Album Art and inherited image BLOB fields stored as managed files.",
+            ),
+            (
+                "image_database",
+                "Database Image Column",
+                "2.4 MB",
+                "Preview for Album Art and inherited image BLOB fields stored directly inside the database.",
+            ),
         )
-        image_text = QLabel("2.4 MB", preview_box)
-        image_text.setProperty("role", "secondary")
-        image_row = QWidget(preview_box)
-        image_row_layout = QHBoxLayout(image_row)
-        image_row_layout.setContentsMargins(0, 0, 0, 0)
-        image_row_layout.setSpacing(10)
-        image_row_layout.addWidget(image_icon)
-        image_row_layout.addWidget(image_text)
-        image_row_layout.addStretch(1)
-        self._blob_icon_preview_labels["image"] = image_icon
-        self._add_row(
-            preview_layout,
-            1,
-            "Image Column",
-            image_row,
-            "Preview for Album Art and inherited image BLOB custom fields.",
-        )
+        for row_index, (kind, label_text, size_text, help_text) in enumerate(preview_specs):
+            _add_preview_row(
+                row_index,
+                kind=kind,
+                label_text=label_text,
+                size_text=size_text,
+                help_text=help_text,
+            )
 
         custom_hint_box = QGroupBox("Custom Column Override", preview_root)
         custom_hint_layout = QVBoxLayout(custom_hint_box)
         custom_hint_layout.setContentsMargins(14, 18, 14, 14)
         custom_hint_layout.setSpacing(8)
         hint = QLabel(
-            "Each custom BLOB column can stay on the global icon or store its own override with the same system-icon, emoji, and custom-image options.",
+            "Each custom BLOB column can stay on the global storage-aware icon or store its own override with the same system-icon, emoji, and custom-image options.",
             custom_hint_box,
         )
         hint.setWordWrap(True)
@@ -2615,7 +2654,7 @@ class ApplicationSettingsDialog(QDialog):
         )
         if self._theme_builder_page_keys[self.theme_builder_tabs.currentIndex()] == "blob_icons":
             self.theme_preview_status_label.setText(
-                "Showing the blob icons preview for the current profile draft. Audio and image media badges can use platform icons, emojis, or compressed custom images stored inside the database."
+                "Showing the media icon preview for the current profile draft. Managed-file and database-backed audio and image badges can each use platform icons, emojis, or compressed custom images stored inside the database."
             )
         else:
             self.theme_preview_status_label.setText(
@@ -9620,8 +9659,30 @@ class App(QMainWindow):
                 self._log_event(
                     "settings.blob_icons",
                     "Blob icon settings updated",
-                    audio=describe_blob_icon_spec(after_blob_icons.get("audio"), kind="audio"),
-                    image=describe_blob_icon_spec(after_blob_icons.get("image"), kind="image"),
+                    audio_managed=describe_blob_icon_spec(
+                        after_blob_icons.get("audio_managed"),
+                        kind="audio_managed",
+                    ),
+                    audio_database=describe_blob_icon_spec(
+                        after_blob_icons.get("audio_database"),
+                        kind="audio_database",
+                    ),
+                    audio_lossy_managed=describe_blob_icon_spec(
+                        after_blob_icons.get("audio_lossy_managed"),
+                        kind="audio_lossy_managed",
+                    ),
+                    audio_lossy_database=describe_blob_icon_spec(
+                        after_blob_icons.get("audio_lossy_database"),
+                        kind="audio_lossy_database",
+                    ),
+                    image_managed=describe_blob_icon_spec(
+                        after_blob_icons.get("image_managed"),
+                        kind="image_managed",
+                    ),
+                    image_database=describe_blob_icon_spec(
+                        after_blob_icons.get("image_database"),
+                        kind="image_database",
+                    ),
                 )
                 if self.history_manager is not None:
                     self.history_manager.record_setting_change(
@@ -22363,7 +22424,8 @@ class App(QMainWindow):
         menu = QMenu(self)
         track_id = self._track_id_for_table_row(row)
         selected_ids = self._selected_track_ids()
-        bulk_count = len(selected_ids) if track_id is not None and track_id in selected_ids else 1
+        effective_track_ids = self._effective_context_menu_track_ids(track_id, selected_ids)
+        bulk_count = len(effective_track_ids) if effective_track_ids else 1
         edit_label = "Edit Track" if bulk_count <= 1 else f"Bulk Edit {bulk_count} Selected Tracks…"
         act_edit = QAction(edit_label, self)
         act_edit.triggered.connect(lambda: self.open_selected_editor(track_id))
@@ -22396,7 +22458,7 @@ class App(QMainWindow):
         if track_id:
             menu.addSeparator()
             if self.track_has_media(track_id, "audio_file"):
-                export_track_ids = selected_ids if track_id in selected_ids else [track_id]
+                export_track_ids = list(effective_track_ids or [track_id])
                 audio_menu = menu.addMenu("Audio")
 
                 act_import_tags = QAction("Import Metadata from Audio Files…", self)
@@ -22504,7 +22566,12 @@ class App(QMainWindow):
 
         if track_id and standard_media_key:
             standard_file_menu = ensure_file_menu()
-            if self.track_has_media(track_id, standard_media_key):
+            focused_track_has_media = self.track_has_media(track_id, standard_media_key)
+            storage_scope = self._standard_media_storage_conversion_scope(
+                effective_track_ids,
+                standard_media_key,
+            )
+            if focused_track_has_media:
                 act_prev = QAction("Preview File…", self)
                 act_prev.triggered.connect(
                     lambda: self._preview_standard_media_for_track(track_id, standard_media_key)
@@ -22517,7 +22584,7 @@ class App(QMainWindow):
             )
             standard_file_menu.addAction(act_attach_standard)
 
-            if self.track_has_media(track_id, standard_media_key):
+            if focused_track_has_media:
                 export_basename = self._media_export_basename_for_track(
                     track_id,
                     standard_media_key,
@@ -22538,29 +22605,22 @@ class App(QMainWindow):
                 )
                 standard_file_menu.addAction(act_delete_standard)
 
-                current_mode = normalize_storage_mode(
-                    str(
-                        self.track_media_meta(track_id, standard_media_key).get("storage_mode")
-                        or ""
+            for target_mode in storage_scope["allowed_targets"]:
+                action = QAction(
+                    self._storage_conversion_action_label(
+                        target_mode,
+                        selection_count=len(effective_track_ids),
                     ),
-                    default=None,
+                    self,
                 )
-                if current_mode != STORAGE_MODE_DATABASE:
-                    act_convert_standard_db = QAction("Store in Database", self)
-                    act_convert_standard_db.triggered.connect(
-                        lambda checked=False, tid=track_id, key=standard_media_key: self._convert_standard_media_for_track(
-                            tid, key, STORAGE_MODE_DATABASE
-                        )
+                action.triggered.connect(
+                    lambda checked=False, track_ids=list(effective_track_ids), key=standard_media_key, mode=target_mode: self._convert_standard_media_for_track(
+                        track_ids,
+                        key,
+                        mode,
                     )
-                    ensure_storage_menu().addAction(act_convert_standard_db)
-                if current_mode != STORAGE_MODE_MANAGED_FILE:
-                    act_convert_standard_file = QAction("Store as Managed File", self)
-                    act_convert_standard_file.triggered.connect(
-                        lambda checked=False, tid=track_id, key=standard_media_key: self._convert_standard_media_for_track(
-                            tid, key, STORAGE_MODE_MANAGED_FILE
-                        )
-                    )
-                    ensure_storage_menu().addAction(act_convert_standard_file)
+                )
+                ensure_storage_menu().addAction(action)
 
         # Preview file action for custom blob columns
         if col >= len(self.BASE_HEADERS):
@@ -22610,6 +22670,10 @@ class App(QMainWindow):
                 track_id = int(id_item.text())
                 track_title = title_item.text() if title_item else f"track_{track_id}"
                 custom_file_menu = ensure_file_menu()
+                storage_scope = self._custom_blob_storage_conversion_scope(
+                    effective_track_ids,
+                    int(field_id),
+                )
                 act_attach = QAction("Attach/Replace File…", self)
                 act_attach.triggered.connect(
                     lambda: self._attach_blob_for_cell(
@@ -22624,32 +22688,22 @@ class App(QMainWindow):
                     lambda: self.cf_export_blob(track_id, field_id, self, track_title)
                 )
                 custom_file_menu.addAction(act_export)
-                meta = self.cf_get_value_meta(
-                    track_id,
-                    field_id,
-                    include_storage_details=True,
-                )
-                current_mode = normalize_storage_mode(meta.get("storage_mode"), default=None)
-                if current_mode != STORAGE_MODE_DATABASE:
-                    act_cf_db = QAction("Store in Database", self)
-                    act_cf_db.triggered.connect(
-                        lambda checked=False, tid=track_id, fid=field_id: self._convert_custom_blob_storage_mode(
-                            tid,
+                for target_mode in storage_scope["allowed_targets"]:
+                    action = QAction(
+                        self._storage_conversion_action_label(
+                            target_mode,
+                            selection_count=len(effective_track_ids),
+                        ),
+                        self,
+                    )
+                    action.triggered.connect(
+                        lambda checked=False, track_ids=list(effective_track_ids), fid=int(field_id), mode=target_mode: self._convert_custom_blob_storage_mode(
+                            track_ids,
                             fid,
-                            STORAGE_MODE_DATABASE,
+                            mode,
                         )
                     )
-                    ensure_storage_menu().addAction(act_cf_db)
-                if current_mode != STORAGE_MODE_MANAGED_FILE:
-                    act_cf_file = QAction("Store as Managed File", self)
-                    act_cf_file.triggered.connect(
-                        lambda checked=False, tid=track_id, fid=field_id: self._convert_custom_blob_storage_mode(
-                            tid,
-                            fid,
-                            STORAGE_MODE_MANAGED_FILE,
-                        )
-                    )
-                    ensure_storage_menu().addAction(act_cf_file)
+                    ensure_storage_menu().addAction(action)
 
         # Delete blob action for custom blob columns
         if col >= len(self.BASE_HEADERS):
@@ -24650,6 +24704,114 @@ class App(QMainWindow):
             "field_type": field_type,
         }
 
+    def _effective_context_menu_track_ids(
+        self,
+        track_id: int | None,
+        selected_ids: list[int] | None = None,
+    ) -> list[int]:
+        normalized_selected = self._normalize_track_ids(selected_ids or [])
+        if track_id is not None and track_id in normalized_selected:
+            return normalized_selected
+        return [int(track_id)] if track_id is not None else []
+
+    @staticmethod
+    def _storage_conversion_action_label(target_mode: str, *, selection_count: int) -> str:
+        clean_target = normalize_storage_mode(target_mode)
+        if selection_count > 1:
+            if clean_target == STORAGE_MODE_DATABASE:
+                return "Store selection in database"
+            return "Store selection as managed file"
+        if clean_target == STORAGE_MODE_DATABASE:
+            return "Store in Database"
+        return "Store as Managed File"
+
+    @staticmethod
+    def _storage_conversion_target_label(target_mode: str) -> str:
+        clean_target = normalize_storage_mode(target_mode)
+        if clean_target == STORAGE_MODE_DATABASE:
+            return "database storage"
+        return "managed-file storage"
+
+    def _classify_storage_conversion_scope(self, track_ids, *, meta_loader) -> dict[str, object]:
+        normalized_ids = self._normalize_track_ids(track_ids or [])
+        target_buckets = {
+            STORAGE_MODE_DATABASE: {"convert_track_ids": [], "skip_track_ids": []},
+            STORAGE_MODE_MANAGED_FILE: {"convert_track_ids": [], "skip_track_ids": []},
+        }
+        available_track_ids: list[int] = []
+        missing_track_ids: list[int] = []
+        modes_present: set[str] = set()
+        for track_id in normalized_ids:
+            try:
+                meta = dict(meta_loader(int(track_id)) or {})
+            except Exception:
+                meta = {}
+            has_payload = bool(meta.get("has_media") or meta.get("has_blob"))
+            current_mode = normalize_storage_mode(meta.get("storage_mode"), default=None)
+            if not has_payload or current_mode is None:
+                missing_track_ids.append(int(track_id))
+                continue
+            available_track_ids.append(int(track_id))
+            modes_present.add(current_mode)
+            for target_mode, bucket in target_buckets.items():
+                bucket_key = "skip_track_ids" if current_mode == target_mode else "convert_track_ids"
+                bucket[bucket_key].append(int(track_id))
+        if modes_present == {STORAGE_MODE_MANAGED_FILE}:
+            allowed_targets = [STORAGE_MODE_DATABASE]
+        elif modes_present == {STORAGE_MODE_DATABASE}:
+            allowed_targets = [STORAGE_MODE_MANAGED_FILE]
+        elif modes_present:
+            allowed_targets = [STORAGE_MODE_MANAGED_FILE, STORAGE_MODE_DATABASE]
+        else:
+            allowed_targets = []
+        return {
+            "scope_track_ids": normalized_ids,
+            "available_track_ids": available_track_ids,
+            "missing_track_ids": missing_track_ids,
+            "modes_present": sorted(modes_present),
+            "allowed_targets": allowed_targets,
+            "targets": target_buckets,
+        }
+
+    def _standard_media_storage_conversion_scope(
+        self,
+        track_ids,
+        media_key: str,
+        *,
+        track_service=None,
+        cursor=None,
+    ) -> dict[str, object]:
+        service = track_service or self.track_service
+        if service is None:
+            return self._classify_storage_conversion_scope([], meta_loader=lambda _track_id: {})
+        return self._classify_storage_conversion_scope(
+            track_ids,
+            meta_loader=lambda track_id: service.get_media_meta(
+                int(track_id),
+                media_key,
+                cursor=cursor,
+            ),
+        )
+
+    def _custom_blob_storage_conversion_scope(
+        self,
+        track_ids,
+        field_id: int,
+        *,
+        custom_field_values=None,
+    ) -> dict[str, object]:
+        service = custom_field_values or self.custom_field_values
+        if service is None:
+            return self._classify_storage_conversion_scope([], meta_loader=lambda _track_id: {})
+        return self._classify_storage_conversion_scope(
+            track_ids,
+            meta_loader=lambda track_id: service.get_value_meta(
+                int(track_id),
+                int(field_id),
+                include_storage_details=True,
+            ),
+        )
+
     def _export_focused_media_column(
         self,
         column: int,
@@ -24794,32 +24956,17 @@ class App(QMainWindow):
         )
 
     def _convert_standard_media_for_track(
-        self, track_id: int, media_key: str, target_mode: str
+        self, track_id: int | list[int], media_key: str, target_mode: str
     ) -> None:
-        try:
-            self._run_snapshot_history_action(
-                action_label=f"Convert {media_key.replace('_', ' ').title()} Storage",
-                action_type=f"track.{media_key}.convert_storage_mode",
-                entity_type="Track",
-                entity_id=track_id,
-                payload={
-                    "track_id": track_id,
-                    "media_key": media_key,
-                    "target_mode": target_mode,
-                },
-                mutation=lambda: self.track_convert_media_storage_mode(
-                    track_id, media_key, target_mode
-                ),
-            )
-            self.refresh_table_preserve_view(focus_id=track_id)
-        except Exception as exc:
-            self.conn.rollback()
-            self.logger.exception("Convert %s storage failed: %s", media_key, exc)
-            QMessageBox.critical(
-                self,
-                "Track Media Error",
-                f"Failed to convert storage mode:\n{exc}",
-            )
+        track_ids = track_id if isinstance(track_id, list) else [int(track_id)]
+        column_label = "Audio File" if media_key == "audio_file" else "Album Art"
+        self._submit_storage_conversion_task(
+            track_ids=track_ids,
+            target_mode=target_mode,
+            scope_kind="standard",
+            column_label=column_label,
+            media_key=media_key,
+        )
 
     # ---------------------- BLOB CF helpers (DB IO + export) ----------------------
     def cf_get_field_type(self, field_def_id: int) -> str:
@@ -24989,35 +25136,283 @@ class App(QMainWindow):
         self.custom_field_values.delete_blob(track_id, field_def_id)
 
     def _convert_custom_blob_storage_mode(
-        self, track_id: int, field_def_id: int, target_mode: str
+        self, track_id: int | list[int], field_def_id: int, target_mode: str
     ) -> None:
-        try:
-            field_name = self.custom_field_definitions.get_field_name(field_def_id)
-            self._run_snapshot_history_action(
-                action_label=f"Convert Custom File Storage: {field_name}",
-                action_type="custom_field.blob_convert_storage_mode",
-                entity_type="CustomFieldValue",
-                entity_id=f"{track_id}:{field_def_id}",
-                payload={
-                    "track_id": track_id,
-                    "field_id": field_def_id,
-                    "target_mode": target_mode,
-                },
-                mutation=lambda: self.cf_convert_blob_storage_mode(
-                    track_id,
-                    field_def_id,
-                    target_mode,
+        track_ids = track_id if isinstance(track_id, list) else [int(track_id)]
+        field_name = self.custom_field_definitions.get_field_name(field_def_id)
+        self._submit_storage_conversion_task(
+            track_ids=track_ids,
+            target_mode=target_mode,
+            scope_kind="custom_blob",
+            column_label=field_name,
+            field_id=field_def_id,
+        )
+
+    def _storage_conversion_summary_lines(self, result: dict[str, object]) -> list[str]:
+        column_label = str(result.get("column_label") or "media")
+        target_label = self._storage_conversion_target_label(str(result.get("target_mode") or ""))
+        converted_track_ids = list(result.get("converted_track_ids") or [])
+        skipped_track_ids = list(result.get("skipped_track_ids") or [])
+        missing_track_ids = list(result.get("missing_track_ids") or [])
+        failures = list(result.get("failed") or [])
+        if converted_track_ids:
+            lines = [
+                f"Converted {len(converted_track_ids)} selected track{'s' if len(converted_track_ids) != 1 else ''} to {target_label} for '{column_label}'."
+            ]
+        else:
+            lines = [f"No selected tracks required conversion for '{column_label}'."]
+        if skipped_track_ids:
+            lines.append(
+                f"Skipped {len(skipped_track_ids)} track{'s' if len(skipped_track_ids) != 1 else ''} already using {target_label}."
+            )
+        if missing_track_ids:
+            lines.append(
+                f"Skipped {len(missing_track_ids)} track{'s' if len(missing_track_ids) != 1 else ''} with no stored media in '{column_label}'."
+            )
+        if failures:
+            lines.append("")
+            lines.append(
+                f"Failures ({len(failures)} track{'s' if len(failures) != 1 else ''}):"
+            )
+            for entry in failures[:10]:
+                label = str(entry.get("label") or f"Track {entry.get('track_id')}")
+                message = str(entry.get("message") or "Unknown error")
+                lines.append(f"- {label}: {message}")
+        return lines
+
+    def _submit_storage_conversion_task(
+        self,
+        *,
+        track_ids: list[int],
+        target_mode: str,
+        scope_kind: str,
+        column_label: str,
+        media_key: str | None = None,
+        field_id: int | None = None,
+    ) -> None:
+        normalized_track_ids = self._normalize_track_ids(track_ids)
+        if not normalized_track_ids:
+            return
+        clean_target = normalize_storage_mode(target_mode)
+        title = f"Convert {column_label} Storage"
+
+        def _worker(bundle, ctx):
+            ctx.report_progress(
+                value=0,
+                maximum=100,
+                message="Collecting the selected tracks for storage conversion...",
+            )
+            if scope_kind == "standard":
+                scope = self._standard_media_storage_conversion_scope(
+                    normalized_track_ids,
+                    str(media_key or ""),
+                    track_service=bundle.track_service,
+                    cursor=bundle.conn.cursor(),
+                )
+                action_type = (
+                    f"track.{media_key}.bulk_convert_storage_mode"
+                    if len(normalized_track_ids) > 1
+                    else f"track.{media_key}.convert_storage_mode"
+                )
+                entity_type = "Track"
+                entity_id = "batch" if len(normalized_track_ids) > 1 else normalized_track_ids[0]
+            else:
+                scope = self._custom_blob_storage_conversion_scope(
+                    normalized_track_ids,
+                    int(field_id or 0),
+                    custom_field_values=bundle.custom_field_values,
+                )
+                action_type = (
+                    "custom_field.blob_bulk_convert_storage_mode"
+                    if len(normalized_track_ids) > 1
+                    else "custom_field.blob_convert_storage_mode"
+                )
+                entity_type = "CustomFieldValue"
+                entity_id = (
+                    "batch"
+                    if len(normalized_track_ids) > 1
+                    else f"{normalized_track_ids[0]}:{int(field_id or 0)}"
+                )
+            ctx.report_progress(
+                value=6,
+                maximum=100,
+                message="Classifying current media storage modes...",
+            )
+            conversion_plan = dict(scope["targets"][clean_target])
+            result = {
+                "column_label": column_label,
+                "target_mode": clean_target,
+                "scope_track_ids": list(normalized_track_ids),
+                "converted_track_ids": [],
+                "skipped_track_ids": list(conversion_plan["skip_track_ids"]),
+                "missing_track_ids": list(scope["missing_track_ids"]),
+                "failed": [],
+            }
+            to_convert = list(conversion_plan["convert_track_ids"])
+            if not to_convert:
+                return result
+
+            progress_callback = self._scaled_progress_callback(
+                ctx.report_progress,
+                start=12,
+                end=88,
+            )
+
+            def _track_label(track_id: int, cursor) -> str:
+                snapshot = bundle.track_service.fetch_track_snapshot(int(track_id), cursor=cursor)
+                if snapshot is not None and str(snapshot.track_title or "").strip():
+                    return str(snapshot.track_title).strip()
+                return f"Track {track_id}"
+
+            def _mutation():
+                converted_track_ids: list[int] = []
+                failures: list[dict[str, object]] = []
+                total = max(1, len(to_convert))
+                with bundle.conn:
+                    cur = bundle.conn.cursor()
+                    for index, pending_track_id in enumerate(to_convert, start=1):
+                        ctx.raise_if_cancelled()
+                        try:
+                            if scope_kind == "standard":
+                                bundle.track_service.convert_media_storage_mode(
+                                    int(pending_track_id),
+                                    str(media_key or ""),
+                                    clean_target,
+                                    cursor=cur,
+                                )
+                            else:
+                                bundle.custom_field_values.convert_storage_mode(
+                                    int(pending_track_id),
+                                    int(field_id or 0),
+                                    clean_target,
+                                )
+                            converted_track_ids.append(int(pending_track_id))
+                            progress_callback(
+                                value=index,
+                                maximum=total,
+                                message=(
+                                    f"Converting '{column_label}' to "
+                                    f"{self._storage_conversion_target_label(clean_target)} "
+                                    f"for {index} of {total} tracks..."
+                                ),
+                            )
+                        except Exception as exc:
+                            failures.append(
+                                {
+                                    "track_id": int(pending_track_id),
+                                    "label": _track_label(int(pending_track_id), cur),
+                                    "message": str(exc),
+                                }
+                            )
+                            progress_callback(
+                                value=index,
+                                maximum=total,
+                                message=(
+                                    f"Processed {index} of {total} tracks while converting "
+                                    f"'{column_label}'..."
+                                ),
+                            )
+                result["converted_track_ids"] = converted_track_ids
+                result["failed"] = failures
+                return result
+
+            return run_snapshot_history_action(
+                history_manager=bundle.history_manager,
+                action_label=(
+                    f"Convert {column_label} Storage ({len(normalized_track_ids)} tracks)"
+                    if len(normalized_track_ids) > 1
+                    else f"Convert {column_label} Storage"
                 ),
+                action_type=action_type,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                payload={
+                    "track_ids": list(normalized_track_ids),
+                    "media_key": media_key,
+                    "field_id": field_id,
+                    "column_label": column_label,
+                    "target_mode": clean_target,
+                },
+                mutation=_mutation,
+                progress_callback=ctx.report_progress,
+                post_mutation_progress=(92, "Capturing storage conversion history snapshot..."),
+                record_progress=(94, "Recording storage conversion history..."),
+                logger=self.logger,
             )
-            self.refresh_table_preserve_view(focus_id=track_id)
-        except Exception as exc:
-            self.conn.rollback()
-            self.logger.exception("Convert custom blob storage failed: %s", exc)
-            QMessageBox.critical(
+
+        def _before_cleanup(result: dict[str, object], ui_progress) -> None:
+            focus_track_id = (
+                list(result.get("converted_track_ids") or [])
+                or list(result.get("scope_track_ids") or [])
+                or [None]
+            )[0]
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=97,
+                message="Applying converted storage changes...",
+            )
+            try:
+                self.conn.commit()
+            except Exception:
+                pass
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=99,
+                message="Refreshing catalog media badges and history...",
+            )
+            if list(result.get("converted_track_ids") or []):
+                self.refresh_table_preserve_view(focus_id=focus_track_id)
+            else:
+                self._refresh_history_actions()
+                if hasattr(self, "table"):
+                    self._apply_blob_badges()
+                    self.table.viewport().update()
+            self._refresh_history_actions()
+            self._advance_task_ui_progress(
+                ui_progress,
+                value=100,
+                message="Storage conversion complete.",
+            )
+
+        def _success(result: dict[str, object]) -> None:
+            message_lines = self._storage_conversion_summary_lines(result)
+            self._log_event(
+                "storage.convert",
+                "Converted catalog media storage mode",
+                track_ids=list(result.get("scope_track_ids") or []),
+                target_mode=result.get("target_mode"),
+                column_label=result.get("column_label"),
+                converted_track_ids=list(result.get("converted_track_ids") or []),
+                skipped_track_ids=list(result.get("skipped_track_ids") or []),
+                missing_track_ids=list(result.get("missing_track_ids") or []),
+                failures=list(result.get("failed") or []),
+            )
+            dialog_fn = QMessageBox.warning if list(result.get("failed") or []) else QMessageBox.information
+            dialog_fn(
                 self,
-                "Custom Field Error",
-                f"Failed to convert storage mode:\n{exc}",
+                title,
+                "\n".join(message_lines),
             )
+
+        self._submit_background_bundle_task(
+            title=title,
+            description=(
+                f"Converting '{column_label}' to "
+                f"{self._storage_conversion_target_label(clean_target)} "
+                "for the selected tracks..."
+            ),
+            task_fn=_worker,
+            kind="write",
+            unique_key=f"storage.convert.{scope_kind}.{media_key or field_id or column_label}",
+            worker_completion_progress=(96, "Finalizing storage conversion..."),
+            on_success_before_cleanup=_before_cleanup,
+            on_success_after_cleanup=_success,
+            on_error=lambda failure: self._show_background_task_error(
+                title,
+                failure,
+                user_message="Could not convert storage mode:",
+            ),
+        )
 
     def _human_size(self, n: int) -> str:
         try:
@@ -25038,14 +25433,43 @@ class App(QMainWindow):
         return self._human_size(size_bytes)
 
     @staticmethod
+    def _storage_mode_badge_label(storage_mode: str | None) -> str:
+        clean_mode = normalize_storage_mode(storage_mode, default=STORAGE_MODE_DATABASE)
+        if clean_mode == STORAGE_MODE_MANAGED_FILE:
+            return "Managed-file storage"
+        return "Database storage"
+
+    @staticmethod
+    def _blob_icon_kind_for_storage(
+        media_kind: str,
+        *,
+        storage_mode: str | None,
+        is_lossy: bool = False,
+    ) -> str:
+        clean_mode = normalize_storage_mode(storage_mode, default=STORAGE_MODE_DATABASE)
+        storage_suffix = "managed" if clean_mode == STORAGE_MODE_MANAGED_FILE else "database"
+        if str(media_kind or "").strip().lower() == "audio":
+            prefix = "audio_lossy" if is_lossy else "audio"
+            return f"{prefix}_{storage_suffix}"
+        return f"image_{storage_suffix}"
+
+    @classmethod
     def _blob_icon_kind_for_standard_media(
+        cls,
         media_key: str,
         *,
         meta: dict[str, object] | None = None,
     ) -> str:
-        if media_key == "audio_file" and bool((meta or {}).get("is_lossy")):
-            return "audio_lossy"
-        return "audio" if media_key == "audio_file" else "image"
+        if media_key == "audio_file":
+            return cls._blob_icon_kind_for_storage(
+                "audio",
+                storage_mode=(meta or {}).get("storage_mode"),
+                is_lossy=bool((meta or {}).get("is_lossy")),
+            )
+        return cls._blob_icon_kind_for_storage(
+            "image",
+            storage_mode=(meta or {}).get("storage_mode"),
+        )
 
     def _standard_media_badge_tooltip(
         self,
@@ -25053,16 +25477,20 @@ class App(QMainWindow):
         meta: dict[str, object],
         display: str,
     ) -> str:
+        storage_label = self._storage_mode_badge_label(meta.get("storage_mode"))
         if media_key != "audio_file":
-            return f"Stored size: {display}"
+            return f"{storage_label}\nStored size: {display}"
         format_label = str(meta.get("format_label") or "").strip()
         if bool(meta.get("is_lossy")):
             if format_label:
-                return f"Lossy primary audio · {format_label}\nStored size: {display}"
-            return f"Lossy primary audio\nStored size: {display}"
+                return (
+                    f"Lossy primary audio · {format_label}\n"
+                    f"{storage_label}\nStored size: {display}"
+                )
+            return f"Lossy primary audio\n{storage_label}\nStored size: {display}"
         if format_label:
-            return f"Primary audio · {format_label}\nStored size: {display}"
-        return f"Primary audio\nStored size: {display}"
+            return f"Primary audio · {format_label}\n{storage_label}\nStored size: {display}"
+        return f"Primary audio\n{storage_label}\nStored size: {display}"
 
     def _blob_icon_spec_for_standard_media(
         self,
@@ -25076,14 +25504,26 @@ class App(QMainWindow):
         return settings[self._blob_icon_kind_for_standard_media(media_key, meta=meta)]
 
     def _blob_icon_spec_for_custom_field(self, field: dict[str, object]) -> dict[str, object]:
+        return self._blob_icon_spec_for_custom_field_with_meta(field, meta=None)
+
+    def _blob_icon_spec_for_custom_field_with_meta(
+        self,
+        field: dict[str, object],
+        *,
+        meta: dict[str, object] | None,
+    ) -> dict[str, object]:
         field_type = str(field.get("field_type") or "").strip().lower()
-        kind = "audio" if field_type == "blob_audio" else "image"
+        kind = self._blob_icon_kind_for_storage(
+            "audio" if field_type == "blob_audio" else "image",
+            storage_mode=(meta or {}).get("storage_mode"),
+        )
         override = field.get("blob_icon_payload")
         if override:
             return override
-        return self._blob_icon_spec_for_standard_media(
-            "audio_file" if kind == "audio" else "album_art"
+        settings = normalize_blob_icon_settings(
+            getattr(self, "blob_icon_settings", None) or default_blob_icon_settings()
         )
+        return settings[kind]
 
     def _resolve_blob_badge_icon(
         self,
@@ -25091,16 +25531,14 @@ class App(QMainWindow):
         spec: dict[str, object] | None,
         kind: str,
     ) -> QIcon:
-        fallback_media_key = "audio_file" if kind in ("audio", "audio_lossy") else "album_art"
-        fallback_meta = {"is_lossy": True} if kind == "audio_lossy" else None
+        settings = normalize_blob_icon_settings(
+            getattr(self, "blob_icon_settings", None) or default_blob_icon_settings()
+        )
         return icon_from_blob_icon_spec(
             spec,
             kind=kind,
             style=self.style() if hasattr(self, "style") else None,
-            fallback_spec=self._blob_icon_spec_for_standard_media(
-                fallback_media_key,
-                meta=fallback_meta,
-            ),
+            fallback_spec=settings.get(kind),
             allow_inherit=True,
             size=18,
         )
@@ -25133,7 +25571,11 @@ class App(QMainWindow):
 
     def _set_blob_indicator(self, row: int, col: int, track_id: int, field_id: int) -> None:
         try:
-            meta = self.cf_get_value_meta(track_id, field_id)
+            meta = self.cf_get_value_meta(
+                track_id,
+                field_id,
+                include_storage_details=True,
+            )
         except Exception:
             meta = {"has_blob": False, "mime_type": None, "size_bytes": 0}
         display = (
@@ -25157,15 +25599,18 @@ class App(QMainWindow):
                 None,
             )
             if field is not None:
-                kind = "audio" if field.get("field_type") == "blob_audio" else "image"
+                kind = self._blob_icon_kind_for_storage(
+                    "audio" if field.get("field_type") == "blob_audio" else "image",
+                    storage_mode=meta.get("storage_mode"),
+                )
                 item.setIcon(
                     self._resolve_blob_badge_icon(
-                        spec=self._blob_icon_spec_for_custom_field(field),
+                        spec=self._blob_icon_spec_for_custom_field_with_meta(field, meta=meta),
                         kind=kind,
                     )
                 )
                 item.setToolTip(
-                    f"{describe_blob_icon_spec(field.get('blob_icon_payload'), kind=kind, allow_inherit=True)}\nStored size: {display}"
+                    f"{describe_blob_icon_spec(field.get('blob_icon_payload'), kind=kind, allow_inherit=True)}\n{self._storage_mode_badge_label(meta.get('storage_mode'))}\nStored size: {display}"
                 )
         else:
             item.setIcon(QIcon())
@@ -25251,32 +25696,20 @@ class App(QMainWindow):
                 if ftype not in ("blob_image", "blob_audio"):
                     continue
 
-                has_blob = False
-                size_bytes = 0
-                mime = None
                 try:
-                    # First: a fast existence check
-                    has_blob = bool(self.cf_has_blob(pk, cf["id"]))
+                    meta = self.cf_get_value_meta(
+                        pk,
+                        cf["id"],
+                        include_storage_details=True,
+                    )
                 except Exception:
-                    has_blob = False
-
-                if has_blob:
-                    # Try a cheap size metadata call; else fetch once and compute
-                    try:
-                        size_bytes = int(self.cf_blob_size(pk, cf["id"]))
-                    except Exception:
-                        try:
-                            blob = self.cf_fetch_blob(pk, cf["id"])
-                            data = blob[0] if isinstance(blob, tuple) else blob
-                            if isinstance(data, memoryview):
-                                data = data.tobytes()
-                            size_bytes = len(data) if isinstance(data, (bytes, bytearray)) else 0
-                            mime = self._detect_mime(data) if size_bytes else None
-                        except Exception:
-                            size_bytes = 0
-                            mime = None
-
-                display = self._format_blob_badge(mime, size_bytes) if has_blob else "—"
+                    meta = {"has_blob": False, "mime_type": None, "size_bytes": 0}
+                has_blob = bool(meta.get("has_blob"))
+                display = (
+                    self._format_blob_badge(meta.get("mime_type"), meta.get("size_bytes", 0))
+                    if has_blob
+                    else "—"
+                )
                 item = self.table.item(row_idx, col)
                 if item is None:
                     item = QTableWidgetItem(display)
@@ -25284,15 +25717,18 @@ class App(QMainWindow):
                 else:
                     item.setText(display)
                 if has_blob:
-                    kind = "audio" if ftype == "blob_audio" else "image"
+                    kind = self._blob_icon_kind_for_storage(
+                        "audio" if ftype == "blob_audio" else "image",
+                        storage_mode=meta.get("storage_mode"),
+                    )
                     item.setIcon(
                         self._resolve_blob_badge_icon(
-                            spec=self._blob_icon_spec_for_custom_field(cf),
+                            spec=self._blob_icon_spec_for_custom_field_with_meta(cf, meta=meta),
                             kind=kind,
                         )
                     )
                     item.setToolTip(
-                        f"{describe_blob_icon_spec(cf.get('blob_icon_payload'), kind=kind, allow_inherit=True)}\nStored size: {display}"
+                        f"{describe_blob_icon_spec(cf.get('blob_icon_payload'), kind=kind, allow_inherit=True)}\n{self._storage_mode_badge_label(meta.get('storage_mode'))}\nStored size: {display}"
                     )
                 else:
                     item.setIcon(QIcon())

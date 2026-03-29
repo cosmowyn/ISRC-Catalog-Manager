@@ -421,6 +421,14 @@ class AppShellTestCase(unittest.TestCase):
             window._prepare_for_background_db_task()
         with window.background_service_factory.open_bundle() as bundle:
             result = kwargs["task_fn"](bundle, _InlineTaskContext())
+        worker_completion_progress = kwargs.get("worker_completion_progress")
+        if worker_completion_progress is not None:
+            progress_value, progress_message = worker_completion_progress
+            _InlineTaskContext().report_progress(
+                value=int(progress_value),
+                maximum=100,
+                message=str(progress_message or ""),
+            )
         on_success_before_cleanup = kwargs.get("on_success_before_cleanup")
         if callable(on_success_before_cleanup):
             on_success_before_cleanup(result, _InlineUiProgress())
@@ -434,6 +442,76 @@ class AppShellTestCase(unittest.TestCase):
         if callable(on_finished):
             on_finished()
         return "inline-task"
+
+    def _run_bundle_task_with_progress_capture(self, window, **kwargs):
+        worker_progress: list[tuple[int | None, int | None, str]] = []
+        ui_progress: list[tuple[int | None, int | None, str]] = []
+
+        class _CapturingTaskContext:
+            def set_status(self, message):
+                worker_progress.append((None, None, str(message or "")))
+
+            def report_progress(self, *args, **kwargs):
+                value = kwargs.get("value")
+                maximum = kwargs.get("maximum")
+                message = kwargs.get("message")
+                if args:
+                    value = args[0]
+                if len(args) > 1:
+                    maximum = args[1]
+                worker_progress.append((value, maximum, str(message or "")))
+
+            def is_cancelled(self):
+                return False
+
+            def raise_if_cancelled(self):
+                return None
+
+        class _CapturingUiProgress:
+            def set_status(self, message):
+                ui_progress.append((None, None, str(message or "")))
+
+            def report_progress(self, *args, **kwargs):
+                value = kwargs.get("value")
+                maximum = kwargs.get("maximum")
+                message = kwargs.get("message")
+                if args:
+                    value = args[0]
+                if len(args) > 1:
+                    maximum = args[1]
+                ui_progress.append((value, maximum, str(message or "")))
+
+        if hasattr(window, "_prepare_for_background_db_task"):
+            window._prepare_for_background_db_task()
+        task_ctx = _CapturingTaskContext()
+        ui_ctx = _CapturingUiProgress()
+        with window.background_service_factory.open_bundle() as bundle:
+            result = kwargs["task_fn"](bundle, task_ctx)
+        worker_completion_progress = kwargs.get("worker_completion_progress")
+        if worker_completion_progress is not None:
+            progress_value, progress_message = worker_completion_progress
+            task_ctx.report_progress(
+                value=int(progress_value),
+                maximum=100,
+                message=str(progress_message or ""),
+            )
+        on_success_before_cleanup = kwargs.get("on_success_before_cleanup")
+        if callable(on_success_before_cleanup):
+            on_success_before_cleanup(result, ui_ctx)
+        on_success = kwargs.get("on_success")
+        if callable(on_success):
+            on_success(result)
+        on_success_after_cleanup = kwargs.get("on_success_after_cleanup")
+        if callable(on_success_after_cleanup):
+            on_success_after_cleanup(result)
+        on_finished = kwargs.get("on_finished")
+        if callable(on_finished):
+            on_finished()
+        return {
+            "result": result,
+            "worker_progress": worker_progress,
+            "ui_progress": ui_progress,
+        }
 
     def _set_first_launch_prompt_pending(self, pending: bool) -> None:
         settings = self._settings()
@@ -6076,8 +6154,129 @@ class AppShellTestCase(unittest.TestCase):
         snapshot = self._table_context_menu_snapshot(row, 0)
         self.assertNotIn("Audio", list(snapshot.get("texts") or []))
 
+    def case_standard_audio_badge_uses_distinct_icons_for_managed_and_database_storage(self):
+        managed_track_id = self._create_track(index=333, title="Managed Audio Badge")
+        database_track_id = self._create_track(index=334, title="Database Audio Badge")
+        managed_audio = self._create_wav_file("managed-audio-badge.wav")
+        database_audio = self._create_wav_file("database-audio-badge.wav")
+        self.window.track_service.set_media_path(managed_track_id, "audio_file", managed_audio)
+        self.window.track_service.set_media_path(
+            database_track_id,
+            "audio_file",
+            database_audio,
+            storage_mode=STORAGE_MODE_DATABASE,
+        )
+        self.window.refresh_table()
+        audio_col = self.window._column_index_by_header("Audio File")
+        managed_item = self.window.table.item(
+            self._table_row_for_track_id(managed_track_id),
+            audio_col,
+        )
+        database_item = self.window.table.item(
+            self._table_row_for_track_id(database_track_id),
+            audio_col,
+        )
+        self.assertIsNotNone(managed_item)
+        self.assertIsNotNone(database_item)
+        assert managed_item is not None
+        assert database_item is not None
+        self.assertIn("Managed-file storage", managed_item.toolTip())
+        self.assertIn("Database storage", database_item.toolTip())
+        self.assertNotEqual(managed_item.icon().cacheKey(), database_item.icon().cacheKey())
+
+    def case_standard_album_art_badge_uses_distinct_icons_for_managed_and_database_storage(self):
+        managed_track_id = self._create_track(index=335, title="Managed Art Badge")
+        database_track_id = self._create_track(index=336, title="Database Art Badge")
+        managed_art = self._create_media_file("managed-art-badge.png", b"\x89PNG\r\n\x1a\nmanaged")
+        database_art = self._create_media_file(
+            "database-art-badge.png",
+            b"\x89PNG\r\n\x1a\ndatabase",
+        )
+        self.window.track_service.set_media_path(managed_track_id, "album_art", managed_art)
+        self.window.track_service.set_media_path(
+            database_track_id,
+            "album_art",
+            database_art,
+            storage_mode=STORAGE_MODE_DATABASE,
+        )
+        self.window.refresh_table()
+        art_col = self.window._column_index_by_header("Album Art")
+        managed_item = self.window.table.item(
+            self._table_row_for_track_id(managed_track_id),
+            art_col,
+        )
+        database_item = self.window.table.item(
+            self._table_row_for_track_id(database_track_id),
+            art_col,
+        )
+        self.assertIsNotNone(managed_item)
+        self.assertIsNotNone(database_item)
+        assert managed_item is not None
+        assert database_item is not None
+        self.assertIn("Managed-file storage", managed_item.toolTip())
+        self.assertIn("Database storage", database_item.toolTip())
+        self.assertNotEqual(managed_item.icon().cacheKey(), database_item.icon().cacheKey())
+
+    def case_custom_blob_image_badge_uses_distinct_icons_for_managed_and_database_storage(self):
+        managed_track_id = self._create_track(index=337, title="Managed Custom Blob")
+        database_track_id = self._create_track(index=338, title="Database Custom Blob")
+        self.assertTrue(
+            self.window._apply_custom_field_configuration(
+                [
+                    {
+                        "id": None,
+                        "name": "Session Artwork",
+                        "field_type": "blob_image",
+                        "options": None,
+                        "blob_icon_payload": {"mode": "inherit"},
+                    }
+                ],
+                action_label="Add Custom Column: Session Artwork",
+                action_type="fields.add",
+            )
+        )
+        field = next(
+            field
+            for field in self.window.active_custom_fields
+            if field.get("name") == "Session Artwork"
+        )
+        managed_image = self._create_media_file("managed-custom-art.png", b"\x89PNGmanaged-custom")
+        database_image = self._create_media_file(
+            "database-custom-art.png",
+            b"\x89PNGdatabase-custom",
+        )
+        self.window.cf_save_value(
+            managed_track_id,
+            int(field["id"]),
+            blob_path=str(managed_image),
+            storage_mode=STORAGE_MODE_MANAGED_FILE,
+        )
+        self.window.cf_save_value(
+            database_track_id,
+            int(field["id"]),
+            blob_path=str(database_image),
+            storage_mode=STORAGE_MODE_DATABASE,
+        )
+        self.window.refresh_table()
+        col = self.window._column_index_by_header("Session Artwork")
+        managed_item = self.window.table.item(
+            self._table_row_for_track_id(managed_track_id),
+            col,
+        )
+        database_item = self.window.table.item(
+            self._table_row_for_track_id(database_track_id),
+            col,
+        )
+        self.assertIsNotNone(managed_item)
+        self.assertIsNotNone(database_item)
+        assert managed_item is not None
+        assert database_item is not None
+        self.assertIn("Managed-file storage", managed_item.toolTip())
+        self.assertIn("Database storage", database_item.toolTip())
+        self.assertNotEqual(managed_item.icon().cacheKey(), database_item.icon().cacheKey())
+
     def case_standard_media_context_menu_groups_file_and_storage_actions(self):
-        track_id = self._create_track(index=333, title="Managed Media Track")
+        track_id = self._create_track(index=339, title="Managed Media Track")
         audio_path = self._create_wav_file("standard-media.wav")
         self.window.track_service.set_media_path(track_id, "audio_file", audio_path)
         self.window.refresh_table()
@@ -6100,8 +6299,93 @@ class AppShellTestCase(unittest.TestCase):
         )
         self.assertEqual(list(storage_snapshot.get("texts") or []), ["Store in Database"])
 
+    def case_standard_media_context_menu_shows_only_store_selection_in_database_for_all_managed_selection(
+        self,
+    ):
+        first_track_id = self._create_track(index=340, title="Managed Selection A")
+        second_track_id = self._create_track(index=341, title="Managed Selection B")
+        self.window.track_service.set_media_path(
+            first_track_id,
+            "audio_file",
+            self._create_wav_file("managed-selection-a.wav"),
+        )
+        self.window.track_service.set_media_path(
+            second_track_id,
+            "audio_file",
+            self._create_wav_file("managed-selection-b.wav"),
+        )
+        self.window.refresh_table()
+        self._select_track_ids([first_track_id, second_track_id])
+        audio_col = self.window._column_index_by_header("Audio File")
+        snapshot = self._table_context_menu_snapshot(
+            self._table_row_for_track_id(first_track_id),
+            audio_col,
+        )
+        storage_snapshot = (snapshot.get("submenus") or {}).get("Storage") or {}
+        self.assertEqual(
+            list(storage_snapshot.get("texts") or []),
+            ["Store selection in database"],
+        )
+
+    def case_standard_media_context_menu_shows_only_store_selection_as_managed_file_for_all_database_selection(
+        self,
+    ):
+        first_track_id = self._create_track(index=342, title="Database Selection A")
+        second_track_id = self._create_track(index=343, title="Database Selection B")
+        self.window.track_service.set_media_path(
+            first_track_id,
+            "audio_file",
+            self._create_wav_file("database-selection-a.wav"),
+            storage_mode=STORAGE_MODE_DATABASE,
+        )
+        self.window.track_service.set_media_path(
+            second_track_id,
+            "audio_file",
+            self._create_wav_file("database-selection-b.wav"),
+            storage_mode=STORAGE_MODE_DATABASE,
+        )
+        self.window.refresh_table()
+        self._select_track_ids([first_track_id, second_track_id])
+        audio_col = self.window._column_index_by_header("Audio File")
+        snapshot = self._table_context_menu_snapshot(
+            self._table_row_for_track_id(first_track_id),
+            audio_col,
+        )
+        storage_snapshot = (snapshot.get("submenus") or {}).get("Storage") or {}
+        self.assertEqual(
+            list(storage_snapshot.get("texts") or []),
+            ["Store selection as managed file"],
+        )
+
+    def case_standard_media_context_menu_shows_both_storage_actions_for_mixed_selection(self):
+        managed_track_id = self._create_track(index=344, title="Mixed Selection Managed")
+        database_track_id = self._create_track(index=345, title="Mixed Selection Database")
+        self.window.track_service.set_media_path(
+            managed_track_id,
+            "audio_file",
+            self._create_wav_file("mixed-selection-managed.wav"),
+        )
+        self.window.track_service.set_media_path(
+            database_track_id,
+            "audio_file",
+            self._create_wav_file("mixed-selection-database.wav"),
+            storage_mode=STORAGE_MODE_DATABASE,
+        )
+        self.window.refresh_table()
+        self._select_track_ids([managed_track_id, database_track_id])
+        audio_col = self.window._column_index_by_header("Audio File")
+        snapshot = self._table_context_menu_snapshot(
+            self._table_row_for_track_id(managed_track_id),
+            audio_col,
+        )
+        storage_snapshot = (snapshot.get("submenus") or {}).get("Storage") or {}
+        self.assertEqual(
+            list(storage_snapshot.get("texts") or []),
+            ["Store selection as managed file", "Store selection in database"],
+        )
+
     def case_custom_blob_context_menu_groups_file_and_storage_actions(self):
-        track_id = self._create_track(index=334, title="Blob Custom Track")
+        track_id = self._create_track(index=346, title="Blob Custom Track")
         self.assertTrue(
             self.window._apply_custom_field_configuration(
                 [
@@ -6149,8 +6433,170 @@ class AppShellTestCase(unittest.TestCase):
         )
         self.assertEqual(list(storage_snapshot.get("texts") or []), ["Store as Managed File"])
 
+    def case_mixed_selection_storage_conversion_skips_already_matching_tracks_and_converts_only_needed_tracks(
+        self,
+    ):
+        managed_track_id = self._create_track(index=347, title="Managed Convert Track")
+        database_track_id = self._create_track(index=348, title="Database Convert Track")
+        self.window.track_service.set_media_path(
+            managed_track_id,
+            "audio_file",
+            self._create_wav_file("managed-convert-track.wav"),
+        )
+        self.window.track_service.set_media_path(
+            database_track_id,
+            "audio_file",
+            self._create_wav_file("database-convert-track.wav"),
+            storage_mode=STORAGE_MODE_DATABASE,
+        )
+        info_messages: list[str] = []
+
+        with (
+            mock.patch.object(
+                app_module.App,
+                "_submit_background_bundle_task",
+                autospec=True,
+                side_effect=self._run_bundle_task_inline,
+            ),
+            mock.patch.object(
+                app_module.QMessageBox,
+                "information",
+                side_effect=lambda *_args: info_messages.append(str(_args[-1])),
+            ),
+        ):
+            self.window._convert_standard_media_for_track(
+                [managed_track_id, database_track_id],
+                "audio_file",
+                STORAGE_MODE_DATABASE,
+            )
+
+        managed_meta = self.window.track_service.get_media_meta(managed_track_id, "audio_file")
+        database_meta = self.window.track_service.get_media_meta(database_track_id, "audio_file")
+        self.assertEqual(managed_meta.get("storage_mode"), STORAGE_MODE_DATABASE)
+        self.assertEqual(database_meta.get("storage_mode"), STORAGE_MODE_DATABASE)
+        self.assertTrue(info_messages)
+        self.assertIn("Converted 1 selected track", info_messages[-1])
+        self.assertIn("Skipped 1 track already using database storage.", info_messages[-1])
+
+    def case_single_track_storage_conversion_uses_background_bundle_task(self):
+        track_id = self._create_track(index=349, title="Background Convert Track")
+        self.window.track_service.set_media_path(
+            track_id,
+            "audio_file",
+            self._create_wav_file("background-convert-track.wav"),
+        )
+        with mock.patch.object(self.window, "_submit_background_bundle_task") as submit_task:
+            self.window._convert_standard_media_for_track(
+                track_id,
+                "audio_file",
+                STORAGE_MODE_DATABASE,
+            )
+
+        submit_task.assert_called_once()
+        self.assertEqual(
+            submit_task.call_args.kwargs["title"],
+            "Convert Audio File Storage",
+        )
+        self.assertEqual(
+            submit_task.call_args.kwargs["worker_completion_progress"],
+            (96, "Finalizing storage conversion..."),
+        )
+        self.assertTrue(callable(submit_task.call_args.kwargs["on_success_before_cleanup"]))
+
+    def case_custom_blob_storage_conversion_uses_background_bundle_task(self):
+        track_id = self._create_track(index=350, title="Background Custom Convert")
+        self.assertTrue(
+            self.window._apply_custom_field_configuration(
+                [
+                    {
+                        "id": None,
+                        "name": "Session Artwork",
+                        "field_type": "blob_image",
+                        "options": None,
+                        "blob_icon_payload": {"mode": "inherit"},
+                    }
+                ],
+                action_label="Add Custom Column: Session Artwork",
+                action_type="fields.add",
+            )
+        )
+        field = next(
+            field
+            for field in self.window.active_custom_fields
+            if field.get("name") == "Session Artwork"
+        )
+        self.window.cf_save_value(
+            track_id,
+            int(field["id"]),
+            blob_path=str(self._create_media_file("background-custom-art.png", b"\x89PNGbg")),
+            storage_mode=STORAGE_MODE_DATABASE,
+        )
+        with mock.patch.object(self.window, "_submit_background_bundle_task") as submit_task:
+            self.window._convert_custom_blob_storage_mode(
+                track_id,
+                int(field["id"]),
+                STORAGE_MODE_MANAGED_FILE,
+            )
+
+        submit_task.assert_called_once()
+        self.assertEqual(
+            submit_task.call_args.kwargs["title"],
+            "Convert Session Artwork Storage",
+        )
+        self.assertEqual(
+            submit_task.call_args.kwargs["worker_completion_progress"],
+            (96, "Finalizing storage conversion..."),
+        )
+        self.assertTrue(callable(submit_task.call_args.kwargs["on_success_before_cleanup"]))
+
+    def case_storage_conversion_progress_reaches_100_only_after_final_ui_refresh(self):
+        track_id = self._create_track(index=351, title="Progress Convert Track")
+        self.window.track_service.set_media_path(
+            track_id,
+            "audio_file",
+            self._create_wav_file("progress-convert-track.wav"),
+        )
+        submitted: dict[str, object] = {}
+
+        def _capture_submit(_window, **kwargs):
+            submitted.update(kwargs)
+            return "captured-task"
+
+        with mock.patch.object(
+            app_module.App,
+            "_submit_background_bundle_task",
+            autospec=True,
+            side_effect=_capture_submit,
+        ):
+            self.window._convert_standard_media_for_track(
+                track_id,
+                "audio_file",
+                STORAGE_MODE_DATABASE,
+            )
+
+        with mock.patch.object(app_module.QMessageBox, "information"):
+            progress = self._run_bundle_task_with_progress_capture(self.window, **submitted)
+
+        worker_values = [
+            int(value)
+            for value, _maximum, _message in progress["worker_progress"]
+            if value is not None
+        ]
+        ui_values = [
+            int(value)
+            for value, _maximum, _message in progress["ui_progress"]
+            if value is not None
+        ]
+        self.assertTrue(worker_values)
+        self.assertTrue(ui_values)
+        self.assertLess(max(worker_values), 100)
+        self.assertEqual(worker_values[-1], 96)
+        self.assertIn(97, ui_values)
+        self.assertIn(99, ui_values)
+        self.assertEqual(ui_values[-1], 100)
+
     def case_text_custom_field_table_edit_saves_without_attachment_state(self):
-        track_id = self._create_track(index=335, title="Text Custom Track")
+        track_id = self._create_track(index=352, title="Text Custom Track")
         self.assertTrue(
             self.window._apply_custom_field_configuration(
                 [

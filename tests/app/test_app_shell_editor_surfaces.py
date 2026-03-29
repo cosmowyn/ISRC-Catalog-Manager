@@ -63,11 +63,41 @@ class AppShellEditorSurfaceTests(AppShellTestCase):
     test_audioless_row_context_menu_omits_audio_submenu = (
         AppShellTestCase.case_audioless_row_context_menu_omits_audio_submenu
     )
+    test_standard_audio_badge_uses_distinct_icons_for_managed_and_database_storage = (
+        AppShellTestCase.case_standard_audio_badge_uses_distinct_icons_for_managed_and_database_storage
+    )
+    test_standard_album_art_badge_uses_distinct_icons_for_managed_and_database_storage = (
+        AppShellTestCase.case_standard_album_art_badge_uses_distinct_icons_for_managed_and_database_storage
+    )
+    test_custom_blob_image_badge_uses_distinct_icons_for_managed_and_database_storage = (
+        AppShellTestCase.case_custom_blob_image_badge_uses_distinct_icons_for_managed_and_database_storage
+    )
     test_standard_media_context_menu_groups_file_and_storage_actions = (
         AppShellTestCase.case_standard_media_context_menu_groups_file_and_storage_actions
     )
+    test_standard_media_context_menu_shows_only_store_selection_in_database_for_all_managed_selection = (
+        AppShellTestCase.case_standard_media_context_menu_shows_only_store_selection_in_database_for_all_managed_selection
+    )
+    test_standard_media_context_menu_shows_only_store_selection_as_managed_file_for_all_database_selection = (
+        AppShellTestCase.case_standard_media_context_menu_shows_only_store_selection_as_managed_file_for_all_database_selection
+    )
+    test_standard_media_context_menu_shows_both_storage_actions_for_mixed_selection = (
+        AppShellTestCase.case_standard_media_context_menu_shows_both_storage_actions_for_mixed_selection
+    )
     test_custom_blob_context_menu_groups_file_and_storage_actions = (
         AppShellTestCase.case_custom_blob_context_menu_groups_file_and_storage_actions
+    )
+    test_mixed_selection_storage_conversion_skips_already_matching_tracks_and_converts_only_needed_tracks = (
+        AppShellTestCase.case_mixed_selection_storage_conversion_skips_already_matching_tracks_and_converts_only_needed_tracks
+    )
+    test_single_track_storage_conversion_uses_background_bundle_task = (
+        AppShellTestCase.case_single_track_storage_conversion_uses_background_bundle_task
+    )
+    test_custom_blob_storage_conversion_uses_background_bundle_task = (
+        AppShellTestCase.case_custom_blob_storage_conversion_uses_background_bundle_task
+    )
+    test_storage_conversion_progress_reaches_100_only_after_final_ui_refresh = (
+        AppShellTestCase.case_storage_conversion_progress_reaches_100_only_after_final_ui_refresh
     )
     test_text_custom_field_table_edit_saves_without_attachment_state = (
         AppShellTestCase.case_text_custom_field_table_edit_saves_without_attachment_state
