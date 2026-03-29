@@ -331,6 +331,57 @@ class ThemeBuilderTests(unittest.TestCase):
             dialog.close()
             host.close()
 
+    def test_theme_builder_blob_icon_values_accept_full_picker_library_choices(self):
+        host = _ThemePreviewHost()
+        dialog = app_module.ApplicationSettingsDialog(
+            window_title="Catalog",
+            icon_path="",
+            artist_code="00",
+            auto_snapshot_enabled=True,
+            auto_snapshot_interval_minutes=30,
+            isrc_prefix="NLABC",
+            sena_number="",
+            btw_number="",
+            buma_relatie_nummer="",
+            buma_ipi="",
+            gs1_template_asset=None,
+            gs1_contracts_csv_path="",
+            gs1_contract_entries=(),
+            gs1_active_contract_number="",
+            gs1_target_market="",
+            gs1_language="",
+            gs1_brand="",
+            gs1_subbrand="",
+            gs1_packaging_type="",
+            gs1_product_classification="",
+            theme_settings={},
+            stored_themes={},
+            current_profile_path="",
+            parent=host,
+        )
+        try:
+            audio_editor = dialog._blob_icon_editors["audio_managed"]
+            image_editor = dialog._blob_icon_editors["image_database"]
+
+            audio_editor.mode_combo.setCurrentIndex(audio_editor.mode_combo.findData("system"))
+            audio_editor.system_combo.setCurrentIndex(
+                audio_editor.system_combo.findData("SP_DesktopIcon")
+            )
+
+            image_editor.mode_combo.setCurrentIndex(image_editor.mode_combo.findData("emoji"))
+            image_editor.emoji_combo.setCurrentIndex(image_editor.emoji_combo.findData("🎶"))
+
+            values = dialog.values()
+
+            self.assertEqual(
+                values["blob_icon_settings"]["audio_managed"]["system_name"],
+                "SP_DesktopIcon",
+            )
+            self.assertEqual(values["blob_icon_settings"]["image_database"]["emoji"], "🎶")
+        finally:
+            dialog.close()
+            host.close()
+
     def test_application_settings_dialog_hides_owner_management_controls(self):
         host = _ThemePreviewHost()
         host.party_service = _PartyServiceStub(

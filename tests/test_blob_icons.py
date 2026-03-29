@@ -10,13 +10,18 @@ try:
     from PySide6.QtGui import QImage
 
     from isrc_manager.blob_icons import (
+        BlobIconEditorWidget,
         BlobIconSettingsService,
         blob_icon_spec_from_storage,
         compress_blob_icon_image,
         default_blob_icon_settings,
+        default_system_icon_name,
+        emoji_blob_icon_presets,
         finalize_blob_icon_spec,
         icon_from_blob_icon_spec,
         normalize_blob_icon_settings,
+        recommended_emoji_blob_icon_presets,
+        system_blob_icon_choices,
     )
 except Exception as exc:  # pragma: no cover - environment-specific fallback
     BLOB_ICON_IMPORT_ERROR = exc
@@ -124,6 +129,58 @@ class BlobIconTests(unittest.TestCase):
     def test_compress_blob_icon_image_rejects_missing_files(self):
         with self.assertRaises(ValueError):
             compress_blob_icon_image("/does/not/exist.png")
+
+    def test_emoji_picker_keeps_recommended_default_first_and_exposes_full_library(self):
+        editor = BlobIconEditorWidget(kind="audio_database")
+        try:
+            recommended = recommended_emoji_blob_icon_presets("audio_database")
+            combo_values = [
+                str(editor.emoji_combo.itemData(index) or "").strip()
+                for index in range(editor.emoji_combo.count())
+                if str(editor.emoji_combo.itemData(index) or "").strip()
+            ]
+
+            self.assertEqual(combo_values[0], recommended[0][0])
+            self.assertEqual(combo_values[0], "💽")
+            self.assertIn("🖼️", combo_values)
+            self.assertIn("🎨", combo_values)
+        finally:
+            editor.close()
+
+    def test_system_picker_keeps_recommended_icons_first_and_exposes_full_library(self):
+        editor = BlobIconEditorWidget(kind="audio_managed")
+        try:
+            combo_values = [
+                str(editor.system_combo.itemData(index) or "").strip()
+                for index in range(editor.system_combo.count())
+                if str(editor.system_combo.itemData(index) or "").strip()
+            ]
+
+            self.assertEqual(combo_values[0], default_system_icon_name("audio_managed"))
+            self.assertEqual(combo_values[0], "SP_MediaVolume")
+            self.assertIn("SP_DesktopIcon", combo_values)
+            self.assertIn("SP_ComputerIcon", combo_values)
+        finally:
+            editor.close()
+
+    def test_picker_selection_supports_full_library_icons_outside_original_kind_subset(self):
+        editor = BlobIconEditorWidget(kind="audio_managed")
+        try:
+            editor.mode_combo.setCurrentIndex(editor.mode_combo.findData("system"))
+            editor.system_combo.setCurrentIndex(editor.system_combo.findData("SP_DesktopIcon"))
+            self.assertEqual(editor.current_spec()["system_name"], "SP_DesktopIcon")
+
+            editor.mode_combo.setCurrentIndex(editor.mode_combo.findData("emoji"))
+            editor.emoji_combo.setCurrentIndex(editor.emoji_combo.findData("🖼️"))
+            self.assertEqual(editor.current_spec()["emoji"], "🖼️")
+
+            self.assertIn("🖼️", dict(emoji_blob_icon_presets("audio_managed")))
+            self.assertIn(
+                "SP_DesktopIcon",
+                {choice.name for choice in system_blob_icon_choices("audio_managed")},
+            )
+        finally:
+            editor.close()
 
 
 if __name__ == "__main__":

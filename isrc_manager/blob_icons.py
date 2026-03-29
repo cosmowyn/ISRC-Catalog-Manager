@@ -112,6 +112,25 @@ EMOJI_BLOB_ICON_PRESETS: dict[str, tuple[tuple[str, str], ...]] = {
     ),
 }
 
+EXACT_KIND_DEFAULT_EMOJI_LABELS: dict[str, str] = {
+    "audio": "Recommended Default",
+    "audio_managed": "Recommended Default - Managed Audio",
+    "audio_database": "Recommended Default - Database Audio",
+    "audio_lossy": "Recommended Default - Lossy Audio",
+    "audio_lossy_managed": "Recommended Default - Managed Lossy Audio",
+    "audio_lossy_database": "Recommended Default - Database Lossy Audio",
+    "image": "Recommended Default",
+    "image_managed": "Recommended Default - Managed Image",
+    "image_database": "Recommended Default - Database Image",
+}
+
+FULL_LIBRARY_EMOJI_LABELS: dict[str, str] = {
+    "🎚️": "Level Slider",
+    "📼": "Tape",
+    "💽": "Optical Disc",
+    "🗃️": "Archive Box",
+}
+
 
 def default_blob_icon_spec(kind: str) -> dict[str, object]:
     clean_kind = str(kind or "").strip().lower()
@@ -163,19 +182,107 @@ def _system_specs_for_kind(kind: str) -> tuple[SystemBlobIconSpec, ...]:
     return tuple(spec for spec in SYSTEM_BLOB_ICON_SPECS if clean_kind in spec.kinds)
 
 
+def _ordered_unique_pairs(
+    pairs: tuple[tuple[str, str], ...] | list[tuple[str, str]],
+) -> tuple[tuple[str, str], ...]:
+    ordered: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for value, label in pairs:
+        clean_value = str(value or "").strip()
+        if not clean_value or clean_value in seen:
+            continue
+        seen.add(clean_value)
+        ordered.append((clean_value, str(label or clean_value).strip() or clean_value))
+    return tuple(ordered)
+
+
+def _ordered_unique_system_specs(
+    specs: tuple[SystemBlobIconSpec, ...] | list[SystemBlobIconSpec],
+) -> tuple[SystemBlobIconSpec, ...]:
+    ordered: list[SystemBlobIconSpec] = []
+    seen: set[str] = set()
+    for spec in specs:
+        if spec.name in seen:
+            continue
+        seen.add(spec.name)
+        ordered.append(spec)
+    return tuple(ordered)
+
+
+def _default_emoji_choice(kind: str) -> tuple[str, str]:
+    clean_kind = str(kind or "").strip().lower()
+    default_emoji = str(default_blob_icon_spec(clean_kind).get("emoji") or "").strip()
+    label = EXACT_KIND_DEFAULT_EMOJI_LABELS.get(
+        clean_kind,
+        EXACT_KIND_DEFAULT_EMOJI_LABELS.get(
+            _normalize_blob_icon_kind(clean_kind),
+            "Recommended Default",
+        ),
+    )
+    return (default_emoji, label)
+
+
+def recommended_system_blob_icon_choices(kind: str) -> tuple[SystemBlobIconSpec, ...]:
+    return _system_specs_for_kind(kind)
+
+
+def available_system_blob_icon_choices() -> tuple[SystemBlobIconSpec, ...]:
+    return SYSTEM_BLOB_ICON_SPECS
+
+
 def default_system_icon_name(kind: str) -> str:
-    specs = _system_specs_for_kind(kind)
+    specs = recommended_system_blob_icon_choices(kind)
     if specs:
         return specs[0].name
     return "SP_FileIcon"
 
 
 def system_blob_icon_choices(kind: str) -> tuple[SystemBlobIconSpec, ...]:
-    return _system_specs_for_kind(kind)
+    return _ordered_unique_system_specs(
+        [
+            *recommended_system_blob_icon_choices(kind),
+            *available_system_blob_icon_choices(),
+        ]
+    )
+
+
+def recommended_emoji_blob_icon_presets(kind: str) -> tuple[tuple[str, str], ...]:
+    clean_kind = str(kind or "").strip().lower()
+    normalized_kind = _normalize_blob_icon_kind(clean_kind)
+    return _ordered_unique_pairs(
+        [
+            _default_emoji_choice(clean_kind),
+            *EMOJI_BLOB_ICON_PRESETS.get(normalized_kind, ()),
+        ]
+    )
+
+
+def available_emoji_blob_icon_presets() -> tuple[tuple[str, str], ...]:
+    ordered: list[tuple[str, str]] = []
+    for preset_group in EMOJI_BLOB_ICON_PRESETS.values():
+        ordered.extend(preset_group)
+    for kind in (
+        "audio_managed",
+        "audio_database",
+        "audio_lossy_managed",
+        "audio_lossy_database",
+        "image_managed",
+        "image_database",
+    ):
+        emoji, _label = _default_emoji_choice(kind)
+        ordered.append((emoji, FULL_LIBRARY_EMOJI_LABELS.get(emoji, emoji)))
+    return _ordered_unique_pairs(ordered)
 
 
 def emoji_blob_icon_presets(kind: str) -> tuple[tuple[str, str], ...]:
-    return EMOJI_BLOB_ICON_PRESETS.get(_normalize_blob_icon_kind(kind), ())
+    recommended = recommended_emoji_blob_icon_presets(kind)
+    recommended_values = {value for value, _label in recommended}
+    remainder = tuple(
+        (value, label)
+        for value, label in available_emoji_blob_icon_presets()
+        if value not in recommended_values
+    )
+    return recommended + remainder
 
 
 def _coerce_image_payload(raw: object) -> dict[str, object]:
@@ -616,9 +723,31 @@ class BlobIconEditorWidget(QWidget):
         system_layout = QVBoxLayout(self.system_page)
         system_layout.setContentsMargins(0, 0, 0, 0)
         system_layout.setSpacing(6)
+        self.system_note_label = QLabel(
+            "Recommended platform icons appear first. Browse the full available platform icon list after the separator.",
+            self.system_page,
+        )
+        self.system_note_label.setWordWrap(True)
+        self.system_note_label.setProperty("role", "secondary")
+        system_layout.addWidget(self.system_note_label)
         self.system_combo = FocusWheelComboBox(self.system_page)
         style = QApplication.instance().style() if QApplication.instance() is not None else None
-        for choice in system_blob_icon_choices(self.kind):
+        recommended_system_choices = recommended_system_blob_icon_choices(self.kind)
+        all_system_choices = system_blob_icon_choices(self.kind)
+        recommended_system_names = {choice.name for choice in recommended_system_choices}
+        for choice in recommended_system_choices:
+            self.system_combo.addItem(choice.label, choice.name)
+            if style is not None:
+                self.system_combo.setItemIcon(
+                    self.system_combo.count() - 1,
+                    style.standardIcon(choice.standard_pixmap),
+                )
+        remaining_system_choices = tuple(
+            choice for choice in all_system_choices if choice.name not in recommended_system_names
+        )
+        if recommended_system_choices and remaining_system_choices:
+            self.system_combo.insertSeparator(self.system_combo.count())
+        for choice in remaining_system_choices:
             self.system_combo.addItem(choice.label, choice.name)
             if style is not None:
                 self.system_combo.setItemIcon(
@@ -634,15 +763,34 @@ class BlobIconEditorWidget(QWidget):
         emoji_layout.setHorizontalSpacing(10)
         emoji_layout.setVerticalSpacing(8)
         self.emoji_combo = FocusWheelComboBox(self.emoji_page)
-        for emoji, label in emoji_blob_icon_presets(self.kind):
+        recommended_emoji_choices = recommended_emoji_blob_icon_presets(self.kind)
+        all_emoji_choices = emoji_blob_icon_presets(self.kind)
+        recommended_emoji_values = {emoji for emoji, _label in recommended_emoji_choices}
+        for emoji, label in recommended_emoji_choices:
+            self.emoji_combo.addItem(f"{emoji}  {label}", emoji)
+        remaining_emoji_choices = tuple(
+            (emoji, label)
+            for emoji, label in all_emoji_choices
+            if emoji not in recommended_emoji_values
+        )
+        if recommended_emoji_choices and remaining_emoji_choices:
+            self.emoji_combo.insertSeparator(self.emoji_combo.count())
+        for emoji, label in remaining_emoji_choices:
             self.emoji_combo.addItem(f"{emoji}  {label}", emoji)
         self.emoji_edit = QLineEdit(self.emoji_page)
         self.emoji_edit.setClearButtonEnabled(True)
         self.emoji_edit.setPlaceholderText("Type or pick an emoji")
-        emoji_layout.addWidget(QLabel("Suggested"), 0, 0)
-        emoji_layout.addWidget(self.emoji_combo, 0, 1)
-        emoji_layout.addWidget(QLabel("Emoji"), 1, 0)
-        emoji_layout.addWidget(self.emoji_edit, 1, 1)
+        emoji_note = QLabel(
+            "Recommended emojis appear first. Browse the full bundled emoji set after the separator, or type any emoji below.",
+            self.emoji_page,
+        )
+        emoji_note.setWordWrap(True)
+        emoji_note.setProperty("role", "secondary")
+        emoji_layout.addWidget(emoji_note, 0, 0, 1, 2)
+        emoji_layout.addWidget(QLabel("Recommended First"), 1, 0)
+        emoji_layout.addWidget(self.emoji_combo, 1, 1)
+        emoji_layout.addWidget(QLabel("Emoji"), 2, 0)
+        emoji_layout.addWidget(self.emoji_edit, 2, 1)
         self.mode_stack.addWidget(self.emoji_page)
 
         self.image_page = QWidget(self.mode_stack)
