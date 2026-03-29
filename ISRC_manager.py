@@ -9502,7 +9502,8 @@ class App(QMainWindow):
         app = QApplication.instance()
         if app is None:
             return
-        normalized = self._normalize_theme_settings(raw_values)
+        theme_source = self.theme_settings if raw_values is None else raw_values
+        normalized = self._normalize_theme_settings(theme_source)
         effective = self._effective_theme_settings(normalized)
         font = QFont(str(effective["font_family"]))
         font.setPointSize(int(effective["font_size"]))
@@ -9527,7 +9528,8 @@ class App(QMainWindow):
     def _prepare_theme_application_payload(
         self, raw_values: dict[str, object] | None = None
     ) -> dict[str, object]:
-        normalized = self._normalize_theme_settings(raw_values)
+        theme_source = self.theme_settings if raw_values is None else raw_values
+        normalized = self._normalize_theme_settings(theme_source)
         qss_issues = validate_qss_document(normalized.get("custom_qss"))
         if qss_issues:
             raise ValueError(

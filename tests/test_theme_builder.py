@@ -7,6 +7,7 @@ from unittest import mock
 from tests.qt_test_helpers import require_qapplication
 
 try:
+    from PySide6.QtGui import QPalette
     from PySide6.QtWidgets import QGridLayout, QLabel, QMessageBox, QWidget
 
     import ISRC_manager as app_module
@@ -51,6 +52,7 @@ class _ThemeApplyHost(QWidget):
     _normalize_theme_settings = app_module.App._normalize_theme_settings
     _effective_theme_settings = app_module.App._effective_theme_settings
     _build_theme_stylesheet = app_module.App._build_theme_stylesheet
+    _apply_theme = app_module.App._apply_theme
     _format_theme_qss_issues = staticmethod(app_module.App._format_theme_qss_issues)
     _prepare_theme_application_payload = app_module.App._prepare_theme_application_payload
     _apply_prepared_theme_payload = app_module.App._apply_prepared_theme_payload
@@ -835,6 +837,57 @@ class ThemeBuilderTests(unittest.TestCase):
                         "custom_qss": "QPushButton",
                     }
                 )
+        finally:
+            host.close()
+
+    def test_apply_theme_without_explicit_values_uses_saved_theme_settings(self):
+        host = _ThemeApplyHost()
+        previous_stylesheet = self.app.styleSheet()
+        previous_font = self.app.font()
+        previous_palette = self.app.palette()
+        try:
+            host.theme_settings = {
+                "font_family": "Courier New",
+                "font_size": 13,
+                "window_bg": "#101820",
+                "window_fg": "#F8FAFC",
+                "accent": "#F97316",
+            }
+
+            host._apply_theme()
+
+            self.assertEqual(self.app.font().pointSize(), 13)
+            self.assertEqual(
+                self.app.palette().color(QPalette.Window).name().upper(),
+                "#101820",
+            )
+            self.assertIn("#F97316", self.app.styleSheet().upper())
+            self.assertGreater(host.boundary_refresh_count, 0)
+        finally:
+            self.app.setStyleSheet(previous_stylesheet)
+            self.app.setFont(previous_font)
+            self.app.setPalette(previous_palette)
+            host.close()
+
+    def test_prepare_theme_application_payload_without_explicit_values_uses_saved_theme_settings(
+        self,
+    ):
+        host = _ThemeApplyHost()
+        try:
+            host.theme_settings = {
+                "font_family": "Courier New",
+                "font_size": 13,
+                "window_bg": "#101820",
+                "window_fg": "#F8FAFC",
+                "accent": "#F97316",
+            }
+
+            payload = host._prepare_theme_application_payload()
+
+            self.assertEqual(payload["normalized_theme"]["window_bg"], "#101820")
+            self.assertEqual(payload["normalized_theme"]["accent"], "#F97316")
+            self.assertEqual(payload["effective_theme"]["window_bg"], "#101820")
+            self.assertIn("#101820", str(payload["stylesheet"]).upper())
         finally:
             host.close()
 
