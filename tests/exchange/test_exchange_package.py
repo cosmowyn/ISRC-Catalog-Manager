@@ -23,6 +23,9 @@ class ExchangePackageTests(ExchangeServiceTestCase):
     test_package_import_round_trip_restores_shared_album_art_without_child_rewrite = (
         ExchangeServiceTestCase.case_package_import_round_trip_restores_shared_album_art_without_child_rewrite
     )
+    test_package_export_omits_missing_release_artwork_with_warning = (
+        ExchangeServiceTestCase.case_package_export_omits_missing_release_artwork_with_warning
+    )
     test_package_import_reuses_duplicate_track_rows_and_preserves_source_release_ids = (
         ExchangeServiceTestCase.case_package_import_reuses_duplicate_track_rows_and_preserves_source_release_ids
     )

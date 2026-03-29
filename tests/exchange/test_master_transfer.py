@@ -396,6 +396,65 @@ class MasterTransferServiceTests(unittest.TestCase):
         self.assertEqual(self._count(target, "Licenses"), 0)
         self.assertEqual(self._count(target, "ContractTemplates"), 0)
 
+    def test_master_transfer_export_surfaces_missing_release_artwork_as_warning(self):
+        artwork_path = self.root / "source" / "broken-master-release.png"
+        artwork_path.write_bytes(
+            bytes.fromhex(
+                "89504E470D0A1A0A"
+                "0000000D49484452000000010000000108060000001F15C489"
+                "0000000D49444154789C63606060000000050001F56E27D4"
+                "0000000049454E44AE426082"
+            )
+        )
+        release_service = self.source["release_service"]
+        release_id = self.source_ids["release_id"]
+        release = release_service.fetch_release(release_id)
+        summary = release_service.fetch_release_summary(release_id)
+        release_service.update_release(
+            release_id,
+            ReleasePayload(
+                title=release.title,
+                version_subtitle=release.version_subtitle,
+                primary_artist=release.primary_artist,
+                album_artist=release.album_artist,
+                release_type=release.release_type,
+                release_date=release.release_date,
+                original_release_date=release.original_release_date,
+                label=release.label,
+                sublabel=release.sublabel,
+                catalog_number=release.catalog_number,
+                upc=release.upc,
+                territory=release.territory,
+                explicit_flag=release.explicit_flag,
+                notes=release.notes,
+                artwork_source_path=str(artwork_path),
+                placements=list(summary.tracks),
+            ),
+        )
+        updated = release_service.fetch_release(release_id)
+        managed_path = release_service.resolve_artwork_path(updated.artwork_path)
+        self.assertIsNotNone(managed_path)
+        managed_path.unlink()
+
+        package_path = self.root / "master-transfer-broken-artwork.zip"
+        result = self.source["master_transfer_service"].export_package(package_path)
+        inspection = self.source["master_transfer_service"].inspect_package(package_path)
+
+        self.assertTrue(
+            any("omitted release artwork" in warning.lower() for warning in result.warnings)
+        )
+        self.assertTrue(
+            any("omitted release artwork" in warning.lower() for warning in inspection.warnings)
+        )
+        with ZipFile(package_path, "r") as archive:
+            manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+        self.assertTrue(
+            any(
+                "omitted release artwork" in str(warning).lower()
+                for warning in manifest.get("warnings") or []
+            )
+        )
+
     def test_master_transfer_import_round_trip_rehydrates_sections_via_real_logic(self):
         package_path = self.root / "master-transfer.zip"
         self.source["master_transfer_service"].export_package(package_path)

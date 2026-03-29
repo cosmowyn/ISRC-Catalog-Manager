@@ -813,11 +813,16 @@ class DiagnosticsDialog(QDialog):
         loading_row.setContentsMargins(0, 0, 0, 0)
         loading_row.setSpacing(10)
         self.loading_bar = QProgressBar(self)
-        self.loading_bar.setRange(0, 0)
-        self.loading_bar.setTextVisible(False)
+        self.loading_bar.setRange(0, 100)
+        self.loading_bar.setValue(0)
+        self.loading_bar.setTextVisible(True)
+        self.loading_bar.setFormat("%p%")
         self.loading_bar.setMinimumWidth(220)
         self.loading_status_label = QLabel("Loading diagnostics...")
         self.loading_status_label.setWordWrap(True)
+        self._loading_progress_value = 0
+        self._loading_progress_maximum = 100
+        self._loading_status_message = "Loading diagnostics..."
         loading_row.addWidget(self.loading_bar)
         loading_row.addWidget(self.loading_status_label, 1)
         self.loading_panel.hide()
@@ -1041,13 +1046,15 @@ class DiagnosticsDialog(QDialog):
             self._set_busy(True, "Loading diagnostics...")
             self.app._load_diagnostics_report_async(
                 owner=self,
-                on_success=self._apply_loaded_report,
+                on_success=self._populate_loaded_report,
                 on_error=lambda failure: self._handle_background_error(
                     "Diagnostics",
                     failure,
                     "Could not load diagnostics.",
                 ),
                 on_cancelled=self._handle_background_cancelled,
+                on_finished=self._finish_loaded_report,
+                on_progress=self._apply_busy_progress,
                 on_status=self._set_busy_message,
             )
             return
@@ -1055,7 +1062,10 @@ class DiagnosticsDialog(QDialog):
         self._apply_loaded_report(report)
 
     def _apply_loaded_report(self, report: dict):
-        self._set_busy(False)
+        self._populate_loaded_report(report)
+        self._finish_loaded_report()
+
+    def _populate_loaded_report(self, report: dict):
         for key, value in report["environment"].items():
             label = self.environment_labels.get(key)
             if label is not None:
@@ -1081,6 +1091,10 @@ class DiagnosticsDialog(QDialog):
         refresh_cleanup = getattr(self.catalog_cleanup_panel, "refresh", None)
         if callable(refresh_cleanup):
             refresh_cleanup()
+
+    def _finish_loaded_report(self) -> None:
+        if self._busy:
+            self._set_busy(False)
 
     def focus_cleanup_tab(self, tab_name: str = "artists") -> None:
         if self.catalog_cleanup_panel is None:
@@ -1120,10 +1134,22 @@ class DiagnosticsDialog(QDialog):
     def _set_busy(self, busy: bool, message: str | None = None) -> None:
         self._busy = bool(busy)
         if self._busy:
+            self._loading_progress_value = 0
+            self._loading_progress_maximum = 100
+            self._loading_status_message = str(message or "Working...")
             self.loading_panel.show()
-            self._set_busy_message(message or "Working...")
+            self.loading_bar.setRange(0, self._loading_progress_maximum)
+            self.loading_bar.setValue(0)
+            self.loading_bar.setFormat("%p%")
+            self._set_busy_message(self._loading_status_message)
         else:
             self.loading_panel.hide()
+            self.loading_bar.setRange(0, 100)
+            self.loading_bar.setValue(0)
+            self.loading_bar.setFormat("%p%")
+            self._loading_progress_value = 0
+            self._loading_progress_maximum = 100
+            self._loading_status_message = ""
             self.loading_status_label.setText("")
         for widget in (
             self.refresh_button,
@@ -1148,7 +1174,24 @@ class DiagnosticsDialog(QDialog):
         self._update_repair_buttons(self._selected_check())
 
     def _set_busy_message(self, message: str) -> None:
-        self.loading_status_label.setText(str(message or "Working..."))
+        self._loading_status_message = str(message or "Working...")
+        self.loading_status_label.setText(self._loading_status_message)
+
+    def _apply_busy_progress(self, update: object) -> None:
+        value = getattr(update, "value", None)
+        maximum = getattr(update, "maximum", None)
+        message = getattr(update, "message", None)
+        if maximum not in (None, 0):
+            self._loading_progress_maximum = max(1, int(maximum))
+        if value is not None:
+            self._loading_progress_value = max(
+                0,
+                min(self._loading_progress_maximum, int(value)),
+            )
+        self.loading_bar.setRange(0, self._loading_progress_maximum)
+        self.loading_bar.setValue(self._loading_progress_value)
+        self.loading_bar.setFormat("%p%")
+        self._set_busy_message(str(message or self._loading_status_message or "Working..."))
 
     def _handle_background_cancelled(self) -> None:
         self._set_busy(False)

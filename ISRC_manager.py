@@ -200,6 +200,7 @@ from isrc_manager.domain.standard_fields import (
     standard_media_specs_by_label,
 )
 from isrc_manager.domain.timecode import hms_to_seconds, parse_hms_text, seconds_to_hms
+from isrc_manager.diagnostics_progress import DiagnosticsProgressTracker
 from isrc_manager.exchange.dialogs import ExchangeImportDialog
 from isrc_manager.exchange.models import (
     ExchangeImportOptions,
@@ -7146,6 +7147,79 @@ class App(QMainWindow):
             return []
         return LegacyPromotedFieldRepairService(connection).inspect_candidates()
 
+    def _diagnostics_managed_file_scan_counts(self, conn=None) -> dict[str, int]:
+        connection = conn if conn is not None else self.conn
+        if connection is None:
+            return {
+                "audio_file_refs": 0,
+                "album_art_refs": 0,
+                "license_file_refs": 0,
+            }
+
+        def _count(query: str) -> int:
+            try:
+                row = connection.execute(query).fetchone()
+            except Exception:
+                return 0
+            return int(row[0] or 0) if row else 0
+
+        return {
+            "audio_file_refs": _count(
+                """
+                SELECT COUNT(*)
+                FROM Tracks
+                WHERE COALESCE(trim(audio_file_path), '') != ''
+                """
+            ),
+            "album_art_refs": _count(
+                """
+                SELECT COUNT(*)
+                FROM Albums
+                WHERE COALESCE(trim(album_art_path), '') != ''
+                """
+            ),
+            "license_file_refs": _count(
+                """
+                SELECT COUNT(*)
+                FROM Licenses
+                WHERE COALESCE(trim(file_path), '') != ''
+                """
+            ),
+        }
+
+    def _build_diagnostics_progress_plan(
+        self,
+        *,
+        conn=None,
+        current_db_path: str | Path | None = None,
+    ) -> dict[str, int]:
+        managed_counts = self._diagnostics_managed_file_scan_counts(conn=conn)
+        managed_file_units = sum(int(value or 0) for value in managed_counts.values()) or 1
+        core_units = 9
+        history_units = 5
+        try:
+            application_storage_units = int(
+                self._application_storage_admin_service().inspect_progress_total(
+                    current_db_path=current_db_path
+                )
+            )
+        except Exception:
+            application_storage_units = 1
+        ui_finalize_units = 1
+        worker_total_units = (
+            core_units + managed_file_units + history_units + application_storage_units
+        )
+        return {
+            **managed_counts,
+            "managed_file_units": int(managed_file_units),
+            "core_units": int(core_units),
+            "history_units": int(history_units),
+            "application_storage_units": int(application_storage_units),
+            "ui_finalize_units": int(ui_finalize_units),
+            "worker_total_units": int(worker_total_units),
+            "overall_total_units": int(worker_total_units + ui_finalize_units),
+        }
+
     def _preview_diagnostics_repair(self, repair_key: str, check: dict | None = None) -> str:
         if repair_key == "storage_layout_migrate":
             inspection = self.storage_migration_service.inspect()
@@ -7441,7 +7515,9 @@ class App(QMainWindow):
         progress_callback=None,
     ) -> dict[str, object]:
         audit = self._application_storage_admin_service().inspect(
-            current_db_path=current_db_path if current_db_path is not None else self.current_db_path,
+            current_db_path=(
+                current_db_path if current_db_path is not None else self.current_db_path
+            ),
             status_callback=status_callback,
             progress_callback=progress_callback,
         )
@@ -7557,6 +7633,7 @@ class App(QMainWindow):
         storage_migration_service=None,
         app_version: str | None = None,
         status_callback=None,
+        progress_callback=None,
     ) -> dict[str, object]:
         connection = conn if conn is not None else self.conn
         current_path = str(
@@ -7583,9 +7660,16 @@ class App(QMainWindow):
         if active_schema_service is None and connection is not None:
             active_schema_service = DatabaseSchemaService(connection, data_root=current_data_root)
 
-        def _set_status(message: str) -> None:
-            if callable(status_callback):
-                status_callback(str(message))
+        progress_plan = self._build_diagnostics_progress_plan(
+            conn=connection,
+            current_db_path=current_path or None,
+        )
+        progress = DiagnosticsProgressTracker(
+            total_units=int(progress_plan["overall_total_units"]),
+            progress_callback=progress_callback,
+            status_callback=status_callback,
+        )
+        progress.set_message("Collecting environment details...")
 
         db_version = 0
         schema_version_text = "Unknown"
@@ -7607,6 +7691,7 @@ class App(QMainWindow):
             "Platform": f"{platform.system()} {platform.release()}",
             "Python": platform.python_version(),
         }
+        progress.complete("Collected environment details.")
 
         checks = []
         history_storage_budget_summary: dict[str, object] = {
@@ -7656,7 +7741,7 @@ class App(QMainWindow):
                 }
             )
 
-        _set_status("Inspecting storage layout...")
+        progress.set_message("Inspecting storage layout...")
         try:
             storage_inspection = active_storage_migration_service.inspect()
             active_layout = active_storage_migration_service.layout
@@ -7724,8 +7809,9 @@ class App(QMainWindow):
                 repair_key="storage_layout_migrate",
                 repair_label="Migrate App Data",
             )
+        progress.complete("Inspected storage layout.")
 
-        _set_status("Checking schema version...")
+        progress.set_message("Checking schema version...")
         if db_version == SCHEMA_TARGET:
             add_check(
                 "Schema version",
@@ -7743,9 +7829,12 @@ class App(QMainWindow):
                 repair_key="schema_migrate",
                 repair_label="Run Schema Migration",
             )
+        progress.complete("Checked schema version.")
 
-        _set_status("Inspecting schema layout...")
+        progress.set_message("Inspecting schema layout...")
+        schema_layout_start = progress.completed_units
         try:
+            progress.set_message("Checking required database tables...")
             table_names = (
                 {
                     row[0]
@@ -7772,7 +7861,9 @@ class App(QMainWindow):
                 "app_kv",
             }
             missing_tables = sorted(required_tables - table_names)
+            progress.complete("Checked required database tables.")
 
+            progress.set_message("Checking required track columns...")
             track_columns = (
                 {row[1] for row in connection.execute("PRAGMA table_info(Tracks)").fetchall()}
                 if connection is not None and "Tracks" in table_names
@@ -7801,6 +7892,7 @@ class App(QMainWindow):
                 "genre",
             }
             missing_columns = sorted(required_track_columns - track_columns)
+            progress.complete("Checked required track columns.")
 
             if not missing_tables and not missing_columns:
                 add_check(
@@ -7831,8 +7923,12 @@ class App(QMainWindow):
                 "Schema layout could not be inspected.",
                 f"An exception occurred while reading table metadata:\n{exc}",
             )
+            progress.complete(
+                "Schema layout inspection failed.",
+                units=max(0, 2 - (progress.completed_units - schema_layout_start)),
+            )
 
-        _set_status("Running SQLite integrity checks...")
+        progress.set_message("Running SQLite integrity checks...")
         try:
             if active_database_maintenance is None or not current_path:
                 raise RuntimeError("No active profile is open.")
@@ -7851,8 +7947,9 @@ class App(QMainWindow):
                 "Integrity check failed to run.",
                 f"An exception occurred while running PRAGMA integrity_check:\n{exc}",
             )
+        progress.complete("Finished SQLite integrity checks.")
 
-        _set_status("Checking foreign-key consistency...")
+        progress.set_message("Checking foreign-key consistency...")
         try:
             fk_rows = (
                 connection.execute("PRAGMA foreign_key_check").fetchall()
@@ -7884,8 +7981,9 @@ class App(QMainWindow):
                 "Foreign-key validation failed to run.",
                 f"An exception occurred while running PRAGMA foreign_key_check:\n{exc}",
             )
+        progress.complete("Checked foreign-key consistency.")
 
-        _set_status("Checking custom-value integrity...")
+        progress.set_message("Checking custom-value integrity...")
         try:
             orphan_count = self._count_orphaned_custom_values(conn=connection)
             if orphan_count == 0:
@@ -7914,8 +8012,9 @@ class App(QMainWindow):
                 repair_key="custom_value_cleanup",
                 repair_label="Delete Orphaned Custom Values",
             )
+        progress.complete("Checked custom-value integrity.")
 
-        _set_status("Checking legacy default-column custom fields...")
+        progress.set_message("Checking legacy default-column custom fields...")
         try:
             legacy_candidates = self._legacy_promoted_field_repair_candidates(conn=connection)
             if not legacy_candidates:
@@ -7963,8 +8062,11 @@ class App(QMainWindow):
                 repair_key="legacy_promoted_field_repair",
                 repair_label="Merge Into Default Columns",
             )
+        progress.complete("Checked legacy default-column custom fields.")
 
-        _set_status("Checking managed files...")
+        progress.set_message("Checking managed files...")
+        managed_file_total = int(progress_plan["managed_file_units"])
+        managed_file_completed = 0
         try:
             missing_files = []
 
@@ -7973,21 +8075,33 @@ class App(QMainWindow):
                     """
                     SELECT id, track_title, audio_file_path
                     FROM Tracks
+                    WHERE audio_file_path IS NOT NULL AND trim(audio_file_path) != ''
                     ORDER BY id
                     """
                 ).fetchall()
+                managed_file_start = progress.completed_units
                 for track_id, track_title, audio_path in media_rows:
-                    if audio_path:
-                        resolved = (
-                            active_track_service.resolve_media_path(audio_path)
-                            if active_track_service
-                            else Path(audio_path)
+                    resolved = (
+                        active_track_service.resolve_media_path(audio_path)
+                        if active_track_service
+                        else Path(audio_path)
+                    )
+                    if resolved is not None and not resolved.exists():
+                        missing_files.append(
+                            f"Track #{track_id} '{track_title}': missing audio file -> {resolved}"
                         )
-                        if resolved is not None and not resolved.exists():
-                            missing_files.append(
-                                f"Track #{track_id} '{track_title}': missing audio file -> {resolved}"
-                            )
+                    managed_file_completed += 1
+                    progress.report_nested(
+                        start_units=managed_file_start,
+                        span_units=managed_file_total,
+                        value=managed_file_completed,
+                        maximum=managed_file_total,
+                        message=(
+                            f"Checking managed audio references ({managed_file_completed}/{managed_file_total})..."
+                        ),
+                    )
 
+                progress.set_message("Checking managed album artwork references...")
                 album_art_rows = connection.execute(
                     """
                     SELECT id, title, album_art_path
@@ -8006,13 +8120,27 @@ class App(QMainWindow):
                         missing_files.append(
                             f"Album #{album_id} '{album_title or 'Untitled Album'}': missing album art -> {resolved}"
                         )
+                    managed_file_completed += 1
+                    progress.report_nested(
+                        start_units=managed_file_start,
+                        span_units=managed_file_total,
+                        value=managed_file_completed,
+                        maximum=managed_file_total,
+                        message=(
+                            f"Checking managed artwork references ({managed_file_completed}/{managed_file_total})..."
+                        ),
+                    )
 
+                progress.set_message("Checking managed license files...")
                 license_rows = connection.execute(
-                    "SELECT id, filename, file_path FROM Licenses ORDER BY id"
+                    """
+                    SELECT id, filename, file_path
+                    FROM Licenses
+                    WHERE file_path IS NOT NULL AND trim(file_path) != ''
+                    ORDER BY id
+                    """
                 ).fetchall()
                 for record_id, filename, file_path in license_rows:
-                    if not file_path:
-                        continue
                     resolved = (
                         active_license_service.resolve_path(file_path)
                         if active_license_service
@@ -8022,6 +8150,18 @@ class App(QMainWindow):
                         missing_files.append(
                             f"License #{record_id} '{filename or 'unnamed'}': missing file -> {resolved}"
                         )
+                    managed_file_completed += 1
+                    progress.report_nested(
+                        start_units=managed_file_start,
+                        span_units=managed_file_total,
+                        value=managed_file_completed,
+                        maximum=managed_file_total,
+                        message=(
+                            f"Checking managed license files ({managed_file_completed}/{managed_file_total})..."
+                        ),
+                    )
+            else:
+                progress.complete("Checked managed files.")
 
             if not missing_files:
                 add_check(
@@ -8045,12 +8185,19 @@ class App(QMainWindow):
                 "Managed file validation failed to run.",
                 f"An exception occurred while checking managed media and license files:\n{exc}",
             )
+        if connection is not None:
+            progress.complete(
+                "Checked managed files.",
+                units=max(0, managed_file_total - managed_file_completed),
+            )
 
-        _set_status("Inspecting history snapshots and backups...")
+        progress.set_message("Inspecting history snapshots and backups...")
+        history_start = progress.completed_units
         try:
             if active_history_manager is None:
                 raise RuntimeError("No active history manager")
             recovery_issues = active_history_manager.inspect_recovery_state()
+            progress.complete("Collected history recovery-state issues.")
 
             snapshot_issues = [
                 issue
@@ -8089,6 +8236,7 @@ class App(QMainWindow):
                     repair_label="Repair History Artifacts",
                     orphan_count=len(snapshot_issues),
                 )
+            progress.complete("Evaluated history snapshot artifacts.")
 
             backup_issues = [
                 issue
@@ -8122,6 +8270,7 @@ class App(QMainWindow):
                     repair_label="Repair History Artifacts",
                     orphan_count=len(backup_issues),
                 )
+            progress.complete("Evaluated backup artifacts.")
 
             invariant_issues = [
                 issue for issue in recovery_issues if issue.issue_type == "stale_current_head"
@@ -8144,6 +8293,7 @@ class App(QMainWindow):
                     repair_label="Repair History Artifacts",
                     orphan_count=len(invariant_issues),
                 )
+            progress.complete("Evaluated history invariants.")
 
             total_history_issues = len(snapshot_issues) + len(backup_issues) + len(invariant_issues)
             if total_history_issues:
@@ -8242,6 +8392,7 @@ class App(QMainWindow):
                     f"of a {self._human_size(budget_preview.budget_bytes)} budget and is over budget by "
                     f"{self._human_size(budget_preview.over_budget_bytes)}."
                 )
+            progress.complete("Evaluated history storage budget.")
         except Exception as exc:
             add_check(
                 "History snapshots",
@@ -8257,15 +8408,40 @@ class App(QMainWindow):
                 "available": False,
                 "summary": f"History storage information could not be inspected: {exc}",
             }
+            progress.complete(
+                "History diagnostics could not be completed cleanly.",
+                units=max(
+                    0,
+                    int(progress_plan["history_units"])
+                    - (progress.completed_units - history_start),
+                ),
+            )
 
-        _set_status("Inspecting application-wide storage...")
+        progress.set_message("Inspecting application-wide storage...")
+        application_storage_start = progress.completed_units
+        application_storage_units = int(progress_plan["application_storage_units"])
         try:
             application_storage_audit = self._application_storage_admin_service().inspect(
                 current_db_path=current_path or None,
-                status_callback=status_callback,
+                status_callback=None,
+                progress_callback=lambda value, maximum, message: progress.report_nested(
+                    start_units=application_storage_start,
+                    span_units=application_storage_units,
+                    value=value,
+                    maximum=maximum,
+                    message=message,
+                ),
             )
             application_storage_summary = self._application_storage_summary_payload(
                 application_storage_audit
+            )
+            progress.complete(
+                "Inspected application-wide storage.",
+                units=max(
+                    0,
+                    application_storage_units
+                    - (progress.completed_units - application_storage_start),
+                ),
             )
         except Exception as exc:
             application_storage_summary = {
@@ -8273,12 +8449,17 @@ class App(QMainWindow):
                 "available": False,
                 "summary": f"Application-wide storage information could not be inspected: {exc}",
             }
+            progress.complete(
+                "Application-wide storage inspection failed.",
+                units=int(progress_plan["application_storage_units"]),
+            )
 
         return {
             "environment": environment,
             "checks": checks,
             "history_storage_budget": history_storage_budget_summary,
             "application_storage": application_storage_summary,
+            "_diagnostics_progress_total": int(progress_plan["overall_total_units"]),
         }
 
     def _load_diagnostics_report_async(
@@ -8289,21 +8470,59 @@ class App(QMainWindow):
         on_error=None,
         on_cancelled=None,
         on_finished=None,
+        on_progress=None,
         on_status=None,
     ):
         current_path = str(getattr(self, "current_db_path", "") or "").strip()
-        if not current_path:
-            report = self._build_diagnostics_report()
-            if on_success is not None:
-                on_success(report)
-            if on_finished is not None:
-                on_finished()
-            return None
 
         app_version = self._app_version_text()
         data_root = self.data_root
         logs_dir = self.logs_dir
         storage_layout = self.storage_layout
+
+        def _handle_success_before_cleanup(result, ui_progress) -> None:
+            if on_success is not None:
+                on_success(result)
+            total_units = max(1, int((result or {}).get("_diagnostics_progress_total") or 1))
+            ui_progress.report_progress(total_units, total_units, "Diagnostics ready.")
+
+        if not current_path:
+
+            def _task(ctx):
+                ctx.set_status("Loading diagnostics...")
+                return self._build_diagnostics_report(
+                    current_db_path=current_path or None,
+                    data_root=data_root,
+                    logs_dir=logs_dir,
+                    storage_migration_service=StorageMigrationService(
+                        storage_layout,
+                        settings=self.settings,
+                    ),
+                    app_version=app_version,
+                    status_callback=ctx.set_status,
+                    progress_callback=lambda value, maximum, message: ctx.report_progress(
+                        value=int(value),
+                        maximum=int(maximum),
+                        message=str(message or ""),
+                    ),
+                )
+
+            return self._submit_background_task(
+                title="Diagnostics",
+                description="Loading diagnostics...",
+                task_fn=_task,
+                kind="read",
+                unique_key="diagnostics.report",
+                requires_profile=False,
+                show_dialog=False,
+                owner=owner or self,
+                on_success_before_cleanup=_handle_success_before_cleanup,
+                on_error=on_error,
+                on_cancelled=on_cancelled,
+                on_finished=on_finished,
+                on_progress=on_progress,
+                on_status=on_status,
+            )
 
         def _task(bundle, ctx):
             ctx.set_status("Loading diagnostics...")
@@ -8322,6 +8541,11 @@ class App(QMainWindow):
                 storage_migration_service=storage_service,
                 app_version=app_version,
                 status_callback=ctx.set_status,
+                progress_callback=lambda value, maximum, message: ctx.report_progress(
+                    value=int(value),
+                    maximum=int(maximum),
+                    message=str(message or ""),
+                ),
             )
 
         return self._submit_background_bundle_task(
@@ -8332,10 +8556,11 @@ class App(QMainWindow):
             unique_key="diagnostics.report",
             show_dialog=False,
             owner=owner or self,
-            on_success=on_success,
+            on_success_before_cleanup=_handle_success_before_cleanup,
             on_error=on_error,
             on_cancelled=on_cancelled,
             on_finished=on_finished,
+            on_progress=on_progress,
             on_status=on_status,
         )
 
@@ -22826,7 +23051,9 @@ class App(QMainWindow):
                     self,
                 )
                 action.triggered.connect(
-                    lambda checked=False, track_ids=list(effective_track_ids), key=standard_media_key, mode=target_mode: self._convert_standard_media_for_track(
+                    lambda checked=False, track_ids=list(
+                        effective_track_ids
+                    ), key=standard_media_key, mode=target_mode: self._convert_standard_media_for_track(
                         track_ids,
                         key,
                         mode,
@@ -22909,7 +23136,9 @@ class App(QMainWindow):
                         self,
                     )
                     action.triggered.connect(
-                        lambda checked=False, track_ids=list(effective_track_ids), fid=int(field_id), mode=target_mode: self._convert_custom_blob_storage_mode(
+                        lambda checked=False, track_ids=list(effective_track_ids), fid=int(
+                            field_id
+                        ), mode=target_mode: self._convert_custom_blob_storage_mode(
                             track_ids,
                             fid,
                             mode,
@@ -24966,7 +25195,9 @@ class App(QMainWindow):
             available_track_ids.append(int(track_id))
             modes_present.add(current_mode)
             for target_mode, bucket in target_buckets.items():
-                bucket_key = "skip_track_ids" if current_mode == target_mode else "convert_track_ids"
+                bucket_key = (
+                    "skip_track_ids" if current_mode == target_mode else "convert_track_ids"
+                )
                 bucket[bucket_key].append(int(track_id))
         if modes_present == {STORAGE_MODE_MANAGED_FILE}:
             allowed_targets = [STORAGE_MODE_DATABASE]
@@ -25383,9 +25614,7 @@ class App(QMainWindow):
             )
         if failures:
             lines.append("")
-            lines.append(
-                f"Failures ({len(failures)} track{'s' if len(failures) != 1 else ''}):"
-            )
+            lines.append(f"Failures ({len(failures)} track{'s' if len(failures) != 1 else ''}):")
             for entry in failures[:10]:
                 label = str(entry.get("label") or f"Track {entry.get('track_id')}")
                 message = str(entry.get("message") or "Unknown error")
@@ -25599,7 +25828,9 @@ class App(QMainWindow):
                 missing_track_ids=list(result.get("missing_track_ids") or []),
                 failures=list(result.get("failed") or []),
             )
-            dialog_fn = QMessageBox.warning if list(result.get("failed") or []) else QMessageBox.information
+            dialog_fn = (
+                QMessageBox.warning if list(result.get("failed") or []) else QMessageBox.information
+            )
             dialog_fn(
                 self,
                 title,

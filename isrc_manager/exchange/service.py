@@ -406,6 +406,18 @@ class ExchangeService:
             return f"media/external/{digest}_{path.name}"
         return f"media/{path.as_posix()}"
 
+    @staticmethod
+    def _append_unique_warning(
+        warnings: list[str],
+        seen_warnings: set[str],
+        message: str,
+    ) -> None:
+        clean_message = str(message or "").strip()
+        if not clean_message or clean_message in seen_warnings:
+            return
+        seen_warnings.add(clean_message)
+        warnings.append(clean_message)
+
     def _package_track_media(
         self,
         archive: ZipFile,
@@ -416,10 +428,14 @@ class ExchangeService:
         media_key: str,
         written_media: set[str],
         packaged_media_index: dict[str, str],
+        warnings: list[str],
+        seen_warnings: set[str],
     ) -> None:
         meta = self.track_service.get_media_meta(int(track_id), media_key)
         if not bool(meta.get("has_media")):
             return
+        storage_field = field_name.replace("_path", "_storage_mode")
+        storage_mode = str(meta.get("storage_mode") or "").strip()
         package_key = str(meta.get("path") or "").strip()
         if not package_key:
             owner_scope = str(meta.get("owner_scope") or "track")
@@ -435,20 +451,36 @@ class ExchangeService:
         arcname = self._package_media_arcname(package_key)
         if arcname not in written_media:
             stored_path = str(meta.get("path") or "").strip()
-            if stored_path:
-                abs_path = self._resolve_packaged_media_source(stored_path)
-                if abs_path is not None and abs_path.exists():
-                    archive.write(abs_path, arcname=arcname)
+            try:
+                if stored_path:
+                    abs_path = self._resolve_packaged_media_source(stored_path)
+                    if abs_path is not None and abs_path.exists():
+                        archive.write(abs_path, arcname=arcname)
+                    else:
+                        data, _ = self.track_service.fetch_media_bytes(int(track_id), media_key)
+                        archive.writestr(arcname, data)
                 else:
                     data, _ = self.track_service.fetch_media_bytes(int(track_id), media_key)
                     archive.writestr(arcname, data)
-            else:
-                data, _ = self.track_service.fetch_media_bytes(int(track_id), media_key)
-                archive.writestr(arcname, data)
+            except FileNotFoundError:
+                media_label = "audio file" if media_key == "audio_file" else "album art"
+                missing_ref = stored_path or str(meta.get("filename") or "").strip() or media_label
+                self._append_unique_warning(
+                    warnings,
+                    seen_warnings,
+                    (
+                        "Catalog exchange package omitted "
+                        f"{media_label} for track {int(track_id)} because the stored media could "
+                        f"not be found: {missing_ref}"
+                    ),
+                )
+                row[field_name] = ""
+                row[storage_field] = ""
+                return
             written_media.add(arcname)
         packaged_media_index[package_key] = arcname
         row[field_name] = package_key
-        row[field_name.replace("_path", "_storage_mode")] = str(meta.get("storage_mode") or "")
+        row[storage_field] = storage_mode
 
     def _package_release_artwork(
         self,
@@ -457,6 +489,8 @@ class ExchangeService:
         row: dict[str, object],
         written_media: set[str],
         packaged_media_index: dict[str, str],
+        warnings: list[str],
+        seen_warnings: set[str],
     ) -> None:
         try:
             release_id = int(row.get("release_id") or 0)
@@ -483,16 +517,33 @@ class ExchangeService:
             )
         arcname = self._package_media_arcname(package_key)
         if arcname not in written_media:
-            if stored_path:
-                abs_path = self._resolve_packaged_media_source(stored_path)
-                if abs_path is not None and abs_path.exists():
-                    archive.write(abs_path, arcname=arcname)
+            try:
+                if stored_path:
+                    abs_path = self._resolve_packaged_media_source(stored_path)
+                    if abs_path is not None and abs_path.exists():
+                        archive.write(abs_path, arcname=arcname)
+                    else:
+                        data, _ = self.release_service.fetch_artwork_bytes(release_id)
+                        archive.writestr(arcname, data)
                 else:
                     data, _ = self.release_service.fetch_artwork_bytes(release_id)
                     archive.writestr(arcname, data)
-            else:
-                data, _ = self.release_service.fetch_artwork_bytes(release_id)
-                archive.writestr(arcname, data)
+            except FileNotFoundError:
+                missing_ref = (
+                    stored_path or str(release.artwork_filename or "").strip() or "artwork"
+                )
+                self._append_unique_warning(
+                    warnings,
+                    seen_warnings,
+                    (
+                        "Catalog exchange package omitted release artwork for "
+                        f"release {release_id} because the stored media could not be found: "
+                        f"{missing_ref}"
+                    ),
+                )
+                row["release_artwork_path"] = ""
+                row["release_artwork_storage_mode"] = ""
+                return
             written_media.add(arcname)
         packaged_media_index[package_key] = arcname
         row["release_artwork_path"] = package_key
@@ -701,6 +752,8 @@ class ExchangeService:
         zip_path.parent.mkdir(parents=True, exist_ok=True)
         headers, rows = self.export_rows(track_ids, progress_callback=progress_callback)
         packaged_media_index: dict[str, str] = {}
+        warnings: list[str] = []
+        seen_warnings: set[str] = set()
         with ZipFile(zip_path, "w", compression=ZIP_DEFLATED) as archive:
             written_media: set[str] = set()
             total_rows = max(len(rows), 1)
@@ -723,6 +776,8 @@ class ExchangeService:
                         media_key="audio_file",
                         written_media=written_media,
                         packaged_media_index=packaged_media_index,
+                        warnings=warnings,
+                        seen_warnings=seen_warnings,
                     )
                     self._package_track_media(
                         archive,
@@ -732,12 +787,16 @@ class ExchangeService:
                         media_key="album_art",
                         written_media=written_media,
                         packaged_media_index=packaged_media_index,
+                        warnings=warnings,
+                        seen_warnings=seen_warnings,
                     )
                 self._package_release_artwork(
                     archive,
                     row=row,
                     written_media=written_media,
                     packaged_media_index=packaged_media_index,
+                    warnings=warnings,
+                    seen_warnings=seen_warnings,
                 )
             payload = {
                 "schema_version": JSON_SCHEMA_VERSION,
@@ -747,6 +806,7 @@ class ExchangeService:
                 "custom_field_defs": self.custom_fields.list_active_fields(),
                 "packaged_media": True,
                 "packaged_media_index": packaged_media_index,
+                "warnings": warnings,
             }
             archive.writestr("manifest.json", json.dumps(payload, indent=2, ensure_ascii=False))
         self._report_progress(progress_callback, 90, "Catalog exchange package written.")
@@ -956,6 +1016,10 @@ class ExchangeService:
         packaged_media_index = payload.get("packaged_media_index")
         media_count = len(packaged_media_index) if isinstance(packaged_media_index, dict) else 0
         warnings = []
+        for warning in payload.get("warnings") or []:
+            clean_warning = str(warning or "").strip()
+            if clean_warning:
+                warnings.append(clean_warning)
         if not bool(payload.get("packaged_media")):
             warnings.append("This ZIP does not advertise packaged media.")
         warnings.append(f"Packaged media entries detected: {media_count}")

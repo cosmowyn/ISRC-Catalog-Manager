@@ -33,6 +33,7 @@ from isrc_manager.app_dialogs import (
     HelpContentsDialog,
 )
 from isrc_manager.help_content import HELP_CHAPTERS_BY_ID, render_help_html
+from isrc_manager.tasks.models import TaskProgressUpdate
 
 
 class _HelpDialogHost(QWidget):
@@ -64,6 +65,7 @@ class _DiagnosticsDialogHost(QWidget):
         self.storage_audit_load_calls = 0
         self.storage_cleanup_calls = []
         self.background_errors = []
+        self.progress_updates = []
         self._report = {
             "environment": {
                 "App version": "3.1.0",
@@ -193,14 +195,31 @@ class _DiagnosticsDialogHost(QWidget):
         on_error=None,
         on_cancelled=None,
         on_finished=None,
+        on_progress=None,
         on_status=None,
     ):
         del owner, on_error, on_cancelled
         self.load_calls += 1
         if on_status is not None:
-            on_status("Inspecting schema layout...")
+            on_status("Checking managed audio references (1/3)...")
+        if on_progress is not None:
+            update = TaskProgressUpdate(
+                value=6,
+                maximum=7,
+                message="Inspecting application-wide storage...",
+            )
+            self.progress_updates.append(update)
+            on_progress(update)
         if on_success is not None:
             on_success(self._report)
+        if on_progress is not None:
+            update = TaskProgressUpdate(
+                value=7,
+                maximum=7,
+                message="Diagnostics ready.",
+            )
+            self.progress_updates.append(update)
+            on_progress(update)
         if on_finished is not None:
             on_finished()
         return f"load-{self.load_calls}"
@@ -405,6 +424,13 @@ class AppDialogsTests(unittest.TestCase):
         dialog = DiagnosticsDialog(host)
         try:
             self.assertEqual(host.load_calls, 1)
+            self.assertEqual(
+                [update.message for update in host.progress_updates],
+                [
+                    "Inspecting application-wide storage...",
+                    "Diagnostics ready.",
+                ],
+            )
             self.assertFalse(dialog.loading_panel.isVisible())
             self.assertEqual(
                 [
@@ -467,6 +493,63 @@ class AppDialogsTests(unittest.TestCase):
             self.assertEqual(host.repair_calls, ["schema_migrate"])
             self.assertEqual(host.load_calls, 2)
             info_mock.assert_called_once()
+        finally:
+            dialog.close()
+            host.close()
+
+    def test_diagnostics_dialog_busy_progress_uses_reported_work_units(self):
+        host = _DiagnosticsDialogHost()
+        dialog = DiagnosticsDialog(host)
+        try:
+            dialog._set_busy(True, "Loading diagnostics...")
+            dialog._apply_busy_progress(
+                TaskProgressUpdate(
+                    value=6,
+                    maximum=7,
+                    message="Inspecting application-wide storage...",
+                )
+            )
+
+            self.assertFalse(dialog.loading_panel.isHidden())
+            self.assertEqual(dialog.loading_bar.minimum(), 0)
+            self.assertEqual(dialog.loading_bar.maximum(), 7)
+            self.assertEqual(dialog.loading_bar.value(), 6)
+            self.assertEqual(
+                dialog.loading_status_label.text(),
+                "Inspecting application-wide storage...",
+            )
+        finally:
+            dialog.close()
+            host.close()
+
+    def test_diagnostics_dialog_reaches_completion_only_after_final_progress_update(self):
+        host = _DiagnosticsDialogHost()
+        dialog = DiagnosticsDialog(host)
+        try:
+            dialog._set_busy(True, "Loading diagnostics...")
+            dialog._apply_busy_progress(
+                TaskProgressUpdate(
+                    value=6,
+                    maximum=7,
+                    message="Inspecting application-wide storage...",
+                )
+            )
+            dialog._populate_loaded_report(host._report)
+            self.assertEqual(dialog.loading_bar.maximum(), 7)
+            self.assertEqual(dialog.loading_bar.value(), 6)
+
+            dialog._apply_busy_progress(
+                TaskProgressUpdate(
+                    value=7,
+                    maximum=7,
+                    message="Diagnostics ready.",
+                )
+            )
+            self.assertEqual(dialog.loading_bar.value(), 7)
+            self.assertEqual(dialog.loading_status_label.text(), "Diagnostics ready.")
+
+            dialog._finish_loaded_report()
+            self.assertFalse(dialog.loading_panel.isVisible())
         finally:
             dialog.close()
             host.close()

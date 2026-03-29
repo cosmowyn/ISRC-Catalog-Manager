@@ -232,11 +232,18 @@ class MasterTransferService:
                 ),
             ]
             omitted_sections = self._omitted_sections()
+            export_warnings = self._dedupe_preserve_order(
+                [
+                    *self._section_manifest_warnings(catalog_path),
+                    *self._section_manifest_warnings(repertoire_path),
+                ]
+            )
             manifest = self._build_manifest(
                 exported_at=exported_at,
                 sections=sections,
                 files=self._build_file_manifest(root),
                 omitted_sections=omitted_sections,
+                warnings=export_warnings,
             )
 
             self._report_progress(progress_callback, 90, "Writing master transfer manifest...")
@@ -454,6 +461,7 @@ class MasterTransferService:
         sections: list[MasterTransferSection],
         files: list[dict[str, object]],
         omitted_sections: list[dict[str, str]],
+        warnings: list[str] | None = None,
     ) -> dict[str, object]:
         return {
             "document_type": MASTER_TRANSFER_DOCUMENT_TYPE,
@@ -537,6 +545,7 @@ class MasterTransferService:
                 for section in sections
             ],
             "files": files,
+            "warnings": list(warnings or []),
             "omitted_sections": omitted_sections,
         }
 
@@ -1105,12 +1114,28 @@ class MasterTransferService:
 
     def _manifest_warnings(self, manifest: dict[str, object]) -> list[str]:
         warnings: list[str] = []
+        for warning in manifest.get("warnings") or []:
+            clean_warning = str(warning or "").strip()
+            if clean_warning:
+                warnings.append(clean_warning)
         for item in manifest.get("omitted_sections") or []:
             section = dict(item)
             section_id = str(section.get("section_id") or "").strip()
             reason = str(section.get("reason") or "").strip()
             if section_id and reason:
                 warnings.append(f"Omitted from this package: {section_id} - {reason}")
+        return warnings
+
+    def _section_manifest_warnings(self, package_path: Path) -> list[str]:
+        try:
+            payload = self._read_zip_json(package_path, "manifest.json")
+        except Exception:
+            return []
+        warnings: list[str] = []
+        for warning in payload.get("warnings") or []:
+            clean_warning = str(warning or "").strip()
+            if clean_warning:
+                warnings.append(clean_warning)
         return warnings
 
     def _build_file_manifest(self, root: Path) -> list[dict[str, object]]:

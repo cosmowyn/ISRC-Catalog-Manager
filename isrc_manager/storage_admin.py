@@ -248,28 +248,34 @@ class ApplicationStorageAdminService:
     ) -> StorageAdminAudit:
         current_profile = self._normalize_existing_path(current_db_path)
         active_profiles = self._active_profile_paths(current_profile)
+        total_steps = max(1, len(active_profiles) + 5)
         active_profile_set = set(active_profiles)
         active_stems = {Path(path).stem for path in active_profiles}
         current_profile_name = Path(current_profile).name if current_profile else None
         references_by_stored_path: dict[str, list[StorageAdminReference]] = defaultdict(list)
 
-        self._report(progress_callback, 1, 6, "Discovering active profiles...")
         if status_callback is not None:
             status_callback("Discovering active profiles...")
+        self._report(progress_callback, 1, total_steps, "Discovered active profiles.")
 
         for index, profile_path in enumerate(active_profiles, start=1):
             if status_callback is not None:
                 status_callback(
                     f"Collecting managed-file references from {Path(profile_path).name}..."
                 )
-            self._report(
-                progress_callback, 2, 6, f"Inspecting profile {index} of {len(active_profiles)}..."
-            )
             self._collect_profile_references(profile_path, references_by_stored_path)
+            self._report(
+                progress_callback,
+                1 + index,
+                total_steps,
+                (
+                    "Collected managed-file references from "
+                    f"{Path(profile_path).name} ({index}/{len(active_profiles)})."
+                ),
+            )
 
         items: list[StorageAdminItem] = []
 
-        self._report(progress_callback, 3, 6, "Auditing managed media and document roots...")
         if status_callback is not None:
             status_callback("Auditing managed media and document roots...")
         items.extend(
@@ -278,8 +284,13 @@ class ApplicationStorageAdminService:
                 active_profile_set=active_profile_set,
             )
         )
+        self._report(
+            progress_callback,
+            2 + len(active_profiles),
+            total_steps,
+            "Audited managed media and document roots.",
+        )
 
-        self._report(progress_callback, 4, 6, "Auditing history, backup, and session artifacts...")
         if status_callback is not None:
             status_callback("Auditing history, backup, and session artifacts...")
         items.extend(
@@ -289,13 +300,23 @@ class ApplicationStorageAdminService:
                 active_profile_set=active_profile_set,
             )
         )
+        self._report(
+            progress_callback,
+            3 + len(active_profiles),
+            total_steps,
+            "Audited history, backup, and session artifacts.",
+        )
 
-        self._report(progress_callback, 5, 6, "Auditing generated exports and log files...")
         if status_callback is not None:
             status_callback("Auditing generated exports and log files...")
         items.extend(self._audit_generated_files())
+        self._report(
+            progress_callback,
+            4 + len(active_profiles),
+            total_steps,
+            "Audited generated exports and log files.",
+        )
 
-        self._report(progress_callback, 6, 6, "Finalizing application storage summary...")
         if status_callback is not None:
             status_callback("Finalizing application storage summary...")
 
@@ -314,7 +335,22 @@ class ApplicationStorageAdminService:
             current_profile=current_profile,
             current_profile_name=current_profile_name,
         )
+        self._report(
+            progress_callback,
+            total_steps,
+            total_steps,
+            "Application-wide storage summary ready.",
+        )
         return StorageAdminAudit(summary=summary, items=tuple(items))
+
+    def inspect_progress_total(
+        self,
+        *,
+        current_db_path: str | Path | None = None,
+    ) -> int:
+        current_profile = self._normalize_existing_path(current_db_path)
+        active_profiles = self._active_profile_paths(current_profile)
+        return max(1, len(active_profiles) + 5)
 
     def cleanup_selected(
         self,
