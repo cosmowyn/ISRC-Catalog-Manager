@@ -6185,8 +6185,16 @@ class AppShellTestCase(unittest.TestCase):
         self.assertNotEqual(managed_item.icon().cacheKey(), database_item.icon().cacheKey())
 
     def case_standard_album_art_badge_uses_distinct_icons_for_managed_and_database_storage(self):
-        managed_track_id = self._create_track(index=335, title="Managed Art Badge")
-        database_track_id = self._create_track(index=336, title="Database Art Badge")
+        managed_track_id = self._create_track(
+            index=335,
+            title="Managed Art Badge",
+            album_title="Managed Art Badge Album",
+        )
+        database_track_id = self._create_track(
+            index=336,
+            title="Database Art Badge",
+            album_title="Database Art Badge Album",
+        )
         managed_art = self._create_media_file("managed-art-badge.png", b"\x89PNG\r\n\x1a\nmanaged")
         database_art = self._create_media_file(
             "database-art-badge.png",
