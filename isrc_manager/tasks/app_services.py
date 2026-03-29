@@ -17,8 +17,8 @@ from isrc_manager.authenticity import (
     AuthenticityKeyService,
     AuthenticityManifestService,
 )
-from isrc_manager.contracts import ContractService
 from isrc_manager.contract_templates import ContractTemplateService
+from isrc_manager.contracts import ContractService
 from isrc_manager.exchange import MasterTransferService
 from isrc_manager.exchange.repertoire_service import RepertoireExchangeService
 from isrc_manager.exchange.service import ExchangeService
