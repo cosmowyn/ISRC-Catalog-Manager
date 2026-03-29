@@ -47,6 +47,9 @@ class AppShellStartupCoreTests(AppShellTestCase):
     test_settings_view_history_help_menus_and_action_ribbon_context_menu_use_streamlined_structure = (
         AppShellTestCase.case_settings_view_history_help_menus_and_action_ribbon_context_menu_use_streamlined_structure
     )
+    test_saved_layouts_menu_uses_scrollable_picker_widget_when_needed = (
+        AppShellTestCase.case_saved_layouts_menu_uses_scrollable_picker_widget_when_needed
+    )
     test_moved_and_renamed_actions_preserve_dialog_routing = (
         AppShellTestCase.case_moved_and_renamed_actions_preserve_dialog_routing
     )

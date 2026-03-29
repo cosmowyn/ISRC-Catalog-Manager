@@ -44,6 +44,9 @@ def build_main_window_shell(app: Any, *, last_db: str, movable: bool) -> None:
     _build_action_ribbon_toolbar(app)
     _build_profiles_toolbar(app, last_db=last_db)
     _build_catalog_docks(app, movable=movable)
+    refresh_saved_layout_controls = getattr(app, "_refresh_saved_layout_controls", None)
+    if callable(refresh_saved_layout_controls):
+        refresh_saved_layout_controls()
     refresh_boundary = getattr(app, "_queue_top_chrome_boundary_refresh", None)
     if callable(refresh_boundary):
         refresh_boundary()
@@ -592,6 +595,7 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     settings_menu.addAction(app.authenticity_keys_action)
 
     view_menu = app.menu_bar.addMenu("View")
+    app.view_menu = view_menu
     app.columns_menu = view_menu.addMenu("Columns")
     app.add_custom_column_action = app._create_action(
         "Add Custom Column…",
@@ -640,7 +644,20 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     view_menu.addAction(app.customize_action_ribbon_action)
     view_menu.addSeparator()
 
-    table_view_menu = view_menu.addMenu("Table Layout")
+    app.layout_menu = view_menu.addMenu("Layout")
+    app.saved_layouts_menu = app.layout_menu.addMenu("Saved Layouts")
+    app.saved_layouts_menu.aboutToShow.connect(app._populate_saved_layouts_menu)
+    app.add_layout_action = app._create_action("Add Layout", slot=app.add_named_main_window_layout)
+    app.layout_menu.addAction(app.add_layout_action)
+    app.delete_layout_action = app._create_action(
+        "Delete Layout",
+        slot=app.delete_named_main_window_layout_interactive,
+    )
+    app.layout_menu.addAction(app.delete_layout_action)
+    app.layout_menu.addSeparator()
+
+    app.catalog_table_layout_menu = app.layout_menu.addMenu("Catalog Table")
+
     app.col_width_action = app._create_action(
         "Edit Column Widths",
         checkable=True,
@@ -648,7 +665,7 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         toggled_slot=app._on_toggle_col_width,
         shortcuts=("Ctrl+Alt+Shift+W", "Meta+Alt+Shift+W"),
     )
-    table_view_menu.addAction(app.col_width_action)
+    app.catalog_table_layout_menu.addAction(app.col_width_action)
 
     app.row_height_action = app._create_action(
         "Edit Row Heights",
@@ -657,7 +674,7 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         toggled_slot=app._on_toggle_row_height,
         shortcuts=("Ctrl+Alt+H", "Meta+Alt+H"),
     )
-    table_view_menu.addAction(app.row_height_action)
+    app.catalog_table_layout_menu.addAction(app.row_height_action)
 
     app.act_reorder_columns = app._create_action(
         "Allow Column Reordering",
@@ -666,7 +683,7 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         toggled_slot=app._toggle_columns_movable,
         shortcuts=("Ctrl+Alt+O", "Meta+Alt+O"),
     )
-    table_view_menu.addAction(app.act_reorder_columns)
+    app.catalog_table_layout_menu.addAction(app.act_reorder_columns)
 
     history_menu = app.menu_bar.addMenu("History")
     app.show_history_action = app._create_action(
@@ -1203,7 +1220,11 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.add_data_dock = QDockWidget("Add Track", app)
     app.add_data_dock.setObjectName("addDataDock")
     app.add_data_dock.setAllowedAreas(Qt.AllDockWidgetAreas)
-    app.add_data_dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
+    app.add_data_dock.setFeatures(
+        QDockWidget.DockWidgetClosable
+        | QDockWidget.DockWidgetMovable
+        | QDockWidget.DockWidgetFloatable
+    )
     app.add_data_dock.setMinimumWidth(320)
     app.add_data_dock.setWidget(app.left_scroll)
     app.addDockWidget(Qt.LeftDockWidgetArea, app.add_data_dock)
@@ -1312,7 +1333,9 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.catalog_table_dock.setObjectName("catalogTableDock")
     app.catalog_table_dock.setAllowedAreas(Qt.AllDockWidgetAreas)
     app.catalog_table_dock.setFeatures(
-        QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable
+        QDockWidget.DockWidgetClosable
+        | QDockWidget.DockWidgetMovable
+        | QDockWidget.DockWidgetFloatable
     )
     app.catalog_table_dock.setMinimumWidth(480)
     app.catalog_table_dock.setWidget(app.table_panel_widget)

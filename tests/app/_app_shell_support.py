@@ -732,6 +732,22 @@ class AppShellTestCase(unittest.TestCase):
                 return menu
         raise AssertionError(f"Menu not found: {text}")
 
+    def _saved_layout_selector_widget(self):
+        selector = getattr(self.window, "saved_layout_selector", None)
+        if isinstance(selector, app_module.QComboBox):
+            return selector
+        raise AssertionError("Saved layout selector not found")
+
+    def _saved_layouts_menu_list_widget(self):
+        self.window._populate_saved_layouts_menu()
+        for action in self.window.saved_layouts_menu.actions():
+            if not isinstance(action, app_module.QWidgetAction):
+                continue
+            widget = action.defaultWidget()
+            if isinstance(widget, app_module.QListWidget):
+                return widget
+        raise AssertionError("Saved layouts menu list widget not found")
+
     def _workspace_dock_tab_bar(self) -> QTabBar:
         expected_titles = {
             dock.windowTitle()
@@ -1390,11 +1406,21 @@ class AppShellTestCase(unittest.TestCase):
                 "Show Profiles Ribbon",
                 "Show Action Ribbon",
                 "Customize Action Ribbon…",
-                "Table Layout",
+                "Layout",
+            ],
+        )
+        layout_texts = list(self._menu_snapshot_at_path(view_snapshot, "Layout").get("texts") or [])
+        self.assertEqual(
+            layout_texts,
+            [
+                "Saved Layouts",
+                "Add Layout",
+                "Delete Layout",
+                "Catalog Table",
             ],
         )
         table_layout_texts = list(
-            self._menu_snapshot_at_path(view_snapshot, "Table Layout").get("texts") or []
+            self._menu_snapshot_at_path(view_snapshot, "Layout", "Catalog Table").get("texts") or []
         )
         self.assertEqual(
             table_layout_texts,
@@ -1404,6 +1430,10 @@ class AppShellTestCase(unittest.TestCase):
                 "Allow Column Reordering",
             ],
         )
+        selector = self._saved_layout_selector_widget()
+        self.assertFalse(selector.isEnabled())
+        self.assertEqual(selector.itemText(0), "No Saved Layouts")
+        self.assertFalse(self.window.delete_layout_action.isEnabled())
 
         history_texts = self._menu_action_texts(self._menu_by_text("History"))
         self.assertEqual(history_texts, ["Show Undo History…", "Create Snapshot…"])
@@ -1442,6 +1472,117 @@ class AppShellTestCase(unittest.TestCase):
                 "show_history",
                 "create_snapshot",
             ],
+        )
+
+    def case_named_main_window_layouts_can_be_saved_applied_deleted_and_shared_between_menu_and_ribbon(
+        self,
+    ):
+        self.assertEqual(self.window._saved_main_window_layout_names(), [])
+
+        self.window.add_data_action.trigger()
+        self.window.open_release_browser()
+        self._drain_events()
+        self.window.addDockWidget(
+            app_module.Qt.LeftDockWidgetArea, self.window.release_browser_dock
+        )
+        self.window.tabifyDockWidget(self.window.add_data_dock, self.window.release_browser_dock)
+        self.window.release_browser_dock.raise_()
+        self._drain_events()
+
+        with mock.patch.object(
+            app_module.QInputDialog,
+            "getText",
+            return_value=("Writer Desk", True),
+        ):
+            self.window.add_layout_action.trigger()
+        self._drain_events()
+
+        self.assertEqual(self.window._saved_main_window_layout_names(), ["Writer Desk"])
+        selector = self._saved_layout_selector_widget()
+        self.assertTrue(selector.isEnabled())
+        self.assertGreater(selector.findData("Writer Desk"), 0)
+        self.assertTrue(self.window.delete_layout_action.isEnabled())
+
+        menu_list = self._saved_layouts_menu_list_widget()
+        self.assertEqual(
+            [menu_list.item(index).text() for index in range(menu_list.count())],
+            ["Writer Desk"],
+        )
+
+        self._reopen_window(skip_background_prepare=True)
+        selector = self._saved_layout_selector_widget()
+        self.assertEqual(self.window._saved_main_window_layout_names(), ["Writer Desk"])
+        self.assertGreater(selector.findData("Writer Desk"), 0)
+        menu_list = self._saved_layouts_menu_list_widget()
+        self.assertEqual(
+            [menu_list.item(index).text() for index in range(menu_list.count())],
+            ["Writer Desk"],
+        )
+
+        self.window.addDockWidget(
+            app_module.Qt.RightDockWidgetArea, self.window.release_browser_dock
+        )
+        self.window.catalog_table_dock.raise_()
+        self._drain_events()
+        self.assertEqual(
+            self.window.dockWidgetArea(self.window.release_browser_dock),
+            app_module.Qt.RightDockWidgetArea,
+        )
+
+        saved_index = selector.findData("Writer Desk")
+        self.assertGreater(saved_index, 0)
+        selector.setCurrentIndex(saved_index)
+        self.window._on_saved_layout_selected(saved_index)
+        self._drain_events()
+        selector = self._saved_layout_selector_widget()
+
+        self.assertEqual(
+            self.window.dockWidgetArea(self.window.release_browser_dock),
+            app_module.Qt.LeftDockWidgetArea,
+        )
+        self.assertIn(
+            self.window.release_browser_dock,
+            set(self.window.tabifiedDockWidgets(self.window.add_data_dock)),
+        )
+
+        with (
+            mock.patch.object(
+                app_module.QInputDialog,
+                "getItem",
+                return_value=("Writer Desk", True),
+            ),
+            mock.patch.object(
+                app_module.QMessageBox,
+                "question",
+                return_value=app_module.QMessageBox.Yes,
+            ),
+        ):
+            self.window.saved_layout_delete_button.click()
+        self._drain_events()
+        selector = self._saved_layout_selector_widget()
+
+        self.assertEqual(self.window._saved_main_window_layout_names(), [])
+        self.assertFalse(selector.isEnabled())
+        self.assertEqual(selector.itemText(0), "No Saved Layouts")
+        self.assertFalse(self.window.delete_layout_action.isEnabled())
+
+    def case_saved_layouts_menu_uses_scrollable_picker_widget_when_needed(self):
+        for index in range(10):
+            self.window._save_named_main_window_layout(f"Layout {index + 1}")
+        self._drain_events()
+
+        menu_list = self._saved_layouts_menu_list_widget()
+        self.assertEqual(menu_list.count(), 10)
+        self.assertEqual(
+            menu_list.verticalScrollMode(),
+            app_module.QAbstractItemView.ScrollPerPixel,
+        )
+        row_height = menu_list.sizeHintForRow(0)
+        if row_height <= 0:
+            row_height = max(menu_list.fontMetrics().height() + 8, 24)
+        self.assertLess(
+            menu_list.height(),
+            (row_height * menu_list.count()) + (menu_list.frameWidth() * 2),
         )
 
     def case_moved_and_renamed_actions_preserve_dialog_routing(self):
@@ -3809,6 +3950,41 @@ class AppShellTestCase(unittest.TestCase):
         self.assertTrue(self.window.work_manager_dock.isVisible())
         self.assertTrue(self.window.global_search_dock.isVisible())
 
+    def case_add_track_and_catalog_table_docks_can_close_from_their_titlebar_controls(self):
+        self.assertTrue(
+            bool(self.window.add_data_dock.features() & app_module.QDockWidget.DockWidgetClosable)
+        )
+        self.assertTrue(
+            bool(
+                self.window.catalog_table_dock.features()
+                & app_module.QDockWidget.DockWidgetClosable
+            )
+        )
+
+        self.window.open_add_track_workspace()
+        self.app.processEvents()
+        self.assertTrue(self.window.add_data_dock.isVisible())
+        self.assertTrue(self.window.add_data_action.isChecked())
+        self.assertTrue(self.window.add_data_dock.close())
+        self.app.processEvents()
+        self.assertFalse(self.window.add_data_dock.isVisible())
+        self.assertFalse(self.window.add_data_action.isChecked())
+
+        self.assertTrue(self.window.catalog_table_dock.isVisible())
+        self.assertTrue(self.window.catalog_table_action.isChecked())
+        self.assertTrue(self.window.catalog_table_dock.close())
+        self.app.processEvents()
+        self.assertFalse(self.window.catalog_table_dock.isVisible())
+        self.assertFalse(self.window.catalog_table_action.isChecked())
+
+        self.window.open_add_track_workspace()
+        self.window.open_catalog_workspace()
+        self.app.processEvents()
+        self.assertTrue(self.window.add_data_dock.isVisible())
+        self.assertTrue(self.window.catalog_table_dock.isVisible())
+        self.assertTrue(self.window.add_data_action.isChecked())
+        self.assertTrue(self.window.catalog_table_action.isChecked())
+
     def case_workspace_layout_round_trip_restores_tabified_non_floating_docks(self):
         self.window.open_release_browser()
         self.window.open_work_manager()
@@ -4650,7 +4826,8 @@ class AppShellTestCase(unittest.TestCase):
         date_widget = panel.manual_widgets["{{manual.license_date}}"]
         selector.setCurrentIndex(1)
         selected_track_value = selector.currentData()
-        date_widget.setDate(QDate(2026, 3, 29))
+        draft_date = QDate.currentDate().addDays(1)
+        date_widget.setDate(draft_date)
         panel.fill_draft_name_edit.setText("Shell Resume Draft")
         panel.fill_draft_storage_combo.setCurrentIndex(1)
         self.app.processEvents()
@@ -4690,7 +4867,7 @@ class AppShellTestCase(unittest.TestCase):
             {
                 "revision_id": revision.revision_id,
                 "db_selections": {"{{db.track.track_title}}": selected_track_value},
-                "manual_values": {"{{manual.license_date}}": "2026-03-29"},
+                "manual_values": {"{{manual.license_date}}": draft_date.toString("yyyy-MM-dd")},
                 "type_overrides": {},
             },
         )

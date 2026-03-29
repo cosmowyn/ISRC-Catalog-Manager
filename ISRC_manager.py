@@ -106,6 +106,7 @@ from PySide6.QtWidgets import (
     QToolButton,
     QVBoxLayout,
     QWidget,
+    QWidgetAction,
 )
 
 from isrc_manager.app_bootstrap import run_desktop_application
@@ -10970,6 +10971,55 @@ class App(QMainWindow):
     def _window_normal_geometry_setting_key() -> str:
         return "display/main_window_normal_geometry"
 
+    @staticmethod
+    def _saved_main_window_layouts_setting_key() -> str:
+        return "display/saved_main_window_layouts_json"
+
+    @staticmethod
+    def _serialize_qbytearray_setting(value: QByteArray | None) -> str:
+        if not isinstance(value, QByteArray) or value.isEmpty():
+            return ""
+        try:
+            return bytes(value.toBase64()).decode("ascii")
+        except Exception:
+            return ""
+
+    @staticmethod
+    def _deserialize_qbytearray_setting(value) -> QByteArray:
+        clean = str(value or "").strip()
+        if not clean:
+            return QByteArray()
+        try:
+            return QByteArray.fromBase64(clean.encode("ascii"))
+        except Exception:
+            return QByteArray()
+
+    @staticmethod
+    def _serialize_rect_setting(value: QRect | None) -> dict[str, int] | None:
+        if not isinstance(value, QRect) or not value.isValid():
+            return None
+        return {
+            "x": int(value.x()),
+            "y": int(value.y()),
+            "width": int(value.width()),
+            "height": int(value.height()),
+        }
+
+    @staticmethod
+    def _deserialize_rect_setting(value) -> QRect | None:
+        if not isinstance(value, dict):
+            return None
+        try:
+            rect = QRect(
+                int(value.get("x", 0)),
+                int(value.get("y", 0)),
+                int(value.get("width", 0)),
+                int(value.get("height", 0)),
+            )
+        except Exception:
+            return None
+        return rect if rect.isValid() else None
+
     def _schedule_main_dock_state_save(self) -> None:
         if (
             getattr(self, "_suspend_dock_state_sync", False)
@@ -11011,11 +11061,7 @@ class App(QMainWindow):
         except Exception as e:
             self.logger.warning("Failed to save dock state: %s", e)
 
-    def _restore_main_dock_state(self) -> bool:
-        try:
-            state = self.settings.value(self._dock_state_setting_key(), None, QByteArray)
-        except Exception:
-            state = None
+    def _apply_main_dock_state_snapshot(self, state: QByteArray | None) -> bool:
         if not isinstance(state, QByteArray) or state.isEmpty():
             return False
         previous_suspend_state = self._suspend_dock_state_sync
@@ -11030,6 +11076,13 @@ class App(QMainWindow):
         finally:
             self._suspend_dock_state_sync = previous_suspend_state
         return restored
+
+    def _restore_main_dock_state(self) -> bool:
+        try:
+            state = self.settings.value(self._dock_state_setting_key(), None, QByteArray)
+        except Exception:
+            state = None
+        return self._apply_main_dock_state_snapshot(state)
 
     def _save_main_window_geometry(self, *, sync: bool = True) -> None:
         try:
@@ -11049,24 +11102,13 @@ class App(QMainWindow):
         except Exception as e:
             self.logger.warning("Failed to save main window geometry: %s", e)
 
-    def _restore_main_window_geometry(self) -> bool:
-        try:
-            geometry = self.settings.value(self._window_geometry_setting_key(), None, QByteArray)
-        except Exception:
-            geometry = None
-        try:
-            normal_geometry = self.settings.value(
-                self._window_normal_geometry_setting_key(),
-                None,
-                QRect,
-            )
-        except Exception:
-            normal_geometry = None
-        try:
-            window_state_marker = self.settings.value(self._window_state_setting_key(), "", str)
-        except Exception:
-            window_state_marker = ""
-
+    def _apply_main_window_geometry_snapshot(
+        self,
+        *,
+        geometry: QByteArray | None,
+        normal_geometry: QRect | None,
+        window_state_marker: str,
+    ) -> bool:
         has_geometry = isinstance(geometry, QByteArray) and not geometry.isEmpty()
         marker = str(window_state_marker or "").strip().lower()
         if not has_geometry and marker not in {"normal", "maximized", "fullscreen"}:
@@ -11092,6 +11134,29 @@ class App(QMainWindow):
             return True
         return restored
 
+    def _restore_main_window_geometry(self) -> bool:
+        try:
+            geometry = self.settings.value(self._window_geometry_setting_key(), None, QByteArray)
+        except Exception:
+            geometry = None
+        try:
+            normal_geometry = self.settings.value(
+                self._window_normal_geometry_setting_key(),
+                None,
+                QRect,
+            )
+        except Exception:
+            normal_geometry = None
+        try:
+            window_state_marker = self.settings.value(self._window_state_setting_key(), "", str)
+        except Exception:
+            window_state_marker = ""
+        return self._apply_main_window_geometry_snapshot(
+            geometry=geometry,
+            normal_geometry=normal_geometry,
+            window_state_marker=window_state_marker,
+        )
+
     def _current_main_window_state_marker(self) -> str:
         window_state = self.windowState()
         if window_state & Qt.WindowFullScreen:
@@ -11099,6 +11164,313 @@ class App(QMainWindow):
         if window_state & Qt.WindowMaximized:
             return "maximized"
         return "normal"
+
+    def _load_saved_main_window_layouts(self) -> dict[str, dict[str, object]]:
+        raw_value = self.settings.value(self._saved_main_window_layouts_setting_key(), "{}")
+        parsed = raw_value
+        if isinstance(raw_value, str):
+            try:
+                parsed = json.loads(raw_value)
+            except Exception:
+                return {}
+        if not isinstance(parsed, dict):
+            return {}
+        normalized: dict[str, dict[str, object]] = {}
+        for name, snapshot in parsed.items():
+            clean_name = str(name or "").strip()
+            if not clean_name or not isinstance(snapshot, dict):
+                continue
+            normalized[clean_name] = dict(snapshot)
+        return dict(sorted(normalized.items(), key=lambda item: item[0].casefold()))
+
+    def _write_saved_main_window_layouts(
+        self,
+        layouts: dict[str, dict[str, object]],
+        *,
+        sync: bool = True,
+    ) -> None:
+        payload = dict(sorted(layouts.items(), key=lambda item: item[0].casefold()))
+        self.settings.setValue(
+            self._saved_main_window_layouts_setting_key(),
+            json.dumps(payload, ensure_ascii=True, sort_keys=True),
+        )
+        if sync:
+            self.settings.sync()
+
+    def _saved_main_window_layout_names(self) -> list[str]:
+        return list(self._load_saved_main_window_layouts().keys())
+
+    def _find_saved_main_window_layout_name(self, name: str) -> str | None:
+        clean_name = str(name or "").strip()
+        if not clean_name:
+            return None
+        for existing_name in self._saved_main_window_layout_names():
+            if existing_name.casefold() == clean_name.casefold():
+                return existing_name
+        return None
+
+    def _default_saved_main_window_layout_name(self) -> str:
+        existing_names = {name.casefold() for name in self._saved_main_window_layout_names()}
+        index = 1
+        while True:
+            candidate = f"Layout {index}"
+            if candidate.casefold() not in existing_names:
+                return candidate
+            index += 1
+
+    def _capture_current_main_window_layout_snapshot(self) -> dict[str, object]:
+        profiles_toolbar = getattr(self, "toolbar", None)
+        action_ribbon_toolbar = getattr(self, "action_ribbon_toolbar", None)
+        add_data_dock = getattr(self, "add_data_dock", None)
+        catalog_table_dock = getattr(self, "catalog_table_dock", None)
+        return {
+            "schema_version": 1,
+            "geometry_b64": self._serialize_qbytearray_setting(self.saveGeometry()),
+            "window_state": self._current_main_window_state_marker(),
+            "normal_geometry": self._serialize_rect_setting(self.normalGeometry()),
+            "dock_state_b64": self._serialize_qbytearray_setting(self.saveState(1)),
+            "add_data_panel": bool(
+                isinstance(add_data_dock, QDockWidget) and add_data_dock.isVisible()
+            ),
+            "catalog_table_panel": bool(
+                isinstance(catalog_table_dock, QDockWidget) and catalog_table_dock.isVisible()
+            ),
+            "profiles_toolbar_visible": bool(
+                isinstance(profiles_toolbar, QToolBar) and profiles_toolbar.isVisible()
+            ),
+            "action_ribbon_visible": bool(
+                isinstance(action_ribbon_toolbar, QToolBar) and action_ribbon_toolbar.isVisible()
+            ),
+        }
+
+    def _save_named_main_window_layout(self, name: str) -> str | None:
+        clean_name = str(name or "").strip()
+        if not clean_name:
+            return None
+        layouts = self._load_saved_main_window_layouts()
+        existing_name = self._find_saved_main_window_layout_name(clean_name)
+        if existing_name is not None and existing_name != clean_name:
+            layouts.pop(existing_name, None)
+        layouts[clean_name] = self._capture_current_main_window_layout_snapshot()
+        self._write_saved_main_window_layouts(layouts)
+        self._active_saved_main_window_layout_name = clean_name
+        self._refresh_saved_layout_controls()
+        return clean_name
+
+    def _apply_named_main_window_layout(self, name: str) -> bool:
+        layouts = self._load_saved_main_window_layouts()
+        resolved_name = self._find_saved_main_window_layout_name(name)
+        if resolved_name is None:
+            return False
+        snapshot = layouts.get(resolved_name)
+        if not isinstance(snapshot, dict):
+            return False
+
+        self._ensure_persistent_workspace_dock_shells()
+        previous_suspend_state = self._suspend_dock_state_sync
+        previous_restore_state = self._is_restoring_workspace_layout
+        self._suspend_dock_state_sync = True
+        self._is_restoring_workspace_layout = True
+        restored_dock_state = False
+        try:
+            self._apply_main_window_geometry_snapshot(
+                geometry=self._deserialize_qbytearray_setting(snapshot.get("geometry_b64")),
+                normal_geometry=self._deserialize_rect_setting(snapshot.get("normal_geometry")),
+                window_state_marker=str(snapshot.get("window_state") or ""),
+            )
+            restored_dock_state = self._apply_main_dock_state_snapshot(
+                self._deserialize_qbytearray_setting(snapshot.get("dock_state_b64"))
+            )
+            if not restored_dock_state:
+                self._apply_add_data_panel_state(bool(snapshot.get("add_data_panel", False)))
+                self._apply_catalog_table_panel_state(
+                    bool(snapshot.get("catalog_table_panel", True))
+                )
+            self._apply_profiles_toolbar_visibility(
+                bool(snapshot.get("profiles_toolbar_visible", True))
+            )
+            self._apply_action_ribbon_configuration(
+                getattr(self, "_action_ribbon_action_ids", []),
+                bool(snapshot.get("action_ribbon_visible", True)),
+            )
+            self._refresh_workspace_dock_default_placement_flags()
+            self._materialize_visible_workspace_dock_panels()
+        finally:
+            self._is_restoring_workspace_layout = previous_restore_state
+            self._suspend_dock_state_sync = previous_suspend_state
+
+        self._active_saved_main_window_layout_name = resolved_name
+        self._store_workspace_panel_visibility_preferences(sync=False)
+        self._save_main_window_geometry(sync=False)
+        self._save_main_dock_state(sync=False)
+        self.settings.sync()
+        self._queue_top_chrome_boundary_refresh()
+        self._refresh_saved_layout_controls()
+        return True
+
+    def _delete_named_main_window_layout(self, name: str) -> bool:
+        layouts = self._load_saved_main_window_layouts()
+        resolved_name = self._find_saved_main_window_layout_name(name)
+        if resolved_name is None or resolved_name not in layouts:
+            return False
+        layouts.pop(resolved_name, None)
+        self._write_saved_main_window_layouts(layouts)
+        if getattr(self, "_active_saved_main_window_layout_name", None) == resolved_name:
+            self._active_saved_main_window_layout_name = ""
+        self._refresh_saved_layout_controls()
+        return True
+
+    def _refresh_saved_layout_controls(self) -> None:
+        names = self._saved_main_window_layout_names()
+        delete_enabled = bool(names)
+
+        delete_action = getattr(self, "delete_layout_action", None)
+        if isinstance(delete_action, QAction):
+            delete_action.setEnabled(delete_enabled)
+
+        selector = getattr(self, "saved_layout_selector", None)
+        if isinstance(selector, QComboBox):
+            previous_state = selector.blockSignals(True)
+            try:
+                selector.clear()
+                if names:
+                    selector.addItem("Saved Layouts", "")
+                    for layout_name in names:
+                        selector.addItem(layout_name, layout_name)
+                    active_name = str(
+                        getattr(self, "_active_saved_main_window_layout_name", "") or ""
+                    ).strip()
+                    selector.setEnabled(True)
+                    active_index = selector.findData(active_name) if active_name else -1
+                    selector.setCurrentIndex(active_index if active_index > 0 else 0)
+                else:
+                    selector.addItem("No Saved Layouts", "")
+                    selector.setCurrentIndex(0)
+                    selector.setEnabled(False)
+            finally:
+                selector.blockSignals(previous_state)
+
+        delete_button = getattr(self, "saved_layout_delete_button", None)
+        if isinstance(delete_button, QPushButton):
+            delete_button.setEnabled(delete_enabled)
+
+    def _populate_saved_layouts_menu(self) -> None:
+        menu = getattr(self, "saved_layouts_menu", None)
+        if not isinstance(menu, QMenu):
+            return
+        menu.clear()
+        names = self._saved_main_window_layout_names()
+        if not names:
+            empty_action = menu.addAction("No Saved Layouts")
+            empty_action.setEnabled(False)
+            return
+
+        layout_list = QListWidget(menu)
+        layout_list.setObjectName("savedLayoutsMenuList")
+        layout_list.setSelectionMode(QAbstractItemView.SingleSelection)
+        layout_list.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        layout_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        layout_list.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+        for layout_name in names:
+            QListWidgetItem(layout_name, layout_list)
+        active_name = str(getattr(self, "_active_saved_main_window_layout_name", "") or "").strip()
+        if active_name:
+            matching_items = layout_list.findItems(active_name, Qt.MatchExactly)
+            if matching_items:
+                layout_list.setCurrentItem(matching_items[0])
+        row_height = layout_list.sizeHintForRow(0)
+        if row_height <= 0:
+            row_height = max(layout_list.fontMetrics().height() + 8, 24)
+        visible_rows = min(len(names), 8)
+        frame_height = layout_list.frameWidth() * 2
+        layout_list.setFixedHeight((row_height * visible_rows) + frame_height + 2)
+        widest_name = max(layout_list.fontMetrics().horizontalAdvance(name) for name in names)
+        layout_list.setMinimumWidth(min(max(widest_name + 56, 220), 360))
+
+        def _apply_selected_layout(item: QListWidgetItem | None) -> None:
+            if item is None:
+                return
+            self._apply_named_main_window_layout(item.text())
+            menu.close()
+
+        layout_list.itemClicked.connect(_apply_selected_layout)
+        layout_list.itemActivated.connect(_apply_selected_layout)
+
+        widget_action = QWidgetAction(menu)
+        widget_action.setDefaultWidget(layout_list)
+        menu.addAction(widget_action)
+
+    def add_named_main_window_layout(self) -> None:
+        suggested_name = self._default_saved_main_window_layout_name()
+        while True:
+            name, ok = QInputDialog.getText(self, "Add Layout", "Layout name:", text=suggested_name)
+            if not ok:
+                return
+            clean_name = str(name or "").strip()
+            if clean_name:
+                break
+            QMessageBox.warning(self, "Add Layout", "Enter a layout name before saving.")
+            suggested_name = str(name or "")
+
+        existing_name = self._find_saved_main_window_layout_name(clean_name)
+        if existing_name is not None:
+            answer = QMessageBox.question(
+                self,
+                "Overwrite Layout",
+                f'A saved layout named "{existing_name}" already exists.\n\nOverwrite it?',
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if answer != QMessageBox.Yes:
+                return
+
+        saved_name = self._save_named_main_window_layout(clean_name)
+        if saved_name is not None:
+            self.statusBar().showMessage(f'Saved layout "{saved_name}".', 3000)
+
+    def delete_named_main_window_layout_interactive(
+        self, preferred_name: str | None = None
+    ) -> None:
+        names = self._saved_main_window_layout_names()
+        if not names:
+            QMessageBox.information(self, "Delete Layout", "No saved layouts are available yet.")
+            return
+
+        resolved_name = self._find_saved_main_window_layout_name(preferred_name or "")
+        default_index = names.index(resolved_name) if resolved_name in names else 0
+        selected_name, ok = QInputDialog.getItem(
+            self,
+            "Delete Layout",
+            "Choose the saved layout to delete:",
+            names,
+            default_index,
+            False,
+        )
+        if not ok or not selected_name:
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "Delete Layout",
+            f'Delete the saved layout "{selected_name}"?',
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+
+        if self._delete_named_main_window_layout(selected_name):
+            self.statusBar().showMessage(f'Deleted layout "{selected_name}".', 3000)
+
+    def _on_saved_layout_selected(self, index: int) -> None:
+        selector = getattr(self, "saved_layout_selector", None)
+        if not isinstance(selector, QComboBox):
+            return
+        selected_name = str(selector.itemData(index) or "").strip()
+        if not selected_name:
+            return
+        if not self._apply_named_main_window_layout(selected_name):
+            self._refresh_saved_layout_controls()
 
     def _store_workspace_panel_visibility_preferences(self, *, sync: bool = True) -> None:
         try:
@@ -12259,6 +12631,43 @@ class App(QMainWindow):
             parts.append(f"Shortcut: {shortcut_text}")
         return "\n".join(part for part in parts if part)
 
+    def _build_saved_layout_ribbon_widget(self, parent: QWidget) -> QWidget:
+        container = QWidget(parent)
+        container.setObjectName("savedLayoutRibbonControls")
+        container.setProperty("role", "actionRibbonCluster")
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+
+        selector = FocusWheelComboBox(container)
+        selector.setObjectName("savedLayoutSelector")
+        selector.setMinimumContentsLength(14)
+        selector.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        selector.setInsertPolicy(QComboBox.NoInsert)
+        selector.setProperty("role", "actionRibbonSelector")
+        selector.activated.connect(self._on_saved_layout_selected)
+        layout.addWidget(selector)
+
+        save_button = QPushButton("Save Layout", container)
+        save_button.setObjectName("savedLayoutAddButton")
+        save_button.setProperty("role", "actionRibbonButton")
+        save_button.clicked.connect(self.add_named_main_window_layout)
+        layout.addWidget(save_button)
+
+        delete_button = QPushButton("Delete Layout", container)
+        delete_button.setObjectName("savedLayoutDeleteButton")
+        delete_button.setProperty("role", "actionRibbonButton")
+        delete_button.clicked.connect(
+            lambda: self.delete_named_main_window_layout_interactive(selector.currentData())
+        )
+        layout.addWidget(delete_button)
+
+        self.saved_layout_selector = selector
+        self.saved_layout_add_button = save_button
+        self.saved_layout_delete_button = delete_button
+        self._refresh_saved_layout_controls()
+        return container
+
     def _rebuild_action_ribbon_toolbar(self):
         toolbar = getattr(self, "action_ribbon_toolbar", None)
         if toolbar is None:
@@ -12284,6 +12693,8 @@ class App(QMainWindow):
         spacer.setObjectName("actionRibbonSpacer")
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         toolbar.addWidget(spacer)
+
+        toolbar.addWidget(self._build_saved_layout_ribbon_widget(toolbar))
 
         toolbar.addAction(self.customize_action_ribbon_action)
         customize_widget = toolbar.widgetForAction(self.customize_action_ribbon_action)

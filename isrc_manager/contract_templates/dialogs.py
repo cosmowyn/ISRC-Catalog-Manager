@@ -2419,9 +2419,17 @@ class ContractTemplateWorkspacePanel(QWidget):
         self._suspend_fill_updates = True
         try:
             for widget in self.selector_widgets.values():
-                self._write_widget_value(widget, None, explicit=False)
+                previous_signal_state = widget.blockSignals(True)
+                try:
+                    self._write_widget_value(widget, None, explicit=False)
+                finally:
+                    widget.blockSignals(previous_signal_state)
             for widget in self.manual_widgets.values():
-                self._write_widget_value(widget, None, explicit=False)
+                previous_signal_state = widget.blockSignals(True)
+                try:
+                    self._write_widget_value(widget, None, explicit=False)
+                finally:
+                    widget.blockSignals(previous_signal_state)
         finally:
             self._suspend_fill_updates = previous_suspend
         self._fill_dirty = False

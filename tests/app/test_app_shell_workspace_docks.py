@@ -56,6 +56,9 @@ class AppShellWorkspaceDockTests(AppShellTestCase):
     test_hidden_catalog_table_does_not_block_workspace_dock_access_or_peer_tabifying = (
         AppShellTestCase.case_hidden_catalog_table_does_not_block_workspace_dock_access_or_peer_tabifying
     )
+    test_add_track_and_catalog_table_docks_can_close_from_their_titlebar_controls = (
+        AppShellTestCase.case_add_track_and_catalog_table_docks_can_close_from_their_titlebar_controls
+    )
     test_legacy_license_browser_is_not_exposed_in_workspace = (
         AppShellTestCase.case_legacy_license_browser_is_not_exposed_in_workspace
     )

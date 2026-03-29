@@ -26,6 +26,9 @@ class AppShellLayoutPersistenceTests(AppShellTestCase):
     test_main_window_geometry_round_trip_restores_non_default_outer_state = (
         AppShellTestCase.case_main_window_geometry_round_trip_restores_non_default_outer_state
     )
+    test_named_main_window_layouts_can_be_saved_applied_deleted_and_shared_between_menu_and_ribbon = (
+        AppShellTestCase.case_named_main_window_layouts_can_be_saved_applied_deleted_and_shared_between_menu_and_ribbon
+    )
 
 
 del AppShellTestCase
