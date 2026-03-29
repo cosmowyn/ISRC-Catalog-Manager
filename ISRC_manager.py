@@ -90,6 +90,7 @@ from PySide6.QtWidgets import (
     QMenuBar,
     QMessageBox,
     QPinchGesture,
+    QPlainTextEdit,
     QProgressBar,
     QPushButton,
     QRadioButton,
@@ -275,7 +276,10 @@ from isrc_manager.paths import (
     settings_path,
     should_ignore_persisted_last_db_path,
 )
-from isrc_manager.qss_autocomplete import QssCodeEditor
+from isrc_manager.qss_autocomplete import (
+    QssCodeEditor,
+    validate_qss_document,
+)
 from isrc_manager.qss_reference import (
     QssReferenceEntry,
     collect_qss_reference_entries,
@@ -730,6 +734,12 @@ class ApplicationSettingsDialog(QDialog):
         self._blob_icon_preview_labels: dict[str, QLabel] = {}
         self._qss_reference_entries: list[QssReferenceEntry] = []
         self._qss_filtered_reference_entries: list[QssReferenceEntry] = []
+        initial_custom_qss = str(self._theme_settings.get("custom_qss") or "")
+        self._theme_last_valid_custom_qss_preview = (
+            initial_custom_qss
+            if not validate_qss_document(initial_custom_qss)
+            else ""
+        )
         self._theme_change_tracking_enabled = True
         self._history_retention_sync_enabled = True
         self._theme_original_values = normalize_app_theme_settings(self._theme_settings)
@@ -1943,7 +1953,7 @@ class ApplicationSettingsDialog(QDialog):
         qss_help = QLabel(
             "Example selectors: `QPushButton`, `QLineEdit`, `QDockWidget::title`, `#profilesToolbar QPushButton`, or `QToolBar#actionRibbonToolbar`. "
             "Press Ctrl+Space in the editor for context-aware autocomplete with selectors, pseudo-states, subcontrols, "
-            "property lines, value suggestions, and full rule templates."
+            "property lines, value suggestions, and full rule templates. Use the selector catalog to insert a complete working template, including a short note about what the selector targets, when you want to start from a full example instead of an empty block."
         )
         qss_help.setProperty("role", "hint")
         qss_help.setWordWrap(True)
@@ -1965,6 +1975,10 @@ class ApplicationSettingsDialog(QDialog):
         self.theme_custom_qss_edit.setMinimumHeight(220)
         self.theme_custom_qss_edit.setPlainText(str(self._theme_settings.get("custom_qss") or ""))
         qss_editor_layout.addWidget(self.theme_custom_qss_edit, 1)
+        self.theme_custom_qss_status_label = QLabel("", self)
+        self.theme_custom_qss_status_label.setWordWrap(True)
+        self.theme_custom_qss_status_label.setProperty("role", "secondary")
+        qss_editor_layout.addWidget(self.theme_custom_qss_status_label)
         self.theme_qss_tabs.addTab(qss_editor_page, "Editor")
 
         qss_reference_page = QWidget(self)
@@ -1976,8 +1990,7 @@ class ApplicationSettingsDialog(QDialog):
         qss_reference_note = QLabel(
             "The reference catalog is built from the currently open app windows and dialogs. "
             "Open the screen you want to style, then refresh the catalog to harvest its generated object names. "
-            "Object-name entries are inserted as references, so they append safely to an existing widget selector "
-            "instead of rewriting it."
+            "Double-click a row or use Insert Full Template when you want a complete scaffold first. Use Insert Selector Only when you explicitly want just the raw selector text."
         )
         qss_reference_note.setWordWrap(True)
         qss_reference_note.setProperty("role", "hint")
@@ -2018,7 +2031,7 @@ class ApplicationSettingsDialog(QDialog):
         self.qss_reference_table.setColumnWidth(1, 320)
         self.qss_reference_table.itemSelectionChanged.connect(self._update_qss_reference_actions)
         self.qss_reference_table.doubleClicked.connect(
-            lambda _index: self._insert_selected_qss_selector()
+            lambda _index: self._insert_selected_qss_template()
         )
         qss_reference_layout.addWidget(self.qss_reference_table, 1)
 
@@ -2029,11 +2042,15 @@ class ApplicationSettingsDialog(QDialog):
         self.qss_reference_copy_button = QPushButton("Copy Selector", self)
         self.qss_reference_copy_button.setAutoDefault(False)
         self.qss_reference_copy_button.clicked.connect(self._copy_selected_qss_selector)
-        self.qss_reference_insert_button = QPushButton("Insert Into Editor", self)
+        self.qss_reference_insert_button = QPushButton("Insert Selector Only", self)
         self.qss_reference_insert_button.setAutoDefault(False)
         self.qss_reference_insert_button.clicked.connect(self._insert_selected_qss_selector)
+        self.qss_reference_insert_template_button = QPushButton("Insert Full Template", self)
+        self.qss_reference_insert_template_button.setAutoDefault(False)
+        self.qss_reference_insert_template_button.clicked.connect(self._insert_selected_qss_template)
         qss_reference_button_row.addWidget(self.qss_reference_copy_button)
         qss_reference_button_row.addWidget(self.qss_reference_insert_button)
+        qss_reference_button_row.addWidget(self.qss_reference_insert_template_button)
         qss_reference_layout.addLayout(qss_reference_button_row)
         self.theme_qss_tabs.addTab(qss_reference_page, "Selector Reference")
 
@@ -2647,11 +2664,20 @@ class ApplicationSettingsDialog(QDialog):
             theme_values = self._theme_value_payload()
         except Exception:
             return
-        stylesheet = build_app_theme_stylesheet(theme_values)
+        qss_issues = self._theme_qss_validation_issues(theme_values.get("custom_qss"))
+        preview_values = dict(theme_values)
+        if qss_issues:
+            preview_values["custom_qss"] = str(self._theme_last_valid_custom_qss_preview or "")
+        else:
+            self._theme_last_valid_custom_qss_preview = str(
+                theme_values.get("custom_qss") or ""
+            )
+        stylesheet = build_app_theme_stylesheet(preview_values)
         for widget in getattr(self, "_theme_preview_roots", []):
             widget.setStyleSheet(stylesheet)
             _repolish_qss_widget_tree(widget)
         self._refresh_blob_icon_previews()
+        self._update_theme_qss_status(qss_issues)
         current_preview_name = self.theme_preview_tabs.tabText(
             self.theme_preview_tabs.currentIndex()
         )
@@ -2671,8 +2697,13 @@ class ApplicationSettingsDialog(QDialog):
                 )
                 + f". {len(self._theme_color_edits)} color slots and {len(self._theme_metric_spins)} geometry/typography controls are available in the builder."
             )
+        if qss_issues:
+            self.theme_preview_status_label.setText(
+                self.theme_preview_status_label.text()
+                + " Advanced QSS preview is holding the last valid stylesheet until the current editor syntax issue is fixed."
+            )
         if self.theme_live_preview_check.isChecked():
-            self._apply_live_theme_preview(theme_values)
+            self._apply_live_theme_preview(preview_values)
         elif (
             hasattr(self, "theme_preview_status_label")
             and self._theme_builder_page_keys[self.theme_builder_tabs.currentIndex()]
@@ -2682,6 +2713,27 @@ class ApplicationSettingsDialog(QDialog):
                 self.theme_preview_status_label.text()
                 + " Turn on Live Preview to apply the draft to the whole running app while you edit."
             )
+
+    @staticmethod
+    def _theme_qss_validation_issues(custom_qss: object) -> list:
+        return validate_qss_document(str(custom_qss or ""))
+
+    def _update_theme_qss_status(self, issues: list) -> None:
+        status_label = getattr(self, "theme_custom_qss_status_label", None)
+        if status_label is None:
+            return
+        if not issues:
+            status_label.setProperty("role", "secondary")
+            status_label.setText(
+                "Advanced QSS is syntactically ready. Autocomplete and Insert Full Template both generate valid starter rules you can trim down, and you can still edit the raw QSS directly."
+            )
+            return
+        first_issue = issues[0]
+        status_label.setProperty("role", "hint")
+        status_label.setText(
+            f"Advanced QSS syntax issue at line {first_issue.line}, column {first_issue.column}: {first_issue.message} "
+            "Live preview is keeping the last valid advanced QSS until this is fixed."
+        )
 
     def _refresh_blob_icon_previews(self) -> None:
         specs = self._blob_icon_value_payload()
@@ -3048,10 +3100,20 @@ class ApplicationSettingsDialog(QDialog):
         item = self.qss_reference_table.item(rows[0].row(), 1)
         return item.text().strip() if item is not None else ""
 
+    def _selected_qss_reference_entry(self) -> QssReferenceEntry | None:
+        rows = self.qss_reference_table.selectionModel().selectedRows()
+        if not rows:
+            return None
+        row = rows[0].row()
+        if row < 0 or row >= len(self._qss_filtered_reference_entries):
+            return None
+        return self._qss_filtered_reference_entries[row]
+
     def _update_qss_reference_actions(self) -> None:
         has_selection = bool(self._selected_qss_selector())
         self.qss_reference_copy_button.setEnabled(has_selection)
         self.qss_reference_insert_button.setEnabled(has_selection)
+        self.qss_reference_insert_template_button.setEnabled(has_selection)
 
     def _copy_selected_qss_selector(self) -> None:
         selector = self._selected_qss_selector()
@@ -3069,6 +3131,14 @@ class ApplicationSettingsDialog(QDialog):
         cursor = self.theme_custom_qss_edit.textCursor()
         cursor.insertText(selector)
         self.theme_custom_qss_edit.setTextCursor(cursor)
+        self.theme_custom_qss_edit.setFocus()
+
+    def _insert_selected_qss_template(self) -> None:
+        entry = self._selected_qss_reference_entry()
+        if entry is None:
+            return
+        self.theme_qss_tabs.setCurrentIndex(0)
+        self.theme_custom_qss_edit.insert_template_for_reference_entry(entry)
         self.theme_custom_qss_edit.setFocus()
 
     def _theme_value_payload(self) -> dict[str, object]:
@@ -3928,6 +3998,20 @@ class ApplicationSettingsDialog(QDialog):
                 edit.setFocus(Qt.OtherFocusReason)
                 edit.selectAll()
                 return
+        qss_issues = self._theme_qss_validation_issues(values.get("custom_qss"))
+        if qss_issues:
+            first_issue = qss_issues[0]
+            QMessageBox.warning(
+                self,
+                "Invalid Advanced QSS",
+                "Advanced QSS is not ready to apply yet.\n\n"
+                f"Line {first_issue.line}, column {first_issue.column}: {first_issue.message}\n\n"
+                "Use Ctrl+Space for completions or Insert Template from the selector catalog to start from a full working scaffold.",
+            )
+            self.tabs.setCurrentIndex(self._theme_tab_index)
+            self.theme_qss_tabs.setCurrentIndex(0)
+            self.theme_custom_qss_edit.setFocus(Qt.OtherFocusReason)
+            return
         self.accept()
 
 
@@ -9281,6 +9365,13 @@ class App(QMainWindow):
     def _normalize_theme_string(value) -> str:
         return normalize_app_theme_string(value)
 
+    @staticmethod
+    def _format_theme_qss_issues(issues: list) -> str:
+        if not issues:
+            return ""
+        first_issue = issues[0]
+        return f"Line {first_issue.line}, column {first_issue.column}: {first_issue.message}"
+
     @classmethod
     def _normalize_theme_font_family(cls, value, fallback) -> str:
         return normalize_app_theme_font_family(value, fallback)
@@ -9411,20 +9502,38 @@ class App(QMainWindow):
         app = QApplication.instance()
         if app is None:
             return
-        effective = self._effective_theme_settings(raw_values)
+        normalized = self._normalize_theme_settings(raw_values)
+        effective = self._effective_theme_settings(normalized)
         font = QFont(str(effective["font_family"]))
         font.setPointSize(int(effective["font_size"]))
         app.setFont(font)
-        palette = build_app_theme_palette(raw_values or self.theme_settings)
+        palette = build_app_theme_palette(normalized)
         app.setPalette(palette)
         self.setPalette(palette)
-        app.setStyleSheet(self._build_theme_stylesheet(raw_values))
+        qss_issues = validate_qss_document(normalized.get("custom_qss"))
+        if qss_issues:
+            safe_values = dict(normalized)
+            safe_values["custom_qss"] = ""
+            if getattr(self, "logger", None) is not None:
+                self.logger.warning(
+                    "Skipping invalid advanced QSS during theme application: %s",
+                    self._format_theme_qss_issues(qss_issues),
+                )
+            app.setStyleSheet(self._build_theme_stylesheet(safe_values))
+        else:
+            app.setStyleSheet(self._build_theme_stylesheet(normalized))
         self._queue_top_chrome_boundary_refresh()
 
     def _prepare_theme_application_payload(
         self, raw_values: dict[str, object] | None = None
     ) -> dict[str, object]:
         normalized = self._normalize_theme_settings(raw_values)
+        qss_issues = validate_qss_document(normalized.get("custom_qss"))
+        if qss_issues:
+            raise ValueError(
+                "Advanced QSS is not ready to apply.\n\n"
+                + self._format_theme_qss_issues(qss_issues)
+            )
         effective = self._effective_theme_settings(normalized)
         return {
             "normalized_theme": normalized,

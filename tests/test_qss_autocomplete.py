@@ -3,10 +3,17 @@ import unittest
 from tests.qt_test_helpers import require_qapplication
 
 try:
+    from PySide6.QtCore import qInstallMessageHandler
     from PySide6.QtGui import QTextCursor
     from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
 
-    from isrc_manager.qss_autocomplete import QssCodeEditor, QssCompletionEngine, parse_qss_context
+    from isrc_manager.qss_autocomplete import (
+        QssCodeEditor,
+        QssCompletionEngine,
+        build_qss_rule_template,
+        parse_qss_context,
+        validate_qss_document,
+    )
     from isrc_manager.qss_reference import collect_qss_reference_entries
 except Exception as exc:  # pragma: no cover - environment-specific fallback
     QSS_AUTOCOMPLETE_IMPORT_ERROR = exc
@@ -37,6 +44,22 @@ def _build_reference_entries():
         return collect_qss_reference_entries([root])
     finally:
         root.close()
+
+
+def _capture_qt_stylesheet_messages(stylesheet: str) -> list[str]:
+    messages: list[str] = []
+
+    def handler(_mode, _context, message):
+        messages.append(str(message))
+
+    previous_handler = qInstallMessageHandler(handler)
+    widget = QWidget()
+    try:
+        widget.setStyleSheet(stylesheet)
+    finally:
+        widget.close()
+        qInstallMessageHandler(previous_handler)
+    return messages
 
 
 class QssAutocompleteTests(unittest.TestCase):
@@ -101,7 +124,7 @@ class QssAutocompleteTests(unittest.TestCase):
     def test_property_completion_inside_rule_body_avoids_selector_templates(self):
         text = "QPushButton {\n    bac\n}"
         labels = self._completion_labels(text[:-2])
-        self.assertIn("background-color: ; [property]", labels)
+        self.assertIn("background-color: palette(window); [property]", labels)
         self.assertFalse(any(label.endswith("[selector]") for label in labels))
 
     def test_property_value_completion_inside_rule_body_suggests_values(self):
@@ -154,8 +177,70 @@ class QssAutocompleteTests(unittest.TestCase):
         self.assertIsNotNone(edit)
         new_text = text[: edit.replace_start] + edit.text + text[edit.replace_end :]
         self.assertIn("QPushButton {", new_text)
-        self.assertIn("background-color: ;", new_text)
+        self.assertIn("background-color: palette(window);", new_text)
+        self.assertIn("QPushButton:hover {", new_text)
+        self.assertIn("QPushButton:pressed {", new_text)
+        self.assertIn("QPushButton:disabled {", new_text)
         self.assertTrue(new_text.rstrip().endswith("}"))
+        self.assertFalse(validate_qss_document(new_text))
+
+    def test_descendant_selector_template_replaces_the_full_selector_text(self):
+        text = "#mainWindow QPushButton"
+        item = next(
+            item
+            for item in self.engine.completion_items(text, len(text))
+            if item.kind == "rule_template" and "#save_button" in item.label
+        )
+        edit = self.engine.completion_edit(text, len(text), item)
+        self.assertIsNotNone(edit)
+        new_text = text[: edit.replace_start] + edit.text + text[edit.replace_end :]
+        self.assertTrue(new_text.startswith("/* Full widget template."))
+        self.assertIn("#mainWindow QPushButton#save_button {", new_text)
+        self.assertFalse(new_text.startswith("#mainWindow "))
+        self.assertFalse(validate_qss_document(new_text))
+
+    def test_full_rule_template_builder_returns_valid_multi_block_scaffold(self):
+        template_text, cursor_offset = build_qss_rule_template("QComboBox", "QComboBox")
+        self.assertGreater(cursor_offset, 0)
+        self.assertIn("QComboBox {", template_text)
+        self.assertIn("QComboBox:focus {", template_text)
+        self.assertIn("QComboBox::drop-down {", template_text)
+        self.assertIn("QComboBox::down-arrow {", template_text)
+        self.assertNotIn("background-color: ;", template_text)
+        self.assertFalse(validate_qss_document(template_text))
+
+    def test_template_generated_qss_applies_without_qt_parser_warnings(self):
+        template_text, _cursor_offset = build_qss_rule_template("QPushButton", "QPushButton")
+        warnings = [
+            message
+            for message in _capture_qt_stylesheet_messages(template_text)
+            if "parse" in message.lower() or "style sheet" in message.lower()
+        ]
+        self.assertEqual(warnings, [])
+
+    def test_property_completion_uses_real_starter_values_for_extended_properties(self):
+        text = "QWidget {\n    max-\n}"
+        labels = self._completion_labels(text[:-2])
+        self.assertIn("max-height: 32px; [property]", labels)
+        self.assertIn("max-width: 240px; [property]", labels)
+
+        outline_text = "QWidget {\n    outl\n}"
+        outline_labels = self._completion_labels(outline_text[:-2])
+        self.assertIn("outline: none; [property]", outline_labels)
+
+    def test_validation_reports_incomplete_selector_fragment(self):
+        issues = validate_qss_document("QPushButton")
+        self.assertEqual(len(issues), 1)
+        self.assertIn("Incomplete selector fragment", issues[0].message)
+
+    def test_validation_reports_incomplete_property_value(self):
+        issues = validate_qss_document("QPushButton {\n    color:\n}")
+        self.assertEqual(len(issues), 1)
+        self.assertIn("Incomplete property value", issues[0].message)
+
+    def test_role_selector_completion_offers_template_item(self):
+        labels = self._completion_labels('[role="secondary"]')
+        self.assertIn('[role="secondary"] { … } [template]', labels)
 
     def test_editor_completion_items_follow_current_context(self):
         editor = QssCodeEditor()
@@ -213,6 +298,35 @@ class QssAutocompleteTests(unittest.TestCase):
         finally:
             editor.close()
 
+    def test_editor_can_insert_full_template_for_selected_selector(self):
+        editor = QssCodeEditor()
+        try:
+            editor.insert_template_for_selector(
+                "QPushButton#save_button", widget_class="QPushButton"
+            )
+            text = editor.toPlainText()
+            self.assertIn("QPushButton#save_button {", text)
+            self.assertIn("QPushButton#save_button:hover {", text)
+            self.assertFalse(validate_qss_document(text))
+        finally:
+            editor.close()
+
+    def test_editor_can_insert_reference_entry_template_with_context_note(self):
+        editor = QssCodeEditor()
+        try:
+            entry = next(
+                entry
+                for entry in self.reference_entries
+                if entry.selector_kind == "object_name" and entry.selector == "#save_button"
+            )
+            editor.insert_template_for_reference_entry(entry)
+            text = editor.toPlainText()
+            self.assertTrue(text.startswith("/* QPushButton named 'save_button'. */"))
+            self.assertIn("QPushButton#save_button {", text)
+            self.assertFalse(validate_qss_document(text))
+        finally:
+            editor.close()
+
     def test_application_settings_dialog_uses_selector_reference_and_contextual_editor(self):
         if app_module is None:
             raise unittest.SkipTest(f"ISRC_manager import unavailable: {APP_IMPORT_ERROR}")
@@ -258,6 +372,24 @@ class QssAutocompleteTests(unittest.TestCase):
                 item.label for item in dialog.theme_custom_qss_edit.current_completion_items()
             ]
             self.assertIn(":hover [append pseudo-state]", labels)
+
+            dialog.qss_reference_filter_edit.setText("#theme_save_button")
+            self.app.processEvents()
+            target_row = next(
+                row
+                for row in range(dialog.qss_reference_table.rowCount())
+                if dialog.qss_reference_table.item(row, 1).text().strip()
+                == "#theme_save_button"
+            )
+            dialog.qss_reference_table.selectRow(target_row)
+            dialog.theme_custom_qss_edit.clear()
+            dialog._insert_selected_qss_template()
+            inserted_text = dialog.theme_custom_qss_edit.toPlainText()
+            self.assertTrue(
+                inserted_text.startswith("/* QPushButton named 'theme_save_button'. */")
+            )
+            self.assertIn("QPushButton#theme_save_button {", inserted_text)
+            self.assertFalse(validate_qss_document(inserted_text))
         finally:
             dialog.close()
 

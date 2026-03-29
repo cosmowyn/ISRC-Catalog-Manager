@@ -51,6 +51,7 @@ class _ThemeApplyHost(QWidget):
     _normalize_theme_settings = app_module.App._normalize_theme_settings
     _effective_theme_settings = app_module.App._effective_theme_settings
     _build_theme_stylesheet = app_module.App._build_theme_stylesheet
+    _format_theme_qss_issues = staticmethod(app_module.App._format_theme_qss_issues)
     _prepare_theme_application_payload = app_module.App._prepare_theme_application_payload
     _apply_prepared_theme_payload = app_module.App._apply_prepared_theme_payload
     _apply_theme_with_loading = app_module.App._apply_theme_with_loading
@@ -820,6 +821,70 @@ class ThemeBuilderTests(unittest.TestCase):
         finally:
             self.app.setStyleSheet(previous_stylesheet)
             self.app.setFont(previous_font)
+            host.close()
+
+    def test_prepare_theme_application_payload_rejects_invalid_custom_qss(self):
+        host = _ThemeApplyHost()
+        try:
+            with self.assertRaisesRegex(ValueError, "Advanced QSS is not ready to apply"):
+                host._prepare_theme_application_payload(
+                    {
+                        "window_bg": "#101820",
+                        "window_fg": "#F8FAFC",
+                        "accent": "#F97316",
+                        "custom_qss": "QPushButton",
+                    }
+                )
+        finally:
+            host.close()
+
+    def test_theme_dialog_reports_invalid_advanced_qss_and_keeps_last_valid_preview(self):
+        host = _ThemePreviewHost()
+        dialog = app_module.ApplicationSettingsDialog(
+            window_title="Catalog",
+            icon_path="",
+            artist_code="00",
+            auto_snapshot_enabled=True,
+            auto_snapshot_interval_minutes=30,
+            isrc_prefix="NLABC",
+            sena_number="",
+            btw_number="",
+            buma_relatie_nummer="",
+            buma_ipi="",
+            gs1_template_asset=None,
+            gs1_contracts_csv_path="",
+            gs1_contract_entries=(),
+            gs1_active_contract_number="",
+            gs1_target_market="",
+            gs1_language="",
+            gs1_brand="",
+            gs1_subbrand="",
+            gs1_packaging_type="",
+            gs1_product_classification="",
+            theme_settings={},
+            stored_themes={},
+            current_profile_path="",
+            parent=host,
+        )
+        try:
+            dialog.theme_custom_qss_edit.setPlainText("QPushButton { color: red; }")
+            dialog._refresh_theme_previews()
+            valid_preview_stylesheet = dialog._theme_preview_roots[0].styleSheet()
+            self.assertIn(
+                "syntactically ready",
+                dialog.theme_custom_qss_status_label.text().lower(),
+            )
+
+            dialog.theme_custom_qss_edit.setPlainText("QPushButton")
+            dialog._refresh_theme_previews()
+            self.assertIn("line 1", dialog.theme_custom_qss_status_label.text().lower())
+            self.assertIn(
+                "last valid stylesheet",
+                dialog.theme_preview_status_label.text().lower(),
+            )
+            self.assertEqual(dialog._theme_preview_roots[0].styleSheet(), valid_preview_stylesheet)
+        finally:
+            dialog.close()
             host.close()
 
     def test_application_settings_dialog_lists_bundled_themes_and_protects_delete(self):
