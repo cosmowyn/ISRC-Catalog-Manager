@@ -177,7 +177,9 @@ class FakeHtmlPdfAdapter:
         output_path: str | Path,
     ) -> Path:
         target = Path(output_path)
-        self.html_calls.append((str(html_text), str(base_url) if base_url is not None else None, target))
+        self.html_calls.append(
+            (str(html_text), str(base_url) if base_url is not None else None, target)
+        )
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(b"%PDF-1.4\n% fake-html-pdf-adapter\n")
         return target

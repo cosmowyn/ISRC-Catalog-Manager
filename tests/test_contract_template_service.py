@@ -546,7 +546,9 @@ class ContractTemplateServiceTests(unittest.TestCase):
             "<html><body><img src='assets/banner.png'><p>{{manual.license_date}}</p></body></html>",
             encoding="utf-8",
         )
-        revision = self.service.import_revision_from_path(template.template_id, source_path).revision
+        revision = self.service.import_revision_from_path(
+            template.template_id, source_path
+        ).revision
         draft = self.service.create_draft(
             ContractTemplateDraftPayload(
                 revision_id=revision.revision_id,
@@ -587,7 +589,9 @@ class ContractTemplateServiceTests(unittest.TestCase):
             "<html><body><img src='assets/seal.png'><p>{{manual.license_date}}</p></body></html>",
             encoding="utf-8",
         )
-        revision = self.service.import_revision_from_path(template.template_id, source_path).revision
+        revision = self.service.import_revision_from_path(
+            template.template_id, source_path
+        ).revision
         source_bundle_root = self.service.resolve_html_revision_bundle_root(revision.revision_id)
         draft = self.service.create_draft(
             ContractTemplateDraftPayload(

@@ -11,12 +11,12 @@ from .export_service import (
     QtWebEngineHtmlPdfAdapter,
     TextutilDocxRenderAdapter,
 )
+from .form_service import ContractTemplateFormService
 from .html_support import (
     HTMLTemplateBundle,
     HTMLTemplateBundleError,
     HTMLTemplateScanner,
 )
-from .form_service import ContractTemplateFormService
 from .ingestion import (
     SUPPORTED_TEMPLATE_SOURCE_FORMATS,
     ContractTemplateIngestionError,

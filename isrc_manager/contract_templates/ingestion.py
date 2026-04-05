@@ -10,7 +10,6 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 from zipfile import BadZipFile, ZipFile
 
-from .html_support import HTMLTemplateScanner
 from .models import (
     ContractTemplateScanDiagnostic,
     ContractTemplateScanEntry,

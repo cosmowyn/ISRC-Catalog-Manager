@@ -214,9 +214,7 @@ def normalize_bundle_relative_path(raw_path: str | Path) -> str | None:
         if part in {"", "."}:
             continue
         if part == "..":
-            raise _ingestion_error(
-                "HTML template package entries must not escape the bundle root."
-            )
+            raise _ingestion_error("HTML template package entries must not escape the bundle root.")
         if part.startswith("._"):
             return None
         normalized_parts.append(part)
@@ -294,12 +292,16 @@ def extract_html_package_archive(
 
 
 def choose_html_package_entrypoint(paths: Iterable[Path]) -> Path:
-    candidates = [Path(item) for item in paths if Path(item).suffix.lower() in HTML_TEMPLATE_SUFFIXES]
+    candidates = [
+        Path(item) for item in paths if Path(item).suffix.lower() in HTML_TEMPLATE_SUFFIXES
+    ]
     if not candidates:
         raise _ingestion_error("The HTML template package does not contain an HTML entrypoint.")
     if len(candidates) == 1:
         return candidates[0]
-    index_candidates = [item for item in candidates if item.name.lower() in {"index.html", "index.htm"}]
+    index_candidates = [
+        item for item in candidates if item.name.lower() in {"index.html", "index.htm"}
+    ]
     if len(index_candidates) == 1:
         return index_candidates[0]
     detail = ", ".join(sorted(str(item) for item in candidates))
@@ -309,7 +311,9 @@ def choose_html_package_entrypoint(paths: Iterable[Path]) -> Path:
     )
 
 
-def clone_html_package_tree(*, source_package_root: str | Path, destination_root: str | Path) -> None:
+def clone_html_package_tree(
+    *, source_package_root: str | Path, destination_root: str | Path
+) -> None:
     source_root = Path(source_package_root)
     destination = Path(destination_root)
     if not source_root.exists():
@@ -349,6 +353,8 @@ def copy_html_template_with_local_assets(
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source_html, target)
     return target
+
+
 def build_scan_diagnostics_payload(
     diagnostics: Iterable[object] | None,
     *,
@@ -384,9 +390,7 @@ def _choose_primary_html_path(candidates: list[str]) -> str:
     if len(candidates) == 1:
         return candidates[0]
     preferred = [
-        item
-        for item in candidates
-        if Path(item).name.lower() in {"index.html", "index.htm"}
+        item for item in candidates if Path(item).name.lower() in {"index.html", "index.htm"}
     ]
     if len(preferred) == 1:
         return preferred[0]

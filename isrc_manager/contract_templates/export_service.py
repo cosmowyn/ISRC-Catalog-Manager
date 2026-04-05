@@ -25,7 +25,6 @@ from isrc_manager.file_storage import coalesce_filename, sha256_digest
 from .html_support import clone_html_package_tree, decode_html_bytes, replace_html_placeholders
 from .ingestion import PagesTemplateAdapter
 from .models import (
-    ContractTemplateDraftPayload,
     ContractTemplateExportResult,
     ContractTemplateOutputArtifactPayload,
     ContractTemplateResolvedSnapshotPayload,
@@ -311,9 +310,7 @@ class ContractTemplateExportService:
             html_adapter if html_adapter is not None else TextutilDocxRenderAdapter()
         )
         self.html_pdf_adapter = (
-            html_pdf_adapter
-            if html_pdf_adapter is not None
-            else QtWebEngineHtmlPdfAdapter()
+            html_pdf_adapter if html_pdf_adapter is not None else QtWebEngineHtmlPdfAdapter()
         )
         self.pages_adapter = (
             pages_adapter if pages_adapter is not None else self.template_service.pages_adapter
@@ -834,9 +831,7 @@ class ContractTemplateExportService:
             raise ContractTemplateExportError(
                 f"HTML template source is unavailable for revision {revision.revision_id}."
             )
-        package_root = self.template_service.resolve_html_revision_bundle_root(
-            revision.revision_id
-        )
+        package_root = self.template_service.resolve_html_revision_bundle_root(revision.revision_id)
         if package_root is None:
             package_root = source_html_path.parent
         resolved_values, warnings = self._resolve_payload_values(
@@ -996,7 +991,10 @@ class ContractTemplateExportService:
 
     @staticmethod
     def _html_output_filename(draft_name: str | None, source_filename: str | None) -> str:
-        stem = _slugify(draft_name or Path(str(source_filename or "contract-template")).stem, fallback="contract-template")
+        stem = _slugify(
+            draft_name or Path(str(source_filename or "contract-template")).stem,
+            fallback="contract-template",
+        )
         return f"{stem}.html"
 
     def _export_source_as_docx(

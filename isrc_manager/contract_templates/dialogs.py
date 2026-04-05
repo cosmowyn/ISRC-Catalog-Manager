@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
 try:
     from PySide6.QtWebEngineWidgets import QWebEngineView
 except ImportError:  # pragma: no cover - environment-specific fallback
@@ -1874,8 +1875,10 @@ class ContractTemplateWorkspacePanel(QWidget):
         clean_name = _clean_text(name) or default_name
         try:
             is_zip_package = source_path.suffix.lower() == ".zip"
-            source_format = "html" if is_zip_package else detect_template_source_format(
-                source_filename=source_path.name
+            source_format = (
+                "html"
+                if is_zip_package
+                else detect_template_source_format(source_filename=source_path.name)
             )
             template = template_service.create_template(
                 ContractTemplatePayload(name=clean_name, source_format=source_format)
@@ -2492,7 +2495,9 @@ class ContractTemplateWorkspacePanel(QWidget):
         is_html = (
             revision is not None and str(revision.source_format or "").strip().lower() == "html"
         )
-        self.fill_preview_button.setEnabled(bool(is_html and self.fill_html_preview_view is not None))
+        self.fill_preview_button.setEnabled(
+            bool(is_html and self.fill_html_preview_view is not None)
+        )
         self.fill_preview_clear_button.setEnabled(self.fill_html_preview_view is not None)
         if not is_html:
             self.clear_html_preview()

@@ -174,7 +174,10 @@ class ContractTemplateRevisionImportTests(unittest.TestCase):
         self.assertTrue(managed_source.exists())
         self.assertTrue((managed_source.parent / "assets" / "footer.png").exists())
         self.assertEqual(
-            [asset.package_rel_path for asset in self.service.list_revision_assets(result.revision.revision_id)],
+            [
+                asset.package_rel_path
+                for asset in self.service.list_revision_assets(result.revision.revision_id)
+            ],
             ["bundle/assets/footer.png"],
         )
 
@@ -216,7 +219,9 @@ class ContractTemplateRevisionImportTests(unittest.TestCase):
         self.assertIsNotNone(duplicated_source)
         self.assertEqual(duplicated_source.read_text(encoding="utf-8"), original_html)
         self.assertTrue((duplicated_source.parent / "assets" / "seal.png").exists())
-        self.assertEqual([asset.package_rel_path for asset in duplicated_assets], ["assets/seal.png"])
+        self.assertEqual(
+            [asset.package_rel_path for asset in duplicated_assets], ["assets/seal.png"]
+        )
 
     def test_rescan_html_revision_preserves_bundle_metadata_and_assets(self):
         template = self.service.create_template(
@@ -237,7 +242,9 @@ class ContractTemplateRevisionImportTests(unittest.TestCase):
         )
 
         imported = self.service.import_revision_from_path(template.template_id, source_path)
-        before_source = self.service.resolve_html_revision_source_path(imported.revision.revision_id)
+        before_source = self.service.resolve_html_revision_source_path(
+            imported.revision.revision_id
+        )
         before_assets = self.service.list_revision_assets(imported.revision.revision_id)
 
         rescan = self.service.rescan_revision(imported.revision.revision_id, activate_if_ready=True)

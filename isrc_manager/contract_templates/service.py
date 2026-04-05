@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 import shutil
+import sqlite3
 import tempfile
 import uuid
 from pathlib import Path
@@ -287,7 +287,8 @@ class ContractTemplateService:
                 bundle_info = html_bundle_metadata(revision.scan_diagnostics) or {}
                 bundle_root = self.source_store.resolve(_clean_text(bundle_info.get("bundle_root")))
                 primary_relative_path = (
-                    _clean_text(bundle_info.get("primary_relative_path")) or revision.source_filename
+                    _clean_text(bundle_info.get("primary_relative_path"))
+                    or revision.source_filename
                 )
                 if bundle_root is not None and bundle_root.exists():
                     html_bundle = collect_html_bundle_from_directory(
@@ -373,9 +374,11 @@ class ContractTemplateService:
             activate_template=activate_template,
             html_bundle=(
                 collect_html_bundle_from_directory(
-                    Path(effective_payload.source_root_path).resolve()
-                    if effective_payload.source_root_path
-                    else source.parent.resolve(),
+                    (
+                        Path(effective_payload.source_root_path).resolve()
+                        if effective_payload.source_root_path
+                        else source.parent.resolve()
+                    ),
                     primary_relative_path=(
                         source.resolve()
                         .relative_to(
@@ -802,7 +805,9 @@ class ContractTemplateService:
         if not source.exists():
             raise FileNotFoundError(source)
         explicit_source_format = payload.source_format if payload is not None else None
-        if source.suffix.lower() == ".zip" and str(explicit_source_format or "").strip().lower() in {
+        if source.suffix.lower() == ".zip" and str(
+            explicit_source_format or ""
+        ).strip().lower() in {
             "",
             "html",
         }:
@@ -854,10 +859,11 @@ class ContractTemplateService:
         source_filename = (payload.source_filename if payload is not None else None) or (
             "contract-template.html"
             if explicit_source_format == "html"
-            else
-            "contract-template.pages"
-            if explicit_source_format == "pages"
-            else "contract-template.docx"
+            else (
+                "contract-template.pages"
+                if explicit_source_format == "pages"
+                else "contract-template.docx"
+            )
         )
         if Path(source_filename).suffix.lower() == ".zip" and str(
             explicit_source_format or ""
@@ -1069,7 +1075,8 @@ class ContractTemplateService:
                 if base.source_root_path is not None
                 else (str(source_path.parent) if source_format == "html" and source_path else None)
             ),
-            source_tree_mode=base.source_tree_mode or ("asset_refs" if source_format == "html" else None),
+            source_tree_mode=base.source_tree_mode
+            or ("asset_refs" if source_format == "html" else None),
             storage_mode=base.storage_mode,
             scan_status=scan_result.scan_status,
             scan_error=self._scan_error_summary(scan_result),
@@ -2582,7 +2589,9 @@ class ContractTemplateService:
             if remove_draft_files and _clean_text(record.managed_file_path)
         ]
         draft_html_paths = (
-            [_clean_text(record.working_file_path) for record in drafts] if remove_draft_files else []
+            [_clean_text(record.working_file_path) for record in drafts]
+            if remove_draft_files
+            else []
         )
         artifact_paths = (
             [artifact.output_path for artifact in artifacts] if remove_output_files else []
