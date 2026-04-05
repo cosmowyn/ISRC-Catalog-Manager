@@ -36,6 +36,8 @@ class ContractTemplateRevisionPayload:
     source_mime_type: str | None = None
     source_format: str = "docx"
     source_path: str | None = None
+    source_root_path: str | None = None
+    source_tree_mode: str | None = None
     storage_mode: str | None = None
     scan_status: str = "scan_pending"
     scan_error: str | None = None
@@ -65,6 +67,34 @@ class ContractTemplateRevisionRecord:
     created_at: str | None
     updated_at: str | None
     stored_in_database: bool
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class ContractTemplateRevisionAssetPayload:
+    package_rel_path: str
+    managed_file_path: str
+    source_filename: str | None = None
+    mime_type: str | None = None
+    size_bytes: int = 0
+    checksum_sha256: str | None = None
+    asset_role: str = "asset"
+
+
+@dataclass(slots=True)
+class ContractTemplateRevisionAssetRecord:
+    asset_id: int
+    revision_id: int
+    package_rel_path: str
+    managed_file_path: str
+    source_filename: str
+    mime_type: str | None
+    size_bytes: int
+    checksum_sha256: str | None
+    asset_role: str
+    created_at: str | None
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -410,6 +440,11 @@ class ContractTemplateDraftRecord:
     filename: str | None
     mime_type: str | None
     size_bytes: int
+    working_file_path: str | None
+    working_filename: str | None
+    working_mime_type: str | None
+    working_size_bytes: int
+    working_checksum_sha256: str | None
     last_resolved_snapshot_id: int | None
     created_at: str | None
     updated_at: str | None
@@ -483,6 +518,7 @@ class ContractTemplateOutputArtifactRecord:
 class ContractTemplateExportResult:
     snapshot: ContractTemplateResolvedSnapshotRecord
     resolved_docx_artifact: ContractTemplateOutputArtifactRecord | None
+    resolved_html_artifact: ContractTemplateOutputArtifactRecord | None
     pdf_artifact: ContractTemplateOutputArtifactRecord
     warnings: tuple[str, ...] = ()
 
@@ -492,6 +528,11 @@ class ContractTemplateExportResult:
             "resolved_docx_artifact": (
                 self.resolved_docx_artifact.to_dict()
                 if self.resolved_docx_artifact is not None
+                else None
+            ),
+            "resolved_html_artifact": (
+                self.resolved_html_artifact.to_dict()
+                if self.resolved_html_artifact is not None
                 else None
             ),
             "pdf_artifact": self.pdf_artifact.to_dict(),

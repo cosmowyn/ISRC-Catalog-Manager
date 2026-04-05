@@ -505,6 +505,9 @@ class DatabaseSchemaService:
             elif version == 33:
                 self._apply_migration(33, self._mig_33_to_34)
                 version = 34
+            elif version == 34:
+                self._apply_migration(34, self._mig_34_to_35)
+                version = 35
             else:
                 self.logger.warning("Unknown migration path from version %s", version)
                 break
@@ -935,6 +938,9 @@ class DatabaseSchemaService:
 
     def _mig_33_to_34(self) -> None:
         self._ensure_track_import_repair_queue_table()
+
+    def _mig_34_to_35(self) -> None:
+        self._ensure_contract_template_tables()
 
     def _ensure_current_custom_field_value_schema(self) -> None:
         cols = self._table_columns("CustomFieldValues")
@@ -2672,6 +2678,11 @@ class DatabaseSchemaService:
                 filename TEXT,
                 mime_type TEXT,
                 size_bytes INTEGER NOT NULL DEFAULT 0,
+                working_file_path TEXT,
+                working_filename TEXT,
+                working_mime_type TEXT,
+                working_size_bytes INTEGER NOT NULL DEFAULT 0,
+                working_checksum_sha256 TEXT,
                 last_resolved_snapshot_id INTEGER,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -2679,6 +2690,18 @@ class DatabaseSchemaService:
             )
             """
         )
+        draft_columns = self._table_columns("ContractTemplateDrafts")
+        for column_name, column_sql in (
+            ("working_file_path", "TEXT"),
+            ("working_filename", "TEXT"),
+            ("working_mime_type", "TEXT"),
+            ("working_size_bytes", "INTEGER NOT NULL DEFAULT 0"),
+            ("working_checksum_sha256", "TEXT"),
+        ):
+            if column_name not in draft_columns:
+                self.cursor.execute(
+                    f"ALTER TABLE ContractTemplateDrafts ADD COLUMN {column_name} {column_sql}"
+                )
         self.cursor.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_contract_template_drafts_revision_id
@@ -2695,6 +2718,44 @@ class DatabaseSchemaService:
             """
             CREATE INDEX IF NOT EXISTS idx_contract_template_drafts_updated_at
             ON ContractTemplateDrafts(updated_at)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_contract_template_drafts_working_file_path
+            ON ContractTemplateDrafts(working_file_path)
+            """
+        )
+
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ContractTemplateRevisionAssets (
+                id INTEGER PRIMARY KEY,
+                revision_id INTEGER NOT NULL,
+                package_rel_path TEXT NOT NULL,
+                managed_file_path TEXT NOT NULL,
+                source_filename TEXT NOT NULL,
+                mime_type TEXT,
+                size_bytes INTEGER NOT NULL DEFAULT 0,
+                checksum_sha256 TEXT,
+                asset_role TEXT NOT NULL DEFAULT 'asset',
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(revision_id, package_rel_path),
+                UNIQUE(revision_id, managed_file_path),
+                FOREIGN KEY (revision_id) REFERENCES ContractTemplateRevisions(id) ON DELETE CASCADE
+            )
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_contract_template_revision_assets_revision_id
+            ON ContractTemplateRevisionAssets(revision_id)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_contract_template_revision_assets_managed_file_path
+            ON ContractTemplateRevisionAssets(managed_file_path)
             """
         )
 

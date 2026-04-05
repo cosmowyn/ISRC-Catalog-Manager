@@ -6,6 +6,7 @@ from unittest import mock
 from isrc_manager.contract_templates import (
     ContractTemplateIngestionError,
     DOCXTemplateScanner,
+    HTMLTemplateScanner,
     PagesTemplateAdapter,
     detect_template_source_format,
 )
@@ -54,8 +55,25 @@ class ContractTemplateScannerTests(unittest.TestCase):
             ),
             "pages",
         )
+        self.assertEqual(
+            detect_template_source_format(source_filename="agreement.html"),
+            "html",
+        )
         with self.assertRaises(ContractTemplateIngestionError):
             detect_template_source_format(source_filename="agreement.txt")
+
+    def test_html_scanner_extracts_placeholders_directly_from_native_html(self):
+        result = HTMLTemplateScanner().scan_bytes(
+            b"<html><body><img src='assets/banner.png'><p>{{db.track.track_title}}</p><footer>{{manual.license_date}}</footer></body></html>",
+            source_filename="agreement.html",
+        )
+
+        self.assertEqual(result.scan_status, "scan_ready")
+        self.assertEqual(result.scan_adapter, "html_source_direct")
+        self.assertEqual(
+            [item.canonical_symbol for item in result.placeholders],
+            ["{{db.track.track_title}}", "{{manual.license_date}}"],
+        )
 
     def test_pages_adapter_uses_pages_app_export_via_osascript(self):
         with tempfile.TemporaryDirectory() as tmpdir:

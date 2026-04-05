@@ -195,6 +195,16 @@ class ApplicationStorageAdminService:
             "category_label": "Contract Template Source",
         },
         {
+            "root": "contract_template_sources",
+            "table": "ContractTemplateRevisionAssets",
+            "path_column": "managed_file_path",
+            "label_sql": "COALESCE(source_filename, '')",
+            "label_template": "Contract template source asset #{row_id}",
+            "detail_template": "Contract template source asset #{row_id} '{name}'",
+            "category_key": "contract_template_source_asset",
+            "category_label": "Contract Template Source Asset",
+        },
+        {
             "root": "contract_template_drafts",
             "table": "ContractTemplateDrafts",
             "path_column": "managed_file_path",
@@ -203,6 +213,16 @@ class ApplicationStorageAdminService:
             "detail_template": "Contract template draft #{row_id} '{name}'",
             "category_key": "contract_template_draft",
             "category_label": "Contract Template Draft",
+        },
+        {
+            "root": "contract_template_drafts",
+            "table": "ContractTemplateDrafts",
+            "path_column": "working_file_path",
+            "label_sql": "COALESCE(working_filename, '')",
+            "label_template": "Contract template draft working file #{row_id}",
+            "detail_template": "Contract template draft working file #{row_id} '{name}'",
+            "category_key": "contract_template_draft_working_file",
+            "category_label": "Contract Template Draft Working File",
         },
         {
             "root": "contract_template_artifacts",

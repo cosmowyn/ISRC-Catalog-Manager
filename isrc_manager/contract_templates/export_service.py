@@ -7,20 +7,25 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import uuid
 from io import BytesIO
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree as ET
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from PySide6.QtCore import QMarginsF, QSizeF
+from PySide6.QtCore import QEventLoop, QMarginsF, QSizeF, QTimer, QUrl
 from PySide6.QtGui import QPageLayout, QPageSize, QPdfWriter, QTextDocument
+from PySide6.QtWebEngineCore import QWebEnginePage
+from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QApplication
 
 from isrc_manager.file_storage import coalesce_filename, sha256_digest
 
+from .html_support import clone_html_package_tree, decode_html_bytes, replace_html_placeholders
 from .ingestion import PagesTemplateAdapter
 from .models import (
+    ContractTemplateDraftPayload,
     ContractTemplateExportResult,
     ContractTemplateOutputArtifactPayload,
     ContractTemplateResolvedSnapshotPayload,
@@ -136,6 +141,138 @@ class TextutilDocxRenderAdapter:
             return html_path.read_text(encoding="utf-8", errors="replace")
 
 
+class QtWebEngineHtmlPdfAdapter:
+    """Renders local HTML files to PDF via Qt WebEngine for high-fidelity output."""
+
+    adapter_name = "qt_webengine_html_pdf"
+
+    def __init__(self, *, timeout_ms: int = 15000):
+        self.timeout_ms = max(1000, int(timeout_ms))
+
+    def is_available(self) -> bool:
+        return True
+
+    def availability_message(self) -> str | None:
+        return None
+
+    def create_view(self, parent=None) -> QWebEngineView:
+        QApplication.instance() or QApplication([])
+        return QWebEngineView(parent)
+
+    def render_file_to_pdf(self, html_path: str | Path, output_path: str | Path) -> Path:
+        source = Path(html_path)
+        target = Path(output_path)
+        if not source.exists():
+            raise ContractTemplateExportError(f"HTML render source does not exist: {source}")
+        app = QApplication.instance() or QApplication([])
+        del app
+        target.parent.mkdir(parents=True, exist_ok=True)
+        page = QWebEnginePage()
+        loop = QEventLoop()
+        result: dict[str, object] = {"loaded": False, "printed": False}
+
+        def _finish_with_error(message: str) -> None:
+            if result.get("printed"):
+                return
+            result["printed"] = True
+            result["error"] = message
+            loop.quit()
+
+        def _on_load_finished(ok: bool) -> None:
+            result["loaded"] = bool(ok)
+            if not ok:
+                _finish_with_error(f"Failed to load HTML source for PDF export: {source}")
+                return
+            page.printToPdf(str(target))
+
+        def _on_pdf_finished(path: str, success: bool) -> None:
+            if not success:
+                _finish_with_error(f"Qt WebEngine failed to write PDF output: {path}")
+                return
+            result["printed"] = True
+            loop.quit()
+
+        page.loadFinished.connect(_on_load_finished)
+        page.pdfPrintingFinished.connect(_on_pdf_finished)
+        page.load(QUrl.fromLocalFile(str(source.resolve())))
+        QTimer.singleShot(
+            self.timeout_ms,
+            lambda: _finish_with_error(
+                f"Timed out after {self.timeout_ms} ms waiting for HTML PDF export."
+            ),
+        )
+        loop.exec()
+        if result.get("error"):
+            raise ContractTemplateExportError(str(result["error"]))
+        if not target.exists():
+            raise ContractTemplateExportError("Qt WebEngine did not produce a PDF output file.")
+        return target
+
+    def render_html_to_pdf(
+        self,
+        html_text: str,
+        *,
+        base_url: str | Path | None,
+        output_path: str | Path,
+    ) -> Path:
+        target = Path(output_path)
+        app = QApplication.instance() or QApplication([])
+        del app
+        target.parent.mkdir(parents=True, exist_ok=True)
+        page = QWebEnginePage()
+        loop = QEventLoop()
+        result: dict[str, object] = {"loaded": False, "printed": False}
+
+        def _finish_with_error(message: str) -> None:
+            if result.get("printed"):
+                return
+            result["printed"] = True
+            result["error"] = message
+            loop.quit()
+
+        def _on_load_finished(ok: bool) -> None:
+            result["loaded"] = bool(ok)
+            if not ok:
+                _finish_with_error("Failed to load HTML content for PDF export.")
+                return
+            page.printToPdf(str(target))
+
+        def _on_pdf_finished(path: str, success: bool) -> None:
+            if not success:
+                _finish_with_error(f"Qt WebEngine failed to write PDF output: {path}")
+                return
+            result["printed"] = True
+            loop.quit()
+
+        base = self._as_base_url(base_url)
+        page.loadFinished.connect(_on_load_finished)
+        page.pdfPrintingFinished.connect(_on_pdf_finished)
+        page.setHtml(str(html_text or ""), base)
+        QTimer.singleShot(
+            self.timeout_ms,
+            lambda: _finish_with_error(
+                f"Timed out after {self.timeout_ms} ms waiting for HTML PDF export."
+            ),
+        )
+        loop.exec()
+        if result.get("error"):
+            raise ContractTemplateExportError(str(result["error"]))
+        if not target.exists():
+            raise ContractTemplateExportError("Qt WebEngine did not produce a PDF output file.")
+        return target
+
+    @staticmethod
+    def _as_base_url(base_url: str | Path | None) -> QUrl:
+        if base_url is None:
+            return QUrl()
+        base_path = Path(base_url)
+        if base_path.exists() and base_path.is_file():
+            base_path = base_path.parent
+        if str(base_path).endswith("/"):
+            return QUrl.fromLocalFile(str(base_path))
+        return QUrl.fromLocalFile(f"{base_path.resolve()}/")
+
+
 class ContractTemplateExportService:
     """Resolves editable payloads into immutable snapshots and PDF artifacts."""
 
@@ -155,6 +292,7 @@ class ContractTemplateExportService:
         custom_field_definition_service=None,
         custom_field_value_service=None,
         html_adapter: TextutilDocxRenderAdapter | None = None,
+        html_pdf_adapter: QtWebEngineHtmlPdfAdapter | None = None,
         pages_adapter: PagesTemplateAdapter | None = None,
     ):
         self.template_service = template_service
@@ -171,6 +309,11 @@ class ContractTemplateExportService:
         self.custom_field_value_service = custom_field_value_service
         self.html_adapter = (
             html_adapter if html_adapter is not None else TextutilDocxRenderAdapter()
+        )
+        self.html_pdf_adapter = (
+            html_pdf_adapter
+            if html_pdf_adapter is not None
+            else QtWebEngineHtmlPdfAdapter()
         )
         self.pages_adapter = (
             pages_adapter if pages_adapter is not None else self.template_service.pages_adapter
@@ -205,6 +348,14 @@ class ContractTemplateExportService:
             raise ContractTemplateExportError(f"Contract template {revision.template_id} not found")
 
         editable_map = dict(editable_payload or {})
+        if str(revision.source_format or "").strip().lower() == "html":
+            return self._export_html_payload_to_pdf(
+                revision=revision,
+                template=template,
+                editable_payload=editable_map,
+                draft_id=draft_id,
+                draft_name=draft_name,
+            )
         resolved_values, resolution_warnings = self._resolve_payload_values(
             revision_id,
             editable_map,
@@ -264,6 +415,7 @@ class ContractTemplateExportService:
         return ContractTemplateExportResult(
             snapshot=snapshot,
             resolved_docx_artifact=resolved_docx_artifact,
+            resolved_html_artifact=None,
             pdf_artifact=pdf_artifact,
             warnings=warnings,
         )
@@ -272,6 +424,8 @@ class ContractTemplateExportService:
         self,
         revision_id: int,
         editable_payload: dict[str, object],
+        *,
+        strict: bool = True,
     ) -> tuple[dict[str, str], tuple[str, ...]]:
         placeholders = self.template_service.list_placeholders(revision_id)
         bindings = {
@@ -296,24 +450,36 @@ class ContractTemplateExportService:
             token = parse_placeholder(canonical)
             if token.binding_kind == "manual":
                 if canonical not in manual_values:
-                    raise ContractTemplateExportError(
-                        f"Manual placeholder {canonical} does not have a saved value."
-                    )
+                    if strict:
+                        raise ContractTemplateExportError(
+                            f"Manual placeholder {canonical} does not have a saved value."
+                        )
+                    continue
                 resolved[canonical] = self._render_output_value(manual_values.get(canonical))
                 continue
             catalog_entry = catalog.get(canonical)
             if catalog_entry is None:
-                raise ContractTemplateExportError(
-                    f"Database-backed placeholder {canonical} is not present in the symbol catalog."
+                if strict:
+                    raise ContractTemplateExportError(
+                        f"Database-backed placeholder {canonical} is not present in the symbol catalog."
+                    )
+                warnings.append(
+                    f"Skipped {canonical} because it is no longer present in the symbol catalog."
                 )
+                continue
             if str(catalog_entry.namespace or "").strip().lower() == "owner":
-                resolved_value = self._resolve_catalog_value(
-                    catalog_entry=catalog_entry,
-                    selection_value=None,
-                )
+                try:
+                    resolved_value = self._resolve_catalog_value(
+                        catalog_entry=catalog_entry,
+                        selection_value=None,
+                    )
+                except ContractTemplateExportError:
+                    if strict:
+                        raise
+                    continue
                 rendered = self._render_output_value(resolved_value)
                 if not rendered and placeholder.required:
-                    if str(catalog_entry.namespace or "").strip().lower() == "owner":
+                    if strict and str(catalog_entry.namespace or "").strip().lower() == "owner":
                         missing_required.append(
                             self._missing_required_value_message(
                                 placeholder=placeholder,
@@ -334,16 +500,26 @@ class ContractTemplateExportService:
                 db_selections.get(canonical),
             )
             if selection_value is None:
-                raise ContractTemplateExportError(
-                    f"Database-backed placeholder {canonical} does not have a selected record."
+                if strict:
+                    raise ContractTemplateExportError(
+                        f"Database-backed placeholder {canonical} does not have a selected record."
+                    )
+                continue
+            try:
+                resolved_value = self._resolve_catalog_value(
+                    catalog_entry=catalog_entry,
+                    selection_value=selection_value,
                 )
-            resolved_value = self._resolve_catalog_value(
-                catalog_entry=catalog_entry,
-                selection_value=selection_value,
-            )
+            except ContractTemplateExportError:
+                if strict:
+                    raise
+                warnings.append(
+                    f"Skipped {canonical} because its selected record could not be resolved."
+                )
+                continue
             rendered = self._render_output_value(resolved_value)
             if not rendered and placeholder.required:
-                if str(catalog_entry.namespace or "").strip().lower() == "owner":
+                if strict and str(catalog_entry.namespace or "").strip().lower() == "owner":
                     missing_required.append(
                         self._missing_required_value_message(
                             placeholder=placeholder,
@@ -605,6 +781,223 @@ class ContractTemplateExportService:
                 )
             return None
         return None
+
+    def synchronize_html_draft(
+        self,
+        draft_id: int,
+        *,
+        require_complete: bool = False,
+    ) -> Path:
+        draft = self.template_service.fetch_draft(draft_id)
+        if draft is None:
+            raise ContractTemplateExportError(f"Contract template draft {draft_id} not found")
+        revision = self.template_service.fetch_revision(draft.revision_id)
+        if revision is None:
+            raise ContractTemplateExportError(
+                f"Contract template revision {draft.revision_id} not found"
+            )
+        if str(revision.source_format or "").strip().lower() != "html":
+            raise ContractTemplateExportError(
+                "HTML draft synchronization is only available for HTML revisions."
+            )
+        editable_payload = dict(self.template_service.fetch_draft_payload(draft_id) or {})
+        source_html_path = self.template_service.resolve_html_revision_source_path(
+            revision.revision_id
+        )
+        if source_html_path is None:
+            raise ContractTemplateExportError(
+                f"HTML template source is unavailable for revision {revision.revision_id}."
+            )
+        rendered_html, source_package_root, _warnings = self._render_html_content(
+            revision=revision,
+            editable_payload=editable_payload,
+            strict=require_complete,
+        )
+        return self._materialize_html_working_copy(
+            draft_id=draft_id,
+            source_html_path=source_html_path,
+            source_package_root=source_package_root,
+            rendered_html=rendered_html,
+        )
+
+    def _render_html_content(
+        self,
+        *,
+        revision,
+        editable_payload: dict[str, object],
+        strict: bool,
+    ) -> tuple[str, Path, tuple[str, ...]]:
+        source_html_path = self.template_service.resolve_html_revision_source_path(
+            revision.revision_id
+        )
+        if source_html_path is None:
+            raise ContractTemplateExportError(
+                f"HTML template source is unavailable for revision {revision.revision_id}."
+            )
+        package_root = self.template_service.resolve_html_revision_bundle_root(
+            revision.revision_id
+        )
+        if package_root is None:
+            package_root = source_html_path.parent
+        resolved_values, warnings = self._resolve_payload_values(
+            revision.revision_id,
+            editable_payload,
+            strict=strict,
+        )
+        rendered_html = replace_html_placeholders(
+            decode_html_bytes(source_html_path.read_bytes()),
+            resolved_values,
+        )
+        return rendered_html, package_root, warnings
+
+    def _export_html_payload_to_pdf(
+        self,
+        *,
+        revision,
+        template,
+        editable_payload: dict[str, object],
+        draft_id: int,
+        draft_name: str | None = None,
+    ) -> ContractTemplateExportResult:
+        resolved_values, resolution_warnings = self._resolve_payload_values(
+            revision.revision_id,
+            editable_payload,
+            strict=True,
+        )
+        rendered_html, source_package_root, _warnings = self._render_html_content(
+            revision=revision,
+            editable_payload=editable_payload,
+            strict=True,
+        )
+        source_html_path = self.template_service.resolve_html_revision_source_path(
+            revision.revision_id
+        )
+        if source_html_path is None:
+            raise ContractTemplateExportError(
+                f"HTML template source is unavailable for revision {revision.revision_id}."
+            )
+        working_html_path = self._materialize_html_working_copy(
+            draft_id=draft_id,
+            source_html_path=source_html_path,
+            source_package_root=source_package_root,
+            rendered_html=rendered_html,
+        )
+        working_filename = working_html_path.name
+        draft_root = self.template_service.draft_store.root_path
+        if draft_root is None:
+            raise ContractTemplateExportError("Managed draft storage is not configured.")
+        try:
+            relative_working = working_html_path.relative_to(draft_root)
+            working_package_root = draft_root / relative_working.parts[0]
+            relative_html = working_html_path.relative_to(working_package_root)
+        except Exception:
+            working_package_root = working_html_path.parent
+            relative_html = Path(working_html_path.name)
+        stem = _slugify(draft_name or template.name, fallback="contract-template-export")
+        rendered_html_bytes = rendered_html.encode("utf-8")
+        warnings = tuple(dict.fromkeys(resolution_warnings))
+
+        snapshot = self.template_service.create_resolved_snapshot(
+            ContractTemplateResolvedSnapshotPayload(
+                draft_id=int(draft_id),
+                revision_id=revision.revision_id,
+                resolved_values=resolved_values,
+                resolution_warnings=list(warnings) if warnings else None,
+                preview_payload={
+                    "renderer": self.html_pdf_adapter.adapter_name,
+                    "source_format": revision.source_format,
+                    "resolved_source_name": working_filename,
+                    "working_copy_path": str(working_html_path),
+                },
+                resolved_checksum_sha256=sha256_digest(rendered_html_bytes),
+            )
+        )
+        self.template_service.set_draft_last_resolved_snapshot(draft_id, snapshot.snapshot_id)
+
+        final_subdir = f"template_{template.template_id}/snapshot_{snapshot.snapshot_id}"
+        artifact_root = self.template_service.artifact_store.root_path
+        if artifact_root is None:
+            raise ContractTemplateExportError("Managed artifact storage is not configured.")
+        resolved_root = artifact_root / final_subdir / f"resolved_html_{uuid.uuid4().hex[:10]}"
+        clone_html_package_tree(
+            source_package_root=working_package_root,
+            destination_root=resolved_root,
+        )
+        final_html_path = resolved_root / relative_html
+        final_html_path.parent.mkdir(parents=True, exist_ok=True)
+        final_html_path.write_text(rendered_html, encoding="utf-8")
+        resolved_html_artifact = self.template_service.create_output_artifact(
+            ContractTemplateOutputArtifactPayload(
+                snapshot_id=snapshot.snapshot_id,
+                artifact_type="resolved_html",
+                output_path=str(final_html_path),
+                output_filename=final_html_path.name,
+                mime_type="text/html",
+                size_bytes=len(rendered_html_bytes),
+                checksum_sha256=sha256_digest(rendered_html_bytes),
+            )
+        )
+        pdf_path = artifact_root / final_subdir / f"{stem}.pdf"
+        self.html_pdf_adapter.render_file_to_pdf(final_html_path, pdf_path)
+        pdf_bytes = pdf_path.read_bytes()
+        pdf_artifact = self.template_service.create_output_artifact(
+            ContractTemplateOutputArtifactPayload(
+                snapshot_id=snapshot.snapshot_id,
+                artifact_type="pdf",
+                output_path=str(pdf_path),
+                output_filename=pdf_path.name,
+                mime_type="application/pdf",
+                size_bytes=len(pdf_bytes),
+                checksum_sha256=sha256_digest(pdf_bytes),
+            )
+        )
+        return ContractTemplateExportResult(
+            snapshot=snapshot,
+            resolved_docx_artifact=None,
+            resolved_html_artifact=resolved_html_artifact,
+            pdf_artifact=pdf_artifact,
+            warnings=warnings,
+        )
+
+    def _materialize_html_working_copy(
+        self,
+        *,
+        draft_id: int,
+        source_html_path: Path,
+        source_package_root: Path,
+        rendered_html: str,
+    ) -> Path:
+        try:
+            relative_html = source_html_path.relative_to(source_package_root)
+        except Exception:
+            relative_html = Path(source_html_path.name)
+        draft_root = self.template_service.draft_store.root_path
+        if draft_root is None:
+            raise ContractTemplateExportError("Managed draft storage is not configured.")
+        destination_root = draft_root / f"html_draft_{draft_id}_{uuid.uuid4().hex[:10]}"
+        clone_html_package_tree(
+            source_package_root=source_package_root,
+            destination_root=destination_root,
+        )
+        target_html_path = destination_root / relative_html
+        target_html_path.parent.mkdir(parents=True, exist_ok=True)
+        target_html_path.write_text(rendered_html, encoding="utf-8")
+        self.template_service.set_draft_working_path(
+            draft_id,
+            working_path=target_html_path,
+            mime_type="text/html",
+        )
+        html_path = self.template_service.resolve_draft_working_path(draft_id)
+        if html_path is None:
+            raise ContractTemplateExportError(
+                f"Managed HTML draft output could not be resolved for draft {draft_id}."
+            )
+        return html_path
+
+    @staticmethod
+    def _html_output_filename(draft_name: str | None, source_filename: str | None) -> str:
+        stem = _slugify(draft_name or Path(str(source_filename or "contract-template")).stem, fallback="contract-template")
+        return f"{stem}.html"
 
     def _export_source_as_docx(
         self,

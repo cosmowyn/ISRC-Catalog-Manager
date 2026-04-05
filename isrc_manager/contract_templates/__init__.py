@@ -8,7 +8,13 @@ from .catalog import (
 from .export_service import (
     ContractTemplateExportError,
     ContractTemplateExportService,
+    QtWebEngineHtmlPdfAdapter,
     TextutilDocxRenderAdapter,
+)
+from .html_support import (
+    HTMLTemplateBundle,
+    HTMLTemplateBundleError,
+    HTMLTemplateScanner,
 )
 from .form_service import ContractTemplateFormService
 from .ingestion import (
@@ -38,6 +44,8 @@ from .models import (
     ContractTemplateRecord,
     ContractTemplateResolvedSnapshotPayload,
     ContractTemplateResolvedSnapshotRecord,
+    ContractTemplateRevisionAssetPayload,
+    ContractTemplateRevisionAssetRecord,
     ContractTemplateRevisionPayload,
     ContractTemplateRevisionRecord,
     ContractTemplateScanDiagnostic,
@@ -81,6 +89,8 @@ __all__ = [
     "ContractTemplatePlaceholderRecord",
     "ContractTemplateResolvedSnapshotPayload",
     "ContractTemplateResolvedSnapshotRecord",
+    "ContractTemplateRevisionAssetPayload",
+    "ContractTemplateRevisionAssetRecord",
     "ContractTemplateRevisionPayload",
     "ContractTemplateRevisionRecord",
     "ContractTemplateRecord",
@@ -90,10 +100,14 @@ __all__ = [
     "ContractTemplateScanResult",
     "ContractTemplateService",
     "DOCXTemplateScanner",
+    "HTMLTemplateBundle",
+    "HTMLTemplateBundleError",
+    "HTMLTemplateScanner",
     "InvalidPlaceholderError",
     "PagesTemplateAdapter",
     "PlaceholderOccurrence",
     "PlaceholderToken",
+    "QtWebEngineHtmlPdfAdapter",
     "SUPPORTED_TEMPLATE_SOURCE_FORMATS",
     "TextutilDocxRenderAdapter",
     "dedupe_placeholders",

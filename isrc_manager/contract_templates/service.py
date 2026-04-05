@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import shutil
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Iterable
 
 from isrc_manager.file_storage import (
     STORAGE_MODE_DATABASE,
+    STORAGE_MODE_MANAGED_FILE,
     ManagedFileStorage,
     bytes_from_blob,
     coalesce_filename,
@@ -19,6 +22,20 @@ from isrc_manager.file_storage import (
     sha256_digest,
 )
 
+from .html_support import (
+    HTMLTemplateBundle,
+    HTMLTemplateBundleError,
+    HTMLTemplateScanner,
+    build_html_bundle_from_source_bytes,
+    build_html_bundle_from_zip_bytes,
+    build_html_bundle_from_zip_path,
+    build_scan_diagnostics_payload,
+    collect_html_bundle_from_directory,
+    html_bundle_metadata,
+    is_html_source_format,
+    scan_diagnostic_entries,
+    write_html_bundle,
+)
 from .ingestion import (
     ContractTemplateIngestionError,
     DOCXTemplateScanner,
@@ -39,6 +56,8 @@ from .models import (
     ContractTemplateRecord,
     ContractTemplateResolvedSnapshotPayload,
     ContractTemplateResolvedSnapshotRecord,
+    ContractTemplateRevisionAssetPayload,
+    ContractTemplateRevisionAssetRecord,
     ContractTemplateRevisionPayload,
     ContractTemplateRevisionRecord,
     ContractTemplateScanDiagnostic,
@@ -69,6 +88,35 @@ def _display_label_from_key(key: str) -> str:
     return " ".join(part.capitalize() for part in str(key or "").split("_") if part)
 
 
+def _html_bundle_metadata_payload(
+    *,
+    bundle_root: str,
+    primary_relative_path: str,
+    import_kind: str,
+    package_filename: str | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "bundle_root": str(bundle_root),
+        "primary_relative_path": str(primary_relative_path),
+        "import_kind": str(import_kind),
+    }
+    clean_package_filename = _clean_text(package_filename)
+    if clean_package_filename:
+        payload["package_filename"] = clean_package_filename
+    return payload
+
+
+def _merged_scan_diagnostics_payload(
+    diagnostics: object | None,
+    *,
+    html_bundle: dict[str, object] | None = None,
+) -> object | None:
+    return build_scan_diagnostics_payload(
+        scan_diagnostic_entries(diagnostics),
+        html_bundle=html_bundle,
+    )
+
+
 class ContractTemplateService:
     """Owns template/revision/draft records for placeholder-driven documents."""
 
@@ -82,6 +130,7 @@ class ContractTemplateService:
         data_root: str | Path | None = None,
         *,
         docx_scanner: DOCXTemplateScanner | None = None,
+        html_scanner: HTMLTemplateScanner | None = None,
         pages_adapter: PagesTemplateAdapter | None = None,
     ):
         self.conn = conn
@@ -96,6 +145,7 @@ class ContractTemplateService:
             data_root=self.data_root, relative_root=self.ARTIFACT_ROOT
         )
         self.docx_scanner = docx_scanner if docx_scanner is not None else DOCXTemplateScanner()
+        self.html_scanner = html_scanner if html_scanner is not None else HTMLTemplateScanner()
         self.pages_adapter = pages_adapter if pages_adapter is not None else PagesTemplateAdapter()
 
     def create_template(self, payload: ContractTemplatePayload) -> ContractTemplateRecord:
@@ -232,6 +282,18 @@ class ContractTemplateService:
         )
         active_new_id: int | None = None
         for revision in reversed(self.list_revisions(template_id)):
+            html_bundle = None
+            if is_html_source_format(revision.source_format):
+                bundle_info = html_bundle_metadata(revision.scan_diagnostics) or {}
+                bundle_root = self.source_store.resolve(_clean_text(bundle_info.get("bundle_root")))
+                primary_relative_path = (
+                    _clean_text(bundle_info.get("primary_relative_path")) or revision.source_filename
+                )
+                if bundle_root is not None and bundle_root.exists():
+                    html_bundle = collect_html_bundle_from_directory(
+                        bundle_root,
+                        primary_relative_path=primary_relative_path,
+                    )
             copied = self.add_revision_from_bytes(
                 duplicate.template_id,
                 self.load_revision_source_bytes(revision.revision_id),
@@ -240,11 +302,12 @@ class ContractTemplateService:
                     source_filename=revision.source_filename,
                     source_mime_type=revision.source_mime_type,
                     source_format=revision.source_format,
+                    source_path=revision.source_path,
                     storage_mode=revision.storage_mode,
                     scan_status=revision.scan_status,
                     scan_error=revision.scan_error,
                     scan_adapter=revision.scan_adapter,
-                    scan_diagnostics=revision.scan_diagnostics,
+                    scan_diagnostics=scan_diagnostic_entries(revision.scan_diagnostics),
                 ),
                 placeholders=(
                     self._placeholder_payload_from_record(item)
@@ -255,6 +318,7 @@ class ContractTemplateService:
                     for item in self.list_placeholder_bindings(revision.revision_id)
                 ),
                 activate_template=False,
+                html_bundle=html_bundle,
             )
             if active_old_id is not None and int(revision.revision_id) == active_old_id:
                 active_new_id = copied.revision_id
@@ -281,25 +345,57 @@ class ContractTemplateService:
         if not source.exists():
             raise FileNotFoundError(source)
         revision_payload = payload or ContractTemplateRevisionPayload()
+        source_format = detect_template_source_format(
+            source_filename=source.name,
+            explicit_format=revision_payload.source_format,
+        )
         effective_payload = ContractTemplateRevisionPayload(
             revision_label=revision_payload.revision_label,
             source_filename=revision_payload.source_filename or source.name,
             source_mime_type=revision_payload.source_mime_type,
-            source_format=revision_payload.source_format,
+            source_format=source_format,
             source_path=str(source),
+            source_root_path=revision_payload.source_root_path,
+            source_tree_mode=revision_payload.source_tree_mode,
             storage_mode=revision_payload.storage_mode,
             scan_status=revision_payload.scan_status,
             scan_error=revision_payload.scan_error,
             scan_adapter=revision_payload.scan_adapter,
             scan_diagnostics=revision_payload.scan_diagnostics,
         )
+        source_bytes = source.read_bytes()
         return self.add_revision_from_bytes(
             template_id,
-            source.read_bytes(),
+            source_bytes,
             payload=effective_payload,
             placeholders=placeholders,
             bindings=bindings,
             activate_template=activate_template,
+            html_bundle=(
+                collect_html_bundle_from_directory(
+                    Path(effective_payload.source_root_path).resolve()
+                    if effective_payload.source_root_path
+                    else source.parent.resolve(),
+                    primary_relative_path=(
+                        source.resolve()
+                        .relative_to(
+                            Path(effective_payload.source_root_path).resolve()
+                            if effective_payload.source_root_path
+                            else source.parent.resolve()
+                        )
+                        .as_posix()
+                        if (
+                            effective_payload.source_root_path
+                            and source.resolve().is_relative_to(
+                                Path(effective_payload.source_root_path).resolve()
+                            )
+                        )
+                        else source.name
+                    ),
+                )
+                if is_html_source_format(source_format)
+                else None
+            ),
         )
 
     def add_revision_from_bytes(
@@ -311,13 +407,18 @@ class ContractTemplateService:
         placeholders: Iterable[ContractTemplatePlaceholderPayload] = (),
         bindings: Iterable[ContractTemplatePlaceholderBindingPayload] = (),
         activate_template: bool = True,
+        html_bundle: HTMLTemplateBundle | None = None,
     ) -> ContractTemplateRevisionRecord:
         template = self.fetch_template(template_id)
         if template is None:
             raise ValueError(f"Contract template {template_id} not found")
         revision_payload = payload or ContractTemplateRevisionPayload()
+        source_format = str(revision_payload.source_format or "docx").strip().lower() or "docx"
         clean_mode = normalize_storage_mode(
-            revision_payload.storage_mode, default=STORAGE_MODE_DATABASE
+            revision_payload.storage_mode,
+            default=(
+                STORAGE_MODE_MANAGED_FILE if source_format == "html" else STORAGE_MODE_DATABASE
+            ),
         )
         clean_filename = coalesce_filename(
             revision_payload.source_filename,
@@ -329,7 +430,28 @@ class ContractTemplateService:
         checksum = sha256_digest(source_bytes)
         managed_file_path = None
         sqlite_blob: bytes | sqlite3.Binary | None = None
-        if clean_mode == STORAGE_MODE_DATABASE:
+        scan_diagnostics = revision_payload.scan_diagnostics
+        if source_format == "html":
+            clean_mode = STORAGE_MODE_MANAGED_FILE
+            bundle = html_bundle or build_html_bundle_from_source_bytes(
+                source_bytes,
+                source_filename=clean_filename,
+            )
+            managed_file_path, bundle_root = write_html_bundle(
+                self.source_store,
+                bundle,
+                bundle_subdir=f"html_revision_{uuid.uuid4().hex[:12]}",
+            )
+            scan_diagnostics = _merged_scan_diagnostics_payload(
+                revision_payload.scan_diagnostics,
+                html_bundle=_html_bundle_metadata_payload(
+                    bundle_root=bundle_root,
+                    primary_relative_path=bundle.primary_relative_path,
+                    import_kind=bundle.import_kind,
+                    package_filename=bundle.package_filename,
+                ),
+            )
+        elif clean_mode == STORAGE_MODE_DATABASE:
             sqlite_blob = sqlite3.Binary(source_bytes)
         else:
             managed_file_path = self.source_store.write_bytes(source_bytes, filename=clean_filename)
@@ -361,7 +483,7 @@ class ContractTemplateService:
                     _clean_text(revision_payload.revision_label),
                     clean_filename,
                     clean_mime,
-                    str(revision_payload.source_format or "docx").strip() or "docx",
+                    source_format,
                     _clean_text(revision_payload.source_path),
                     managed_file_path,
                     clean_mode,
@@ -371,7 +493,7 @@ class ContractTemplateService:
                     str(revision_payload.scan_status or "scan_pending").strip() or "scan_pending",
                     _clean_text(revision_payload.scan_error),
                     _clean_text(revision_payload.scan_adapter),
-                    _json_dumps(revision_payload.scan_diagnostics),
+                    _json_dumps(scan_diagnostics),
                 ),
             )
             revision_id = int(cur.lastrowid)
@@ -403,7 +525,7 @@ class ContractTemplateService:
                     effective_scan_status,
                     effective_scan_error,
                     _clean_text(revision_payload.scan_adapter),
-                    _json_dumps(revision_payload.scan_diagnostics),
+                    _json_dumps(scan_diagnostics),
                     revision_id,
                 ),
             )
@@ -423,13 +545,18 @@ class ContractTemplateService:
                     WHERE id=?
                     """,
                     (
-                        str(revision_payload.source_format or "docx").strip() or "docx",
+                        source_format,
                         int(template_id),
                     ),
                 )
         record = self.fetch_revision(revision_id)
         if record is None:
             raise RuntimeError(f"Contract template revision {revision_id} was not created")
+        if is_html_source_format(source_format) and managed_file_path:
+            self.replace_revision_assets(
+                revision_id,
+                assets=self._html_asset_payloads_for_source(managed_file_path),
+            )
         return record
 
     def fetch_revision(self, revision_id: int) -> ContractTemplateRevisionRecord | None:
@@ -509,6 +636,93 @@ class ContractTemplateService:
                 records.append(record)
         return records
 
+    def list_revision_assets(self, revision_id: int) -> list[ContractTemplateRevisionAssetRecord]:
+        rows = self.conn.execute(
+            """
+            SELECT
+                id,
+                revision_id,
+                package_rel_path,
+                managed_file_path,
+                source_filename,
+                mime_type,
+                size_bytes,
+                checksum_sha256,
+                asset_role,
+                created_at
+            FROM ContractTemplateRevisionAssets
+            WHERE revision_id=?
+            ORDER BY package_rel_path ASC, id ASC
+            """,
+            (int(revision_id),),
+        ).fetchall()
+        return [
+            ContractTemplateRevisionAssetRecord(
+                asset_id=int(row[0]),
+                revision_id=int(row[1]),
+                package_rel_path=str(row[2] or ""),
+                managed_file_path=str(row[3] or ""),
+                source_filename=str(row[4] or ""),
+                mime_type=_clean_text(row[5]),
+                size_bytes=int(row[6] or 0),
+                checksum_sha256=_clean_text(row[7]),
+                asset_role=str(row[8] or "asset"),
+                created_at=_clean_text(row[9]),
+            )
+            for row in rows
+        ]
+
+    def replace_revision_assets(
+        self,
+        revision_id: int,
+        *,
+        assets: Iterable[ContractTemplateRevisionAssetPayload],
+    ) -> list[ContractTemplateRevisionAssetRecord]:
+        revision = self.fetch_revision(revision_id)
+        if revision is None:
+            raise ValueError(f"Contract template revision {revision_id} not found")
+        with self.conn:
+            cur = self.conn.cursor()
+            cur.execute(
+                "DELETE FROM ContractTemplateRevisionAssets WHERE revision_id=?",
+                (int(revision_id),),
+            )
+            for asset in assets:
+                clean_package_rel_path = str(asset.package_rel_path or "").strip()
+                clean_managed_file_path = str(asset.managed_file_path or "").strip()
+                if not clean_package_rel_path or not clean_managed_file_path:
+                    continue
+                cur.execute(
+                    """
+                    INSERT INTO ContractTemplateRevisionAssets (
+                        revision_id,
+                        package_rel_path,
+                        managed_file_path,
+                        source_filename,
+                        mime_type,
+                        size_bytes,
+                        checksum_sha256,
+                        asset_role
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        int(revision_id),
+                        clean_package_rel_path,
+                        clean_managed_file_path,
+                        coalesce_filename(
+                            asset.source_filename,
+                            stored_path=clean_package_rel_path,
+                            default_stem=Path(clean_package_rel_path).stem or "asset",
+                        ),
+                        _clean_text(asset.mime_type) or guess_mime_type(clean_package_rel_path),
+                        max(0, int(asset.size_bytes or 0)),
+                        _clean_text(asset.checksum_sha256),
+                        _clean_text(asset.asset_role) or "asset",
+                    ),
+                )
+        return self.list_revision_assets(revision_id)
+
     def set_active_revision(self, revision_id: int) -> ContractTemplateRecord:
         record = self.fetch_revision(revision_id)
         if record is None:
@@ -559,6 +773,16 @@ class ContractTemplateService:
             source_filename=effective_filename,
             explicit_format=source_format,
         )
+        if source.suffix.lower() == ".zip" and resolved_format == "html":
+            try:
+                bundle = build_html_bundle_from_zip_path(source)
+            except HTMLTemplateBundleError as exc:
+                raise ContractTemplateIngestionError(str(exc)) from exc
+            return self._scan_source_bytes(
+                bundle.primary_bytes(),
+                source_filename=bundle.primary_filename,
+                source_format=resolved_format,
+            )
         return self._scan_source_bytes(
             source.read_bytes(),
             source_filename=effective_filename,
@@ -577,16 +801,28 @@ class ContractTemplateService:
         source = Path(str(source_path or "").strip())
         if not source.exists():
             raise FileNotFoundError(source)
+        explicit_source_format = payload.source_format if payload is not None else None
+        if source.suffix.lower() == ".zip" and str(explicit_source_format or "").strip().lower() in {
+            "",
+            "html",
+        }:
+            return self.import_html_package_from_path(
+                template_id,
+                source,
+                payload=payload,
+                bindings=bindings,
+                activate_if_ready=activate_if_ready,
+            )
         scan_result = self.scan_source_path(
             source,
             source_filename=source.name,
-            source_format=(payload.source_format if payload is not None else None),
+            source_format=explicit_source_format,
         )
         revision_payload = self._revision_payload_for_import(
             source_filename=source.name,
             source_format=detect_template_source_format(
                 source_filename=source.name,
-                explicit_format=(payload.source_format if payload is not None else None),
+                explicit_format=explicit_source_format,
             ),
             payload=payload,
             scan_result=scan_result,
@@ -616,10 +852,30 @@ class ContractTemplateService:
     ) -> ContractTemplateImportResult:
         explicit_source_format = payload.source_format if payload is not None else None
         source_filename = (payload.source_filename if payload is not None else None) or (
+            "contract-template.html"
+            if explicit_source_format == "html"
+            else
             "contract-template.pages"
             if explicit_source_format == "pages"
             else "contract-template.docx"
         )
+        if Path(source_filename).suffix.lower() == ".zip" and str(
+            explicit_source_format or ""
+        ).strip().lower() in {"", "html"}:
+            try:
+                bundle = build_html_bundle_from_zip_bytes(
+                    source_bytes,
+                    package_filename=source_filename,
+                )
+            except HTMLTemplateBundleError as exc:
+                raise ContractTemplateIngestionError(str(exc)) from exc
+            return self._import_html_bundle_from_bundle(
+                template_id,
+                bundle,
+                payload=payload,
+                bindings=bindings,
+                activate_if_ready=activate_if_ready,
+            )
         scan_result = self.scan_source_bytes(
             source_bytes,
             source_filename=source_filename,
@@ -660,10 +916,19 @@ class ContractTemplateService:
         record = self.fetch_revision(revision_id)
         if record is None:
             raise ValueError(f"Contract template revision {revision_id} not found")
+        bundle_info = (
+            html_bundle_metadata(record.scan_diagnostics)
+            if is_html_source_format(record.source_format)
+            else None
+        )
         scan_result = self.scan_source_bytes(
             self.load_revision_source_bytes(revision_id),
             source_filename=record.source_filename,
             source_format=record.source_format,
+        )
+        scan_diagnostics_payload = _merged_scan_diagnostics_payload(
+            [item.to_dict() for item in scan_result.diagnostics],
+            html_bundle=bundle_info,
         )
         if scan_result.scan_status == "scan_ready":
             bindings = (
@@ -678,7 +943,7 @@ class ContractTemplateService:
                 scan_status=scan_result.scan_status,
                 scan_error=self._scan_error_summary(scan_result),
                 scan_adapter=scan_result.scan_adapter,
-                scan_diagnostics=[item.to_dict() for item in scan_result.diagnostics],
+                scan_diagnostics=scan_diagnostics_payload,
             )
             if activate_if_ready:
                 self.set_active_revision(revision_id)
@@ -688,9 +953,77 @@ class ContractTemplateService:
                 scan_status=scan_result.scan_status,
                 scan_error=self._scan_error_summary(scan_result),
                 scan_adapter=scan_result.scan_adapter,
-                scan_diagnostics=[item.to_dict() for item in scan_result.diagnostics],
+                scan_diagnostics=scan_diagnostics_payload,
             )
         return scan_result
+
+    def import_html_package_from_path(
+        self,
+        template_id: int,
+        package_path: str | Path,
+        *,
+        payload: ContractTemplateRevisionPayload | None = None,
+        bindings: Iterable[ContractTemplatePlaceholderBindingPayload] = (),
+        activate_if_ready: bool = True,
+    ) -> ContractTemplateImportResult:
+        package = Path(str(package_path or "").strip())
+        if not package.exists():
+            raise FileNotFoundError(package)
+        try:
+            bundle = build_html_bundle_from_zip_path(package)
+        except HTMLTemplateBundleError as exc:
+            raise ContractTemplateIngestionError(str(exc)) from exc
+        return self._import_html_bundle_from_bundle(
+            template_id,
+            bundle,
+            payload=payload,
+            bindings=bindings,
+            activate_if_ready=activate_if_ready,
+            source_path=str(package),
+        )
+
+    def _import_html_bundle_from_bundle(
+        self,
+        template_id: int,
+        bundle: HTMLTemplateBundle,
+        *,
+        payload: ContractTemplateRevisionPayload | None = None,
+        bindings: Iterable[ContractTemplatePlaceholderBindingPayload] = (),
+        activate_if_ready: bool = True,
+        source_path: str | None = None,
+    ) -> ContractTemplateImportResult:
+        scan_result = self.scan_source_bytes(
+            bundle.primary_bytes(),
+            source_filename=bundle.primary_filename,
+            source_format="html",
+        )
+        import_payload = payload or ContractTemplateRevisionPayload()
+        revision = self.add_revision_from_bytes(
+            template_id,
+            bundle.primary_bytes(),
+            payload=ContractTemplateRevisionPayload(
+                revision_label=import_payload.revision_label,
+                source_filename=import_payload.source_filename or bundle.primary_filename,
+                source_mime_type=(
+                    import_payload.source_mime_type or guess_mime_type(bundle.primary_filename)
+                ),
+                source_format="html",
+                source_path=_clean_text(source_path) or import_payload.source_path,
+                storage_mode=STORAGE_MODE_MANAGED_FILE,
+                scan_status=scan_result.scan_status,
+                scan_error=self._scan_error_summary(scan_result),
+                scan_adapter=scan_result.scan_adapter,
+                scan_diagnostics=scan_diagnostic_entries(import_payload.scan_diagnostics),
+            ),
+            placeholders=self._placeholder_payloads_from_scan_result(scan_result),
+            bindings=bindings,
+            activate_template=False,
+            html_bundle=bundle,
+        )
+        if activate_if_ready and scan_result.scan_status == "scan_ready":
+            self.set_active_revision(revision.revision_id)
+            revision = self.fetch_revision(revision.revision_id) or revision
+        return ContractTemplateImportResult(revision=revision, scan_result=scan_result)
 
     def _set_template_active_revision(
         self,
@@ -731,6 +1064,12 @@ class ContractTemplateService:
             source_mime_type=base.source_mime_type,
             source_format=source_format,
             source_path=str(source_path) if source_path is not None else base.source_path,
+            source_root_path=(
+                base.source_root_path
+                if base.source_root_path is not None
+                else (str(source_path.parent) if source_format == "html" and source_path else None)
+            ),
+            source_tree_mode=base.source_tree_mode or ("asset_refs" if source_format == "html" else None),
             storage_mode=base.storage_mode,
             scan_status=scan_result.scan_status,
             scan_error=self._scan_error_summary(scan_result),
@@ -747,6 +1086,8 @@ class ContractTemplateService:
     ) -> ContractTemplateScanResult:
         if source_format == "docx":
             return self.docx_scanner.scan_bytes(source_bytes)
+        if source_format == "html":
+            return self.html_scanner.scan_bytes(source_bytes, source_filename=source_filename)
         if source_format == "pages":
             return self._scan_pages_bytes(source_bytes, source_filename=source_filename)
         raise ContractTemplateIngestionError(f"Unsupported template source format: {source_format}")
@@ -906,6 +1247,50 @@ class ContractTemplateService:
             raise FileNotFoundError(str(managed_file_path or source_filename or revision_id))
         return resolved.read_bytes()
 
+    def resolve_html_revision_source_path(self, revision_id: int) -> Path | None:
+        revision = self.fetch_revision(revision_id)
+        if revision is None or str(revision.source_format or "").strip().lower() != "html":
+            return None
+        bundle_info = html_bundle_metadata(revision.scan_diagnostics) or {}
+        bundle_root = self.source_store.resolve(_clean_text(bundle_info.get("bundle_root")))
+        primary_relative_path = (
+            _clean_text(bundle_info.get("primary_relative_path")) or revision.source_filename
+        )
+        if bundle_root is not None:
+            candidate = bundle_root / Path(primary_relative_path)
+            if candidate.exists():
+                return candidate
+        resolved = self.source_store.resolve(revision.managed_file_path)
+        if resolved is not None and resolved.exists():
+            return resolved
+        return None
+
+    def html_package_root_for_path(self, source_path: str | Path) -> Path:
+        root_path = self.source_store.root_path
+        resolved = Path(source_path).resolve()
+        if root_path is None:
+            return resolved.parent
+        try:
+            relative = resolved.relative_to(root_path.resolve())
+        except Exception:
+            return resolved.parent
+        if not relative.parts:
+            return resolved.parent
+        return root_path / relative.parts[0]
+
+    def resolve_html_revision_bundle_root(self, revision_id: int) -> Path | None:
+        revision = self.fetch_revision(revision_id)
+        if revision is None or not is_html_source_format(revision.source_format):
+            return None
+        bundle_info = html_bundle_metadata(revision.scan_diagnostics) or {}
+        bundle_root = self.source_store.resolve(_clean_text(bundle_info.get("bundle_root")))
+        if bundle_root is not None and bundle_root.exists():
+            return bundle_root
+        source_path = self.source_store.resolve(revision.managed_file_path)
+        if source_path is not None and source_path.exists():
+            return source_path.parent
+        return None
+
     def convert_revision_storage_mode(
         self, revision_id: int, target_mode: str
     ) -> ContractTemplateRevisionRecord:
@@ -913,6 +1298,12 @@ class ContractTemplateService:
         if record is None:
             raise ValueError(f"Contract template revision {revision_id} not found")
         clean_mode = normalize_storage_mode(target_mode)
+        if str(record.source_format or "").strip().lower() == "html":
+            if clean_mode != STORAGE_MODE_MANAGED_FILE:
+                raise ValueError(
+                    "HTML template revisions must stay in managed-file storage so assets remain available."
+                )
+            return record
         if record.storage_mode == clean_mode:
             return record
         data = self.load_revision_source_bytes(revision_id)
@@ -1473,6 +1864,11 @@ class ContractTemplateService:
                 filename,
                 mime_type,
                 size_bytes,
+                working_file_path,
+                working_filename,
+                working_mime_type,
+                working_size_bytes,
+                working_checksum_sha256,
                 last_resolved_snapshot_id,
                 created_at,
                 updated_at,
@@ -1487,7 +1883,7 @@ class ContractTemplateService:
         mode = infer_storage_mode(
             explicit_mode=row[7],
             stored_path=row[6],
-            blob_value=b"x" if row[14] else None,
+            blob_value=b"x" if row[19] else None,
             default=STORAGE_MODE_DATABASE,
         )
         return ContractTemplateDraftRecord(
@@ -1502,9 +1898,14 @@ class ContractTemplateService:
             filename=_clean_text(row[8]),
             mime_type=_clean_text(row[9]),
             size_bytes=int(row[10] or 0),
-            last_resolved_snapshot_id=int(row[11]) if row[11] is not None else None,
-            created_at=_clean_text(row[12]),
-            updated_at=_clean_text(row[13]),
+            working_file_path=_clean_text(row[11]),
+            working_filename=_clean_text(row[12]),
+            working_mime_type=_clean_text(row[13]),
+            working_size_bytes=int(row[14] or 0),
+            working_checksum_sha256=_clean_text(row[15]),
+            last_resolved_snapshot_id=int(row[16]) if row[16] is not None else None,
+            created_at=_clean_text(row[17]),
+            updated_at=_clean_text(row[18]),
             stored_in_database=(mode == STORAGE_MODE_DATABASE),
         )
 
@@ -1647,6 +2048,158 @@ class ContractTemplateService:
             payload_bytes = resolved.read_bytes()
         text = payload_bytes.decode("utf-8") if payload_bytes else ""
         return _json_loads(text)
+
+    def resolve_draft_working_path(self, draft_id: int) -> Path | None:
+        draft = self.fetch_draft(draft_id)
+        if draft is None:
+            raise ValueError(f"Contract template draft {draft_id} not found")
+        clean_path = _clean_text(draft.working_file_path)
+        if not clean_path:
+            return None
+        resolved = self.draft_store.resolve(clean_path)
+        if resolved is None or not resolved.exists():
+            return None
+        return resolved
+
+    def load_draft_working_bytes(self, draft_id: int) -> bytes | None:
+        resolved = self.resolve_draft_working_path(draft_id)
+        if resolved is None:
+            return None
+        return resolved.read_bytes()
+
+    def set_draft_working_file(
+        self,
+        draft_id: int,
+        *,
+        content_bytes: bytes,
+        filename: str,
+        mime_type: str,
+    ) -> ContractTemplateDraftRecord:
+        draft = self.fetch_draft(draft_id)
+        if draft is None:
+            raise ValueError(f"Contract template draft {draft_id} not found")
+        revision = self.fetch_revision(draft.revision_id)
+        if revision is None:
+            raise ValueError(f"Contract template revision {draft.revision_id} not found")
+        subdir = f"html_draft_{draft_id}"
+        relative_path = self.draft_store.write_bytes(
+            content_bytes,
+            filename=filename,
+            subdir=subdir,
+        )
+        resolved = self.draft_store.resolve(relative_path)
+        if resolved is None:
+            raise RuntimeError("Managed draft storage is not configured.")
+        stale_path = _clean_text(draft.working_file_path)
+        with self.conn:
+            self.conn.execute(
+                """
+                UPDATE ContractTemplateDrafts
+                SET working_file_path=?,
+                    working_filename=?,
+                    working_mime_type=?,
+                    working_size_bytes=?,
+                    working_checksum_sha256=?,
+                    updated_at=datetime('now')
+                WHERE id=?
+                """,
+                (
+                    relative_path,
+                    coalesce_filename(filename, default_stem=resolved.stem or "draft"),
+                    _clean_text(mime_type) or "text/html",
+                    len(content_bytes),
+                    sha256_digest(content_bytes),
+                    int(draft_id),
+                ),
+            )
+        if stale_path and stale_path != relative_path:
+            self._delete_managed_tree_for_path(self.draft_store, stale_path)
+        updated = self.fetch_draft(draft_id)
+        if updated is None:
+            raise RuntimeError(f"Contract template draft {draft_id} disappeared after update")
+        return updated
+
+    def set_draft_working_path(
+        self,
+        draft_id: int,
+        *,
+        working_path: str | Path,
+        mime_type: str = "text/html",
+    ) -> ContractTemplateDraftRecord:
+        draft = self.fetch_draft(draft_id)
+        if draft is None:
+            raise ValueError(f"Contract template draft {draft_id} not found")
+        candidate = Path(working_path)
+        if not candidate.is_absolute():
+            resolved = self.draft_store.resolve(str(candidate))
+            candidate = resolved if resolved is not None else candidate
+        if not candidate.exists():
+            raise FileNotFoundError(candidate)
+        root_path = self.draft_store.root_path
+        if root_path is None or self.data_root is None:
+            raise ValueError("Managed draft storage is not configured.")
+        try:
+            relative = candidate.resolve().relative_to(self.data_root.resolve())
+            candidate.resolve().relative_to(root_path.resolve())
+        except Exception as exc:
+            raise ValueError(
+                "Draft working paths must stay inside managed contract template draft storage."
+            ) from exc
+        data = candidate.read_bytes()
+        stale_path = _clean_text(draft.working_file_path)
+        with self.conn:
+            self.conn.execute(
+                """
+                UPDATE ContractTemplateDrafts
+                SET working_file_path=?,
+                    working_filename=?,
+                    working_mime_type=?,
+                    working_size_bytes=?,
+                    working_checksum_sha256=?,
+                    updated_at=datetime('now')
+                WHERE id=?
+                """,
+                (
+                    str(relative),
+                    candidate.name,
+                    _clean_text(mime_type) or "text/html",
+                    len(data),
+                    sha256_digest(data),
+                    int(draft_id),
+                ),
+            )
+        if stale_path and stale_path != str(relative):
+            self._delete_managed_tree_for_path(self.draft_store, stale_path)
+        updated = self.fetch_draft(draft_id)
+        if updated is None:
+            raise RuntimeError(f"Contract template draft {draft_id} disappeared after update")
+        return updated
+
+    def clear_draft_working_file(self, draft_id: int) -> ContractTemplateDraftRecord:
+        draft = self.fetch_draft(draft_id)
+        if draft is None:
+            raise ValueError(f"Contract template draft {draft_id} not found")
+        stale_path = _clean_text(draft.working_file_path)
+        with self.conn:
+            self.conn.execute(
+                """
+                UPDATE ContractTemplateDrafts
+                SET working_file_path=NULL,
+                    working_filename=NULL,
+                    working_mime_type=NULL,
+                    working_size_bytes=0,
+                    working_checksum_sha256=NULL,
+                    updated_at=datetime('now')
+                WHERE id=?
+                """,
+                (int(draft_id),),
+            )
+        if stale_path:
+            self._delete_managed_tree_for_path(self.draft_store, stale_path)
+        updated = self.fetch_draft(draft_id)
+        if updated is None:
+            raise RuntimeError(f"Contract template draft {draft_id} disappeared after update")
+        return updated
 
     def convert_draft_storage_mode(
         self, draft_id: int, target_mode: str
@@ -1951,6 +2504,9 @@ class ContractTemplateService:
         if current is None:
             raise ValueError(f"Contract template draft {draft_id} not found")
         payload_path = _clean_text(current.managed_file_path) if remove_managed_payload else None
+        html_working_copy_path = (
+            _clean_text(current.working_file_path) if remove_managed_payload else None
+        )
         snapshots = tuple(self.list_resolved_snapshots(draft_id=draft_id))
         snapshot_ids = [snapshot.snapshot_id for snapshot in snapshots]
         artifact_ids = [
@@ -1991,6 +2547,8 @@ class ContractTemplateService:
                     resolved.unlink(missing_ok=True)
                 except Exception:
                     pass
+        if html_working_copy_path:
+            self._delete_managed_tree_for_path(self.draft_store, html_working_copy_path)
         for artifact_path in artifact_paths:
             self._delete_artifact_file(artifact_path)
 
@@ -2023,6 +2581,9 @@ class ContractTemplateService:
             for record in drafts
             if remove_draft_files and _clean_text(record.managed_file_path)
         ]
+        draft_html_paths = (
+            [_clean_text(record.working_file_path) for record in drafts] if remove_draft_files else []
+        )
         artifact_paths = (
             [artifact.output_path for artifact in artifacts] if remove_output_files else []
         )
@@ -2048,6 +2609,10 @@ class ContractTemplateService:
             if revision_ids:
                 cursor = self.conn.cursor()
                 cursor.execute(
+                    f"DELETE FROM ContractTemplateRevisionAssets WHERE revision_id IN ({','.join('?' for _ in revision_ids)})",
+                    tuple(int(revision_id) for revision_id in revision_ids),
+                )
+                cursor.execute(
                     f"DELETE FROM ContractTemplatePlaceholderBindings WHERE revision_id IN ({','.join('?' for _ in revision_ids)})",
                     tuple(int(revision_id) for revision_id in revision_ids),
                 )
@@ -2065,12 +2630,7 @@ class ContractTemplateService:
                 (int(template_id),),
             )
         for stored_path in source_paths:
-            resolved = self.source_store.resolve(stored_path)
-            if resolved is not None:
-                try:
-                    resolved.unlink(missing_ok=True)
-                except Exception:
-                    pass
+            self._delete_managed_tree_for_path(self.source_store, stored_path)
         for stored_path in draft_paths:
             resolved = self.draft_store.resolve(stored_path)
             if resolved is not None:
@@ -2078,6 +2638,9 @@ class ContractTemplateService:
                     resolved.unlink(missing_ok=True)
                 except Exception:
                     pass
+        for stored_path in draft_html_paths:
+            if stored_path:
+                self._delete_managed_tree_for_path(self.draft_store, stored_path)
         for artifact_path in artifact_paths:
             self._delete_artifact_file(artifact_path)
 
@@ -2116,6 +2679,42 @@ class ContractTemplateService:
             metadata=record.metadata,
         )
 
+    def _html_asset_payloads_for_source(
+        self,
+        managed_file_path: str,
+    ) -> tuple[ContractTemplateRevisionAssetPayload, ...]:
+        resolved_primary = self.source_store.resolve(managed_file_path)
+        root_path = self.source_store.root_path
+        if (
+            resolved_primary is None
+            or root_path is None
+            or self.data_root is None
+            or not resolved_primary.exists()
+        ):
+            return ()
+        try:
+            relative = resolved_primary.resolve().relative_to(root_path.resolve())
+        except Exception:
+            return ()
+        bundle_root = root_path / relative.parts[0] if relative.parts else resolved_primary.parent
+        assets: list[ContractTemplateRevisionAssetPayload] = []
+        for path in sorted(item for item in bundle_root.rglob("*") if item.is_file()):
+            if path.resolve() == resolved_primary.resolve():
+                continue
+            data = path.read_bytes()
+            assets.append(
+                ContractTemplateRevisionAssetPayload(
+                    package_rel_path=path.relative_to(bundle_root).as_posix(),
+                    managed_file_path=str(path.relative_to(self.data_root)),
+                    source_filename=path.name,
+                    mime_type=guess_mime_type(path.name),
+                    size_bytes=len(data),
+                    checksum_sha256=sha256_digest(data),
+                    asset_role="asset",
+                )
+            )
+        return tuple(assets)
+
     def _delete_artifact_file(self, output_path: str | None) -> None:
         clean_path = str(output_path or "").strip()
         if not clean_path:
@@ -2135,6 +2734,35 @@ class ContractTemplateService:
             ) from exc
         try:
             candidate.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    def _delete_managed_tree_for_path(
+        self,
+        file_store: ManagedFileStorage,
+        stored_path: str | None,
+    ) -> None:
+        clean_path = _clean_text(stored_path)
+        if not clean_path:
+            return
+        resolved = file_store.resolve(clean_path)
+        if resolved is None:
+            return
+        root_path = file_store.root_path
+        if root_path is None:
+            return
+        try:
+            relative = resolved.resolve().relative_to(root_path.resolve())
+        except Exception:
+            return
+        target = resolved
+        if len(relative.parts) > 1:
+            target = root_path / relative.parts[0]
+        try:
+            if target.is_dir():
+                shutil.rmtree(target, ignore_errors=True)
+            else:
+                target.unlink(missing_ok=True)
         except Exception:
             pass
 

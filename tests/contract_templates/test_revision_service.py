@@ -10,7 +10,7 @@ from isrc_manager.services import (
     ContractTemplateService,
     DatabaseSchemaService,
 )
-from tests.contract_templates._support import FakePagesAdapter, make_docx_bytes
+from tests.contract_templates._support import FakePagesAdapter, make_docx_bytes, make_html_zip_bytes
 
 
 class ContractTemplateRevisionImportTests(unittest.TestCase):
@@ -111,6 +111,149 @@ class ContractTemplateRevisionImportTests(unittest.TestCase):
             self.service.import_revision_from_path(template.template_id, source_path)
 
         self.assertEqual(self.service.list_revisions(template.template_id), [])
+
+    def test_import_revision_from_html_path_copies_assets_and_scans_natively(self):
+        template = self.service.create_template(
+            ContractTemplatePayload(
+                name="HTML Template",
+                description="HTML import coverage",
+                template_family="contract",
+                source_format="html",
+            )
+        )
+        html_root = self.root / "html-template"
+        (html_root / "assets").mkdir(parents=True)
+        (html_root / "assets" / "banner.png").write_bytes(b"png-bytes")
+        source_path = html_root / "agreement.html"
+        source_path.write_text(
+            "<html><body><img src='assets/banner.png'><p>{{manual.license_date}}</p></body></html>",
+            encoding="utf-8",
+        )
+
+        result = self.service.import_revision_from_path(
+            template.template_id,
+            source_path,
+            payload=ContractTemplateRevisionPayload(source_filename=source_path.name),
+        )
+        managed_source = self.service.resolve_html_revision_source_path(result.revision.revision_id)
+        revision_assets = self.service.list_revision_assets(result.revision.revision_id)
+
+        self.assertEqual(result.revision.source_format, "html")
+        self.assertEqual(result.scan_result.scan_adapter, "html_source_direct")
+        self.assertIsNotNone(managed_source)
+        self.assertTrue(managed_source.exists())
+        self.assertNotEqual(managed_source.read_text(encoding="utf-8"), "")
+        self.assertTrue((managed_source.parent / "assets" / "banner.png").exists())
+        self.assertEqual(len(revision_assets), 1)
+        self.assertEqual(revision_assets[0].package_rel_path, "assets/banner.png")
+
+    def test_import_html_package_from_zip_persists_html_and_assets(self):
+        template = self.service.create_template(
+            ContractTemplatePayload(
+                name="ZIP HTML Template",
+                description="ZIP import coverage",
+                template_family="license",
+                source_format="html",
+            )
+        )
+        package_path = self.root / "agreement.zip"
+        package_path.write_bytes(
+            make_html_zip_bytes(
+                {
+                    "bundle/index.html": "<html><body><img src='assets/footer.png'><p>{{manual.license_date}}</p></body></html>",
+                    "bundle/assets/footer.png": b"footer-bytes",
+                }
+            )
+        )
+
+        result = self.service.import_html_package_from_path(template.template_id, package_path)
+        managed_source = self.service.resolve_html_revision_source_path(result.revision.revision_id)
+
+        self.assertEqual(result.revision.source_format, "html")
+        self.assertIsNotNone(managed_source)
+        self.assertTrue(managed_source.exists())
+        self.assertTrue((managed_source.parent / "assets" / "footer.png").exists())
+        self.assertEqual(
+            [asset.package_rel_path for asset in self.service.list_revision_assets(result.revision.revision_id)],
+            ["bundle/assets/footer.png"],
+        )
+
+    def test_duplicate_html_template_preserves_bundle_assets(self):
+        template = self.service.create_template(
+            ContractTemplatePayload(
+                name="Duplicate HTML Template",
+                description="Duplicate HTML coverage",
+                template_family="contract",
+                source_format="html",
+            )
+        )
+        html_root = self.root / "duplicate-html-template"
+        (html_root / "assets").mkdir(parents=True)
+        (html_root / "assets" / "seal.png").write_bytes(b"seal")
+        source_path = html_root / "license.html"
+        original_html = (
+            "<html><body><img src='assets/seal.png'><p>{{manual.license_date}}</p></body></html>"
+        )
+        source_path.write_text(original_html, encoding="utf-8")
+        imported = self.service.import_revision_from_path(
+            template.template_id,
+            source_path,
+            payload=ContractTemplateRevisionPayload(source_filename=source_path.name),
+        )
+
+        duplicated = self.service.duplicate_template(template.template_id)
+        duplicated_revisions = self.service.list_revisions(duplicated.template_id)
+        self.assertEqual(len(duplicated_revisions), 1)
+
+        duplicated_revision = duplicated_revisions[0]
+        duplicated_source = self.service.resolve_html_revision_source_path(
+            duplicated_revision.revision_id
+        )
+        duplicated_assets = self.service.list_revision_assets(duplicated_revision.revision_id)
+
+        self.assertEqual(imported.revision.source_format, "html")
+        self.assertEqual(duplicated_revision.source_format, "html")
+        self.assertIsNotNone(duplicated_source)
+        self.assertEqual(duplicated_source.read_text(encoding="utf-8"), original_html)
+        self.assertTrue((duplicated_source.parent / "assets" / "seal.png").exists())
+        self.assertEqual([asset.package_rel_path for asset in duplicated_assets], ["assets/seal.png"])
+
+    def test_rescan_html_revision_preserves_bundle_metadata_and_assets(self):
+        template = self.service.create_template(
+            ContractTemplatePayload(
+                name="Rescan HTML Template",
+                description="Rescan HTML coverage",
+                template_family="contract",
+                source_format="html",
+            )
+        )
+        html_root = self.root / "rescan-html-template"
+        (html_root / "assets").mkdir(parents=True)
+        (html_root / "assets" / "footer.png").write_bytes(b"footer")
+        source_path = html_root / "agreement.html"
+        source_path.write_text(
+            "<html><body><img src='assets/footer.png'><p>{{manual.license_date}}</p></body></html>",
+            encoding="utf-8",
+        )
+
+        imported = self.service.import_revision_from_path(template.template_id, source_path)
+        before_source = self.service.resolve_html_revision_source_path(imported.revision.revision_id)
+        before_assets = self.service.list_revision_assets(imported.revision.revision_id)
+
+        rescan = self.service.rescan_revision(imported.revision.revision_id, activate_if_ready=True)
+        after_revision = self.service.fetch_revision(imported.revision.revision_id)
+        after_source = self.service.resolve_html_revision_source_path(imported.revision.revision_id)
+        after_assets = self.service.list_revision_assets(imported.revision.revision_id)
+
+        self.assertEqual(rescan.scan_status, "scan_ready")
+        self.assertIsNotNone(after_revision)
+        self.assertEqual(after_revision.scan_adapter, "html_source_direct")
+        self.assertEqual(before_source, after_source)
+        self.assertEqual(
+            [asset.package_rel_path for asset in before_assets],
+            [asset.package_rel_path for asset in after_assets],
+        )
+        self.assertTrue((after_source.parent / "assets" / "footer.png").exists())
 
     def test_import_pages_revision_from_bytes_uses_adapter_and_ready_rescan_preserves_bindings(
         self,

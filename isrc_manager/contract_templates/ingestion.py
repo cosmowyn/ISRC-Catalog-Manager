@@ -10,6 +10,7 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 from zipfile import BadZipFile, ZipFile
 
+from .html_support import HTMLTemplateScanner
 from .models import (
     ContractTemplateScanDiagnostic,
     ContractTemplateScanEntry,
@@ -18,7 +19,7 @@ from .models import (
 )
 from .parser import extract_placeholders
 
-SUPPORTED_TEMPLATE_SOURCE_FORMATS = frozenset({"docx", "pages"})
+SUPPORTED_TEMPLATE_SOURCE_FORMATS = frozenset({"docx", "pages", "html"})
 
 _DOCX_NS = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
 
@@ -37,11 +38,16 @@ def detect_template_source_format(
         return "docx"
     if suffix == ".pages":
         return "pages"
+    if suffix in {".html", ".htm"}:
+        return "html"
     clean_format = str(explicit_format or "").strip().lower().replace("-", "_")
+    if suffix == ".zip" and clean_format == "html":
+        return "html"
     if clean_format in SUPPORTED_TEMPLATE_SOURCE_FORMATS:
         return clean_format
     raise ContractTemplateIngestionError(
-        "Unsupported template source format. Phase 2 supports .docx directly and .pages through an adapter seam."
+        "Unsupported template source format. Supported contract template sources are "
+        ".docx, .pages, and .html. ZIP packages are available only for HTML template imports."
     )
 
 

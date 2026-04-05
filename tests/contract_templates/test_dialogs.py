@@ -25,7 +25,7 @@ from tests.contract_templates._support import (
     FakePagesAdapter,
     make_docx_bytes,
 )
-from tests.qt_test_helpers import pump_events, require_qapplication
+from tests.qt_test_helpers import pump_events, require_qapplication, wait_for
 
 
 class ContractTemplateWorkspacePanelTests(unittest.TestCase):
@@ -158,6 +158,17 @@ class ContractTemplateWorkspacePanelTests(unittest.TestCase):
         self.panel.copy_manual_symbol()
         self.assertEqual(self.app.clipboard().text(), "{{manual.license_date}}")
 
+    def test_panel_double_click_copies_symbol_to_clipboard(self):
+        self.panel.focus_namespace("contract")
+        self.panel.search_edit.setText("signature")
+        pump_events(app=self.app, cycles=3)
+
+        index = self.panel.table.model().index(0, 4)
+        self.panel.table.doubleClicked.emit(index)
+        pump_events(app=self.app, cycles=2)
+
+        self.assertEqual(self.app.clipboard().text(), "{{db.contract.signature_date}}")
+
     def test_panel_shows_custom_fields_as_stable_cf_symbols(self):
         self.panel.focus_namespace("custom")
         self.panel.search_edit.setText("mood")
@@ -284,6 +295,59 @@ class ContractTemplateWorkspacePanelTests(unittest.TestCase):
                 "type_overrides": {},
             },
         )
+
+    def test_fill_tab_renders_html_draft_preview_in_web_view(self):
+        html_template = self.template_service.create_template(
+            ContractTemplatePayload(
+                name="HTML Dialog Template",
+                description="Dialog HTML preview coverage",
+                template_family="contract",
+                source_format="html",
+            )
+        )
+        html_root = self.root / "dialog-html-template"
+        (html_root / "assets").mkdir(parents=True)
+        (html_root / "assets" / "logo.png").write_bytes(b"logo")
+        html_path = html_root / "preview.html"
+        html_path.write_text(
+            "<html><body><img src='assets/logo.png'><p>{{manual.license_date}}</p></body></html>",
+            encoding="utf-8",
+        )
+        html_revision = self.template_service.import_revision_from_path(
+            html_template.template_id,
+            html_path,
+            payload=ContractTemplateRevisionPayload(source_filename=html_path.name),
+        ).revision
+        self.panel.refresh()
+        self.panel.focus_tab("fill")
+        pump_events(app=self.app, cycles=3)
+
+        self.panel._select_combo_data(self.panel.fill_template_combo, html_template.template_id)
+        self.panel._select_combo_data(self.panel.fill_revision_combo, html_revision.revision_id)
+        self.panel.refresh_fill_form()
+        pump_events(app=self.app, cycles=3)
+
+        manual_widget = self.panel.manual_widgets["{{manual.license_date}}"]
+        manual_widget.setDate(QDate(2026, 4, 5))
+        self.panel.fill_draft_name_edit.setText("HTML Preview Draft")
+        pump_events(app=self.app, cycles=2)
+
+        self.panel.refresh_current_html_preview()
+        pump_events(app=self.app, cycles=5)
+
+        drafts = self.template_service.list_drafts(revision_id=html_revision.revision_id)
+        self.assertEqual(len(drafts), 1)
+        working_path = self.template_service.resolve_draft_working_path(drafts[0].draft_id)
+        self.assertIsNotNone(self.panel.fill_html_preview_view)
+        self.assertIsNotNone(working_path)
+        wait_for(
+            lambda: self.panel.fill_html_preview_view.url().toLocalFile() == str(working_path),
+            timeout_ms=5000,
+            app=self.app,
+            description="HTML preview URL to load",
+        )
+        self.assertTrue((working_path.parent / "assets" / "logo.png").exists())
+        self.assertIn("Previewing HTML draft", self.panel.fill_preview_status_label.text())
 
     def test_fill_tab_can_export_pdf_and_update_latest_artifact_status(self):
         self.panel.focus_tab("fill")

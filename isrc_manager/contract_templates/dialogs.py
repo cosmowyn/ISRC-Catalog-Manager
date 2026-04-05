@@ -29,6 +29,10 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+try:
+    from PySide6.QtWebEngineWidgets import QWebEngineView
+except ImportError:  # pragma: no cover - environment-specific fallback
+    QWebEngineView = None
 
 from isrc_manager.file_storage import STORAGE_MODE_DATABASE, STORAGE_MODE_MANAGED_FILE
 from isrc_manager.ui_common import (
@@ -100,6 +104,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         self._suspend_admin_updates = False
         self._fill_type_overrides: dict[str, str] = {}
         self._fill_payload_extras: dict[str, object] = {}
+        self.fill_html_preview_view = None
         self.selector_widgets: dict[str, QWidget] = {}
         self.manual_widgets: dict[str, QWidget] = {}
         self.setObjectName("contractTemplateWorkspacePanel")
@@ -216,7 +221,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
         self.table.itemSelectionChanged.connect(self._update_selected_details)
-        self.table.doubleClicked.connect(lambda _index: self.copy_selected_symbol())
+        self.table.doubleClicked.connect(self._copy_symbol_from_index)
         table_layout.addWidget(self.table, 1)
         left_layout.addWidget(table_box, 1)
         splitter.addWidget(left_container)
@@ -461,6 +466,47 @@ class ContractTemplateWorkspacePanel(QWidget):
         self.fill_export_status_label.setProperty("role", "secondary")
         export_layout.addWidget(self.fill_export_status_label)
         scroll_layout.addWidget(export_box)
+
+        preview_box, preview_layout = _create_standard_section(
+            self.fill_form_tab,
+            "HTML Draft Preview",
+            "HTML revisions keep a native working-copy draft and render it through a real web view so CSS, layout, and images stay intact during review.",
+        )
+        self.fill_preview_button = QPushButton("Refresh HTML Preview", preview_box)
+        self.fill_preview_button.setObjectName("contractTemplateRefreshHtmlPreviewButton")
+        self.fill_preview_button.clicked.connect(self.refresh_current_html_preview)
+        self.fill_preview_clear_button = QPushButton("Clear Preview", preview_box)
+        self.fill_preview_clear_button.setObjectName("contractTemplateClearHtmlPreviewButton")
+        self.fill_preview_clear_button.clicked.connect(self.clear_html_preview)
+        self.fill_preview_actions_cluster = _create_action_button_cluster(
+            preview_box,
+            [self.fill_preview_button, self.fill_preview_clear_button],
+            columns=2,
+            min_button_width=170,
+        )
+        self.fill_preview_actions_cluster.setObjectName("contractTemplatePreviewActionsCluster")
+        preview_layout.addWidget(self.fill_preview_actions_cluster)
+        self.fill_preview_status_label = QLabel(
+            "HTML preview becomes available when the selected revision is a native HTML template."
+        )
+        self.fill_preview_status_label.setObjectName("contractTemplatePreviewStatusLabel")
+        self.fill_preview_status_label.setWordWrap(True)
+        self.fill_preview_status_label.setProperty("role", "secondary")
+        preview_layout.addWidget(self.fill_preview_status_label)
+        if QWebEngineView is not None:
+            self.fill_html_preview_view = QWebEngineView(preview_box)
+            self.fill_html_preview_view.setObjectName("contractTemplateHtmlPreviewView")
+            self.fill_html_preview_view.setMinimumHeight(420)
+            preview_layout.addWidget(self.fill_html_preview_view, 1)
+        else:
+            self.fill_preview_unavailable_label = QLabel(
+                "Qt WebEngine is unavailable in this runtime, so native HTML preview cannot be shown here.",
+                preview_box,
+            )
+            self.fill_preview_unavailable_label.setWordWrap(True)
+            self.fill_preview_unavailable_label.setProperty("role", "secondary")
+            preview_layout.addWidget(self.fill_preview_unavailable_label)
+        scroll_layout.addWidget(preview_box)
 
         auto_box, auto_layout = _create_standard_section(
             self.fill_form_tab,
@@ -903,6 +949,7 @@ class ContractTemplateWorkspacePanel(QWidget):
             self._clear_fill_drafts("Open a profile to browse and resume contract template drafts.")
             self.fill_status_label.setText("Open a profile to browse imported template revisions.")
             self.fill_warning_label.setText("")
+            self._sync_html_preview_state(None)
             return
 
         templates = tuple(template_service.list_templates())
@@ -918,6 +965,7 @@ class ContractTemplateWorkspacePanel(QWidget):
                 "Phase 2 tooling or seed one through the service layer."
             )
             self.fill_warning_label.setText("")
+            self._sync_html_preview_state(None)
             return
 
         active_revision_id = None
@@ -941,6 +989,7 @@ class ContractTemplateWorkspacePanel(QWidget):
                 "The selected template does not have any stored revisions yet."
             )
             self.fill_warning_label.setText("")
+            self._sync_html_preview_state(None)
             return
 
         preserved_state = None
@@ -959,6 +1008,7 @@ class ContractTemplateWorkspacePanel(QWidget):
                 f"Unable to build a fill form for revision #{int(revision_id)}."
             )
             self.fill_warning_label.setText(str(exc))
+            self._sync_html_preview_state(revision_id)
             return
 
         self._fill_definition = form_definition
@@ -994,6 +1044,7 @@ class ContractTemplateWorkspacePanel(QWidget):
                 "This revision is not fully scan-ready, so the editable form may be incomplete.",
             )
         self.fill_warning_label.setText("\n".join(line for line in warning_lines if line))
+        self._sync_html_preview_state(revision_id)
 
     def current_fill_state(self) -> dict[str, object]:
         revision_id = self._selected_fill_revision_id()
@@ -1061,6 +1112,7 @@ class ContractTemplateWorkspacePanel(QWidget):
 
     def _save_draft(self, *, save_as_new: bool) -> bool:
         template_service = self._template_service()
+        export_service = self._export_service()
         revision_id = self._selected_fill_revision_id()
         if template_service is None or revision_id is None:
             self.fill_draft_status_label.setText("Choose a revision before saving a draft.")
@@ -1078,11 +1130,25 @@ class ContractTemplateWorkspacePanel(QWidget):
             self.fill_draft_status_label.setText(f"Unable to save draft: {exc}")
             QMessageBox.warning(self, "Draft Workspace", str(exc))
             return False
+        html_synced = False
+        if export_service is not None:
+            revision = template_service.fetch_revision(saved.revision_id)
+            if revision is not None and str(revision.source_format or "").strip().lower() == "html":
+                try:
+                    export_service.synchronize_html_draft(saved.draft_id)
+                    html_synced = True
+                except Exception as exc:
+                    self.fill_draft_status_label.setText(
+                        f"Saved draft #{saved.draft_id}, but HTML preview copy could not be refreshed: {exc}"
+                    )
+                    QMessageBox.warning(self, "Draft Workspace", str(exc))
+                    return False
         self._loaded_draft_id = saved.draft_id
         self._fill_dirty = False
         self.refresh_fill_drafts(selected_draft_id=saved.draft_id)
         self.fill_draft_status_label.setText(
             f"Saved draft #{saved.draft_id} using {self._storage_label(saved.storage_mode)} storage."
+            + (" Native HTML working copy refreshed." if html_synced else "")
         )
         return True
 
@@ -1113,6 +1179,12 @@ class ContractTemplateWorkspacePanel(QWidget):
         self.fill_draft_status_label.setText(
             f"Loaded draft #{draft.draft_id} and restored its editable state."
         )
+        working_path = template_service.resolve_draft_working_path(draft.draft_id)
+        if working_path is not None and self.fill_html_preview_view is not None:
+            self.fill_html_preview_view.setUrl(QUrl.fromLocalFile(str(working_path)))
+            self.fill_preview_status_label.setText(
+                f"Loaded native HTML preview from {working_path}."
+            )
 
     def reset_fill_form(self) -> None:
         self._clear_fill_input_values()
@@ -1127,6 +1199,7 @@ class ContractTemplateWorkspacePanel(QWidget):
             "Cleared the current fill form. Saved drafts remain available to load."
         )
         self._sync_fill_export_status(None)
+        self.clear_html_preview()
 
     def export_current_pdf(self) -> None:
         export_service = self._export_service()
@@ -1159,6 +1232,52 @@ class ContractTemplateWorkspacePanel(QWidget):
         self.fill_export_status_label.setText(
             f"Exported PDF for draft #{draft.draft_id} to {result.pdf_artifact.output_path}.{warning_text}"
         )
+
+    def refresh_current_html_preview(self) -> None:
+        export_service = self._export_service()
+        template_service = self._template_service()
+        if export_service is None or template_service is None:
+            self.fill_preview_status_label.setText(
+                "Open a profile to preview HTML contract template drafts."
+            )
+            return
+        if QWebEngineView is None or self.fill_html_preview_view is None:
+            self.fill_preview_status_label.setText(
+                "Qt WebEngine is unavailable, so native HTML preview cannot be shown."
+            )
+            return
+        revision_id = self._selected_fill_revision_id()
+        revision = template_service.fetch_revision(revision_id) if revision_id is not None else None
+        if revision is None or str(revision.source_format or "").strip().lower() != "html":
+            self.fill_preview_status_label.setText(
+                "Select an HTML template revision to render a native draft preview."
+            )
+            self.clear_html_preview()
+            return
+        try:
+            draft = self._ensure_export_draft_record()
+            if draft is None:
+                self.fill_preview_status_label.setText(
+                    "Save or select a draft before refreshing the HTML preview."
+                )
+                return
+            preview_path = export_service.synchronize_html_draft(draft.draft_id)
+        except Exception as exc:
+            self.fill_preview_status_label.setText(f"Unable to refresh HTML preview: {exc}")
+            QMessageBox.warning(self, "HTML Draft Preview", str(exc))
+            return
+        self.fill_html_preview_view.setUrl(QUrl.fromLocalFile(str(preview_path)))
+        self.fill_preview_status_label.setText(
+            f"Previewing HTML draft #{draft.draft_id} from {preview_path}."
+        )
+
+    def clear_html_preview(self) -> None:
+        if self.fill_html_preview_view is not None:
+            self.fill_html_preview_view.setHtml("")
+        if hasattr(self, "fill_preview_status_label"):
+            self.fill_preview_status_label.setText(
+                "HTML preview becomes available when the selected revision is a native HTML template."
+            )
 
     def open_latest_pdf_for_current_draft(self) -> None:
         draft = self._selected_fill_draft_record() or self._loaded_draft_record()
@@ -1204,6 +1323,17 @@ class ContractTemplateWorkspacePanel(QWidget):
 
     def copy_selected_symbol(self) -> None:
         entry = self._selected_entry()
+        if entry is None:
+            return
+        self._copy_to_clipboard(entry.canonical_symbol)
+
+    def _copy_symbol_from_index(self, index) -> None:
+        if not index.isValid():
+            return
+        self.table.selectRow(index.row())
+        entry = self._selected_entry()
+        if entry is None and 0 <= index.row() < len(self._visible_entries):
+            entry = self._visible_entries[index.row()]
         if entry is None:
             return
         self._copy_to_clipboard(entry.canonical_symbol)
@@ -1719,7 +1849,7 @@ class ContractTemplateWorkspacePanel(QWidget):
             self,
             title,
             "",
-            "Template Documents (*.docx *.pages);;Word Documents (*.docx);;Pages Documents (*.pages)",
+            "Template Documents (*.docx *.pages *.html *.htm *.zip);;HTML Templates (*.html *.htm);;HTML Template Packages (*.zip);;Word Documents (*.docx);;Pages Documents (*.pages)",
         )
         clean_path = str(file_path or "").strip()
         return Path(clean_path) if clean_path else None
@@ -1743,21 +1873,31 @@ class ContractTemplateWorkspacePanel(QWidget):
             return
         clean_name = _clean_text(name) or default_name
         try:
-            source_format = detect_template_source_format(source_filename=source_path.name)
+            is_zip_package = source_path.suffix.lower() == ".zip"
+            source_format = "html" if is_zip_package else detect_template_source_format(
+                source_filename=source_path.name
+            )
             template = template_service.create_template(
-                ContractTemplatePayload(
-                    name=clean_name,
-                    source_format=source_format,
+                ContractTemplatePayload(name=clean_name, source_format=source_format)
+            )
+            if is_zip_package:
+                result = template_service.import_html_package_from_path(
+                    template.template_id,
+                    source_path,
+                    payload=ContractTemplateRevisionPayload(
+                        source_filename=source_path.name,
+                        source_format="html",
+                    ),
                 )
-            )
-            result = template_service.import_revision_from_path(
-                template.template_id,
-                source_path,
-                payload=ContractTemplateRevisionPayload(
-                    source_filename=source_path.name,
-                    source_format=source_format,
-                ),
-            )
+            else:
+                result = template_service.import_revision_from_path(
+                    template.template_id,
+                    source_path,
+                    payload=ContractTemplateRevisionPayload(
+                        source_filename=source_path.name,
+                        source_format=source_format,
+                    ),
+                )
         except Exception as exc:
             QMessageBox.warning(self, "Import Contract Template", str(exc))
             self.admin_status_label.setText(f"Unable to import template: {exc}")
@@ -1788,15 +1928,25 @@ class ContractTemplateWorkspacePanel(QWidget):
         if source_path is None:
             return
         try:
-            source_format = detect_template_source_format(source_filename=source_path.name)
-            result = template_service.import_revision_from_path(
-                template.template_id,
-                source_path,
-                payload=ContractTemplateRevisionPayload(
-                    source_filename=source_path.name,
-                    source_format=source_format,
-                ),
-            )
+            if source_path.suffix.lower() == ".zip":
+                result = template_service.import_html_package_from_path(
+                    template.template_id,
+                    source_path,
+                    payload=ContractTemplateRevisionPayload(
+                        source_filename=source_path.name,
+                        source_format="html",
+                    ),
+                )
+            else:
+                source_format = detect_template_source_format(source_filename=source_path.name)
+                result = template_service.import_revision_from_path(
+                    template.template_id,
+                    source_path,
+                    payload=ContractTemplateRevisionPayload(
+                        source_filename=source_path.name,
+                        source_format=source_format,
+                    ),
+                )
         except Exception as exc:
             QMessageBox.warning(self, "Add Template Revision", str(exc))
             self.admin_status_label.setText(f"Unable to add revision: {exc}")
@@ -2332,6 +2482,21 @@ class ContractTemplateWorkspacePanel(QWidget):
     def _set_storage_mode_value(self, storage_mode: str) -> None:
         self._select_combo_data(self.fill_draft_storage_combo, storage_mode)
 
+    def _sync_html_preview_state(self, revision_id: int | None) -> None:
+        template_service = self._template_service()
+        revision = (
+            template_service.fetch_revision(revision_id)
+            if template_service is not None and revision_id is not None
+            else None
+        )
+        is_html = (
+            revision is not None and str(revision.source_format or "").strip().lower() == "html"
+        )
+        self.fill_preview_button.setEnabled(bool(is_html and self.fill_html_preview_view is not None))
+        self.fill_preview_clear_button.setEnabled(self.fill_html_preview_view is not None)
+        if not is_html:
+            self.clear_html_preview()
+
     @staticmethod
     def _storage_label(storage_mode: str | None) -> str:
         return (
@@ -2500,6 +2665,10 @@ class ContractTemplateWorkspacePanel(QWidget):
         if self._suspend_fill_updates:
             return
         self._fill_dirty = True
+        if "_html_draft" in self._fill_payload_extras:
+            self._fill_payload_extras.pop("_html_draft", None)
+            if self.fill_html_preview_view is not None:
+                self.fill_html_preview_view.setHtml("")
         if self._loaded_draft_id is not None:
             self.fill_draft_status_label.setText(
                 f"Draft #{self._loaded_draft_id} has unsaved changes."

@@ -146,3 +146,46 @@ class FakeDocxHtmlAdapter:
     ) -> str:
         self.calls.append((bytes(docx_bytes), str(source_filename)))
         return self.html_text
+
+
+class FakeHtmlPdfAdapter:
+    adapter_name = "fake_html_pdf"
+
+    def __init__(self):
+        self.file_calls: list[tuple[Path, Path]] = []
+        self.html_calls: list[tuple[str, str | None, Path]] = []
+
+    def is_available(self) -> bool:
+        return True
+
+    def availability_message(self) -> str | None:
+        return None
+
+    def render_file_to_pdf(self, html_path: str | Path, output_path: str | Path) -> Path:
+        source = Path(html_path)
+        target = Path(output_path)
+        self.file_calls.append((source, target))
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"%PDF-1.4\n% fake-html-pdf-adapter\n")
+        return target
+
+    def render_html_to_pdf(
+        self,
+        html_text: str,
+        *,
+        base_url: str | Path | None,
+        output_path: str | Path,
+    ) -> Path:
+        target = Path(output_path)
+        self.html_calls.append((str(html_text), str(base_url) if base_url is not None else None, target))
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"%PDF-1.4\n% fake-html-pdf-adapter\n")
+        return target
+
+
+def make_html_zip_bytes(entries: dict[str, bytes | str]) -> bytes:
+    buffer = BytesIO()
+    with ZipFile(buffer, "w", compression=ZIP_DEFLATED) as archive:
+        for name, payload in entries.items():
+            archive.writestr(name, payload if isinstance(payload, bytes) else str(payload))
+    return buffer.getvalue()

@@ -529,6 +529,96 @@ class ContractTemplateServiceTests(unittest.TestCase):
         self.assertFalse(draft_path.exists())
         self.assertFalse(artifact_path.exists())
 
+    def test_delete_draft_removes_native_html_working_copy_tree(self):
+        template = self.service.create_template(
+            ContractTemplatePayload(
+                name="HTML Draft Delete",
+                description="HTML draft cleanup coverage",
+                template_family="contract",
+                source_format="html",
+            )
+        )
+        html_root = self.root / "html-draft-delete"
+        (html_root / "assets").mkdir(parents=True)
+        (html_root / "assets" / "banner.png").write_bytes(b"banner")
+        source_path = html_root / "agreement.html"
+        source_path.write_text(
+            "<html><body><img src='assets/banner.png'><p>{{manual.license_date}}</p></body></html>",
+            encoding="utf-8",
+        )
+        revision = self.service.import_revision_from_path(template.template_id, source_path).revision
+        draft = self.service.create_draft(
+            ContractTemplateDraftPayload(
+                revision_id=revision.revision_id,
+                name="HTML Working Draft",
+                editable_payload={"manual_values": {"{{manual.license_date}}": "2026-04-05"}},
+                storage_mode="database",
+            )
+        )
+        working_root = self.service.draft_store.root_path / f"html_draft_{draft.draft_id}"
+        (working_root / "assets").mkdir(parents=True)
+        (working_root / "assets" / "banner.png").write_bytes(b"banner")
+        working_html = working_root / "agreement.html"
+        working_html.write_text(
+            "<html><body><img src='assets/banner.png'><p>2026-04-05</p></body></html>",
+            encoding="utf-8",
+        )
+        self.service.set_draft_working_path(draft.draft_id, working_path=working_html)
+
+        self.service.delete_draft(draft.draft_id, remove_managed_payload=True)
+
+        self.assertIsNone(self.service.fetch_draft(draft.draft_id))
+        self.assertFalse(working_root.exists())
+
+    def test_delete_template_removes_html_source_bundle_and_working_copy_tree(self):
+        template = self.service.create_template(
+            ContractTemplatePayload(
+                name="HTML Template Delete",
+                description="HTML template cleanup coverage",
+                template_family="license",
+                source_format="html",
+            )
+        )
+        html_root = self.root / "html-template-delete"
+        (html_root / "assets").mkdir(parents=True)
+        (html_root / "assets" / "seal.png").write_bytes(b"seal")
+        source_path = html_root / "license.html"
+        source_path.write_text(
+            "<html><body><img src='assets/seal.png'><p>{{manual.license_date}}</p></body></html>",
+            encoding="utf-8",
+        )
+        revision = self.service.import_revision_from_path(template.template_id, source_path).revision
+        source_bundle_root = self.service.resolve_html_revision_bundle_root(revision.revision_id)
+        draft = self.service.create_draft(
+            ContractTemplateDraftPayload(
+                revision_id=revision.revision_id,
+                name="HTML Delete Draft",
+                editable_payload={"manual_values": {"{{manual.license_date}}": "2026-04-06"}},
+                storage_mode="managed_file",
+            )
+        )
+        working_root = self.service.draft_store.root_path / f"html_draft_{draft.draft_id}"
+        (working_root / "assets").mkdir(parents=True)
+        (working_root / "assets" / "seal.png").write_bytes(b"seal")
+        working_html = working_root / "license.html"
+        working_html.write_text(
+            "<html><body><img src='assets/seal.png'><p>2026-04-06</p></body></html>",
+            encoding="utf-8",
+        )
+        self.service.set_draft_working_path(draft.draft_id, working_path=working_html)
+
+        self.service.delete_template(
+            template.template_id,
+            remove_source_files=True,
+            remove_draft_files=True,
+            remove_output_files=False,
+        )
+
+        self.assertIsNone(self.service.fetch_template(template.template_id))
+        self.assertIsNotNone(source_bundle_root)
+        self.assertFalse(source_bundle_root.exists())
+        self.assertFalse(working_root.exists())
+
     def test_snapshot_and_artifact_rows_can_be_created_and_listed_without_export_logic(self):
         _, revision = self._create_revision(storage_mode="database")
         draft = self.service.create_draft(

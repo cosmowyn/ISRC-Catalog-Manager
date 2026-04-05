@@ -6324,9 +6324,9 @@ class App(QMainWindow):
 
         self.resize(1280, 800)
         self._refresh_history_actions()
-        app_instance = QApplication.instance()
-        if app_instance is not None:
-            app_instance.installEventFilter(self)
+        # Avoid installing the main window as an application-wide event filter.
+        # PySide can crash while wrapping Qt Quick / WebEngine internal objects
+        # during focus changes when a Python QMainWindow filters every app event.
         self._ensure_widget_object_names(self)
         finalize_progress(4, 5, "Finalized window wiring and runtime bindings.")
         self._apply_theme()

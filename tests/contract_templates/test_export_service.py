@@ -24,6 +24,7 @@ from isrc_manager.services import (
 )
 from tests.contract_templates._support import (
     FakeDocxHtmlAdapter,
+    FakeHtmlPdfAdapter,
     FakePagesAdapter,
     make_docx_bytes,
 )
@@ -161,6 +162,7 @@ class ContractTemplateExportServiceTests(unittest.TestCase):
             )
         )
         self.html_adapter = FakeDocxHtmlAdapter()
+        self.html_pdf_adapter = FakeHtmlPdfAdapter()
         self.pages_adapter = FakePagesAdapter()
         self.export_service = ContractTemplateExportService(
             template_service=self.template_service,
@@ -169,6 +171,7 @@ class ContractTemplateExportServiceTests(unittest.TestCase):
             track_service=self.track_service,
             party_service=self.party_service,
             html_adapter=self.html_adapter,
+            html_pdf_adapter=self.html_pdf_adapter,
             pages_adapter=self.pages_adapter,
         )
 
@@ -236,6 +239,82 @@ class ContractTemplateExportServiceTests(unittest.TestCase):
 
         with self.assertRaises(ContractTemplateExportError):
             self.export_service.export_draft_to_pdf(broken.draft_id)
+
+    def test_export_html_draft_to_pdf_uses_native_html_working_copy_and_preserves_source(self):
+        template = self.template_service.create_template(
+            ContractTemplatePayload(
+                name="HTML Export Template",
+                description="Native HTML export coverage",
+                template_family="contract",
+                source_format="html",
+            )
+        )
+        html_root = self.root / "html-export-template"
+        (html_root / "assets").mkdir(parents=True)
+        (html_root / "assets" / "banner.png").write_bytes(b"banner-bytes")
+        source_path = html_root / "agreement.html"
+        original_html = (
+            "<html><body><img src='assets/banner.png'><style>p{color:#205090;}</style>"
+            "<p>{{manual.license_date}}</p></body></html>"
+        )
+        source_path.write_text(original_html, encoding="utf-8")
+        revision = self.template_service.import_revision_from_path(
+            template.template_id,
+            source_path,
+            payload=ContractTemplateRevisionPayload(source_filename=source_path.name),
+        ).revision
+        draft = self.template_service.create_draft(
+            ContractTemplateDraftPayload(
+                revision_id=revision.revision_id,
+                name="HTML Export Draft",
+                editable_payload={
+                    "revision_id": revision.revision_id,
+                    "db_selections": {},
+                    "manual_values": {"{{manual.license_date}}": "2026-04-05"},
+                    "type_overrides": {},
+                },
+                storage_mode="database",
+            )
+        )
+
+        working_path = self.export_service.synchronize_html_draft(draft.draft_id)
+        self.assertTrue(working_path.exists())
+        result = self.export_service.export_draft_to_pdf(draft.draft_id)
+        source_copy = self.template_service.resolve_html_revision_source_path(revision.revision_id)
+        refreshed_draft = self.template_service.fetch_draft(draft.draft_id)
+        self.assertIsNotNone(refreshed_draft)
+        refreshed_working_path = self.template_service.resolve_draft_working_path(draft.draft_id)
+        self.assertIsNotNone(refreshed_working_path)
+
+        self.assertTrue(refreshed_working_path.exists())
+        self.assertTrue((refreshed_working_path.parent / "assets" / "banner.png").exists())
+        self.assertEqual(result.resolved_docx_artifact, None)
+        self.assertIsNotNone(result.resolved_html_artifact)
+        self.assertEqual(result.resolved_html_artifact.artifact_type, "resolved_html")
+        self.assertTrue(Path(result.resolved_html_artifact.output_path).exists())
+        self.assertTrue(Path(result.pdf_artifact.output_path).read_bytes().startswith(b"%PDF"))
+        self.assertIn("2026-04-05", Path(result.resolved_html_artifact.output_path).read_text())
+        self.assertIn("2026-04-05", refreshed_working_path.read_text(encoding="utf-8"))
+        self.assertNotIn(
+            "{{manual.license_date}}",
+            refreshed_working_path.read_text(encoding="utf-8"),
+        )
+        self.assertIsNotNone(source_copy)
+        self.assertEqual(source_copy.read_text(encoding="utf-8"), original_html)
+        self.assertIsNotNone(refreshed_draft.working_file_path)
+        self.assertEqual(result.snapshot.preview_payload.get("renderer"), "fake_html_pdf")
+        self.assertEqual(result.snapshot.preview_payload.get("source_format"), "html")
+        self.assertEqual(
+            result.snapshot.preview_payload.get("working_copy_path"),
+            str(refreshed_working_path),
+        )
+        self.assertEqual(len(self.html_pdf_adapter.file_calls), 1)
+        self.assertEqual(len(self.html_pdf_adapter.html_calls), 0)
+        self.assertEqual(len(self.pages_adapter.pdf_calls), 0)
+        self.assertEqual(len(self.html_adapter.calls), 0)
+        rendered_source, rendered_pdf = self.html_pdf_adapter.file_calls[0]
+        self.assertEqual(rendered_source, Path(result.resolved_html_artifact.output_path))
+        self.assertEqual(rendered_pdf, Path(result.pdf_artifact.output_path))
 
     def test_export_normalizes_conflicting_legacy_track_selections_to_one_scope(self):
         draft = self.template_service.create_draft(
