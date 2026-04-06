@@ -43,4 +43,3 @@ class DesktopSafetyDiscoveryProbeTests(unittest.TestCase):
         self.assertEqual(requests[0].via, "external_launch.open_external_url")
         self.assertEqual(requests[1].via, "QFileDialog.getOpenFileName")
         self.assertTrue(all(request.blocked for request in requests))
-

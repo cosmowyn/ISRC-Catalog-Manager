@@ -182,6 +182,7 @@ def _normalized_workspace_layout_state(state: dict[str, object] | None) -> dict[
         ),
     }
 
+
 @dataclass
 class _PreviewCandidate:
     generation: int
@@ -487,7 +488,9 @@ class _InteractiveHtmlPreviewView(QWebEngineView if QWebEngineView is not None e
                     measured_width = 0.0
             if measured_width > 0:
                 self._fit_measure_failures = 0
-                self._document_css_width = max(float(self._document_css_width or 0.0), measured_width)
+                self._document_css_width = max(
+                    float(self._document_css_width or 0.0), measured_width
+                )
                 self._apply_fit_if_needed(force=True)
                 return
             if self._document_css_width > 0:
@@ -625,9 +628,10 @@ class _InteractiveHtmlPreviewView(QWebEngineView if QWebEngineView is not None e
         if event.type() == QEvent.NativeGesture:
             gesture_type = event.gestureType() if hasattr(event, "gestureType") else None
             if gesture_type == Qt.ZoomNativeGesture:
-                allow_native_zoom = (
-                    not isinstance(event, QEvent) or self._gesture_platform in {"cocoa", "offscreen"}
-                )
+                allow_native_zoom = not isinstance(event, QEvent) or self._gesture_platform in {
+                    "cocoa",
+                    "offscreen",
+                }
                 value = float(event.value() if hasattr(event, "value") else 0.0)
                 if not allow_native_zoom:
                     event.accept()
@@ -936,9 +940,7 @@ class _DockableWorkspaceTab(QMainWindow):
             return False
         finally:
             self._applying_layout_normalization = False
-            self._layout_normalization_pending = (
-                not succeeded or self._has_exposed_central_canvas()
-            )
+            self._layout_normalization_pending = not succeeded or self._has_exposed_central_canvas()
         if succeeded and not self._layout_normalization_pending:
             self._cache_stable_layout_state_if_ready()
         return succeeded
@@ -1092,8 +1094,7 @@ class _DockableWorkspaceTab(QMainWindow):
         )
         if not expected_visibility:
             expected_visibility = {
-                dock.objectName(): _dock_logically_visible(dock)
-                for dock in self._docks
+                dock.objectName(): _dock_logically_visible(dock) for dock in self._docks
             }
         try:
             prepared_default_layout = False
@@ -1329,10 +1330,7 @@ class _DockableWorkspaceTab(QMainWindow):
 
     def validate_layout_integrity_after_restore(self) -> bool:
         self._apply_pending_state_if_ready()
-        visibility_snapshot = {
-            dock.objectName(): bool(dock.isVisible())
-            for dock in self._docks
-        }
+        visibility_snapshot = {dock.objectName(): bool(dock.isVisible()) for dock in self._docks}
         self._ensure_panels_menu_matches_live_docks()
         self._repair_unrecoverable_restore_state(visibility_snapshot)
         self._ensure_panels_menu_matches_live_docks()
@@ -1784,13 +1782,10 @@ class _FillHtmlPreviewController(QWidget):
                     self._latest_requested_reason or "Previewing current HTML draft state."
                 )
             return
-        if (
-            request_key == self._latest_request_key
-            and (
-                self._refresh_timer.isActive()
-                or self._inflight_generation is not None
-                or self._awaiting_load_generation is not None
-            )
+        if request_key == self._latest_request_key and (
+            self._refresh_timer.isActive()
+            or self._inflight_generation is not None
+            or self._awaiting_load_generation is not None
         ):
             self._debug_preview_log(
                 "preview_controller.request_refresh.skipped",

@@ -14,11 +14,20 @@ from typing import Any
 
 from PySide6.QtCore import QRect, QSize, Qt
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QComboBox, QDockWidget, QFormLayout, QLabel, QMainWindow, QScrollArea, QWidget
+from PySide6.QtWidgets import (
+    QComboBox,
+    QDockWidget,
+    QFormLayout,
+    QLabel,
+    QMainWindow,
+    QScrollArea,
+    QWidget,
+)
 
 try:
     from shiboken6 import isValid as _qt_object_is_valid
 except Exception:  # pragma: no cover - runtime guard
+
     def _qt_object_is_valid(_obj) -> bool:
         return True
 
@@ -38,11 +47,7 @@ def _env_topics(name: str) -> set[str]:
         return set()
     if raw_value in _TRUE_VALUES:
         return {"all"}
-    return {
-        token.strip()
-        for token in raw_value.replace(";", ",").split(",")
-        if token.strip()
-    }
+    return {token.strip() for token in raw_value.replace(";", ",").split(",") if token.strip()}
 
 
 def workspace_debug_enabled(topic: str | None = None) -> bool:
@@ -175,11 +180,15 @@ def _scroll_area_summary(scroll: QScrollArea | None) -> dict[str, object] | None
     content = scroll.widget()
     viewport = scroll.viewport()
     try:
-        direct_child_widgets = [
-            child
-            for child in content.findChildren(QWidget, options=Qt.FindDirectChildrenOnly)
-            if _qt_object_is_valid(child)
-        ] if isinstance(content, QWidget) else []
+        direct_child_widgets = (
+            [
+                child
+                for child in content.findChildren(QWidget, options=Qt.FindDirectChildrenOnly)
+                if _qt_object_is_valid(child)
+            ]
+            if isinstance(content, QWidget)
+            else []
+        )
     except Exception:
         direct_child_widgets = []
     return {
@@ -224,9 +233,7 @@ def workspace_debug_log(topic: str, event: str, **payload) -> None:
     if _env_flag("ISRC_CT_DEBUG_STACKS"):
         stack_lines = traceback.format_stack(limit=10)
         payload["stack"] = [
-            line.rstrip()
-            for line in stack_lines[:-1]
-            if "workspace_debug.py" not in line
+            line.rstrip() for line in stack_lines[:-1] if "workspace_debug.py" not in line
         ]
     record = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -304,13 +311,19 @@ def summarize_qdockwidget(
             "hidden": bool(dock.isHidden()),
             "updates_enabled": bool(dock.updatesEnabled()),
             "floating": bool(dock.isFloating()),
-            "toggle_checked": bool(isinstance(toggle_action, QAction) and toggle_action.isChecked()),
+            "toggle_checked": bool(
+                isinstance(toggle_action, QAction) and toggle_action.isChecked()
+            ),
             "area": _enum_payload(area) or 0,
             "last_dock_area": _enum_payload(dock.property("lastDockArea")) or 0,
             "geometry": _rect_payload(dock.geometry()),
             "minimum_size": _size_payload(dock.minimumSize()),
-            "widget_class_name": dock.widget().__class__.__name__ if isinstance(dock.widget(), QWidget) else "",
-            "widget_visible": bool(isinstance(dock.widget(), QWidget) and dock.widget().isVisible()),
+            "widget_class_name": (
+                dock.widget().__class__.__name__ if isinstance(dock.widget(), QWidget) else ""
+            ),
+            "widget_visible": bool(
+                isinstance(dock.widget(), QWidget) and dock.widget().isVisible()
+            ),
             "scroll_area": _scroll_area_summary(dock.widget()),
         }
     except Exception as exc:
@@ -337,33 +350,43 @@ def summarize_workspace_host(host: QWidget) -> dict[str, object]:
             "updates_enabled": bool(host.updatesEnabled()),
             "size": _size_payload(host.size()),
             "geometry": _rect_payload(host.geometry()),
-            "central_geometry": _rect_payload(central_widget.geometry())
-            if isinstance(central_widget, QWidget)
-            else None,
+            "central_geometry": (
+                _rect_payload(central_widget.geometry())
+                if isinstance(central_widget, QWidget)
+                else None
+            ),
             "locked": bool(getattr(host, "_locked", True)),
             "layout_normalization_pending": bool(
                 getattr(host, "_layout_normalization_pending", False)
             ),
-            "pending_state": {
-                "layout_locked": bool(pending_state.get("layout_locked", True)),
-                "layout_version": int(pending_state.get("layout_version") or 0),
-                "dock_state_b64_len": len(str(pending_state.get("dock_state_b64") or "")),
-                "dock_state_digest": digest_debug_value(str(pending_state.get("dock_state_b64") or "")),
-                "dock_object_names": list(pending_state.get("dock_object_names") or []),
-                "dock_visibility": dict(pending_state.get("dock_visibility") or {}),
-            }
-            if pending_state
-            else None,
-            "stable_state": {
-                "layout_locked": bool(stable_state.get("layout_locked", True)),
-                "layout_version": int(stable_state.get("layout_version") or 0),
-                "dock_state_b64_len": len(str(stable_state.get("dock_state_b64") or "")),
-                "dock_state_digest": digest_debug_value(str(stable_state.get("dock_state_b64") or "")),
-                "dock_object_names": list(stable_state.get("dock_object_names") or []),
-                "dock_visibility": dict(stable_state.get("dock_visibility") or {}),
-            }
-            if stable_state
-            else None,
+            "pending_state": (
+                {
+                    "layout_locked": bool(pending_state.get("layout_locked", True)),
+                    "layout_version": int(pending_state.get("layout_version") or 0),
+                    "dock_state_b64_len": len(str(pending_state.get("dock_state_b64") or "")),
+                    "dock_state_digest": digest_debug_value(
+                        str(pending_state.get("dock_state_b64") or "")
+                    ),
+                    "dock_object_names": list(pending_state.get("dock_object_names") or []),
+                    "dock_visibility": dict(pending_state.get("dock_visibility") or {}),
+                }
+                if pending_state
+                else None
+            ),
+            "stable_state": (
+                {
+                    "layout_locked": bool(stable_state.get("layout_locked", True)),
+                    "layout_version": int(stable_state.get("layout_version") or 0),
+                    "dock_state_b64_len": len(str(stable_state.get("dock_state_b64") or "")),
+                    "dock_state_digest": digest_debug_value(
+                        str(stable_state.get("dock_state_b64") or "")
+                    ),
+                    "dock_object_names": list(stable_state.get("dock_object_names") or []),
+                    "dock_visibility": dict(stable_state.get("dock_visibility") or {}),
+                }
+                if stable_state
+                else None
+            ),
             "docks": [
                 summarize_qdockwidget(dock, host=host if isinstance(host, QMainWindow) else None)
                 for dock in docks
@@ -420,7 +443,9 @@ def summarize_contract_template_panel(panel: QWidget | None) -> dict[str, object
             "fill_preview_status_label": _label_summary(
                 getattr(panel, "fill_preview_status_label", None)
             ),
-            "fill_preview_stale_label": _label_summary(getattr(panel, "fill_preview_stale_label", None)),
+            "fill_preview_stale_label": _label_summary(
+                getattr(panel, "fill_preview_stale_label", None)
+            ),
             "fill_auto_form": _form_layout_summary(getattr(panel, "fill_auto_form", None)),
             "fill_selector_form": _form_layout_summary(getattr(panel, "fill_selector_form", None)),
             "fill_manual_form": _form_layout_summary(getattr(panel, "fill_manual_form", None)),
@@ -462,16 +487,20 @@ def summarize_catalog_workspace_dock(dock: QDockWidget | None) -> dict[str, obje
                     getattr(dock, "_pending_panel_layout_state_dirty", False)
                 ),
                 "pending_panel_layout_state": summarize_panel_layout_state(
-                    pending_panel_layout_state if isinstance(pending_panel_layout_state, dict) else {}
+                    pending_panel_layout_state
+                    if isinstance(pending_panel_layout_state, dict)
+                    else {}
                 ),
                 "default_placement_pending": bool(
                     getattr(dock, "_default_placement_pending", False)
                 ),
                 "panel_materialized": bool(isinstance(panel, QWidget)),
                 "panel_class_name": panel.__class__.__name__ if isinstance(panel, QWidget) else "",
-                "panel_summary": summarize_contract_template_panel(panel)
-                if isinstance(panel, QWidget)
-                else {"valid": False},
+                "panel_summary": (
+                    summarize_contract_template_panel(panel)
+                    if isinstance(panel, QWidget)
+                    else {"valid": False}
+                ),
             }
         )
         return summary

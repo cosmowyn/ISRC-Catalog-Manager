@@ -8,9 +8,9 @@ from tests.qt_test_helpers import require_qapplication
 try:
     from PySide6.QtWidgets import QDockWidget, QLabel, QMainWindow, QToolBar, QVBoxLayout, QWidget
 
-    from isrc_manager.catalog_workspace import CatalogWorkspaceDock
     from isrc_manager import settings as app_settings
     from isrc_manager.app_bootstrap import get_or_create_application, run_desktop_application
+    from isrc_manager.catalog_workspace import CatalogWorkspaceDock
     from isrc_manager.constants import SETTINGS_BASENAME
     from isrc_manager.startup_progress import StartupPhase, startup_phase_label
 except Exception as exc:  # pragma: no cover - environment-specific fallback

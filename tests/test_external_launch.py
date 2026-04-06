@@ -125,11 +125,14 @@ class ExternalLaunchPolicyTests(unittest.TestCase):
         self.assertEqual(save_filter, "")
         self.assertEqual(selected_directory, "")
         requests = get_recorded_external_launches()
-        self.assertEqual([request.via for request in requests], [
-            "QFileDialog.getOpenFileName",
-            "QFileDialog.getSaveFileName",
-            "QFileDialog.getExistingDirectory",
-        ])
+        self.assertEqual(
+            [request.via for request in requests],
+            [
+                "QFileDialog.getOpenFileName",
+                "QFileDialog.getSaveFileName",
+                "QFileDialog.getExistingDirectory",
+            ],
+        )
         self.assertTrue(all(request.blocked for request in requests))
         self.assertEqual(requests[0].metadata.get("directory"), "/tmp/contracts")
         self.assertEqual(requests[1].metadata.get("directory"), "/tmp/exports/agreement.pdf")
@@ -306,7 +309,9 @@ class ExternalLaunchPolicyTests(unittest.TestCase):
         self.assertEqual(payload["request_count"], 1)
         self.assertEqual(payload["first_via"], "external_launch.open_external_url")
         self.assertTrue(payload["first_blocked"])
-        self.assertTrue(str(payload["first_target"]).startswith("file:///tmp/external-launch-probe"))
+        self.assertTrue(
+            str(payload["first_target"]).startswith("file:///tmp/external-launch-probe")
+        )
 
     def test_unittest_discover_bootstraps_guard_for_top_level_gui_modules(self):
         repo_root = Path(__file__).resolve().parents[1]

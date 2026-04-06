@@ -17,7 +17,6 @@ from isrc_manager.contract_templates.dialogs import (
     QWebEngineView,
     _ContractTemplatePreviewPage,
     _DockableWorkspaceTab,
-    _FillHtmlPreviewController,
     _InteractiveHtmlPreviewView,
 )
 from isrc_manager.contract_templates.form_service import ContractTemplateFormService
@@ -246,7 +245,9 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
                     ),
                 )
 
-    def _make_outer_workspace_dock(self, window: QMainWindow, object_name: str) -> CatalogWorkspaceDock:
+    def _make_outer_workspace_dock(
+        self, window: QMainWindow, object_name: str
+    ) -> CatalogWorkspaceDock:
         panel_kwargs = self._panel_constructor_kwargs()
         return CatalogWorkspaceDock(
             window,
@@ -931,9 +932,7 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
         self._focus_fill()
         host = self.panel._tab_hosts["fill"]
         revision_dock = next(
-            dock
-            for dock in host._docks
-            if dock.objectName() == "contractTemplateFillRevisionDock"
+            dock for dock in host._docks if dock.objectName() == "contractTemplateFillRevisionDock"
         )
 
         host.set_locked(False)
@@ -982,9 +981,7 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
         self._focus_fill()
         host = self.panel._tab_hosts["fill"]
         revision_dock = next(
-            dock
-            for dock in host._docks
-            if dock.objectName() == "contractTemplateFillRevisionDock"
+            dock for dock in host._docks if dock.objectName() == "contractTemplateFillRevisionDock"
         )
 
         host.set_locked(False)
@@ -1254,7 +1251,9 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
             restored_panel.deleteLater()
             pump_events(app=self.app, cycles=2)
 
-    def test_restore_layout_state_defers_hidden_import_restore_until_tab_activation_and_keeps_docks_reopenable(self):
+    def test_restore_layout_state_defers_hidden_import_restore_until_tab_activation_and_keeps_docks_reopenable(
+        self,
+    ):
         self._focus_import()
         import_host = self.panel._tab_hosts["import"]
         snapshots_dock = next(
@@ -1307,7 +1306,9 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
             self.assertTrue(visible_scroll_contents)
             self.assertTrue(all(widget.isVisible() for widget in visible_scroll_contents))
             self.assertTrue(
-                all(widget.width() > 8 and widget.height() > 8 for widget in visible_scroll_contents)
+                all(
+                    widget.width() > 8 and widget.height() > 8 for widget in visible_scroll_contents
+                )
             )
 
             panels_action.trigger()
@@ -1460,7 +1461,9 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
             restored_panel.deleteLater()
             pump_events(app=self.app, cycles=2)
 
-    def test_outer_workspace_restore_keeps_hidden_fill_dock_recoverable_when_panel_materializes(self):
+    def test_outer_workspace_restore_keeps_hidden_fill_dock_recoverable_when_panel_materializes(
+        self,
+    ):
         window = self._OuterWorkspaceWindow()
         window.resize(1600, 1100)
         source_dock = self._make_outer_workspace_dock(window, "contractTemplateOuterSourceDock")
@@ -1529,7 +1532,9 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
             window.deleteLater()
             pump_events(app=self.app, cycles=4)
 
-    def test_outer_workspace_sparse_saved_state_materializes_default_fill_layout_without_orphans(self):
+    def test_outer_workspace_sparse_saved_state_materializes_default_fill_layout_without_orphans(
+        self,
+    ):
         window = self._OuterWorkspaceWindow()
         window.resize(1600, 1100)
         source_dock = self._make_outer_workspace_dock(
@@ -1580,7 +1585,9 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
     def test_outer_hidden_workspace_resave_preserves_pending_nested_fill_state(self):
         window = self._OuterWorkspaceWindow()
         window.resize(1600, 1100)
-        source_dock = self._make_outer_workspace_dock(window, "contractTemplateOuterHiddenSourceDock")
+        source_dock = self._make_outer_workspace_dock(
+            window, "contractTemplateOuterHiddenSourceDock"
+        )
         restored_dock = self._make_outer_workspace_dock(
             window, "contractTemplateOuterHiddenRestoreDock"
         )
@@ -1726,10 +1733,11 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
         self.assertLess(export_dock.geometry().y(), initial_export_y)
         self.assertLessEqual(export_dock.geometry().y(), revision_dock.geometry().bottom() + 16)
 
-    def test_fill_workspace_has_no_visible_dock_overlaps_after_unlock_hide_show_move_and_restore(self):
+    def test_fill_workspace_has_no_visible_dock_overlaps_after_unlock_hide_show_move_and_restore(
+        self,
+    ):
         host = self._fill_host()
         draft_dock = self._fill_dock("contractTemplateFillDraftWorkspaceDock")
-        export_dock = self._fill_dock("contractTemplateFillResolvedExportDock")
         panels_action = host.panels_action_for_dock(draft_dock)
 
         host.set_locked(False)
@@ -1861,10 +1869,13 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
                 apply_calls.append(bool(force))
                 return original_apply(force=force)
 
-            with mock.patch.object(view, "_apply_fit_if_needed", side_effect=_record_apply), mock.patch.object(
-                view,
-                "_schedule_fit",
-                side_effect=lambda *, delay_ms=90: schedule_calls.append(int(delay_ms)),
+            with (
+                mock.patch.object(view, "_apply_fit_if_needed", side_effect=_record_apply),
+                mock.patch.object(
+                    view,
+                    "_schedule_fit",
+                    side_effect=lambda *, delay_ms=90: schedule_calls.append(int(delay_ms)),
+                ),
             ):
                 view.resizeEvent(
                     QResizeEvent(
@@ -2117,7 +2128,9 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
         self.panel.focus_tab("fill")
         pump_events(app=self.app, cycles=6)
 
-        self.assertEqual(self.panel._fill_preview_controller._latest_generation, starting_generation)
+        self.assertEqual(
+            self.panel._fill_preview_controller._latest_generation, starting_generation
+        )
         self.assertEqual(view.current_zoom_percent(), starting_zoom)
         self.assertEqual(self.panel.fill_preview_zoom_label.text(), f"{starting_zoom}%")
 
@@ -2144,7 +2157,9 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
         pump_events(app=self.app, cycles=4)
 
         self.assertEqual(view._zoom_owner, "manual")
-        self.assertEqual(self.panel._fill_preview_controller._latest_generation, starting_generation)
+        self.assertEqual(
+            self.panel._fill_preview_controller._latest_generation, starting_generation
+        )
         self.assertEqual(view.current_zoom_percent(), manual_zoom)
         self.assertEqual(self.panel.fill_preview_zoom_label.text(), f"{manual_zoom}%")
 

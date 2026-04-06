@@ -146,7 +146,10 @@ class CatalogWorkspaceDock(QDockWidget):
                     schedule_save()
 
         QTimer.singleShot(0, _finalize_show_panel)
-        if not self._pending_panel_layout_state_dirty and not self._app_layout_restore_in_progress():
+        if (
+            not self._pending_panel_layout_state_dirty
+            and not self._app_layout_restore_in_progress()
+        ):
             refresh = getattr(panel, "refresh", None)
             if callable(refresh):
                 refresh()
