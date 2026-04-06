@@ -10,7 +10,12 @@ from isrc_manager.services import (
     ContractTemplateService,
     DatabaseSchemaService,
 )
-from tests.contract_templates._support import FakePagesAdapter, make_docx_bytes, make_html_zip_bytes
+from tests.contract_templates._support import (
+    FakeDocxHtmlAdapter,
+    FakePagesAdapter,
+    make_docx_bytes,
+    make_html_zip_bytes,
+)
 
 
 class ContractTemplateRevisionImportTests(unittest.TestCase):
@@ -40,12 +45,11 @@ class ContractTemplateRevisionImportTests(unittest.TestCase):
     def test_import_revision_from_docx_path_persists_scan_metadata_and_inventory(self):
         template = self._create_template()
         source_path = self.root / "artist-agreement.docx"
-        source_path.write_bytes(
-            make_docx_bytes(
-                document_paragraphs=(("Track ", "{{db.track.track_title}}"),),
-                header_paragraphs=(("Signed ", "{{manual.license_date}}"),),
-            )
+        source_bytes = make_docx_bytes(
+            document_paragraphs=(("Track ", "{{db.track.track_title}}"),),
+            header_paragraphs=(("Signed ", "{{manual.license_date}}"),),
         )
+        source_path.write_bytes(source_bytes)
 
         result = self.service.import_revision_from_path(
             template.template_id,
@@ -54,6 +58,7 @@ class ContractTemplateRevisionImportTests(unittest.TestCase):
         )
         placeholders = self.service.list_placeholders(result.revision.revision_id)
         template_after = self.service.fetch_template(template.template_id)
+        html_source = self.service.resolve_html_revision_source_path(result.revision.revision_id)
 
         self.assertEqual(result.scan_result.scan_status, "scan_ready")
         self.assertEqual(result.revision.scan_adapter, "docx_ooxml_direct")
@@ -66,6 +71,15 @@ class ContractTemplateRevisionImportTests(unittest.TestCase):
         )
         self.assertIsNotNone(placeholders[0].metadata)
         self.assertEqual(template_after.active_revision_id, result.revision.revision_id)
+        self.assertEqual(
+            self.service.load_revision_source_bytes(result.revision.revision_id),
+            source_bytes,
+        )
+        self.assertIsNotNone(html_source)
+        self.assertTrue(html_source.exists())
+        self.assertTrue(
+            self.service.revision_supports_html_working_draft(result.revision.revision_id)
+        )
 
     def test_import_revision_dedupes_repeated_symbols_and_preserves_occurrence_counts(self):
         template = self._create_template()
@@ -274,6 +288,9 @@ class ContractTemplateRevisionImportTests(unittest.TestCase):
         self.service = ContractTemplateService(
             self.conn,
             data_root=self.root,
+            docx_html_adapter=FakeDocxHtmlAdapter(
+                html_text="<html><body><p>{{db.track.track_title}}</p></body></html>"
+            ),
             pages_adapter=pages_adapter,
         )
 
@@ -297,6 +314,7 @@ class ContractTemplateRevisionImportTests(unittest.TestCase):
         )
         rescan = self.service.rescan_revision(result.revision.revision_id)
         bindings = self.service.list_placeholder_bindings(result.revision.revision_id)
+        html_source = self.service.resolve_html_revision_source_path(result.revision.revision_id)
 
         self.assertEqual(result.revision.scan_adapter, "fake_pages_bridge")
         self.assertEqual(result.revision.source_format, "pages")
@@ -308,6 +326,8 @@ class ContractTemplateRevisionImportTests(unittest.TestCase):
             self.service.load_revision_source_bytes(result.revision.revision_id),
             b"pages-source",
         )
+        self.assertIsNotNone(html_source)
+        self.assertTrue(html_source.exists())
         self.assertGreaterEqual(len(pages_adapter.convert_calls), 2)
 
     def test_blocked_pages_import_persists_revision_without_replacing_active_ready_revision(self):
@@ -334,6 +354,9 @@ class ContractTemplateRevisionImportTests(unittest.TestCase):
         self.assertEqual(blocked_result.revision.placeholder_count, 0)
         self.assertEqual(template_after.active_revision_id, ready_result.revision.revision_id)
         self.assertEqual(len(blocked_service.list_revisions(template.template_id)), 2)
+        self.assertIsNone(
+            blocked_service.resolve_html_revision_source_path(blocked_result.revision.revision_id)
+        )
 
     def test_blocked_pages_rescan_preserves_existing_inventory_and_bindings(self):
         template = self._create_template()

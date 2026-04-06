@@ -2,14 +2,24 @@
 
 from __future__ import annotations
 
+import html as html_module
 import shutil
+import subprocess
 import sys
+import tempfile
 from io import BytesIO
 from pathlib import Path
 from xml.etree import ElementTree as ET
 from zipfile import BadZipFile, ZipFile
 
+from isrc_manager.file_storage import coalesce_filename
+
 from ..external_launch import run_external_launcher_subprocess
+from .html_support import (
+    HTMLTemplateBundle,
+    build_html_bundle_from_source_bytes,
+    collect_html_bundle_from_directory,
+)
 from .models import (
     ContractTemplateScanDiagnostic,
     ContractTemplateScanEntry,
@@ -185,6 +195,197 @@ class DOCXTemplateScanner:
         if "}" in tag:
             return tag.rsplit("}", 1)[-1]
         return tag
+
+
+class DOCXHtmlAdapter:
+    """Normalizes DOCX sources into an HTML working bundle."""
+
+    adapter_name = "docx_html_working_draft"
+
+    def __init__(
+        self,
+        *,
+        textutil_path: str | None = None,
+        scanner: DOCXTemplateScanner | None = None,
+    ):
+        self.textutil_path = (
+            textutil_path if textutil_path is not None else shutil.which("textutil")
+        )
+        self.scanner = scanner if scanner is not None else DOCXTemplateScanner()
+
+    def is_available(self) -> bool:
+        return True
+
+    def availability_message(self) -> str | None:
+        return None
+
+    def docx_bytes_to_html(
+        self,
+        docx_bytes: bytes,
+        *,
+        source_filename: str = "contract-template.docx",
+    ) -> str:
+        bundle = self.docx_bytes_to_html_bundle(
+            docx_bytes,
+            source_filename=source_filename,
+        )
+        return bundle.primary_bytes().decode("utf-8", errors="replace")
+
+    def docx_bytes_to_html_bundle(
+        self,
+        docx_bytes: bytes,
+        *,
+        source_filename: str = "contract-template.docx",
+    ) -> HTMLTemplateBundle:
+        try:
+            if self._native_textutil_available():
+                return self._convert_via_textutil(
+                    docx_bytes,
+                    source_filename=source_filename,
+                )
+        except ContractTemplateIngestionError:
+            pass
+        return self._convert_via_best_effort_html(
+            docx_bytes,
+            source_filename=source_filename,
+        )
+
+    def _native_textutil_available(self) -> bool:
+        return sys.platform == "darwin" and bool(self.textutil_path)
+
+    def _convert_via_textutil(
+        self,
+        docx_bytes: bytes,
+        *,
+        source_filename: str,
+    ) -> HTMLTemplateBundle:
+        if not self._native_textutil_available():
+            raise ContractTemplateIngestionError(
+                "Native DOCX-to-HTML conversion is unavailable on this machine."
+            )
+        with tempfile.TemporaryDirectory(prefix="contract-template-docx-html-") as tmpdir:
+            workdir = Path(tmpdir)
+            source_root = workdir / "source"
+            rendered_root = workdir / "rendered"
+            source_root.mkdir(parents=True, exist_ok=True)
+            rendered_root.mkdir(parents=True, exist_ok=True)
+            docx_path = source_root / coalesce_filename(
+                source_filename,
+                default_stem="contract-template",
+                default_suffix=".docx",
+            )
+            if docx_path.suffix.lower() != ".docx":
+                docx_path = docx_path.with_suffix(".docx")
+            html_path = rendered_root / docx_path.with_suffix(".html").name
+            docx_path.write_bytes(docx_bytes)
+            result = subprocess.run(
+                [
+                    str(self.textutil_path),
+                    "-convert",
+                    "html",
+                    "-output",
+                    str(html_path),
+                    str(docx_path),
+                ],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0 or not html_path.exists():
+                raise ContractTemplateIngestionError(
+                    "DOCX-to-HTML conversion via textutil failed."
+                    + (
+                        f" {str(result.stderr or '').strip()}"
+                        if str(result.stderr or "").strip()
+                        else ""
+                    )
+                )
+            return collect_html_bundle_from_directory(
+                rendered_root,
+                primary_relative_path=html_path.name,
+            )
+
+    def _convert_via_best_effort_html(
+        self,
+        docx_bytes: bytes,
+        *,
+        source_filename: str,
+    ) -> HTMLTemplateBundle:
+        try:
+            with ZipFile(BytesIO(docx_bytes)) as archive:
+                sections = self._extract_docx_sections(archive)
+        except BadZipFile as exc:
+            raise ContractTemplateIngestionError(
+                f"The DOCX file could not be read as an OOXML archive: {exc}"
+            ) from exc
+        html_text = self._render_best_effort_html(sections)
+        html_filename = Path(
+            coalesce_filename(
+                source_filename,
+                default_stem="contract-template",
+                default_suffix=".html",
+            )
+        ).with_suffix(".html")
+        return build_html_bundle_from_source_bytes(
+            html_text.encode("utf-8"),
+            source_filename=html_filename.name,
+        )
+
+    def _extract_docx_sections(self, archive: ZipFile) -> list[tuple[str, str, list[str]]]:
+        sections: list[tuple[str, str, list[str]]] = []
+        for part_name in self.scanner._scan_parts(archive.namelist()):
+            try:
+                root = ET.fromstring(archive.read(part_name))
+            except ET.ParseError:
+                continue
+            paragraphs = self.scanner._extract_paragraph_texts(root)
+            if not paragraphs:
+                continue
+            if part_name == "word/document.xml":
+                sections.append(("main", part_name, paragraphs))
+            elif "header" in part_name:
+                sections.append(("header", part_name, paragraphs))
+            else:
+                sections.append(("footer", part_name, paragraphs))
+        if not sections:
+            raise ContractTemplateIngestionError(
+                "The DOCX file does not contain readable document content."
+            )
+        return sections
+
+    def _render_best_effort_html(
+        self,
+        sections: list[tuple[str, str, list[str]]],
+    ) -> str:
+        fragments = [
+            "<!DOCTYPE html>",
+            "<html>",
+            "<head>",
+            '<meta charset="utf-8">',
+            "<style>",
+            "body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; "
+            "margin: 32px; color: #111827; }",
+            "header, footer { color: #4b5563; margin: 0 0 20px 0; }",
+            "main { margin: 0; }",
+            "p { margin: 0 0 12px 0; white-space: normal; }",
+            "</style>",
+            "</head>",
+            "<body>",
+        ]
+        for role, part_name, paragraphs in sections:
+            tag = "main" if role == "main" else role
+            fragments.append(
+                f'<{tag} data-source-part="{html_module.escape(part_name, quote=True)}">'
+            )
+            for paragraph in paragraphs:
+                fragments.append(f"<p>{self._htmlize_paragraph(paragraph)}</p>")
+            fragments.append(f"</{tag}>")
+        fragments.extend(["</body>", "</html>"])
+        return "".join(fragments)
+
+    @staticmethod
+    def _htmlize_paragraph(text: str) -> str:
+        escaped = html_module.escape(str(text or ""))
+        return escaped.replace("\t", "&emsp;").replace("\n", "<br/>")
 
 
 class PagesTemplateAdapter:

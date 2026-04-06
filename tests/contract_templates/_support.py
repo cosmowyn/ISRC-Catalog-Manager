@@ -6,6 +6,7 @@ from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from isrc_manager.contract_templates import ContractTemplateIngestionError
+from isrc_manager.contract_templates.html_support import build_html_bundle_from_source_bytes
 
 _WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
@@ -137,6 +138,7 @@ class FakeDocxHtmlAdapter:
     def __init__(self, *, html_text: str | None = None):
         self.html_text = html_text or "<html><body><p>Contract Template Export</p></body></html>"
         self.calls: list[tuple[bytes, str]] = []
+        self.bundle_calls: list[tuple[bytes, str]] = []
 
     def docx_bytes_to_html(
         self,
@@ -146,6 +148,19 @@ class FakeDocxHtmlAdapter:
     ) -> str:
         self.calls.append((bytes(docx_bytes), str(source_filename)))
         return self.html_text
+
+    def docx_bytes_to_html_bundle(
+        self,
+        docx_bytes: bytes,
+        *,
+        source_filename: str = "contract-template.docx",
+    ):
+        self.bundle_calls.append((bytes(docx_bytes), str(source_filename)))
+        html_name = f"{Path(source_filename).stem or 'contract-template'}.html"
+        return build_html_bundle_from_source_bytes(
+            self.html_text.encode("utf-8"),
+            source_filename=html_name,
+        )
 
 
 class FakeHtmlPdfAdapter:

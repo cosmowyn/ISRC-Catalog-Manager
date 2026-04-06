@@ -5488,7 +5488,7 @@ class AppShellTestCase(unittest.TestCase):
         )
         self.assertEqual(
             sorted(artifact.artifact_type for artifact in artifacts),
-            ["pdf", "resolved_docx"],
+            ["pdf", "resolved_docx", "resolved_html"],
         )
         self.assertIn("Exported PDF", panel.fill_export_status_label.text())
         self.assertTrue(Path(artifacts[0].output_path).exists())

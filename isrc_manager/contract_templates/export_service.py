@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import re
 import shutil
-import subprocess
-import sys
 import tempfile
 import uuid
 from io import BytesIO
@@ -23,7 +21,7 @@ from PySide6.QtWidgets import QApplication
 from isrc_manager.file_storage import coalesce_filename, sha256_digest
 
 from .html_support import clone_html_package_tree, decode_html_bytes, replace_html_placeholders
-from .ingestion import PagesTemplateAdapter
+from .ingestion import DOCXHtmlAdapter, PagesTemplateAdapter
 from .models import (
     ContractTemplateExportResult,
     ContractTemplateOutputArtifactPayload,
@@ -73,71 +71,10 @@ class ContractTemplateExportError(RuntimeError):
     """Raised when a contract template draft cannot be resolved or exported."""
 
 
-class TextutilDocxRenderAdapter:
-    """Converts resolved DOCX bytes to HTML using local macOS tooling."""
+class TextutilDocxRenderAdapter(DOCXHtmlAdapter):
+    """Converts resolved DOCX bytes to HTML with native tooling and a best-effort fallback."""
 
     adapter_name = "textutil_docx_html_qt_pdf"
-
-    def __init__(self, *, textutil_path: str | None = None):
-        self.textutil_path = (
-            textutil_path if textutil_path is not None else shutil.which("textutil")
-        )
-
-    def is_available(self) -> bool:
-        return sys.platform == "darwin" and bool(self.textutil_path)
-
-    def availability_message(self) -> str | None:
-        if self.is_available():
-            return None
-        if sys.platform != "darwin":
-            return "PDF export is only available on macOS hosts with the local document bridge."
-        if not self.textutil_path:
-            return "PDF export is unavailable because the macOS 'textutil' tool was not found."
-        return "PDF export is unavailable on this machine."
-
-    def docx_bytes_to_html(
-        self,
-        docx_bytes: bytes,
-        *,
-        source_filename: str = "contract-template.docx",
-    ) -> str:
-        if not self.is_available():
-            raise ContractTemplateExportError(
-                self.availability_message() or "PDF export is unavailable."
-            )
-        with tempfile.TemporaryDirectory(prefix="contract-template-render-") as tmpdir:
-            workdir = Path(tmpdir)
-            docx_path = workdir / coalesce_filename(
-                source_filename,
-                default_stem="contract-template",
-                default_suffix=".docx",
-            )
-            if docx_path.suffix.lower() != ".docx":
-                docx_path = docx_path.with_suffix(".docx")
-            html_path = docx_path.with_suffix(".html")
-            docx_path.write_bytes(docx_bytes)
-            result = subprocess.run(
-                [
-                    str(self.textutil_path),
-                    "-convert",
-                    "html",
-                    "-output",
-                    str(html_path),
-                    str(docx_path),
-                ],
-                capture_output=True,
-                text=True,
-            )
-            if result.returncode != 0 or not html_path.exists():
-                raise ContractTemplateExportError(
-                    "DOCX-to-HTML rendering via textutil failed."
-                    + (
-                        f" {str(result.stderr or '').strip()}"
-                        if str(result.stderr or "").strip()
-                        else ""
-                    )
-                )
-            return html_path.read_text(encoding="utf-8", errors="replace")
 
 
 class QtWebEngineHtmlPdfAdapter:
@@ -292,7 +229,7 @@ class ContractTemplateExportService:
         asset_service=None,
         custom_field_definition_service=None,
         custom_field_value_service=None,
-        html_adapter: TextutilDocxRenderAdapter | None = None,
+        html_adapter: DOCXHtmlAdapter | None = None,
         html_pdf_adapter: QtWebEngineHtmlPdfAdapter | None = None,
         pages_adapter: PagesTemplateAdapter | None = None,
     ):
@@ -309,7 +246,10 @@ class ContractTemplateExportService:
         self.custom_field_definition_service = custom_field_definition_service
         self.custom_field_value_service = custom_field_value_service
         self.html_adapter = (
-            html_adapter if html_adapter is not None else TextutilDocxRenderAdapter()
+            html_adapter
+            if html_adapter is not None
+            else getattr(self.template_service, "docx_html_adapter", None)
+            or TextutilDocxRenderAdapter()
         )
         self.html_pdf_adapter = (
             html_pdf_adapter if html_pdf_adapter is not None else QtWebEngineHtmlPdfAdapter()
@@ -347,76 +287,17 @@ class ContractTemplateExportService:
             raise ContractTemplateExportError(f"Contract template {revision.template_id} not found")
 
         editable_map = dict(editable_payload or {})
-        if str(revision.source_format or "").strip().lower() == "html":
-            return self._export_html_payload_to_pdf(
-                revision=revision,
-                template=template,
-                editable_payload=editable_map,
-                draft_id=draft_id,
-                draft_name=draft_name,
-            )
-        resolved_values, resolution_warnings = self._resolve_payload_values(
-            revision_id,
-            editable_map,
-        )
-        source_docx_bytes, render_source_name = self._export_source_as_docx(
-            revision=revision,
-        )
-        resolved_docx_bytes, replacement_warnings = self._replace_docx_placeholders(
-            source_docx_bytes,
-            resolved_values,
-        )
-        unresolved = self.template_service.docx_scanner.scan_bytes(resolved_docx_bytes).placeholders
-        if unresolved:
-            unresolved_text = ", ".join(item.canonical_symbol for item in unresolved)
+        if not self.template_service.revision_supports_html_working_draft(revision.revision_id):
             raise ContractTemplateExportError(
-                "Resolved document still contains placeholder tokens after replacement: "
-                f"{unresolved_text}"
+                "The selected template revision cannot be normalized into an HTML working draft "
+                "on this machine."
             )
-        warnings = tuple(dict.fromkeys([*resolution_warnings, *replacement_warnings]))
-
-        snapshot = self.template_service.create_resolved_snapshot(
-            ContractTemplateResolvedSnapshotPayload(
-                draft_id=int(draft_id),
-                revision_id=revision.revision_id,
-                resolved_values=resolved_values,
-                resolution_warnings=list(warnings) if warnings else None,
-                preview_payload={
-                    "renderer": self._pdf_renderer_name(),
-                    "source_format": revision.source_format,
-                    "resolved_source_name": render_source_name,
-                },
-                resolved_checksum_sha256=sha256_digest(
-                    str(sorted(resolved_values.items())).encode("utf-8")
-                ),
-            )
-        )
-        self.template_service.set_draft_last_resolved_snapshot(
-            draft_id,
-            snapshot.snapshot_id,
-        )
-
-        stem = _slugify(draft_name or template.name, fallback="contract-template-export")
-        artifact_subdir = f"template_{template.template_id}/snapshot_{snapshot.snapshot_id}"
-        resolved_docx_artifact = self._write_resolved_docx_artifact(
-            snapshot_id=snapshot.snapshot_id,
-            docx_bytes=resolved_docx_bytes,
-            stem=stem,
-            subdir=artifact_subdir,
-        )
-        pdf_artifact = self._write_pdf_artifact(
-            snapshot_id=snapshot.snapshot_id,
-            docx_bytes=resolved_docx_bytes,
-            source_filename=render_source_name,
-            stem=stem,
-            subdir=artifact_subdir,
-        )
-        return ContractTemplateExportResult(
-            snapshot=snapshot,
-            resolved_docx_artifact=resolved_docx_artifact,
-            resolved_html_artifact=None,
-            pdf_artifact=pdf_artifact,
-            warnings=warnings,
+        return self._export_html_payload_to_pdf(
+            revision=revision,
+            template=template,
+            editable_payload=editable_map,
+            draft_id=draft_id,
+            draft_name=draft_name,
         )
 
     def _resolve_payload_values(
@@ -795,17 +676,13 @@ class ContractTemplateExportService:
             raise ContractTemplateExportError(
                 f"Contract template revision {draft.revision_id} not found"
             )
-        if str(revision.source_format or "").strip().lower() != "html":
-            raise ContractTemplateExportError(
-                "HTML draft synchronization is only available for HTML revisions."
-            )
         editable_payload = dict(self.template_service.fetch_draft_payload(draft_id) or {})
-        source_html_path = self.template_service.resolve_html_revision_source_path(
+        source_html_path = self.template_service.ensure_html_revision_source_path(
             revision.revision_id
         )
         if source_html_path is None:
             raise ContractTemplateExportError(
-                f"HTML template source is unavailable for revision {revision.revision_id}."
+                f"HTML working draft source is unavailable for revision {revision.revision_id}."
             )
         rendered_html, source_package_root, _warnings = self._render_html_content(
             revision=revision,
@@ -858,14 +735,10 @@ class ContractTemplateExportService:
         revision = self.template_service.fetch_revision(revision_id)
         if revision is None:
             raise ContractTemplateExportError(f"Contract template revision {revision_id} not found")
-        if str(revision.source_format or "").strip().lower() != "html":
-            raise ContractTemplateExportError(
-                "HTML preview sessions are only available for HTML revisions."
-            )
-        source_html_path = self.template_service.resolve_html_revision_source_path(revision_id)
+        source_html_path = self.template_service.ensure_html_revision_source_path(revision_id)
         if source_html_path is None:
             raise ContractTemplateExportError(
-                f"HTML template source is unavailable for revision {revision_id}."
+                f"HTML working draft source is unavailable for revision {revision_id}."
             )
         rendered_html, source_package_root, warnings = self._render_html_content(
             revision=revision,
@@ -898,12 +771,12 @@ class ContractTemplateExportService:
         editable_payload: dict[str, object],
         strict: bool,
     ) -> tuple[str, Path, tuple[str, ...]]:
-        source_html_path = self.template_service.resolve_html_revision_source_path(
+        source_html_path = self.template_service.ensure_html_revision_source_path(
             revision.revision_id
         )
         if source_html_path is None:
             raise ContractTemplateExportError(
-                f"HTML template source is unavailable for revision {revision.revision_id}."
+                f"HTML working draft source is unavailable for revision {revision.revision_id}."
             )
         package_root = self.template_service.resolve_html_revision_bundle_root(revision.revision_id)
         if package_root is None:
@@ -933,17 +806,26 @@ class ContractTemplateExportService:
             editable_payload,
             strict=True,
         )
+        resolved_docx_bytes = None
+        resolved_docx_name = None
+        docx_warnings: tuple[str, ...] = ()
+        if str(revision.source_format or "").strip().lower() in {"docx", "pages"}:
+            resolved_docx_bytes, resolved_docx_name = self._export_source_as_docx(revision=revision)
+            resolved_docx_bytes, docx_warnings = self._replace_docx_placeholders(
+                resolved_docx_bytes,
+                resolved_values,
+            )
         rendered_html, source_package_root, _warnings = self._render_html_content(
             revision=revision,
             editable_payload=editable_payload,
             strict=True,
         )
-        source_html_path = self.template_service.resolve_html_revision_source_path(
+        source_html_path = self.template_service.ensure_html_revision_source_path(
             revision.revision_id
         )
         if source_html_path is None:
             raise ContractTemplateExportError(
-                f"HTML template source is unavailable for revision {revision.revision_id}."
+                f"HTML working draft source is unavailable for revision {revision.revision_id}."
             )
         working_html_path = self._materialize_html_working_copy(
             draft_id=draft_id,
@@ -964,7 +846,7 @@ class ContractTemplateExportService:
             relative_html = Path(working_html_path.name)
         stem = _slugify(draft_name or template.name, fallback="contract-template-export")
         rendered_html_bytes = rendered_html.encode("utf-8")
-        warnings = tuple(dict.fromkeys(resolution_warnings))
+        warnings = tuple(dict.fromkeys((*resolution_warnings, *docx_warnings)))
 
         snapshot = self.template_service.create_resolved_snapshot(
             ContractTemplateResolvedSnapshotPayload(
@@ -975,6 +857,7 @@ class ContractTemplateExportService:
                 preview_payload={
                     "renderer": self.html_pdf_adapter.adapter_name,
                     "source_format": revision.source_format,
+                    "working_format": "html",
                     "resolved_source_name": working_filename,
                     "working_copy_path": str(working_html_path),
                 },
@@ -1006,6 +889,14 @@ class ContractTemplateExportService:
                 checksum_sha256=sha256_digest(rendered_html_bytes),
             )
         )
+        resolved_docx_artifact = None
+        if resolved_docx_bytes is not None and resolved_docx_name is not None:
+            resolved_docx_artifact = self._write_resolved_docx_artifact(
+                snapshot_id=snapshot.snapshot_id,
+                docx_bytes=resolved_docx_bytes,
+                stem=_slugify(Path(resolved_docx_name).stem, fallback=stem),
+                subdir=final_subdir,
+            )
         pdf_path = artifact_root / final_subdir / f"{stem}.pdf"
         self.html_pdf_adapter.render_file_to_pdf(final_html_path, pdf_path)
         pdf_bytes = pdf_path.read_bytes()
@@ -1022,7 +913,7 @@ class ContractTemplateExportService:
         )
         return ContractTemplateExportResult(
             snapshot=snapshot,
-            resolved_docx_artifact=None,
+            resolved_docx_artifact=resolved_docx_artifact,
             resolved_html_artifact=resolved_html_artifact,
             pdf_artifact=pdf_artifact,
             warnings=warnings,

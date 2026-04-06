@@ -187,10 +187,14 @@ class ContractTemplateExportServiceTests(unittest.TestCase):
         self.assertEqual(updated_draft.last_resolved_snapshot_id, result.snapshot.snapshot_id)
         self.assertEqual(result.pdf_artifact.artifact_type, "pdf")
         self.assertEqual(result.resolved_docx_artifact.artifact_type, "resolved_docx")
+        self.assertIsNotNone(result.resolved_html_artifact)
+        self.assertEqual(result.resolved_html_artifact.artifact_type, "resolved_html")
         self.assertTrue(result.pdf_artifact.output_path.endswith(".pdf"))
         self.assertTrue(result.resolved_docx_artifact.output_path.endswith(".docx"))
+        self.assertTrue(result.resolved_html_artifact.output_path.endswith(".html"))
         self.assertTrue(Path(result.pdf_artifact.output_path).exists())
         self.assertTrue(Path(result.resolved_docx_artifact.output_path).exists())
+        self.assertTrue(Path(result.resolved_html_artifact.output_path).exists())
         self.assertTrue(Path(result.pdf_artifact.output_path).read_bytes().startswith(b"%PDF"))
         resolved_docx_bytes = Path(result.resolved_docx_artifact.output_path).read_bytes()
         self.assertEqual(
@@ -202,9 +206,9 @@ class ContractTemplateExportServiceTests(unittest.TestCase):
         )
         self.assertEqual(
             [artifact.artifact_type for artifact in artifacts],
-            ["pdf", "resolved_docx"],
+            ["pdf", "resolved_docx", "resolved_html"],
         )
-        self.assertEqual(len(self.pages_adapter.pdf_calls), 1)
+        self.assertEqual(len(self.pages_adapter.pdf_calls), 0)
         self.assertEqual(len(self.html_adapter.calls), 0)
         self.assertEqual(
             result.snapshot.resolved_values,
@@ -216,8 +220,10 @@ class ContractTemplateExportServiceTests(unittest.TestCase):
         )
         self.assertEqual(
             result.snapshot.preview_payload.get("renderer"),
-            "fake_pages_bridge_pdf",
+            "fake_html_pdf",
         )
+        self.assertEqual(result.snapshot.preview_payload.get("source_format"), "docx")
+        self.assertEqual(result.snapshot.preview_payload.get("working_format"), "html")
 
     def test_export_draft_to_pdf_rejects_missing_manual_values(self):
         broken = self.template_service.create_draft(
@@ -304,6 +310,7 @@ class ContractTemplateExportServiceTests(unittest.TestCase):
         self.assertIsNotNone(refreshed_draft.working_file_path)
         self.assertEqual(result.snapshot.preview_payload.get("renderer"), "fake_html_pdf")
         self.assertEqual(result.snapshot.preview_payload.get("source_format"), "html")
+        self.assertEqual(result.snapshot.preview_payload.get("working_format"), "html")
         self.assertEqual(
             result.snapshot.preview_payload.get("working_copy_path"),
             str(refreshed_working_path),
@@ -614,6 +621,76 @@ class ContractTemplateExportServiceTests(unittest.TestCase):
 
         self.assertNotIn("{{db.owner.company_name}}", resolved_xml)
         self.assertIn('owner="Moonwake Records"', resolved_xml)
+
+    def test_export_pages_revision_preserves_source_and_renders_pdf_from_html_working_draft(self):
+        pages_template = self.template_service.create_template(
+            ContractTemplatePayload(
+                name="Pages Export Template",
+                description="Pages import/export normalization coverage",
+                template_family="contract",
+                source_format="pages",
+            )
+        )
+        pages_service = ContractTemplateService(
+            self.conn,
+            data_root=self.root,
+            pages_adapter=FakePagesAdapter(
+                docx_bytes=make_docx_bytes(
+                    document_paragraphs=(
+                        ("Track ", "{{db.track.track_title}}"),
+                        ("Date ", "{{manual.license_date}}"),
+                    )
+                )
+            ),
+            docx_html_adapter=FakeDocxHtmlAdapter(
+                html_text=(
+                    "<html><body><p>{{db.track.track_title}}</p>"
+                    "<p>{{manual.license_date}}</p></body></html>"
+                )
+            ),
+        )
+        pages_revision = pages_service.import_revision_from_bytes(
+            pages_template.template_id,
+            b"original-pages-template",
+            payload=ContractTemplateRevisionPayload(source_filename="license.pages"),
+        ).revision
+        pages_draft = pages_service.create_draft(
+            ContractTemplateDraftPayload(
+                revision_id=pages_revision.revision_id,
+                name="Pages Export Draft",
+                editable_payload={
+                    "revision_id": pages_revision.revision_id,
+                    "db_selections": {"{{db.track.track_title}}": "1"},
+                    "manual_values": {"{{manual.license_date}}": "2026-04-06"},
+                    "type_overrides": {},
+                },
+                storage_mode="database",
+            )
+        )
+        export_service = ContractTemplateExportService(
+            template_service=pages_service,
+            catalog_service=self.catalog_service,
+            settings_reads=self.settings_reads,
+            track_service=self.track_service,
+            party_service=self.party_service,
+            html_adapter=FakeDocxHtmlAdapter(),
+            html_pdf_adapter=self.html_pdf_adapter,
+            pages_adapter=pages_service.pages_adapter,
+        )
+
+        result = export_service.export_draft_to_pdf(pages_draft.draft_id)
+
+        self.assertEqual(
+            pages_service.load_revision_source_bytes(pages_revision.revision_id),
+            b"original-pages-template",
+        )
+        self.assertEqual(result.snapshot.preview_payload.get("source_format"), "pages")
+        self.assertEqual(result.snapshot.preview_payload.get("working_format"), "html")
+        self.assertEqual(result.snapshot.preview_payload.get("renderer"), "fake_html_pdf")
+        self.assertIsNotNone(result.resolved_docx_artifact)
+        self.assertIsNotNone(result.resolved_html_artifact)
+        self.assertEqual(len(self.html_pdf_adapter.file_calls), 1)
+        self.assertEqual(len(pages_service.pages_adapter.pdf_calls), 0)
 
     def _docx_with_owner_attribute(self, token: str) -> bytes:
         base_bytes = make_docx_bytes(document_paragraphs=(("Owner ", token),))

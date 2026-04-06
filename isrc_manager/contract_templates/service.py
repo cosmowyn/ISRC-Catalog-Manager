@@ -38,6 +38,7 @@ from .html_support import (
 )
 from .ingestion import (
     ContractTemplateIngestionError,
+    DOCXHtmlAdapter,
     DOCXTemplateScanner,
     PagesTemplateAdapter,
     detect_template_source_format,
@@ -130,6 +131,7 @@ class ContractTemplateService:
         data_root: str | Path | None = None,
         *,
         docx_scanner: DOCXTemplateScanner | None = None,
+        docx_html_adapter: DOCXHtmlAdapter | None = None,
         html_scanner: HTMLTemplateScanner | None = None,
         pages_adapter: PagesTemplateAdapter | None = None,
     ):
@@ -145,6 +147,9 @@ class ContractTemplateService:
             data_root=self.data_root, relative_root=self.ARTIFACT_ROOT
         )
         self.docx_scanner = docx_scanner if docx_scanner is not None else DOCXTemplateScanner()
+        self.docx_html_adapter = (
+            docx_html_adapter if docx_html_adapter is not None else DOCXHtmlAdapter()
+        )
         self.html_scanner = html_scanner if html_scanner is not None else HTMLTemplateScanner()
         self.pages_adapter = pages_adapter if pages_adapter is not None else PagesTemplateAdapter()
 
@@ -560,6 +565,8 @@ class ContractTemplateService:
                 revision_id,
                 assets=self._html_asset_payloads_for_source(managed_file_path),
             )
+        elif record.scan_status == "scan_ready" and source_format in {"docx", "pages"}:
+            self.ensure_html_revision_source_path(revision_id)
         return record
 
     def fetch_revision(self, revision_id: int) -> ContractTemplateRevisionRecord | None:
@@ -922,11 +929,7 @@ class ContractTemplateService:
         record = self.fetch_revision(revision_id)
         if record is None:
             raise ValueError(f"Contract template revision {revision_id} not found")
-        bundle_info = (
-            html_bundle_metadata(record.scan_diagnostics)
-            if is_html_source_format(record.source_format)
-            else None
-        )
+        bundle_info = html_bundle_metadata(record.scan_diagnostics)
         scan_result = self.scan_source_bytes(
             self.load_revision_source_bytes(revision_id),
             source_filename=record.source_filename,
@@ -953,6 +956,8 @@ class ContractTemplateService:
             )
             if activate_if_ready:
                 self.set_active_revision(revision_id)
+            if str(record.source_format or "").strip().lower() in {"docx", "pages"}:
+                self.ensure_html_revision_source_path(revision_id)
         else:
             self._update_revision_scan_state(
                 revision_id,
@@ -1227,6 +1232,45 @@ class ContractTemplateService:
                 ),
             )
 
+    def _build_html_bundle_for_revision(self, revision: ContractTemplateRevisionRecord):
+        source_format = str(revision.source_format or "").strip().lower()
+        if source_format == "docx":
+            return self.docx_html_adapter.docx_bytes_to_html_bundle(
+                self.load_revision_source_bytes(revision.revision_id),
+                source_filename=revision.source_filename,
+            )
+        if source_format != "pages":
+            raise ContractTemplateIngestionError(
+                f"Unsupported template source format for HTML normalization: {revision.source_format}"
+            )
+        if self.pages_adapter is None or not self.pages_adapter.is_available():
+            raise ContractTemplateIngestionError(
+                self.pages_adapter.availability_message()
+                if self.pages_adapter is not None
+                else "Pages conversion is unavailable on this machine."
+            )
+        with tempfile.TemporaryDirectory(prefix="contract-template-pages-html-") as tmpdir:
+            workdir = Path(tmpdir)
+            pages_path = workdir / coalesce_filename(
+                revision.source_filename,
+                default_stem="contract-template",
+                default_suffix=".pages",
+            )
+            if pages_path.suffix.lower() != ".pages":
+                pages_path = pages_path.with_suffix(".pages")
+            pages_path.write_bytes(self.load_revision_source_bytes(revision.revision_id))
+            converted_docx_path = workdir / f"{pages_path.stem}.docx"
+            self.pages_adapter.convert_to_docx(pages_path, converted_docx_path)
+            return self.docx_html_adapter.docx_bytes_to_html_bundle(
+                converted_docx_path.read_bytes(),
+                source_filename=converted_docx_path.name,
+            )
+
+    @staticmethod
+    def _revision_html_bundle_root_path(scan_diagnostics: object | None) -> str | None:
+        bundle_info = html_bundle_metadata(scan_diagnostics) or {}
+        return _clean_text(bundle_info.get("bundle_root"))
+
     def load_revision_source_bytes(self, revision_id: int) -> bytes:
         row = self.conn.execute(
             """
@@ -1256,20 +1300,19 @@ class ContractTemplateService:
 
     def resolve_html_revision_source_path(self, revision_id: int) -> Path | None:
         revision = self.fetch_revision(revision_id)
-        if revision is None or str(revision.source_format or "").strip().lower() != "html":
+        if revision is None:
             return None
         bundle_info = html_bundle_metadata(revision.scan_diagnostics) or {}
         bundle_root = self.source_store.resolve(_clean_text(bundle_info.get("bundle_root")))
-        primary_relative_path = (
-            _clean_text(bundle_info.get("primary_relative_path")) or revision.source_filename
-        )
-        if bundle_root is not None:
+        primary_relative_path = _clean_text(bundle_info.get("primary_relative_path"))
+        if bundle_root is not None and primary_relative_path:
             candidate = bundle_root / Path(primary_relative_path)
             if candidate.exists():
                 return candidate
-        resolved = self.source_store.resolve(revision.managed_file_path)
-        if resolved is not None and resolved.exists():
-            return resolved
+        if is_html_source_format(revision.source_format):
+            resolved = self.source_store.resolve(revision.managed_file_path)
+            if resolved is not None and resolved.exists():
+                return resolved
         return None
 
     def html_package_root_for_path(self, source_path: str | Path) -> Path:
@@ -1287,16 +1330,80 @@ class ContractTemplateService:
 
     def resolve_html_revision_bundle_root(self, revision_id: int) -> Path | None:
         revision = self.fetch_revision(revision_id)
-        if revision is None or not is_html_source_format(revision.source_format):
+        if revision is None:
             return None
         bundle_info = html_bundle_metadata(revision.scan_diagnostics) or {}
         bundle_root = self.source_store.resolve(_clean_text(bundle_info.get("bundle_root")))
         if bundle_root is not None and bundle_root.exists():
             return bundle_root
-        source_path = self.source_store.resolve(revision.managed_file_path)
-        if source_path is not None and source_path.exists():
-            return source_path.parent
+        if is_html_source_format(revision.source_format):
+            source_path = self.source_store.resolve(revision.managed_file_path)
+            if source_path is not None and source_path.exists():
+                return source_path.parent
         return None
+
+    def revision_supports_html_working_draft(self, revision_id: int) -> bool:
+        revision = self.fetch_revision(revision_id)
+        if revision is None:
+            return False
+        if self.resolve_html_revision_source_path(revision_id) is not None:
+            return True
+        source_format = str(revision.source_format or "").strip().lower()
+        if source_format == "html":
+            return True
+        if source_format == "docx":
+            return self.docx_html_adapter is not None and self.docx_html_adapter.is_available()
+        if source_format == "pages":
+            return (
+                self.pages_adapter is not None
+                and self.pages_adapter.is_available()
+                and self.docx_html_adapter is not None
+                and self.docx_html_adapter.is_available()
+            )
+        return False
+
+    def ensure_html_revision_source_path(self, revision_id: int) -> Path | None:
+        existing = self.resolve_html_revision_source_path(revision_id)
+        if existing is not None and existing.exists():
+            return existing
+        revision = self.fetch_revision(revision_id)
+        if revision is None:
+            raise ValueError(f"Contract template revision {revision_id} not found")
+        if is_html_source_format(revision.source_format):
+            return existing
+        bundle = self._build_html_bundle_for_revision(revision)
+        previous_bundle_root = self._revision_html_bundle_root_path(revision.scan_diagnostics)
+        bundle_subdir = f"html_revision_{uuid.uuid4().hex[:12]}"
+        managed_primary_path, bundle_root = write_html_bundle(
+            self.source_store,
+            bundle,
+            bundle_subdir=bundle_subdir,
+        )
+        scan_diagnostics = _merged_scan_diagnostics_payload(
+            scan_diagnostic_entries(revision.scan_diagnostics),
+            html_bundle=_html_bundle_metadata_payload(
+                bundle_root=bundle_root,
+                primary_relative_path=bundle.primary_relative_path,
+                import_kind=bundle.import_kind,
+                package_filename=bundle.package_filename,
+            ),
+        )
+        with self.conn:
+            self.conn.execute(
+                """
+                UPDATE ContractTemplateRevisions
+                SET scan_diagnostics_json=?,
+                    updated_at=datetime('now')
+                WHERE id=?
+                """,
+                (
+                    _json_dumps(scan_diagnostics),
+                    int(revision_id),
+                ),
+            )
+        if previous_bundle_root and previous_bundle_root != bundle_root:
+            self._delete_managed_tree_for_path(self.source_store, previous_bundle_root)
+        return self.source_store.resolve(managed_primary_path)
 
     def convert_revision_storage_mode(
         self, revision_id: int, target_mode: str
@@ -2583,6 +2690,11 @@ class ContractTemplateService:
             for record in revisions
             if remove_source_files and _clean_text(record.managed_file_path)
         ]
+        source_bundle_paths = [
+            self._revision_html_bundle_root_path(record.scan_diagnostics)
+            for record in revisions
+            if remove_source_files
+        ]
         draft_paths = [
             record.managed_file_path
             for record in drafts
@@ -2640,6 +2752,9 @@ class ContractTemplateService:
             )
         for stored_path in source_paths:
             self._delete_managed_tree_for_path(self.source_store, stored_path)
+        for stored_path in source_bundle_paths:
+            if stored_path and stored_path not in source_paths:
+                self._delete_managed_tree_for_path(self.source_store, stored_path)
         for stored_path in draft_paths:
             resolved = self.draft_store.resolve(stored_path)
             if resolved is not None:

@@ -673,14 +673,42 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
         )
         self.assertEqual(
             sorted(artifact.artifact_type for artifact in artifacts),
-            ["pdf", "resolved_docx"],
+            ["pdf", "resolved_docx", "resolved_html"],
         )
         pdf_artifact = next(artifact for artifact in artifacts if artifact.artifact_type == "pdf")
         self.assertTrue(Path(pdf_artifact.output_path).exists())
-        self.assertEqual(len(self.pages_adapter.pdf_calls), 1)
+        self.assertEqual(len(self.pages_adapter.pdf_calls), 0)
         self.assertEqual(len(self.html_adapter.calls), 0)
         self.assertIn("Exported PDF", self.panel.fill_export_status_label.text())
         self.assertIn(str(pdf_artifact.output_path), self.panel.fill_export_status_label.text())
+
+    def test_fill_tab_renders_preview_for_docx_revision_via_html_working_draft(self):
+        self._focus_fill()
+
+        selector = self.panel.selector_widgets["{{db.track.track_title}}"]
+        date_widget = self.panel.manual_widgets["{{manual.license_date}}"]
+        selector.setCurrentIndex(1)
+        date_widget.setDate(QDate(2026, 4, 6))
+        pump_events(app=self.app, cycles=2)
+
+        self.assertTrue(self.panel.fill_preview_button.isEnabled())
+        self.panel.refresh_current_html_preview()
+        pump_events(app=self.app, cycles=5)
+
+        self.assertIsNotNone(self.panel.fill_html_preview_view)
+        wait_for(
+            lambda: bool(self.panel.fill_html_preview_view.url().toLocalFile()),
+            timeout_ms=5000,
+            app=self.app,
+            description="DOCX-derived HTML preview URL to load",
+        )
+        wait_for(
+            lambda: "Previewing current HTML draft state"
+            in self.panel.fill_preview_status_label.text(),
+            timeout_ms=5000,
+            app=self.app,
+            description="DOCX-derived HTML preview status to settle",
+        )
 
     def test_admin_tab_can_import_templates_and_export_selected_draft(self):
         source_path = self.root / "admin-import-template.docx"

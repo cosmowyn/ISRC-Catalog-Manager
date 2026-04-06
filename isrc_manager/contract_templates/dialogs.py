@@ -1736,7 +1736,7 @@ class _FillHtmlPreviewController(QWidget):
             stale_label.setText("Preview stale")
         if not keep_status and hasattr(self.panel, "fill_preview_status_label"):
             self.panel.fill_preview_status_label.setText(
-                "HTML preview becomes available when the selected revision is a native HTML template."
+                "HTML preview becomes available when the selected revision can be prepared as an HTML working draft."
             )
 
     @staticmethod
@@ -2241,7 +2241,9 @@ class ContractTemplateWorkspacePanel(QWidget):
             object_name="contractTemplateImportAdminSurface",
             description=(
                 "Manage imported template families, add new revisions, and keep the "
-                "library honest about archive versus delete semantics."
+                "library honest about archive versus delete semantics. Print-safe HTML "
+                "templates provide the best fidelity, while Pages and DOCX imports are "
+                "preserved unchanged and normalized into HTML working drafts."
             ),
         )
         self.admin_template_table = self._create_admin_table(
@@ -3110,7 +3112,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         preview_toolbar_layout.addStretch(1)
         preview_layout.addWidget(preview_toolbar)
         self.fill_preview_status_label = QLabel(
-            "HTML preview becomes available when the selected revision is a native HTML template.",
+            "HTML preview becomes available when the selected revision can be prepared as an HTML working draft.",
             preview_surface,
         )
         self.fill_preview_status_label.setObjectName("contractTemplatePreviewStatusLabel")
@@ -3144,7 +3146,7 @@ class ContractTemplateWorkspacePanel(QWidget):
             preview_layout.addWidget(self.fill_html_preview_view, 1)
         else:
             self.fill_preview_unavailable_label = QLabel(
-                "Qt WebEngine is unavailable in this runtime, so native HTML preview cannot be shown here.",
+                "Qt WebEngine is unavailable in this runtime, so the HTML working-draft preview cannot be shown here.",
                 preview_surface,
             )
             self.fill_preview_unavailable_label.setWordWrap(True)
@@ -3860,7 +3862,9 @@ class ContractTemplateWorkspacePanel(QWidget):
         html_synced = False
         if export_service is not None:
             revision = template_service.fetch_revision(saved.revision_id)
-            if revision is not None and str(revision.source_format or "").strip().lower() == "html":
+            if revision is not None and template_service.revision_supports_html_working_draft(
+                revision.revision_id
+            ):
                 try:
                     export_service.synchronize_html_draft(saved.draft_id)
                     html_synced = True
@@ -3875,7 +3879,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         self.refresh_fill_drafts(selected_draft_id=saved.draft_id)
         self.fill_draft_status_label.setText(
             f"Saved draft #{saved.draft_id} using {self._storage_label(saved.storage_mode)} storage."
-            + (" Native HTML working copy refreshed." if html_synced else "")
+            + (" HTML working draft refreshed." if html_synced else "")
         )
         if self._fill_preview_controller is not None:
             self._fill_preview_controller.request_refresh(
@@ -3984,14 +3988,16 @@ class ContractTemplateWorkspacePanel(QWidget):
             return
         if QWebEngineView is None or self.fill_html_preview_view is None:
             self.fill_preview_status_label.setText(
-                "Qt WebEngine is unavailable, so native HTML preview cannot be shown."
+                "Qt WebEngine is unavailable, so the HTML working-draft preview cannot be shown."
             )
             return
         revision_id = self._selected_fill_revision_id()
         revision = template_service.fetch_revision(revision_id) if revision_id is not None else None
-        if revision is None or str(revision.source_format or "").strip().lower() != "html":
+        if revision is None or not template_service.revision_supports_html_working_draft(
+            revision.revision_id
+        ):
             self.fill_preview_status_label.setText(
-                "Select an HTML template revision to render a native draft preview."
+                "Select a revision that can be prepared as an HTML working draft to render the preview."
             )
             self.clear_html_preview()
             return
@@ -4008,7 +4014,7 @@ class ContractTemplateWorkspacePanel(QWidget):
             self.fill_html_preview_view.setHtml("")
         if hasattr(self, "fill_preview_status_label"):
             self.fill_preview_status_label.setText(
-                "HTML preview becomes available when the selected revision is a native HTML template."
+                "HTML preview becomes available when the selected revision can be prepared as an HTML working draft."
             )
 
     def open_latest_pdf_for_current_draft(self) -> None:
@@ -5251,26 +5257,31 @@ class ContractTemplateWorkspacePanel(QWidget):
             if template_service is not None and revision_id is not None
             else None
         )
-        is_html = (
-            revision is not None and str(revision.source_format or "").strip().lower() == "html"
+        supports_html_working_draft = (
+            revision is not None
+            and template_service is not None
+            and template_service.revision_supports_html_working_draft(revision.revision_id)
         )
         if hasattr(self, "fill_preview_button"):
             self.fill_preview_button.setEnabled(
-                bool(is_html and self.fill_html_preview_view is not None)
+                bool(supports_html_working_draft and self.fill_html_preview_view is not None)
             )
         if hasattr(self, "fill_preview_clear_button"):
             self.fill_preview_clear_button.setEnabled(self.fill_html_preview_view is not None)
         if self._fill_preview_controller is not None:
-            self._fill_preview_controller.set_revision_context(revision_id if is_html else None)
+            self._fill_preview_controller.set_revision_context(
+                revision_id if supports_html_working_draft else None
+            )
         workspace_debug_log(
             "preview",
             "workspace_panel.sync_html_preview_state",
             revision_id=revision_id,
-            is_html=bool(is_html),
+            supports_html_working_draft=bool(supports_html_working_draft),
+            source_format=_clean_text(getattr(revision, "source_format", None)),
             current_tab=str(self._current_tab_key() or ""),
             preview_refresh_suspended=bool(self._suspend_preview_refresh),
         )
-        if not is_html:
+        if not supports_html_working_draft:
             self.clear_html_preview()
         elif self._fill_preview_controller is not None:
             if self._suspend_preview_refresh:
