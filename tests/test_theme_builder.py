@@ -8,12 +8,21 @@ from tests.qt_test_helpers import require_qapplication
 
 try:
     from PySide6.QtGui import QPalette
-    from PySide6.QtWidgets import QGridLayout, QLabel, QMenuBar, QMessageBox, QWidget
+    from PySide6.QtWidgets import (
+        QGridLayout,
+        QLabel,
+        QMenuBar,
+        QMessageBox,
+        QStyle,
+        QStyleFactory,
+        QWidget,
+    )
 
     import ISRC_manager as app_module
     from isrc_manager.parties import PartyRecord
     from isrc_manager.starter_themes import starter_theme_library, starter_theme_names
     from isrc_manager.theme_builder import (
+        build_theme_style,
         build_theme_stylesheet,
         effective_theme_settings,
         theme_setting_defaults,
@@ -226,6 +235,8 @@ class ThemeBuilderTests(unittest.TestCase):
         self.assertIn("QWidget#contractTemplatePreviewToolbar", stylesheet)
         self.assertIn('QWidget[role="dockTitleBar"]', stylesheet)
         self.assertIn('QPushButton[role="dockControlButton"]', stylesheet)
+        self.assertIn('QToolButton[role="dockControlButton"]', stylesheet)
+        self.assertIn('QToolButton[role="dockControlButton"]::menu-indicator', stylesheet)
         self.assertIn("QSplitter#contractTemplateSnapshotsArtifactsSplitter::handle", stylesheet)
         self.assertIn("QHeaderView {", stylesheet)
         self.assertIn("QTableCornerButton::section", stylesheet)
@@ -245,10 +256,16 @@ class ThemeBuilderTests(unittest.TestCase):
         self.assertIn("background-color:", stylesheet)
         self.assertIn("QMenuBar::item:selected", stylesheet)
         self.assertIn("QMenu::item:disabled", stylesheet)
+        self.assertIn("QMenu::right-arrow", stylesheet)
+        self.assertIn("QMenu::left-arrow", stylesheet)
         self.assertIn("QMenu::separator", stylesheet)
         self.assertIn('QLabel[role="dialogTitle"]', stylesheet)
         self.assertIn("/* Advanced QSS */", stylesheet)
         self.assertIn("QLabel#marker { color: #123456; }", stylesheet)
+
+    def test_build_theme_style_returns_arrow_proxy(self):
+        style = build_theme_style({"window_bg": "#1F2937", "window_fg": "#F9FAFB"})
+        self.assertEqual(style.objectName(), "themeArrowProxyStyle")
 
     def test_application_settings_dialog_exposes_theme_builder_tabs_and_payload(self):
         host = _ThemePreviewHost()
@@ -856,6 +873,14 @@ class ThemeBuilderTests(unittest.TestCase):
         previous_stylesheet = self.app.styleSheet()
         previous_font = self.app.font()
         previous_palette = self.app.palette()
+        previous_style = self.app.style()
+        previous_style_key = str(
+            getattr(
+                getattr(previous_style, "baseStyle", lambda: None)(), "objectName", lambda: ""
+            )()
+            or getattr(previous_style, "objectName", lambda: "")()
+            or "fusion"
+        )
         try:
             host.theme_settings = {
                 "font_family": "Courier New",
@@ -880,12 +905,16 @@ class ThemeBuilderTests(unittest.TestCase):
                 host.file_menu.palette().color(QPalette.WindowText).name().upper(),
                 "#F8FAFC",
             )
+            self.assertEqual(self.app.style().pixelMetric(QStyle.PM_MenuButtonIndicator), 14)
             self.assertIn("#F97316", self.app.styleSheet().upper())
             self.assertGreater(host.boundary_refresh_count, 0)
         finally:
             self.app.setStyleSheet(previous_stylesheet)
             self.app.setFont(previous_font)
             self.app.setPalette(previous_palette)
+            restored_style = QStyleFactory.create(previous_style_key)
+            if restored_style is not None:
+                self.app.setStyle(restored_style)
             host.close()
 
     def test_prepare_theme_application_payload_without_explicit_values_uses_saved_theme_settings(

@@ -7,7 +7,14 @@ from unittest import mock
 
 from PySide6.QtCore import QDate, QEvent, QPoint, QSize, Qt, QUrl
 from PySide6.QtGui import QResizeEvent
-from PySide6.QtWidgets import QDockWidget, QMainWindow, QPushButton, QScrollArea, QTabBar
+from PySide6.QtWidgets import (
+    QDockWidget,
+    QMainWindow,
+    QPushButton,
+    QScrollArea,
+    QTabBar,
+    QToolButton,
+)
 
 from isrc_manager.catalog_workspace import CatalogWorkspaceDock
 from isrc_manager.contract_templates.catalog import ContractTemplateCatalogService
@@ -1767,6 +1774,76 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
             pump_events(app=self.app, cycles=6)
             restored_host = restored_panel._tab_hosts["fill"]
             self._assert_no_visible_dock_overlap(restored_host)
+        finally:
+            restored_panel.close()
+            restored_panel.deleteLater()
+            pump_events(app=self.app, cycles=2)
+
+    def test_fill_title_bar_uses_popup_menu_button_and_live_actions_after_unlock(self):
+        host = self._fill_host()
+        draft_dock = self._fill_dock("contractTemplateFillDraftWorkspaceDock")
+        title_bar = draft_dock.titleBarWidget()
+
+        self.assertIsInstance(title_bar.options_button, QToolButton)
+        self.assertEqual(title_bar.options_button.popupMode(), QToolButton.InstantPopup)
+
+        host.set_locked(False)
+        pump_events(app=self.app, cycles=3)
+
+        start_area = host.dockWidgetArea(draft_dock)
+        title_bar._move_right_action.trigger()
+        pump_events(app=self.app, cycles=4)
+        self.assertNotEqual(host.dockWidgetArea(draft_dock), start_area)
+
+        title_bar._hide_action.trigger()
+        pump_events(app=self.app, cycles=4)
+        self.assertFalse(draft_dock.isVisible())
+
+        draft_dock.toggleViewAction().trigger()
+        pump_events(app=self.app, cycles=4)
+        self.assertTrue(draft_dock.isVisible())
+
+    def test_fill_panels_button_uses_themed_dock_control_role(self):
+        host = self._fill_host()
+
+        self.assertEqual(host.panels_button.property("role"), "dockControlButton")
+        self.assertEqual(host.panels_button.popupMode(), QToolButton.InstantPopup)
+
+    def test_restored_fill_title_bar_actions_stay_bound_to_live_host(self):
+        self._focus_fill()
+        saved_state = self.panel.capture_layout_state()
+
+        restored_panel = ContractTemplateWorkspacePanel(**self._panel_constructor_kwargs())
+        try:
+            restored_panel.show()
+            pump_events(app=self.app, cycles=3)
+            restored_panel.restore_layout_state(saved_state)
+            restored_panel.focus_tab("fill")
+            pump_events(app=self.app, cycles=8)
+
+            restored_host = restored_panel._tab_hosts["fill"]
+            restored_dock = next(
+                dock
+                for dock in restored_host._docks
+                if dock.objectName() == "contractTemplateFillDraftWorkspaceDock"
+            )
+            title_bar = restored_dock.titleBarWidget()
+
+            restored_host.set_locked(False)
+            pump_events(app=self.app, cycles=4)
+
+            start_area = restored_host.dockWidgetArea(restored_dock)
+            title_bar._move_right_action.trigger()
+            pump_events(app=self.app, cycles=4)
+            self.assertNotEqual(restored_host.dockWidgetArea(restored_dock), start_area)
+
+            title_bar._hide_action.trigger()
+            pump_events(app=self.app, cycles=4)
+            self.assertFalse(restored_dock.isVisible())
+
+            restored_dock.toggleViewAction().trigger()
+            pump_events(app=self.app, cycles=4)
+            self.assertTrue(restored_dock.isVisible())
         finally:
             restored_panel.close()
             restored_panel.deleteLater()

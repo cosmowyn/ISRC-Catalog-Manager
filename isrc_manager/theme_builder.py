@@ -5,8 +5,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from urllib.parse import quote
 
-from PySide6.QtGui import QColor, QFont, QPalette
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QPointF, Qt
+from PySide6.QtGui import QColor, QFont, QPainter, QPalette, QPen
+from PySide6.QtWidgets import (
+    QAbstractButton,
+    QAbstractSpinBox,
+    QApplication,
+    QComboBox,
+    QMenu,
+    QProxyStyle,
+    QStyle,
+    QStyleFactory,
+)
 
 
 @dataclass(frozen=True)
@@ -1089,6 +1099,126 @@ def _combo_arrow_data_uri(color: str) -> str:
     return _svg_data_uri(svg_markup)
 
 
+def _compact_menu_arrow_data_uri(color: str) -> str:
+    svg_markup = (
+        "<svg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'>"
+        f"<path fill='{color}' d='M.76.38 4 3.32 7.24.38 8 1.16 4 5 0 1.16z'/>"
+        "</svg>"
+    )
+    return _svg_data_uri(svg_markup)
+
+
+class ThemeArrowProxyStyle(QProxyStyle):
+    """Draw a smaller consistent arrow primitive across styled widgets."""
+
+    _DOWN_MAX_WIDTH = 7.0
+    _DOWN_MAX_HEIGHT = 4.5
+    _SIDE_MAX_WIDTH = 4.5
+    _SIDE_MAX_HEIGHT = 7.0
+
+    def __init__(self, base_style_key: str = "") -> None:
+        super().__init__(base_style_key or "fusion")
+        self.setObjectName("themeArrowProxyStyle")
+
+    def drawPrimitive(
+        self, element, option, painter, widget=None
+    ):  # pragma: no cover - Qt callback
+        if element in {
+            QStyle.PE_IndicatorArrowDown,
+            QStyle.PE_IndicatorArrowUp,
+            QStyle.PE_IndicatorArrowLeft,
+            QStyle.PE_IndicatorArrowRight,
+        }:
+            self._draw_themed_arrow(element, option, painter, widget)
+            return
+        super().drawPrimitive(element, option, painter, widget)
+
+    def pixelMetric(self, metric, option=None, widget=None):  # pragma: no cover - Qt callback
+        if metric == QStyle.PM_MenuButtonIndicator:
+            return 14
+        return super().pixelMetric(metric, option, widget)
+
+    def _draw_themed_arrow(self, element, option, painter, widget) -> None:
+        rect = option.rect
+        if rect.isNull() or not rect.isValid():
+            return
+
+        color = self._arrow_color(option, widget)
+        pen = QPen(color, 1.7, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+        center = rect.center()
+        cx = float(center.x()) + 0.5
+        cy = float(center.y()) + 0.5
+
+        if element in {QStyle.PE_IndicatorArrowDown, QStyle.PE_IndicatorArrowUp}:
+            half_width = min(self._DOWN_MAX_WIDTH / 2.0, max(2.0, rect.width() * 0.26))
+            half_height = min(self._DOWN_MAX_HEIGHT / 2.0, max(1.5, rect.height() * 0.18))
+            if element == QStyle.PE_IndicatorArrowDown:
+                points = (
+                    QPointF(cx - half_width, cy - half_height),
+                    QPointF(cx, cy + half_height),
+                    QPointF(cx + half_width, cy - half_height),
+                )
+            else:
+                points = (
+                    QPointF(cx - half_width, cy + half_height),
+                    QPointF(cx, cy - half_height),
+                    QPointF(cx + half_width, cy + half_height),
+                )
+        else:
+            half_width = min(self._SIDE_MAX_WIDTH / 2.0, max(1.5, rect.width() * 0.18))
+            half_height = min(self._SIDE_MAX_HEIGHT / 2.0, max(2.5, rect.height() * 0.26))
+            if element == QStyle.PE_IndicatorArrowRight:
+                points = (
+                    QPointF(cx - half_width, cy - half_height),
+                    QPointF(cx + half_width, cy),
+                    QPointF(cx - half_width, cy + half_height),
+                )
+            else:
+                points = (
+                    QPointF(cx + half_width, cy - half_height),
+                    QPointF(cx - half_width, cy),
+                    QPointF(cx + half_width, cy + half_height),
+                )
+
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawPolyline(points)
+        painter.restore()
+
+    def _arrow_color(self, option, widget) -> QColor:
+        palette = option.palette
+        enabled = bool(option.state & QStyle.State_Enabled)
+        selected = bool(option.state & QStyle.State_Selected)
+        group = QPalette.Active if enabled else QPalette.Disabled
+
+        if isinstance(widget, QMenu):
+            role = QPalette.HighlightedText if selected else QPalette.WindowText
+        elif isinstance(widget, (QComboBox, QAbstractSpinBox)):
+            role = QPalette.Text
+        elif isinstance(widget, QAbstractButton):
+            role = QPalette.ButtonText
+        else:
+            role = QPalette.WindowText
+        return palette.color(group, role)
+
+
+def build_theme_style(raw_values: dict[str, object] | None = None) -> QProxyStyle:
+    del raw_values
+    app = QApplication.instance()
+    base_style_key = "fusion"
+    if app is not None:
+        current_style = app.style()
+        if isinstance(current_style, ThemeArrowProxyStyle):
+            base_style_key = str(current_style.baseStyle().objectName() or "fusion")
+        elif current_style is not None:
+            base_style_key = str(current_style.objectName() or "fusion")
+    if QStyleFactory.create(base_style_key) is None:
+        base_style_key = "fusion"
+    return ThemeArrowProxyStyle(base_style_key)
+
+
 THEME_COLOR_KEYS = tuple(spec.key for spec in THEME_COLOR_FIELD_SPECS)
 THEME_METRIC_KEYS = tuple(spec.key for spec in THEME_METRIC_FIELD_SPECS)
 THEME_METRIC_SPECS_BY_KEY = {spec.key: spec for spec in THEME_METRIC_FIELD_SPECS}
@@ -1877,12 +2007,17 @@ def build_theme_stylesheet(raw_values: dict[str, object] | None = None) -> str:
         color: {theme["header_fg"]};
         font-weight: 600;
     }}
-    QPushButton[role="dockControlButton"] {{
-        padding: 2px 10px;
+    QPushButton[role="dockControlButton"],
+    QToolButton[role="dockControlButton"] {{
+        padding: 2px 18px 2px 10px;
     }}
-    QPushButton[role="dockControlButton"]::menu-indicator {{
+    QPushButton[role="dockControlButton"]::menu-indicator,
+    QToolButton[role="dockControlButton"]::menu-indicator {{
         subcontrol-origin: padding;
         subcontrol-position: right center;
+        image: url("{_compact_menu_arrow_data_uri(theme["header_fg"])}");
+        width: 8px;
+        height: 5px;
     }}
     QToolButton[role="dockTitleButton"] {{
         background-color: {theme["compact_group_bg"]};
@@ -2036,11 +2171,16 @@ def build_theme_stylesheet(raw_values: dict[str, object] | None = None) -> str:
     QStatusBar QLabel {{
         color: {theme["statusbar_fg"]};
     }}
-    QMenuBar::item,
-    QMenu::item {{
+    QMenuBar::item {{
         background: transparent;
         color: {theme["menu_fg"]};
         padding: 6px 10px;
+        border-radius: {int(theme["menu_radius"])}px;
+    }}
+    QMenu::item {{
+        background: transparent;
+        color: {theme["menu_fg"]};
+        padding: 6px 22px 6px 10px;
         border-radius: {int(theme["menu_radius"])}px;
     }}
     QMenuBar::item:selected,
@@ -2065,6 +2205,16 @@ def build_theme_stylesheet(raw_values: dict[str, object] | None = None) -> str:
         height: {max(1, int(theme["border_width"]))}px;
         background: {theme["menu_border"]};
         margin: 6px 8px;
+    }}
+    QMenu::right-arrow {{
+        width: 6px;
+        height: 10px;
+        margin-right: 4px;
+    }}
+    QMenu::left-arrow {{
+        width: 6px;
+        height: 10px;
+        margin-left: 4px;
     }}
     QTabWidget {{
         background-color: {theme["tab_bar_bg"]};

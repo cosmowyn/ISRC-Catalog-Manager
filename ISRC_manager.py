@@ -421,6 +421,9 @@ from isrc_manager.theme_builder import (
     build_theme_palette as build_app_theme_palette,
 )
 from isrc_manager.theme_builder import (
+    build_theme_style as build_app_theme_style,
+)
+from isrc_manager.theme_builder import (
     build_theme_stylesheet as build_app_theme_stylesheet,
 )
 from isrc_manager.theme_builder import (
@@ -9619,6 +9622,7 @@ class App(QMainWindow):
         palette = build_app_theme_palette(normalized)
         app.setPalette(palette)
         self.setPalette(palette)
+        app.setStyle(build_app_theme_style(normalized))
         qss_issues = validate_qss_document(normalized.get("custom_qss"))
         if qss_issues:
             safe_values = dict(normalized)
@@ -9664,6 +9668,7 @@ class App(QMainWindow):
         palette = build_app_theme_palette(normalized)
         app.setPalette(palette)
         self.setPalette(palette)
+        app.setStyle(build_app_theme_style(normalized))
         app.setStyleSheet(
             str(payload.get("stylesheet") or self._build_theme_stylesheet(normalized))
         )
@@ -12417,9 +12422,7 @@ class App(QMainWindow):
             self._refresh_workspace_dock_default_placement_flags()
             self._materialize_visible_workspace_dock_panels(
                 progress_callback=lambda value, maximum, message: (
-                    ui_progress.report_progress(
-                        value=8, maximum=progress_total, message=message
-                    )
+                    ui_progress.report_progress(value=8, maximum=progress_total, message=message)
                     if ui_progress is not None
                     else None
                 )

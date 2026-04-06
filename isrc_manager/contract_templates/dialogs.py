@@ -696,10 +696,14 @@ class _WorkspaceDockTitleBar(QWidget):
         self.title_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         layout.addWidget(self.title_label, 1)
 
-        self.options_button = QPushButton("Dock", self)
+        self.options_button = QToolButton(self)
         self.options_button.setObjectName(f"{dock.objectName()}OptionsButton")
         self.options_button.setProperty("role", "dockControlButton")
-        self.options_button.setAutoDefault(False)
+        self.options_button.setText("Dock")
+        self.options_button.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self.options_button.setPopupMode(QToolButton.InstantPopup)
+        self.options_button.setAutoRaise(False)
+        self.options_button.setFocusPolicy(Qt.NoFocus)
         self.options_menu = QMenu(self.options_button)
         self.options_menu.setObjectName(f"{dock.objectName()}OptionsMenu")
         self.options_button.setMenu(self.options_menu)
@@ -764,19 +768,19 @@ class _WorkspaceDockTitleBar(QWidget):
 
     def mousePressEvent(self, event):  # pragma: no cover - drag passthrough
         event.ignore()
-        super().mousePressEvent(event)
+        return
 
     def mouseMoveEvent(self, event):  # pragma: no cover - drag passthrough
         event.ignore()
-        super().mouseMoveEvent(event)
+        return
 
     def mouseReleaseEvent(self, event):  # pragma: no cover - drag passthrough
         event.ignore()
-        super().mouseReleaseEvent(event)
+        return
 
     def mouseDoubleClickEvent(self, event):  # pragma: no cover - drag passthrough
         event.ignore()
-        super().mouseDoubleClickEvent(event)
+        return
 
 
 class _DockableWorkspaceTab(QMainWindow):
@@ -824,6 +828,7 @@ class _DockableWorkspaceTab(QMainWindow):
 
         self.panels_button = QToolButton(self.chrome_row)
         self.panels_button.setObjectName(f"{host_object_name}PanelsButton")
+        self.panels_button.setProperty("role", "dockControlButton")
         self.panels_button.setText("Panels")
         self.panels_button.setPopupMode(QToolButton.InstantPopup)
         self.panels_menu = QMenu(self.panels_button)
