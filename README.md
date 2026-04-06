@@ -17,6 +17,7 @@ The app is built for the operational layer around a real music catalog. It helps
 - works and composition metadata
 - parties, counterparties, and reusable identities
 - contracts, obligations, and managed documents
+- contract and license template drafting, placeholder filling, live preview, and PDF export
 - rights positions and source-agreement links
 - assets, deliverables, masters, derivatives, and artwork variants
 - custom metadata, GS1 workbook data, and exchange-ready fields
@@ -103,6 +104,24 @@ The import layer is a reviewed workflow surface rather than a blind file picker.
 - reviewed bulk audio attachment and single-file album-art attachment
 - package round-tripping with preserved storage-mode behavior
 
+### Contract and license templates
+
+The `Contract Template Workspace` is a dockable drafting surface for placeholder-driven contract
+and license templates.
+
+It supports:
+
+- importing Pages, DOCX, HTML, and HTML package sources
+- preserving the original imported source file unchanged
+- symbol lookup through the placeholder catalog and symbol generator
+- fill-form drafting against authoritative catalog, party, contract, rights, and owner data
+- live HTML preview from the current editable draft state
+- PDF export from the same HTML working draft used for preview
+
+For the best fidelity, print-safe HTML templates are ideal. Pages and DOCX imports still work, but
+they are normalized into HTML working drafts behind the scenes so preview and export stay
+consistent.
+
 ### Quality, diagnostics, and recovery
 
 Operational safety is part of the product. The app includes:
@@ -155,6 +174,7 @@ Advanced users can go further with a selector reference and syntax-aware QSS edi
 Some of the strongest workflow features are easy to underestimate from a quick skim:
 
 - the docked workspace keeps Release Browser, Work Manager, Party Manager, Contract Manager, Rights Matrix, Asset Registry, Global Search, and Catalog Managers open beside the table as tabbed panels
+- the Contract Template Workspace can import Pages, DOCX, HTML, and HTML packages, keep the original source untouched, and drive drafting, preview, and PDF export from one HTML working draft
 - the deliverables workspace pairs the Asset Registry with a Derivative Ledger for managed export batches, lineage review, and safe cleanup
 - layout and dock state are remembered, so the app reopens as a real workstation instead of a fixed single screen
 - the action ribbon can be customized around your high-frequency commands
@@ -201,6 +221,9 @@ Use `Add Track` for single governed musical items, `Add Album` for batch governe
 Create releases, works, parties, contracts, rights, and asset versions as first-class records. Link them across the catalog so tracks, compositions, agreements, deliverables, and supporting documents stay connected.
 
 Use the docked workspace panels to keep those managers open as tabbed companions to the track table rather than as one-at-a-time modal dialogs.
+
+Use the same workspace model for contract and license templates when you need placeholder-aware
+drafting, live HTML preview, and PDF export without mutating the original imported source file.
 
 ### 3. Review, clean up, and verify
 
@@ -254,6 +277,7 @@ Start with `Help > Help Contents` inside the app for the integrated manual, then
 - [Documentation Hub](docs/README.md)
 - [Import and Merge Workflows](docs/import-and-merge-workflows.md)
 - [Catalog Workspace Workflows](docs/catalog-workspace-workflows.md)
+- [Contract Template Workflows](docs/contract-template-workflows.md)
 - [Diagnostics and Recovery](docs/diagnostics-and-recovery.md)
 - [Attachment Storage Modes](docs/file_storage_modes.md)
 - [Repertoire Knowledge System](docs/repertoire_knowledge_system.md)
