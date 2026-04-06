@@ -422,7 +422,7 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
         first_title_bar = host._docks[0].titleBarWidget()
         self.assertIsNotNone(first_title_bar)
         options_button = first_title_bar.findChild(
-            QPushButton,
+            QToolButton,
             "contractTemplateImportAdminDockOptionsButton",
         )
         self.assertIsNotNone(options_button)
