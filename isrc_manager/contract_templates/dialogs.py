@@ -240,6 +240,7 @@ class _InteractiveHtmlPreviewView(QWebEngineView if QWebEngineView is not None e
         self._last_pan_pos = QPoint()
         self._document_css_width = 0.0
         self._last_fit_percent = 100
+        self._last_fit_viewport_width = 0
         self._fit_measure_failures = 0
         self._native_zoom_active = False
         self._native_zoom_reset_timer = QTimer(self)
@@ -338,6 +339,16 @@ class _InteractiveHtmlPreviewView(QWebEngineView if QWebEngineView is not None e
         )
         self._fit_measure_failures = 0
         self._set_zoom_owner("fit")
+        viewport_width = max(0, int(self.contentsRect().width()))
+        if (
+            self._document_css_width > 0
+            and self._last_fit_percent > 0
+            and viewport_width > 0
+            and abs(viewport_width - int(self._last_fit_viewport_width or 0)) <= 1
+        ):
+            self.set_zoom_percent(int(self._last_fit_percent), user_initiated=False)
+            self._finish_fit_transition()
+            return
         self._fit_guard_timer.start(250)
         if self._document_css_width > 0:
             self._apply_fit_if_needed(force=True, finalize=False)
@@ -405,6 +416,7 @@ class _InteractiveHtmlPreviewView(QWebEngineView if QWebEngineView is not None e
             return
         target_percent = self._fit_zoom_percent()
         self._last_fit_percent = target_percent
+        self._last_fit_viewport_width = max(0, int(self.contentsRect().width()))
         if not force and abs(target_percent - self.current_zoom_percent()) <= 1:
             self._emit_zoom_percent_changed()
             if finalize:
