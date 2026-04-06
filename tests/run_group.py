@@ -9,6 +9,7 @@ import sys
 import time
 from typing import Iterable
 
+from isrc_manager.external_launch import TEST_BLOCK_ENV_VAR
 from tests import ci_groups
 
 DEFAULT_GROUP_TIMEOUT_SECONDS: dict[str, int] = {
@@ -95,6 +96,7 @@ def _run_module(
     env = os.environ.copy()
     env.setdefault("PYTHONFAULTHANDLER", "1")
     env.setdefault("PYTHONUNBUFFERED", "1")
+    env.setdefault(TEST_BLOCK_ENV_VAR, "1")
     try:
         completed = subprocess.run(
             command,

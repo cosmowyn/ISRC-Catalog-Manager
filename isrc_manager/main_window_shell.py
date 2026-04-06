@@ -54,6 +54,8 @@ def build_main_window_shell(app: Any, *, last_db: str, movable: bool) -> None:
 
 def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     app.menu_bar = QMenuBar(app)
+    app.menu_bar.setNativeMenuBar(False)
+    app.menu_bar.setProperty("role", "menuBar")
     app.setMenuBar(app.menu_bar)
 
     app.undo_action = app._create_action(

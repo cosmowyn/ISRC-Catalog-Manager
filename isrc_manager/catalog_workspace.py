@@ -5,8 +5,13 @@ from __future__ import annotations
 import copy
 from typing import Any, Callable
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtWidgets import QDockWidget, QWidget
+
+from isrc_manager.workspace_debug import (
+    summarize_panel_layout_state,
+    workspace_debug_log,
+)
 
 
 class CatalogWorkspaceDock(QDockWidget):
@@ -29,7 +34,11 @@ class CatalogWorkspaceDock(QDockWidget):
         self._panel: QWidget | None = None
         self._default_placement_pending = True
         self._pending_panel_layout_state: dict[str, object] | None = None
+        self._pending_panel_layout_state_dirty = False
         self._default_dock_area = Qt.RightDockWidgetArea
+        self._pending_panel_layout_timer = QTimer(self)
+        self._pending_panel_layout_timer.setSingleShot(True)
+        self._pending_panel_layout_timer.timeout.connect(self._apply_pending_panel_layout_state)
         self._placeholder = QWidget(self)
         self._placeholder.setObjectName(f"{dock_object_name}Placeholder")
         self._placeholder.setProperty("role", "workspaceCanvas")
@@ -49,6 +58,7 @@ class CatalogWorkspaceDock(QDockWidget):
             self._panel = self.panel_factory(self)
             if self._panel.property("role") is None:
                 self._panel.setProperty("role", "workspaceCanvas")
+            self._panel.installEventFilter(self)
             close_requested = getattr(self._panel, "close_requested", None)
             if close_requested is not None and hasattr(close_requested, "connect"):
                 close_requested.connect(self.hide)
@@ -56,11 +66,36 @@ class CatalogWorkspaceDock(QDockWidget):
             if self._placeholder is not None:
                 self._placeholder.deleteLater()
                 self._placeholder = None
-            self._apply_pending_panel_layout_state()
+            workspace_debug_log(
+                "layout",
+                "catalog_workspace_dock.panel_materialized",
+                dock_object_name=str(self.objectName() or ""),
+                workspace_panel_key=str(self._workspace_panel_key or ""),
+            )
+            self._schedule_pending_panel_layout_state_application()
         return self._panel
 
+    def _app_layout_restore_in_progress(self) -> bool:
+        return bool(getattr(self.app, "_is_restoring_workspace_layout", False))
+
     def refresh_panel(self) -> None:
-        if self._panel is None:
+        if self._panel is None or not self.isVisible():
+            return
+        if self._app_layout_restore_in_progress():
+            workspace_debug_log(
+                "layout",
+                "catalog_workspace_dock.refresh.skipped",
+                dock_object_name=str(self.objectName() or ""),
+                reason="app_layout_restore",
+            )
+            return
+        if self._pending_panel_layout_state_dirty:
+            workspace_debug_log(
+                "layout",
+                "catalog_workspace_dock.refresh.skipped",
+                dock_object_name=str(self.objectName() or ""),
+                reason="pending_layout_restore",
+            )
             return
         refresh = getattr(self._panel, "refresh", None)
         if callable(refresh):
@@ -68,6 +103,13 @@ class CatalogWorkspaceDock(QDockWidget):
 
     def show_panel(self) -> QWidget:
         panel = self.panel()
+        workspace_debug_log(
+            "layout",
+            "catalog_workspace_dock.show_panel.begin",
+            dock_object_name=str(self.objectName() or ""),
+            visible=bool(self.isVisible()),
+            pending_dirty=bool(self._pending_panel_layout_state_dirty),
+        )
         apply_default_placement = bool(
             self._default_placement_pending
             or (
@@ -97,27 +139,79 @@ class CatalogWorkspaceDock(QDockWidget):
                     self.raise_()
             finally:
                 setattr(self.app, "_suspend_dock_state_sync", suspended_state)
+            self._schedule_pending_panel_layout_state_application()
             if self.isVisible():
                 schedule_save = getattr(self.app, "_schedule_main_dock_state_save", None)
                 if callable(schedule_save):
                     schedule_save()
 
         QTimer.singleShot(0, _finalize_show_panel)
-        refresh = getattr(panel, "refresh", None)
-        if callable(refresh):
-            refresh()
+        if not self._pending_panel_layout_state_dirty and not self._app_layout_restore_in_progress():
+            refresh = getattr(panel, "refresh", None)
+            if callable(refresh):
+                refresh()
+        else:
+            workspace_debug_log(
+                "layout",
+                "catalog_workspace_dock.show_panel.refresh_deferred",
+                dock_object_name=str(self.objectName() or ""),
+                reason=(
+                    "app_layout_restore"
+                    if self._app_layout_restore_in_progress()
+                    else "pending_layout_restore"
+                ),
+            )
         return panel
 
     def _on_visibility_changed(self, visible: bool) -> None:
+        workspace_debug_log(
+            "layout",
+            "catalog_workspace_dock.visibility_changed",
+            dock_object_name=str(self.objectName() or ""),
+            visible=bool(visible),
+            pending_dirty=bool(self._pending_panel_layout_state_dirty),
+        )
         if visible:
             if self._panel is None:
-                self.panel()
-            self.refresh_panel()
+                if self._app_layout_restore_in_progress():
+                    workspace_debug_log(
+                        "layout",
+                        "catalog_workspace_dock.visibility_materialization_deferred",
+                        dock_object_name=str(self.objectName() or ""),
+                    )
+                else:
+                    self.panel()
+            self._schedule_pending_panel_layout_state_application()
+            if self._panel is not None and not self._pending_panel_layout_state_dirty:
+                self.refresh_panel()
+            else:
+                workspace_debug_log(
+                    "layout",
+                    "catalog_workspace_dock.visibility_refresh_deferred",
+                    dock_object_name=str(self.objectName() or ""),
+                )
         schedule_save = getattr(self.app, "_schedule_main_dock_state_save", None)
         if callable(schedule_save):
             schedule_save()
 
     def capture_panel_layout_state(self) -> dict[str, object] | None:
+        workspace_debug_log(
+            "layout",
+            "catalog_workspace_dock.capture.begin",
+            dock_object_name=str(self.objectName() or ""),
+            pending_dirty=bool(self._pending_panel_layout_state_dirty),
+        )
+        self.stabilize_panel_layout_after_restore()
+        if self._pending_panel_layout_state_dirty and isinstance(
+            self._pending_panel_layout_state, dict
+        ):
+            workspace_debug_log(
+                "layout",
+                "catalog_workspace_dock.capture.pending_reused",
+                dock_object_name=str(self.objectName() or ""),
+                state=summarize_panel_layout_state(self._pending_panel_layout_state),
+            )
+            return copy.deepcopy(self._pending_panel_layout_state)
         panel = self._panel
         capture = getattr(panel, "capture_layout_state", None) if panel is not None else None
         if callable(capture):
@@ -127,31 +221,172 @@ class CatalogWorkspaceDock(QDockWidget):
                 state = None
             if isinstance(state, dict):
                 self._pending_panel_layout_state = copy.deepcopy(state)
+                self._pending_panel_layout_state_dirty = False
         if isinstance(self._pending_panel_layout_state, dict):
+            workspace_debug_log(
+                "layout",
+                "catalog_workspace_dock.capture.end",
+                dock_object_name=str(self.objectName() or ""),
+                state=summarize_panel_layout_state(self._pending_panel_layout_state),
+            )
             return copy.deepcopy(self._pending_panel_layout_state)
+        workspace_debug_log(
+            "layout",
+            "catalog_workspace_dock.capture.end",
+            dock_object_name=str(self.objectName() or ""),
+            state=None,
+        )
         return None
 
     def restore_panel_layout_state(self, state: dict[str, object] | None) -> None:
         self._pending_panel_layout_state = copy.deepcopy(state) if isinstance(state, dict) else None
-        if self._panel is not None:
-            restore = getattr(self._panel, "restore_layout_state", None)
-            if callable(restore):
-                try:
-                    restore(copy.deepcopy(state) if isinstance(state, dict) else None)
-                except Exception:
-                    pass
-        self._apply_pending_panel_layout_state()
+        self._pending_panel_layout_state_dirty = isinstance(self._pending_panel_layout_state, dict)
+        workspace_debug_log(
+            "layout",
+            "catalog_workspace_dock.restore.requested",
+            dock_object_name=str(self.objectName() or ""),
+            pending_dirty=bool(self._pending_panel_layout_state_dirty),
+            state=summarize_panel_layout_state(self._pending_panel_layout_state),
+        )
+        if not self._pending_panel_layout_state_dirty:
+            return
+        if self._panel_ready_for_layout_restore():
+            self._apply_pending_panel_layout_state()
+            return
+        self._schedule_pending_panel_layout_state_application()
 
     def _apply_pending_panel_layout_state(self) -> None:
-        if self._panel is None or not isinstance(self._pending_panel_layout_state, dict):
+        if (
+            not self._pending_panel_layout_state_dirty
+            or self._panel is None
+            or not isinstance(self._pending_panel_layout_state, dict)
+            or not self._panel_ready_for_layout_restore()
+        ):
+            workspace_debug_log(
+                "layout",
+                "catalog_workspace_dock.restore.skipped",
+                dock_object_name=str(self.objectName() or ""),
+                pending_dirty=bool(self._pending_panel_layout_state_dirty),
+                panel_ready=bool(self._panel_ready_for_layout_restore()),
+                has_panel=bool(self._panel is not None),
+            )
             return
         restore = getattr(self._panel, "restore_layout_state", None)
         if not callable(restore):
             return
+        begin_layout_restore = getattr(self._panel, "begin_layout_restore", None)
+        finish_layout_restore = getattr(self._panel, "finish_layout_restore", None)
+        if callable(begin_layout_restore):
+            try:
+                begin_layout_restore()
+            except Exception:
+                pass
+        restore_applied = False
         try:
             restore(copy.deepcopy(self._pending_panel_layout_state))
         except Exception:
+            if callable(finish_layout_restore):
+                try:
+                    finish_layout_restore()
+                except Exception:
+                    pass
             return
+        restore_applied = True
+        self._pending_panel_layout_state_dirty = False
+        workspace_debug_log(
+            "layout",
+            "catalog_workspace_dock.restore.applied",
+            dock_object_name=str(self.objectName() or ""),
+            state=summarize_panel_layout_state(self._pending_panel_layout_state),
+        )
+        self._run_panel_stabilizer()
+        if restore_applied and callable(finish_layout_restore):
+            try:
+                finish_layout_restore()
+            except Exception:
+                pass
+
+    def _schedule_pending_panel_layout_state_application(self) -> None:
+        if not self._pending_panel_layout_state_dirty or self._panel is None:
+            return
+        if not self._panel_ready_for_layout_restore():
+            return
+        self._pending_panel_layout_timer.start(0)
+
+    def _panel_ready_for_layout_restore(self) -> bool:
+        panel = self._panel
+        if not isinstance(panel, QWidget):
+            return False
+        if not self.isVisible() or not panel.isVisible():
+            return False
+        if bool(getattr(self.app, "_is_restoring_workspace_layout", False)):
+            return False
+        return panel.width() > 64 and panel.height() > 64
+
+    def resizeEvent(self, event) -> None:  # pragma: no cover - Qt callback
+        super().resizeEvent(event)
+        self._schedule_pending_panel_layout_state_application()
+
+    def showEvent(self, event) -> None:  # pragma: no cover - Qt callback
+        super().showEvent(event)
+        workspace_debug_log(
+            "layout",
+            "catalog_workspace_dock.show_event",
+            dock_object_name=str(self.objectName() or ""),
+            pending_dirty=bool(self._pending_panel_layout_state_dirty),
+            panel_visible=bool(isinstance(self._panel, QWidget) and self._panel.isVisible()),
+        )
+        self._schedule_pending_panel_layout_state_application()
+
+    def eventFilter(self, watched, event) -> bool:  # pragma: no cover - Qt callback
+        if watched is self._panel and isinstance(event, QEvent):
+            if event.type() in {
+                QEvent.Show,
+                QEvent.Resize,
+                QEvent.LayoutRequest,
+                QEvent.ParentChange,
+            }:
+                workspace_debug_log(
+                    "layout",
+                    "catalog_workspace_dock.panel_event",
+                    dock_object_name=str(self.objectName() or ""),
+                    event_type=int(event.type()),
+                    pending_dirty=bool(self._pending_panel_layout_state_dirty),
+                )
+                self._schedule_pending_panel_layout_state_application()
+        return super().eventFilter(watched, event)
+
+    def _run_panel_stabilizer(self) -> None:
+        panel = self._panel
+        stabilize = getattr(panel, "stabilize_layout_after_restore", None) if panel else None
+        if callable(stabilize):
+            try:
+                stabilize()
+            except Exception:
+                pass
+
+    def stabilize_panel_layout_after_restore(self) -> None:
+        workspace_debug_log(
+            "layout",
+            "catalog_workspace_dock.stabilize.begin",
+            dock_object_name=str(self.objectName() or ""),
+            pending_dirty=bool(self._pending_panel_layout_state_dirty),
+            panel_ready=bool(self._panel_ready_for_layout_restore()),
+        )
+        if self._pending_panel_layout_state_dirty:
+            if self._panel_ready_for_layout_restore():
+                self._apply_pending_panel_layout_state()
+                return
+            self._schedule_pending_panel_layout_state_application()
+            if self._pending_panel_layout_state_dirty:
+                return
+        self._run_panel_stabilizer()
+        workspace_debug_log(
+            "layout",
+            "catalog_workspace_dock.stabilize.end",
+            dock_object_name=str(self.objectName() or ""),
+            pending_dirty=bool(self._pending_panel_layout_state_dirty),
+        )
 
 
 def ensure_catalog_workspace_dock(

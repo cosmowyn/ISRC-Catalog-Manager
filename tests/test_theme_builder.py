@@ -8,7 +8,7 @@ from tests.qt_test_helpers import require_qapplication
 
 try:
     from PySide6.QtGui import QPalette
-    from PySide6.QtWidgets import QGridLayout, QLabel, QMessageBox, QWidget
+    from PySide6.QtWidgets import QGridLayout, QLabel, QMenuBar, QMessageBox, QWidget
 
     import ISRC_manager as app_module
     from isrc_manager.parties import PartyRecord
@@ -57,12 +57,16 @@ class _ThemeApplyHost(QWidget):
     _prepare_theme_application_payload = app_module.App._prepare_theme_application_payload
     _apply_prepared_theme_payload = app_module.App._apply_prepared_theme_payload
     _apply_theme_with_loading = app_module.App._apply_theme_with_loading
+    _refresh_menu_theme_state = app_module.App._refresh_menu_theme_state
 
     def __init__(self):
         super().__init__()
         self.theme_settings = {}
         self.submissions = []
         self.boundary_refresh_count = 0
+        self.menu_bar = QMenuBar(self)
+        self.menu_bar.setNativeMenuBar(False)
+        self.file_menu = self.menu_bar.addMenu("File")
 
     def _queue_top_chrome_boundary_refresh(self):
         self.boundary_refresh_count += 1
@@ -240,6 +244,8 @@ class ThemeBuilderTests(unittest.TestCase):
         self.assertIn("QComboBox QAbstractItemView", stylesheet)
         self.assertIn("background-color:", stylesheet)
         self.assertIn("QMenuBar::item:selected", stylesheet)
+        self.assertIn("QMenu::item:disabled", stylesheet)
+        self.assertIn("QMenu::separator", stylesheet)
         self.assertIn('QLabel[role="dialogTitle"]', stylesheet)
         self.assertIn("/* Advanced QSS */", stylesheet)
         self.assertIn("QLabel#marker { color: #123456; }", stylesheet)
@@ -865,6 +871,14 @@ class ThemeBuilderTests(unittest.TestCase):
             self.assertEqual(
                 self.app.palette().color(QPalette.Window).name().upper(),
                 "#101820",
+            )
+            self.assertEqual(
+                host.menu_bar.palette().color(QPalette.WindowText).name().upper(),
+                "#F8FAFC",
+            )
+            self.assertEqual(
+                host.file_menu.palette().color(QPalette.WindowText).name().upper(),
+                "#F8FAFC",
             )
             self.assertIn("#F97316", self.app.styleSheet().upper())
             self.assertGreater(host.boundary_refresh_count, 0)

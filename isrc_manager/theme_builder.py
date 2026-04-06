@@ -2049,12 +2049,22 @@ def build_theme_stylesheet(raw_values: dict[str, object] | None = None) -> str:
         background-color: {theme["menu_selected_bg"]};
         color: {theme["menu_selected_fg"]};
     }}
+    QMenuBar::item:disabled,
+    QMenu::item:disabled {{
+        color: {theme["button_disabled_fg"]};
+        background: transparent;
+    }}
     QMenu {{
         background-color: {theme["menu_bg"]};
         color: {theme["menu_fg"]};
         border: {int(theme["border_width"])}px solid {theme["menu_border"]};
         border-radius: {int(theme["menu_radius"])}px;
         padding: 6px;
+    }}
+    QMenu::separator {{
+        height: {max(1, int(theme["border_width"]))}px;
+        background: {theme["menu_border"]};
+        margin: 6px 8px;
     }}
     QTabWidget {{
         background-color: {theme["tab_bar_bg"]};

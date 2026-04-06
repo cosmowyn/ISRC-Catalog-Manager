@@ -5,13 +5,14 @@ from unittest.mock import patch
 
 try:
     from PySide6.QtCore import QTimer
-    from PySide6.QtWidgets import QApplication, QLabel, QProgressBar, QPushButton
+    from PySide6.QtWidgets import QApplication, QLabel, QProgressBar, QPushButton, QWidget
 except ImportError as exc:  # pragma: no cover - environment-specific fallback
     QApplication = None
     QLabel = None
     QProgressBar = None
     QPushButton = None
     QTimer = None
+    QWidget = None
     QT_IMPORT_ERROR = exc
 else:
     QT_IMPORT_ERROR = None
@@ -22,7 +23,17 @@ from isrc_manager.tasks.manager import (
     _format_progress_dialog_message,
 )
 from isrc_manager.tasks.models import TaskProgressUpdate
+from isrc_manager.theme_builder import effective_theme_settings
 from tests.qt_test_helpers import pump_events, wait_for
+
+
+class _ThemedProgressOwner(QWidget):
+    def __init__(self, theme_values):
+        super().__init__()
+        self._theme_values = effective_theme_settings(theme_values)
+
+    def _effective_theme_settings(self):
+        return dict(self._theme_values)
 
 
 class BackgroundTaskManagerTests(unittest.TestCase):
@@ -278,6 +289,61 @@ class BackgroundTaskManagerTests(unittest.TestCase):
             finished.is_set,
             description="compact progress dialog completion",
         )
+
+    def test_progress_dialog_chrome_uses_owner_theme_colors(self):
+        finished = threading.Event()
+        release = threading.Event()
+        owner = _ThemedProgressOwner(
+            {
+                "window_bg": "#0F172A",
+                "window_fg": "#E2E8F0",
+                "panel_bg": "#112233",
+                "panel_alt_bg": "#1A2B3C",
+                "menu_border": "#445566",
+                "accent": "#33AAFF",
+            }
+        )
+
+        def _long_running(ctx):
+            ctx.set_status("Applying themed progress dialog chrome.")
+            while not release.is_set():
+                time.sleep(0.01)
+            return "done"
+
+        try:
+            task_id = self.manager.submit(
+                title="Themed Progress Task",
+                description="Verifying themed progress dialog chrome.",
+                task_fn=_long_running,
+                owner=owner,
+                show_dialog=True,
+                cancellable=False,
+                on_finished=finished.set,
+            )
+            self.assertIsNotNone(task_id)
+            dialog = self.manager._tasks[task_id].dialog
+            self.assertIsNotNone(dialog)
+            assert dialog is not None
+
+            self._wait_for_task_completion(
+                lambda: dialog.isVisible(),
+                description="themed progress dialog visibility",
+            )
+            pump_events(app=self.app)
+
+            stylesheet = dialog.styleSheet()
+            self.assertIn("rgba(17, 34, 51, 246)", stylesheet)
+            self.assertIn("rgba(26, 43, 60, 252)", stylesheet)
+            self.assertIn("#E2E8F0", stylesheet)
+            self.assertNotIn("rgba(18, 34, 54, 244)", stylesheet)
+            self.assertNotIn("#ffbf5a", stylesheet.lower())
+        finally:
+            release.set()
+            self._wait_for_task_completion(
+                lambda: finished.is_set(),
+                description="themed progress dialog completion",
+            )
+            owner.close()
 
     def test_non_cancellable_progress_dialog_uses_full_width_progress_surface(self):
         finished = threading.Event()

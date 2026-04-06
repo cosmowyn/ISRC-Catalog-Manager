@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
 import sys
 from io import BytesIO
 from pathlib import Path
 from xml.etree import ElementTree as ET
 from zipfile import BadZipFile, ZipFile
 
+from ..external_launch import run_external_launcher_subprocess
 from .models import (
     ContractTemplateScanDiagnostic,
     ContractTemplateScanEntry,
@@ -265,11 +265,18 @@ tell application "Pages"
     close docRef saving no
 end tell
 """
-        result = subprocess.run(
+        result = run_external_launcher_subprocess(
             [str(self.osascript_path)],
             input=script,
             capture_output=True,
             text=True,
+            source="PagesTemplateAdapter._export_via_pages",
+            metadata={
+                "integration": "pages_export",
+                "export_kind": export_kind,
+                "source_path": str(source),
+                "output_path": str(target),
+            },
         )
         if result.returncode != 0 or not target.exists():
             stderr = str(result.stderr or result.stdout or "").strip()

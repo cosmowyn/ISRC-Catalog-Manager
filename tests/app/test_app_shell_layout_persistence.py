@@ -44,6 +44,12 @@ class AppShellLayoutPersistenceTests(AppShellTestCase):
     test_contract_template_workspace_legacy_layout_without_nested_state_uses_default_inner_layout = (
         AppShellTestCase.case_contract_template_workspace_legacy_layout_without_nested_state_uses_default_inner_layout
     )
+    test_contract_template_workspace_named_layout_restore_keeps_import_and_fill_controls_visible = (
+        AppShellTestCase.case_contract_template_workspace_named_layout_restore_keeps_import_and_fill_controls_visible
+    )
+    test_contract_template_workspace_named_layout_restore_can_reopen_hidden_fill_dock_while_locked = (
+        AppShellTestCase.case_contract_template_workspace_named_layout_restore_can_reopen_hidden_fill_dock_while_locked
+    )
 
 
 del AppShellTestCase

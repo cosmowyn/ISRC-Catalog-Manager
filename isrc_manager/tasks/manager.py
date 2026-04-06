@@ -9,7 +9,9 @@ from threading import Event
 from typing import Callable
 
 from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
+    QApplication,
     QLabel,
     QProgressBar,
     QProgressDialog,
@@ -19,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 from shiboken6 import isValid as _qt_object_is_valid
 
+from ..theme_builder import effective_theme_settings
 from ..ui_common import _abbreviate_middle_text, _compose_widget_stylesheet
 from .models import TaskCancelledError, TaskFailure, TaskProgressUpdate
 
@@ -39,57 +42,62 @@ _PROGRESS_DIALOG_BOTTOM_PADDING = 16
 _PROGRESS_DIALOG_LABEL_BAR_GAP = 8
 
 
-def _progress_dialog_stylesheet() -> str:
+def _rgba(color_value: object, alpha: int) -> str:
+    color = QColor(str(color_value or "#000000"))
+    return f"rgba({color.red()}, {color.green()}, {color.blue()}, {max(0, min(255, int(alpha)))})"
+
+
+def _progress_dialog_theme(owner: QWidget | None) -> dict[str, object]:
+    current = owner
+    while current is not None:
+        getter = getattr(current, "_effective_theme_settings", None)
+        if callable(getter):
+            try:
+                values = dict(getter() or {})
+            except Exception:
+                values = {}
+            if values:
+                return values
+        raw_settings = getattr(current, "theme_settings", None)
+        if isinstance(raw_settings, dict):
+            return effective_theme_settings(raw_settings)
+        current = current.parentWidget()
+    return effective_theme_settings({})
+
+
+def _progress_dialog_stylesheet(owner: QWidget | None) -> str:
+    theme = _progress_dialog_theme(owner)
+    progress_radius = max(2, int(theme.get("progress_radius", 8)))
+    chunk_radius = max(1, progress_radius - 1)
     return f"""
     QProgressDialog#backgroundTaskProgressDialog {{
         background: qlineargradient(
             x1: 0, y1: 0, x2: 0, y2: 1,
-            stop: 0 rgba(18, 34, 54, 244),
-            stop: 1 rgba(10, 20, 34, 248)
+            stop: 0 {_rgba(theme.get("panel_bg"), 246)},
+            stop: 1 {_rgba(theme.get("panel_alt_bg"), 252)}
         );
-        border: 1px solid rgba(115, 154, 196, 118);
+        border: 1px solid {_rgba(theme.get("menu_border"), 218)};
         border-radius: {_PROGRESS_DIALOG_CORNER_RADIUS}px;
     }}
     QProgressDialog#backgroundTaskProgressDialog QLabel#backgroundTaskProgressLabel {{
         background: transparent;
-        color: #f4f7fb;
+        color: {theme["window_fg"]};
         font-size: 14px;
         font-weight: 600;
         padding: 0;
         margin: 0;
     }}
     QProgressDialog#backgroundTaskProgressDialog QProgressBar#backgroundTaskProgressBar {{
-        background: rgba(125, 157, 191, 38);
-        border: 1px solid rgba(125, 157, 191, 82);
-        border-radius: 7px;
         min-height: 14px;
         max-height: 14px;
-        text-align: center;
-        color: transparent;
     }}
     QProgressDialog#backgroundTaskProgressDialog QProgressBar#backgroundTaskProgressBar::chunk {{
-        background: qlineargradient(
-            x1: 0, y1: 0, x2: 1, y2: 0,
-            stop: 0 #ffbf5a,
-            stop: 1 #f29a38
-        );
-        border-radius: 6px;
+        border-radius: {chunk_radius}px;
         margin: 1px;
     }}
     QProgressDialog#backgroundTaskProgressDialog QPushButton#backgroundTaskProgressButton {{
         min-height: 30px;
         padding: 0 14px;
-        border-radius: 10px;
-        border: 1px solid rgba(79, 149, 214, 182);
-        background: rgba(24, 70, 108, 208);
-        color: #f5f7fb;
-        font-weight: 600;
-    }}
-    QProgressDialog#backgroundTaskProgressDialog QPushButton#backgroundTaskProgressButton:hover {{
-        background: rgba(34, 90, 136, 224);
-    }}
-    QProgressDialog#backgroundTaskProgressDialog QPushButton#backgroundTaskProgressButton:pressed {{
-        background: rgba(17, 55, 88, 228);
     }}
     """
 
@@ -98,7 +106,10 @@ def _apply_progress_dialog_chrome(dialog: QProgressDialog) -> None:
     dialog.setObjectName("backgroundTaskProgressDialog")
     dialog.setProperty("role", "panel")
     dialog.setAttribute(Qt.WA_StyledBackground, True)
-    dialog.setStyleSheet(_compose_widget_stylesheet(dialog, _progress_dialog_stylesheet()))
+    app = QApplication.instance()
+    if app is not None:
+        dialog.setPalette(app.palette())
+    dialog.setStyleSheet(_compose_widget_stylesheet(dialog, _progress_dialog_stylesheet(dialog)))
 
 
 def _progress_dialog_target_width(dialog: QProgressDialog) -> int:

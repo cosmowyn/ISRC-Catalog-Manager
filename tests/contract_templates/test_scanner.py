@@ -11,6 +11,10 @@ from isrc_manager.contract_templates import (
     detect_template_source_format,
 )
 from isrc_manager.contract_templates import ingestion as ingestion_module
+from isrc_manager.external_launch import (
+    clear_recorded_external_launches,
+    get_recorded_external_launches,
+)
 from tests.contract_templates._support import make_docx_bytes
 
 
@@ -102,7 +106,11 @@ class ContractTemplateScannerTests(unittest.TestCase):
                 pages_app_path=pages_app,
             )
             with mock.patch.object(ingestion_module.sys, "platform", "darwin"):
-                with mock.patch.object(ingestion_module.subprocess, "run", side_effect=_fake_run):
+                with mock.patch.object(
+                    ingestion_module,
+                    "run_external_launcher_subprocess",
+                    side_effect=_fake_run,
+                ):
                     converted = adapter.convert_to_docx(source, target)
                     output_exists = target.exists()
 
@@ -139,7 +147,11 @@ class ContractTemplateScannerTests(unittest.TestCase):
                 pages_app_path=pages_app,
             )
             with mock.patch.object(ingestion_module.sys, "platform", "darwin"):
-                with mock.patch.object(ingestion_module.subprocess, "run", side_effect=_fake_run):
+                with mock.patch.object(
+                    ingestion_module,
+                    "run_external_launcher_subprocess",
+                    side_effect=_fake_run,
+                ):
                     exported = adapter.export_to_pdf(source, target)
                     output_exists = target.exists()
 
@@ -148,3 +160,29 @@ class ContractTemplateScannerTests(unittest.TestCase):
         self.assertIn('tell application "Pages"', str(captured["input"]))
         self.assertIn("export docRef to outputPath as PDF", str(captured["input"]))
         self.assertTrue(output_exists)
+
+    def test_pages_adapter_records_central_launch_intent_when_test_guard_blocks_pages(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source = root / "agreement.pages"
+            target = root / "agreement.docx"
+            pages_app = root / "Pages.app"
+            pages_app.mkdir()
+            source.write_bytes(b"fake-pages")
+            adapter = PagesTemplateAdapter(
+                osascript_path="/usr/bin/osascript",
+                pages_app_path=pages_app,
+            )
+            clear_recorded_external_launches()
+
+            with mock.patch.object(ingestion_module.sys, "platform", "darwin"):
+                with self.assertRaises(ContractTemplateIngestionError):
+                    adapter.convert_to_docx(source, target)
+
+        requests = get_recorded_external_launches()
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(requests[0].via, "external_launch.run_external_launcher_subprocess")
+        self.assertEqual(requests[0].source, "PagesTemplateAdapter._export_via_pages")
+        self.assertEqual(requests[0].target, "/usr/bin/osascript")
+        self.assertEqual(requests[0].metadata.get("integration"), "pages_export")
+        self.assertTrue(requests[0].blocked)

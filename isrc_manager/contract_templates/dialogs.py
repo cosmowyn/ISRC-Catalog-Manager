@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtCore import QDate, QEvent, QPoint, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -35,6 +37,15 @@ from PySide6.QtWidgets import (
     QToolButton,
     QVBoxLayout,
     QWidget,
+)
+from shiboken6 import isValid as _qt_object_is_valid
+
+from isrc_manager.workspace_debug import (
+    digest_debug_value,
+    summarize_panel_layout_state,
+    summarize_workspace_host,
+    workspace_debug_enabled,
+    workspace_debug_log,
 )
 
 try:
@@ -110,6 +121,67 @@ def _dock_area_value(area) -> int:
         return 0
 
 
+def _dock_area_from_value(value):
+    mapping = {
+        _dock_area_value(Qt.LeftDockWidgetArea): Qt.LeftDockWidgetArea,
+        _dock_area_value(Qt.RightDockWidgetArea): Qt.RightDockWidgetArea,
+        _dock_area_value(Qt.TopDockWidgetArea): Qt.TopDockWidgetArea,
+        _dock_area_value(Qt.BottomDockWidgetArea): Qt.BottomDockWidgetArea,
+    }
+    return mapping.get(_dock_area_value(value), Qt.NoDockWidgetArea)
+
+
+def _normalized_dock_object_names(value) -> list[str]:
+    return [str(name) for name in list(value or []) if str(name)]
+
+
+def _normalized_dock_visibility_map(
+    value,
+    dock_object_names: list[str] | None = None,
+) -> dict[str, bool]:
+    allowed_names = set(_normalized_dock_object_names(dock_object_names))
+    normalized: dict[str, bool] = {}
+    for name, visible in dict(value or {}).items():
+        clean_name = str(name or "").strip()
+        if not clean_name:
+            continue
+        if allowed_names and clean_name not in allowed_names:
+            continue
+        normalized[clean_name] = bool(visible)
+    return normalized
+
+
+def _dock_logically_visible(dock: QDockWidget) -> bool:
+    if not isinstance(dock, QDockWidget):
+        return False
+    try:
+        return not dock.isHidden()
+    except Exception:
+        return bool(dock.isVisible())
+
+
+def _layout_state_has_saved_dock_topology(state: dict[str, object] | None) -> bool:
+    if not isinstance(state, dict):
+        return False
+    if str(state.get("dock_state_b64") or "").strip():
+        return True
+    return bool(_normalized_dock_object_names(state.get("dock_object_names")))
+
+
+def _normalized_workspace_layout_state(state: dict[str, object] | None) -> dict[str, object]:
+    payload = dict(state or {})
+    dock_object_names = _normalized_dock_object_names(payload.get("dock_object_names"))
+    return {
+        "dock_state_b64": str(payload.get("dock_state_b64") or ""),
+        "layout_locked": bool(payload.get("layout_locked", True)),
+        "layout_version": int(payload.get("layout_version") or 0),
+        "dock_object_names": dock_object_names,
+        "dock_visibility": _normalized_dock_visibility_map(
+            payload.get("dock_visibility"),
+            dock_object_names,
+        ),
+    }
+
 @dataclass
 class _PreviewCandidate:
     generation: int
@@ -152,6 +224,8 @@ class _InteractiveHtmlPreviewView(QWebEngineView if QWebEngineView is not None e
     """QWebEngine preview surface with fit, zoom, and pan affordances."""
 
     zoom_percent_changed = Signal(int)
+    _MIN_ZOOM_PERCENT = 10
+    _MAX_ZOOM_PERCENT = 1000
 
     def __init__(self, parent=None):
         if QWebEngineView is None:  # pragma: no cover - runtime guard
@@ -159,104 +233,245 @@ class _InteractiveHtmlPreviewView(QWebEngineView if QWebEngineView is not None e
             return
         super().__init__(parent)
         self._gesture_platform = (QApplication.platformName() or "").strip().lower()
-        self._user_zoomed = False
+        self._zoom_owner = "fit"
         self._space_pan_active = False
         self._mouse_pan_active = False
         self._last_pan_pos = QPoint()
         self._document_css_width = 0.0
+        self._last_fit_percent = 100
+        self._fit_measure_failures = 0
+        self._native_zoom_active = False
+        self._native_zoom_reset_timer = QTimer(self)
+        self._native_zoom_reset_timer.setSingleShot(True)
+        self._native_zoom_reset_timer.timeout.connect(self._reset_native_zoom_state)
         self._fit_measure_serial = 0
+        self._pending_fit_request_serial: int | None = None
         self._fit_measure_timer = QTimer(self)
         self._fit_measure_timer.setSingleShot(True)
         self._fit_measure_timer.timeout.connect(self._measure_and_apply_fit)
+        self._fit_guard_timer = QTimer(self)
+        self._fit_guard_timer.setSingleShot(True)
+        self._fit_guard_timer.timeout.connect(self._finish_fit_transition)
         self.setObjectName("contractTemplateHtmlPreviewView")
         self.setProperty("role", "workspaceCanvas")
         self.setPage(_ContractTemplatePreviewPage(self))
         self.page().contentsSizeChanged.connect(self._on_contents_size_changed)
+        self.loadStarted.connect(self._on_load_started)
         self.loadFinished.connect(self._on_load_finished)
         self.setZoomFactor(1.0)
 
     def current_zoom_percent(self) -> int:
         if QWebEngineView is None:  # pragma: no cover - runtime guard
             return 100
-        return max(10, min(400, int(round(self.zoomFactor() * 100.0))))
+        return max(self._MIN_ZOOM_PERCENT, int(round(self.zoomFactor() * 100.0)))
+
+    def _debug_preview_log(self, event: str, **payload) -> None:
+        workspace_debug_log(
+            "preview",
+            event,
+            object_name=str(self.objectName() or ""),
+            zoom_percent=int(self.current_zoom_percent()),
+            zoom_owner=str(self._zoom_owner or ""),
+            visible=bool(self.isVisible()),
+            payload=payload,
+        )
+
+    def _emit_zoom_percent_changed(self) -> None:
+        if QWebEngineView is None:  # pragma: no cover - runtime guard
+            return
+        self.zoom_percent_changed.emit(self.current_zoom_percent())
+
+    def _fit_mode_active(self) -> bool:
+        return str(self._zoom_owner or "fit") == "fit"
+
+    def _set_zoom_owner(self, owner: str) -> None:
+        clean_owner = str(owner or "").strip().lower()
+        if clean_owner not in {"fit", "manual", "viewport"}:
+            clean_owner = "manual"
+        self._zoom_owner = clean_owner
+
+    def _freeze_auto_fit_from_navigation(self) -> None:
+        if QWebEngineView is None:  # pragma: no cover - runtime guard
+            return
+        self._pending_fit_request_serial = None
+        self._fit_guard_timer.stop()
+        self._fit_measure_timer.stop()
+        self._fit_measure_serial += 1
+        if self._fit_mode_active():
+            self._set_zoom_owner("viewport")
+
+    def _set_zoom_factor(self, factor: float, *, user_initiated: bool = False) -> None:
+        if QWebEngineView is None:  # pragma: no cover - runtime guard
+            return
+        clamped_factor = max(
+            self._MIN_ZOOM_PERCENT / 100.0,
+            min(self._MAX_ZOOM_PERCENT / 100.0, float(factor or 1.0)),
+        )
+        if user_initiated:
+            self._set_zoom_owner("manual")
+            self._pending_fit_request_serial = None
+            self._fit_guard_timer.stop()
+            self._fit_measure_timer.stop()
+            self._fit_measure_serial += 1
+        if abs(clamped_factor - float(self.zoomFactor())) <= 0.0005:
+            self._emit_zoom_percent_changed()
+            return
+        QWebEngineView.setZoomFactor(self, clamped_factor)
+        self._emit_zoom_percent_changed()
 
     def set_zoom_percent(self, percent: int, *, user_initiated: bool = False) -> None:
         if QWebEngineView is None:  # pragma: no cover - runtime guard
             return
-        clamped = max(10, min(400, int(round(percent))))
-        if user_initiated:
-            self._user_zoomed = True
-        self.setZoomFactor(clamped / 100.0)
-        self.zoom_percent_changed.emit(clamped)
+        clamped = max(
+            self._MIN_ZOOM_PERCENT,
+            min(self._MAX_ZOOM_PERCENT, int(round(percent))),
+        )
+        self._set_zoom_factor(clamped / 100.0, user_initiated=user_initiated)
 
     def reset_to_fit(self) -> None:
         if QWebEngineView is None:  # pragma: no cover - runtime guard
             return
-        self._user_zoomed = False
+        self._debug_preview_log(
+            "preview_view.reset_to_fit",
+            document_css_width=float(self._document_css_width or 0.0),
+        )
+        self._fit_measure_failures = 0
+        self._set_zoom_owner("fit")
+        if self._document_css_width > 0:
+            self._apply_fit_if_needed(force=True)
+            return
+        self._fit_guard_timer.start(250)
         self._schedule_fit(delay_ms=0)
 
     def mark_programmatic_reload(self) -> None:
         if QWebEngineView is None:  # pragma: no cover - runtime guard
             return
+        self._debug_preview_log(
+            "preview_view.mark_programmatic_reload",
+            pending_fit_request_serial=self._pending_fit_request_serial,
+        )
+        self._fit_guard_timer.stop()
+        self._pending_fit_request_serial = None
         self._fit_measure_timer.stop()
         self._fit_measure_serial += 1
+        self._document_css_width = 0.0
+
+    def _on_load_started(self) -> None:  # pragma: no cover - Qt callback
+        self._debug_preview_log("preview_view.load_started")
+        self._fit_guard_timer.stop()
+        self._pending_fit_request_serial = None
+        self._document_css_width = 0.0
+        self._fit_measure_failures = 0
 
     def _schedule_fit(self, *, delay_ms: int = 90) -> None:
         if QWebEngineView is None:  # pragma: no cover - runtime guard
             return
-        if self._user_zoomed:
+        if not self._fit_mode_active():
             return
         self._fit_measure_serial += 1
+        self._pending_fit_request_serial = self._fit_measure_serial
         self._fit_measure_timer.start(max(0, int(delay_ms)))
 
     def _on_contents_size_changed(self, _size) -> None:  # pragma: no cover - Qt callback
-        self._schedule_fit(delay_ms=140)
+        if self._fit_mode_active():
+            self._schedule_fit(delay_ms=140)
 
     def _on_load_finished(self, ok: bool) -> None:  # pragma: no cover - Qt callback
-        if ok and not self._user_zoomed:
+        self._debug_preview_log(
+            "preview_view.load_finished",
+            ok=bool(ok),
+            fit_mode_active=bool(self._fit_mode_active()),
+            document_css_width=float(self._document_css_width or 0.0),
+        )
+        self._emit_zoom_percent_changed()
+        if ok and self._fit_mode_active():
+            self._fit_guard_timer.start(250)
             self._schedule_fit(delay_ms=140)
 
     def _fit_zoom_percent(self) -> int:
         if QWebEngineView is None:  # pragma: no cover - runtime guard
-            return 100
+            return self._last_fit_percent
         contents_width = max(1.0, float(self._document_css_width or 0.0))
         viewport_width = max(1.0, float(self.contentsRect().width() - 40))
         ratio = min(1.0, viewport_width / contents_width) if contents_width > 0 else 1.0
-        return max(10, min(100, int(round(ratio * 100.0))))
+        return max(self._MIN_ZOOM_PERCENT, min(100, int(round(ratio * 100.0))))
 
-    def _apply_fit_if_needed(self) -> None:
+    def _apply_fit_if_needed(self, *, force: bool = False) -> None:
         if QWebEngineView is None:  # pragma: no cover - runtime guard
             return
-        if self._user_zoomed:
+        if not self._fit_mode_active():
             return
         target_percent = self._fit_zoom_percent()
-        if abs(target_percent - self.current_zoom_percent()) <= 1:
+        self._last_fit_percent = target_percent
+        if not force and abs(target_percent - self.current_zoom_percent()) <= 1:
+            self._emit_zoom_percent_changed()
+            self._finish_fit_transition()
             return
         self.set_zoom_percent(target_percent, user_initiated=False)
+        self._finish_fit_transition()
+
+    def _finish_fit_transition(self) -> None:
+        if QWebEngineView is None:  # pragma: no cover - runtime guard
+            return
+        if not self._fit_mode_active():
+            return
+        self._fit_measure_failures = 0
+        self._fit_guard_timer.stop()
+        self._pending_fit_request_serial = None
+        self._fit_measure_timer.stop()
+        self._fit_measure_serial += 1
+        self._set_zoom_owner("viewport")
 
     def _measure_and_apply_fit(self) -> None:
         if QWebEngineView is None:  # pragma: no cover - runtime guard
             return
-        if self._user_zoomed:
+        if not self._fit_mode_active():
             return
         request_serial = int(self._fit_measure_serial)
         script = """
             (function() {
                 const doc = document.documentElement || {};
                 const body = document.body || {};
-                return Math.max(
-                    Number(doc.scrollWidth || 0),
+                const widths = [];
+                for (const element of Array.from(body.children || [])) {
+                    if (!element || !element.tagName) {
+                        continue;
+                    }
+                    const tagName = String(element.tagName || "").toLowerCase();
+                    if (["script", "style", "link", "meta"].includes(tagName)) {
+                        continue;
+                    }
+                    const computed = window.getComputedStyle(element);
+                    if (!computed || computed.display === "none" || computed.position === "fixed") {
+                        continue;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const width = Math.max(
+                        Number(element.clientWidth || 0),
+                        Number(element.offsetWidth || 0),
+                        Number(rect.width || 0)
+                    );
+                    if (width > 0) {
+                        widths.push(width);
+                    }
+                }
+                const structuredWidth = widths.length ? Math.max(...widths) : 0;
+                const fallbackWidth = Math.max(
                     Number(doc.offsetWidth || 0),
-                    Number(body.scrollWidth || 0),
-                    Number(body.offsetWidth || 0)
+                    Number(body.offsetWidth || 0),
+                    Number(doc.scrollWidth || 0),
+                    Number(body.scrollWidth || 0)
                 );
+                return structuredWidth > 0 ? structuredWidth : fallbackWidth;
             })();
         """
 
         def _apply_measured_width(result) -> None:
+            if not _qt_object_is_valid(self):
+                return
             if QWebEngineView is None:  # pragma: no cover - runtime guard
                 return
-            if request_serial != self._fit_measure_serial or self._user_zoomed:
+            if request_serial != self._pending_fit_request_serial:
                 return
             try:
                 measured_width = float(result or 0.0)
@@ -271,8 +486,20 @@ class _InteractiveHtmlPreviewView(QWebEngineView if QWebEngineView is not None e
                 except Exception:
                     measured_width = 0.0
             if measured_width > 0:
-                self._document_css_width = measured_width
-            self._apply_fit_if_needed()
+                self._fit_measure_failures = 0
+                self._document_css_width = max(float(self._document_css_width or 0.0), measured_width)
+                self._apply_fit_if_needed(force=True)
+                return
+            if self._document_css_width > 0:
+                self._fit_measure_failures = 0
+                self._apply_fit_if_needed(force=True)
+                return
+            if request_serial == self._fit_measure_serial:
+                self._fit_measure_failures += 1
+                if self._fit_measure_failures >= 2:
+                    self._finish_fit_transition()
+                    return
+                self._fit_measure_timer.start(60)
 
         self.page().runJavaScript(script, _apply_measured_width)
 
@@ -297,6 +524,9 @@ class _InteractiveHtmlPreviewView(QWebEngineView if QWebEngineView is not None e
             return
         self.page().runJavaScript(f"window.scrollBy({int(dx)}, {int(dy)});")
 
+    def _reset_native_zoom_state(self) -> None:
+        self._native_zoom_active = False
+
     def keyPressEvent(self, event):  # pragma: no cover - Qt input
         if event.key() == Qt.Key_Space:
             self._space_pan_active = True
@@ -316,18 +546,32 @@ class _InteractiveHtmlPreviewView(QWebEngineView if QWebEngineView is not None e
         if modifiers & (Qt.ControlModifier | Qt.MetaModifier):
             steps = self._zoom_steps_from_event(event)
             if steps:
+                self._debug_preview_log(
+                    "preview_view.ctrl_wheel_zoom",
+                    steps=int(steps),
+                )
                 self.set_zoom_percent(
                     self.current_zoom_percent() + (int(steps) * 10),
                     user_initiated=True,
                 )
                 event.accept()
                 return
-        super().wheelEvent(event)
+        self._debug_preview_log("preview_view.plain_wheel")
+        self._freeze_auto_fit_from_navigation()
+        zoom_before = float(self.zoomFactor()) if QWebEngineView is not None else 1.0
+        if QWebEngineView is not None:
+            QWebEngineView.wheelEvent(self, event)
+        else:  # pragma: no cover - runtime guard
+            super().wheelEvent(event)
+        if QWebEngineView is not None and abs(float(self.zoomFactor()) - zoom_before) > 0.0005:
+            QWebEngineView.setZoomFactor(self, zoom_before)
+            self._emit_zoom_percent_changed()
 
     def mousePressEvent(self, event):  # pragma: no cover - Qt input
         if event.button() == Qt.MiddleButton or (
             event.button() == Qt.LeftButton and self._space_pan_active
         ):
+            self._freeze_auto_fit_from_navigation()
             self._mouse_pan_active = True
             self._last_pan_pos = event.position().toPoint()
             self.setCursor(Qt.ClosedHandCursor)
@@ -362,17 +606,48 @@ class _InteractiveHtmlPreviewView(QWebEngineView if QWebEngineView is not None e
         super().mouseDoubleClickEvent(event)
 
     def event(self, event):  # pragma: no cover - Qt input
+        if workspace_debug_enabled("events"):
+            event_type = int(event.type()) if hasattr(event, "type") else -1
+            if event_type in {
+                int(QEvent.FocusIn),
+                int(QEvent.FocusOut),
+                int(QEvent.Show),
+                int(QEvent.Hide),
+                int(QEvent.ParentChange),
+                int(QEvent.WindowActivate),
+                int(QEvent.WindowDeactivate),
+                int(QEvent.Resize),
+            }:
+                self._debug_preview_log(
+                    "preview_view.event",
+                    event_type=event_type,
+                )
         if event.type() == QEvent.NativeGesture:
             gesture_type = event.gestureType() if hasattr(event, "gestureType") else None
             if gesture_type == Qt.ZoomNativeGesture:
+                allow_native_zoom = (
+                    not isinstance(event, QEvent) or self._gesture_platform in {"cocoa", "offscreen"}
+                )
                 value = float(event.value() if hasattr(event, "value") else 0.0)
-                if abs(value) > 0.0001:
-                    self.set_zoom_percent(
-                        int(round(self.current_zoom_percent() * (1.0 + value))),
+                if not allow_native_zoom:
+                    event.accept()
+                    return True
+                if abs(value) < 0.05 and not self._native_zoom_active:
+                    event.accept()
+                    return True
+                if not self._native_zoom_active:
+                    self._native_zoom_active = True
+                if abs(value) >= 0.05:
+                    self._native_zoom_reset_timer.start(160)
+                    self._set_zoom_factor(
+                        float(self.zoomFactor()) * max(0.5, min(1.5, 1.0 + value)),
                         user_initiated=True,
                     )
                     event.accept()
                     return True
+                self._native_zoom_reset_timer.start(160)
+                event.accept()
+                return True
             if gesture_type == Qt.SmartZoomNativeGesture:
                 self.reset_to_fit()
                 event.accept()
@@ -381,8 +656,6 @@ class _InteractiveHtmlPreviewView(QWebEngineView if QWebEngineView is not None e
 
     def resizeEvent(self, event):  # pragma: no cover - Qt callback
         super().resizeEvent(event)
-        if not self._user_zoomed:
-            self._schedule_fit(delay_ms=120)
 
 
 class _WorkspaceDockTitleBar(QWidget):
@@ -456,10 +729,10 @@ class _WorkspaceDockTitleBar(QWidget):
             self._move_right_action,
             self._move_top_action,
             self._move_bottom_action,
-            self._float_action,
             self._hide_action,
         ):
             action.setEnabled(unlocked)
+        self._float_action.setEnabled(unlocked and self.host._dock_allows_floating(self.dock))
         self._move_up_action.setEnabled(
             unlocked and self.host.can_move_dock_in_stack(self.dock, -1)
         )
@@ -496,19 +769,25 @@ class _DockableWorkspaceTab(QMainWindow):
         *,
         tab_key: str,
         host_object_name: str,
+        layout_version: int,
         reset_handler,
         layout_changed_handler,
         parent=None,
     ):
         super().__init__(parent)
         self.tab_key = str(tab_key)
+        self._layout_version = max(1, int(layout_version or 1))
         self._reset_handler = reset_handler
         self._layout_changed_handler = layout_changed_handler
         self._docks: list[QDockWidget] = []
         self._pending_state: dict[str, object] | None = None
+        self._stable_layout_state: dict[str, object] | None = None
         self._locked = True
         self._applying_layout_state = False
         self._compacting_layout = False
+        self._layout_normalizer = None
+        self._layout_normalization_pending = False
+        self._applying_layout_normalization = False
         self.main_window = self
         self.setObjectName(host_object_name)
         self.setProperty("role", "workspaceCanvas")
@@ -559,6 +838,42 @@ class _DockableWorkspaceTab(QMainWindow):
         self._compact_layout_timer.setSingleShot(True)
         self._compact_layout_timer.timeout.connect(self._compact_empty_dock_space)
 
+    def _debug_layout_log(self, event: str, **payload) -> None:
+        workspace_debug_log(
+            "layout",
+            event,
+            host=summarize_workspace_host(self),
+            payload=payload,
+        )
+
+    def _capture_live_layout_state(self) -> dict[str, object]:
+        dock_object_names = [dock.objectName() for dock in self._docks]
+        return _normalized_workspace_layout_state(
+            {
+                "dock_state_b64": _serialize_dock_state(self.main_window.saveState(1)),
+                "layout_locked": bool(self._locked),
+                "layout_version": int(self._layout_version),
+                "dock_object_names": dock_object_names,
+                "dock_visibility": {
+                    dock.objectName(): _dock_logically_visible(dock) for dock in self._docks
+                },
+            }
+        )
+
+    def _cache_stable_layout_state_if_ready(self) -> dict[str, object] | None:
+        if (
+            not self._docks
+            or not self._layout_restore_ready()
+            or self._transient_restore_churn_active()
+            or self._applying_layout_state
+            or self._applying_layout_normalization
+            or self._compacting_layout
+        ):
+            return None
+        state = self._capture_live_layout_state()
+        self._stable_layout_state = dict(state)
+        return dict(state)
+
     def register_docks(self, docks: list[QDockWidget]) -> None:
         self._docks = list(docks)
         self.panels_menu.clear()
@@ -566,8 +881,7 @@ class _DockableWorkspaceTab(QMainWindow):
             dock.setProperty("dockOrderHint", index)
             dock.setProperty("lastDockArea", _dock_area_value(self.dockWidgetArea(dock)))
             dock.setTitleBarWidget(_WorkspaceDockTitleBar(self, dock))
-            toggle_action = dock.toggleViewAction()
-            self.panels_menu.addAction(toggle_action)
+            self.panels_menu.addAction(dock.toggleViewAction())
             dock.dockLocationChanged.connect(
                 lambda *_args, _dock=dock: self._on_dock_layout_event(_dock)
             )
@@ -577,24 +891,109 @@ class _DockableWorkspaceTab(QMainWindow):
             dock.visibilityChanged.connect(
                 lambda *_args, _dock=dock: self._on_dock_layout_event(_dock)
             )
+            dock.toggleViewAction().triggered.connect(
+                lambda checked=False, _dock=dock: self._debug_layout_log(
+                    "workspace_host.toggle_view_action.triggered",
+                    dock_object_name=str(_dock.objectName() or ""),
+                    checked=bool(checked),
+                )
+            )
+            dock.toggleViewAction().toggled.connect(
+                lambda checked=False, _dock=dock: self._debug_layout_log(
+                    "workspace_host.toggle_view_action.toggled",
+                    dock_object_name=str(_dock.objectName() or ""),
+                    checked=bool(checked),
+                )
+            )
         self._refresh_dock_order_hints()
         self._apply_lock_state(notify=False)
-        self._apply_pending_state_if_ready()
+        self._debug_layout_log(
+            "workspace_host.register_docks",
+            dock_count=len(self._docks),
+        )
+
+    def set_layout_normalizer(self, callback) -> None:
+        self._layout_normalizer = callback if callable(callback) else None
+
+    def _layout_ready_for_normalization(self) -> bool:
+        return self.isVisible() and self.width() > 64 and self.height() > 64
+
+    def apply_layout_normalization_if_ready(self, *, force: bool = False) -> bool:
+        if self._applying_layout_normalization:
+            return False
+        if not callable(self._layout_normalizer):
+            return False
+        if not force and not self._layout_normalization_pending:
+            return False
+        if not self._layout_ready_for_normalization():
+            return False
+        self._applying_layout_normalization = True
+        succeeded = False
+        try:
+            self._layout_normalizer()
+            succeeded = True
+        except Exception:
+            return False
+        finally:
+            self._applying_layout_normalization = False
+            self._layout_normalization_pending = (
+                not succeeded or self._has_exposed_central_canvas()
+            )
+        if succeeded and not self._layout_normalization_pending:
+            self._cache_stable_layout_state_if_ready()
+        return succeeded
+
+    def schedule_layout_normalization(self) -> None:
+        if not callable(self._layout_normalizer):
+            return
+        self._layout_normalization_pending = True
+        if self._applying_layout_state:
+            return
+        self.apply_layout_normalization_if_ready()
 
     def capture_layout_state(self) -> dict[str, object]:
-        if self._docks:
-            self._pending_state = {
-                "dock_state_b64": _serialize_dock_state(self.main_window.saveState(1)),
-                "layout_locked": bool(self._locked),
-            }
-        return dict(self._pending_state or {"dock_state_b64": "", "layout_locked": True})
+        if self._pending_state and not self._layout_restore_ready():
+            state = _normalized_workspace_layout_state(self._pending_state)
+            self._debug_layout_log(
+                "workspace_host.capture_layout_state.pending_reused",
+                state=summarize_panel_layout_state({"tabs": {self.tab_key: state}}),
+            )
+            return state
+        state_source = "empty"
+        state = {}
+        if self._layout_restore_ready() and self._docks:
+            state = self._cache_stable_layout_state_if_ready() or {}
+            state_source = "live"
+        elif self._stable_layout_state:
+            state = _normalized_workspace_layout_state(self._stable_layout_state)
+            state_source = "stable_reused"
+        elif self._docks:
+            state = _normalized_workspace_layout_state(
+                {
+                    "dock_state_b64": "",
+                    "layout_locked": bool(self._locked),
+                    "layout_version": int(self._layout_version),
+                    "dock_object_names": [dock.objectName() for dock in self._docks],
+                    "dock_visibility": {
+                        dock.objectName(): _dock_logically_visible(dock) for dock in self._docks
+                    },
+                }
+            )
+            state_source = "topology_only"
+        self._debug_layout_log(
+            "workspace_host.capture_layout_state.captured",
+            state=summarize_panel_layout_state({"tabs": {self.tab_key: state}}),
+            source=state_source,
+        )
+        return state
 
     def restore_layout_state(self, state: dict[str, object] | None) -> None:
-        normalized = {
-            "dock_state_b64": str((state or {}).get("dock_state_b64") or ""),
-            "layout_locked": bool((state or {}).get("layout_locked", True)),
-        }
+        normalized = _normalized_workspace_layout_state(state)
         self._pending_state = normalized
+        self._debug_layout_log(
+            "workspace_host.restore_layout_state.requested",
+            state=summarize_panel_layout_state({"tabs": {self.tab_key: normalized}}),
+        )
         self._apply_pending_state_if_ready()
 
     def reset_to_default_layout(self) -> None:
@@ -606,6 +1005,7 @@ class _DockableWorkspaceTab(QMainWindow):
             self.set_locked(True)
         finally:
             self._applying_layout_state = False
+        self._cache_stable_layout_state_if_ready()
         self._queue_layout_compaction()
         self._notify_layout_changed()
 
@@ -614,56 +1014,355 @@ class _DockableWorkspaceTab(QMainWindow):
         self._apply_lock_state(notify=True)
 
     def _toggle_locked_state(self) -> None:
+        self._debug_layout_log(
+            "workspace_host.toggle_locked_state.clicked",
+            locked_before=bool(self._locked),
+        )
         self.set_locked(not self._locked)
 
-    def _apply_lock_state(self, *, notify: bool) -> None:
-        features = (
-            QDockWidget.NoDockWidgetFeatures
-            if self._locked
-            else (
-                QDockWidget.DockWidgetClosable
-                | QDockWidget.DockWidgetMovable
-                | QDockWidget.DockWidgetFloatable
-            )
-        )
-        for dock in self._docks:
-            dock.setFeatures(features)
-        self.lock_layout_button.setText("Unlock Layout" if self._locked else "Lock Layout")
-        if notify:
-            self._notify_layout_changed()
+    @staticmethod
+    def _dock_allows_floating(dock: QDockWidget) -> bool:
+        return bool(dock.property("workspaceAllowFloating"))
 
-    def _apply_pending_state_if_ready(self) -> None:
-        if not self._docks or not self._pending_state:
-            return
-        self._locked = bool(self._pending_state.get("layout_locked", True))
-        self._applying_layout_state = True
+    def _unlocked_features_for_dock(self, dock: QDockWidget):
+        features = QDockWidget.DockWidgetClosable | QDockWidget.DockWidgetMovable
+        if self._dock_allows_floating(dock):
+            features |= QDockWidget.DockWidgetFloatable
+        return features
+
+    def panels_action_for_dock(self, dock: QDockWidget) -> QAction | None:
+        return dock.toggleViewAction() if dock in self._docks else None
+
+    def has_compatible_pending_state(self) -> bool:
+        return bool(self._pending_state) and self._pending_state_is_compatible()
+
+    def _apply_lock_state(self, *, notify: bool) -> None:
         for dock in self._docks:
             dock.setFeatures(
                 QDockWidget.DockWidgetClosable
-                | QDockWidget.DockWidgetMovable
-                | QDockWidget.DockWidgetFloatable
+                if self._locked
+                else self._unlocked_features_for_dock(dock)
             )
-        dock_state = _deserialize_dock_state(self._pending_state.get("dock_state_b64"))
+            dock.toggleViewAction().setEnabled(True)
+        self.lock_layout_button.setText("Unlock Layout" if self._locked else "Lock Layout")
+        self._debug_layout_log(
+            "workspace_host.apply_lock_state",
+            locked=bool(self._locked),
+            notify=bool(notify),
+        )
+        if notify:
+            self._notify_layout_changed()
+
+    def _layout_restore_ready(self) -> bool:
+        if not self.isVisible():
+            return False
+        if self.width() <= 64 or self.height() <= 64:
+            return False
+        return self.main_window.width() > 64 and self.main_window.height() > 64
+
+    def _transient_restore_churn_active(self) -> bool:
         try:
+            window = self.window()
+        except RuntimeError:
+            window = None
+        return bool(
+            getattr(window, "_is_restoring_workspace_layout", False)
+            or getattr(window, "_restoring_layout_state", False)
+        )
+
+    def _apply_pending_state_if_ready(self) -> None:
+        if not self._docks or not self._pending_state or not self._layout_restore_ready():
+            self._debug_layout_log(
+                "workspace_host.apply_pending_state.skipped",
+                has_docks=bool(self._docks),
+                has_pending_state=bool(self._pending_state),
+                ready=bool(self._layout_restore_ready()),
+            )
+            return
+        pending_state = dict(self._pending_state)
+        self._locked = bool(self._pending_state.get("layout_locked", True))
+        self._applying_layout_state = True
+        compatible_state = self._pending_state_is_compatible()
+        for dock in self._docks:
+            dock.setFeatures(self._unlocked_features_for_dock(dock))
+        dock_state = _deserialize_dock_state(self._pending_state.get("dock_state_b64"))
+        expected_visibility = _normalized_dock_visibility_map(
+            self._pending_state.get("dock_visibility"),
+            self._pending_state.get("dock_object_names"),
+        )
+        if not expected_visibility:
+            expected_visibility = {
+                dock.objectName(): _dock_logically_visible(dock)
+                for dock in self._docks
+            }
+        try:
+            prepared_default_layout = False
+            if callable(self._reset_handler):
+                self._reset_handler()
+                prepared_default_layout = True
+                self._debug_layout_log(
+                    "workspace_host.apply_pending_state.after_default_layout",
+                    compatible_state=bool(compatible_state),
+                    expected_visibility=dict(expected_visibility),
+                )
             restored_state = False
-            if (
+            visibility_snapshot: dict[str, bool] = {}
+            has_dock_state = (
                 dock_state is not None
                 and hasattr(dock_state, "isEmpty")
                 and not dock_state.isEmpty()
-            ):
+            )
+            if has_dock_state and compatible_state:
                 try:
                     restored_state = bool(self.main_window.restoreState(dock_state, 1))
                 except Exception:
                     restored_state = False
-            if dock_state is not None and not restored_state and callable(self._reset_handler):
+                visibility_snapshot = dict(expected_visibility)
+            self._debug_layout_log(
+                "workspace_host.apply_pending_state.after_restore_state",
+                compatible_state=bool(compatible_state),
+                has_dock_state=bool(has_dock_state),
+                restored_state=bool(restored_state),
+                expected_visibility=dict(expected_visibility),
+            )
+            if (
+                has_dock_state
+                and compatible_state
+                and not restored_state
+                and callable(self._reset_handler)
+                and not prepared_default_layout
+            ):
                 self._reset_handler()
+            self._restore_saved_dock_visibility(expected_visibility)
+            self._debug_layout_log(
+                "workspace_host.apply_pending_state.after_visibility_restore",
+                compatible_state=bool(compatible_state),
+                restored_state=bool(restored_state),
+                expected_visibility=dict(expected_visibility),
+            )
+            if has_dock_state and compatible_state and restored_state:
+                self._repair_unrecoverable_restore_state(visibility_snapshot)
+                self._debug_layout_log(
+                    "workspace_host.apply_pending_state.after_repair",
+                    visibility_snapshot=dict(visibility_snapshot),
+                    layout_integrity_ok=bool(self._layout_integrity_ok()),
+                )
+            self._ensure_panels_menu_matches_live_docks()
             self._apply_lock_state(notify=False)
         finally:
             self._applying_layout_state = False
+            if self._pending_state == pending_state:
+                self._pending_state = None
+        self._cache_stable_layout_state_if_ready()
         self._refresh_dock_order_hints()
-        self._queue_layout_compaction()
+        self._debug_layout_log("workspace_host.apply_pending_state.completed")
+
+    def _pending_state_is_compatible(self) -> bool:
+        if not self._pending_state:
+            return True
+        state_layout_version = int(self._pending_state.get("layout_version") or 0)
+        if state_layout_version <= 0:
+            if self._layout_version != 1:
+                self._debug_layout_log(
+                    "workspace_host.pending_state_incompatible",
+                    reason="legacy_layout_version_mismatch",
+                    state_layout_version=int(state_layout_version),
+                    host_layout_version=int(self._layout_version),
+                )
+                return False
+        elif state_layout_version != self._layout_version:
+            self._debug_layout_log(
+                "workspace_host.pending_state_incompatible",
+                reason="layout_version_mismatch",
+                state_layout_version=int(state_layout_version),
+                host_layout_version=int(self._layout_version),
+            )
+            return False
+        current_names = [dock.objectName() for dock in self._docks]
+        pending_names = [
+            str(name)
+            for name in list(self._pending_state.get("dock_object_names") or [])
+            if str(name)
+        ]
+        if pending_names and pending_names != current_names:
+            self._debug_layout_log(
+                "workspace_host.pending_state_incompatible",
+                reason="dock_object_names_mismatch",
+                pending_names=list(pending_names),
+                current_names=list(current_names),
+            )
+            return False
+        return True
+
+    def _has_exposed_central_canvas(self) -> bool:
+        central = self.centralWidget()
+        if not isinstance(central, QWidget):
+            return False
+        visible_docked = [
+            dock for dock in self._docks if dock.isVisible() and not dock.isFloating()
+        ]
+        if not visible_docked:
+            return False
+        geometry = central.geometry()
+        if geometry.width() < 160 or geometry.height() < 160:
+            return False
+        top_origin = 0
+        menu_widget = self.menuWidget()
+        if isinstance(menu_widget, QWidget):
+            top_origin = max(0, menu_widget.geometry().bottom() + 1)
+        visible_left = max(0, geometry.x())
+        visible_top = max(top_origin, geometry.y())
+        visible_right = min(self.width(), geometry.x() + geometry.width())
+        visible_bottom = min(self.height(), geometry.y() + geometry.height())
+        visible_width = max(0, visible_right - visible_left)
+        visible_height = max(0, visible_bottom - visible_top)
+        if visible_width < 160 or visible_height < 160:
+            return False
+        available_height = max(1, self.height() - top_origin)
+        available_area = max(1, self.width() * available_height)
+        exposed_area = visible_width * visible_height
+        return (exposed_area / available_area) >= 0.12
+
+    def _repair_visible_scroll_area_contents(self) -> bool:
+        repaired = False
+        for dock in self._docks:
+            if not dock.isVisible():
+                continue
+            scroll = dock.widget()
+            if not isinstance(scroll, QScrollArea):
+                continue
+            content = scroll.widget()
+            if not isinstance(content, QWidget):
+                continue
+            try:
+                if not content.isVisible():
+                    content.show()
+                    repaired = True
+                if content.width() <= 8 or content.height() <= 8:
+                    content.adjustSize()
+                    repaired = True
+                content.updateGeometry()
+                scroll.updateGeometry()
+                scroll.viewport().update()
+            except Exception:
+                continue
+        return repaired
+
+    def _visible_scroll_area_contents_ready(self) -> bool:
+        for dock in self._docks:
+            if not dock.isVisible():
+                continue
+            scroll = dock.widget()
+            if not isinstance(scroll, QScrollArea):
+                continue
+            content = scroll.widget()
+            if not isinstance(content, QWidget):
+                return False
+            if not content.isVisible():
+                return False
+            if content.width() <= 8 or content.height() <= 8:
+                return False
+        return True
+
+    def _layout_integrity_ok(self) -> bool:
+        if any(not self._dock_is_recoverably_registered(dock) for dock in self._docks):
+            return False
+        if self._has_exposed_central_canvas():
+            return False
+        return self._visible_scroll_area_contents_ready()
+
+    def _ensure_panels_menu_matches_live_docks(self) -> None:
+        existing_actions = set(self.panels_menu.actions())
+        for dock in self._docks:
+            action = dock.toggleViewAction()
+            if action not in existing_actions:
+                self.panels_menu.addAction(action)
+                existing_actions.add(action)
+            action.setEnabled(True)
+
+    def _dock_is_recoverably_registered(self, dock: QDockWidget) -> bool:
+        if dock not in self._docks:
+            return False
+        if dock.isFloating():
+            return True
+        return self.dockWidgetArea(dock) != Qt.NoDockWidgetArea
+
+    def _restore_saved_dock_visibility(
+        self,
+        visibility_snapshot: dict[str, bool],
+    ) -> None:
+        for dock in self._docks:
+            if visibility_snapshot.get(dock.objectName(), True):
+                dock.show()
+            else:
+                dock.hide()
+
+    def _repair_unrecoverable_restore_state(
+        self,
+        visibility_snapshot: dict[str, bool],
+    ) -> None:
+        if self._layout_integrity_ok():
+            return
+        if self.apply_layout_normalization_if_ready(force=True) and self._layout_integrity_ok():
+            return
+        repaired_scroll_content = self._repair_visible_scroll_area_contents()
+        if repaired_scroll_content and self._layout_integrity_ok():
+            return
+        for dock in self._docks:
+            if not self._dock_is_recoverably_registered(dock):
+                target_area = _dock_area_from_value(dock.property("lastDockArea"))
+                if target_area == Qt.NoDockWidgetArea:
+                    target_area = Qt.LeftDockWidgetArea
+                dock.show()
+                self.addDockWidget(target_area, dock)
+                dock.setProperty("lastDockArea", _dock_area_value(target_area))
+        self._restore_saved_dock_visibility(visibility_snapshot)
+        self._repair_visible_scroll_area_contents()
+        self.apply_layout_normalization_if_ready(force=True)
+        if self._layout_integrity_ok():
+            return
+        if callable(self._reset_handler):
+            self._reset_handler()
+            self._restore_saved_dock_visibility(visibility_snapshot)
+            self._repair_visible_scroll_area_contents()
+            self.apply_layout_normalization_if_ready(force=True)
+
+    def validate_layout_integrity_after_restore(self) -> bool:
+        self._apply_pending_state_if_ready()
+        visibility_snapshot = {
+            dock.objectName(): bool(dock.isVisible())
+            for dock in self._docks
+        }
+        self._ensure_panels_menu_matches_live_docks()
+        self._repair_unrecoverable_restore_state(visibility_snapshot)
+        self._ensure_panels_menu_matches_live_docks()
+        self._apply_lock_state(notify=False)
+        self._cache_stable_layout_state_if_ready()
+        result = self._layout_integrity_ok()
+        self._debug_layout_log(
+            "workspace_host.validate_layout_integrity_after_restore",
+            result=bool(result),
+        )
+        return result
+
+    def showEvent(self, event):  # pragma: no cover - Qt callback
+        super().showEvent(event)
+        if self._transient_restore_churn_active():
+            return
+        self._apply_pending_state_if_ready()
+        self.apply_layout_normalization_if_ready()
+
+    def resizeEvent(self, event):  # pragma: no cover - Qt callback
+        super().resizeEvent(event)
+        if self._transient_restore_churn_active():
+            return
+        self._apply_pending_state_if_ready()
+        self.apply_layout_normalization_if_ready()
 
     def _notify_layout_changed(self) -> None:
+        if self._transient_restore_churn_active() or self._applying_layout_state:
+            return
+        self._cache_stable_layout_state_if_ready()
         if callable(self._layout_changed_handler):
             self._layout_changed_handler()
 
@@ -679,41 +1378,13 @@ class _DockableWorkspaceTab(QMainWindow):
         self._notify_layout_changed()
 
     def can_move_dock_in_stack(self, dock: QDockWidget, step: int) -> bool:
-        if dock not in self._docks or dock.isFloating():
-            return False
-        area = self.dockWidgetArea(dock)
-        groups = self._ordered_visible_area_groups(area)
-        for group in groups:
-            if dock not in group:
-                continue
-            target_index = group.index(dock) + int(step)
-            return 0 <= target_index < len(group)
         return False
 
     def move_dock_in_stack(self, dock: QDockWidget, step: int) -> None:
-        if self._locked or dock not in self._docks or dock.isFloating():
-            return
-        area = self.dockWidgetArea(dock)
-        groups = self._ordered_visible_area_groups(area)
-        for group in groups:
-            if dock not in group:
-                continue
-            current_index = group.index(dock)
-            target_index = current_index + int(step)
-            if not (0 <= target_index < len(group)):
-                return
-            group[current_index], group[target_index] = group[target_index], group[current_index]
-            self._applying_layout_state = True
-            try:
-                self._rebuild_area_groups(area, groups)
-            finally:
-                self._applying_layout_state = False
-            self._queue_layout_compaction()
-            self._notify_layout_changed()
-            return
+        return
 
     def float_dock(self, dock: QDockWidget) -> None:
-        if self._locked or dock not in self._docks:
+        if self._locked or dock not in self._docks or not self._dock_allows_floating(dock):
             return
         dock.show()
         dock.setFloating(True)
@@ -732,14 +1403,32 @@ class _DockableWorkspaceTab(QMainWindow):
                 dock.setProperty("lastDockArea", _dock_area_value(self.dockWidgetArea(dock)))
             except Exception:
                 pass
+        ignore_reason = ""
+        if self._transient_restore_churn_active():
+            ignore_reason = "outer_restore"
+        elif self._applying_layout_state:
+            ignore_reason = "apply_pending_state"
+        elif self._applying_layout_normalization:
+            ignore_reason = "layout_normalization"
+        elif self._compacting_layout:
+            ignore_reason = "layout_compaction"
+        self._debug_layout_log(
+            "workspace_host.dock_layout_event",
+            dock_object_name=str(dock.objectName() or ""),
+            dock_visible=bool(dock.isVisible()),
+            dock_hidden=bool(dock.isHidden()),
+            dock_floating=bool(dock.isFloating()),
+            ignored=bool(ignore_reason),
+            ignore_reason=str(ignore_reason),
+        )
+        if ignore_reason:
+            return
         self._refresh_dock_order_hints()
         self._queue_layout_compaction()
         self._notify_layout_changed()
 
     def _queue_layout_compaction(self) -> None:
-        if self._applying_layout_state or self._compacting_layout:
-            return
-        self._compact_layout_timer.start(0)
+        self.schedule_layout_normalization()
 
     def _compact_empty_dock_space(self) -> None:
         if self._applying_layout_state or self._compacting_layout:
@@ -931,6 +1620,9 @@ class _FillHtmlPreviewController(QWidget):
         self._latest_requested_reason = ""
         self._current_revision_id: int | None = None
         self._latest_payload: dict[str, object] | None = None
+        self._latest_request_key: tuple[int | None, str] | None = None
+        self._pending_request_key: tuple[int | None, str] | None = None
+        self._active_request_key: tuple[int | None, str] | None = None
         self._active_candidate: _PreviewCandidate | None = None
         self._active_tree: Path | None = None
         self._pending_candidate: _PreviewCandidate | None = None
@@ -940,6 +1632,27 @@ class _FillHtmlPreviewController(QWidget):
         self._refresh_timer.timeout.connect(self._start_refresh_if_idle)
         if self.panel.fill_html_preview_view is not None:
             self.panel.fill_html_preview_view.loadFinished.connect(self._on_view_load_finished)
+
+    def _debug_preview_log(self, event: str, **payload) -> None:
+        workspace_debug_log(
+            "preview",
+            event,
+            latest_generation=int(self._latest_generation),
+            inflight_generation=self._inflight_generation,
+            awaiting_load_generation=self._awaiting_load_generation,
+            current_revision_id=self._current_revision_id,
+            active_request_key_digest=(
+                digest_debug_value(self._active_request_key)
+                if self._active_request_key is not None
+                else None
+            ),
+            latest_request_key_digest=(
+                digest_debug_value(self._latest_request_key)
+                if self._latest_request_key is not None
+                else None
+            ),
+            payload=payload,
+        )
 
     def initialize(self) -> None:
         export_service = self.panel._export_service()
@@ -958,8 +1671,16 @@ class _FillHtmlPreviewController(QWidget):
 
     def set_revision_context(self, revision_id: int | None) -> None:
         self._current_revision_id = int(revision_id) if revision_id is not None else None
+        self._debug_preview_log(
+            "preview_controller.set_revision_context",
+            revision_id=self._current_revision_id,
+        )
 
     def mark_stale(self, message: str | None = None) -> None:
+        self._debug_preview_log(
+            "preview_controller.mark_stale",
+            message=str(message or ""),
+        )
         self._stale = True
         stale_label = getattr(self.panel, "fill_preview_stale_label", None)
         if isinstance(stale_label, QLabel):
@@ -970,9 +1691,16 @@ class _FillHtmlPreviewController(QWidget):
             status.setText(message)
 
     def clear(self, *, keep_status: bool = False) -> None:
+        self._debug_preview_log(
+            "preview_controller.clear",
+            keep_status=bool(keep_status),
+        )
         self._refresh_timer.stop()
         self._latest_payload = None
         self._latest_requested_reason = ""
+        self._latest_request_key = None
+        self._pending_request_key = None
+        self._active_request_key = None
         self._latest_generation += 1
         self._inflight_generation = None
         self._awaiting_load_generation = None
@@ -994,30 +1722,122 @@ class _FillHtmlPreviewController(QWidget):
                 "HTML preview becomes available when the selected revision is a native HTML template."
             )
 
+    @staticmethod
+    def _request_key_for(
+        revision_id: int | None,
+        payload: dict[str, object] | None,
+    ) -> tuple[int | None, str]:
+        normalized_revision = int(revision_id) if revision_id is not None else None
+        try:
+            payload_key = json.dumps(payload or {}, sort_keys=True, ensure_ascii=True)
+        except Exception:
+            payload_key = repr(payload or {})
+        return (normalized_revision, payload_key)
+
     def request_refresh(self, *, reason: str, delay_ms: int = 180) -> None:
         view = self.panel.fill_html_preview_view
         if view is None or QWebEngineView is None:
+            self._debug_preview_log(
+                "preview_controller.request_refresh.skipped",
+                reason=str(reason or ""),
+                delay_ms=int(delay_ms),
+                skip_reason="no_view",
+            )
             return
         revision_id = self._current_revision_id
         if revision_id is None:
+            self._debug_preview_log(
+                "preview_controller.request_refresh.skipped",
+                reason=str(reason or ""),
+                delay_ms=int(delay_ms),
+                skip_reason="no_revision_context",
+            )
+            return
+        payload = dict(self.panel.current_fill_state() or {})
+        request_key = self._request_key_for(revision_id, payload)
+        self._debug_preview_log(
+            "preview_controller.request_refresh.requested",
+            reason=str(reason or ""),
+            delay_ms=int(delay_ms),
+            request_key_digest=digest_debug_value(request_key),
+            payload_digest=digest_debug_value(payload),
+        )
+        self._latest_requested_reason = str(reason or "").strip()
+        self._latest_payload = payload
+        if (
+            request_key == self._active_request_key
+            and self._inflight_generation is None
+            and self._awaiting_load_generation is None
+            and not self._stale
+        ):
+            self._debug_preview_log(
+                "preview_controller.request_refresh.skipped",
+                reason=str(reason or ""),
+                delay_ms=int(delay_ms),
+                skip_reason="already_active",
+                request_key_digest=digest_debug_value(request_key),
+            )
+            if isinstance(getattr(self.panel, "fill_preview_stale_label", None), QLabel):
+                self.panel.fill_preview_stale_label.setVisible(False)
+            if hasattr(self.panel, "fill_preview_status_label"):
+                self.panel.fill_preview_status_label.setText(
+                    self._latest_requested_reason or "Previewing current HTML draft state."
+                )
+            return
+        if (
+            request_key == self._latest_request_key
+            and (
+                self._refresh_timer.isActive()
+                or self._inflight_generation is not None
+                or self._awaiting_load_generation is not None
+            )
+        ):
+            self._debug_preview_log(
+                "preview_controller.request_refresh.skipped",
+                reason=str(reason or ""),
+                delay_ms=int(delay_ms),
+                skip_reason="already_queued",
+                request_key_digest=digest_debug_value(request_key),
+            )
             return
         self._latest_generation += 1
-        self._latest_payload = dict(self.panel.current_fill_state() or {})
-        self._latest_requested_reason = str(reason or "").strip()
+        self._latest_request_key = request_key
+        self._debug_preview_log(
+            "preview_controller.request_refresh.queued",
+            reason=str(reason or ""),
+            delay_ms=int(delay_ms),
+            request_key_digest=digest_debug_value(request_key),
+        )
         self.mark_stale("Preview stale. Refreshing current draft state...")
         self._refresh_timer.start(max(0, int(delay_ms)))
 
     def _start_refresh_if_idle(self) -> None:
         if self._inflight_generation is not None:
+            self._debug_preview_log(
+                "preview_controller.start_refresh.skipped",
+                skip_reason="inflight_generation_present",
+            )
             return
         revision_id = self._current_revision_id
         export_service = self.panel._export_service()
         view = self.panel.fill_html_preview_view
         if revision_id is None or export_service is None or view is None:
+            self._debug_preview_log(
+                "preview_controller.start_refresh.skipped",
+                skip_reason="missing_context",
+                has_revision=bool(revision_id is not None),
+                has_export_service=bool(export_service is not None),
+                has_view=bool(view is not None),
+            )
             return
         generation = int(self._latest_generation)
+        self._debug_preview_log(
+            "preview_controller.start_refresh.begin",
+            generation=generation,
+        )
         self._inflight_generation = generation
         payload = dict(self._latest_payload or {})
+        request_key = self._latest_request_key
         try:
             session_root = export_service.create_html_preview_session_root()
             root_path, html_path, _warnings = export_service.materialize_html_preview_session(
@@ -1027,6 +1847,11 @@ class _FillHtmlPreviewController(QWidget):
             )
         except Exception as exc:
             self._inflight_generation = None
+            self._debug_preview_log(
+                "preview_controller.start_refresh.failed",
+                generation=generation,
+                error=str(exc),
+            )
             self.mark_stale("Preview stale. Latest refresh failed.")
             self.panel.fill_preview_status_label.setText(f"Unable to refresh HTML preview: {exc}")
             return
@@ -1044,7 +1869,14 @@ class _FillHtmlPreviewController(QWidget):
         if self._pending_candidate is not None:
             self._delete_tree(self._pending_candidate.root_path)
         self._pending_candidate = candidate
+        self._pending_request_key = request_key
         self._awaiting_load_generation = generation
+        self._debug_preview_log(
+            "preview_controller.start_refresh.load_requested",
+            generation=generation,
+            html_path=str(candidate.html_path),
+            request_key_digest=digest_debug_value(request_key),
+        )
         view.mark_programmatic_reload()
         view.load(QUrl.fromLocalFile(str(candidate.html_path.resolve())))
         self.panel.fill_preview_status_label.setText(
@@ -1057,8 +1889,20 @@ class _FillHtmlPreviewController(QWidget):
         self._awaiting_load_generation = None
         self._inflight_generation = None
         if generation is None or candidate is None:
+            self._debug_preview_log(
+                "preview_controller.load_finished.ignored",
+                ok=bool(ok),
+                generation=generation,
+            )
             return
         if not ok or generation != self._latest_generation:
+            self._debug_preview_log(
+                "preview_controller.load_finished.rejected",
+                ok=bool(ok),
+                generation=generation,
+                latest_generation=int(self._latest_generation),
+            )
+            self._pending_request_key = None
             self._delete_tree(candidate.root_path)
             self._pending_candidate = None
             if not ok:
@@ -1073,7 +1917,15 @@ class _FillHtmlPreviewController(QWidget):
         self._active_tree = candidate.root_path
         self._active_candidate = candidate
         self._pending_candidate = None
+        self._active_request_key = self._pending_request_key
+        self._pending_request_key = None
         self._stale = False
+        self._debug_preview_log(
+            "preview_controller.load_finished.applied",
+            ok=bool(ok),
+            generation=generation,
+            html_path=str(candidate.html_path),
+        )
         if isinstance(self.panel.fill_preview_stale_label, QLabel):
             self.panel.fill_preview_stale_label.setVisible(False)
         self.panel.fill_preview_status_label.setText(
@@ -1102,6 +1954,11 @@ class ContractTemplateWorkspacePanel(QWidget):
     _IMPORT_TAB_KEY = "import"
     _SYMBOLS_TAB_KEY = "symbols"
     _FILL_TAB_KEY = "fill"
+    _TAB_LAYOUT_VERSIONS = {
+        _IMPORT_TAB_KEY: 1,
+        _SYMBOLS_TAB_KEY: 1,
+        _FILL_TAB_KEY: 4,
+    }
 
     def __init__(
         self,
@@ -1142,6 +1999,8 @@ class ContractTemplateWorkspacePanel(QWidget):
         self._pending_tab_layout_states: dict[str, dict[str, object] | None] = {
             key: None for key in self.TAB_ORDER
         }
+        self._restoring_layout_state = False
+        self._suspend_preview_refresh = False
         self._fill_preview_controller: _FillHtmlPreviewController | None = None
         self.setObjectName("contractTemplateWorkspacePanel")
         _apply_standard_widget_chrome(self, "contractTemplateWorkspacePanel")
@@ -1178,6 +2037,30 @@ class ContractTemplateWorkspacePanel(QWidget):
         if self._fill_preview_controller is not None:
             self._fill_preview_controller.cleanup()
         super().closeEvent(event)
+
+    def _debug_layout_log(self, event: str, **payload) -> None:
+        workspace_debug_log(
+            "layout",
+            event,
+            object_name=str(self.objectName() or ""),
+            current_tab=str(self._current_tab_key() or ""),
+            host_keys=list(self._tab_hosts.keys()),
+            payload=payload,
+        )
+
+    def begin_layout_restore(self) -> None:
+        self._suspend_preview_refresh = True
+        self._debug_layout_log("workspace_panel.begin_layout_restore")
+
+    def finish_layout_restore(self) -> None:
+        was_suspended = bool(self._suspend_preview_refresh)
+        self._suspend_preview_refresh = False
+        if was_suspended and self._current_tab_key() == self._FILL_TAB_KEY:
+            self._sync_html_preview_state(self._selected_fill_revision_id())
+        self._debug_layout_log(
+            "workspace_panel.finish_layout_restore",
+            preview_resumed=bool(was_suspended),
+        )
 
     def _build_import_tab(self) -> None:
         self.import_tab = self._create_workspace_tab_page(
@@ -1244,10 +2127,12 @@ class ContractTemplateWorkspacePanel(QWidget):
         object_name: str,
         content: QWidget,
         scrollable: bool = True,
+        allow_floating: bool = True,
     ) -> QDockWidget:
         dock = QDockWidget(title, host.main_window)
         dock.setObjectName(object_name)
         dock.setAllowedAreas(Qt.AllDockWidgetAreas)
+        dock.setProperty("workspaceAllowFloating", bool(allow_floating))
         if scrollable:
             scroll = QScrollArea(dock)
             scroll.setObjectName(f"{object_name}ScrollArea")
@@ -1268,6 +2153,21 @@ class ContractTemplateWorkspacePanel(QWidget):
             if dock.isFloating():
                 dock.setFloating(False)
 
+    @staticmethod
+    def _resize_visible_docks(window: QMainWindow, docks, sizes, orientation) -> None:
+        visible_docks: list[QDockWidget] = []
+        visible_sizes: list[int] = []
+        for dock, size in zip(list(docks or []), list(sizes or [])):
+            if not isinstance(dock, QDockWidget):
+                continue
+            if not dock.isVisible() or dock.isFloating():
+                continue
+            visible_docks.append(dock)
+            visible_sizes.append(max(1, int(size)))
+        if not visible_docks:
+            return
+        window.resizeDocks(visible_docks, visible_sizes, orientation)
+
     def _ensure_workspace_container(
         self,
         *,
@@ -1282,13 +2182,11 @@ class ContractTemplateWorkspacePanel(QWidget):
         host = _DockableWorkspaceTab(
             tab_key=key,
             host_object_name=host_object_name,
+            layout_version=int(self._TAB_LAYOUT_VERSIONS.get(key, 1)),
             reset_handler=reset_handler,
             layout_changed_handler=self._notify_layout_state_changed,
             parent=self.workspace_tabs,
         )
-        pending_state = self._pending_tab_layout_states.get(key)
-        if pending_state is not None:
-            host.restore_layout_state(pending_state)
         tab_index = self.workspace_tabs.indexOf(page)
         tab_label = self.workspace_tabs.tabText(tab_index) if tab_index >= 0 else ""
         was_current = self.workspace_tabs.currentWidget() is page
@@ -1624,6 +2522,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         host.register_docks(
             [import_dock, revision_dock, placeholder_dock, draft_dock, snapshots_dock]
         )
+        host.set_layout_normalizer(self._normalize_import_workspace_layout)
         self._reset_import_workspace_layout()
         return host
 
@@ -1640,10 +2539,45 @@ class ContractTemplateWorkspacePanel(QWidget):
         self._show_docks(import_dock, revision_dock, placeholder_dock, draft_dock, snapshots_dock)
         window = host.main_window
         window.addDockWidget(Qt.LeftDockWidgetArea, import_dock)
+        window.splitDockWidget(import_dock, revision_dock, Qt.Horizontal)
         window.splitDockWidget(import_dock, draft_dock, Qt.Vertical)
-        window.addDockWidget(Qt.RightDockWidgetArea, revision_dock)
         window.splitDockWidget(revision_dock, placeholder_dock, Qt.Vertical)
         window.splitDockWidget(placeholder_dock, snapshots_dock, Qt.Vertical)
+        self._normalize_import_workspace_layout()
+        host.schedule_layout_normalization()
+
+    def _normalize_import_workspace_layout(self) -> None:
+        host = self._tab_hosts.get(self._IMPORT_TAB_KEY)
+        if host is None:
+            return
+        docks = {dock.objectName(): dock for dock in host._docks}
+        import_dock = docks["contractTemplateImportAdminDock"]
+        revision_dock = docks["contractTemplateRevisionInventoryDock"]
+        placeholder_dock = docks["contractTemplatePlaceholderInventoryDock"]
+        draft_dock = docks["contractTemplateDraftArchiveDock"]
+        snapshots_dock = docks["contractTemplateSnapshotsArtifactsDock"]
+        window = host.main_window
+        try:
+            self._resize_visible_docks(
+                window,
+                [import_dock, revision_dock],
+                [820, 920],
+                Qt.Horizontal,
+            )
+            self._resize_visible_docks(
+                window,
+                [import_dock, draft_dock],
+                [420, 320],
+                Qt.Vertical,
+            )
+            self._resize_visible_docks(
+                window,
+                [revision_dock, placeholder_dock, snapshots_dock],
+                [260, 260, 340],
+                Qt.Vertical,
+            )
+        except Exception:
+            pass
 
     def _ensure_symbol_workspace(self) -> _DockableWorkspaceTab:
         host = self._tab_hosts.get(self._SYMBOLS_TAB_KEY)
@@ -1834,6 +2768,7 @@ class ContractTemplateWorkspacePanel(QWidget):
             content=manual_surface,
         )
         host.register_docks([controls_dock, known_symbols_dock, selected_dock, manual_dock])
+        host.set_layout_normalizer(self._normalize_symbol_workspace_layout)
         self._populate_namespace_combo(())
         self._refresh_manual_symbol_preview()
         self._reset_symbol_workspace_layout()
@@ -1851,9 +2786,43 @@ class ContractTemplateWorkspacePanel(QWidget):
         self._show_docks(controls_dock, known_symbols_dock, selected_dock, manual_dock)
         window = host.main_window
         window.addDockWidget(Qt.LeftDockWidgetArea, controls_dock)
+        window.splitDockWidget(controls_dock, selected_dock, Qt.Horizontal)
         window.splitDockWidget(controls_dock, known_symbols_dock, Qt.Vertical)
-        window.addDockWidget(Qt.RightDockWidgetArea, selected_dock)
         window.splitDockWidget(selected_dock, manual_dock, Qt.Vertical)
+        self._normalize_symbol_workspace_layout()
+        host.schedule_layout_normalization()
+
+    def _normalize_symbol_workspace_layout(self) -> None:
+        host = self._tab_hosts.get(self._SYMBOLS_TAB_KEY)
+        if host is None:
+            return
+        docks = {dock.objectName(): dock for dock in host._docks}
+        controls_dock = docks["contractTemplateGeneratorControlsDock"]
+        known_symbols_dock = docks["contractTemplateKnownSymbolsDock"]
+        selected_dock = docks["contractTemplateSelectedSymbolDock"]
+        manual_dock = docks["contractTemplateManualSymbolDock"]
+        window = host.main_window
+        try:
+            self._resize_visible_docks(
+                window,
+                [controls_dock, selected_dock],
+                [760, 720],
+                Qt.Horizontal,
+            )
+            self._resize_visible_docks(
+                window,
+                [controls_dock, known_symbols_dock],
+                [260, 520],
+                Qt.Vertical,
+            )
+            self._resize_visible_docks(
+                window,
+                [selected_dock, manual_dock],
+                [420, 320],
+                Qt.Vertical,
+            )
+        except Exception:
+            pass
 
     def _ensure_fill_workspace(self) -> _DockableWorkspaceTab:
         host = self._tab_hosts.get(self._FILL_TAB_KEY)
@@ -2218,6 +3187,7 @@ class ContractTemplateWorkspacePanel(QWidget):
             object_name="contractTemplateHtmlPreviewDock",
             content=preview_surface,
             scrollable=False,
+            allow_floating=False,
         )
         host.register_docks(
             [
@@ -2231,6 +3201,7 @@ class ContractTemplateWorkspacePanel(QWidget):
                 preview_dock,
             ]
         )
+        host.set_layout_normalizer(self._normalize_fill_workspace_layout)
         self._reset_fill_workspace_layout()
         return host
 
@@ -2259,25 +3230,45 @@ class ContractTemplateWorkspacePanel(QWidget):
         )
         window = host.main_window
         window.addDockWidget(Qt.LeftDockWidgetArea, revision_dock)
+        window.splitDockWidget(revision_dock, auto_dock, Qt.Horizontal)
+        window.splitDockWidget(auto_dock, preview_dock, Qt.Horizontal)
         window.splitDockWidget(revision_dock, draft_dock, Qt.Vertical)
         window.splitDockWidget(draft_dock, export_dock, Qt.Vertical)
         window.splitDockWidget(export_dock, notes_dock, Qt.Vertical)
-        window.splitDockWidget(revision_dock, auto_dock, Qt.Horizontal)
-        window.splitDockWidget(auto_dock, preview_dock, Qt.Horizontal)
         window.splitDockWidget(auto_dock, selector_dock, Qt.Vertical)
         window.splitDockWidget(selector_dock, manual_dock, Qt.Vertical)
+        self._normalize_fill_workspace_layout()
+        host.schedule_layout_normalization()
+
+    def _normalize_fill_workspace_layout(self) -> None:
+        host = self._tab_hosts.get(self._FILL_TAB_KEY)
+        if host is None:
+            return
+        docks = {dock.objectName(): dock for dock in host._docks}
+        revision_dock = docks["contractTemplateFillRevisionDock"]
+        draft_dock = docks["contractTemplateFillDraftWorkspaceDock"]
+        export_dock = docks["contractTemplateFillResolvedExportDock"]
+        notes_dock = docks["contractTemplateFillDraftNotesDock"]
+        auto_dock = docks["contractTemplateFillAutomaticFieldsDock"]
+        selector_dock = docks["contractTemplateFillDatabaseFieldsDock"]
+        manual_dock = docks["contractTemplateFillManualFieldsDock"]
+        preview_dock = docks["contractTemplateHtmlPreviewDock"]
+        window = host.main_window
         try:
-            window.resizeDocks(
+            self._resize_visible_docks(
+                window,
                 [revision_dock, auto_dock, preview_dock],
                 [360, 420, 760],
                 Qt.Horizontal,
             )
-            window.resizeDocks(
+            self._resize_visible_docks(
+                window,
                 [revision_dock, draft_dock, export_dock, notes_dock],
                 [280, 360, 200, 160],
                 Qt.Vertical,
             )
-            window.resizeDocks(
+            self._resize_visible_docks(
+                window,
                 [auto_dock, selector_dock, manual_dock],
                 [180, 320, 260],
                 Qt.Vertical,
@@ -2308,6 +3299,19 @@ class ContractTemplateWorkspacePanel(QWidget):
             return self._ensure_fill_workspace()
         return self._ensure_import_workspace()
 
+    def _refresh_workspace_tab(self, key: str, *, validate: bool = True) -> None:
+        if key == self._SYMBOLS_TAB_KEY:
+            self.refresh_symbol_generator()
+        elif key == self._FILL_TAB_KEY:
+            self.refresh_fill_form()
+        else:
+            self.refresh_admin_workspace()
+        host = self._tab_hosts.get(key)
+        if host is not None:
+            host.schedule_layout_normalization()
+            if validate:
+                host.validate_layout_integrity_after_restore()
+
     def _on_workspace_tab_changed(self, index: int) -> None:
         page = self.workspace_tabs.widget(index)
         if page is None:
@@ -2321,25 +3325,40 @@ class ContractTemplateWorkspacePanel(QWidget):
             self._IMPORT_TAB_KEY,
         )
         self._ensure_tab_workspace(key)
-        if key == self._SYMBOLS_TAB_KEY:
-            self.refresh_symbol_generator()
-        elif key == self._FILL_TAB_KEY:
-            self.refresh_fill_form()
-        else:
-            self.refresh_admin_workspace()
+        if self._restoring_layout_state:
+            self._debug_layout_log(
+                "workspace_panel.current_tab_changed.suppressed",
+                index=int(index),
+                tab_key=str(key),
+            )
+            return
+        self._refresh_workspace_tab(key)
+        self._debug_layout_log(
+            "workspace_panel.current_tab_changed",
+            index=int(index),
+            tab_key=str(key),
+        )
         self._notify_layout_state_changed()
 
     def focus_tab(self, tab_name: str = "import") -> None:
         key = self._normalize_tab_key(tab_name)
+        self._debug_layout_log(
+            "workspace_panel.focus_tab.begin",
+            requested_tab=str(tab_name or ""),
+            normalized_tab=str(key),
+        )
         self._ensure_tab_workspace(key)
         target_page = self._tab_pages[key]
+        already_current = self.workspace_tabs.currentWidget() is target_page
         self.workspace_tabs.setCurrentWidget(target_page)
-        if key == self._FILL_TAB_KEY:
-            self.refresh_fill_form()
-        elif key == self._SYMBOLS_TAB_KEY:
-            self.refresh_symbol_generator()
-        else:
-            self.refresh_admin_workspace()
+        if already_current:
+            self._refresh_workspace_tab(key, validate=True)
+        self._debug_layout_log(
+            "workspace_panel.focus_tab.end",
+            requested_tab=str(tab_name or ""),
+            normalized_tab=str(key),
+            already_current=bool(already_current),
+        )
 
     def focus_namespace(self, namespace: str | None = None) -> None:
         self._ensure_symbol_workspace()
@@ -2366,41 +3385,124 @@ class ContractTemplateWorkspacePanel(QWidget):
             host = self._tab_hosts.get(key)
             if host is not None:
                 tabs_payload[key] = host.capture_layout_state()
-            elif self._pending_tab_layout_states.get(key) is not None:
-                tabs_payload[key] = dict(self._pending_tab_layout_states[key] or {})
-            else:
-                tabs_payload[key] = {"dock_state_b64": "", "layout_locked": True}
-        return {
+        state = {
             "schema_version": 1,
             "current_tab": self._current_tab_key(),
             "tabs": tabs_payload,
         }
+        self._debug_layout_log(
+            "workspace_panel.capture_layout_state",
+            state=summarize_panel_layout_state(state),
+        )
+        return state
 
     def restore_layout_state(self, state: dict[str, object] | None) -> None:
+        self._debug_layout_log(
+            "workspace_panel.restore_layout_state.begin",
+            state=summarize_panel_layout_state(state),
+        )
+        self._restoring_layout_state = True
         payload = dict(state or {})
         tabs_payload = dict(payload.get("tabs") or {})
-        has_nested_state = bool(tabs_payload)
-        for key in self.TAB_ORDER:
-            entry = tabs_payload.get(key)
-            normalized_entry = (
-                {
-                    "dock_state_b64": str((entry or {}).get("dock_state_b64") or ""),
-                    "layout_locked": bool((entry or {}).get("layout_locked", True)),
-                }
-                if entry is not None
-                else None
-            )
-            self._pending_tab_layout_states[key] = normalized_entry
-            host = self._tab_hosts.get(key)
-            if host is not None and normalized_entry is not None:
-                host.restore_layout_state(normalized_entry)
-            elif host is not None:
-                host.reset_to_default_layout()
-        current_tab = self._normalize_tab_key(payload.get("current_tab"))
-        if not has_nested_state:
-            current_tab = self._IMPORT_TAB_KEY
-        self.workspace_tabs.setCurrentWidget(self._tab_pages[current_tab])
+        normalized_tabs: dict[str, dict[str, object] | None] = {}
+        current_tab = self._IMPORT_TAB_KEY
+        try:
+            for key in self.TAB_ORDER:
+                entry = tabs_payload.get(key)
+                normalized_entry = (
+                    {
+                        "dock_state_b64": str((entry or {}).get("dock_state_b64") or ""),
+                        "layout_locked": bool((entry or {}).get("layout_locked", True)),
+                        "layout_version": int((entry or {}).get("layout_version") or 0),
+                        "dock_object_names": _normalized_dock_object_names(
+                            (entry or {}).get("dock_object_names")
+                        ),
+                        "dock_visibility": _normalized_dock_visibility_map(
+                            (entry or {}).get("dock_visibility"),
+                            (entry or {}).get("dock_object_names"),
+                        ),
+                    }
+                    if entry is not None
+                    else None
+                )
+                if normalized_entry is not None and not _layout_state_has_saved_dock_topology(
+                    normalized_entry
+                ):
+                    normalized_entry = None
+                normalized_tabs[key] = normalized_entry
+                self._pending_tab_layout_states[key] = normalized_entry
+            has_nested_state = any(value is not None for value in normalized_tabs.values())
+            if has_nested_state:
+                for key in self.TAB_ORDER:
+                    self._ensure_tab_workspace(key)
+            for key in self.TAB_ORDER:
+                host = self._tab_hosts.get(key)
+                normalized_entry = normalized_tabs.get(key)
+                self._debug_layout_log(
+                    "workspace_panel.restore_layout_state.host_dispatch",
+                    tab_key=str(key),
+                    has_state=bool(normalized_entry is not None),
+                    action="restore" if normalized_entry is not None else "reset",
+                    host=summarize_workspace_host(host) if host is not None else None,
+                    state=summarize_panel_layout_state(
+                        {
+                            "schema_version": 1,
+                            "current_tab": key,
+                            "tabs": {key: normalized_entry} if normalized_entry is not None else {},
+                        }
+                    ),
+                )
+                if host is not None and normalized_entry is not None:
+                    host.restore_layout_state(normalized_entry)
+                elif host is not None:
+                    host.reset_to_default_layout()
+                self._debug_layout_log(
+                    "workspace_panel.restore_layout_state.host_dispatched",
+                    tab_key=str(key),
+                    host=summarize_workspace_host(host) if host is not None else None,
+                )
+            current_tab = self._normalize_tab_key(payload.get("current_tab"))
+            if not has_nested_state:
+                current_tab = self._IMPORT_TAB_KEY
+            was_blocked = self.workspace_tabs.blockSignals(True)
+            try:
+                self.workspace_tabs.setCurrentWidget(self._tab_pages[current_tab])
+            finally:
+                self.workspace_tabs.blockSignals(was_blocked)
+            self._ensure_tab_workspace(current_tab)
+        finally:
+            self._restoring_layout_state = False
+        self._refresh_workspace_tab(current_tab)
+        self._debug_layout_log(
+            "workspace_panel.restore_layout_state.after_refresh",
+            current_tab=str(current_tab),
+            host=summarize_workspace_host(self._tab_hosts.get(current_tab)),
+        )
+        self.stabilize_layout_after_restore()
+        self._debug_layout_log(
+            "workspace_panel.restore_layout_state.after_stabilize",
+            current_tab=str(current_tab),
+            host=summarize_workspace_host(self._tab_hosts.get(current_tab)),
+        )
+        self._debug_layout_log(
+            "workspace_panel.restore_layout_state.end",
+            current_tab=str(current_tab),
+        )
+
+    def stabilize_layout_after_restore(self) -> None:
+        current_tab = self._current_tab_key()
         self._ensure_tab_workspace(current_tab)
+        for host in list(self._tab_hosts.values()):
+            validator = getattr(host, "validate_layout_integrity_after_restore", None)
+            if callable(validator):
+                try:
+                    validator()
+                except Exception:
+                    continue
+        self._debug_layout_log(
+            "workspace_panel.stabilize_layout_after_restore",
+            current_tab=str(current_tab),
+        )
 
     def _notify_layout_state_changed(self) -> None:
         try:
@@ -2506,6 +3608,15 @@ class ContractTemplateWorkspacePanel(QWidget):
         selected_template_id = self._selected_fill_template_id()
         selected_revision_id = self._selected_fill_revision_id()
         selected_draft_id = self._selected_fill_draft_id()
+        self._debug_layout_log(
+            "workspace_panel.refresh_fill_form.begin",
+            selected_template_id=selected_template_id,
+            selected_revision_id=selected_revision_id,
+            selected_draft_id=selected_draft_id,
+            template_count=int(self.fill_template_combo.count()),
+            revision_count=int(self.fill_revision_combo.count()),
+            draft_count=int(self.fill_draft_combo.count()),
+        )
 
         if template_service is None or form_service is None:
             self._fill_definition = None
@@ -2516,6 +3627,11 @@ class ContractTemplateWorkspacePanel(QWidget):
             self.fill_status_label.setText("Open a profile to browse imported template revisions.")
             self.fill_warning_label.setText("")
             self._sync_html_preview_state(None)
+            self._debug_layout_log(
+                "workspace_panel.refresh_fill_form.end",
+                reason="missing_services",
+                revision_id=None,
+            )
             return
 
         templates = tuple(template_service.list_templates())
@@ -2532,6 +3648,11 @@ class ContractTemplateWorkspacePanel(QWidget):
             )
             self.fill_warning_label.setText("")
             self._sync_html_preview_state(None)
+            self._debug_layout_log(
+                "workspace_panel.refresh_fill_form.end",
+                reason="no_selected_template",
+                revision_id=None,
+            )
             return
 
         active_revision_id = None
@@ -2556,6 +3677,12 @@ class ContractTemplateWorkspacePanel(QWidget):
             )
             self.fill_warning_label.setText("")
             self._sync_html_preview_state(None)
+            self._debug_layout_log(
+                "workspace_panel.refresh_fill_form.end",
+                reason="no_selected_revision",
+                template_id=template_id,
+                revision_id=None,
+            )
             return
 
         preserved_state = None
@@ -2575,6 +3702,12 @@ class ContractTemplateWorkspacePanel(QWidget):
             )
             self.fill_warning_label.setText(str(exc))
             self._sync_html_preview_state(revision_id)
+            self._debug_layout_log(
+                "workspace_panel.refresh_fill_form.end",
+                reason="form_definition_error",
+                template_id=template_id,
+                revision_id=revision_id,
+            )
             return
 
         self._fill_definition = form_definition
@@ -2582,7 +3715,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         if preserved_state is not None and int(preserved_state.get("revision_id") or 0) == int(
             revision_id
         ):
-            self.apply_editable_payload(preserved_state)
+            self.apply_editable_payload(preserved_state, refresh_preview=False)
         else:
             self._fill_dirty = False
         self.refresh_fill_drafts(selected_draft_id=selected_draft_id)
@@ -2611,6 +3744,18 @@ class ContractTemplateWorkspacePanel(QWidget):
             )
         self.fill_warning_label.setText("\n".join(line for line in warning_lines if line))
         self._sync_html_preview_state(revision_id)
+        self._debug_layout_log(
+            "workspace_panel.refresh_fill_form.end",
+            reason="ok",
+            template_id=template_id,
+            revision_id=revision_id,
+            template_count=int(self.fill_template_combo.count()),
+            revision_count=int(self.fill_revision_combo.count()),
+            draft_count=int(self.fill_draft_combo.count()),
+            auto_field_count=len(form_definition.auto_fields),
+            selector_field_count=len(form_definition.selector_fields),
+            manual_field_count=len(form_definition.manual_fields),
+        )
 
     def current_fill_state(self) -> dict[str, object]:
         revision_id = self._selected_fill_revision_id()
@@ -2743,7 +3888,7 @@ class ContractTemplateWorkspacePanel(QWidget):
             QMessageBox.warning(self, "Draft Workspace", str(exc))
             return
         self._select_revision_context(revision.template_id, draft.revision_id)
-        self.apply_editable_payload(payload)
+        self.apply_editable_payload(payload, refresh_preview=True)
         self.fill_draft_name_edit.setText(draft.name)
         self._set_storage_mode_value(draft.storage_mode or STORAGE_MODE_DATABASE)
         self._loaded_draft_id = draft.draft_id
@@ -2869,7 +4014,12 @@ class ContractTemplateWorkspacePanel(QWidget):
             f"{'Opened' if opened else 'Could not open'} PDF artifact: {artifact.output_path}"
         )
 
-    def apply_editable_payload(self, payload: object | None) -> None:
+    def apply_editable_payload(
+        self,
+        payload: object | None,
+        *,
+        refresh_preview: bool = True,
+    ) -> None:
         payload_map = dict(payload or {})
         self._fill_type_overrides = {
             str(key): str(value)
@@ -2897,7 +4047,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         finally:
             self._suspend_fill_updates = previous_suspend
         self._fill_dirty = False
-        if self._fill_preview_controller is not None:
+        if refresh_preview and self._fill_preview_controller is not None:
             self._fill_preview_controller.request_refresh(
                 reason="Previewing current HTML draft state.",
                 delay_ms=0,
@@ -4098,13 +5248,30 @@ class ContractTemplateWorkspacePanel(QWidget):
             self.fill_preview_clear_button.setEnabled(self.fill_html_preview_view is not None)
         if self._fill_preview_controller is not None:
             self._fill_preview_controller.set_revision_context(revision_id if is_html else None)
+        workspace_debug_log(
+            "preview",
+            "workspace_panel.sync_html_preview_state",
+            revision_id=revision_id,
+            is_html=bool(is_html),
+            current_tab=str(self._current_tab_key() or ""),
+            preview_refresh_suspended=bool(self._suspend_preview_refresh),
+        )
         if not is_html:
             self.clear_html_preview()
         elif self._fill_preview_controller is not None:
-            self._fill_preview_controller.request_refresh(
-                reason="Previewing current HTML draft state.",
-                delay_ms=0,
-            )
+            if self._suspend_preview_refresh:
+                self._fill_preview_controller.mark_stale(
+                    "Preview stale. Waiting for workspace restore to settle..."
+                )
+                if hasattr(self, "fill_preview_status_label"):
+                    self.fill_preview_status_label.setText(
+                        "Restoring workspace layout before refreshing the HTML preview."
+                    )
+            else:
+                self._fill_preview_controller.request_refresh(
+                    reason="Previewing current HTML draft state.",
+                    delay_ms=0,
+                )
 
     @staticmethod
     def _storage_label(storage_mode: str | None) -> str:

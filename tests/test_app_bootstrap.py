@@ -6,11 +6,21 @@ from unittest import mock
 from tests.qt_test_helpers import require_qapplication
 
 try:
+    from PySide6.QtWidgets import QDockWidget, QLabel, QMainWindow, QToolBar, QVBoxLayout, QWidget
+
+    from isrc_manager.catalog_workspace import CatalogWorkspaceDock
     from isrc_manager import settings as app_settings
     from isrc_manager.app_bootstrap import get_or_create_application, run_desktop_application
     from isrc_manager.constants import SETTINGS_BASENAME
     from isrc_manager.startup_progress import StartupPhase, startup_phase_label
 except Exception as exc:  # pragma: no cover - environment-specific fallback
+    CatalogWorkspaceDock = None
+    QDockWidget = None
+    QLabel = None
+    QMainWindow = None
+    QToolBar = None
+    QVBoxLayout = None
+    QWidget = None
     app_settings = None
     get_or_create_application = None
     run_desktop_application = None
@@ -353,6 +363,74 @@ class AppWindowStatusTests(unittest.TestCase):
         app_module.App._on_background_task_state_changed(host)
 
         self.assertEqual(len(host.find_children_calls), 1)
+
+
+class SavedLayoutTransitionUpdateTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        if app_module is None:
+            raise unittest.SkipTest(f"ISRC_manager import unavailable: {APP_IMPORT_ERROR}")
+        cls.app = require_qapplication()
+
+    def test_transition_update_suspension_skips_catalog_workspace_docks(self):
+        class _Host(QMainWindow):
+            _suspend_saved_layout_transition_updates = (
+                app_module.App._suspend_saved_layout_transition_updates
+            )
+
+        host = _Host()
+        host.resize(1200, 900)
+        central = QWidget(host)
+        central.setLayout(QVBoxLayout())
+        host.setCentralWidget(central)
+
+        outer_panel = QWidget()
+        outer_panel.setLayout(QVBoxLayout())
+        nested_host = QMainWindow(outer_panel)
+        nested_host.setObjectName("nestedWorkspaceWindow")
+        nested_host.setCentralWidget(QWidget(nested_host))
+        outer_panel.layout().addWidget(nested_host)
+
+        inner_dock = QDockWidget("Inner", nested_host)
+        inner_dock.setObjectName("contractTemplateFillRevisionDock")
+        inner_dock.setWidget(QLabel("Inner dock content", inner_dock))
+        nested_host.addDockWidget(app_module.Qt.LeftDockWidgetArea, inner_dock)
+
+        outer_dock = CatalogWorkspaceDock(
+            host,
+            dock_title="Contract Template Workspace",
+            dock_object_name="contractTemplateWorkspaceDock",
+            panel_factory=lambda _dock: outer_panel,
+        )
+        host.addDockWidget(app_module.Qt.RightDockWidgetArea, outer_dock)
+
+        toolbar = QToolBar("Main", host)
+        toolbar.setObjectName("mainToolbar")
+        host.addToolBar(toolbar)
+        host.show()
+        try:
+            outer_dock.show_panel()
+            self.assertTrue(outer_dock.updatesEnabled())
+            self.assertTrue(inner_dock.updatesEnabled())
+            self.assertTrue(toolbar.updatesEnabled())
+
+            with host._suspend_saved_layout_transition_updates():
+                self.assertTrue(
+                    outer_dock.updatesEnabled(),
+                    "workspace dock shells manage nested dock lifecycles and must stay out of transition suppression",
+                )
+                self.assertFalse(toolbar.updatesEnabled())
+                self.assertTrue(
+                    inner_dock.updatesEnabled(),
+                    "nested workspace docks must stay enabled while the outer workspace shell remains live",
+                )
+
+            self.assertTrue(outer_dock.updatesEnabled())
+            self.assertTrue(toolbar.updatesEnabled())
+            self.assertTrue(inner_dock.updatesEnabled())
+        finally:
+            host.close()
+            host.deleteLater()
 
 
 if __name__ == "__main__":

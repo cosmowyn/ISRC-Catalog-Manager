@@ -959,6 +959,7 @@ class AppShellTestCase(unittest.TestCase):
         self.assertIsNotNone(self.window.conn)
         self.assertTrue(Path(self.window.current_db_path).exists())
         self.assertEqual(self.window.menuBar(), self.window.menu_bar)
+        self.assertFalse(self.window.menu_bar.isNativeMenuBar())
         self.assertGreaterEqual(self.window.profile_combo.count(), 1)
         self.assertEqual(self.window.profile_combo.itemData(0), self.window.current_db_path)
         self.assertEqual(self.window.windowTitle(), self.window.identity["window_title"])
@@ -5498,14 +5499,14 @@ class AppShellTestCase(unittest.TestCase):
         panel = self.window.open_contract_template_workspace(initial_tab="fill")
         self.app.processEvents()
         fill_host = panel._tab_hosts["fill"]
-        preview_dock = next(
+        revision_dock = next(
             dock
             for dock in fill_host._docks
-            if dock.objectName() == "contractTemplateHtmlPreviewDock"
+            if dock.objectName() == "contractTemplateFillRevisionDock"
         )
         fill_host.set_locked(False)
         self.app.processEvents()
-        preview_dock.setFloating(True)
+        revision_dock.setFloating(True)
         self.app.processEvents()
         self.window._save_main_dock_state()
         self.window._save_main_window_geometry()
@@ -5520,13 +5521,13 @@ class AppShellTestCase(unittest.TestCase):
             "Fill Form",
         )
         fill_host = panel._tab_hosts["fill"]
-        preview_dock = next(
+        revision_dock = next(
             dock
             for dock in fill_host._docks
-            if dock.objectName() == "contractTemplateHtmlPreviewDock"
+            if dock.objectName() == "contractTemplateFillRevisionDock"
         )
         self.assertEqual(fill_host.lock_layout_button.text(), "Lock Layout")
-        self.assertTrue(preview_dock.isFloating())
+        self.assertTrue(revision_dock.isFloating())
 
     def case_contract_template_workspace_legacy_layout_without_nested_state_uses_default_inner_layout(
         self,
@@ -5534,14 +5535,14 @@ class AppShellTestCase(unittest.TestCase):
         panel = self.window.open_contract_template_workspace(initial_tab="fill")
         self.app.processEvents()
         fill_host = panel._tab_hosts["fill"]
-        preview_dock = next(
+        revision_dock = next(
             dock
             for dock in fill_host._docks
-            if dock.objectName() == "contractTemplateHtmlPreviewDock"
+            if dock.objectName() == "contractTemplateFillRevisionDock"
         )
         fill_host.set_locked(False)
         self.app.processEvents()
-        preview_dock.setFloating(True)
+        revision_dock.setFloating(True)
         self.app.processEvents()
 
         legacy_snapshot = self.window._capture_current_main_window_layout_snapshot()
@@ -5562,13 +5563,96 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(import_host._docks[0].windowTitle(), "Import / Admin")
         fill_host = panel._tab_hosts.get("fill")
         self.assertIsNotNone(fill_host)
+        revision_dock = next(
+            dock
+            for dock in fill_host._docks
+            if dock.objectName() == "contractTemplateFillRevisionDock"
+        )
+        self.assertFalse(revision_dock.isFloating())
+        self.assertEqual(fill_host.lock_layout_button.text(), "Unlock Layout")
+
+    def case_contract_template_workspace_named_layout_restore_keeps_import_and_fill_controls_visible(
+        self,
+    ):
+        panel = self.window.open_contract_template_workspace(initial_tab="fill")
+        self.app.processEvents()
+        panel.focus_tab("import")
+        self.app.processEvents()
+        panel.focus_tab("fill")
+        self.app.processEvents()
+
+        snapshot = self.window._capture_current_main_window_layout_snapshot()
+        self.window._write_saved_main_window_layouts({"Contract Template Fill Desk": snapshot})
+
+        self.assertTrue(self.window._apply_named_main_window_layout("Contract Template Fill Desk"))
+        self.app.processEvents()
+
+        dock = self.window.contract_template_workspace_dock
+        panel = dock.show_panel()
+        self.app.processEvents()
+
+        panel.focus_tab("import")
+        self.app.processEvents()
+        import_host = panel._tab_hosts["import"]
+        self.assertFalse(import_host._has_exposed_central_canvas())
+        self.assertTrue(all(dock.isVisible() for dock in import_host._docks))
+
+        panel.focus_tab("fill")
+        self.app.processEvents()
+        fill_host = panel._tab_hosts["fill"]
+        self.assertFalse(fill_host._has_exposed_central_canvas())
+        self.assertTrue(all(dock.isVisible() for dock in fill_host._docks))
+
+    def case_contract_template_workspace_named_layout_restore_can_reopen_hidden_fill_dock_while_locked(
+        self,
+    ):
+        panel = self.window.open_contract_template_workspace(initial_tab="fill")
+        self.app.processEvents()
+        fill_host = panel._tab_hosts["fill"]
         preview_dock = next(
             dock
             for dock in fill_host._docks
             if dock.objectName() == "contractTemplateHtmlPreviewDock"
         )
-        self.assertFalse(preview_dock.isFloating())
-        self.assertEqual(fill_host.lock_layout_button.text(), "Unlock Layout")
+        fill_host.set_locked(False)
+        self.app.processEvents()
+        preview_dock.hide()
+        self.app.processEvents()
+        fill_host.set_locked(True)
+        self.app.processEvents()
+
+        snapshot = self.window._capture_current_main_window_layout_snapshot()
+        self.window._write_saved_main_window_layouts(
+            {"Contract Template Locked Fill Desk": snapshot}
+        )
+
+        self.assertTrue(
+            self.window._apply_named_main_window_layout("Contract Template Locked Fill Desk")
+        )
+        self.app.processEvents()
+
+        dock = self.window.contract_template_workspace_dock
+        panel = dock.show_panel()
+        self.app.processEvents()
+        panel.focus_tab("fill")
+        self.app.processEvents()
+        fill_host = panel._tab_hosts["fill"]
+        preview_dock = next(
+            dock
+            for dock in fill_host._docks
+            if dock.objectName() == "contractTemplateHtmlPreviewDock"
+        )
+        panels_action = fill_host.panels_action_for_dock(preview_dock)
+
+        self.assertTrue(fill_host._locked)
+        self.assertFalse(preview_dock.isVisible())
+        self.assertIsNotNone(panels_action)
+        self.assertTrue(panels_action.isEnabled())
+
+        panels_action.trigger()
+        self.app.processEvents()
+
+        self.assertTrue(preview_dock.isVisible())
 
     def case_asset_workspace_rejoins_tabbed_dock_strip_when_reopened(self):
         track_id = self._create_track(index=142, title="Docked Deliverables Track")

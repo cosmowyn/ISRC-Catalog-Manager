@@ -147,8 +147,16 @@ from isrc_manager.blob_icons import (
     normalize_blob_icon_settings,
 )
 from isrc_manager.catalog_workspace import (
+    CatalogWorkspaceDock,
     ensure_catalog_workspace_dock,
     refresh_catalog_workspace_docks,
+)
+from isrc_manager.workspace_debug import (
+    summarize_catalog_workspace_dock,
+    summarize_panel_layout_snapshot,
+    summarize_panel_layout_state,
+    workspace_debug_enabled,
+    workspace_debug_log,
 )
 from isrc_manager.constants import (
     APP_NAME,
@@ -9623,6 +9631,7 @@ class App(QMainWindow):
             app.setStyleSheet(self._build_theme_stylesheet(safe_values))
         else:
             app.setStyleSheet(self._build_theme_stylesheet(normalized))
+        self._refresh_menu_theme_state()
         self._queue_top_chrome_boundary_refresh()
 
     def _prepare_theme_application_payload(
@@ -9658,7 +9667,44 @@ class App(QMainWindow):
         app.setStyleSheet(
             str(payload.get("stylesheet") or self._build_theme_stylesheet(normalized))
         )
+        self._refresh_menu_theme_state()
         self._queue_top_chrome_boundary_refresh()
+
+    def _refresh_menu_theme_state(self) -> None:
+        app = QApplication.instance()
+        if app is None:
+            return
+        palette = app.palette()
+        seen: set[int] = set()
+
+        def _refresh(widget: QWidget | None) -> None:
+            if widget is None:
+                return
+            widget_id = id(widget)
+            if widget_id in seen:
+                return
+            seen.add(widget_id)
+            try:
+                widget.setPalette(palette)
+            except Exception:
+                pass
+            try:
+                style = widget.style()
+                if style is not None:
+                    style.unpolish(widget)
+                    style.polish(widget)
+            except Exception:
+                pass
+            try:
+                widget.update()
+            except Exception:
+                pass
+
+        menu_bar = getattr(self, "menu_bar", None)
+        if isinstance(menu_bar, QMenuBar):
+            _refresh(menu_bar)
+        for menu in self.findChildren(QMenu):
+            _refresh(menu)
 
     def _apply_theme_with_loading(
         self,
@@ -11773,9 +11819,16 @@ class App(QMainWindow):
         if getattr(self, "_suspend_dock_state_sync", False):
             return
         try:
+            snapshot = self._capture_current_workspace_panel_layout_snapshot()
+            workspace_debug_log(
+                "layout",
+                "app.save_main_dock_state",
+                sync=bool(sync),
+                workspace_panels=summarize_panel_layout_snapshot(snapshot),
+            )
             self.settings.setValue(self._dock_state_setting_key(), self.saveState(1))
             self._write_workspace_panel_layouts(
-                self._capture_current_workspace_panel_layout_snapshot(),
+                snapshot,
                 sync=False,
             )
             if sync:
@@ -11965,13 +12018,62 @@ class App(QMainWindow):
                 state = None
             if isinstance(state, dict):
                 snapshot[str(key)] = dict(state)
+        workspace_debug_log(
+            "layout",
+            "app.capture_workspace_panel_layout_snapshot",
+            snapshot=summarize_panel_layout_snapshot(snapshot),
+        )
         return snapshot
+
+    def _contract_template_workspace_debug_summary(self) -> dict[str, object]:
+        registry = getattr(self, "_catalog_workspace_docks", {})
+        dock = getattr(self, "contract_template_workspace_dock", None)
+        if not isinstance(dock, QDockWidget):
+            candidate = registry.get("contract_template_workspace")
+            if isinstance(candidate, QDockWidget):
+                dock = candidate
+        return summarize_catalog_workspace_dock(dock)
+
+    def _log_contract_template_restore_checkpoint(self, event: str, **payload) -> None:
+        workspace_debug_log(
+            "layout",
+            event,
+            contract_template_workspace=self._contract_template_workspace_debug_summary(),
+            payload=payload,
+        )
+
+    def _schedule_contract_template_restore_debug_snapshots(
+        self,
+        *,
+        event_prefix: str,
+        layout_name: str,
+    ) -> None:
+        if not workspace_debug_enabled("layout"):
+            return
+        for delay_ms in (0, 25, 100, 250, 1000):
+            QTimer.singleShot(
+                delay_ms,
+                lambda _delay_ms=delay_ms: self._log_contract_template_restore_checkpoint(
+                    f"{event_prefix}.checkpoint",
+                    name=str(layout_name or ""),
+                    delay_ms=int(_delay_ms),
+                    restore_complete=bool(
+                        getattr(self, "_workspace_layout_restore_complete", False)
+                    ),
+                    restoring=bool(getattr(self, "_is_restoring_workspace_layout", False)),
+                ),
+            )
 
     def _apply_workspace_panel_layout_snapshot(
         self,
         snapshot: dict[str, object] | None,
     ) -> None:
         payload = dict(snapshot or {})
+        workspace_debug_log(
+            "layout",
+            "app.apply_workspace_panel_layout_snapshot.begin",
+            snapshot=summarize_panel_layout_snapshot(payload),
+        )
         registry = getattr(self, "_catalog_workspace_docks", {})
         for key, dock in list(registry.items()):
             if not isinstance(dock, QDockWidget):
@@ -11980,7 +12082,26 @@ class App(QMainWindow):
             if not callable(restore):
                 continue
             panel_payload = payload.get(str(key))
+            if str(key) == "contract_template_workspace":
+                self._log_contract_template_restore_checkpoint(
+                    "app.apply_workspace_panel_layout_snapshot.contract_templates.before_restore",
+                    requested_panel_state=summarize_panel_layout_state(
+                        panel_payload if isinstance(panel_payload, dict) else {}
+                    ),
+                )
             restore(panel_payload if isinstance(panel_payload, dict) else None)
+            if str(key) == "contract_template_workspace":
+                self._log_contract_template_restore_checkpoint(
+                    "app.apply_workspace_panel_layout_snapshot.contract_templates.after_restore_request",
+                    requested_panel_state=summarize_panel_layout_state(
+                        panel_payload if isinstance(panel_payload, dict) else {}
+                    ),
+                )
+        workspace_debug_log(
+            "layout",
+            "app.apply_workspace_panel_layout_snapshot.end",
+            snapshot=summarize_panel_layout_snapshot(payload),
+        )
 
     def _saved_main_window_layout_names(self) -> list[str]:
         return list(self._load_saved_main_window_layouts().keys())
@@ -12009,7 +12130,7 @@ class App(QMainWindow):
         add_data_dock = getattr(self, "add_data_dock", None)
         catalog_table_dock = getattr(self, "catalog_table_dock", None)
         action_ribbon_snapshot = self._capture_current_action_ribbon_layout_snapshot()
-        return {
+        snapshot = {
             "schema_version": 3,
             "geometry_b64": self._serialize_qbytearray_setting(self.saveGeometry()),
             "window_state": self._current_main_window_state_marker(),
@@ -12030,6 +12151,14 @@ class App(QMainWindow):
             "action_ribbon": action_ribbon_snapshot,
             "workspace_panels": self._capture_current_workspace_panel_layout_snapshot(),
         }
+        workspace_debug_log(
+            "layout",
+            "app.capture_named_main_window_layout_snapshot",
+            name=str(getattr(self, "_active_saved_main_window_layout_name", "") or ""),
+            workspace_panels=summarize_panel_layout_snapshot(snapshot.get("workspace_panels")),
+            contract_template_workspace=self._contract_template_workspace_debug_summary(),
+        )
+        return snapshot
 
     def _save_named_main_window_layout(self, name: str) -> str | None:
         clean_name = str(name or "").strip()
@@ -12041,6 +12170,17 @@ class App(QMainWindow):
             layouts.pop(existing_name, None)
         layouts[clean_name] = self._capture_current_main_window_layout_snapshot()
         self._write_saved_main_window_layouts(layouts)
+        workspace_debug_log(
+            "layout",
+            "app.save_named_main_window_layout",
+            name=clean_name,
+            workspace_panels=summarize_panel_layout_snapshot(
+                dict(layouts.get(clean_name, {})).get("workspace_panels")
+                if isinstance(dict(layouts.get(clean_name, {})), dict)
+                else {}
+            ),
+            contract_template_workspace=self._contract_template_workspace_debug_summary(),
+        )
         self._active_saved_main_window_layout_name = clean_name
         self._refresh_saved_layout_controls()
         return clean_name
@@ -12124,13 +12264,16 @@ class App(QMainWindow):
     def _suspend_saved_layout_transition_updates(self):
         widgets: list[QWidget] = []
         seen: set[int] = set()
+        direct_children_only = Qt.FindChildOption.FindDirectChildrenOnly
         candidates = [
             self.centralWidget(),
-            *self.findChildren(QDockWidget),
-            *self.findChildren(QToolBar),
+            *self.findChildren(QDockWidget, options=direct_children_only),
+            *self.findChildren(QToolBar, options=direct_children_only),
         ]
         for candidate in candidates:
             if not isinstance(candidate, QWidget):
+                continue
+            if isinstance(candidate, CatalogWorkspaceDock):
                 continue
             widget_id = id(candidate)
             if widget_id in seen:
@@ -12188,12 +12331,32 @@ class App(QMainWindow):
             ribbon_action_ids = list(getattr(self, "_action_ribbon_default_ids", []))
 
         self._ensure_persistent_workspace_dock_shells()
+        self._log_contract_template_restore_checkpoint(
+            "app.apply_named_main_window_layout.after_ensure_shells",
+            name=resolved_name,
+            prepared_workspace_panels=summarize_panel_layout_snapshot(
+                prepared.get("workspace_panels")
+                if isinstance(prepared.get("workspace_panels"), dict)
+                else {}
+            ),
+        )
         _advance(3, f'Preparing saved layout "{resolved_name}" for restore...')
         previous_suspend_state = self._suspend_dock_state_sync
         previous_restore_state = self._is_restoring_workspace_layout
         self._suspend_dock_state_sync = True
         self._is_restoring_workspace_layout = True
         restored_dock_state = False
+        workspace_debug_log(
+            "layout",
+            "app.apply_named_main_window_layout.begin",
+            name=resolved_name,
+            workspace_panels=summarize_panel_layout_snapshot(
+                prepared.get("workspace_panels")
+                if isinstance(prepared.get("workspace_panels"), dict)
+                else {}
+            ),
+            contract_template_workspace=self._contract_template_workspace_debug_summary(),
+        )
         try:
             with self._suspend_saved_layout_transition_updates():
                 self._apply_main_window_geometry_snapshot(
@@ -12201,9 +12364,18 @@ class App(QMainWindow):
                     normal_geometry=prepared.get("normal_geometry"),
                     window_state_marker=str(prepared.get("window_state_marker") or ""),
                 )
+                self._log_contract_template_restore_checkpoint(
+                    "app.apply_named_main_window_layout.after_geometry",
+                    name=resolved_name,
+                )
                 _advance(4, f'Applied saved geometry for layout "{resolved_name}".')
                 restored_dock_state = self._apply_main_dock_state_snapshot(
                     prepared.get("dock_state")
+                )
+                self._log_contract_template_restore_checkpoint(
+                    "app.apply_named_main_window_layout.after_main_dock_state",
+                    name=resolved_name,
+                    restored_dock_state=bool(restored_dock_state),
                 )
                 if not restored_dock_state:
                     self._apply_add_data_panel_state(bool(prepared.get("add_data_panel", False)))
@@ -12221,28 +12393,42 @@ class App(QMainWindow):
                 self._apply_profiles_toolbar_visibility(
                     bool(prepared.get("profiles_toolbar_visible", True))
                 )
-                self._apply_workspace_panel_layout_snapshot(
-                    prepared.get("workspace_panels")
-                    if isinstance(prepared.get("workspace_panels"), dict)
-                    else {}
-                )
-                _advance(6, f'Applied nested workspace panel state for "{resolved_name}".')
                 self._apply_action_ribbon_configuration(
                     ribbon_action_ids,
                     bool(prepared.get("ribbon_visible", True)),
                 )
                 self._refresh_workspace_dock_default_placement_flags()
                 _advance(7, f'Applied toolbar and Action Ribbon state for "{resolved_name}".')
-                self._materialize_visible_workspace_dock_panels(
-                    progress_callback=lambda value, maximum, message: (
-                        ui_progress.report_progress(
-                            value=8, maximum=progress_total, message=message
-                        )
-                        if ui_progress is not None
-                        else None
+
+            self._log_contract_template_restore_checkpoint(
+                "app.apply_named_main_window_layout.after_transition_updates_resumed",
+                name=resolved_name,
+            )
+            self._apply_workspace_panel_layout_snapshot(
+                prepared.get("workspace_panels")
+                if isinstance(prepared.get("workspace_panels"), dict)
+                else {}
+            )
+            self._log_contract_template_restore_checkpoint(
+                "app.apply_named_main_window_layout.after_workspace_panel_snapshot",
+                name=resolved_name,
+            )
+            _advance(6, f'Applied nested workspace panel state for "{resolved_name}".')
+            self._refresh_workspace_dock_default_placement_flags()
+            self._materialize_visible_workspace_dock_panels(
+                progress_callback=lambda value, maximum, message: (
+                    ui_progress.report_progress(
+                        value=8, maximum=progress_total, message=message
                     )
+                    if ui_progress is not None
+                    else None
                 )
-                _advance(8, f'Restored visible workspace panels for "{resolved_name}".')
+            )
+            self._log_contract_template_restore_checkpoint(
+                "app.apply_named_main_window_layout.after_materialize_visible_panels",
+                name=resolved_name,
+            )
+            _advance(8, f'Restored visible workspace panels for "{resolved_name}".')
         finally:
             self._is_restoring_workspace_layout = previous_restore_state
             self._suspend_dock_state_sync = previous_suspend_state
@@ -12273,9 +12459,25 @@ class App(QMainWindow):
             value=9,
             maximum=progress_total,
         )
+        self._log_contract_template_restore_checkpoint(
+            "app.apply_named_main_window_layout.after_stabilize_visible_layout",
+            name=resolved_name,
+        )
+        self._validate_visible_workspace_dock_panels_after_restore()
+        workspace_debug_log(
+            "layout",
+            "app.apply_named_main_window_layout.end",
+            name=resolved_name,
+            restored_dock_state=bool(restored_dock_state),
+            contract_template_workspace=self._contract_template_workspace_debug_summary(),
+        )
+        self._schedule_contract_template_restore_debug_snapshots(
+            event_prefix="app.apply_named_main_window_layout",
+            layout_name=resolved_name,
+        )
         self._stop_queued_main_window_layout_persistence()
-        self._save_main_window_geometry(sync=False)
-        self._save_main_dock_state(sync=False)
+        self._schedule_main_window_geometry_save()
+        self._schedule_main_dock_state_save()
         self._apply_top_chrome_boundary()
         self.settings.sync()
         _advance(10, f'Saved layout "{resolved_name}" is ready.')
@@ -13161,8 +13363,17 @@ class App(QMainWindow):
 
         try:
             self._restore_main_window_geometry()
+            self._log_contract_template_restore_checkpoint(
+                "app.restore_workspace_layout_on_first_show.after_geometry",
+                name=str(getattr(self, "_active_saved_main_window_layout_name", "") or ""),
+            )
             _advance("Restored main window geometry.")
             restored_dock_state = self._restore_main_dock_state()
+            self._log_contract_template_restore_checkpoint(
+                "app.restore_workspace_layout_on_first_show.after_main_dock_state",
+                name=str(getattr(self, "_active_saved_main_window_layout_name", "") or ""),
+                restored_dock_state=bool(restored_dock_state),
+            )
             _advance("Restored saved workspace dock layout.")
             self._apply_saved_view_preferences(
                 apply_workspace_panel_visibility=not restored_dock_state
@@ -13171,6 +13382,10 @@ class App(QMainWindow):
             self._refresh_workspace_dock_default_placement_flags()
             _advance("Refreshed workspace dock placement defaults.")
             self._apply_workspace_panel_layout_snapshot(self._load_workspace_panel_layouts())
+            self._log_contract_template_restore_checkpoint(
+                "app.restore_workspace_layout_on_first_show.after_workspace_panel_snapshot",
+                name=str(getattr(self, "_active_saved_main_window_layout_name", "") or ""),
+            )
             _advance("Applied nested workspace panel layout state.")
             self._materialize_visible_workspace_dock_panels(
                 progress_callback=lambda value, maximum, message: restore_progress(
@@ -13178,6 +13393,10 @@ class App(QMainWindow):
                     total_steps,
                     message,
                 )
+            )
+            self._log_contract_template_restore_checkpoint(
+                "app.restore_workspace_layout_on_first_show.after_materialize_visible_panels",
+                name=str(getattr(self, "_active_saved_main_window_layout_name", "") or ""),
             )
             completed_steps += materialize_steps
         finally:
@@ -13196,7 +13415,16 @@ class App(QMainWindow):
             value=total_steps,
             maximum=total_steps,
         )
+        self._log_contract_template_restore_checkpoint(
+            "app.restore_workspace_layout_on_first_show.after_stabilize_visible_layout",
+            name=str(getattr(self, "_active_saved_main_window_layout_name", "") or ""),
+        )
+        self._validate_visible_workspace_dock_panels_after_restore()
         _advance("Workspace visually stabilized and ready.")
+        self._schedule_contract_template_restore_debug_snapshots(
+            event_prefix="app.restore_workspace_layout_on_first_show",
+            layout_name=str(getattr(self, "_active_saved_main_window_layout_name", "") or ""),
+        )
         self._maybe_finish_startup_loading()
 
     def _materialize_visible_workspace_dock_panels(self, *, progress_callback=None) -> None:
@@ -13227,6 +13455,27 @@ class App(QMainWindow):
                     total_docks,
                     f"Restored {dock_title} workspace panel.",
                 )
+
+    def _validate_visible_workspace_dock_panels_after_restore(self) -> None:
+        registry = getattr(self, "_catalog_workspace_docks", {})
+        for dock in list(registry.values()):
+            if not isinstance(dock, QDockWidget) or not dock.isVisible():
+                continue
+            stabilize = getattr(dock, "stabilize_panel_layout_after_restore", None)
+            if callable(stabilize):
+                try:
+                    stabilize()
+                except Exception:
+                    continue
+        workspace_debug_log(
+            "layout",
+            "app.validate_visible_workspace_dock_panels_after_restore",
+            visible_docks=[
+                str(dock.objectName() or "")
+                for dock in list(registry.values())
+                if isinstance(dock, QDockWidget) and dock.isVisible()
+            ],
+        )
 
     def _refresh_workspace_dock_default_placement_flags(self) -> None:
         registry = getattr(self, "_catalog_workspace_docks", {})

@@ -9,8 +9,11 @@ import time
 import unittest
 from typing import Iterable
 
+from isrc_manager.external_launch import install_test_process_desktop_safety
+
 
 def main(argv: Iterable[str] | None = None) -> int:
+    install_test_process_desktop_safety()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("module", help="unittest module path to execute")
     parser.add_argument(
