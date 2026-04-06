@@ -10,7 +10,6 @@ from PySide6.QtGui import QResizeEvent
 from PySide6.QtWidgets import (
     QDockWidget,
     QMainWindow,
-    QPushButton,
     QScrollArea,
     QTabBar,
     QToolButton,
