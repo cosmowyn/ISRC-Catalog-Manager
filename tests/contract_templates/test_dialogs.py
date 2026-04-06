@@ -1772,7 +1772,7 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
             restored_panel.deleteLater()
             pump_events(app=self.app, cycles=2)
 
-    def test_html_preview_fit_zoom_stays_stable_across_reloads_and_reset(self):
+    def test_html_preview_fit_zoom_stays_stable_across_reloads(self):
         if QWebEnginePage is None:
             self.skipTest("Qt WebEngine is unavailable")
         view = _InteractiveHtmlPreviewView()
@@ -1800,17 +1800,6 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
                     fit_percent = view.current_zoom_percent()
                 self.assertIsNotNone(fit_percent)
                 self.assertAlmostEqual(view.current_zoom_percent(), fit_percent, delta=1)
-            view.set_zoom_percent(int(fit_percent) + 25, user_initiated=True)
-            pump_events(app=self.app, cycles=2)
-            self.assertGreater(view.current_zoom_percent(), int(fit_percent))
-            view.reset_to_fit()
-            wait_for(
-                lambda: abs(view.current_zoom_percent() - int(fit_percent)) <= 1,
-                timeout_ms=5000,
-                app=self.app,
-                description="preview reset-to-fit to restore stable fit zoom",
-            )
-            self.assertAlmostEqual(view.current_zoom_percent(), int(fit_percent), delta=1)
         finally:
             view.close()
             view.deleteLater()
@@ -2087,6 +2076,37 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
 
             self.assertFalse(view._fit_measure_timer.isActive())
             self.assertAlmostEqual(view.current_zoom_percent(), expected_fit, delta=1)
+        finally:
+            view.close()
+            view.deleteLater()
+            pump_events(app=self.app, cycles=2)
+
+    def test_reset_to_fit_reuses_last_stable_fit_after_spurious_load_cycle(self):
+        if QWebEngineView is None:
+            self.skipTest("Qt WebEngine is unavailable")
+        view = _InteractiveHtmlPreviewView()
+        try:
+            view.resize(760, 920)
+            view._document_css_width = 820.0
+            stable_fit = view._fit_zoom_percent()
+            view._last_fit_percent = stable_fit
+            view._last_fit_viewport_width = view.contentsRect().width()
+
+            view.set_zoom_percent(stable_fit + 25, user_initiated=True)
+            pump_events(app=self.app, cycles=2)
+            self.assertGreater(view.current_zoom_percent(), stable_fit)
+
+            view._on_load_started()
+            view._on_load_finished(True)
+            self.assertEqual(view._document_css_width, 0.0)
+
+            view.reset_to_fit()
+            pump_events(app=self.app, cycles=2)
+
+            self.assertFalse(view._fit_measure_timer.isActive())
+            self.assertFalse(view._fit_guard_timer.isActive())
+            self.assertEqual(view._zoom_owner, "viewport")
+            self.assertAlmostEqual(view.current_zoom_percent(), stable_fit, delta=1)
         finally:
             view.close()
             view.deleteLater()

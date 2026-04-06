@@ -341,8 +341,7 @@ class _InteractiveHtmlPreviewView(QWebEngineView if QWebEngineView is not None e
         self._set_zoom_owner("fit")
         viewport_width = max(0, int(self.contentsRect().width()))
         if (
-            self._document_css_width > 0
-            and self._last_fit_percent > 0
+            self._last_fit_percent > 0
             and viewport_width > 0
             and abs(viewport_width - int(self._last_fit_viewport_width or 0)) <= 1
         ):
