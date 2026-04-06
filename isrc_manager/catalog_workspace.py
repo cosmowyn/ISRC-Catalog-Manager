@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from typing import Any, Callable
 
 from PySide6.QtCore import Qt, QTimer
@@ -24,8 +25,10 @@ class CatalogWorkspaceDock(QDockWidget):
         self.app = app
         self.panel_factory = panel_factory
         self.retabify_when_shown = bool(retabify_when_shown)
+        self._workspace_panel_key = ""
         self._panel: QWidget | None = None
         self._default_placement_pending = True
+        self._pending_panel_layout_state: dict[str, object] | None = None
         self._default_dock_area = Qt.RightDockWidgetArea
         self._placeholder = QWidget(self)
         self._placeholder.setObjectName(f"{dock_object_name}Placeholder")
@@ -53,6 +56,7 @@ class CatalogWorkspaceDock(QDockWidget):
             if self._placeholder is not None:
                 self._placeholder.deleteLater()
                 self._placeholder = None
+            self._apply_pending_panel_layout_state()
         return self._panel
 
     def refresh_panel(self) -> None:
@@ -113,6 +117,42 @@ class CatalogWorkspaceDock(QDockWidget):
         if callable(schedule_save):
             schedule_save()
 
+    def capture_panel_layout_state(self) -> dict[str, object] | None:
+        panel = self._panel
+        capture = getattr(panel, "capture_layout_state", None) if panel is not None else None
+        if callable(capture):
+            try:
+                state = capture()
+            except Exception:
+                state = None
+            if isinstance(state, dict):
+                self._pending_panel_layout_state = copy.deepcopy(state)
+        if isinstance(self._pending_panel_layout_state, dict):
+            return copy.deepcopy(self._pending_panel_layout_state)
+        return None
+
+    def restore_panel_layout_state(self, state: dict[str, object] | None) -> None:
+        self._pending_panel_layout_state = copy.deepcopy(state) if isinstance(state, dict) else None
+        if self._panel is not None:
+            restore = getattr(self._panel, "restore_layout_state", None)
+            if callable(restore):
+                try:
+                    restore(copy.deepcopy(state) if isinstance(state, dict) else None)
+                except Exception:
+                    pass
+        self._apply_pending_panel_layout_state()
+
+    def _apply_pending_panel_layout_state(self) -> None:
+        if self._panel is None or not isinstance(self._pending_panel_layout_state, dict):
+            return
+        restore = getattr(self._panel, "restore_layout_state", None)
+        if not callable(restore):
+            return
+        try:
+            restore(copy.deepcopy(self._pending_panel_layout_state))
+        except Exception:
+            return
+
 
 def ensure_catalog_workspace_dock(
     app: Any,
@@ -141,6 +181,7 @@ def ensure_catalog_workspace_dock(
         retabify_when_shown=retabify_when_shown,
     )
     dock._default_dock_area = default_area
+    dock._workspace_panel_key = str(key or "")
     registry[key] = dock
     anchor = _default_tab_anchor(app, dock)
     area = default_area

@@ -38,6 +38,12 @@ class AppShellLayoutPersistenceTests(AppShellTestCase):
     test_saved_layout_switch_suspends_visible_updates_during_apply = (
         AppShellTestCase.case_saved_layout_switch_suspends_visible_updates_during_apply
     )
+    test_contract_template_workspace_nested_layout_round_trip_restores_live_inner_state = (
+        AppShellTestCase.case_contract_template_workspace_nested_layout_round_trip_restores_live_inner_state
+    )
+    test_contract_template_workspace_legacy_layout_without_nested_state_uses_default_inner_layout = (
+        AppShellTestCase.case_contract_template_workspace_legacy_layout_without_nested_state_uses_default_inner_layout
+    )
 
 
 del AppShellTestCase

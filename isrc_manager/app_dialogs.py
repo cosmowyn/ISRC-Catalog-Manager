@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
 
 from isrc_manager.blob_icons import BlobIconDialog, describe_blob_icon_spec
 from isrc_manager.constants import DEFAULT_WINDOW_TITLE, FIELD_TYPE_CHOICES
+from isrc_manager.external_launch import open_external_url
 from isrc_manager.help_content import HELP_CHAPTERS_BY_ID, iter_help_sections
 from isrc_manager.ui_common import (
     FocusWheelComboBox,
@@ -2223,7 +2224,7 @@ class HelpContentsDialog(QDialog):
         splitter.addWidget(self.chapter_list)
 
         self.browser = QTextBrowser(self)
-        self.browser.setOpenExternalLinks(True)
+        self.browser.setOpenExternalLinks(False)
         self.browser.setOpenLinks(False)
         splitter.addWidget(self.browser)
         splitter.setStretchFactor(0, 0)
@@ -2319,6 +2320,12 @@ class HelpContentsDialog(QDialog):
         fragment = (url.fragment() or "").strip()
         if fragment:
             self.open_topic(fragment, focus_search=False)
+            return
+        open_external_url(
+            url,
+            source="HelpContentsDialog.anchorClicked",
+            metadata={"topic_id": self._current_topic_id or ""},
+        )
 
     def _move_search_to_start(self) -> None:
         cursor = self.browser.textCursor()

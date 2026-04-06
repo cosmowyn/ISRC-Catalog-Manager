@@ -275,6 +275,8 @@ class QtWebEngineHtmlPdfAdapter:
 class ContractTemplateExportService:
     """Resolves editable payloads into immutable snapshots and PDF artifacts."""
 
+    HTML_PREVIEW_SESSION_DIRNAME = "isrc-catalog-manager-contract-template-previews"
+
     def __init__(
         self,
         *,
@@ -816,6 +818,78 @@ class ContractTemplateExportService:
             source_package_root=source_package_root,
             rendered_html=rendered_html,
         )
+
+    def html_preview_sessions_root(self) -> Path:
+        root = Path(tempfile.gettempdir()) / self.HTML_PREVIEW_SESSION_DIRNAME
+        root.mkdir(parents=True, exist_ok=True)
+        return root
+
+    def create_html_preview_session_root(self) -> Path:
+        root = self.html_preview_sessions_root()
+        session_root = root / f"preview_{uuid.uuid4().hex[:12]}"
+        session_root.mkdir(parents=True, exist_ok=True)
+        return session_root
+
+    def prune_html_preview_sessions(self, *, keep_paths: tuple[Path | str, ...] = ()) -> None:
+        root = self.html_preview_sessions_root()
+        keep_resolved: set[Path] = set()
+        for candidate in keep_paths:
+            try:
+                keep_resolved.add(Path(candidate).resolve())
+            except Exception:
+                continue
+        for child in root.iterdir():
+            try:
+                resolved = child.resolve()
+            except Exception:
+                resolved = child
+            if resolved in keep_resolved:
+                continue
+            shutil.rmtree(child, ignore_errors=True)
+
+    def materialize_html_preview_session(
+        self,
+        *,
+        revision_id: int,
+        editable_payload: object,
+        session_root: str | Path | None = None,
+        strict: bool = False,
+    ) -> tuple[Path, Path, tuple[str, ...]]:
+        revision = self.template_service.fetch_revision(revision_id)
+        if revision is None:
+            raise ContractTemplateExportError(f"Contract template revision {revision_id} not found")
+        if str(revision.source_format or "").strip().lower() != "html":
+            raise ContractTemplateExportError(
+                "HTML preview sessions are only available for HTML revisions."
+            )
+        source_html_path = self.template_service.resolve_html_revision_source_path(revision_id)
+        if source_html_path is None:
+            raise ContractTemplateExportError(
+                f"HTML template source is unavailable for revision {revision_id}."
+            )
+        rendered_html, source_package_root, warnings = self._render_html_content(
+            revision=revision,
+            editable_payload=dict(editable_payload or {}),
+            strict=bool(strict),
+        )
+        target_root = (
+            Path(session_root).resolve()
+            if session_root is not None
+            else self.create_html_preview_session_root().resolve()
+        )
+        target_root.mkdir(parents=True, exist_ok=True)
+        try:
+            relative_html = source_html_path.relative_to(source_package_root)
+        except Exception:
+            relative_html = Path(source_html_path.name)
+        clone_html_package_tree(
+            source_package_root=source_package_root,
+            destination_root=target_root,
+        )
+        target_html_path = target_root / relative_html
+        target_html_path.parent.mkdir(parents=True, exist_ok=True)
+        target_html_path.write_text(rendered_html, encoding="utf-8")
+        return target_root, target_html_path, warnings
 
     def _render_html_content(
         self,

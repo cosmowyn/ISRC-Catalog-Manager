@@ -8,8 +8,7 @@ from datetime import date
 from difflib import SequenceMatcher
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QUrl, Signal
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -35,6 +34,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from isrc_manager.external_launch import open_external_path
 from isrc_manager.file_storage import (
     STORAGE_MODE_DATABASE,
     STORAGE_MODE_MANAGED_FILE,
@@ -1689,7 +1689,11 @@ class ContractDocumentEditor(QWidget):
         except Exception as exc:
             QMessageBox.critical(self, "Open Document", str(exc))
             return None
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(preview_path)))
+        open_external_path(
+            preview_path,
+            source="ContractDocumentsDialog.open_selected_document",
+            metadata={"document_filename": document.filename or ""},
+        )
         return preview_path
 
     def _export_selected_document(self, path: str | Path | None = None) -> Path | None:

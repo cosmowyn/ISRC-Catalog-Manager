@@ -49,7 +49,6 @@ from PySide6.QtGui import (
     QAction,
     QColor,
     QCursor,
-    QDesktopServices,
     QFont,
     QIcon,
     QImage,
@@ -121,6 +120,7 @@ from isrc_manager.app_dialogs import (
     HelpContentsDialog,
     MasterTransferExportDialog,
 )
+from isrc_manager.external_launch import open_external_path
 from isrc_manager.assets import AssetService
 from isrc_manager.assets.dialogs import AssetBrowserPanel
 from isrc_manager.authenticity import (
@@ -4850,8 +4850,11 @@ class LicensesBrowserPanel(QWidget):
 
             dlg.exec()
         except Exception:
-            opened_externally = True
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(abs_path)))
+            opened_externally = open_external_path(
+                abs_path,
+                source="LicenseArchivePreviewFallback",
+                metadata={"action": "preview_pdf"},
+            )
         finally:
             if remove_after and not opened_externally:
                 try:
@@ -6402,6 +6405,99 @@ class App(QMainWindow):
         if callable(process_events):
             process_events()
 
+    def _visible_layout_stabilization_targets(self) -> list[QWidget]:
+        seen: set[int] = set()
+        widgets: list[QWidget] = []
+        candidates = [
+            self,
+            self.centralWidget(),
+            *self.findChildren(QDockWidget),
+            *self.findChildren(QToolBar),
+            *self.findChildren(QMainWindow),
+        ]
+        for candidate in candidates:
+            if not isinstance(candidate, QWidget):
+                continue
+            if not candidate.isVisible():
+                continue
+            widget_id = id(candidate)
+            if widget_id in seen:
+                continue
+            seen.add(widget_id)
+            widgets.append(candidate)
+        return widgets
+
+    @staticmethod
+    def _geometry_snapshot_for_widgets(widgets: list[QWidget]) -> tuple[tuple[object, ...], ...]:
+        snapshot: list[tuple[object, ...]] = []
+        for widget in widgets:
+            try:
+                geometry = widget.geometry()
+            except Exception:
+                continue
+            snapshot.append(
+                (
+                    str(widget.objectName() or widget.metaObject().className() or "widget"),
+                    int(geometry.x()),
+                    int(geometry.y()),
+                    int(geometry.width()),
+                    int(geometry.height()),
+                    bool(widget.isVisible()),
+                )
+            )
+        return tuple(snapshot)
+
+    def _stabilize_visible_layout_after_restore(
+        self,
+        *,
+        progress_callback=None,
+        maximum: int | None = None,
+        value: int | None = None,
+        stabilization_limit: int = 6,
+    ) -> bool:
+        previous_snapshot = None
+        stabilized = False
+        limit = max(1, int(stabilization_limit))
+        for attempt in range(1, limit + 1):
+            widgets = self._visible_layout_stabilization_targets()
+            for widget in widgets:
+                try:
+                    widget.updateGeometry()
+                    widget.update()
+                    widget.repaint()
+                except Exception:
+                    continue
+            self.updateGeometry()
+            self.update()
+            self.repaint()
+            self._drain_qt_events()
+            current_snapshot = self._geometry_snapshot_for_widgets(widgets)
+            if current_snapshot == previous_snapshot:
+                stabilized = True
+                if callable(progress_callback):
+                    progress_callback(
+                        value,
+                        maximum,
+                        f"Visible workspace geometry stabilized after pass {attempt}.",
+                    )
+                break
+            previous_snapshot = current_snapshot
+        if not stabilized:
+            self.logger.warning(
+                "Visible workspace layout stabilization hit the bounded limit (%s passes).",
+                limit,
+            )
+            if callable(progress_callback):
+                progress_callback(
+                    value,
+                    maximum,
+                    (
+                        "Visible workspace stabilization reached the bounded limit; "
+                        "continuing with the best painted state available."
+                    ),
+                )
+        return stabilized
+
     def _suspend_startup_feedback(self) -> None:
         controller = getattr(self, "_startup_feedback", None)
         suspend = getattr(controller, "suspend", None)
@@ -7118,7 +7214,11 @@ class App(QMainWindow):
         if not target.exists():
             QMessageBox.warning(self, action_label, f"Path does not exist:\n{target}")
             return False
-        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(target))):
+        if not open_external_path(
+            target,
+            source="App._open_local_path",
+            metadata={"action_label": action_label},
+        ):
             QMessageBox.warning(self, action_label, f"Could not open:\n{target}")
             return False
         return True
@@ -11584,6 +11684,10 @@ class App(QMainWindow):
         return "display/saved_main_window_layouts_json"
 
     @staticmethod
+    def _workspace_panels_setting_key() -> str:
+        return "display/main_window_workspace_panels_json"
+
+    @staticmethod
     def _serialize_qbytearray_setting(value: QByteArray | None) -> str:
         if not isinstance(value, QByteArray) or value.isEmpty():
             return ""
@@ -11670,6 +11774,10 @@ class App(QMainWindow):
             return
         try:
             self.settings.setValue(self._dock_state_setting_key(), self.saveState(1))
+            self._write_workspace_panel_layouts(
+                self._capture_current_workspace_panel_layout_snapshot(),
+                sync=False,
+            )
             if sync:
                 self.settings.sync()
         except Exception as e:
@@ -11811,6 +11919,69 @@ class App(QMainWindow):
         if sync:
             self.settings.sync()
 
+    def _load_workspace_panel_layouts(self) -> dict[str, dict[str, object]]:
+        raw_value = self.settings.value(self._workspace_panels_setting_key(), "{}")
+        parsed = raw_value
+        if isinstance(raw_value, str):
+            try:
+                parsed = json.loads(raw_value)
+            except Exception:
+                return {}
+        if not isinstance(parsed, dict):
+            return {}
+        normalized: dict[str, dict[str, object]] = {}
+        for key, payload in parsed.items():
+            clean_key = str(key or "").strip()
+            if clean_key and isinstance(payload, dict):
+                normalized[clean_key] = dict(payload)
+        return normalized
+
+    def _write_workspace_panel_layouts(
+        self,
+        layouts: dict[str, dict[str, object]],
+        *,
+        sync: bool = True,
+    ) -> None:
+        payload = dict(sorted(layouts.items(), key=lambda item: item[0].casefold()))
+        self.settings.setValue(
+            self._workspace_panels_setting_key(),
+            json.dumps(payload, ensure_ascii=True, sort_keys=True),
+        )
+        if sync:
+            self.settings.sync()
+
+    def _capture_current_workspace_panel_layout_snapshot(self) -> dict[str, dict[str, object]]:
+        registry = getattr(self, "_catalog_workspace_docks", {})
+        snapshot: dict[str, dict[str, object]] = {}
+        for key, dock in list(registry.items()):
+            if not isinstance(dock, QDockWidget):
+                continue
+            capture = getattr(dock, "capture_panel_layout_state", None)
+            if not callable(capture):
+                continue
+            try:
+                state = capture()
+            except Exception:
+                state = None
+            if isinstance(state, dict):
+                snapshot[str(key)] = dict(state)
+        return snapshot
+
+    def _apply_workspace_panel_layout_snapshot(
+        self,
+        snapshot: dict[str, object] | None,
+    ) -> None:
+        payload = dict(snapshot or {})
+        registry = getattr(self, "_catalog_workspace_docks", {})
+        for key, dock in list(registry.items()):
+            if not isinstance(dock, QDockWidget):
+                continue
+            restore = getattr(dock, "restore_panel_layout_state", None)
+            if not callable(restore):
+                continue
+            panel_payload = payload.get(str(key))
+            restore(panel_payload if isinstance(panel_payload, dict) else None)
+
     def _saved_main_window_layout_names(self) -> list[str]:
         return list(self._load_saved_main_window_layouts().keys())
 
@@ -11839,7 +12010,7 @@ class App(QMainWindow):
         catalog_table_dock = getattr(self, "catalog_table_dock", None)
         action_ribbon_snapshot = self._capture_current_action_ribbon_layout_snapshot()
         return {
-            "schema_version": 2,
+            "schema_version": 3,
             "geometry_b64": self._serialize_qbytearray_setting(self.saveGeometry()),
             "window_state": self._current_main_window_state_marker(),
             "normal_geometry": self._serialize_rect_setting(self.normalGeometry()),
@@ -11857,6 +12028,7 @@ class App(QMainWindow):
                 isinstance(action_ribbon_toolbar, QToolBar) and action_ribbon_toolbar.isVisible()
             ),
             "action_ribbon": action_ribbon_snapshot,
+            "workspace_panels": self._capture_current_workspace_panel_layout_snapshot(),
         }
 
     def _save_named_main_window_layout(self, name: str) -> str | None:
@@ -11936,6 +12108,11 @@ class App(QMainWindow):
             "normal_geometry": App._deserialize_rect_setting(snapshot.get("normal_geometry")),
             "window_state_marker": str(snapshot.get("window_state") or ""),
             "dock_state": App._deserialize_qbytearray_setting(snapshot.get("dock_state_b64")),
+            "workspace_panels": (
+                dict(snapshot.get("workspace_panels"))
+                if isinstance(snapshot.get("workspace_panels"), dict)
+                else {}
+            ),
             "add_data_panel": bool(snapshot.get("add_data_panel", False)),
             "catalog_table_panel": bool(snapshot.get("catalog_table_panel", True)),
             "profiles_toolbar_visible": bool(snapshot.get("profiles_toolbar_visible", True)),
@@ -11994,7 +12171,7 @@ class App(QMainWindow):
         if not resolved_name:
             return False
 
-        progress_total = 9
+        progress_total = 10
 
         def _advance(value: int, message: str) -> None:
             if ui_progress is None:
@@ -12044,22 +12221,28 @@ class App(QMainWindow):
                 self._apply_profiles_toolbar_visibility(
                     bool(prepared.get("profiles_toolbar_visible", True))
                 )
+                self._apply_workspace_panel_layout_snapshot(
+                    prepared.get("workspace_panels")
+                    if isinstance(prepared.get("workspace_panels"), dict)
+                    else {}
+                )
+                _advance(6, f'Applied nested workspace panel state for "{resolved_name}".')
                 self._apply_action_ribbon_configuration(
                     ribbon_action_ids,
                     bool(prepared.get("ribbon_visible", True)),
                 )
                 self._refresh_workspace_dock_default_placement_flags()
-                _advance(6, f'Applied toolbar and Action Ribbon state for "{resolved_name}".')
+                _advance(7, f'Applied toolbar and Action Ribbon state for "{resolved_name}".')
                 self._materialize_visible_workspace_dock_panels(
                     progress_callback=lambda value, maximum, message: (
                         ui_progress.report_progress(
-                            value=6, maximum=progress_total, message=message
+                            value=8, maximum=progress_total, message=message
                         )
                         if ui_progress is not None
                         else None
                     )
                 )
-                _advance(7, f'Restored visible workspace panels for "{resolved_name}".')
+                _advance(8, f'Restored visible workspace panels for "{resolved_name}".')
         finally:
             self._is_restoring_workspace_layout = previous_restore_state
             self._suspend_dock_state_sync = previous_suspend_state
@@ -12072,14 +12255,30 @@ class App(QMainWindow):
             sync=False,
         )
         self._refresh_saved_layout_controls()
-        _advance(8, f'Persisting restored layout "{resolved_name}".')
-        self._drain_qt_events()
+        _advance(
+            9, f'Waiting for visible workspace repaint and stabilization for "{resolved_name}".'
+        )
+        self._stabilize_visible_layout_after_restore(
+            progress_callback=(
+                lambda value, maximum, message: (
+                    ui_progress.report_progress(
+                        value=value,
+                        maximum=maximum,
+                        message=message,
+                    )
+                    if ui_progress is not None
+                    else None
+                )
+            ),
+            value=9,
+            maximum=progress_total,
+        )
         self._stop_queued_main_window_layout_persistence()
         self._save_main_window_geometry(sync=False)
         self._save_main_dock_state(sync=False)
         self._apply_top_chrome_boundary()
         self.settings.sync()
-        _advance(9, f'Saved layout "{resolved_name}" is ready.')
+        _advance(10, f'Saved layout "{resolved_name}" is ready.')
         return True
 
     def _apply_named_main_window_layout(self, name: str) -> bool:
@@ -12097,7 +12296,7 @@ class App(QMainWindow):
             self._refresh_saved_layout_controls()
             return None
 
-        progress_total = 9
+        progress_total = 10
         requested_name = str(request.get("requested_name") or "").strip()
         apply_result: dict[str, bool] = {"applied": False}
 
@@ -12951,7 +13150,8 @@ class App(QMainWindow):
             and dock.isVisible()
             and getattr(dock, "_panel", None) is None
         ]
-        total_steps = 7 + max(1, len(visible_lazy_docks))
+        materialize_steps = max(1, len(visible_lazy_docks))
+        total_steps = 9 + materialize_steps
         completed_steps = 0
 
         def _advance(message: str) -> None:
@@ -12970,6 +13170,8 @@ class App(QMainWindow):
             _advance("Applied saved workspace panel visibility.")
             self._refresh_workspace_dock_default_placement_flags()
             _advance("Refreshed workspace dock placement defaults.")
+            self._apply_workspace_panel_layout_snapshot(self._load_workspace_panel_layouts())
+            _advance("Applied nested workspace panel layout state.")
             self._materialize_visible_workspace_dock_panels(
                 progress_callback=lambda value, maximum, message: restore_progress(
                     completed_steps + value,
@@ -12977,7 +13179,7 @@ class App(QMainWindow):
                     message,
                 )
             )
-            completed_steps += max(1, len(visible_lazy_docks))
+            completed_steps += materialize_steps
         finally:
             self._restored_main_dock_state = restored_dock_state
             self._workspace_layout_restore_complete = True
@@ -12989,6 +13191,12 @@ class App(QMainWindow):
         _advance("Queued startup window geometry persistence.")
         self._schedule_main_dock_state_save()
         _advance("Queued startup dock layout persistence.")
+        self._stabilize_visible_layout_after_restore(
+            progress_callback=restore_progress,
+            value=total_steps,
+            maximum=total_steps,
+        )
+        _advance("Workspace visually stabilized and ready.")
         self._maybe_finish_startup_loading()
 
     def _materialize_visible_workspace_dock_panels(self, *, progress_callback=None) -> None:
@@ -17198,7 +17406,7 @@ class App(QMainWindow):
             configure=lambda panel: panel.focus_contract(contract_id),
         )
 
-    def open_contract_template_workspace(self, *, initial_tab: str = "symbols"):
+    def open_contract_template_workspace(self, *, initial_tab: str = "import"):
         if (
             self.contract_template_catalog_service is None
             or self.contract_template_service is None

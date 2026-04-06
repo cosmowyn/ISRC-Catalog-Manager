@@ -7,6 +7,8 @@ import time
 import unittest
 from typing import Callable
 
+from isrc_manager.external_launch import install_test_external_launch_guard
+
 try:
     from PySide6.QtCore import QCoreApplication, QEvent
     from PySide6.QtWidgets import QApplication
@@ -21,6 +23,7 @@ else:
 
 def require_qapplication():
     """Return a QApplication for tests or skip cleanly when Qt is unavailable."""
+    install_test_external_launch_guard()
     if QApplication is None:
         raise unittest.SkipTest(f"PySide6 QtWidgets unavailable: {QT_IMPORT_ERROR}")
     return QApplication.instance() or QApplication([])

@@ -5,11 +5,20 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from PySide6.QtCore import QDate
+from PySide6.QtCore import QDate, QUrl
+from PySide6.QtWidgets import QDockWidget, QPushButton, QScrollArea, QTabBar
 
 from isrc_manager.contract_templates.catalog import ContractTemplateCatalogService
-from isrc_manager.contract_templates.dialogs import ContractTemplateWorkspacePanel
+from isrc_manager.contract_templates.dialogs import (
+    ContractTemplateWorkspacePanel,
+    QWebEnginePage,
+    _ContractTemplatePreviewPage,
+)
 from isrc_manager.contract_templates.form_service import ContractTemplateFormService
+from isrc_manager.external_launch import (
+    clear_recorded_external_launches,
+    get_recorded_external_launches,
+)
 from isrc_manager.services import (
     ContractTemplateExportService,
     ContractTemplatePayload,
@@ -124,15 +133,34 @@ class ContractTemplateWorkspacePanelTests(unittest.TestCase):
         self.conn.close()
         self.tmpdir.cleanup()
 
+    def _focus_symbols(self):
+        self.panel.focus_tab("symbols")
+        pump_events(app=self.app, cycles=3)
+
+    def _focus_import(self):
+        self.panel.focus_tab("import")
+        pump_events(app=self.app, cycles=3)
+
+    def _focus_fill(self):
+        self.panel.focus_tab("fill")
+        pump_events(app=self.app, cycles=3)
+
     def test_panel_populates_symbol_table_and_detail_panel(self):
-        self.assertEqual(self.panel.workspace_tabs.tabText(0), "Symbol Generator")
-        self.assertGreaterEqual(self.panel.workspace_tabs.count(), 1)
+        self.assertEqual(
+            [
+                self.panel.workspace_tabs.tabText(index)
+                for index in range(self.panel.workspace_tabs.count())
+            ],
+            ["Import", "Symbol Generator", "Fill Form"],
+        )
+        self._focus_symbols()
         self.assertGreater(self.panel.table.rowCount(), 0)
         self.assertTrue(self.panel.selected_symbol_edit.text().startswith("{{db."))
         self.assertIn("Resolver Target:", self.panel.detail_resolver_label.text())
         self.assertIn("Source Kind:", self.panel.detail_source_label.text())
 
     def test_panel_filters_and_copies_selected_symbol(self):
+        self._focus_symbols()
         self.panel.focus_namespace("contract")
         self.panel.search_edit.setText("signature")
         pump_events(app=self.app, cycles=3)
@@ -148,6 +176,7 @@ class ContractTemplateWorkspacePanelTests(unittest.TestCase):
         )
 
     def test_panel_manual_helper_normalizes_and_copies_symbol(self):
+        self._focus_symbols()
         self.panel.manual_key_edit.setText("License Date")
         pump_events(app=self.app, cycles=2)
 
@@ -159,6 +188,7 @@ class ContractTemplateWorkspacePanelTests(unittest.TestCase):
         self.assertEqual(self.app.clipboard().text(), "{{manual.license_date}}")
 
     def test_panel_double_click_copies_symbol_to_clipboard(self):
+        self._focus_symbols()
         self.panel.focus_namespace("contract")
         self.panel.search_edit.setText("signature")
         pump_events(app=self.app, cycles=3)
@@ -170,6 +200,7 @@ class ContractTemplateWorkspacePanelTests(unittest.TestCase):
         self.assertEqual(self.app.clipboard().text(), "{{db.contract.signature_date}}")
 
     def test_panel_shows_custom_fields_as_stable_cf_symbols(self):
+        self._focus_symbols()
         self.panel.focus_namespace("custom")
         self.panel.search_edit.setText("mood")
         pump_events(app=self.app, cycles=3)
@@ -199,9 +230,44 @@ class ContractTemplateWorkspacePanelTests(unittest.TestCase):
             self.panel.workspace_tabs.tabText(self.panel.workspace_tabs.currentIndex()).lower(),
         )
 
+    def test_import_workspace_exposes_expected_docks_and_primary_title(self):
+        self._focus_import()
+        host = self.panel._tab_hosts["import"]
+        dock_names = [dock.objectName() for dock in host._docks]
+        dock_titles = [dock.windowTitle() for dock in host._docks]
+        self.assertEqual(
+            dock_names,
+            [
+                "contractTemplateImportAdminDock",
+                "contractTemplateRevisionInventoryDock",
+                "contractTemplatePlaceholderInventoryDock",
+                "contractTemplateDraftArchiveDock",
+                "contractTemplateSnapshotsArtifactsDock",
+            ],
+        )
+        self.assertEqual(dock_titles[0], "Import / Admin")
+        self.assertTrue(host.isVisible())
+        self.assertTrue(all(dock.isVisible() for dock in host._docks))
+        self.assertTrue(all(dock.titleBarWidget() is not None for dock in host._docks))
+        first_title_bar = host._docks[0].titleBarWidget()
+        self.assertIsNotNone(first_title_bar)
+        options_button = first_title_bar.findChild(
+            QPushButton,
+            "contractTemplateImportAdminDockOptionsButton",
+        )
+        self.assertIsNotNone(options_button)
+        action_texts = [
+            action.text() for action in options_button.menu().actions() if action.text()
+        ]
+        self.assertIn("Dock Left", action_texts)
+        self.assertIn("Dock Right", action_texts)
+        self.assertIn("Dock Top", action_texts)
+        self.assertIn("Dock Bottom", action_texts)
+        self.assertIn("Move Up In Stack", action_texts)
+        self.assertIn("Move Down In Stack", action_texts)
+
     def test_fill_tab_can_save_and_resume_drafts_across_storage_modes(self):
-        self.panel.focus_tab("fill")
-        pump_events(app=self.app, cycles=2)
+        self._focus_fill()
 
         selector = self.panel.selector_widgets["{{db.track.track_title}}"]
         date_widget = self.panel.manual_widgets["{{manual.license_date}}"]
@@ -319,8 +385,7 @@ class ContractTemplateWorkspacePanelTests(unittest.TestCase):
             payload=ContractTemplateRevisionPayload(source_filename=html_path.name),
         ).revision
         self.panel.refresh()
-        self.panel.focus_tab("fill")
-        pump_events(app=self.app, cycles=3)
+        self._focus_fill()
 
         self.panel._select_combo_data(self.panel.fill_template_combo, html_template.template_id)
         self.panel._select_combo_data(self.panel.fill_revision_combo, html_revision.revision_id)
@@ -336,22 +401,71 @@ class ContractTemplateWorkspacePanelTests(unittest.TestCase):
         pump_events(app=self.app, cycles=5)
 
         drafts = self.template_service.list_drafts(revision_id=html_revision.revision_id)
-        self.assertEqual(len(drafts), 1)
-        working_path = self.template_service.resolve_draft_working_path(drafts[0].draft_id)
+        self.assertEqual(len(drafts), 0)
         self.assertIsNotNone(self.panel.fill_html_preview_view)
-        self.assertIsNotNone(working_path)
         wait_for(
-            lambda: self.panel.fill_html_preview_view.url().toLocalFile() == str(working_path),
+            lambda: bool(self.panel.fill_html_preview_view.url().toLocalFile()),
             timeout_ms=5000,
             app=self.app,
             description="HTML preview URL to load",
         )
-        self.assertTrue((working_path.parent / "assets" / "logo.png").exists())
-        self.assertIn("Previewing HTML draft", self.panel.fill_preview_status_label.text())
+        wait_for(
+            lambda: "Previewing current HTML draft state"
+            in self.panel.fill_preview_status_label.text(),
+            timeout_ms=5000,
+            app=self.app,
+            description="HTML preview status to become current",
+        )
+        preview_path = Path(self.panel.fill_html_preview_view.url().toLocalFile())
+        self.assertTrue(preview_path.exists())
+        self.assertTrue((preview_path.parent / "assets" / "logo.png").exists())
+        draft_root = self.template_service.draft_store.root_path
+        self.assertFalse(draft_root is not None and preview_path.is_relative_to(draft_root))
+        self.assertIn(
+            "Previewing current HTML draft state", self.panel.fill_preview_status_label.text()
+        )
+
+    def test_preview_page_keeps_clear_preview_navigation_internal(self):
+        if QWebEnginePage is None:
+            self.skipTest("Qt WebEngine is unavailable")
+        page = _ContractTemplatePreviewPage()
+        try:
+            with mock.patch(
+                "isrc_manager.contract_templates.dialogs.open_external_url"
+            ) as open_url:
+                accepted = page.acceptNavigationRequest(
+                    QUrl("data:text/html;charset=UTF-8,"),
+                    QWebEnginePage.NavigationType.NavigationTypeOther,
+                    True,
+                )
+            self.assertTrue(accepted)
+            open_url.assert_not_called()
+        finally:
+            page.deleteLater()
+
+    def test_preview_page_routes_external_navigation_through_launch_guard(self):
+        if QWebEnginePage is None:
+            self.skipTest("Qt WebEngine is unavailable")
+        clear_recorded_external_launches()
+        page = _ContractTemplatePreviewPage()
+        try:
+            accepted = page.acceptNavigationRequest(
+                QUrl("https://example.com/template-preview"),
+                QWebEnginePage.NavigationType.NavigationTypeLinkClicked,
+                True,
+            )
+        finally:
+            page.deleteLater()
+
+        self.assertFalse(accepted)
+        requests = get_recorded_external_launches()
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(requests[0].source, "ContractTemplatePreviewPage")
+        self.assertEqual(requests[0].target, "https://example.com/template-preview")
+        self.assertTrue(requests[0].blocked)
 
     def test_fill_tab_can_export_pdf_and_update_latest_artifact_status(self):
-        self.panel.focus_tab("fill")
-        pump_events(app=self.app, cycles=2)
+        self._focus_fill()
 
         selector = self.panel.selector_widgets["{{db.track.track_title}}"]
         date_widget = self.panel.manual_widgets["{{manual.license_date}}"]
@@ -400,7 +514,7 @@ class ContractTemplateWorkspacePanelTests(unittest.TestCase):
             self.panel.import_template_from_file()
         pump_events(app=self.app, cycles=3)
 
-        self.panel.focus_tab("fill")
+        self._focus_fill()
         self.panel._select_revision_context(self.revision.template_id, self.revision.revision_id)
         pump_events(app=self.app, cycles=2)
         selector = self.panel.selector_widgets["{{db.track.track_title}}"]
@@ -449,8 +563,7 @@ class ContractTemplateWorkspacePanelTests(unittest.TestCase):
             payload=ContractTemplateRevisionPayload(source_filename=source_path.name),
         ).revision
         self.panel.refresh()
-        self.panel.focus_tab("fill")
-        pump_events(app=self.app, cycles=3)
+        self._focus_fill()
 
         for index in range(self.panel.fill_revision_combo.count()):
             if self.panel.fill_revision_combo.itemData(index) == revision.revision_id:
@@ -520,3 +633,179 @@ class ContractTemplateWorkspacePanelTests(unittest.TestCase):
         self.assertTrue(bool(restored_exclusive.property("has_user_value")))
         self.assertEqual(restored_share.value(), 0.0)
         self.assertTrue(bool(restored_share.property("has_user_value")))
+
+    def test_fill_workspace_uses_two_column_docks_and_preview_can_float_when_unlocked(self):
+        self._focus_fill()
+        host = self.panel._tab_hosts["fill"]
+        dock_names = [dock.objectName() for dock in host._docks]
+        self.assertEqual(
+            dock_names,
+            [
+                "contractTemplateFillRevisionDock",
+                "contractTemplateFillDraftWorkspaceDock",
+                "contractTemplateFillResolvedExportDock",
+                "contractTemplateFillDraftNotesDock",
+                "contractTemplateFillAutomaticFieldsDock",
+                "contractTemplateFillDatabaseFieldsDock",
+                "contractTemplateFillManualFieldsDock",
+                "contractTemplateHtmlPreviewDock",
+            ],
+        )
+        self.assertTrue(host.isVisible())
+        self.assertTrue(all(dock.isVisible() for dock in host._docks))
+        revision_dock = next(
+            dock for dock in host._docks if dock.objectName() == "contractTemplateFillRevisionDock"
+        )
+        automatic_dock = next(
+            dock
+            for dock in host._docks
+            if dock.objectName() == "contractTemplateFillAutomaticFieldsDock"
+        )
+        selector_dock = next(
+            dock
+            for dock in host._docks
+            if dock.objectName() == "contractTemplateFillDatabaseFieldsDock"
+        )
+        manual_dock = next(
+            dock
+            for dock in host._docks
+            if dock.objectName() == "contractTemplateFillManualFieldsDock"
+        )
+        preview_dock = next(
+            dock for dock in host._docks if dock.objectName() == "contractTemplateHtmlPreviewDock"
+        )
+        self.assertIsInstance(revision_dock.widget(), QScrollArea)
+        self.assertIsInstance(automatic_dock.widget(), QScrollArea)
+        self.assertIsInstance(selector_dock.widget(), QScrollArea)
+        self.assertIsInstance(manual_dock.widget(), QScrollArea)
+        self.assertNotIsInstance(preview_dock.widget(), QScrollArea)
+        self.assertLess(revision_dock.geometry().x(), automatic_dock.geometry().x())
+        self.assertLess(automatic_dock.geometry().x(), preview_dock.geometry().x())
+        host.set_locked(False)
+        pump_events(app=self.app, cycles=2)
+        self.assertTrue(
+            bool(preview_dock.features() & QDockWidget.DockWidgetFeature.DockWidgetFloatable),
+        )
+        preview_dock.setFloating(True)
+        pump_events(app=self.app, cycles=2)
+        self.assertTrue(preview_dock.isFloating())
+        preview_dock.setFloating(False)
+        host.set_locked(True)
+
+    def test_locked_layout_preserves_tabified_dock_switching(self):
+        self._focus_fill()
+        host = self.panel._tab_hosts["fill"]
+        docks = {dock.objectName(): dock for dock in host._docks}
+        revision_dock = docks["contractTemplateFillRevisionDock"]
+        draft_dock = docks["contractTemplateFillDraftWorkspaceDock"]
+
+        host.set_locked(False)
+        host.main_window.tabifyDockWidget(revision_dock, draft_dock)
+        pump_events(app=self.app, cycles=2)
+
+        self.assertIn(draft_dock, host.main_window.tabifiedDockWidgets(revision_dock))
+
+        host.set_locked(True)
+        pump_events(app=self.app, cycles=2)
+        self.assertEqual(revision_dock.features(), QDockWidget.NoDockWidgetFeatures)
+        self.assertEqual(draft_dock.features(), QDockWidget.NoDockWidgetFeatures)
+        dock_tab_bar = next(
+            (tab_bar for tab_bar in host.main_window.findChildren(QTabBar) if tab_bar.count() >= 2),
+            None,
+        )
+        self.assertIsNotNone(dock_tab_bar)
+        self.assertTrue(dock_tab_bar.isEnabled())
+        next_index = 1 if dock_tab_bar.currentIndex() == 0 else 0
+        dock_tab_bar.setCurrentIndex(next_index)
+        pump_events(app=self.app, cycles=2)
+        self.assertEqual(dock_tab_bar.currentIndex(), next_index)
+
+    def test_fill_workspace_move_up_in_stack_reorders_left_column(self):
+        self._focus_fill()
+        host = self.panel._tab_hosts["fill"]
+        docks = {dock.objectName(): dock for dock in host._docks}
+        draft_dock = docks["contractTemplateFillDraftWorkspaceDock"]
+        export_dock = docks["contractTemplateFillResolvedExportDock"]
+
+        host.set_locked(False)
+        pump_events(app=self.app, cycles=2)
+
+        self.assertGreater(export_dock.geometry().y(), draft_dock.geometry().y())
+        host.move_dock_in_stack(export_dock, -1)
+        pump_events(app=self.app, cycles=3)
+        self.assertLess(export_dock.geometry().y(), draft_dock.geometry().y())
+
+    def test_reset_layout_restores_default_fill_layout_and_persists_reset_state(self):
+        self._focus_fill()
+        host = self.panel._tab_hosts["fill"]
+        preview_dock = next(
+            dock for dock in host._docks if dock.objectName() == "contractTemplateHtmlPreviewDock"
+        )
+
+        host.set_locked(False)
+        preview_dock.setFloating(True)
+        pump_events(app=self.app, cycles=2)
+        self.assertTrue(preview_dock.isFloating())
+
+        host.reset_to_default_layout()
+        pump_events(app=self.app, cycles=3)
+        self.assertTrue(host._locked)
+        self.assertFalse(preview_dock.isFloating())
+
+        reset_state = self.panel.capture_layout_state()
+
+        panel_kwargs = {
+            "catalog_service_provider": lambda: self.catalog_service,
+            "template_service_provider": lambda: self.template_service,
+            "form_service_provider": lambda: self.form_service,
+            "export_service_provider": lambda: self.export_service,
+        }
+        panel_signature = inspect.signature(ContractTemplateWorkspacePanel.__init__)
+        accepted_kwargs = {
+            key: value for key, value in panel_kwargs.items() if key in panel_signature.parameters
+        }
+        restored_panel = ContractTemplateWorkspacePanel(**accepted_kwargs)
+        try:
+            restored_panel.show()
+            pump_events(app=self.app, cycles=2)
+            restored_panel.restore_layout_state(reset_state)
+            restored_panel.focus_tab("fill")
+            pump_events(app=self.app, cycles=4)
+            restored_host = restored_panel._tab_hosts["fill"]
+            restored_preview_dock = next(
+                dock
+                for dock in restored_host._docks
+                if dock.objectName() == "contractTemplateHtmlPreviewDock"
+            )
+            self.assertFalse(restored_preview_dock.isFloating())
+            self.assertTrue(restored_host._locked)
+        finally:
+            restored_panel.close()
+            restored_panel.deleteLater()
+            pump_events(app=self.app, cycles=2)
+
+    def test_hiding_fill_draft_workspace_compacts_remaining_left_column_space(self):
+        self._focus_fill()
+        host = self.panel._tab_hosts["fill"]
+        revision_dock = next(
+            dock for dock in host._docks if dock.objectName() == "contractTemplateFillRevisionDock"
+        )
+        draft_dock = next(
+            dock
+            for dock in host._docks
+            if dock.objectName() == "contractTemplateFillDraftWorkspaceDock"
+        )
+        export_dock = next(
+            dock
+            for dock in host._docks
+            if dock.objectName() == "contractTemplateFillResolvedExportDock"
+        )
+        initial_export_y = export_dock.geometry().y()
+        host.set_locked(False)
+        pump_events(app=self.app, cycles=2)
+        draft_dock.hide()
+        pump_events(app=self.app, cycles=4)
+
+        self.assertFalse(draft_dock.isVisible())
+        self.assertLess(export_dock.geometry().y(), initial_export_y)
+        self.assertLessEqual(export_dock.geometry().y(), revision_dock.geometry().bottom() + 2)

@@ -1841,6 +1841,62 @@ def build_theme_stylesheet(raw_values: dict[str, object] | None = None) -> str:
         background-color: {theme["workspace_bg"]};
         color: {theme["window_fg"]};
     }}
+    QWidget#contractTemplateImportWorkspaceWindowHost,
+    QWidget#contractTemplateSymbolWorkspaceWindowHost,
+    QWidget#contractTemplateFillWorkspaceWindowHost,
+    QMainWindow#contractTemplateImportWorkspaceWindow,
+    QMainWindow#contractTemplateSymbolWorkspaceWindow,
+    QMainWindow#contractTemplateFillWorkspaceWindow,
+    QWidget#contractTemplateImportWorkspaceWindowCentral,
+    QWidget#contractTemplateSymbolWorkspaceWindowCentral,
+    QWidget#contractTemplateFillWorkspaceWindowCentral {{
+        background-color: {theme["workspace_bg"]};
+        color: {theme["window_fg"]};
+    }}
+    QWidget#contractTemplateImportWorkspaceWindowChrome,
+    QWidget#contractTemplateSymbolWorkspaceWindowChrome,
+    QWidget#contractTemplateFillWorkspaceWindowChrome,
+    QWidget#contractTemplatePreviewToolbar {{
+        border: {int(theme["border_width"])}px solid {theme["compact_group_border"]};
+        border-radius: {int(theme["panel_radius"])}px;
+        background-color: {theme["compact_group_bg"]};
+        color: {theme["window_fg"]};
+    }}
+    QLabel#contractTemplatePreviewZoomLabel,
+    QLabel#contractTemplatePreviewStatusLabel,
+    QLabel#contractTemplatePreviewStaleLabel {{
+        color: {theme["secondary_text"]};
+    }}
+    QWidget[role="dockTitleBar"] {{
+        background-color: {theme["header_bg"]};
+        color: {theme["header_fg"]};
+        border: {int(theme["border_width"])}px solid {theme["header_border"]};
+        border-bottom: none;
+    }}
+    QLabel[role="dockTitle"] {{
+        color: {theme["header_fg"]};
+        font-weight: 600;
+    }}
+    QPushButton[role="dockControlButton"] {{
+        padding: 2px 10px;
+    }}
+    QPushButton[role="dockControlButton"]::menu-indicator {{
+        subcontrol-origin: padding;
+        subcontrol-position: right center;
+    }}
+    QToolButton[role="dockTitleButton"] {{
+        background-color: {theme["compact_group_bg"]};
+        color: {theme["header_fg"]};
+        border: {int(theme["border_width"])}px solid {theme["compact_group_border"]};
+        border-radius: {int(theme["panel_radius"])}px;
+        padding: 2px 8px;
+    }}
+    QToolButton[role="dockTitleButton"]:hover {{
+        background-color: {theme["button_hover_bg"]};
+    }}
+    QSplitter#contractTemplateSnapshotsArtifactsSplitter::handle {{
+        background-color: {theme["border_color"]};
+    }}
     QDockWidget QWidget[role="workspaceCanvas"],
     QDockWidget QScrollArea,
     QDockWidget QAbstractScrollArea,

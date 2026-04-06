@@ -1979,12 +1979,16 @@ class AppShellTestCase(unittest.TestCase):
 
         self.assertEqual(worker_values[:2], [1, 2])
         self.assertTrue(ui_values)
-        self.assertEqual(ui_values[-1], 9)
+        self.assertEqual(ui_values[-1], 10)
         self.assertEqual(max(worker_values), 2)
         self.assertIn(3, ui_values)
-        self.assertIn(7, ui_values)
         self.assertIn(8, ui_values)
         self.assertIn(9, ui_values)
+        self.assertIn(10, ui_values)
+        self.assertTrue(
+            any("nested workspace panel state" in message for message in progress_messages),
+            progress_messages,
+        )
         self.assertTrue(
             any("Applied saved geometry" in message for message in progress_messages),
             progress_messages,
@@ -1995,6 +1999,13 @@ class AppShellTestCase(unittest.TestCase):
         )
         self.assertTrue(
             any("workspace panel" in message for message in progress_messages),
+            progress_messages,
+        )
+        self.assertTrue(
+            any(
+                "stabilization" in message.lower() or "stabilized" in message.lower()
+                for message in progress_messages
+            ),
             progress_messages,
         )
         self.assertIn('Saved layout "Writer Desk" is ready.', progress_messages)
@@ -5269,13 +5280,12 @@ class AppShellTestCase(unittest.TestCase):
             self.window.contract_template_workspace_action.text(),
             "Contract Template Workspace…",
         )
-        self.assertEqual(panel.workspace_tabs.tabText(0), "Symbol Generator")
-        self.assertGreater(panel.table.rowCount(), 0)
-        self.assertTrue(panel.selected_symbol_edit.text().startswith("{{db."))
         self.assertEqual(
-            panel.symbol_actions_cluster.objectName(),
-            "contractTemplateSymbolActionsCluster",
+            [panel.workspace_tabs.tabText(index) for index in range(panel.workspace_tabs.count())],
+            ["Import", "Symbol Generator", "Fill Form"],
         )
+        import_host = panel._tab_hosts["import"]
+        self.assertEqual(import_host._docks[0].windowTitle(), "Import / Admin")
         tabified = set(self.window.tabifiedDockWidgets(self.window.catalog_table_dock))
         self.assertIn(self.window.contract_template_workspace_dock, tabified)
 
@@ -5481,6 +5491,84 @@ class AppShellTestCase(unittest.TestCase):
         )
         self.assertIn("Exported PDF", panel.fill_export_status_label.text())
         self.assertTrue(Path(artifacts[0].output_path).exists())
+
+    def case_contract_template_workspace_nested_layout_round_trip_restores_live_inner_state(
+        self,
+    ):
+        panel = self.window.open_contract_template_workspace(initial_tab="fill")
+        self.app.processEvents()
+        fill_host = panel._tab_hosts["fill"]
+        preview_dock = next(
+            dock
+            for dock in fill_host._docks
+            if dock.objectName() == "contractTemplateHtmlPreviewDock"
+        )
+        fill_host.set_locked(False)
+        self.app.processEvents()
+        preview_dock.setFloating(True)
+        self.app.processEvents()
+        self.window._save_main_dock_state()
+        self.window._save_main_window_geometry()
+
+        self._reopen_window(skip_background_prepare=True)
+        dock = self.window._ensure_contract_template_workspace_dock()
+        panel = dock.show_panel()
+        self.app.processEvents()
+
+        self.assertEqual(
+            panel.workspace_tabs.tabText(panel.workspace_tabs.currentIndex()),
+            "Fill Form",
+        )
+        fill_host = panel._tab_hosts["fill"]
+        preview_dock = next(
+            dock
+            for dock in fill_host._docks
+            if dock.objectName() == "contractTemplateHtmlPreviewDock"
+        )
+        self.assertEqual(fill_host.lock_layout_button.text(), "Lock Layout")
+        self.assertTrue(preview_dock.isFloating())
+
+    def case_contract_template_workspace_legacy_layout_without_nested_state_uses_default_inner_layout(
+        self,
+    ):
+        panel = self.window.open_contract_template_workspace(initial_tab="fill")
+        self.app.processEvents()
+        fill_host = panel._tab_hosts["fill"]
+        preview_dock = next(
+            dock
+            for dock in fill_host._docks
+            if dock.objectName() == "contractTemplateHtmlPreviewDock"
+        )
+        fill_host.set_locked(False)
+        self.app.processEvents()
+        preview_dock.setFloating(True)
+        self.app.processEvents()
+
+        legacy_snapshot = self.window._capture_current_main_window_layout_snapshot()
+        legacy_snapshot.pop("workspace_panels", None)
+        self.window._write_saved_main_window_layouts({"Legacy Contract Templates": legacy_snapshot})
+
+        self.assertTrue(self.window._apply_named_main_window_layout("Legacy Contract Templates"))
+        self.app.processEvents()
+
+        dock = self.window.contract_template_workspace_dock
+        panel = dock.show_panel()
+        self.app.processEvents()
+        self.assertEqual(
+            panel.workspace_tabs.tabText(panel.workspace_tabs.currentIndex()),
+            "Import",
+        )
+        import_host = panel._tab_hosts["import"]
+        self.assertEqual(import_host._docks[0].windowTitle(), "Import / Admin")
+        fill_host = panel._tab_hosts.get("fill")
+        self.assertIsNotNone(fill_host)
+        preview_dock = next(
+            dock
+            for dock in fill_host._docks
+            if dock.objectName() == "contractTemplateHtmlPreviewDock"
+        )
+        self.assertFalse(preview_dock.isFloating())
+        self.assertEqual(fill_host.lock_layout_button.text(), "Unlock Layout")
 
     def case_asset_workspace_rejoins_tabbed_dock_strip_when_reopened(self):
         track_id = self._create_track(index=142, title="Docked Deliverables Track")
