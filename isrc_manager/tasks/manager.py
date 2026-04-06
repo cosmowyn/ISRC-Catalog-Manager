@@ -112,6 +112,63 @@ def _apply_progress_dialog_chrome(dialog: QProgressDialog) -> None:
     dialog.setStyleSheet(_compose_widget_stylesheet(dialog, _progress_dialog_stylesheet(dialog)))
 
 
+def _repolish_widget_tree(root: QWidget) -> None:
+    widgets = [root, *root.findChildren(QWidget)]
+    for widget in widgets:
+        try:
+            style = widget.style()
+            if style is not None:
+                style.unpolish(widget)
+                style.polish(widget)
+        except Exception:
+            pass
+        try:
+            widget.update()
+        except Exception:
+            pass
+
+
+def _prepare_progress_dialog_controls(dialog: QProgressDialog) -> tuple[list[QPushButton], int]:
+    buttons = [button for button in dialog.findChildren(QPushButton) if not button.isHidden()]
+    button_width = 0
+    for button in buttons:
+        button.setObjectName("backgroundTaskProgressButton")
+        button.setCursor(Qt.PointingHandCursor)
+        preferred_width = max(_PROGRESS_DIALOG_BUTTON_MIN_WIDTH, button.sizeHint().width())
+        button_width = max(button_width, min(_PROGRESS_DIALOG_BUTTON_MAX_WIDTH, preferred_width))
+    label_max_width = max(
+        _PROGRESS_DIALOG_LABEL_MIN_WIDTH,
+        _progress_dialog_target_width(dialog) - _PROGRESS_DIALOG_SIDE_PADDING,
+    )
+    progress_max_width = max(
+        _PROGRESS_DIALOG_PROGRESS_MIN_WIDTH,
+        _progress_dialog_target_width(dialog) - _PROGRESS_DIALOG_SIDE_PADDING,
+    )
+    for label in dialog.findChildren(QLabel):
+        label.setObjectName("backgroundTaskProgressLabel")
+        label.setWordWrap(True)
+        label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+        label.setAlignment(Qt.AlignHCenter | Qt.AlignVCenter | Qt.TextWordWrap)
+        label.setMinimumWidth(0)
+        label.setMaximumWidth(label_max_width)
+    for progress_bar in dialog.findChildren(QProgressBar):
+        progress_bar.setObjectName("backgroundTaskProgressBar")
+        progress_bar.setTextVisible(False)
+        progress_bar.setMinimumWidth(min(_PROGRESS_DIALOG_PROGRESS_MIN_WIDTH, progress_max_width))
+        progress_bar.setMaximumWidth(progress_max_width)
+        progress_bar.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+    return buttons, button_width
+
+
+def refresh_progress_dialog_theme(dialog: QProgressDialog) -> None:
+    if dialog is None or not _qt_object_is_valid(dialog):
+        return
+    _prepare_progress_dialog_controls(dialog)
+    _apply_progress_dialog_chrome(dialog)
+    _repolish_widget_tree(dialog)
+    _refresh_progress_dialog_height(dialog)
+
+
 def _progress_dialog_target_width(dialog: QProgressDialog) -> int:
     current_width = dialog.width()
     if current_width > 0:
@@ -149,37 +206,14 @@ def _format_progress_dialog_message(message: str | None) -> str:
 
 
 def _configure_progress_dialog(dialog: QProgressDialog) -> None:
-    width = _progress_dialog_target_width(dialog)
-    _apply_progress_dialog_chrome(dialog)
     dialog.setMinimumWidth(_PROGRESS_DIALOG_MIN_WIDTH)
     dialog.setMaximumWidth(_PROGRESS_DIALOG_MAX_WIDTH)
     dialog.setMinimumHeight(_PROGRESS_DIALOG_MIN_HEIGHT)
     dialog.setMaximumHeight(_PROGRESS_DIALOG_MAX_HEIGHT)
     dialog.setSizeGripEnabled(False)
-    buttons = [button for button in dialog.findChildren(QPushButton) if not button.isHidden()]
-    button_width = 0
-    for button in buttons:
-        button.setObjectName("backgroundTaskProgressButton")
-        button.setCursor(Qt.PointingHandCursor)
-        preferred_width = max(_PROGRESS_DIALOG_BUTTON_MIN_WIDTH, button.sizeHint().width())
-        button_width = max(button_width, min(_PROGRESS_DIALOG_BUTTON_MAX_WIDTH, preferred_width))
-    label_max_width = max(_PROGRESS_DIALOG_LABEL_MIN_WIDTH, width - _PROGRESS_DIALOG_SIDE_PADDING)
-    progress_max_width = max(
-        _PROGRESS_DIALOG_PROGRESS_MIN_WIDTH, width - _PROGRESS_DIALOG_SIDE_PADDING
-    )
-    for label in dialog.findChildren(QLabel):
-        label.setObjectName("backgroundTaskProgressLabel")
-        label.setWordWrap(True)
-        label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
-        label.setAlignment(Qt.AlignHCenter | Qt.AlignVCenter | Qt.TextWordWrap)
-        label.setMinimumWidth(0)
-        label.setMaximumWidth(label_max_width)
-    for progress_bar in dialog.findChildren(QProgressBar):
-        progress_bar.setObjectName("backgroundTaskProgressBar")
-        progress_bar.setTextVisible(False)
-        progress_bar.setMinimumWidth(min(_PROGRESS_DIALOG_PROGRESS_MIN_WIDTH, progress_max_width))
-        progress_bar.setMaximumWidth(progress_max_width)
-        progress_bar.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+    buttons, button_width = _prepare_progress_dialog_controls(dialog)
+    _apply_progress_dialog_chrome(dialog)
+    _repolish_widget_tree(dialog)
     if button_width:
         for button in buttons:
             button.setMinimumWidth(button_width)
@@ -519,6 +553,13 @@ class BackgroundTaskManager(QObject):
 
     def active_task_titles(self) -> list[str]:
         return [record.title for record in self._tasks.values()]
+
+    def refresh_active_progress_dialogs(self) -> None:
+        for record in list(self._tasks.values()):
+            dialog = record.dialog
+            if dialog is None or not _qt_object_is_valid(dialog):
+                continue
+            refresh_progress_dialog_theme(dialog)
 
     def can_start(
         self, *, kind: str = "read", unique_key: str | None = None

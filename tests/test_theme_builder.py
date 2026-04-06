@@ -73,12 +73,17 @@ class _ThemeApplyHost(QWidget):
         self.theme_settings = {}
         self.submissions = []
         self.boundary_refresh_count = 0
+        self.progress_dialog_refresh_count = 0
         self.menu_bar = QMenuBar(self)
         self.menu_bar.setNativeMenuBar(False)
         self.file_menu = self.menu_bar.addMenu("File")
+        self.background_tasks = self
 
     def _queue_top_chrome_boundary_refresh(self):
         self.boundary_refresh_count += 1
+
+    def refresh_active_progress_dialogs(self):
+        self.progress_dialog_refresh_count += 1
 
     def _submit_background_task(self, **kwargs):
         self.submissions.append(dict(kwargs))
@@ -907,6 +912,7 @@ class ThemeBuilderTests(unittest.TestCase):
             )
             self.assertEqual(self.app.style().pixelMetric(QStyle.PM_MenuButtonIndicator), 14)
             self.assertIn("#F97316", self.app.styleSheet().upper())
+            self.assertGreater(host.progress_dialog_refresh_count, 0)
             self.assertGreater(host.boundary_refresh_count, 0)
         finally:
             self.app.setStyleSheet(previous_stylesheet)

@@ -345,6 +345,140 @@ class BackgroundTaskManagerTests(unittest.TestCase):
             )
             owner.close()
 
+    def test_progress_dialog_assigns_child_object_names_before_chrome_application(self):
+        finished = threading.Event()
+        release = threading.Event()
+        recorded: dict[str, list[str]] = {}
+        original = None
+
+        def _long_running(ctx):
+            ctx.set_status("Preparing themed progress dialog chrome.")
+            while not release.is_set():
+                time.sleep(0.01)
+            return "done"
+
+        from isrc_manager.tasks import manager as task_manager_module
+
+        original = task_manager_module._apply_progress_dialog_chrome
+
+        def _recording_apply(dialog):
+            recorded["labels"] = [label.objectName() for label in dialog.findChildren(QLabel)]
+            recorded["bars"] = [bar.objectName() for bar in dialog.findChildren(QProgressBar)]
+            recorded["buttons"] = [
+                button.objectName()
+                for button in dialog.findChildren(QPushButton)
+                if not button.isHidden()
+            ]
+            return original(dialog)
+
+        with patch(
+            "isrc_manager.tasks.manager._apply_progress_dialog_chrome",
+            side_effect=_recording_apply,
+        ):
+            task_id = self.manager.submit(
+                title="Progress Chrome Ordering Task",
+                description="Testing progress dialog chrome ordering.",
+                task_fn=_long_running,
+                show_dialog=True,
+                cancellable=True,
+                on_finished=finished.set,
+            )
+            self.assertIsNotNone(task_id)
+            dialog = self.manager._tasks[task_id].dialog
+            self.assertIsNotNone(dialog)
+            assert dialog is not None
+
+            self._wait_for_task_completion(
+                lambda: dialog.isVisible(),
+                description="progress chrome ordering visibility",
+            )
+            pump_events(app=self.app)
+            self.assertTrue(recorded.get("labels"))
+            self.assertTrue(recorded.get("bars"))
+            self.assertTrue(recorded.get("buttons"))
+            self.assertTrue(
+                all(name == "backgroundTaskProgressLabel" for name in recorded["labels"])
+            )
+            self.assertTrue(all(name == "backgroundTaskProgressBar" for name in recorded["bars"]))
+            self.assertTrue(
+                all(name == "backgroundTaskProgressButton" for name in recorded["buttons"])
+            )
+
+        release.set()
+        self._wait_for_task_completion(
+            lambda: finished.is_set(),
+            description="progress chrome ordering completion",
+        )
+
+    def test_refresh_active_progress_dialogs_rebuilds_theme_from_owner(self):
+        finished = threading.Event()
+        release = threading.Event()
+        owner = _ThemedProgressOwner(
+            {
+                "window_bg": "#0F172A",
+                "window_fg": "#E2E8F0",
+                "panel_bg": "#112233",
+                "panel_alt_bg": "#1A2B3C",
+                "menu_border": "#445566",
+                "accent": "#33AAFF",
+            }
+        )
+
+        def _long_running(ctx):
+            ctx.set_status("Refreshing themed progress dialog chrome.")
+            while not release.is_set():
+                time.sleep(0.01)
+            return "done"
+
+        try:
+            task_id = self.manager.submit(
+                title="Refreshable Progress Task",
+                description="Testing live progress dialog theme refresh.",
+                task_fn=_long_running,
+                owner=owner,
+                show_dialog=True,
+                cancellable=False,
+                on_finished=finished.set,
+            )
+            self.assertIsNotNone(task_id)
+            dialog = self.manager._tasks[task_id].dialog
+            self.assertIsNotNone(dialog)
+            assert dialog is not None
+
+            self._wait_for_task_completion(
+                lambda: dialog.isVisible(),
+                description="refreshable progress dialog visibility",
+            )
+            pump_events(app=self.app)
+
+            self.assertIn("rgba(17, 34, 51, 246)", dialog.styleSheet())
+
+            owner._theme_values = effective_theme_settings(
+                {
+                    "window_bg": "#E5EEF7",
+                    "window_fg": "#102033",
+                    "panel_bg": "#F4F8FC",
+                    "panel_alt_bg": "#E2EBF5",
+                    "menu_border": "#8AA0B8",
+                    "accent": "#2F6BFF",
+                }
+            )
+            self.manager.refresh_active_progress_dialogs()
+            pump_events(app=self.app)
+
+            stylesheet = dialog.styleSheet()
+            self.assertIn("rgba(244, 248, 252, 246)", stylesheet)
+            self.assertIn("rgba(226, 235, 245, 252)", stylesheet)
+            self.assertIn("#102033", stylesheet)
+            self.assertNotIn("rgba(17, 34, 51, 246)", stylesheet)
+        finally:
+            release.set()
+            self._wait_for_task_completion(
+                lambda: finished.is_set(),
+                description="refreshable progress dialog completion",
+            )
+            owner.close()
+
     def test_non_cancellable_progress_dialog_uses_full_width_progress_surface(self):
         finished = threading.Event()
         release = threading.Event()

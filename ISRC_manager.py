@@ -9635,6 +9635,11 @@ class App(QMainWindow):
             app.setStyleSheet(self._build_theme_stylesheet(safe_values))
         else:
             app.setStyleSheet(self._build_theme_stylesheet(normalized))
+        task_manager = getattr(self, "background_tasks", None)
+        if task_manager is not None and callable(
+            getattr(task_manager, "refresh_active_progress_dialogs", None)
+        ):
+            task_manager.refresh_active_progress_dialogs()
         self._refresh_menu_theme_state()
         self._queue_top_chrome_boundary_refresh()
 
@@ -9672,6 +9677,11 @@ class App(QMainWindow):
         app.setStyleSheet(
             str(payload.get("stylesheet") or self._build_theme_stylesheet(normalized))
         )
+        task_manager = getattr(self, "background_tasks", None)
+        if task_manager is not None and callable(
+            getattr(task_manager, "refresh_active_progress_dialogs", None)
+        ):
+            task_manager.refresh_active_progress_dialogs()
         self._refresh_menu_theme_state()
         self._queue_top_chrome_boundary_refresh()
 
