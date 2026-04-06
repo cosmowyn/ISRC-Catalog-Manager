@@ -252,6 +252,34 @@ class CatalogWorkspaceDock(QDockWidget):
             state=summarize_panel_layout_state(self._pending_panel_layout_state),
         )
         if not self._pending_panel_layout_state_dirty:
+            panel = self._panel
+            restore = getattr(panel, "restore_layout_state", None) if panel is not None else None
+            begin_layout_restore = (
+                getattr(panel, "begin_layout_restore", None) if panel is not None else None
+            )
+            finish_layout_restore = (
+                getattr(panel, "finish_layout_restore", None) if panel is not None else None
+            )
+            if callable(restore):
+                if callable(begin_layout_restore):
+                    try:
+                        begin_layout_restore()
+                    except Exception:
+                        pass
+                try:
+                    restore(None)
+                finally:
+                    if callable(finish_layout_restore):
+                        try:
+                            finish_layout_restore()
+                        except Exception:
+                            pass
+                self._run_panel_stabilizer()
+                workspace_debug_log(
+                    "layout",
+                    "catalog_workspace_dock.restore.reset_to_default",
+                    dock_object_name=str(self.objectName() or ""),
+                )
             return
         if self._panel_ready_for_layout_restore():
             self._apply_pending_panel_layout_state()

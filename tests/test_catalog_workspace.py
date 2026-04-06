@@ -151,6 +151,39 @@ class CatalogWorkspaceDockTests(unittest.TestCase):
             window.deleteLater()
             pump_events(app=self.app, cycles=2)
 
+    def test_restore_panel_layout_state_none_resets_live_panel_to_default(self):
+        window = _WorkspaceTestWindow()
+        panel = _DummyPanel()
+        dock = CatalogWorkspaceDock(
+            window,
+            dock_title="Contract Template Workspace",
+            dock_object_name="contractTemplateWorkspaceDock",
+            panel_factory=lambda _dock: panel,
+        )
+        try:
+            window.resize(1200, 900)
+            window.addDockWidget(Qt.RightDockWidgetArea, dock)
+            window.show()
+            dock.show()
+            pump_events(app=self.app, cycles=4)
+            dock.panel()
+            pump_events(app=self.app, cycles=4)
+
+            panel.events.clear()
+            dock.restore_panel_layout_state(None)
+            pump_events(app=self.app, cycles=2)
+
+            self.assertEqual(panel.restore_calls, [None])
+            self.assertEqual(panel.events[:2], ["begin_layout_restore", "restore"])
+            self.assertIn("finish_layout_restore", panel.events)
+            self.assertIn("stabilize", panel.events)
+        finally:
+            dock.close()
+            dock.deleteLater()
+            window.close()
+            window.deleteLater()
+            pump_events(app=self.app, cycles=2)
+
     def test_visibility_during_outer_restore_defers_panel_materialization(self):
         window = _WorkspaceTestWindow()
         panel = _DummyPanel()
