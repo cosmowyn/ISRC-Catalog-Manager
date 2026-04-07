@@ -3769,6 +3769,7 @@ class AppShellTestCase(unittest.TestCase):
                 "Work Manager…",
                 "Party Manager…",
                 "Contract Manager…",
+                "Code Registry Workspace…",
                 "Contract Template Workspace…",
                 "Rights Matrix…",
             ],
@@ -3838,11 +3839,11 @@ class AppShellTestCase(unittest.TestCase):
             description="catalog dock to become visible",
         )
         wait_for(
-            lambda: self.window.table.hasFocus(),
+            lambda: self.window.table.isVisibleTo(self.window),
             timeout_ms=1000,
             interval_ms=10,
             app=self.app,
-            description="catalog table to receive focus",
+            description="catalog table to be visible after workspace routing",
         )
         self.assertTrue(self.window.catalog_table_dock.isVisible())
         self.assertTrue(self.window.settings.value("display/catalog_table_panel", False, bool))
@@ -5379,9 +5380,12 @@ class AppShellTestCase(unittest.TestCase):
         )
 
         selector = panel.selector_widgets["{{db.track.track_title}}"]
+        selector_combo = panel._selector_combo(selector)
+        self.assertIsNotNone(selector_combo)
+        assert selector_combo is not None
         date_widget = panel.manual_widgets["{{manual.license_date}}"]
-        selector.setCurrentIndex(1)
-        selected_track_value = selector.currentData()
+        selector_combo.setCurrentIndex(1)
+        selected_track_value = selector_combo.currentData()
         draft_date = QDate.currentDate().addDays(1)
         date_widget.setDate(draft_date)
         panel.fill_draft_name_edit.setText("Shell Resume Draft")
@@ -5470,8 +5474,11 @@ class AppShellTestCase(unittest.TestCase):
         )
 
         selector = panel.selector_widgets["{{db.track.track_title}}"]
+        selector_combo = panel._selector_combo(selector)
+        self.assertIsNotNone(selector_combo)
+        assert selector_combo is not None
         date_widget = panel.manual_widgets["{{manual.license_date}}"]
-        selector.setCurrentIndex(1)
+        selector_combo.setCurrentIndex(1)
         date_widget.setDate(QDate(2026, 3, 30))
         panel.fill_draft_name_edit.setText("Shell Export Draft")
         self.app.processEvents()
@@ -6481,10 +6488,9 @@ class AppShellTestCase(unittest.TestCase):
         upc_values = [
             self.window.upc_field.itemText(index) for index in range(self.window.upc_field.count())
         ]
-        catalog_values = [
-            self.window.catalog_number_field.itemText(index)
-            for index in range(self.window.catalog_number_field.count())
-        ]
+        selector = self.window.catalog_number_field
+        selector.mode_combo.setCurrentIndex(selector.mode_combo.findData("external"))
+        catalog_values = [selector.combo.itemText(index) for index in range(selector.combo.count())]
         self.assertIn("8720892724990", upc_values)
         self.assertIn("CAT-REL-900", catalog_values)
 

@@ -305,6 +305,20 @@ class CodeRegistryServiceTests(unittest.TestCase):
         self.assertEqual(records[0].value, shared_value)
         self.assertEqual(records[0].usage_count, 2)
 
+    def test_external_catalog_suggestions_include_legacy_release_catalog_text(self):
+        with self.conn:
+            self.conn.execute(
+                """
+                INSERT INTO Releases(title, release_type, upc, catalog_number)
+                VALUES (?, ?, ?, ?)
+                """,
+                ("Legacy Release", "album", "8720892724990", "CAT-REL-900"),
+            )
+
+        suggestions = self.registry.external_catalog_suggestions()
+
+        self.assertIn("CAT-REL-900", suggestions)
+
     def test_generated_internal_entry_can_be_linked_from_workspace_service(self):
         self._set_prefix(BUILTIN_CATEGORY_CATALOG_NUMBER, "ACR")
         track_id = self._create_track(isrc="NL-TST-26-40021", title="Link Target")

@@ -742,17 +742,44 @@ class CodeRegistryService:
         return [self._row_to_external(row) for row in rows]
 
     def external_catalog_suggestions(self, *, limit: int = 250) -> list[str]:
-        rows = self.conn.execute(
-            """
-            SELECT value
-            FROM ExternalCatalogIdentifiers
-            WHERE value IS NOT NULL AND value != ''
-            GROUP BY normalized_value, value
-            ORDER BY lower(value), value
-            LIMIT ?
-            """,
-            (int(limit),),
-        ).fetchall()
+        try:
+            rows = self.conn.execute(
+                """
+                SELECT value
+                FROM (
+                    SELECT value
+                    FROM ExternalCatalogIdentifiers
+                    WHERE value IS NOT NULL AND value != ''
+                    UNION
+                    SELECT catalog_number AS value
+                    FROM Tracks
+                    WHERE catalog_number IS NOT NULL
+                      AND catalog_number != ''
+                      AND catalog_registry_entry_id IS NULL
+                    UNION
+                    SELECT catalog_number AS value
+                    FROM Releases
+                    WHERE catalog_number IS NOT NULL
+                      AND catalog_number != ''
+                      AND catalog_registry_entry_id IS NULL
+                )
+                ORDER BY lower(value), value
+                LIMIT ?
+                """,
+                (int(limit),),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            rows = self.conn.execute(
+                """
+                SELECT value
+                FROM ExternalCatalogIdentifiers
+                WHERE value IS NOT NULL AND value != ''
+                GROUP BY normalized_value, value
+                ORDER BY lower(value), value
+                LIMIT ?
+                """,
+                (int(limit),),
+            ).fetchall()
         return [str(row[0] or "").strip() for row in rows if str(row[0] or "").strip()]
 
     def classify_catalog_identifier(self, value: str | None) -> CatalogIdentifierClassification:

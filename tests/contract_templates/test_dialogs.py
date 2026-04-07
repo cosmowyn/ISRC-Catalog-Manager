@@ -450,10 +450,13 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
         self._focus_fill()
 
         selector = self.panel.selector_widgets["{{db.track.track_title}}"]
+        selector_combo = self.panel._selector_combo(selector)
+        self.assertIsNotNone(selector_combo)
+        assert selector_combo is not None
         date_widget = self.panel.manual_widgets["{{manual.license_date}}"]
         draft_date = QDate.currentDate().addDays(1)
         updated_date = draft_date.addDays(6)
-        selector.setCurrentIndex(1)
+        selector_combo.setCurrentIndex(1)
         date_widget.setDate(draft_date)
         self.panel.fill_draft_name_edit.setText("Managed Resume Draft")
         self.panel.fill_draft_storage_combo.setCurrentIndex(1)
@@ -654,9 +657,12 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
         self._focus_fill()
 
         selector = self.panel.selector_widgets["{{db.track.track_title}}"]
+        selector_combo = self.panel._selector_combo(selector)
+        self.assertIsNotNone(selector_combo)
+        assert selector_combo is not None
         date_widget = self.panel.manual_widgets["{{manual.license_date}}"]
         export_date = QDate.currentDate().addDays(4)
-        selector.setCurrentIndex(1)
+        selector_combo.setCurrentIndex(1)
         date_widget.setDate(export_date)
         self.panel.fill_draft_name_edit.setText("Export From Fill Tab")
         pump_events(app=self.app, cycles=2)
@@ -686,8 +692,11 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
         self._focus_fill()
 
         selector = self.panel.selector_widgets["{{db.track.track_title}}"]
+        selector_combo = self.panel._selector_combo(selector)
+        self.assertIsNotNone(selector_combo)
+        assert selector_combo is not None
         date_widget = self.panel.manual_widgets["{{manual.license_date}}"]
-        selector.setCurrentIndex(1)
+        selector_combo.setCurrentIndex(1)
         date_widget.setDate(QDate(2026, 4, 6))
         pump_events(app=self.app, cycles=2)
 
@@ -732,9 +741,12 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
         self.panel._select_revision_context(self.revision.template_id, self.revision.revision_id)
         pump_events(app=self.app, cycles=2)
         selector = self.panel.selector_widgets["{{db.track.track_title}}"]
+        selector_combo = self.panel._selector_combo(selector)
+        self.assertIsNotNone(selector_combo)
+        assert selector_combo is not None
         date_widget = self.panel.manual_widgets["{{manual.license_date}}"]
         admin_export_date = QDate.currentDate().addDays(7)
-        selector.setCurrentIndex(1)
+        selector_combo.setCurrentIndex(1)
         date_widget.setDate(admin_export_date)
         self.panel.fill_draft_name_edit.setText("Admin Export Draft")
         self.panel.save_new_draft()
@@ -786,10 +798,13 @@ class ContractTemplateWorkspacePanelBehaviorTests(ContractTemplateWorkspacePanel
         pump_events(app=self.app, cycles=3)
 
         selector = self.panel.selector_widgets["{{db.track.track_title}}"]
+        selector_combo = self.panel._selector_combo(selector)
+        self.assertIsNotNone(selector_combo)
+        assert selector_combo is not None
         is_exclusive = self.panel.manual_widgets["{{manual.is_exclusive}}"]
         royalty_share = self.panel.manual_widgets["{{manual.royalty_share}}"]
 
-        selector.setCurrentIndex(1)
+        selector_combo.setCurrentIndex(1)
         is_exclusive.setChecked(True)
         is_exclusive.setChecked(False)
         royalty_share.setValue(5.0)
