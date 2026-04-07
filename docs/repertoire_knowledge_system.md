@@ -12,6 +12,7 @@ The main layers are:
 
 - `Track`: the recording-level catalog entity
 - `Release`: the product layer for grouped commercial delivery
+- `Code Registry`: authoritative internal business codes plus separate external catalog identifiers
 - `Work`: the composition layer
 - `Party`: reusable people and companies
 - `Contract`: structured agreements and obligations
@@ -46,6 +47,7 @@ The legal and operational layer is meant to stay usable, not archival only.
 
 - Parties keep canonical people and companies reusable across the catalog
 - Contracts track dates, obligations, and counterparties as structured fields
+- Contracts can also carry registry-backed contract numbers, license numbers, and a distinct `Registry SHA-256 Key`
 - Contract documents preserve draft, signed, amended, and supporting files in the same system
 - Rights records express type, exclusivity, territory, dates, and source-agreement lineage
 
@@ -62,6 +64,7 @@ Assets represent the file/version layer around tracks and releases.
 Use the in-app help for the deeper workflow detail:
 
 - `Works, Rights, and Contracts`
+- `Code Registry Workspace`
 - `Releases`
 - `File Storage Modes`
 - `Import and Merge Workflows`

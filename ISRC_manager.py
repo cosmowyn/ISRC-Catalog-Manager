@@ -151,6 +151,7 @@ from isrc_manager.catalog_workspace import (
     ensure_catalog_workspace_dock,
     refresh_catalog_workspace_docks,
 )
+from isrc_manager.code_registry import CatalogIdentifierField, CodeRegistryWorkspacePanel
 from isrc_manager.workspace_debug import (
     summarize_catalog_workspace_dock,
     summarize_panel_layout_snapshot,
@@ -192,7 +193,7 @@ from isrc_manager.constants import (
     SCHEMA_TARGET,
 )
 from isrc_manager.contract_templates.dialogs import ContractTemplateWorkspacePanel
-from isrc_manager.contracts import ContractService
+from isrc_manager.contracts import ContractPayload, ContractService
 from isrc_manager.contracts.dialogs import ContractBrowserPanel
 from isrc_manager.domain.codes import (
     is_blank,
@@ -318,6 +319,7 @@ from isrc_manager.selection_scope import TrackChoice
 from isrc_manager.services import (
     CatalogAdminService,
     CatalogReadService,
+    CodeRegistryService,
     ContractTemplateCatalogService,
     ContractTemplateExportService,
     ContractTemplateFormService,
@@ -6276,6 +6278,7 @@ class App(QMainWindow):
         self.gs1_integration_service = None
         self.catalog_service = None
         self.catalog_reads = None
+        self.code_registry_service = None
         self.license_service = None
         self.license_migration_service = None
         self.profile_kv = None
@@ -9048,6 +9051,9 @@ class App(QMainWindow):
         )
         self.catalog_service = CatalogAdminService(self.conn) if self.conn is not None else None
         self.catalog_reads = CatalogReadService(self.conn) if self.conn is not None else None
+        self.code_registry_service = (
+            CodeRegistryService(self.conn) if self.conn is not None else None
+        )
         self.profile_kv = ProfileKVService(self.conn) if self.conn is not None else None
         self.track_import_repair_queue_service = (
             TrackImportRepairQueueService(self.conn) if self.conn is not None else None
@@ -11090,6 +11096,7 @@ class App(QMainWindow):
         self.settings_reads = None
         self.settings_mutations = None
         self.blob_icon_settings_service = None
+        self.code_registry_service = None
         self.contract_template_catalog_service = None
         self.contract_template_service = None
         self.contract_template_form_service = None
@@ -12874,6 +12881,15 @@ class App(QMainWindow):
     def _create_contract_manager_panel(self, parent: QWidget) -> ContractBrowserPanel:
         return ContractBrowserPanel(
             contract_service_provider=lambda: self.contract_service,
+            create_contract_handler=self._create_contract_with_history,
+            update_contract_handler=self._update_contract_with_history,
+            delete_contract_handler=self._delete_contract_with_history,
+            parent=parent,
+        )
+
+    def _create_code_registry_workspace_panel(self, parent: QWidget) -> CodeRegistryWorkspacePanel:
+        return CodeRegistryWorkspacePanel(
+            service_provider=lambda: self.code_registry_service,
             parent=parent,
         )
 
@@ -12967,6 +12983,17 @@ class App(QMainWindow):
             panel_factory=self._create_contract_manager_panel,
         )
         self.contract_manager_dock = dock
+        return dock
+
+    def _ensure_code_registry_workspace_dock(self) -> QDockWidget:
+        dock = ensure_catalog_workspace_dock(
+            self,
+            key="code_registry_workspace",
+            title="Code Registry Workspace",
+            object_name="codeRegistryWorkspaceDock",
+            panel_factory=self._create_code_registry_workspace_panel,
+        )
+        self.code_registry_workspace_dock = dock
         return dock
 
     def _ensure_contract_template_workspace_dock(self) -> QDockWidget:
@@ -13338,6 +13365,7 @@ class App(QMainWindow):
                 self._ensure_global_search_dock,
                 self._ensure_party_manager_dock,
                 self._ensure_contract_manager_dock,
+                self._ensure_code_registry_workspace_dock,
                 self._ensure_contract_template_workspace_dock,
                 self._ensure_rights_matrix_dock,
                 self._ensure_asset_registry_dock,
@@ -15088,11 +15116,14 @@ class App(QMainWindow):
         )
         self._populate_combobox(self.upc_field, combo_values.get("upcs", []), allow_empty=True)
         self._populate_combobox(self.genre_field, combo_values.get("genres", []), allow_empty=True)
-        self._populate_combobox(
-            self.catalog_number_field,
-            combo_values.get("catalog_numbers", []),
-            allow_empty=True,
-        )
+        if hasattr(self.catalog_number_field, "refresh"):
+            self.catalog_number_field.refresh()
+        else:
+            self._populate_combobox(
+                self.catalog_number_field,
+                combo_values.get("catalog_numbers", []),
+                allow_empty=True,
+            )
 
     def populate_all_comboboxes(self):
         if self.conn is None:
@@ -16463,6 +16494,16 @@ class App(QMainWindow):
                 upc=(self.upc_field.currentText().strip() or None),
                 genre=(self.genre_field.currentText().strip() or None),
                 catalog_number=(self.catalog_number_field.currentText().strip() or None),
+                catalog_registry_entry_id=(
+                    self.catalog_number_field.catalog_registry_entry_id()
+                    if hasattr(self.catalog_number_field, "catalog_registry_entry_id")
+                    else None
+                ),
+                external_catalog_identifier_id=(
+                    self.catalog_number_field.external_catalog_identifier_id()
+                    if hasattr(self.catalog_number_field, "external_catalog_identifier_id")
+                    else None
+                ),
                 buma_work_number=(self.buma_work_number_field.text().strip() or None),
                 audio_file_source_path=(self.audio_file_field.text().strip() or None),
                 album_art_source_path=(self.album_art_field.text().strip() or None),
@@ -17668,6 +17709,79 @@ class App(QMainWindow):
             configure=lambda panel: panel.focus_contract(contract_id),
         )
 
+    def open_code_registry_workspace(self):
+        if self.code_registry_service is None:
+            QMessageBox.warning(self, "Code Registry Workspace", "Open a profile first.")
+            return
+        return self._show_workspace_panel(
+            self._ensure_code_registry_workspace_dock,
+            panel_attr="code_registry_workspace_panel",
+        )
+
+    def _create_contract_with_history(self, payload: ContractPayload) -> int:
+        if self.contract_service is None or self.conn is None:
+            raise ValueError("Contract service is unavailable.")
+
+        def mutation():
+            with self.conn:
+                return int(self.contract_service.create_contract(payload, cursor=self.conn.cursor()))
+
+        contract_id = int(
+            self._run_snapshot_history_action(
+                action_label=f"Create Contract: {str(payload.title or 'Untitled Contract').strip()}",
+                action_type="contract.create",
+                entity_type="Contract",
+                payload={"title": str(payload.title or "").strip()},
+                mutation=mutation,
+            )
+        )
+        self._refresh_catalog_workspace_docks()
+        return contract_id
+
+    def _update_contract_with_history(self, contract_id: int, payload: ContractPayload) -> None:
+        if self.contract_service is None or self.conn is None:
+            raise ValueError("Contract service is unavailable.")
+
+        def mutation():
+            with self.conn:
+                self.contract_service.update_contract(
+                    int(contract_id),
+                    payload,
+                    cursor=self.conn.cursor(),
+                )
+                return int(contract_id)
+
+        self._run_snapshot_history_action(
+            action_label=f"Update Contract: {str(payload.title or 'Untitled Contract').strip()}",
+            action_type="contract.update",
+            entity_type="Contract",
+            entity_id=int(contract_id),
+            payload={"title": str(payload.title or "").strip()},
+            mutation=mutation,
+        )
+        self._refresh_catalog_workspace_docks()
+
+    def _delete_contract_with_history(self, contract_id: int) -> None:
+        if self.contract_service is None or self.conn is None:
+            raise ValueError("Contract service is unavailable.")
+        record = self.contract_service.fetch_contract(int(contract_id))
+        title = "" if record is None else str(record.title or "").strip()
+
+        def mutation():
+            with self.conn:
+                self.contract_service.delete_contract(int(contract_id))
+                return int(contract_id)
+
+        self._run_snapshot_history_action(
+            action_label=f"Delete Contract: {title or f'#{int(contract_id)}'}",
+            action_type="contract.delete",
+            entity_type="Contract",
+            entity_id=int(contract_id),
+            payload={"title": title},
+            mutation=mutation,
+        )
+        self._refresh_catalog_workspace_docks()
+
     def open_contract_template_workspace(self, *, initial_tab: str = "import"):
         if (
             self.contract_template_catalog_service is None
@@ -18757,6 +18871,26 @@ class App(QMainWindow):
             lines.append(f"Would create tracks: {report.would_create_tracks}")
         if report.would_update_tracks:
             lines.append(f"Would update tracks: {report.would_update_tracks}")
+        if report.internal_catalog_identifiers:
+            lines.append(
+                f"Catalogs accepted as internal: {report.internal_catalog_identifiers}"
+            )
+        if report.external_catalog_identifiers:
+            lines.append(
+                f"Catalogs stored as external: {report.external_catalog_identifiers}"
+            )
+        if report.mismatched_catalog_identifiers:
+            lines.append(
+                f"Catalog mismatches flagged: {report.mismatched_catalog_identifiers}"
+            )
+        if report.merged_catalog_identifiers:
+            lines.append(
+                f"Catalog values merged/skipped: {report.merged_catalog_identifiers}"
+            )
+        if report.skipped_catalog_identifiers:
+            lines.append(
+                f"Catalog values skipped: {report.skipped_catalog_identifiers}"
+            )
         if report.duplicates:
             lines.append(f"Duplicate-safe skips: {len(report.duplicates)}")
         if report.unknown_fields:
@@ -22782,6 +22916,16 @@ class App(QMainWindow):
                 lines.append(f"Would create tracks: {report.would_create_tracks}")
             if report.would_update_tracks:
                 lines.append(f"Would update tracks: {report.would_update_tracks}")
+        if report.internal_catalog_identifiers:
+            lines.append(f"Accepted as internal: {report.internal_catalog_identifiers}")
+        if report.external_catalog_identifiers:
+            lines.append(f"Stored as external: {report.external_catalog_identifiers}")
+        if report.mismatched_catalog_identifiers:
+            lines.append(f"Flagged mismatch: {report.mismatched_catalog_identifiers}")
+        if report.merged_catalog_identifiers:
+            lines.append(f"Merged/skipped catalog values: {report.merged_catalog_identifiers}")
+        if report.skipped_catalog_identifiers:
+            lines.append(f"Skipped catalog values: {report.skipped_catalog_identifiers}")
         if report.duplicates:
             lines.append(f"Duplicates: {len(report.duplicates)}")
         if report.repair_queue_entry_ids:
@@ -27944,7 +28088,11 @@ class AlbumEntryDialog(QDialog):
         self.genre = self._build_genre_combo()
         self._add_labeled_widget(overview_layout, "Genre", self.genre)
 
-        self.catalog_number = self._build_catalog_number_combo()
+        self.catalog_number = CatalogIdentifierField(
+            service_provider=lambda: getattr(self.app, "code_registry_service", None),
+            created_via="album_entry",
+            parent=self,
+        )
         self.catalog_number.setCurrentText("")
         self._add_labeled_widget(overview_layout, "Catalog#", self.catalog_number)
 
@@ -28363,6 +28511,16 @@ class AlbumEntryDialog(QDialog):
                     upc=(upc_raw or None),
                     genre=genre,
                     catalog_number=catalog_number,
+                    catalog_registry_entry_id=(
+                        self.catalog_number.catalog_registry_entry_id()
+                        if hasattr(self.catalog_number, "catalog_registry_entry_id")
+                        else None
+                    ),
+                    external_catalog_identifier_id=(
+                        self.catalog_number.external_catalog_identifier_id()
+                        if hasattr(self.catalog_number, "external_catalog_identifier_id")
+                        else None
+                    ),
                     buma_work_number=(section.buma_work_number.text().strip() or None),
                     work_id=selected_work_id,
                     parent_track_id=parent_track_id,
@@ -28822,18 +28980,33 @@ class EditDialog(QDialog):
         artwork_layout_section.addWidget(hint_row)
         self._refresh_album_art_controls()
 
-        self.catalog_number = combo(
-            registration_layout,
-            "Catalog#",
-            "catalog_number",
-            self.snapshot.catalog_number or "",
-            """
-            SELECT DISTINCT catalog_number
-            FROM Tracks
-            WHERE catalog_number IS NOT NULL AND catalog_number != ''
-            ORDER BY catalog_number
-            """,
+        self.catalog_number = CatalogIdentifierField(
+            service_provider=lambda: getattr(self.parent, "code_registry_service", None),
+            allow_generate=not self._is_bulk_edit,
+            created_via=("track.bulk_edit" if self._is_bulk_edit else "track.editor"),
+            parent=self,
         )
+        if not self._is_bulk_edit:
+            self.catalog_number.set_assignment(
+                value=self.snapshot.catalog_number or "",
+                registry_entry_id=self.snapshot.catalog_registry_entry_id,
+                external_catalog_identifier_id=self.snapshot.external_catalog_identifier_id,
+            )
+        else:
+            self.catalog_number.set_assignment(
+                value=self._display_value_for_field("catalog_number", self.snapshot.catalog_number or ""),
+                registry_entry_id=None,
+                external_catalog_identifier_id=None,
+            )
+            self._set_bulk_hint(self.catalog_number.combo, "catalog_number")
+            line_edit = self.catalog_number.lineEdit()
+            if line_edit is not None:
+                self._set_bulk_hint(line_edit, "catalog_number")
+                self._register_bulk_focus_target(line_edit, "catalog_number")
+            self.catalog_number.valueChanged.connect(
+                lambda: self._mark_bulk_field_modified("catalog_number")
+            )
+        add_row(registration_layout, "Catalog#", self.catalog_number)
 
         self.buma_work_number = QLineEdit()
         self._configure_text_field(
@@ -29624,6 +29797,16 @@ class EditDialog(QDialog):
                 upc=(new_upc_raw or None),
                 genre=(new_genre or None),
                 catalog_number=new_catalog_number,
+                catalog_registry_entry_id=(
+                    self.catalog_number.catalog_registry_entry_id()
+                    if hasattr(self.catalog_number, "catalog_registry_entry_id")
+                    else None
+                ),
+                external_catalog_identifier_id=(
+                    self.catalog_number.external_catalog_identifier_id()
+                    if hasattr(self.catalog_number, "external_catalog_identifier_id")
+                    else None
+                ),
                 buma_work_number=new_buma_work_number,
                 audio_file_source_path=audio_source_path,
                 audio_file_storage_mode=audio_storage_mode,
@@ -30001,6 +30184,24 @@ class EditDialog(QDialog):
                     (new_catalog_number or None)
                     if apply_catalog_number
                     else snapshot.catalog_number
+                ),
+                catalog_registry_entry_id=(
+                    (
+                        self.catalog_number.catalog_registry_entry_id()
+                        if hasattr(self.catalog_number, "catalog_registry_entry_id")
+                        else None
+                    )
+                    if apply_catalog_number
+                    else snapshot.catalog_registry_entry_id
+                ),
+                external_catalog_identifier_id=(
+                    (
+                        self.catalog_number.external_catalog_identifier_id()
+                        if hasattr(self.catalog_number, "external_catalog_identifier_id")
+                        else None
+                    )
+                    if apply_catalog_number
+                    else snapshot.external_catalog_identifier_id
                 ),
                 buma_work_number=(
                     (new_buma_work_number or None)

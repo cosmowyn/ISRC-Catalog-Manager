@@ -18,6 +18,7 @@ class HelpContentTests(unittest.TestCase):
         self.assertEqual(set(chapter_ids), set(HELP_CHAPTERS_BY_ID))
         self.assertIn("overview", HELP_CHAPTERS_BY_ID)
         self.assertIn("audio-authenticity", HELP_CHAPTERS_BY_ID)
+        self.assertIn("code-registry", HELP_CHAPTERS_BY_ID)
         self.assertIn("settings", HELP_CHAPTERS_BY_ID)
         self.assertIn("history", HELP_CHAPTERS_BY_ID)
         self.assertIn("keyboard-shortcuts", HELP_CHAPTERS_BY_ID)
@@ -66,6 +67,15 @@ class HelpContentTests(unittest.TestCase):
         self.assertIn("AIFF", chapter.content_html)
         self.assertIn("Provenance", chapter.content_html)
         self.assertIn("separate managed export workflow", chapter.content_html.lower())
+        self.assertIn("Registry SHA-256 Key", chapter.content_html)
+
+    def test_code_registry_help_chapter_covers_shared_usage_and_distinction(self):
+        chapter = HELP_CHAPTERS_BY_ID["code-registry"]
+
+        self.assertIn("Link Selected Value", chapter.content_html)
+        self.assertIn("usage count", chapter.content_html.lower())
+        self.assertIn("Registry SHA-256 Key", chapter.content_html)
+        self.assertIn("not an audio-authenticity key", chapter.content_html.lower())
 
     def test_help_chapters_are_grouped_into_layered_sections(self):
         grouped = list(iter_help_sections())
@@ -76,6 +86,7 @@ class HelpContentTests(unittest.TestCase):
         }
         self.assertIn("overview", grouped_ids["Quick Start"])
         self.assertIn("keyboard-shortcuts", grouped_ids["Quick Start"])
+        self.assertIn("code-registry", grouped_ids["Daily Workflows"])
         self.assertIn("repertoire-knowledge", grouped_ids["Deep Dives"])
         self.assertIn("diagnostics", grouped_ids["Operations & Recovery"])
         self.assertEqual(help_section_for_chapter("theme-settings"), "Settings & Reference")

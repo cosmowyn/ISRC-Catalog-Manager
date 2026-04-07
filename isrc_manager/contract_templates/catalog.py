@@ -223,6 +223,20 @@ _STATIC_SEEDS: tuple[_CatalogSeed, ...] = _track_seeds() + (
     _CatalogSeed(
         "contract", "contract_type", "Contract Type", "text", "Contracts", "contract_type"
     ),
+    _CatalogSeed(
+        "contract", "contract_number", "Contract Number", "text", "Contracts", "contract_number"
+    ),
+    _CatalogSeed(
+        "contract", "license_number", "License Number", "text", "Contracts", "license_number"
+    ),
+    _CatalogSeed(
+        "contract",
+        "registry_sha256_key",
+        "Registry SHA-256 Key",
+        "text",
+        "Contracts",
+        "registry_sha256_key",
+    ),
     _CatalogSeed("contract", "draft_date", "Draft Date", "date", "Contracts", "draft_date"),
     _CatalogSeed(
         "contract", "signature_date", "Signature Date", "date", "Contracts", "signature_date"

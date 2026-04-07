@@ -6,6 +6,10 @@ from pathlib import Path
 from unittest import mock
 
 from isrc_manager.assets import AssetService, AssetVersionPayload
+from isrc_manager.code_registry import (
+    BUILTIN_CATEGORY_CONTRACT_NUMBER,
+    BUILTIN_CATEGORY_LICENSE_NUMBER,
+)
 from isrc_manager.contracts import (
     ContractDetail,
     ContractDocumentPayload,
@@ -760,6 +764,12 @@ class ContractRightsAssetServiceTestCase(unittest.TestCase):
                 profile_name=None,
                 created_at=None,
                 updated_at=None,
+                contract_number=None,
+                license_number=None,
+                registry_sha256_key=None,
+                contract_registry_entry_id=None,
+                license_registry_entry_id=None,
+                registry_sha256_key_entry_id=None,
                 obligation_count=0,
                 document_count=1,
             ),
@@ -837,6 +847,12 @@ class ContractRightsAssetServiceTestCase(unittest.TestCase):
                 profile_name=None,
                 created_at=None,
                 updated_at=None,
+                contract_number=None,
+                license_number=None,
+                registry_sha256_key=None,
+                contract_registry_entry_id=None,
+                license_registry_entry_id=None,
+                registry_sha256_key_entry_id=None,
                 obligation_count=1,
                 document_count=0,
             ),
@@ -958,6 +974,72 @@ class ContractRightsAssetServiceTestCase(unittest.TestCase):
             self.assertEqual(payload.parties[1].role_label, "licensee")
             self.assertFalse(payload.parties[1].is_primary)
             self.assertEqual(payload.parties[1].notes, "Created by typed name")
+        finally:
+            dialog.close()
+
+    def case_contract_editor_generates_registry_values_and_keeps_sha256_distinct(self):
+        if ContractEditorDialog is None:
+            self.skipTest("Contract editor dialog unavailable")
+        require_qapplication()
+
+        code_registry = self.contract_service.code_registry_service()
+        contract_category = code_registry.fetch_category_by_system_key(
+            BUILTIN_CATEGORY_CONTRACT_NUMBER
+        )
+        license_category = code_registry.fetch_category_by_system_key(
+            BUILTIN_CATEGORY_LICENSE_NUMBER
+        )
+        self.assertIsNotNone(contract_category)
+        self.assertIsNotNone(license_category)
+        assert contract_category is not None
+        assert license_category is not None
+        code_registry.update_category(contract_category.id, prefix="CTR")
+        code_registry.update_category(license_category.id, prefix="LIC")
+
+        dialog = ContractEditorDialog(contract_service=self.contract_service)
+        try:
+            dialog.title_edit.setText("Generated Registry Contract")
+            with (
+                mock.patch("isrc_manager.contracts.dialogs.QMessageBox.warning") as warning,
+                mock.patch("isrc_manager.contracts.dialogs.QMessageBox.critical") as critical,
+            ):
+                dialog.contract_number_edit.generate_button.click()
+                dialog.license_number_edit.generate_button.click()
+                dialog.registry_sha256_key_edit.generate_button.click()
+
+            warning.assert_not_called()
+            critical.assert_not_called()
+            payload = dialog.payload()
+            self.assertIsNotNone(payload.contract_registry_entry_id)
+            self.assertIsNotNone(payload.license_registry_entry_id)
+            self.assertIsNotNone(payload.registry_sha256_key_entry_id)
+            self.assertTrue(str(payload.contract_number or "").startswith("CTR"))
+            self.assertTrue(str(payload.license_number or "").startswith("LIC"))
+            self.assertRegex(str(payload.registry_sha256_key or ""), r"^[0-9a-f]{64}$")
+            self.assertNotIn(
+                "watermark", dialog.registry_sha256_key_edit.status_label.text().lower()
+            )
+            self.assertEqual(dialog.registry_sha256_key_edit.generate_button.text(), "Generate Key")
+
+            contract_id = self.contract_service.create_contract(payload)
+            record = self.contract_service.fetch_contract(contract_id)
+            self.assertIsNotNone(record)
+            assert record is not None
+            self.assertEqual(record.contract_number, payload.contract_number)
+            self.assertEqual(record.license_number, payload.license_number)
+            self.assertEqual(record.registry_sha256_key, payload.registry_sha256_key)
+            self.assertEqual(
+                record.contract_registry_entry_id,
+                payload.contract_registry_entry_id,
+            )
+            self.assertEqual(
+                record.license_registry_entry_id,
+                payload.license_registry_entry_id,
+            )
+            self.assertEqual(
+                record.registry_sha256_key_entry_id,
+                payload.registry_sha256_key_entry_id,
+            )
         finally:
             dialog.close()
 

@@ -44,6 +44,9 @@ class ContractTemplateCatalogServiceTests(unittest.TestCase):
         self.assertIn("{{db.track.track_title}}", symbols)
         self.assertIn("{{db.release.title}}", symbols)
         self.assertIn("{{db.contract.signature_date}}", symbols)
+        self.assertIn("{{db.contract.contract_number}}", symbols)
+        self.assertIn("{{db.contract.license_number}}", symbols)
+        self.assertIn("{{db.contract.registry_sha256_key}}", symbols)
         self.assertIn("{{db.owner.legal_name}}", symbols)
         self.assertTrue(any(symbol.startswith("{{db.custom.cf_") for symbol in symbols))
         self.assertFalse(

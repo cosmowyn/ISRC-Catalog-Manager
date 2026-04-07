@@ -9,6 +9,15 @@ from dataclasses import asdict
 from datetime import date, timedelta
 from pathlib import Path
 
+from isrc_manager.code_registry import (
+    BUILTIN_CATEGORY_CONTRACT_NUMBER,
+    BUILTIN_CATEGORY_LICENSE_NUMBER,
+    BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
+    ENTRY_KIND_MANUAL_CAPTURE,
+    GENERATION_STRATEGY_SHA256,
+    CodeRegistryEntryRecord,
+    CodeRegistryService,
+)
 from isrc_manager.domain.repertoire import clean_text, parse_iso_date
 from isrc_manager.file_storage import (
     STORAGE_MODE_DATABASE,
@@ -59,6 +68,7 @@ class ContractService:
             data_root=data_root, relative_root="contract_documents"
         )
         self.party_service = party_service
+        self._code_registry_service_instance: CodeRegistryService | None = None
         self._ensure_storage_columns()
 
     @staticmethod
@@ -81,6 +91,161 @@ class ContractService:
         if clean not in DOCUMENT_TYPE_CHOICES:
             return "other"
         return clean
+
+    def _code_registry_service(self) -> CodeRegistryService | None:
+        tables = {
+            str(row[0])
+            for row in self.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+            if row and row[0]
+        }
+        if "CodeRegistryCategories" not in tables:
+            return None
+        if self._code_registry_service_instance is None:
+            self._code_registry_service_instance = CodeRegistryService(self.conn)
+        return self._code_registry_service_instance
+
+    def code_registry_service(self) -> CodeRegistryService | None:
+        return self._code_registry_service()
+
+    def generate_registry_value_for_contract(
+        self,
+        contract_id: int,
+        *,
+        system_key: str,
+        created_via: str = "contract.template.generate",
+    ) -> CodeRegistryEntryRecord:
+        service = self._code_registry_service()
+        if service is None:
+            raise ValueError("Code registry service is unavailable.")
+        category = service.fetch_category_by_system_key(system_key)
+        if category is None:
+            raise ValueError(f"Registry category '{system_key}' is not available.")
+        result = (
+            service.generate_sha256_key(
+                category_id=category.id,
+                created_via=created_via,
+            )
+            if category.generation_strategy == GENERATION_STRATEGY_SHA256
+            else service.generate_next_code(
+                category_id=category.id,
+                created_via=created_via,
+            )
+        )
+        column_map = {
+            BUILTIN_CATEGORY_CONTRACT_NUMBER: ("contract_number", "contract_registry_entry_id"),
+            BUILTIN_CATEGORY_LICENSE_NUMBER: ("license_number", "license_registry_entry_id"),
+            BUILTIN_CATEGORY_REGISTRY_SHA256_KEY: (
+                "registry_sha256_key",
+                "registry_sha256_key_entry_id",
+            ),
+        }
+        text_column, link_column = column_map.get(system_key, (None, None))
+        if not text_column or not link_column:
+            raise ValueError(f"Unsupported contract registry category '{system_key}'.")
+        with self.conn:
+            self.conn.execute(
+                f"""
+                UPDATE Contracts
+                SET {text_column}=?,
+                    {link_column}=?,
+                    updated_at=datetime('now')
+                WHERE id=?
+                """,
+                (result.entry.value, int(result.entry.id), int(contract_id)),
+            )
+        return result.entry
+
+    def _resolve_contract_registry_entry(
+        self,
+        *,
+        entry_id: int | None,
+        value: str | None,
+        system_key: str,
+        created_via: str,
+        cursor: sqlite3.Cursor,
+    ) -> CodeRegistryEntryRecord | None:
+        service = self._code_registry_service()
+        if service is None:
+            return None
+        category = service.fetch_category_by_system_key(system_key)
+        if category is None:
+            raise ValueError(f"Registry category '{system_key}' is not available.")
+        if entry_id is not None:
+            entry = service.fetch_entry(int(entry_id))
+            if entry is None:
+                raise ValueError(f"Registry entry {int(entry_id)} was not found.")
+            if int(entry.category_id) != int(category.id):
+                raise ValueError(
+                    f"Registry entry {int(entry_id)} does not belong to '{category.display_name}'."
+                )
+            return entry
+        clean_value = clean_text(value)
+        if not clean_value:
+            return None
+        return service.capture_value_for_category(
+            category_id=category.id,
+            value=clean_value,
+            created_via=created_via,
+            entry_kind=ENTRY_KIND_MANUAL_CAPTURE,
+            cursor=cursor,
+        )
+
+    def _apply_registry_assignments(
+        self,
+        *,
+        contract_id: int,
+        payload: ContractPayload,
+        cursor: sqlite3.Cursor,
+        created_via: str,
+    ) -> None:
+        service = self._code_registry_service()
+        if service is None:
+            return
+        contract_entry = self._resolve_contract_registry_entry(
+            entry_id=payload.contract_registry_entry_id,
+            value=payload.contract_number,
+            system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+            created_via=f"{created_via}.contract_number",
+            cursor=cursor,
+        )
+        license_entry = self._resolve_contract_registry_entry(
+            entry_id=payload.license_registry_entry_id,
+            value=payload.license_number,
+            system_key=BUILTIN_CATEGORY_LICENSE_NUMBER,
+            created_via=f"{created_via}.license_number",
+            cursor=cursor,
+        )
+        registry_key_entry = self._resolve_contract_registry_entry(
+            entry_id=payload.registry_sha256_key_entry_id,
+            value=payload.registry_sha256_key,
+            system_key=BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
+            created_via=f"{created_via}.registry_sha256_key",
+            cursor=cursor,
+        )
+        cursor.execute(
+            """
+            UPDATE Contracts
+            SET contract_number=?,
+                license_number=?,
+                registry_sha256_key=?,
+                contract_registry_entry_id=?,
+                license_registry_entry_id=?,
+                registry_sha256_key_entry_id=?,
+                updated_at=datetime('now')
+            WHERE id=?
+            """,
+            (
+                contract_entry.value if contract_entry is not None else None,
+                license_entry.value if license_entry is not None else None,
+                registry_key_entry.value if registry_key_entry is not None else None,
+                contract_entry.id if contract_entry is not None else None,
+                license_entry.id if license_entry is not None else None,
+                registry_key_entry.id if registry_key_entry is not None else None,
+                int(contract_id),
+            ),
+        )
 
     def _ensure_storage_columns(self) -> None:
         table_names = {
@@ -173,26 +338,32 @@ class ContractService:
             id=int(row[0]),
             title=str(row[1] or ""),
             contract_type=clean_text(row[2]),
-            draft_date=clean_text(row[3]),
-            signature_date=clean_text(row[4]),
-            effective_date=clean_text(row[5]),
-            start_date=clean_text(row[6]),
-            end_date=clean_text(row[7]),
-            renewal_date=clean_text(row[8]),
-            notice_deadline=clean_text(row[9]),
-            option_periods=clean_text(row[10]),
-            reversion_date=clean_text(row[11]),
-            termination_date=clean_text(row[12]),
-            status=str(row[13] or "draft"),
-            supersedes_contract_id=int(row[14]) if row[14] is not None else None,
-            superseded_by_contract_id=int(row[15]) if row[15] is not None else None,
-            summary=clean_text(row[16]),
-            notes=clean_text(row[17]),
-            profile_name=clean_text(row[18]),
-            created_at=clean_text(row[19]),
-            updated_at=clean_text(row[20]),
-            obligation_count=int(row[21] or 0),
-            document_count=int(row[22] or 0),
+            contract_number=clean_text(row[3]),
+            license_number=clean_text(row[4]),
+            registry_sha256_key=clean_text(row[5]),
+            contract_registry_entry_id=int(row[6]) if row[6] is not None else None,
+            license_registry_entry_id=int(row[7]) if row[7] is not None else None,
+            registry_sha256_key_entry_id=int(row[8]) if row[8] is not None else None,
+            draft_date=clean_text(row[9]),
+            signature_date=clean_text(row[10]),
+            effective_date=clean_text(row[11]),
+            start_date=clean_text(row[12]),
+            end_date=clean_text(row[13]),
+            renewal_date=clean_text(row[14]),
+            notice_deadline=clean_text(row[15]),
+            option_periods=clean_text(row[16]),
+            reversion_date=clean_text(row[17]),
+            termination_date=clean_text(row[18]),
+            status=str(row[19] or "draft"),
+            supersedes_contract_id=int(row[20]) if row[20] is not None else None,
+            superseded_by_contract_id=int(row[21]) if row[21] is not None else None,
+            summary=clean_text(row[22]),
+            notes=clean_text(row[23]),
+            profile_name=clean_text(row[24]),
+            created_at=clean_text(row[25]),
+            updated_at=clean_text(row[26]),
+            obligation_count=int(row[27] or 0),
+            document_count=int(row[28] or 0),
         )
 
     @staticmethod
@@ -586,6 +757,12 @@ class ContractService:
             INSERT INTO Contracts (
                 title,
                 contract_type,
+                contract_number,
+                license_number,
+                registry_sha256_key,
+                contract_registry_entry_id,
+                license_registry_entry_id,
+                registry_sha256_key_entry_id,
                 draft_date,
                 signature_date,
                 effective_date,
@@ -603,11 +780,17 @@ class ContractService:
                 notes,
                 profile_name
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 str(clean_text(payload.title) or ""),
                 clean_text(payload.contract_type),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
                 clean_text(payload.draft_date),
                 clean_text(payload.signature_date),
                 clean_text(payload.effective_date),
@@ -639,6 +822,12 @@ class ContractService:
             contract_id, "ContractReleaseLinks", "release_id", payload.release_ids, cursor=cur
         )
         self._replace_documents(contract_id, payload.documents, cursor=cur)
+        self._apply_registry_assignments(
+            contract_id=contract_id,
+            payload=payload,
+            cursor=cur,
+            created_via="contract.create",
+        )
         if cursor is None:
             self.conn.commit()
         return contract_id
@@ -660,6 +849,12 @@ class ContractService:
             UPDATE Contracts
             SET title=?,
                 contract_type=?,
+                contract_number=NULL,
+                license_number=NULL,
+                registry_sha256_key=NULL,
+                contract_registry_entry_id=NULL,
+                license_registry_entry_id=NULL,
+                registry_sha256_key_entry_id=NULL,
                 draft_date=?,
                 signature_date=?,
                 effective_date=?,
@@ -713,6 +908,12 @@ class ContractService:
             int(contract_id), "ContractReleaseLinks", "release_id", payload.release_ids, cursor=cur
         )
         self._replace_documents(int(contract_id), payload.documents, cursor=cur)
+        self._apply_registry_assignments(
+            contract_id=int(contract_id),
+            payload=payload,
+            cursor=cur,
+            created_via="contract.update",
+        )
         if cursor is None:
             self.conn.commit()
 
@@ -1014,6 +1215,12 @@ class ContractService:
                 c.id,
                 c.title,
                 c.contract_type,
+                c.contract_number,
+                c.license_number,
+                c.registry_sha256_key,
+                c.contract_registry_entry_id,
+                c.license_registry_entry_id,
+                c.registry_sha256_key_entry_id,
                 c.draft_date,
                 c.signature_date,
                 c.effective_date,
@@ -1174,6 +1381,12 @@ class ContractService:
                 c.id,
                 c.title,
                 c.contract_type,
+                c.contract_number,
+                c.license_number,
+                c.registry_sha256_key,
+                c.contract_registry_entry_id,
+                c.license_registry_entry_id,
+                c.registry_sha256_key_entry_id,
                 c.draft_date,
                 c.signature_date,
                 c.effective_date,

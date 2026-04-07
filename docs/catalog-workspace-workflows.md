@@ -17,6 +17,7 @@ The main window is built as a working catalog surface rather than a sequence of 
 
 The docked catalog workspace includes:
 
+- Code Registry Workspace
 - Release Browser
 - Work Manager
 - Party Manager
@@ -26,6 +27,18 @@ The docked catalog workspace includes:
 - Global Search and Relationships
 
 These panels are meant to stay in the same workflow loop as the table. You can review a release, change the current table selection, inspect the linked work, and move into rights or assets without closing one tool to reach another.
+
+## Code Registry Workspace
+
+`Code Registry Workspace` keeps app-managed internal business codes and external catalog identifiers visible beside the rest of the catalog workflow.
+
+Its tabs are:
+
+- `Internal Registry`: inspect issued internal values, filter by category and year, generate the next code, generate a `Registry SHA-256 Key`, review usage, link an unassigned value later, and delete an unused Registry SHA-256 Key
+- `External Catalogs`: review foreign/non-conforming catalog identifiers, inspect shared usage counts, and promote or reclassify canonical candidates
+- `Categories`: manage built-in prefixes and custom categories
+
+Repeated catalog identifiers are intentionally shared. When multiple tracks in the same album use the same catalog number, the workspace keeps one unique identifier row and shows how many tracks or releases reference it.
 
 ## Release And Selection Workflows
 
@@ -37,6 +50,13 @@ Release work is centered on the current selection.
 - filter the table to a selected release
 
 This keeps release maintenance grounded in the actual catalog rows rather than in a disconnected product editor.
+
+Catalog-number fields in `Add Track`, `Add Album`, `Edit Track`, and `Release Editor` use the same registry-aware control:
+
+- choose `Internal Registry` to select an existing managed value or generate the next one
+- choose `External Catalog` to keep a third-party or non-conforming value without forcing it into the internal numbering rules
+
+If a code was generated earlier without an owner, the workspace can assign it later with `Link Selected Value`.
 
 ## Deliverables And Asset Review
 
@@ -71,6 +91,7 @@ Preview stays close to the catalog workflow.
 ## Recommended In-App Help Topics
 
 - `Main Window`
+- `Code Registry Workspace`
 - `Catalog Table`
 - `Releases`
 - `Works, Rights, and Contracts`

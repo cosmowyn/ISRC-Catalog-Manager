@@ -13,6 +13,15 @@ from pathlib import Path
 from typing import Iterable
 
 from isrc_manager.assets import AssetService
+from isrc_manager.code_registry import (
+    CATALOG_MODE_EMPTY,
+    CATALOG_MODE_EXTERNAL,
+    CATALOG_MODE_INTERNAL,
+    CLASSIFICATION_INTERNAL,
+    ENTRY_KIND_MANUAL_CAPTURE,
+    CatalogIdentifierResolution,
+    CodeRegistryService,
+)
 from isrc_manager.domain.codes import is_blank, to_compact_isrc
 from isrc_manager.domain.standard_fields import standard_media_specs_by_key
 from isrc_manager.file_storage import (
@@ -79,6 +88,8 @@ class TrackCreatePayload:
     upc: str | None
     genre: str | None
     catalog_number: str | None = None
+    catalog_registry_entry_id: int | None = None
+    external_catalog_identifier_id: int | None = None
     buma_work_number: str | None = None
     composer: str | None = None
     publisher: str | None = None
@@ -107,6 +118,8 @@ class TrackUpdatePayload:
     upc: str | None
     genre: str | None
     catalog_number: str | None = None
+    catalog_registry_entry_id: int | None = None
+    external_catalog_identifier_id: int | None = None
     buma_work_number: str | None = None
     composer: str | None = None
     publisher: str | None = None
@@ -143,6 +156,8 @@ class TrackSnapshot:
     publisher: str | None
     comments: str | None
     lyrics: str | None
+    catalog_registry_entry_id: int | None = None
+    external_catalog_identifier_id: int | None = None
     work_id: int | None = None
     parent_track_id: int | None = None
     relationship_type: str | None = "original"
@@ -249,6 +264,7 @@ class TrackService:
         self.media_store = ManagedFileStorage(data_root=data_root, relative_root="track_media")
         self.asset_service = AssetService(self.conn, data_root)
         self.require_governed_creation = bool(require_governed_creation)
+        self._code_registry_service_instance: CodeRegistryService | None = None
         self._ensure_storage_columns()
 
     def _ensure_storage_columns(self) -> None:
@@ -312,6 +328,103 @@ class TrackService:
             ).fetchall()
             if row and row[0]
         }
+
+    def _code_registry_service(self) -> CodeRegistryService | None:
+        if "CodeRegistryCategories" not in self._table_names():
+            return None
+        if self._code_registry_service_instance is None:
+            self._code_registry_service_instance = CodeRegistryService(self.conn)
+        return self._code_registry_service_instance
+
+    def code_registry_service(self) -> CodeRegistryService | None:
+        return self._code_registry_service()
+
+    def _apply_catalog_identifier_assignment(
+        self,
+        *,
+        owner_id: int,
+        catalog_number: str | None,
+        catalog_registry_entry_id: int | None,
+        external_catalog_identifier_id: int | None,
+        cursor: sqlite3.Cursor,
+        created_via: str,
+    ) -> None:
+        service = self._code_registry_service()
+        if service is None:
+            return
+        if {"catalog_registry_entry_id", "external_catalog_identifier_id"} - self._track_columns():
+            return
+
+        clean_catalog_number = str(catalog_number or "").strip() or None
+        resolution: CatalogIdentifierResolution
+        if catalog_registry_entry_id is not None:
+            entry = service.fetch_entry(int(catalog_registry_entry_id))
+            if entry is None:
+                raise ValueError(
+                    f"Catalog registry entry {int(catalog_registry_entry_id)} was not found."
+                )
+            resolution = CatalogIdentifierResolution(
+                mode=CATALOG_MODE_INTERNAL,
+                value=entry.value,
+                registry_entry_id=entry.id,
+                category_id=entry.category_id,
+                classification_status=CLASSIFICATION_INTERNAL,
+                classification_reason="Selected existing internal registry value.",
+            )
+        elif external_catalog_identifier_id is not None:
+            record = service.fetch_external_catalog_identifier(int(external_catalog_identifier_id))
+            external_value = (
+                record.value
+                if record is not None and str(record.value or "").strip()
+                else clean_catalog_number
+            )
+            resolution = CatalogIdentifierResolution(
+                mode=CATALOG_MODE_EXTERNAL if external_value else CATALOG_MODE_EMPTY,
+                value=external_value,
+                external_value=external_value,
+                classification_status=(
+                    str(record.classification_status or "") if record is not None else None
+                ),
+                classification_reason=(
+                    str(record.classification_reason or "") if record is not None else None
+                ),
+            )
+        elif clean_catalog_number:
+            classification = service.classify_catalog_identifier(clean_catalog_number)
+            if classification.classification == CLASSIFICATION_INTERNAL:
+                entry = service.create_or_capture_catalog_entry(
+                    clean_catalog_number,
+                    created_via=created_via,
+                    entry_kind=ENTRY_KIND_MANUAL_CAPTURE,
+                    cursor=cursor,
+                )
+                resolution = CatalogIdentifierResolution(
+                    mode=CATALOG_MODE_INTERNAL,
+                    value=entry.value,
+                    registry_entry_id=entry.id,
+                    category_id=entry.category_id,
+                    classification_status=classification.classification,
+                    classification_reason=classification.reason,
+                )
+            else:
+                resolution = CatalogIdentifierResolution(
+                    mode=CATALOG_MODE_EXTERNAL,
+                    value=clean_catalog_number,
+                    external_value=clean_catalog_number,
+                    classification_status=classification.classification,
+                    classification_reason=classification.reason,
+                )
+        else:
+            resolution = CatalogIdentifierResolution(mode=CATALOG_MODE_EMPTY)
+
+        service.assign_catalog_to_owner(
+            owner_kind="track",
+            owner_id=int(owner_id),
+            resolution=resolution,
+            provenance_kind="manual",
+            source_label=created_via,
+            cursor=cursor,
+        )
 
     def _track_columns(self) -> set[str]:
         if "Tracks" not in self._table_names():
@@ -1490,6 +1603,16 @@ class TrackService:
         relationship_expr = (
             "t.relationship_type" if "relationship_type" in track_columns else "'original'"
         )
+        catalog_registry_expr = (
+            "t.catalog_registry_entry_id"
+            if "catalog_registry_entry_id" in track_columns
+            else "NULL"
+        )
+        external_catalog_expr = (
+            "t.external_catalog_identifier_id"
+            if "external_catalog_identifier_id" in track_columns
+            else "NULL"
+        )
         row = cur.execute(
             f"""
             SELECT
@@ -1515,6 +1638,8 @@ class TrackService:
                 t.audio_file_filename,
                 t.audio_file_mime_type,
                 t.audio_file_size_bytes,
+                {catalog_registry_expr},
+                {external_catalog_expr},
                 {work_expr},
                 {parent_expr},
                 {relationship_expr}
@@ -1568,9 +1693,11 @@ class TrackService:
             publisher=row[14],
             comments=row[15],
             lyrics=row[16],
-            work_id=int(row[22]) if row[22] is not None else None,
-            parent_track_id=int(row[23]) if row[23] is not None else None,
-            relationship_type=self._normalize_relationship_type(row[24]),
+            catalog_registry_entry_id=int(row[22]) if row[22] is not None else None,
+            external_catalog_identifier_id=int(row[23]) if row[23] is not None else None,
+            work_id=int(row[24]) if row[24] is not None else None,
+            parent_track_id=int(row[25]) if row[25] is not None else None,
+            relationship_type=self._normalize_relationship_type(row[26]),
             catalog_number=row[4],
             buma_work_number=row[6],
             audio_file_path=str(audio_meta.get("path") or "") or None,
@@ -1767,6 +1894,14 @@ class TrackService:
                 """,
                 insert_values,
             )
+        self._apply_catalog_identifier_assignment(
+            owner_id=int(snapshot.track_id),
+            catalog_number=snapshot.catalog_number,
+            catalog_registry_entry_id=snapshot.catalog_registry_entry_id,
+            external_catalog_identifier_id=snapshot.external_catalog_identifier_id,
+            cursor=cur,
+            created_via="track.restore_snapshot",
+        )
         self._sync_shadow_work_link(snapshot.track_id, snapshot.work_id, cursor=cur)
         if self._album_supports_shared_art(album_id, snapshot.album_title):
             self._update_album_art_reference(
@@ -1926,6 +2061,14 @@ class TrackService:
             insert_values,
         )
         track_id = int(cur.lastrowid)
+        self._apply_catalog_identifier_assignment(
+            owner_id=track_id,
+            catalog_number=payload.catalog_number,
+            catalog_registry_entry_id=payload.catalog_registry_entry_id,
+            external_catalog_identifier_id=payload.external_catalog_identifier_id,
+            cursor=cur,
+            created_via="track.create",
+        )
         self._sync_shadow_work_link(track_id, payload.work_id, cursor=cur)
         if payload.audio_file_source_path:
             self.set_media_path(
@@ -2084,6 +2227,14 @@ class TrackService:
             WHERE id=?
             """,
             (*update_values, payload.track_id),
+        )
+        self._apply_catalog_identifier_assignment(
+            owner_id=int(payload.track_id),
+            catalog_number=payload.catalog_number,
+            catalog_registry_entry_id=payload.catalog_registry_entry_id,
+            external_catalog_identifier_id=payload.external_catalog_identifier_id,
+            cursor=cursor,
+            created_via="track.update",
         )
         self._sync_shadow_work_link(payload.track_id, next_work_id, cursor=cursor)
 

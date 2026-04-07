@@ -8,6 +8,15 @@ import sqlite3
 from pathlib import Path
 from typing import Iterable
 
+from isrc_manager.code_registry import (
+    CATALOG_MODE_EMPTY,
+    CATALOG_MODE_EXTERNAL,
+    CATALOG_MODE_INTERNAL,
+    CLASSIFICATION_INTERNAL,
+    ENTRY_KIND_MANUAL_CAPTURE,
+    CatalogIdentifierResolution,
+    CodeRegistryService,
+)
 from isrc_manager.domain.codes import barcode_validation_status
 from isrc_manager.file_storage import (
     STORAGE_MODE_DATABASE,
@@ -55,6 +64,7 @@ class ReleaseService:
         self.data_root = Path(data_root) if data_root is not None else None
         self.media_root = self.data_root / "release_media" if self.data_root is not None else None
         self.media_store = ManagedFileStorage(data_root=data_root, relative_root="release_media")
+        self._code_registry_service_instance: CodeRegistryService | None = None
         self._ensure_storage_columns()
 
     def _ensure_storage_columns(self) -> None:
@@ -86,6 +96,107 @@ class ReleaseService:
     def _clean_text(value: str | None) -> str | None:
         text = str(value or "").strip()
         return text or None
+
+    def _code_registry_service(self) -> CodeRegistryService | None:
+        tables = {
+            str(row[0])
+            for row in self.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+            if row and row[0]
+        }
+        if "CodeRegistryCategories" not in tables:
+            return None
+        if self._code_registry_service_instance is None:
+            self._code_registry_service_instance = CodeRegistryService(self.conn)
+        return self._code_registry_service_instance
+
+    def code_registry_service(self) -> CodeRegistryService | None:
+        return self._code_registry_service()
+
+    def _apply_catalog_identifier_assignment(
+        self,
+        *,
+        release_id: int,
+        payload: ReleasePayload,
+        cursor: sqlite3.Cursor,
+        created_via: str,
+    ) -> None:
+        service = self._code_registry_service()
+        if service is None:
+            return
+        clean_catalog_number = self._clean_text(payload.catalog_number)
+        resolution: CatalogIdentifierResolution
+        if payload.catalog_registry_entry_id is not None:
+            entry = service.fetch_entry(int(payload.catalog_registry_entry_id))
+            if entry is None:
+                raise ValueError(
+                    f"Catalog registry entry {int(payload.catalog_registry_entry_id)} was not found."
+                )
+            resolution = CatalogIdentifierResolution(
+                mode=CATALOG_MODE_INTERNAL,
+                value=entry.value,
+                registry_entry_id=entry.id,
+                category_id=entry.category_id,
+                classification_status=CLASSIFICATION_INTERNAL,
+                classification_reason="Selected existing internal registry value.",
+            )
+        elif payload.external_catalog_identifier_id is not None:
+            record = service.fetch_external_catalog_identifier(
+                int(payload.external_catalog_identifier_id)
+            )
+            external_value = (
+                record.value
+                if record is not None and str(record.value or "").strip()
+                else clean_catalog_number
+            )
+            resolution = CatalogIdentifierResolution(
+                mode=CATALOG_MODE_EXTERNAL if external_value else CATALOG_MODE_EMPTY,
+                value=external_value,
+                external_value=external_value,
+                classification_status=(
+                    str(record.classification_status or "") if record is not None else None
+                ),
+                classification_reason=(
+                    str(record.classification_reason or "") if record is not None else None
+                ),
+            )
+        elif clean_catalog_number:
+            classification = service.classify_catalog_identifier(clean_catalog_number)
+            if classification.classification == CLASSIFICATION_INTERNAL:
+                entry = service.create_or_capture_catalog_entry(
+                    clean_catalog_number,
+                    created_via=created_via,
+                    entry_kind=ENTRY_KIND_MANUAL_CAPTURE,
+                    cursor=cursor,
+                )
+                resolution = CatalogIdentifierResolution(
+                    mode=CATALOG_MODE_INTERNAL,
+                    value=entry.value,
+                    registry_entry_id=entry.id,
+                    category_id=entry.category_id,
+                    classification_status=classification.classification,
+                    classification_reason=classification.reason,
+                )
+            else:
+                resolution = CatalogIdentifierResolution(
+                    mode=CATALOG_MODE_EXTERNAL,
+                    value=clean_catalog_number,
+                    external_value=clean_catalog_number,
+                    classification_status=classification.classification,
+                    classification_reason=classification.reason,
+                )
+        else:
+            resolution = CatalogIdentifierResolution(mode=CATALOG_MODE_EMPTY)
+
+        service.assign_catalog_to_owner(
+            owner_kind="release",
+            owner_id=int(release_id),
+            resolution=resolution,
+            provenance_kind="manual",
+            source_label=created_via,
+            cursor=cursor,
+        )
 
     @staticmethod
     def _clean_release_type(value: str | None) -> str:
@@ -443,6 +554,7 @@ class ReleaseService:
         release_id: int | None = None,
         cursor: sqlite3.Cursor,
     ) -> int:
+        is_create = release_id is None
         issues = self.validate_release(payload, release_id=release_id, cursor=cursor)
         errors = [issue.message for issue in issues if issue.severity == "error"]
         if errors:
@@ -618,6 +730,12 @@ class ReleaseService:
 
         if payload.placements:
             self.replace_release_tracks(release_id, payload.placements, cursor=cursor)
+        self._apply_catalog_identifier_assignment(
+            release_id=int(release_id),
+            payload=payload,
+            cursor=cursor,
+            created_via=("release.create" if is_create else "release.update"),
+        )
         return int(release_id)
 
     def create_release(
@@ -700,6 +818,8 @@ class ReleaseService:
             label=summary.release.label,
             sublabel=summary.release.sublabel,
             catalog_number=summary.release.catalog_number,
+            catalog_registry_entry_id=summary.release.catalog_registry_entry_id,
+            external_catalog_identifier_id=summary.release.external_catalog_identifier_id,
             upc=None,
             territory=summary.release.territory,
             explicit_flag=summary.release.explicit_flag,
@@ -822,6 +942,8 @@ class ReleaseService:
                 r.label,
                 r.sublabel,
                 r.catalog_number,
+                r.catalog_registry_entry_id,
+                r.external_catalog_identifier_id,
                 r.upc,
                 r.barcode_validation_status,
                 r.territory,
@@ -845,7 +967,8 @@ class ReleaseService:
             GROUP BY
                 r.id, r.title, r.version_subtitle, r.primary_artist, r.album_artist,
                 r.release_type, r.release_date, r.original_release_date, r.label,
-                r.sublabel, r.catalog_number, r.upc, r.barcode_validation_status,
+                r.sublabel, r.catalog_number, r.catalog_registry_entry_id,
+                r.external_catalog_identifier_id, r.upc, r.barcode_validation_status,
                 r.territory, r.explicit_flag, r.repertoire_status, r.metadata_complete,
                 r.contract_signed, r.rights_verified, r.release_notes, r.artwork_path,
                 r.artwork_storage_mode, r.artwork_filename, r.artwork_mime_type,
@@ -867,26 +990,28 @@ class ReleaseService:
             label=self._clean_text(row[8]),
             sublabel=self._clean_text(row[9]),
             catalog_number=self._clean_text(row[10]),
-            upc=self._clean_text(row[11]),
-            barcode_validation_status=str(row[12] or "missing"),
-            territory=self._clean_text(row[13]),
-            explicit_flag=bool(int(row[14] or 0)),
-            repertoire_status=self._clean_text(row[15]),
-            metadata_complete=bool(int(row[16] or 0)),
-            contract_signed=bool(int(row[17] or 0)),
-            rights_verified=bool(int(row[18] or 0)),
-            notes=self._clean_text(row[19]),
-            artwork_path=self._clean_text(row[20]),
+            catalog_registry_entry_id=int(row[11]) if row[11] is not None else None,
+            external_catalog_identifier_id=int(row[12]) if row[12] is not None else None,
+            upc=self._clean_text(row[13]),
+            barcode_validation_status=str(row[14] or "missing"),
+            territory=self._clean_text(row[15]),
+            explicit_flag=bool(int(row[16] or 0)),
+            repertoire_status=self._clean_text(row[17]),
+            metadata_complete=bool(int(row[18] or 0)),
+            contract_signed=bool(int(row[19] or 0)),
+            rights_verified=bool(int(row[20] or 0)),
+            notes=self._clean_text(row[21]),
+            artwork_path=self._clean_text(row[22]),
             artwork_storage_mode=infer_storage_mode(
-                explicit_mode=row[21],
-                stored_path=row[20],
-                blob_value=b"\x00" if int(row[26] or 0) else None,
+                explicit_mode=row[23],
+                stored_path=row[22],
+                blob_value=b"\x00" if int(row[28] or 0) else None,
             ),
-            artwork_filename=self._clean_text(row[22]),
-            artwork_mime_type=self._clean_text(row[23]),
-            artwork_size_bytes=int(row[24] or 0),
-            profile_name=self._clean_text(row[25]),
-            track_count=int(row[27] or 0),
+            artwork_filename=self._clean_text(row[24]),
+            artwork_mime_type=self._clean_text(row[25]),
+            artwork_size_bytes=int(row[26] or 0),
+            profile_name=self._clean_text(row[27]),
+            track_count=int(row[29] or 0),
         )
 
     def list_release_tracks(
@@ -949,6 +1074,8 @@ class ReleaseService:
                 r.label,
                 r.sublabel,
                 r.catalog_number,
+                r.catalog_registry_entry_id,
+                r.external_catalog_identifier_id,
                 r.upc,
                 r.barcode_validation_status,
                 r.territory,
@@ -972,7 +1099,8 @@ class ReleaseService:
             GROUP BY
                 r.id, r.title, r.version_subtitle, r.primary_artist, r.album_artist,
                 r.release_type, r.release_date, r.original_release_date, r.label,
-                r.sublabel, r.catalog_number, r.upc, r.barcode_validation_status,
+                r.sublabel, r.catalog_number, r.catalog_registry_entry_id,
+                r.external_catalog_identifier_id, r.upc, r.barcode_validation_status,
                 r.territory, r.explicit_flag, r.repertoire_status, r.metadata_complete,
                 r.contract_signed, r.rights_verified, r.release_notes, r.artwork_path,
                 r.artwork_storage_mode, r.artwork_filename, r.artwork_mime_type,
@@ -994,26 +1122,28 @@ class ReleaseService:
                 label=self._clean_text(row[8]),
                 sublabel=self._clean_text(row[9]),
                 catalog_number=self._clean_text(row[10]),
-                upc=self._clean_text(row[11]),
-                barcode_validation_status=str(row[12] or "missing"),
-                territory=self._clean_text(row[13]),
-                explicit_flag=bool(int(row[14] or 0)),
-                repertoire_status=self._clean_text(row[15]),
-                metadata_complete=bool(int(row[16] or 0)),
-                contract_signed=bool(int(row[17] or 0)),
-                rights_verified=bool(int(row[18] or 0)),
-                notes=self._clean_text(row[19]),
-                artwork_path=self._clean_text(row[20]),
+                catalog_registry_entry_id=int(row[11]) if row[11] is not None else None,
+                external_catalog_identifier_id=int(row[12]) if row[12] is not None else None,
+                upc=self._clean_text(row[13]),
+                barcode_validation_status=str(row[14] or "missing"),
+                territory=self._clean_text(row[15]),
+                explicit_flag=bool(int(row[16] or 0)),
+                repertoire_status=self._clean_text(row[17]),
+                metadata_complete=bool(int(row[18] or 0)),
+                contract_signed=bool(int(row[19] or 0)),
+                rights_verified=bool(int(row[20] or 0)),
+                notes=self._clean_text(row[21]),
+                artwork_path=self._clean_text(row[22]),
                 artwork_storage_mode=infer_storage_mode(
-                    explicit_mode=row[21],
-                    stored_path=row[20],
-                    blob_value=b"\x00" if int(row[26] or 0) else None,
+                    explicit_mode=row[23],
+                    stored_path=row[22],
+                    blob_value=b"\x00" if int(row[28] or 0) else None,
                 ),
-                artwork_filename=self._clean_text(row[22]),
-                artwork_mime_type=self._clean_text(row[23]),
-                artwork_size_bytes=int(row[24] or 0),
-                profile_name=self._clean_text(row[25]),
-                track_count=int(row[27] or 0),
+                artwork_filename=self._clean_text(row[24]),
+                artwork_mime_type=self._clean_text(row[25]),
+                artwork_size_bytes=int(row[26] or 0),
+                profile_name=self._clean_text(row[27]),
+                track_count=int(row[29] or 0),
             )
             for row in rows
         ]

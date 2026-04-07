@@ -58,14 +58,15 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Add Album</strong>: the primary batch-entry surface. It behaves as batch Add Track, so each populated row resolves Work governance before the album save completes.</li>
           <li><strong>Work Manager</strong>: the parent governance and management surface for work metadata, ownership, contributions, and linked tracks after or alongside track-first entry.</li>
           <li><strong>Releases</strong>: first-class product records for UPC/EAN, release artwork, ordering, and release-level metadata.</li>
+          <li><strong>Code Registry Workspace</strong>: the central workspace for internal catalog, contract, and license numbers plus the separate Registry SHA-256 Key and external catalog identifiers.</li>
           <li><strong>Works</strong>: a composition layer that stays distinct from recordings so the same work can connect to multiple tracks.</li>
           <li><strong>Parties</strong>: reusable people and companies for writers, publishers, labels, managers, licensees, and organizations.</li>
           <li><strong>Contracts and rights</strong>: lifecycle-aware agreement records, obligations, document versions, and explicit rights positions linked back to the catalog.</li>
           <li><strong>Assets</strong>: managed deliverables and artwork variants with approval and primary-version tracking.</li>
           <li><strong>Catalog Table</strong>: the central browser for searching, selecting, bulk editing, and reviewing recording data.</li>
           <li><strong>Global Search</strong>: a relationship-aware search surface across works, tracks, releases, contracts, rights, parties, documents, and assets.</li>
-          <li><strong>Docked catalog workspace</strong>: release, work, license, party, contract, rights, deliverables, and search panels can stay open as tabbed workspace surfaces beside the catalog table.</li>
-          <li><strong>Import and exchange</strong>: CSV, XLSX, JSON, XML, ZIP, audio-tag, bulk audio attach, and GS1 workflows for bringing data in, reconciling it, attaching media, exporting it, and archiving it safely.</li>
+          <li><strong>Docked catalog workspace</strong>: code registry, release, work, license, party, contract, rights, deliverables, and search panels can stay open as tabbed workspace surfaces beside the catalog table.</li>
+          <li><strong>Import and exchange</strong>: CSV, XLSX, JSON, XML, ZIP, audio-tag, bulk audio attach, and GS1 workflows for bringing data in, classifying internal versus external identifiers, reconciling it, attaching media, exporting it, and archiving it safely.</li>
           <li><strong>Quality Dashboard</strong>: a practical readiness view for metadata gaps, identifier conflicts, broken media links, rights risks, and operational blockers.</li>
           <li><strong>Diagnostics and recovery</strong>: snapshots, backups, cleanup, trim, diagnostics, repair paths, and logs keep heavier workflows recoverable.</li>
           <li><strong>Action Ribbon</strong>: a customizable quick-action strip for your most-used commands.</li>
@@ -99,7 +100,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Profiles toolbar</strong>: switch databases, create a new profile, browse to an external profile, reload the profile list, or remove the selected entry.</li>
           <li><strong>Profiles ribbon toggle</strong>: use <strong>View &gt; Show Profiles Ribbon</strong> when you want that toolbar visible or hidden, and the choice is remembered with the rest of the workspace.</li>
           <li><strong>Dockable panes</strong>: keep the window focused on your current task by showing only the panes you need.</li>
-          <li><strong>Tabbed catalog tools</strong>: Release Browser, Work Manager, Party Manager, Contract Manager, Rights Matrix, Deliverables and Asset Versions, and Global Search open as docked tabs beside the table so you can keep using the catalog inventory while those panels remain open.</li>
+          <li><strong>Tabbed catalog tools</strong>: Code Registry Workspace, Release Browser, Work Manager, Party Manager, Contract Manager, Rights Matrix, Deliverables and Asset Versions, and Global Search open as docked tabs beside the table so you can keep using the catalog inventory while those panels remain open.</li>
           <li><strong>Diagnostics cleanup tools</strong>: stored artist and album cleanup lives with Diagnostics so integrity review and cleanup follow-up stay together.</li>
           <li><strong>Saved layout</strong>: column layout, dock placement, and visibility preferences are remembered so the app opens the way you work.</li>
         </ul>
@@ -237,10 +238,10 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         <ul>
           <li><strong>Track</strong>: track title, main artist, additional artists, and genre.</li>
           <li><strong>Release</strong>: album title, release date, and track length.</li>
-          <li><strong>Codes</strong>: preview-only generated values such as the future row ID, generated ISRC, and entry date, plus ISWC, UPC/EAN, catalog number, and BUMA work number.</li>
+          <li><strong>Codes</strong>: preview-only generated values such as the future row ID, generated ISRC, and entry date, plus ISWC, UPC/EAN, catalog number, and BUMA work number. The catalog identifier field can stay in <strong>Internal Registry</strong> mode for app-managed values or switch to <strong>External Catalog</strong> for foreign/non-conforming identifiers.</li>
           <li><strong>Media</strong>: attach a local audio file and album art image, then choose whether each file should be stored in the database or in managed local storage.</li>
         </ul>
-        <p>Use <strong>Save Track</strong> to save the governed track currently in progress, or <strong>Clear Draft</strong> to reset the current Add Track draft. In <strong>Create New Work From Track</strong> mode, the app seeds the new parent Work directly from the track title, ISWC, and registration number you already entered, then links the track immediately as the first governed original. In <strong>Link to Existing Work</strong> mode, you choose the parent Work plus the child relationship type and optional parent track before save.</p>
+        <p>Use <strong>Save Track</strong> to save the governed track currently in progress, or <strong>Clear Draft</strong> to reset the current Add Track draft. In <strong>Create New Work From Track</strong> mode, the app seeds the new parent Work directly from the track title, ISWC, and registration number you already entered, then links the track immediately as the first governed original. In <strong>Link to Existing Work</strong> mode, you choose the parent Work plus the child relationship type and optional parent track before save. When the catalog identifier is app-managed, use <strong>Generate</strong> to issue the next internal code immediately; when it comes from a third party, keep the field in <strong>External Catalog</strong> mode instead of forcing it into the internal numbering scheme.</p>
         <p>Main artist names resolve through the <strong>Party</strong> layer on save, so when a Party-backed artist is selected the stored artist display comes from that authoritative Party record instead of loose text. Later track edits do not silently overwrite Work metadata, but the initial creation flow avoids making you enter the same shared concepts twice.</p>
         """,
     ),
@@ -260,13 +261,13 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         <p><strong>Add Album</strong> is batch Add Track. Instead of retyping the same album data over and over, you enter the shared product details once and then complete each track on its own tab. Every populated row must resolve Work governance before save: either link that row to an existing Work, or create a new Work from that row so the track saves as its first governed original.</p>
         <ul>
           <li><strong>Work Governance</strong>: each populated track row chooses its own governed outcome. You can link a row to an existing Work or create a new Work from that row without leaving the album workflow.</li>
-          <li><strong>Album Overview</strong>: album title, UPC/EAN, genre, catalog number, album art, album-art storage choice, and the release-year rule used when auto-generating blank ISRC values.</li>
+          <li><strong>Album Overview</strong>: album title, UPC/EAN, genre, catalog number, album art, album-art storage choice, and the release-year rule used when auto-generating blank ISRC values. The shared catalog identifier can be selected from the internal registry, generated from the next configured internal number, or stored as an external catalog value when needed.</li>
           <li><strong>Track Tabs</strong>: each tab stores one track title, main artist, additional artists, release date, track length, optional ISRC, optional ISWC, optional BUMA work number, an audio file, and its storage choice.</li>
           <li><strong>Dynamic layout</strong>: the dialog opens with two track tabs by default, but you can add more or remove the current tab at any time.</li>
           <li><strong>Blank-tab handling</strong>: completely unused track tabs are ignored when you save, so you do not need to delete every spare tab before closing the dialog.</li>
           <li><strong>Shared album art</strong>: the selected album art is stored once and linked across the saved album tracks automatically.</li>
         </ul>
-        <p>If ISRC generation is configured, blank track ISRC fields can be generated automatically during save. If not, the dialog still creates the release and track rows successfully so you can complete identifiers later. Shared album metadata is entered once, while each row still governs itself explicitly so the batch never creates floating orphan tracks and does not force you to repeat Work metadata when a new Work is created from a row.</p>
+        <p>If ISRC generation is configured, blank track ISRC fields can be generated automatically during save. If not, the dialog still creates the release and track rows successfully so you can complete identifiers later. Shared album metadata is entered once, while each row still governs itself explicitly so the batch never creates floating orphan tracks and does not force you to repeat Work metadata when a new Work is created from a row. When multiple saved tracks and the release share the same catalog identifier, the code registry keeps one shared value and records how many owners use it rather than duplicating the identifier row.</p>
         """,
     ),
     HelpChapter(
@@ -342,8 +343,9 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         <ul>
           <li><strong>Copy buttons</strong>: copy ISO or compact forms of ISRC and ISWC values.</li>
           <li><strong>Media replacement</strong>: browse for new audio or album art files, choose database or managed-file storage for replacements, or clear the currently stored media.</li>
+          <li><strong>Catalog Identifier</strong>: single-record edit supports the same internal-registry versus external-catalog modes as Add Track, including selection, manual external entry, and <strong>Generate</strong> for app-managed catalog numbers.</li>
           <li><strong>Bulk edit safeguards</strong>: only fields you actually change are written back to every selected row.</li>
-          <li><strong>Bulk edit locked fields</strong>: ISRC, ISWC, Track Title, Audio File, Track Length, and BUMA work number remain view-only during multi-row editing.</li>
+          <li><strong>Bulk edit locked fields</strong>: ISRC, ISWC, Track Title, Audio File, Track Length, and BUMA work number remain view-only during multi-row editing. Bulk edit can assign an existing internal catalog identifier or an external value, but it intentionally does not issue new generated codes in bulk.</li>
           <li><strong>GS1 handoff</strong>: the <strong>GS1 Metadata…</strong> button opens the GS1 dialog for the same current track or selected batch.</li>
           <li><strong>Validation</strong>: duplicate ISRCs, invalid ISWC values, and invalid UPC/EAN values are blocked before save.</li>
         </ul>
@@ -429,8 +431,39 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Release Browser…</strong>: browse releases, inspect the ordered track list, duplicate releases, add the current track selection, and filter the main catalog table to a chosen release.</li>
           <li><strong>Docked workflow</strong>: the Release Browser stays open as a tabbed workspace panel, so you can keep changing the track-table selection while assigning or reviewing releases.</li>
           <li><strong>Single-track workflows</strong>: saving the Add Track panel or the Edit Track dialog also keeps the corresponding release record synchronized when release-level fields change.</li>
+          <li><strong>Registry-aware catalog values</strong>: release catalog identifiers use the same internal-registry versus external-catalog model as track editing, and the workspace shows one shared identifier with a usage count when that same catalog value is linked across a release and its tracks.</li>
         </ul>
         <p>Older databases are migrated additively. Existing catalog data remains usable, while release records are inferred where possible to give older profiles access to the richer product model without destructive change.</p>
+        """,
+    ),
+    HelpChapter(
+        chapter_id="code-registry",
+        title="Code Registry Workspace",
+        summary="Manage app-owned business codes and separate external catalog identifiers from one docked workspace.",
+        keywords=(
+            "code registry",
+            "catalog identifier",
+            "internal registry",
+            "external catalog",
+            "registry sha-256 key",
+            "contract number",
+            "license number",
+            "prefix",
+            "generate",
+            "usage count",
+            "link selected value",
+        ),
+        content_html="""
+        <p>The <strong>Code Registry Workspace</strong> is the authoritative home for app-managed business codes and generated keys. It keeps internal registry values separate from external catalog identifiers so the app can govern its own numbering without rejecting real third-party catalog data.</p>
+        <ul>
+          <li><strong>Internal Registry</strong>: search and filter issued internal values, review where they are linked, generate the next internal code for a category, generate a <strong>Registry SHA-256 Key</strong>, link a generated value later with <strong>Link Selected Value</strong>, and delete an unused Registry SHA-256 Key when it is not linked anywhere.</li>
+          <li><strong>External Catalogs</strong>: review foreign or non-conforming catalog identifiers, including migration and import outcomes, shared usage counts, and promotion or reclassification actions.</li>
+          <li><strong>Categories</strong>: manage built-in category prefixes, activate or deactivate categories, add custom categories, and remove custom categories when they are no longer in use.</li>
+          <li><strong>Internal code format</strong>: app-managed sequential codes use <code>&lt;PREFIX&gt;&lt;YY&gt;&lt;NNNN&gt;</code>. Generation advances from the category/year high-water mark rather than filling old gaps automatically.</li>
+          <li><strong>Shared identifier rows</strong>: when the same catalog number is used by multiple tracks in one album or by a release and its tracks, the registry keeps one unique value and shows a usage count instead of duplicating the identifier row for every owner.</li>
+          <li><strong>Import classification</strong>: canonical values that match a configured internal prefix and the expected structure can enter the internal registry directly, while unknown, malformed, or foreign values are preserved as external identifiers and reported clearly.</li>
+        </ul>
+        <p><strong>Registry SHA-256 Key</strong> is a code-registry feature, not an audio-authenticity key. It does not replace watermark keys or signing keys, and it stays separate in naming, symbol resolution, workspace actions, and tests.</p>
         """,
     ),
     HelpChapter(
@@ -455,7 +488,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Work creators and splits</strong>: songwriter, composer, lyricist, arranger, adaptor, publisher, and subpublisher roles can all be recorded. Split totals are validated so share mistakes are easy to spot.</li>
           <li><strong>Track-to-work links</strong>: one work can link to many recordings, and one recording can link back to more than one work where needed. Tracks and releases continue to keep their own recording/product metadata.</li>
           <li><strong>Parties</strong>: reusable people and companies can be linked as writers, publishers, contract counterparties, licensors, licensees, and rights holders.</li>
-          <li><strong>Contracts</strong>: draft, signature, effective, start, end, renewal, notice, reversion, and termination dates are stored as structured fields. Contracts can link to works, tracks, releases, and parties.</li>
+          <li><strong>Contracts</strong>: draft, signature, effective, start, end, renewal, notice, reversion, and termination dates are stored as structured fields. Contracts can link to works, tracks, releases, and parties, and they can keep registry-backed contract numbers, license numbers, and the separate <strong>Registry SHA-256 Key</strong>.</li>
           <li><strong>Obligations and reminders</strong>: delivery, approval, exclusivity, notice, follow-up, and reminder obligations are edited as structured rows with due dates, completion state, and notes.</li>
           <li><strong>Document intelligence</strong>: a contract can keep multiple managed documents such as drafts, signed agreements, amendments, appendices, exhibits, correspondence, and scans, with version labels and active/superseded relationships.</li>
           <li><strong>Rights matrix</strong>: rights records store the right type, exclusivity, territory, media/use scope, dates, source contract, and who granted, received, or retained the right.</li>
@@ -525,6 +558,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Skip targets</strong>: any incoming field can be marked as <strong>Skip this field</strong> when you want it inspected but not applied.</li>
           <li><strong>Import modes</strong>: dry-run validation, create new rows, merge into existing matches, update existing matches only, or insert-new-when-duplicate-exists.</li>
           <li><strong>Matching options</strong>: internal ID, ISRC, UPC/EAN plus title, and optional title/artist heuristics.</li>
+          <li><strong>Catalog identifier classification</strong>: imported catalog values can be accepted into the internal registry when they match a configured internal prefix and the canonical <code>&lt;PREFIX&gt;&lt;YY&gt;&lt;NNNN&gt;</code> format. Non-conforming or foreign values remain safely storable as external catalog identifiers instead.</li>
           <li><strong>JSON schema versioning</strong>: exported JSON includes an explicit schema version so future migrations stay manageable.</li>
           <li><strong>Repertoire Exchange</strong>: a separate import/export workflow covers parties, works, contracts, rights, asset versions, and their relationship references as JSON, XLSX, CSV bundles, or ZIP packages with managed files.</li>
         </ul>
@@ -557,6 +591,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Exchange modes</strong>: <code>dry_run</code> checks setup without writing, <code>create</code> creates new tracks, <code>update</code> updates matched tracks only, <code>merge</code> updates matched tracks while preserving many existing populated values, and <code>insert_new</code> creates only unmatched rows and skips duplicates.</li>
           <li><strong>Exchange matching</strong>: matching can use internal ID, ISRC, UPC plus title, and optional title/artist heuristics. The importer is deterministic and does not provide a row-by-row manual assignment queue.</li>
           <li><strong>Release upsert and package restore</strong>: exchange import can update or create linked releases from supplied release fields, while ZIP package import restores packaged files and their recorded storage mode.</li>
+          <li><strong>Catalog identifier outcomes</strong>: import reporting now distinguishes values that were accepted as internal registry entries, stored as external catalog identifiers, flagged as mismatches, skipped, merged, or conflicted. Reused external identifiers are shared and counted rather than duplicated once per owner.</li>
           <li><strong>XML import</strong>: supported catalog XML shapes flow through the same exchange setup surface as the tabular formats. The XML parser still performs schema-aware inspection first, surfaces duplicate ISRCs and custom-field conflicts, and can create missing custom fields when allowed before the mapped import runs.</li>
           <li><strong>Bulk audio attach</strong>: <strong>Catalog &gt; Audio &gt; Import &amp; Attach &gt; Bulk Attach Audio Files…</strong> is the better fit when track rows already exist and you need to match local files onto them in one reviewed batch.</li>
           <li><strong>Audio tags</strong>: read embedded tags from supported audio files and preview conflicts before writing to the catalog. Catalog-backed audio export workflows embed metadata automatically, while the plain external conversion workflow stays metadata-free.</li>
@@ -668,6 +703,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         </ul>
         <p>This feature is <strong>not DRM</strong> and does not promise forensic certainty. A watermark always changes the waveform slightly, so the goal is perceptual transparency rather than mathematical identity. The strongest in-app verification happens when the open profile still contains the original reference audio, because the app can compare the inspected export against that stored source directly.</p>
         <p>Direct embedded authenticity verification is intentionally limited to WAV, FLAC, and AIFF. Lossy formats such as MP3, OGG/OGA, Opus, and M4A/MP4/AAC are not treated as direct authenticity masters in this workflow; use provenance lineage sidecars or the separate forensic export workflow when you need lossy delivery copies.</p>
+        <p>The separate <strong>Registry SHA-256 Key</strong> in the Code Registry Workspace is <strong>not</strong> part of this authenticity system. It does not replace watermark keys, authenticity signing keys, or the signed provenance workflow described here.</p>
         <p>Recipient-specific forensic watermarking for leak tracing is a separate managed export workflow. It remains distinct from authenticity: authenticity proves signed linkage to a canonical master record, while forensic delivery exports focus on tracing shared copies and use conservative inspection semantics.</p>
         """,
     ),
@@ -749,6 +785,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Trim History</strong>: keep the most recent reversible actions on the active branch while removing older history rows and newly unreferenced storage artifacts.</li>
           <li><strong>Retention and safety controls</strong>: the General settings page can store Maximum Safety, Balanced, Lean, or Custom cleanup posture for the active profile.</li>
           <li><strong>Budget-aware prompts</strong>: snapshot, restore, and related flows can warn when the profile is over its configured history storage budget and open cleanup directly.</li>
+          <li><strong>Code registry behavior</strong>: internal registry issuance is append-only. Undo and redo revert owner links and surrounding editor state rather than editing immutable internal code rows in place. Generated values can remain intentionally unlinked, and unused <strong>Registry SHA-256 Key</strong> rows can be deleted manually from the Code Registry Workspace when they are not in use.</li>
         </ul>
         <p>Snapshots capture the profile database and related managed state where supported, giving heavier workflows a safer recovery path than a simple session-only undo stack. Cleanup previews exactly which artifacts are eligible, protects anything still required by undo, redo, snapshot restore, backup restore, or session restore, and leaves protected items untouched. Manual snapshots and protected restore points stay protected by default, while automatic cleanup focuses on safe auto-generated artifacts only. If Diagnostics reports missing or inconsistent history artifacts, repair those issues first before trimming storage.</p>
         """,
@@ -851,6 +888,7 @@ HELP_SECTION_MAP: dict[str, str] = {
     "audio-tags": "Daily Workflows",
     "bulk-audio-attach": "Daily Workflows",
     "releases": "Daily Workflows",
+    "code-registry": "Daily Workflows",
     "media-preview": "Daily Workflows",
     "repertoire-knowledge": "Deep Dives",
     "storage-modes": "Deep Dives",

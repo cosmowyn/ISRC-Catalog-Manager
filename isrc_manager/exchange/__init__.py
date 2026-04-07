@@ -9,7 +9,12 @@ from .master_transfer import (
     MasterTransferSection,
     MasterTransferService,
 )
-from .models import ExchangeImportOptions, ExchangeImportReport, ExchangeInspection
+from .models import (
+    ExchangeCatalogClassificationOutcome,
+    ExchangeImportOptions,
+    ExchangeImportReport,
+    ExchangeInspection,
+)
 from .repertoire_service import (
     RepertoireExchangeService,
     RepertoireImportInspection,
@@ -22,6 +27,7 @@ __all__ = [
     "ExchangeImportOptions",
     "ExchangeImportReport",
     "ExchangeInspection",
+    "ExchangeCatalogClassificationOutcome",
     "ExchangeService",
     "MasterTransferExportOption",
     "MasterTransferExportPreview",

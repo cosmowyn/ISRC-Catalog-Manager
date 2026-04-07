@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from isrc_manager.code_registry import CatalogIdentifierSelector
 from isrc_manager.file_storage import (
     STORAGE_MODE_DATABASE,
     STORAGE_MODE_MANAGED_FILE,
@@ -231,20 +232,16 @@ class ReleaseEditorDialog(QDialog):
         )
         identity_form.addRow("Sublabel", self.sublabel_edit)
 
-        self.catalog_number_edit = stored_value_combo(
-            """
-            SELECT value
-            FROM (
-                SELECT catalog_number AS value
-                FROM Tracks
-                WHERE catalog_number IS NOT NULL AND catalog_number != ''
-                UNION
-                SELECT catalog_number AS value
-                FROM Releases
-                WHERE catalog_number IS NOT NULL AND catalog_number != ''
-            )
-            ORDER BY value
-            """
+        registry_service_provider = getattr(self.release_service, "code_registry_service", None)
+        if not callable(registry_service_provider):
+
+            def registry_service_provider():
+                return None
+
+        self.catalog_number_edit = CatalogIdentifierSelector(
+            service_provider=registry_service_provider,
+            created_via="release.editor",
+            parent=self,
         )
         scheduling_form.addRow("Catalog#", self.catalog_number_edit)
 
@@ -418,7 +415,11 @@ class ReleaseEditorDialog(QDialog):
         self.original_release_date_edit.setText(release.original_release_date or "")
         self.label_edit.setCurrentText(release.label or "")
         self.sublabel_edit.setCurrentText(release.sublabel or "")
-        self.catalog_number_edit.setCurrentText(release.catalog_number or "")
+        self.catalog_number_edit.set_value(
+            catalog_number=release.catalog_number,
+            catalog_registry_entry_id=release.catalog_registry_entry_id,
+            external_catalog_identifier_id=release.external_catalog_identifier_id,
+        )
         self.upc_edit.setCurrentText(release.upc or "")
         self.territory_edit.setText(release.territory or "")
         self.status_combo.setCurrentText(
@@ -580,7 +581,9 @@ class ReleaseEditorDialog(QDialog):
             original_release_date=self.original_release_date_edit.text().strip() or None,
             label=self.label_edit.currentText().strip() or None,
             sublabel=self.sublabel_edit.currentText().strip() or None,
-            catalog_number=self.catalog_number_edit.currentText().strip() or None,
+            catalog_number=self.catalog_number_edit.catalog_number(),
+            catalog_registry_entry_id=self.catalog_number_edit.catalog_registry_entry_id(),
+            external_catalog_identifier_id=self.catalog_number_edit.external_catalog_identifier_id(),
             upc=self.upc_edit.currentText().strip() or None,
             territory=self.territory_edit.text().strip() or None,
             explicit_flag=self.explicit_checkbox.isChecked(),

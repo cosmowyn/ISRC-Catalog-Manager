@@ -82,6 +82,12 @@ class ContractDocumentPayload:
 class ContractPayload:
     title: str
     contract_type: str | None = None
+    contract_number: str | None = None
+    license_number: str | None = None
+    registry_sha256_key: str | None = None
+    contract_registry_entry_id: int | None = None
+    license_registry_entry_id: int | None = None
+    registry_sha256_key_entry_id: int | None = None
     draft_date: str | None = None
     signature_date: str | None = None
     effective_date: str | None = None
@@ -111,6 +117,12 @@ class ContractRecord:
     id: int
     title: str
     contract_type: str | None
+    contract_number: str | None
+    license_number: str | None
+    registry_sha256_key: str | None
+    contract_registry_entry_id: int | None
+    license_registry_entry_id: int | None
+    registry_sha256_key_entry_id: int | None
     draft_date: str | None
     signature_date: str | None
     effective_date: str | None

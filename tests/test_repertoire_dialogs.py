@@ -23,6 +23,7 @@ try:
     )
 
     from isrc_manager.assets.dialogs import AssetBrowserPanel, AssetEditorDialog
+    from isrc_manager.code_registry import CatalogIdentifierSelector
     from isrc_manager.contracts.dialogs import ContractEditorDialog
     from isrc_manager.media.derivatives import DerivativeLedgerService
     from isrc_manager.parties import PartyPayload, PartyService
@@ -299,6 +300,10 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
             self.assertFalse(isinstance(dialog.obligations_editor, QPlainTextEdit))
             self.assertFalse(isinstance(dialog.documents_editor.supersedes_edit, QLineEdit))
             self.assertFalse(isinstance(dialog.documents_editor.superseded_by_edit, QLineEdit))
+            self.assertTrue(hasattr(dialog.contract_number_edit, "entry_id"))
+            self.assertTrue(hasattr(dialog.license_number_edit, "entry_id"))
+            self.assertTrue(hasattr(dialog.registry_sha256_key_edit, "entry_id"))
+            self.assertEqual(dialog.registry_sha256_key_edit.generate_button.text(), "Generate Key")
             self.assertIsInstance(dialog.documents_editor.detail_scroll_area, QScrollArea)
             self.assertEqual(
                 dialog.documents_editor.actions_cluster.objectName(),
@@ -686,8 +691,9 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
             self.assertTrue(dialog.label_edit.isEditable())
             self.assertIsInstance(dialog.sublabel_edit, QComboBox)
             self.assertTrue(dialog.sublabel_edit.isEditable())
-            self.assertIsInstance(dialog.catalog_number_edit, QComboBox)
-            self.assertTrue(dialog.catalog_number_edit.isEditable())
+            self.assertIsInstance(dialog.catalog_number_edit, CatalogIdentifierSelector)
+            self.assertIsInstance(dialog.catalog_number_edit.lineEdit(), QLineEdit)
+            self.assertTrue(dialog.catalog_number_edit.lineEdit().isEnabled())
             self.assertIsInstance(dialog.upc_edit, QComboBox)
             self.assertTrue(dialog.upc_edit.isEditable())
             self.assertIsInstance(dialog.territory_edit, QLineEdit)

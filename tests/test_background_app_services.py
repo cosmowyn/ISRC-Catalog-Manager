@@ -199,6 +199,7 @@ class BackgroundAppServiceIntegrationTests(unittest.TestCase):
         with self.factory.open_bundle() as bundle:
             record = bundle.authenticity_key_service.generate_keypair(signer_label="Background")
 
+            self.assertIsNotNone(bundle.code_registry_service)
             self.assertIsNotNone(bundle.authenticity_manifest_service)
             self.assertIsNotNone(bundle.audio_watermark_service)
             self.assertIsNotNone(bundle.audio_authenticity_service)

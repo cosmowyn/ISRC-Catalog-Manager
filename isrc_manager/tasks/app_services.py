@@ -32,6 +32,7 @@ from isrc_manager.rights import RightsService
 from isrc_manager.search import GlobalSearchService, RelationshipExplorerService
 from isrc_manager.services import (
     CatalogReadService,
+    CodeRegistryService,
     CustomFieldDefinitionService,
     CustomFieldValueService,
     DatabaseMaintenanceService,
@@ -69,6 +70,7 @@ def _app_version_text() -> str:
 class BackgroundAppServiceBundle:
     conn: sqlite3.Connection
     settings: QSettings
+    code_registry_service: CodeRegistryService
     track_service: TrackService
     release_service: ReleaseService
     license_service: LicenseService
@@ -186,6 +188,7 @@ class BackgroundAppServiceFactory:
         settings.setFallbacksEnabled(False)
         conn = self.connection_factory.open(self.db_path)
 
+        code_registry_service = CodeRegistryService(conn)
         track_service = TrackService(
             conn,
             self.data_root,
@@ -304,6 +307,7 @@ class BackgroundAppServiceFactory:
         return BackgroundAppServiceBundle(
             conn=conn,
             settings=settings,
+            code_registry_service=code_registry_service,
             track_service=track_service,
             release_service=release_service,
             license_service=license_service,

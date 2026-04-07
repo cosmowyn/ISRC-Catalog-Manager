@@ -13,6 +13,8 @@ The authenticity workflow combines two linked layers:
 
 The watermark links the file back to the catalog record. The signed manifest provides the cryptographic proof.
 
+This workflow is separate from the code registry. The registry's `Registry SHA-256 Key` values are not watermark keys, are not authenticity signing keys, and do not replace the signed provenance workflow described here.
+
 ## Core Commands
 
 - `Settings > Audio Authenticity Keys…`

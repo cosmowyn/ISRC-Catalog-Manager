@@ -14,6 +14,7 @@ The app is built for the operational layer around a real music catalog. It helps
 
 - recordings and release metadata
 - releases as first-class product records
+- a central code registry for app-managed catalog numbers, contract numbers, license numbers, and Registry SHA-256 Keys
 - works and composition metadata
 - parties, counterparties, and reusable identities
 - contracts, obligations, and managed documents
@@ -65,6 +66,7 @@ Imports, bulk edits, restore flows, media attachment, and other higher-risk acti
 
 The main catalog table supports fast searching, bulk selection, contextual actions, and direct handoff into related workflows. The most track-table-dependent tools stay available as docked workspace panels:
 
+- Code Registry Workspace
 - Release Browser
 - Work Manager
 - Party Manager
@@ -74,6 +76,21 @@ The main catalog table supports fast searching, bulk selection, contextual actio
 - Global Search and Relationships
 
 These panels remain available beside the table so you can keep browsing and selecting records while you review related release, rights, party, contract, and asset context.
+
+### Code registry and generated keys
+
+The `Code Registry Workspace` is the authoritative home for app-managed business codes and generated keys.
+
+It supports:
+
+- internal catalog, contract, and license number categories with configurable prefixes
+- generated internal codes in the `<PREFIX><YY><NNNN>` format
+- a separate `Registry SHA-256 Key` category for secure generated registry keys
+- external catalog identifiers that do not match the internal format
+- shared usage counts when the same catalog identifier is linked to multiple tracks or releases
+- linking unassigned generated values later from the workspace itself
+
+The registry is intentionally separate from audio authenticity. `Registry SHA-256 Key` values are not watermark keys, do not replace authenticity signing keys, and use their own workflows in editors, templates, and the workspace.
 
 ### Assets and deliverables
 
@@ -173,8 +190,10 @@ Advanced users can go further with a selector reference and syntax-aware QSS edi
 
 Some of the strongest workflow features are easy to underestimate from a quick skim:
 
-- the docked workspace keeps Release Browser, Work Manager, Party Manager, Contract Manager, Rights Matrix, Asset Registry, Global Search, and Catalog Managers open beside the table as tabbed panels
+- the docked workspace keeps Code Registry Workspace, Release Browser, Work Manager, Party Manager, Contract Manager, Rights Matrix, Asset Registry, Global Search, and Catalog Managers open beside the table as tabbed panels
+- the Code Registry Workspace separates app-managed internal codes from external catalog identifiers, shows shared usage counts, and lets you link an unassigned generated value later
 - the Contract Template Workspace can import Pages, DOCX, HTML, and HTML packages, keep the original source untouched, and drive drafting, preview, and PDF export from one HTML working draft
+- exchange import can classify canonical internal-looking catalog values into the internal registry, keep non-conforming values as external identifiers, and report accepted, external, mismatch, skipped, merged, and conflicted outcomes explicitly
 - the deliverables workspace pairs the Asset Registry with a Derivative Ledger for managed export batches, lineage review, and safe cleanup
 - layout and dock state are remembered, so the app reopens as a real workstation instead of a fixed single screen
 - the action ribbon can be customized around your high-frequency commands

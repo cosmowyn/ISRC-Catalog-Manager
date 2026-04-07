@@ -6,6 +6,17 @@ from dataclasses import dataclass, field
 
 
 @dataclass(slots=True)
+class ExchangeCatalogClassificationOutcome:
+    row_index: int
+    field_name: str
+    value: str
+    classification: str
+    outcome: str
+    category: str | None = None
+    reason: str | None = None
+
+
+@dataclass(slots=True)
 class ExchangeInspection:
     file_path: str
     format_name: str
@@ -47,3 +58,12 @@ class ExchangeImportReport:
     repair_queue_entry_ids: list[int] = field(default_factory=list)
     source_track_id_map: dict[int, int] = field(default_factory=dict)
     source_release_id_map: dict[int, int] = field(default_factory=dict)
+    internal_catalog_identifiers: int = 0
+    external_catalog_identifiers: int = 0
+    mismatched_catalog_identifiers: int = 0
+    skipped_catalog_identifiers: int = 0
+    merged_catalog_identifiers: int = 0
+    conflicted_catalog_identifiers: int = 0
+    catalog_classifications: list[ExchangeCatalogClassificationOutcome] = field(
+        default_factory=list
+    )

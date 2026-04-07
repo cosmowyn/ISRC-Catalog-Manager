@@ -3,7 +3,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from isrc_manager.code_registry import BUILTIN_CATEGORY_REGISTRY_SHA256_KEY, CodeRegistryService
 from isrc_manager.constants import SCHEMA_TARGET
+from isrc_manager.contracts import ContractPayload, ContractService
+from isrc_manager.parties import PartyService
 from isrc_manager.services import DatabaseSchemaService
 
 
@@ -36,6 +39,23 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
         }
         track_columns = {
             row[1] for row in self.conn.execute("PRAGMA table_info(Tracks)").fetchall()
+        }
+        release_columns = {
+            row[1] for row in self.conn.execute("PRAGMA table_info(Releases)").fetchall()
+        }
+        contract_columns = {
+            row[1] for row in self.conn.execute("PRAGMA table_info(Contracts)").fetchall()
+        }
+        code_registry_category_columns = {
+            row[1]
+            for row in self.conn.execute("PRAGMA table_info(CodeRegistryCategories)").fetchall()
+        }
+        code_registry_entry_columns = {
+            row[1] for row in self.conn.execute("PRAGMA table_info(CodeRegistryEntries)").fetchall()
+        }
+        external_catalog_columns = {
+            row[1]
+            for row in self.conn.execute("PRAGMA table_info(ExternalCatalogIdentifiers)").fetchall()
         }
         gs1_columns = {
             row[1] for row in self.conn.execute("PRAGMA table_info(GS1Metadata)").fetchall()
@@ -200,6 +220,10 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
         self.assertIn("ContractTemplateDrafts", tables)
         self.assertIn("ContractTemplateResolvedSnapshots", tables)
         self.assertIn("ContractTemplateOutputArtifacts", tables)
+        self.assertIn("CodeRegistryCategories", tables)
+        self.assertIn("CodeRegistrySequences", tables)
+        self.assertIn("CodeRegistryEntries", tables)
+        self.assertIn("ExternalCatalogIdentifiers", tables)
         self.assertIn("RightsRecords", tables)
         self.assertIn("AssetVersions", tables)
         self.assertIn("SavedSearches", tables)
@@ -453,6 +477,64 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
             }
             <= track_columns
         )
+        self.assertTrue(
+            {"catalog_registry_entry_id", "external_catalog_identifier_id"} <= track_columns
+        )
+        self.assertTrue(
+            {"catalog_registry_entry_id", "external_catalog_identifier_id"} <= release_columns
+        )
+        self.assertTrue(
+            {
+                "contract_number",
+                "license_number",
+                "registry_sha256_key",
+                "contract_registry_entry_id",
+                "license_registry_entry_id",
+                "registry_sha256_key_entry_id",
+            }
+            <= contract_columns
+        )
+        self.assertTrue(
+            {
+                "system_key",
+                "display_name",
+                "subject_kind",
+                "generation_strategy",
+                "prefix",
+                "normalized_prefix",
+                "active_flag",
+                "sort_order",
+                "is_system",
+            }
+            <= code_registry_category_columns
+        )
+        self.assertTrue(
+            {
+                "category_id",
+                "value",
+                "normalized_value",
+                "entry_kind",
+                "prefix_snapshot",
+                "sequence_year",
+                "sequence_number",
+                "immutable_flag",
+                "created_via",
+            }
+            <= code_registry_entry_columns
+        )
+        self.assertTrue(
+            {
+                "subject_kind",
+                "subject_id",
+                "value",
+                "normalized_value",
+                "provenance_kind",
+                "classification_status",
+                "classification_reason",
+                "source_label",
+            }
+            <= external_catalog_columns
+        )
         self.assertIn("idx_tracks_isrc_compact_unique", track_indexes)
         self.assertIn("idx_tracks_catalog_number", track_indexes)
         self.assertIn("idx_tracks_buma_work_number", track_indexes)
@@ -533,6 +615,8 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
         self.assertIn("trg_contract_template_revisions_storage_upd", triggers)
         self.assertIn("trg_contract_template_drafts_storage_ins", triggers)
         self.assertIn("trg_contract_template_drafts_storage_upd", triggers)
+        self.assertIn("trg_code_registry_entries_no_update", triggers)
+        self.assertIn("trg_code_registry_entries_no_delete", triggers)
         self.assertIn("trg_auditlog_no_update", triggers)
 
     def case_migrate_20_to_21_adds_repertoire_tables(self):
@@ -1779,6 +1863,282 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
             self.assertIn("idx_tracks_genre", track_indexes)
             self.assertIn("idx_tracks_catalog_number", track_indexes)
             self.assertIn("idx_tracks_buma_work_number", track_indexes)
+        finally:
+            conn.close()
+
+    def case_migrate_35_to_36_adds_code_registry_tables_and_backfills_catalog_links(self):
+        conn = sqlite3.connect(":memory:")
+        conn.execute("PRAGMA foreign_keys = ON")
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                service = DatabaseSchemaService(conn, data_root=Path(tmpdir))
+                service.init_db()
+
+                conn.execute("INSERT INTO Artists(name) VALUES ('Migration Artist')")
+                artist_id = int(conn.execute("SELECT id FROM Artists").fetchone()[0])
+                conn.execute(
+                    """
+                    INSERT INTO Tracks(
+                        isrc,
+                        isrc_compact,
+                        track_title,
+                        main_artist_id,
+                        catalog_number
+                    )
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    ("NL-TST-26-10001", "NLTST2610001", "Legacy Track", artist_id, "LEG-001"),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO Releases(
+                        title,
+                        primary_artist,
+                        catalog_number
+                    )
+                    VALUES (?, ?, ?)
+                    """,
+                    ("Legacy Release", "Migration Artist", "LEG-REL-001"),
+                )
+                conn.execute("PRAGMA user_version = 35")
+                conn.commit()
+
+                service.migrate_schema()
+
+                tables = {
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table'"
+                    ).fetchall()
+                }
+                track_columns = {
+                    row[1] for row in conn.execute("PRAGMA table_info(Tracks)").fetchall()
+                }
+                release_columns = {
+                    row[1] for row in conn.execute("PRAGMA table_info(Releases)").fetchall()
+                }
+                contract_columns = {
+                    row[1] for row in conn.execute("PRAGMA table_info(Contracts)").fetchall()
+                }
+
+                self.assertIn("CodeRegistryCategories", tables)
+                self.assertIn("CodeRegistryEntries", tables)
+                self.assertIn("ExternalCatalogIdentifiers", tables)
+                self.assertTrue(
+                    {"catalog_registry_entry_id", "external_catalog_identifier_id"} <= track_columns
+                )
+                self.assertTrue(
+                    {"catalog_registry_entry_id", "external_catalog_identifier_id"}
+                    <= release_columns
+                )
+                self.assertTrue(
+                    {
+                        "contract_number",
+                        "license_number",
+                        "registry_sha256_key",
+                        "contract_registry_entry_id",
+                        "license_registry_entry_id",
+                        "registry_sha256_key_entry_id",
+                    }
+                    <= contract_columns
+                )
+
+                builtins = {
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT system_key FROM CodeRegistryCategories WHERE is_system=1"
+                    ).fetchall()
+                }
+                self.assertEqual(
+                    builtins,
+                    {
+                        "catalog_number",
+                        "contract_number",
+                        "license_number",
+                        "registry_sha256_key",
+                    },
+                )
+                self.assertEqual(
+                    conn.execute("SELECT COUNT(*) FROM CodeRegistryEntries").fetchone()[0],
+                    0,
+                )
+                self.assertEqual(
+                    conn.execute("SELECT COUNT(*) FROM ExternalCatalogIdentifiers").fetchone()[0],
+                    2,
+                )
+                self.assertEqual(
+                    conn.execute(
+                        """
+                        SELECT catalog_number, catalog_registry_entry_id, external_catalog_identifier_id
+                        FROM Tracks
+                        """
+                    ).fetchone(),
+                    ("LEG-001", None, 1),
+                )
+                self.assertEqual(
+                    conn.execute(
+                        """
+                        SELECT catalog_number, catalog_registry_entry_id, external_catalog_identifier_id
+                        FROM Releases
+                        """
+                    ).fetchone(),
+                    ("LEG-REL-001", None, 2),
+                )
+        finally:
+            conn.close()
+
+    def case_migrate_36_to_37_deduplicates_shared_external_catalog_identifiers(self):
+        conn = sqlite3.connect(":memory:")
+        conn.execute("PRAGMA foreign_keys = ON")
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                service = DatabaseSchemaService(conn, data_root=Path(tmpdir))
+                service.init_db()
+                service._mig_35_to_36()
+                conn.execute("PRAGMA user_version = 36")
+                conn.execute(
+                    "DROP INDEX IF EXISTS idx_external_catalog_identifiers_normalized_value"
+                )
+
+                conn.execute("INSERT INTO Artists(name) VALUES ('Migration Artist')")
+                artist_id = int(conn.execute("SELECT id FROM Artists").fetchone()[0])
+                conn.execute(
+                    """
+                    INSERT INTO ExternalCatalogIdentifiers(
+                        id,
+                        subject_kind,
+                        subject_id,
+                        value,
+                        normalized_value,
+                        provenance_kind,
+                        classification_status,
+                        classification_reason,
+                        source_label
+                    )
+                    VALUES
+                        (1, 'track', 1, 'ALB-2501', 'alb-2501', 'migration', 'external', NULL, 'old_schema'),
+                        (2, 'track', 2, 'ALB-2501', 'alb-2501', 'migration', 'external', NULL, 'old_schema')
+                    """
+                )
+                conn.execute(
+                    """
+                    INSERT INTO Tracks(
+                        isrc,
+                        isrc_compact,
+                        track_title,
+                        main_artist_id,
+                        external_catalog_identifier_id,
+                        catalog_number
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    ("NL-TST-26-30001", "NLTST2630001", "Track A", artist_id, 1, "ALB-2501"),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO Tracks(
+                        isrc,
+                        isrc_compact,
+                        track_title,
+                        main_artist_id,
+                        external_catalog_identifier_id,
+                        catalog_number
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    ("NL-TST-26-30002", "NLTST2630002", "Track B", artist_id, 2, "ALB-2501"),
+                )
+                conn.commit()
+
+                service.migrate_schema()
+
+                self.assertEqual(service.get_db_version(), SCHEMA_TARGET)
+                self.assertEqual(
+                    conn.execute("SELECT COUNT(*) FROM ExternalCatalogIdentifiers").fetchone()[0],
+                    1,
+                )
+                rows = conn.execute(
+                    """
+                    SELECT external_catalog_identifier_id
+                    FROM Tracks
+                    ORDER BY id
+                    """
+                ).fetchall()
+                self.assertEqual(rows, [(1,), (1,)])
+                normalized_index = conn.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM sqlite_master
+                    WHERE type='index'
+                      AND name='idx_external_catalog_identifiers_normalized_value'
+                    """
+                ).fetchone()
+                self.assertEqual(normalized_index[0], 1)
+        finally:
+            conn.close()
+
+    def case_migrate_37_to_38_allows_unused_registry_sha256_key_deletion(self):
+        conn = sqlite3.connect(":memory:")
+        conn.execute("PRAGMA foreign_keys = ON")
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                service = DatabaseSchemaService(conn, data_root=root)
+                service.init_db()
+                service._mig_35_to_36()
+                service._mig_36_to_37()
+                conn.execute("PRAGMA user_version = 37")
+                conn.execute("DROP TRIGGER IF EXISTS trg_code_registry_entries_no_delete")
+                conn.execute(
+                    """
+                    CREATE TRIGGER trg_code_registry_entries_no_delete
+                    BEFORE DELETE ON CodeRegistryEntries
+                    FOR EACH ROW
+                    WHEN OLD.immutable_flag = 1
+                    BEGIN
+                        SELECT RAISE(ABORT, 'CodeRegistryEntries are immutable once created');
+                    END
+                    """
+                )
+                conn.commit()
+
+                registry = CodeRegistryService(conn)
+                party_service = PartyService(conn)
+                contract_service = ContractService(
+                    conn,
+                    root,
+                    party_service=party_service,
+                )
+                unused_entry = registry.generate_sha256_key(created_via="test.migration").entry
+                contract_id = contract_service.create_contract(
+                    ContractPayload(
+                        title="Used Hash Contract",
+                        contract_type="license",
+                        status="draft",
+                    )
+                )
+                used_entry = contract_service.generate_registry_value_for_contract(
+                    contract_id,
+                    system_key=BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
+                    created_via="test.migration",
+                )
+
+                service.migrate_schema()
+
+                self.assertEqual(service.get_db_version(), SCHEMA_TARGET)
+                conn.execute(
+                    "DELETE FROM CodeRegistryEntries WHERE id=?",
+                    (int(unused_entry.id),),
+                )
+                conn.commit()
+                self.assertIsNone(registry.fetch_entry(unused_entry.id))
+
+                with self.assertRaises(sqlite3.DatabaseError):
+                    conn.execute(
+                        "DELETE FROM CodeRegistryEntries WHERE id=?",
+                        (int(used_entry.id),),
+                    )
+                    conn.commit()
         finally:
             conn.close()
 

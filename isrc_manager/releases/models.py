@@ -25,6 +25,8 @@ class ReleasePayload:
     label: str | None = None
     sublabel: str | None = None
     catalog_number: str | None = None
+    catalog_registry_entry_id: int | None = None
+    external_catalog_identifier_id: int | None = None
     upc: str | None = None
     territory: str | None = None
     explicit_flag: bool = False
@@ -53,6 +55,8 @@ class ReleaseRecord:
     label: str | None
     sublabel: str | None
     catalog_number: str | None
+    catalog_registry_entry_id: int | None
+    external_catalog_identifier_id: int | None
     upc: str | None
     barcode_validation_status: str
     territory: str | None

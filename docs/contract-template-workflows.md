@@ -64,6 +64,15 @@ The `Fill Form` workspace resolves placeholders from:
 - parties and owner settings
 - manual fields when a value should be typed directly instead of selected from the catalog
 
+Registry-backed entity fields stay available in the fill form. That means template drafting can resolve and, where appropriate, generate:
+
+- track and release catalog numbers through their linked registry-aware fields
+- contract numbers
+- license numbers
+- `Registry SHA-256 Key` values
+
+Generation in the fill form creates the authoritative registry value immediately and links it back to the selected entity instead of inserting ad hoc text into the draft only.
+
 The symbol catalog and generator are there so source templates can use the same canonical placeholder
 syntax the fill form understands.
 
@@ -89,9 +98,12 @@ This workflow keeps the user-facing process familiar while solving a real backen
 - one PDF export path
 - original source files preserved for traceability and re-import safety
 
+`Registry SHA-256 Key` remains distinct from the audio authenticity subsystem. It is a code-registry value for contracts and related workflows, not a watermark key and not an authenticity signing key.
+
 ## Related docs
 
 - [Repository README](../README.md)
+- [Code Registry Workflows](code-registry-workflows.md)
 - [Catalog Workspace Workflows](catalog-workspace-workflows.md)
 - [Attachment Storage Modes](file_storage_modes.md)
 - [Diagnostics and Recovery](diagnostics-and-recovery.md)

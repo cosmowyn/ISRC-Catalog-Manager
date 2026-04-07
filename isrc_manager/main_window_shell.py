@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from isrc_manager.code_registry import CatalogIdentifierField
 from isrc_manager.ui_common import (
     FocusWheelCalendarWidget,
     FocusWheelComboBox,
@@ -403,6 +404,12 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         shortcuts=("Ctrl+Alt+C", "Meta+Alt+C"),
     )
     workspace_create_menu.addAction(app.contract_manager_action)
+    app.code_registry_workspace_action = app._create_action(
+        "Code Registry Workspace…",
+        slot=app.open_code_registry_workspace,
+        shortcuts=("Ctrl+Alt+Shift+K", "Meta+Alt+Shift+K"),
+    )
+    workspace_create_menu.addAction(app.code_registry_workspace_action)
     app.contract_template_workspace_action = app._create_action(
         "Contract Template Workspace…",
         slot=app.open_contract_template_workspace,
@@ -1081,9 +1088,11 @@ def _build_catalog_docks(app: Any, *, movable: bool) -> None:
     app.genre_field.setMinimumWidth(170)
 
     app.catalog_number_label = QLabel("Catalog#")
-    app.catalog_number_field = FocusWheelComboBox()
-    app.catalog_number_field.setEditable(True)
-    app.catalog_number_field.setMinimumWidth(170)
+    app.catalog_number_field = CatalogIdentifierField(
+        service_provider=lambda: getattr(app, "code_registry_service", None),
+        created_via="add_track",
+        parent=app,
+    )
 
     app.buma_work_number_label = QLabel("BUMA Wnr.")
     app.buma_work_number_field = QLineEdit()

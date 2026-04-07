@@ -20,6 +20,11 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from openpyxl import Workbook, load_workbook
 
+from isrc_manager.code_registry import (
+    CLASSIFICATION_INTERNAL,
+    CLASSIFICATION_MISMATCH,
+    CodeRegistryService,
+)
 from isrc_manager.domain.codes import is_blank, to_compact_isrc, to_iso_isrc
 from isrc_manager.domain.timecode import hms_to_seconds, parse_hms_text, seconds_to_hms
 from isrc_manager.file_storage import coalesce_filename, infer_storage_mode
@@ -32,7 +37,12 @@ from isrc_manager.services.imports import XMLImportService
 from isrc_manager.services.tracks import TrackCreatePayload, TrackService, TrackUpdatePayload
 from isrc_manager.works import WorkService
 
-from .models import ExchangeImportOptions, ExchangeImportReport, ExchangeInspection
+from .models import (
+    ExchangeCatalogClassificationOutcome,
+    ExchangeImportOptions,
+    ExchangeImportReport,
+    ExchangeInspection,
+)
 
 JSON_SCHEMA_VERSION = 1
 CSV_SNIFF_SAMPLE_SIZE = 4096
@@ -1625,6 +1635,79 @@ class ExchangeService:
             return str(path)
         return None
 
+    def _code_registry_service(self) -> CodeRegistryService | None:
+        tables = {
+            str(row[0])
+            for row in self.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+            if row and row[0]
+        }
+        if "CodeRegistryCategories" not in tables:
+            return None
+        return CodeRegistryService(self.conn)
+
+    def _record_catalog_classification(
+        self,
+        *,
+        row_index: int,
+        field_name: str,
+        value: str | None,
+        outcomes: list[ExchangeCatalogClassificationOutcome],
+        counters: dict[str, int],
+        outcome_override: str | None = None,
+    ) -> None:
+        clean_value = str(value or "").strip()
+        if not clean_value:
+            return
+        service = self._code_registry_service()
+        classification = (
+            service.classify_catalog_identifier(clean_value) if service is not None else None
+        )
+        classification_name = (
+            str(classification.classification or "").strip()
+            if classification is not None
+            else "external"
+        )
+        category_name = (
+            str(classification.category_display_name or "").strip()
+            if classification is not None and classification.category_display_name
+            else None
+        )
+        reason = str(classification.reason or "").strip() if classification is not None else None
+        outcome = outcome_override or (
+            "accepted_internal"
+            if classification_name == CLASSIFICATION_INTERNAL
+            else (
+                "flagged_mismatch"
+                if classification_name == CLASSIFICATION_MISMATCH
+                else "stored_external"
+            )
+        )
+        if outcome == "accepted_internal":
+            counters["internal"] += 1
+        elif outcome == "stored_external":
+            counters["external"] += 1
+        elif outcome == "flagged_mismatch":
+            counters["mismatch"] += 1
+        elif outcome.startswith("skipped"):
+            counters["skipped"] += 1
+        elif outcome.startswith("merged"):
+            counters["merged"] += 1
+        elif outcome.startswith("conflicted"):
+            counters["conflicted"] += 1
+        outcomes.append(
+            ExchangeCatalogClassificationOutcome(
+                row_index=int(row_index),
+                field_name=str(field_name or "").strip(),
+                value=clean_value,
+                classification=classification_name or "external",
+                outcome=outcome,
+                category=category_name,
+                reason=reason,
+            )
+        )
+
     def _upsert_release_from_row(
         self,
         row: dict[str, object],
@@ -1634,6 +1717,9 @@ class ExchangeService:
         source_release_map: dict[str, int] | None = None,
         preserve_source_release_identity: bool = False,
         cursor: sqlite3.Cursor | None = None,
+        catalog_outcomes: list[ExchangeCatalogClassificationOutcome] | None = None,
+        catalog_counters: dict[str, int] | None = None,
+        row_index: int | None = None,
     ) -> None:
         release_title = str(row.get("release_title") or "").strip()
         if not release_title:
@@ -1708,6 +1794,14 @@ class ExchangeService:
             artwork_storage_mode=str(row.get("release_artwork_storage_mode") or "").strip() or None,
             placements=[placement],
         )
+        if catalog_outcomes is not None and catalog_counters is not None and row_index is not None:
+            self._record_catalog_classification(
+                row_index=int(row_index),
+                field_name="release_catalog_number",
+                value=payload.catalog_number,
+                outcomes=catalog_outcomes,
+                counters=catalog_counters,
+            )
         if existing_id is None:
             created_release_id = self.release_service.create_release(payload, cursor=cursor)
             if source_release_map is not None and source_release_key:
@@ -1769,6 +1863,15 @@ class ExchangeService:
         would_update_tracks = 0
         created_tracks: list[int] = []
         updated_tracks: list[int] = []
+        catalog_outcomes: list[ExchangeCatalogClassificationOutcome] = []
+        catalog_counters = {
+            "internal": 0,
+            "external": 0,
+            "mismatch": 0,
+            "skipped": 0,
+            "merged": 0,
+            "conflicted": 0,
+        }
         total_rows = max(len(normalized_rows), 1)
         package_create_mode = format_name == "package" and (
             effective_mode == "create" or opts.preserve_source_package_identity
@@ -1874,14 +1977,69 @@ class ExchangeService:
                     else self._find_existing_track_id(row, options=opts)
                 )
             if effective_mode == "update" and existing_track_id is None:
+                self._record_catalog_classification(
+                    row_index=index,
+                    field_name="catalog_number",
+                    value=str(row.get("catalog_number") or "").strip() or None,
+                    outcomes=catalog_outcomes,
+                    counters=catalog_counters,
+                    outcome_override="skipped_no_match",
+                )
+                self._record_catalog_classification(
+                    row_index=index,
+                    field_name="release_catalog_number",
+                    value=str(
+                        row.get("release_catalog_number") or row.get("catalog_number") or ""
+                    ).strip()
+                    or None,
+                    outcomes=catalog_outcomes,
+                    counters=catalog_counters,
+                    outcome_override="skipped_no_match",
+                )
                 skipped += 1
                 warnings.append(f"Row {index}: no existing match was found for update mode.")
                 continue
             if effective_mode == "insert_new" and existing_track_id is not None:
+                self._record_catalog_classification(
+                    row_index=index,
+                    field_name="catalog_number",
+                    value=str(row.get("catalog_number") or "").strip() or None,
+                    outcomes=catalog_outcomes,
+                    counters=catalog_counters,
+                    outcome_override="skipped_duplicate_match",
+                )
+                self._record_catalog_classification(
+                    row_index=index,
+                    field_name="release_catalog_number",
+                    value=str(
+                        row.get("release_catalog_number") or row.get("catalog_number") or ""
+                    ).strip()
+                    or None,
+                    outcomes=catalog_outcomes,
+                    counters=catalog_counters,
+                    outcome_override="skipped_duplicate_match",
+                )
                 skipped += 1
                 duplicates.append(f"Row {index}: matched existing track {existing_track_id}")
                 continue
             if opts.mode == "dry_run":
+                self._record_catalog_classification(
+                    row_index=index,
+                    field_name="catalog_number",
+                    value=str(row.get("catalog_number") or "").strip() or None,
+                    outcomes=catalog_outcomes,
+                    counters=catalog_counters,
+                )
+                self._record_catalog_classification(
+                    row_index=index,
+                    field_name="release_catalog_number",
+                    value=str(
+                        row.get("release_catalog_number") or row.get("catalog_number") or ""
+                    ).strip()
+                    or None,
+                    outcomes=catalog_outcomes,
+                    counters=catalog_counters,
+                )
                 if existing_track_id is None:
                     would_create_tracks += 1
                 else:
@@ -2000,7 +2158,17 @@ class ExchangeService:
                         snapshot = self.track_service.fetch_track_snapshot(existing_track_id)
                         if snapshot is None:
                             raise ValueError(f"Track {existing_track_id} not found")
+                        track_catalog_outcome_override = None
                         if opts.mode == "merge":
+                            incoming_catalog_number = (
+                                str(row.get("catalog_number") or "").strip() or None
+                            )
+                            if (
+                                incoming_catalog_number
+                                and snapshot.catalog_number
+                                and str(snapshot.catalog_number).strip() != incoming_catalog_number
+                            ):
+                                track_catalog_outcome_override = "merged_retained_existing"
                             payload_kwargs["track_title"] = (
                                 snapshot.track_title or payload_kwargs["track_title"]
                             )
@@ -2079,6 +2247,18 @@ class ExchangeService:
                         if source_track_key:
                             source_track_map[source_track_key] = int(track_id)
 
+                    self._record_catalog_classification(
+                        row_index=index,
+                        field_name="catalog_number",
+                        value=str(row.get("catalog_number") or "").strip() or None,
+                        outcomes=catalog_outcomes,
+                        counters=catalog_counters,
+                        outcome_override=(
+                            track_catalog_outcome_override
+                            if "track_catalog_outcome_override" in locals()
+                            else None
+                        ),
+                    )
                     _apply_custom_fields(track_id, row, cursor=cur)
                     self._upsert_release_from_row(
                         row,
@@ -2087,6 +2267,9 @@ class ExchangeService:
                         source_release_map=(source_release_map if package_create_mode else None),
                         preserve_source_release_identity=package_create_mode,
                         cursor=cur,
+                        catalog_outcomes=catalog_outcomes,
+                        catalog_counters=catalog_counters,
+                        row_index=index,
                     )
                     if repair_entry_id is not None:
                         self.repair_queue_service.mark_resolved(
@@ -2147,4 +2330,11 @@ class ExchangeService:
                 for key, value in source_release_map.items()
                 if str(key).strip().isdigit()
             },
+            internal_catalog_identifiers=int(catalog_counters["internal"]),
+            external_catalog_identifiers=int(catalog_counters["external"]),
+            mismatched_catalog_identifiers=int(catalog_counters["mismatch"]),
+            skipped_catalog_identifiers=int(catalog_counters["skipped"]),
+            merged_catalog_identifiers=int(catalog_counters["merged"]),
+            conflicted_catalog_identifiers=int(catalog_counters["conflicted"]),
+            catalog_classifications=catalog_outcomes,
         )

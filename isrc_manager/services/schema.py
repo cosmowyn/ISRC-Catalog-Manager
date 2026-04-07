@@ -326,6 +326,7 @@ class DatabaseSchemaService:
         self._ensure_gs1_template_storage_table()
         self._ensure_release_tables()
         self._ensure_repertoire_tables()
+        self._ensure_code_registry_tables()
         self._ensure_track_import_repair_queue_table()
         self._ensure_contract_template_tables()
         self._ensure_authenticity_tables()
@@ -508,6 +509,15 @@ class DatabaseSchemaService:
             elif version == 34:
                 self._apply_migration(34, self._mig_34_to_35)
                 version = 35
+            elif version == 35:
+                self._apply_migration(35, self._mig_35_to_36)
+                version = 36
+            elif version == 36:
+                self._apply_migration(36, self._mig_36_to_37)
+                version = 37
+            elif version == 37:
+                self._apply_migration(37, self._mig_37_to_38)
+                version = 38
             else:
                 self.logger.warning("Unknown migration path from version %s", version)
                 break
@@ -941,6 +951,15 @@ class DatabaseSchemaService:
 
     def _mig_34_to_35(self) -> None:
         self._ensure_contract_template_tables()
+
+    def _mig_35_to_36(self) -> None:
+        self._ensure_code_registry_tables()
+
+    def _mig_36_to_37(self) -> None:
+        self._deduplicate_external_catalog_registry_rows()
+
+    def _mig_37_to_38(self) -> None:
+        self._ensure_code_registry_entry_immutability_triggers()
 
     def _ensure_current_custom_field_value_schema(self) -> None:
         cols = self._table_columns("CustomFieldValues")
@@ -1736,6 +1755,413 @@ class DatabaseSchemaService:
             ON Releases(title)
             """
         )
+
+    def _ensure_code_registry_tables(self) -> None:
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS CodeRegistryCategories (
+                id INTEGER PRIMARY KEY,
+                system_key TEXT UNIQUE,
+                display_name TEXT NOT NULL,
+                subject_kind TEXT NOT NULL,
+                generation_strategy TEXT NOT NULL,
+                prefix TEXT,
+                normalized_prefix TEXT,
+                active_flag INTEGER NOT NULL DEFAULT 1,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                is_system INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS CodeRegistrySequences (
+                category_id INTEGER NOT NULL,
+                sequence_year INTEGER NOT NULL,
+                last_sequence_number INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                PRIMARY KEY (category_id, sequence_year),
+                FOREIGN KEY (category_id) REFERENCES CodeRegistryCategories(id) ON DELETE CASCADE
+            )
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS CodeRegistryEntries (
+                id INTEGER PRIMARY KEY,
+                category_id INTEGER NOT NULL,
+                value TEXT NOT NULL,
+                normalized_value TEXT NOT NULL,
+                entry_kind TEXT NOT NULL DEFAULT 'manual_capture',
+                prefix_snapshot TEXT,
+                sequence_year INTEGER,
+                sequence_number INTEGER,
+                immutable_flag INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                created_via TEXT,
+                notes TEXT,
+                FOREIGN KEY (category_id) REFERENCES CodeRegistryCategories(id) ON DELETE RESTRICT
+            )
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ExternalCatalogIdentifiers (
+                id INTEGER PRIMARY KEY,
+                subject_kind TEXT NOT NULL,
+                subject_id INTEGER NOT NULL,
+                value TEXT NOT NULL,
+                normalized_value TEXT NOT NULL,
+                provenance_kind TEXT NOT NULL DEFAULT 'manual',
+                classification_status TEXT NOT NULL DEFAULT 'external',
+                classification_reason TEXT,
+                source_label TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
+
+        self.cursor.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_code_registry_categories_prefix
+            ON CodeRegistryCategories(normalized_prefix)
+            WHERE normalized_prefix IS NOT NULL AND trim(normalized_prefix) != ''
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_code_registry_categories_subject_kind
+            ON CodeRegistryCategories(subject_kind, sort_order, display_name)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_code_registry_entries_normalized_value
+            ON CodeRegistryEntries(normalized_value)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_code_registry_entries_sequence_unique
+            ON CodeRegistryEntries(category_id, sequence_year, sequence_number)
+            WHERE sequence_year IS NOT NULL AND sequence_number IS NOT NULL
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_code_registry_entries_category
+            ON CodeRegistryEntries(category_id, created_at DESC, id DESC)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_external_catalog_identifiers_status
+            ON ExternalCatalogIdentifiers(classification_status, updated_at DESC)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_external_catalog_identifiers_normalized_value
+            ON ExternalCatalogIdentifiers(normalized_value)
+            WHERE normalized_value IS NOT NULL AND trim(normalized_value) != ''
+            """
+        )
+
+        self._ensure_code_registry_entry_immutability_triggers()
+
+        track_columns = self._table_columns("Tracks")
+        for column_name, column_sql in (
+            (
+                "catalog_registry_entry_id",
+                "INTEGER REFERENCES CodeRegistryEntries(id) ON DELETE SET NULL",
+            ),
+            (
+                "external_catalog_identifier_id",
+                "INTEGER REFERENCES ExternalCatalogIdentifiers(id) ON DELETE SET NULL",
+            ),
+        ):
+            if column_name not in track_columns:
+                self.cursor.execute(f"ALTER TABLE Tracks ADD COLUMN {column_name} {column_sql}")
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_tracks_catalog_registry_entry_id
+            ON Tracks(catalog_registry_entry_id)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_tracks_external_catalog_identifier_id
+            ON Tracks(external_catalog_identifier_id)
+            """
+        )
+
+        release_columns = self._table_columns("Releases")
+        for column_name, column_sql in (
+            (
+                "catalog_registry_entry_id",
+                "INTEGER REFERENCES CodeRegistryEntries(id) ON DELETE SET NULL",
+            ),
+            (
+                "external_catalog_identifier_id",
+                "INTEGER REFERENCES ExternalCatalogIdentifiers(id) ON DELETE SET NULL",
+            ),
+        ):
+            if column_name not in release_columns:
+                self.cursor.execute(f"ALTER TABLE Releases ADD COLUMN {column_name} {column_sql}")
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_releases_catalog_registry_entry_id
+            ON Releases(catalog_registry_entry_id)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_releases_external_catalog_identifier_id
+            ON Releases(external_catalog_identifier_id)
+            """
+        )
+
+        contract_columns = self._table_columns("Contracts")
+        contract_additions = (
+            ("contract_number", "TEXT"),
+            ("license_number", "TEXT"),
+            ("registry_sha256_key", "TEXT"),
+            (
+                "contract_registry_entry_id",
+                "INTEGER REFERENCES CodeRegistryEntries(id) ON DELETE SET NULL",
+            ),
+            (
+                "license_registry_entry_id",
+                "INTEGER REFERENCES CodeRegistryEntries(id) ON DELETE SET NULL",
+            ),
+            (
+                "registry_sha256_key_entry_id",
+                "INTEGER REFERENCES CodeRegistryEntries(id) ON DELETE SET NULL",
+            ),
+        )
+        for column_name, column_sql in contract_additions:
+            if column_name not in contract_columns:
+                self.cursor.execute(f"ALTER TABLE Contracts ADD COLUMN {column_name} {column_sql}")
+        self.cursor.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_contracts_contract_registry_entry_unique
+            ON Contracts(contract_registry_entry_id)
+            WHERE contract_registry_entry_id IS NOT NULL
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_contracts_license_registry_entry_unique
+            ON Contracts(license_registry_entry_id)
+            WHERE license_registry_entry_id IS NOT NULL
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_contracts_registry_sha256_key_entry_unique
+            ON Contracts(registry_sha256_key_entry_id)
+            WHERE registry_sha256_key_entry_id IS NOT NULL
+            """
+        )
+
+        self._seed_code_registry_categories()
+        self._backfill_catalog_registry_links()
+
+    def _ensure_code_registry_entry_immutability_triggers(self) -> None:
+        self.cursor.execute("DROP TRIGGER IF EXISTS trg_code_registry_entries_no_update")
+        self.cursor.execute("DROP TRIGGER IF EXISTS trg_code_registry_entries_no_delete")
+        self.cursor.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS trg_code_registry_entries_no_update
+            BEFORE UPDATE ON CodeRegistryEntries
+            FOR EACH ROW
+            WHEN OLD.immutable_flag = 1
+            BEGIN
+                SELECT RAISE(ABORT, 'CodeRegistryEntries are immutable once created');
+            END
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS trg_code_registry_entries_no_delete
+            BEFORE DELETE ON CodeRegistryEntries
+            FOR EACH ROW
+            WHEN OLD.immutable_flag = 1
+              AND NOT (
+                EXISTS(
+                    SELECT 1
+                    FROM CodeRegistryCategories c
+                    WHERE c.id = OLD.category_id
+                      AND c.system_key = 'registry_sha256_key'
+                )
+                AND NOT EXISTS(
+                    SELECT 1
+                    FROM Tracks t
+                    WHERE t.catalog_registry_entry_id = OLD.id
+                )
+                AND NOT EXISTS(
+                    SELECT 1
+                    FROM Releases r
+                    WHERE r.catalog_registry_entry_id = OLD.id
+                )
+                AND NOT EXISTS(
+                    SELECT 1
+                    FROM Contracts c
+                    WHERE c.contract_registry_entry_id = OLD.id
+                       OR c.license_registry_entry_id = OLD.id
+                       OR c.registry_sha256_key_entry_id = OLD.id
+                )
+              )
+            BEGIN
+                SELECT RAISE(ABORT, 'CodeRegistryEntries are immutable once created');
+            END
+            """
+        )
+
+    def _deduplicate_external_catalog_registry_rows(self) -> None:
+        tables = {
+            str(row[0] or "")
+            for row in self.cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        if "ExternalCatalogIdentifiers" not in tables:
+            return
+        self.cursor.execute(
+            "DROP INDEX IF EXISTS idx_external_catalog_identifiers_normalized_value"
+        )
+        duplicate_rows = self.cursor.execute(
+            """
+            SELECT normalized_value
+            FROM ExternalCatalogIdentifiers
+            WHERE normalized_value IS NOT NULL AND trim(normalized_value) != ''
+            GROUP BY normalized_value
+            HAVING COUNT(*) > 1
+            ORDER BY normalized_value
+            """
+        ).fetchall()
+        for (normalized_value,) in duplicate_rows:
+            rows = self.cursor.execute(
+                """
+                SELECT id
+                FROM ExternalCatalogIdentifiers
+                WHERE normalized_value=?
+                ORDER BY id
+                """,
+                (str(normalized_value or ""),),
+            ).fetchall()
+            if not rows:
+                continue
+            keep_id = int(rows[0][0])
+            duplicate_ids = [int(row[0]) for row in rows[1:]]
+            for duplicate_id in duplicate_ids:
+                self.cursor.execute(
+                    """
+                    UPDATE Tracks
+                    SET external_catalog_identifier_id=?
+                    WHERE external_catalog_identifier_id=?
+                    """,
+                    (keep_id, duplicate_id),
+                )
+                self.cursor.execute(
+                    """
+                    UPDATE Releases
+                    SET external_catalog_identifier_id=?
+                    WHERE external_catalog_identifier_id=?
+                    """,
+                    (keep_id, duplicate_id),
+                )
+            if duplicate_ids:
+                placeholders = ",".join("?" for _ in duplicate_ids)
+                self.cursor.execute(
+                    f"DELETE FROM ExternalCatalogIdentifiers WHERE id IN ({placeholders})",
+                    duplicate_ids,
+                )
+        self.cursor.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_external_catalog_identifiers_normalized_value
+            ON ExternalCatalogIdentifiers(normalized_value)
+            WHERE normalized_value IS NOT NULL AND trim(normalized_value) != ''
+            """
+        )
+
+    def _seed_code_registry_categories(self) -> None:
+        try:
+            from isrc_manager.code_registry.service import CodeRegistryService
+        except Exception:
+            return
+        CodeRegistryService(self.conn).ensure_default_categories(cursor=self.cursor)
+
+    def _backfill_catalog_registry_links(self) -> None:
+        try:
+            from isrc_manager.code_registry.models import (
+                CATALOG_MODE_INTERNAL,
+                CLASSIFICATION_INTERNAL,
+                ENTRY_KIND_IMPORTED,
+                CatalogIdentifierResolution,
+            )
+            from isrc_manager.code_registry.service import CodeRegistryService
+        except Exception:
+            return
+
+        service = CodeRegistryService(self.conn)
+        for owner_kind, table_name in (("track", "Tracks"), ("release", "Releases")):
+            rows = self.cursor.execute(
+                f"""
+                SELECT id, catalog_number
+                FROM {table_name}
+                WHERE COALESCE(trim(catalog_number), '') != ''
+                  AND catalog_registry_entry_id IS NULL
+                  AND external_catalog_identifier_id IS NULL
+                ORDER BY id
+                """
+            ).fetchall()
+            for owner_id, raw_value in rows:
+                clean_value = str(raw_value or "").strip()
+                if not clean_value:
+                    continue
+                classification = service.classify_catalog_identifier(clean_value)
+                if classification.classification == CLASSIFICATION_INTERNAL:
+                    entry = service.create_or_capture_catalog_entry(
+                        clean_value,
+                        created_via="migration.backfill.catalog",
+                        entry_kind=ENTRY_KIND_IMPORTED,
+                        cursor=self.cursor,
+                    )
+                    service.assign_catalog_to_owner(
+                        owner_kind=owner_kind,
+                        owner_id=int(owner_id),
+                        resolution=CatalogIdentifierResolution(
+                            mode=CATALOG_MODE_INTERNAL,
+                            value=entry.value,
+                            registry_entry_id=entry.id,
+                            category_id=entry.category_id,
+                            classification_status=classification.classification,
+                            classification_reason=classification.reason,
+                        ),
+                        provenance_kind="migration",
+                        source_label="schema_36_backfill",
+                        cursor=self.cursor,
+                    )
+                    continue
+                service.assign_catalog_to_owner(
+                    owner_kind=owner_kind,
+                    owner_id=int(owner_id),
+                    resolution=CatalogIdentifierResolution(
+                        mode="external",
+                        value=clean_value,
+                        external_value=clean_value,
+                        classification_status=classification.classification,
+                        classification_reason=classification.reason,
+                    ),
+                    provenance_kind="migration",
+                    source_label="schema_36_backfill",
+                    cursor=self.cursor,
+                )
 
     def _ensure_repertoire_tables(self) -> None:
         self.cursor.execute(

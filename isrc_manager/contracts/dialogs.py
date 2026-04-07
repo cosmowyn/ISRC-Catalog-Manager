@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import date
 from difflib import SequenceMatcher
 from pathlib import Path
+from typing import Callable
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -34,6 +35,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from isrc_manager.code_registry import (
+    BUILTIN_CATEGORY_CONTRACT_NUMBER,
+    BUILTIN_CATEGORY_LICENSE_NUMBER,
+    BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
+    CodeRegistryService,
+)
 from isrc_manager.external_launch import open_external_path
 from isrc_manager.file_storage import (
     STORAGE_MODE_DATABASE,
@@ -88,6 +95,183 @@ def _parse_optional_int(text: str) -> int | None:
     if not clean:
         return None
     return int(clean)
+
+
+class _RegistryFieldEditor(QWidget):
+    valueChanged = Signal()
+
+    def __init__(
+        self,
+        *,
+        registry_service_provider: Callable[[], CodeRegistryService | None],
+        system_key: str,
+        generate_label: str,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.registry_service_provider = registry_service_provider
+        self.system_key = str(system_key or "").strip()
+        self._current_entry_id: int | None = None
+        self._value_to_entry_id: dict[str, int] = {}
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+
+        input_row = QWidget(self)
+        input_layout = QHBoxLayout(input_row)
+        input_layout.setContentsMargins(0, 0, 0, 0)
+        input_layout.setSpacing(8)
+        self.combo = FocusWheelComboBox(input_row)
+        self.combo.setEditable(True)
+        self.combo.setInsertPolicy(QComboBox.NoInsert)
+        self.combo.currentIndexChanged.connect(self._on_combo_changed)
+        line_edit = self.combo.lineEdit()
+        if line_edit is not None:
+            line_edit.textEdited.connect(self._on_text_edited)
+        input_layout.addWidget(self.combo, 1)
+        self.generate_button = QPushButton(generate_label, input_row)
+        self.generate_button.clicked.connect(self.generate_value)
+        input_layout.addWidget(self.generate_button)
+        layout.addWidget(input_row)
+
+        self.status_label = QLabel("", self)
+        self.status_label.setWordWrap(True)
+        self.status_label.setProperty("role", "supportingText")
+        layout.addWidget(self.status_label)
+
+        self.refresh_choices()
+
+    def _registry_service(self) -> CodeRegistryService | None:
+        return self.registry_service_provider()
+
+    def _category_entries(self):
+        service = self._registry_service()
+        if service is None:
+            return None, []
+        category = service.fetch_category_by_system_key(self.system_key)
+        if category is None:
+            return None, []
+        return category, service.list_entries(category_id=category.id)
+
+    def refresh_choices(self) -> None:
+        category, entries = self._category_entries()
+        current_text = self.combo.currentText().strip()
+        self._value_to_entry_id = {str(entry.value): int(entry.id) for entry in entries}
+        previous = self.combo.blockSignals(True)
+        try:
+            self.combo.clear()
+            self.combo.addItem("")
+            for entry in entries:
+                self.combo.addItem(entry.value, int(entry.id))
+            if current_text:
+                index = self.combo.findText(current_text)
+                if index >= 0:
+                    self.combo.setCurrentIndex(index)
+                else:
+                    self.combo.setCurrentIndex(-1)
+                    self.combo.setEditText(current_text)
+            else:
+                self.combo.setCurrentIndex(0)
+        finally:
+            self.combo.blockSignals(previous)
+        self.generate_button.setEnabled(category is not None)
+        self._sync_current_entry_id()
+        self._refresh_status()
+
+    def _sync_current_entry_id(self) -> None:
+        current_index = self.combo.currentIndex()
+        if current_index >= 0:
+            data = self.combo.itemData(current_index)
+            if data not in (None, ""):
+                self._current_entry_id = int(data)
+                return
+        self._current_entry_id = self._value_to_entry_id.get(self.combo.currentText().strip())
+
+    def _refresh_status(self) -> None:
+        clean_value = self.combo.currentText().strip()
+        if not clean_value:
+            self.status_label.setText("No registry value selected.")
+            return
+        if self._current_entry_id is not None:
+            self.status_label.setText("Selected existing immutable registry value.")
+            return
+        if self.system_key == BUILTIN_CATEGORY_REGISTRY_SHA256_KEY:
+            self.status_label.setText(
+                "Manual entry will be validated as a Registry SHA-256 Key when you save."
+            )
+            return
+        self.status_label.setText(
+            "Manual entry will be captured as a new immutable registry code when you save if it matches the configured category rules."
+        )
+
+    def _on_combo_changed(self, _index: int) -> None:
+        self._sync_current_entry_id()
+        self._refresh_status()
+        self.valueChanged.emit()
+
+    def _on_text_edited(self, _text: str) -> None:
+        self._current_entry_id = None
+        self._refresh_status()
+        self.valueChanged.emit()
+
+    def set_value(self, *, entry_id: int | None, value: str | None) -> None:
+        clean_value = str(value or "").strip()
+        self.refresh_choices()
+        previous = self.combo.blockSignals(True)
+        try:
+            if entry_id is not None:
+                index = self.combo.findData(int(entry_id))
+                if index >= 0:
+                    self.combo.setCurrentIndex(index)
+                else:
+                    self.combo.setCurrentIndex(-1)
+                    self.combo.setEditText(clean_value)
+            elif clean_value:
+                index = self.combo.findText(clean_value)
+                if index >= 0:
+                    self.combo.setCurrentIndex(index)
+                else:
+                    self.combo.setCurrentIndex(-1)
+                    self.combo.setEditText(clean_value)
+            else:
+                self.combo.setCurrentIndex(0)
+        finally:
+            self.combo.blockSignals(previous)
+        self._current_entry_id = int(entry_id) if entry_id is not None else None
+        if self._current_entry_id is None:
+            self._sync_current_entry_id()
+        self._refresh_status()
+
+    def entry_id(self) -> int | None:
+        self._sync_current_entry_id()
+        return self._current_entry_id
+
+    def value(self) -> str | None:
+        clean_value = self.combo.currentText().strip()
+        return clean_value or None
+
+    def generate_value(self) -> None:
+        service = self._registry_service()
+        if service is None:
+            QMessageBox.warning(self, "Code Registry", "Open a profile first.")
+            return
+        try:
+            result = (
+                service.generate_sha256_key(
+                    system_key=self.system_key, created_via="contract.editor.generate"
+                )
+                if self.system_key == BUILTIN_CATEGORY_REGISTRY_SHA256_KEY
+                else service.generate_next_code(
+                    system_key=self.system_key, created_via="contract.editor.generate"
+                )
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, "Code Registry", str(exc))
+            return
+        self.refresh_choices()
+        self.set_value(entry_id=int(result.entry.id), value=result.entry.value)
+        self.status_label.setText("Generated and issued as an immutable registry value.")
+        self.valueChanged.emit()
 
 
 @dataclass(slots=True)
@@ -2191,6 +2375,43 @@ class ContractEditorDialog(QDialog):
         core_layout.addLayout(core_form)
         overview_layout.addWidget(core_box)
 
+        registry_box, registry_layout = _create_standard_section(
+            self,
+            "Registry IDs",
+            "Assign immutable internal contract and license numbers here, and keep the Registry SHA-256 Key clearly separate from watermark/authenticity keys.",
+        )
+        registry_form = QFormLayout()
+        _configure_standard_form_layout(registry_form)
+        registry_service_provider = getattr(self.contract_service, "code_registry_service", None)
+        if not callable(registry_service_provider):
+
+            def registry_service_provider():
+                return None
+
+        self.contract_number_edit = _RegistryFieldEditor(
+            registry_service_provider=registry_service_provider,
+            system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+            generate_label="Generate",
+            parent=self,
+        )
+        registry_form.addRow("Contract Number", self.contract_number_edit)
+        self.license_number_edit = _RegistryFieldEditor(
+            registry_service_provider=registry_service_provider,
+            system_key=BUILTIN_CATEGORY_LICENSE_NUMBER,
+            generate_label="Generate",
+            parent=self,
+        )
+        registry_form.addRow("License Number", self.license_number_edit)
+        self.registry_sha256_key_edit = _RegistryFieldEditor(
+            registry_service_provider=registry_service_provider,
+            system_key=BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
+            generate_label="Generate Key",
+            parent=self,
+        )
+        registry_form.addRow("Registry SHA-256 Key", self.registry_sha256_key_edit)
+        registry_layout.addLayout(registry_form)
+        overview_layout.addWidget(registry_box)
+
         lifecycle_box, lifecycle_layout = _create_standard_section(
             self,
             "Lifecycle Dates",
@@ -2382,6 +2603,18 @@ class ContractEditorDialog(QDialog):
             self.option_periods_edit.setText(contract.option_periods or "")
             self.reversion_edit.setText(contract.reversion_date or "")
             self.termination_edit.setText(contract.termination_date or "")
+            self.contract_number_edit.set_value(
+                entry_id=contract.contract_registry_entry_id,
+                value=contract.contract_number,
+            )
+            self.license_number_edit.set_value(
+                entry_id=contract.license_registry_entry_id,
+                value=contract.license_number,
+            )
+            self.registry_sha256_key_edit.set_value(
+                entry_id=contract.registry_sha256_key_entry_id,
+                value=contract.registry_sha256_key,
+            )
             self.summary_edit.setPlainText(contract.summary or "")
             self.notes_edit.setPlainText(contract.notes or "")
             self.work_ids_edit.set_value_ids(detail.work_ids)
@@ -2391,6 +2624,9 @@ class ContractEditorDialog(QDialog):
             self.obligations_editor.load_obligations(detail.obligations)
             self.documents_editor.load_documents(detail.documents)
         else:
+            self.contract_number_edit.set_value(entry_id=None, value=None)
+            self.license_number_edit.set_value(entry_id=None, value=None)
+            self.registry_sha256_key_edit.set_value(entry_id=None, value=None)
             self.obligations_editor.load_obligations([])
             self.documents_editor.load_documents([])
 
@@ -2479,6 +2715,12 @@ class ContractEditorDialog(QDialog):
         return ContractPayload(
             title=self.title_edit.text().strip(),
             contract_type=self.type_edit.text().strip() or None,
+            contract_number=self.contract_number_edit.value(),
+            license_number=self.license_number_edit.value(),
+            registry_sha256_key=self.registry_sha256_key_edit.value(),
+            contract_registry_entry_id=self.contract_number_edit.entry_id(),
+            license_registry_entry_id=self.license_number_edit.entry_id(),
+            registry_sha256_key_entry_id=self.registry_sha256_key_edit.entry_id(),
             draft_date=self.draft_edit.text().strip() or None,
             signature_date=self.signature_edit.text().strip() or None,
             effective_date=self.effective_edit.text().strip() or None,
@@ -2511,9 +2753,20 @@ class ContractEditorDialog(QDialog):
 class ContractBrowserPanel(QWidget):
     """Browse and edit contract lifecycle records inside a workspace panel."""
 
-    def __init__(self, *, contract_service_provider, parent=None):
+    def __init__(
+        self,
+        *,
+        contract_service_provider,
+        create_contract_handler=None,
+        update_contract_handler=None,
+        delete_contract_handler=None,
+        parent=None,
+    ):
         super().__init__(parent)
         self.contract_service_provider = contract_service_provider
+        self.create_contract_handler = create_contract_handler
+        self.update_contract_handler = update_contract_handler
+        self.delete_contract_handler = delete_contract_handler
         self.setObjectName("contractBrowserPanel")
         _apply_standard_widget_chrome(self, "contractBrowserPanel")
 
@@ -2659,7 +2912,8 @@ class ContractBrowserPanel(QWidget):
         if dialog.exec() != QDialog.Accepted:
             return
         try:
-            contract_id = service.create_contract(dialog.payload())
+            create_handler = self.create_contract_handler or service.create_contract
+            contract_id = create_handler(dialog.payload())
         except Exception as exc:
             QMessageBox.critical(self, "Contract Manager", str(exc))
             return
@@ -2683,7 +2937,8 @@ class ContractBrowserPanel(QWidget):
         if dialog.exec() != QDialog.Accepted:
             return
         try:
-            service.update_contract(contract_id, dialog.payload())
+            update_handler = self.update_contract_handler or service.update_contract
+            update_handler(contract_id, dialog.payload())
         except Exception as exc:
             QMessageBox.critical(self, "Contract Manager", str(exc))
             return
@@ -2705,7 +2960,8 @@ class ContractBrowserPanel(QWidget):
             prompt="Delete the selected contract?",
         ):
             return
-        service.delete_contract(contract_id)
+        delete_handler = self.delete_contract_handler or service.delete_contract
+        delete_handler(contract_id)
         self.refresh()
 
     def export_deadlines(self) -> None:

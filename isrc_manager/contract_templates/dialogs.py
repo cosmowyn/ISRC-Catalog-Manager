@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import shutil
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 from PySide6.QtCore import QDate, QEvent, QPoint, Qt, QTimer, QUrl, Signal
@@ -40,6 +41,15 @@ from PySide6.QtWidgets import (
 )
 from shiboken6 import isValid as _qt_object_is_valid
 
+from isrc_manager.code_registry import (
+    BUILTIN_CATEGORY_CATALOG_NUMBER,
+    BUILTIN_CATEGORY_CONTRACT_NUMBER,
+    BUILTIN_CATEGORY_LICENSE_NUMBER,
+    BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
+    CATALOG_MODE_INTERNAL,
+    CLASSIFICATION_INTERNAL,
+    CatalogIdentifierResolution,
+)
 from isrc_manager.workspace_debug import (
     digest_debug_value,
     summarize_panel_layout_state,
@@ -5385,11 +5395,12 @@ class ContractTemplateWorkspacePanel(QWidget):
         self._suspend_fill_updates = True
         try:
             for widget in self.selector_widgets.values():
-                previous_signal_state = widget.blockSignals(True)
+                target = self._selector_combo(widget) or widget
+                previous_signal_state = target.blockSignals(True)
                 try:
                     self._write_widget_value(widget, None, explicit=False)
                 finally:
-                    widget.blockSignals(previous_signal_state)
+                    target.blockSignals(previous_signal_state)
             for widget in self.manual_widgets.values():
                 previous_signal_state = widget.blockSignals(True)
                 try:
@@ -5407,16 +5418,17 @@ class ContractTemplateWorkspacePanel(QWidget):
         *,
         explicit: bool,
     ) -> None:
-        if isinstance(widget, QComboBox):
+        combo = self._selector_combo(widget)
+        if combo is not None:
             if not explicit or value is None:
-                widget.setCurrentIndex(0)
+                combo.setCurrentIndex(0)
                 return
-            index = widget.findData(value)
+            index = combo.findData(value)
             if index < 0:
-                index = widget.findData(str(value))
+                index = combo.findData(str(value))
             if index < 0:
-                index = widget.findText(str(value))
-            widget.setCurrentIndex(index if index >= 0 else 0)
+                index = combo.findText(str(value))
+            combo.setCurrentIndex(index if index >= 0 else 0)
             return
         if isinstance(widget, QCheckBox):
             widget.setChecked(bool(value) if explicit else False)
@@ -5442,8 +5454,9 @@ class ContractTemplateWorkspacePanel(QWidget):
 
     @staticmethod
     def _read_widget_value(widget: QWidget) -> object | None:
-        if isinstance(widget, QComboBox):
-            value = widget.currentData()
+        combo = ContractTemplateWorkspacePanel._selector_combo(widget)
+        if combo is not None:
+            value = combo.currentData()
             return value if value is not None else None
         if isinstance(widget, QCheckBox):
             if not bool(widget.property("has_user_value")):
@@ -5461,6 +5474,18 @@ class ContractTemplateWorkspacePanel(QWidget):
         if isinstance(widget, QLineEdit):
             return _clean_text(widget.text())
         return None
+
+    @staticmethod
+    def _selector_combo(widget: QWidget | None) -> QComboBox | None:
+        if isinstance(widget, QComboBox):
+            return widget
+        if widget is None:
+            return None
+        combo = widget.property("selector_combo")
+        if isinstance(combo, QComboBox):
+            return combo
+        found = widget.findChild(QComboBox, "contractTemplateSelectorWidget")
+        return found if isinstance(found, QComboBox) else None
 
     def _mark_fill_dirty(self) -> None:
         if self._suspend_fill_updates:
@@ -5659,8 +5684,50 @@ class ContractTemplateWorkspacePanel(QWidget):
         while layout.rowCount() > 0:
             layout.removeRow(0)
 
-    def _build_selector_widget(self, field: ContractTemplateFormSelectorField) -> QComboBox:
-        combo = QComboBox(self.fill_form_tab)
+    @staticmethod
+    def _selector_generate_actions(
+        field: ContractTemplateFormSelectorField,
+    ) -> list[tuple[str, str]]:
+        symbols = {
+            str(symbol or "").strip()
+            for symbol in field.placeholder_symbols
+            if str(symbol or "").strip()
+        }
+        normalized_symbols = {symbol.strip("{} ") for symbol in symbols}
+        actions: list[tuple[str, str]] = []
+        if field.scope_entity_type == "track" and any(
+            symbol.endswith("catalog_number") and ".track." in symbol
+            for symbol in normalized_symbols
+        ):
+            actions.append(("Generate Catalog Number", BUILTIN_CATEGORY_CATALOG_NUMBER))
+        if field.scope_entity_type == "release" and any(
+            symbol.endswith("catalog_number") and ".release." in symbol
+            for symbol in normalized_symbols
+        ):
+            actions.append(("Generate Catalog Number", BUILTIN_CATEGORY_CATALOG_NUMBER))
+        if field.scope_entity_type == "contract":
+            if any(symbol.endswith("contract_number") for symbol in normalized_symbols):
+                actions.append(("Generate Contract Number", BUILTIN_CATEGORY_CONTRACT_NUMBER))
+            if any(symbol.endswith("license_number") for symbol in normalized_symbols):
+                actions.append(("Generate License Number", BUILTIN_CATEGORY_LICENSE_NUMBER))
+            if any(symbol.endswith("registry_sha256_key") for symbol in normalized_symbols):
+                actions.append(
+                    ("Generate Registry SHA-256 Key", BUILTIN_CATEGORY_REGISTRY_SHA256_KEY)
+                )
+        return actions
+
+    def _build_selector_widget(self, field: ContractTemplateFormSelectorField) -> QWidget:
+        container = QWidget(self.fill_form_tab)
+        container.setProperty("selector_key", field.selector_key)
+        container.setProperty("placeholder_symbols", list(field.placeholder_symbols))
+        container.setProperty("scope_entity_type", field.scope_entity_type)
+        container.setProperty("scope_policy", field.scope_policy)
+        container.setProperty("widget_kind", field.widget_kind)
+        row = QHBoxLayout(container)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(8)
+
+        combo = QComboBox(container)
         combo.setObjectName("contractTemplateSelectorWidget")
         combo.setProperty("selector_key", field.selector_key)
         combo.setProperty("placeholder_symbols", list(field.placeholder_symbols))
@@ -5675,7 +5742,95 @@ class ContractTemplateWorkspacePanel(QWidget):
             if choice.description:
                 combo.setItemData(combo.count() - 1, choice.description, Qt.ToolTipRole)
         combo.currentIndexChanged.connect(self._mark_fill_dirty)
-        return combo
+        container.setProperty("selector_combo", combo)
+        row.addWidget(combo, 1)
+        for label, system_key in self._selector_generate_actions(field):
+            button = QPushButton(label, container)
+            button.setProperty("registry_system_key", system_key)
+            button.clicked.connect(
+                partial(
+                    self._handle_selector_generate_clicked,
+                    container,
+                    system_key,
+                )
+            )
+            row.addWidget(button)
+        return container
+
+    def _handle_selector_generate_clicked(
+        self,
+        widget: QWidget,
+        system_key: str,
+        _checked: bool = False,
+    ) -> None:
+        self._generate_selector_registry_value(widget, system_key=system_key)
+
+    def _generate_selector_registry_value(self, widget: QWidget, *, system_key: str) -> None:
+        combo = self._selector_combo(widget)
+        if combo is None or combo.currentData() in (None, ""):
+            QMessageBox.information(
+                self,
+                "Fill Form",
+                "Choose the track, release, or contract that should receive the generated registry value first.",
+            )
+            return
+        scope_entity_type = str(widget.property("scope_entity_type") or "").strip().lower()
+        record_id = int(combo.currentData())
+        export_service = self._export_service()
+        if export_service is None:
+            QMessageBox.warning(self, "Fill Form", "Open a profile first.")
+            return
+        try:
+            if scope_entity_type in {"track", "release"}:
+                owner_service = (
+                    export_service.track_service
+                    if scope_entity_type == "track"
+                    else export_service.release_service
+                )
+                if owner_service is None:
+                    raise ValueError(f"{scope_entity_type.title()} service is unavailable.")
+                registry_service = owner_service.code_registry_service()
+                if registry_service is None:
+                    raise ValueError("Code registry service is unavailable.")
+                result = registry_service.generate_next_code(
+                    system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+                    created_via="contract_template.fill_form.generate",
+                )
+                registry_service.assign_catalog_to_owner(
+                    owner_kind=scope_entity_type,
+                    owner_id=record_id,
+                    resolution=CatalogIdentifierResolution(
+                        mode=CATALOG_MODE_INTERNAL,
+                        value=result.entry.value,
+                        registry_entry_id=result.entry.id,
+                        category_id=result.entry.category_id,
+                        classification_status=CLASSIFICATION_INTERNAL,
+                    ),
+                    provenance_kind="generated",
+                    source_label="contract_template.fill_form.generate",
+                )
+                self.fill_status_label.setText(
+                    f"Generated {result.entry.value} for {scope_entity_type} #{record_id}."
+                )
+            elif scope_entity_type == "contract":
+                contract_service = export_service.contract_service
+                if contract_service is None:
+                    raise ValueError("Contract service is unavailable.")
+                entry = contract_service.generate_registry_value_for_contract(
+                    record_id,
+                    system_key=system_key,
+                    created_via="contract_template.fill_form.generate",
+                )
+                self.fill_status_label.setText(
+                    f"Generated {entry.value} for contract #{record_id}."
+                )
+            else:
+                raise ValueError("This selector does not support registry generation.")
+        except Exception as exc:
+            QMessageBox.critical(self, "Fill Form", str(exc))
+            return
+        self.fill_warning_label.setText("")
+        self._mark_fill_dirty()
 
     def _build_auto_field_widget(self, field: ContractTemplateFormAutoField) -> QLabel:
         label = QLabel(field.source_label, self.fill_form_tab)
