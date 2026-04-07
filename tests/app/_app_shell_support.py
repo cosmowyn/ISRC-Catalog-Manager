@@ -6209,8 +6209,8 @@ class AppShellTestCase(unittest.TestCase):
             )
             current_page = dialog.primary_tabs.currentWidget()
             self.assertEqual(current_page.property("role"), "workspaceCanvas")
-            self.assertIsInstance(dialog.catalog_number, app_module.QComboBox)
-            self.assertTrue(dialog.catalog_number.isEditable())
+            self.assertIsInstance(dialog.catalog_number, app_module.CatalogIdentifierField)
+            self.assertTrue(dialog.catalog_number.combo.isEditable())
         finally:
             dialog.close()
 

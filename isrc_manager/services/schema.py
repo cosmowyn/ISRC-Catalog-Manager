@@ -41,6 +41,18 @@ class DatabaseSchemaService:
             row[1] for row in self.cursor.execute(f"PRAGMA table_info({table_name})").fetchall()
         }
 
+    def _table_exists(self, table_name: str) -> bool:
+        row = self.cursor.execute(
+            """
+            SELECT 1
+            FROM sqlite_master
+            WHERE type='table' AND name=?
+            LIMIT 1
+            """,
+            (table_name,),
+        ).fetchone()
+        return row is not None
+
     def init_db(self) -> None:
         # Core entities
         self.cursor.execute(
@@ -1899,74 +1911,80 @@ class DatabaseSchemaService:
             """
         )
 
-        release_columns = self._table_columns("Releases")
-        for column_name, column_sql in (
-            (
-                "catalog_registry_entry_id",
-                "INTEGER REFERENCES CodeRegistryEntries(id) ON DELETE SET NULL",
-            ),
-            (
-                "external_catalog_identifier_id",
-                "INTEGER REFERENCES ExternalCatalogIdentifiers(id) ON DELETE SET NULL",
-            ),
-        ):
-            if column_name not in release_columns:
-                self.cursor.execute(f"ALTER TABLE Releases ADD COLUMN {column_name} {column_sql}")
-        self.cursor.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_releases_catalog_registry_entry_id
-            ON Releases(catalog_registry_entry_id)
-            """
-        )
-        self.cursor.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_releases_external_catalog_identifier_id
-            ON Releases(external_catalog_identifier_id)
-            """
-        )
+        if self._table_exists("Releases"):
+            release_columns = self._table_columns("Releases")
+            for column_name, column_sql in (
+                (
+                    "catalog_registry_entry_id",
+                    "INTEGER REFERENCES CodeRegistryEntries(id) ON DELETE SET NULL",
+                ),
+                (
+                    "external_catalog_identifier_id",
+                    "INTEGER REFERENCES ExternalCatalogIdentifiers(id) ON DELETE SET NULL",
+                ),
+            ):
+                if column_name not in release_columns:
+                    self.cursor.execute(
+                        f"ALTER TABLE Releases ADD COLUMN {column_name} {column_sql}"
+                    )
+            self.cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_releases_catalog_registry_entry_id
+                ON Releases(catalog_registry_entry_id)
+                """
+            )
+            self.cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_releases_external_catalog_identifier_id
+                ON Releases(external_catalog_identifier_id)
+                """
+            )
 
-        contract_columns = self._table_columns("Contracts")
-        contract_additions = (
-            ("contract_number", "TEXT"),
-            ("license_number", "TEXT"),
-            ("registry_sha256_key", "TEXT"),
-            (
-                "contract_registry_entry_id",
-                "INTEGER REFERENCES CodeRegistryEntries(id) ON DELETE SET NULL",
-            ),
-            (
-                "license_registry_entry_id",
-                "INTEGER REFERENCES CodeRegistryEntries(id) ON DELETE SET NULL",
-            ),
-            (
-                "registry_sha256_key_entry_id",
-                "INTEGER REFERENCES CodeRegistryEntries(id) ON DELETE SET NULL",
-            ),
-        )
-        for column_name, column_sql in contract_additions:
-            if column_name not in contract_columns:
-                self.cursor.execute(f"ALTER TABLE Contracts ADD COLUMN {column_name} {column_sql}")
-        self.cursor.execute(
-            """
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_contracts_contract_registry_entry_unique
-            ON Contracts(contract_registry_entry_id)
-            WHERE contract_registry_entry_id IS NOT NULL
-            """
-        )
-        self.cursor.execute(
-            """
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_contracts_license_registry_entry_unique
-            ON Contracts(license_registry_entry_id)
-            WHERE license_registry_entry_id IS NOT NULL
-            """
-        )
-        self.cursor.execute(
-            """
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_contracts_registry_sha256_key_entry_unique
-            ON Contracts(registry_sha256_key_entry_id)
-            WHERE registry_sha256_key_entry_id IS NOT NULL
-            """
-        )
+        if self._table_exists("Contracts"):
+            contract_columns = self._table_columns("Contracts")
+            contract_additions = (
+                ("contract_number", "TEXT"),
+                ("license_number", "TEXT"),
+                ("registry_sha256_key", "TEXT"),
+                (
+                    "contract_registry_entry_id",
+                    "INTEGER REFERENCES CodeRegistryEntries(id) ON DELETE SET NULL",
+                ),
+                (
+                    "license_registry_entry_id",
+                    "INTEGER REFERENCES CodeRegistryEntries(id) ON DELETE SET NULL",
+                ),
+                (
+                    "registry_sha256_key_entry_id",
+                    "INTEGER REFERENCES CodeRegistryEntries(id) ON DELETE SET NULL",
+                ),
+            )
+            for column_name, column_sql in contract_additions:
+                if column_name not in contract_columns:
+                    self.cursor.execute(
+                        f"ALTER TABLE Contracts ADD COLUMN {column_name} {column_sql}"
+                    )
+            self.cursor.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_contracts_contract_registry_entry_unique
+                ON Contracts(contract_registry_entry_id)
+                WHERE contract_registry_entry_id IS NOT NULL
+                """
+            )
+            self.cursor.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_contracts_license_registry_entry_unique
+                ON Contracts(license_registry_entry_id)
+                WHERE license_registry_entry_id IS NOT NULL
+                """
+            )
+            self.cursor.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_contracts_registry_sha256_key_entry_unique
+                ON Contracts(registry_sha256_key_entry_id)
+                WHERE registry_sha256_key_entry_id IS NOT NULL
+                """
+            )
 
         self._seed_code_registry_categories()
         self._backfill_catalog_registry_links()
@@ -2110,6 +2128,8 @@ class DatabaseSchemaService:
 
         service = CodeRegistryService(self.conn)
         for owner_kind, table_name in (("track", "Tracks"), ("release", "Releases")):
+            if not self._table_exists(table_name):
+                continue
             rows = self.cursor.execute(
                 f"""
                 SELECT id, catalog_number

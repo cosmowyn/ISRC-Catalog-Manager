@@ -11478,6 +11478,8 @@ class App(QMainWindow):
             # Run schema migrations and then refresh caches that depend on schema
             try:
                 self.migrate_schema()
+                if self.code_registry_service is not None:
+                    self.code_registry_service.ensure_default_categories()
             except Exception as e:
                 self.logger.exception(f"Schema migration failed: {e}")
                 self._run_startup_message_box(

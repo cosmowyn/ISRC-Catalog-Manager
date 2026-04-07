@@ -98,6 +98,26 @@ class CodeRegistryService:
         self.conn = conn
         self.ensure_default_categories()
 
+    def _registry_schema_ready(self, *, cursor: sqlite3.Cursor | None = None) -> bool:
+        cur = cursor or self.conn.cursor()
+        required_tables = (
+            "CodeRegistryCategories",
+            "CodeRegistrySequences",
+            "CodeRegistryEntries",
+            "ExternalCatalogIdentifiers",
+        )
+        rows = cur.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type='table'
+              AND name IN (?, ?, ?, ?)
+            """,
+            required_tables,
+        ).fetchall()
+        present = {str(row[0]) for row in rows}
+        return all(table_name in present for table_name in required_tables)
+
     @staticmethod
     def _clean_text(value: object | None) -> str | None:
         text = str(value or "").strip()
@@ -119,6 +139,8 @@ class CodeRegistryService:
 
     def ensure_default_categories(self, *, cursor: sqlite3.Cursor | None = None) -> None:
         cur = cursor or self.conn.cursor()
+        if not self._registry_schema_ready(cursor=cur):
+            return
         for payload in _BUILTIN_CATEGORIES:
             cur.execute(
                 """
