@@ -139,6 +139,14 @@ For the best fidelity, print-safe HTML templates are ideal. Pages and DOCX impor
 they are normalized into HTML working drafts behind the scenes so preview and export stay
 consistent.
 
+The repository also includes a bundled print-safe starter package at
+[HTML license template/README.md](HTML%20license%20template/README.md). It ships as a seven-page
+HTML remix-license example with companion `banner.png` and `footer-logo.png` assets, and it
+demonstrates owner, party, track, manual, `db.contract.license_number`, and
+`db.contract.registry_sha256_key` placeholders on the app's preferred HTML-native path. Use it as
+a starting point, not as legal advice, and customize the content for your own workflow and
+jurisdiction before relying on it.
+
 ### Quality, diagnostics, and recovery
 
 Operational safety is part of the product. The app includes:

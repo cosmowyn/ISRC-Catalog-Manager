@@ -16,6 +16,7 @@ This `docs/` directory is the repository-side companion to that help surface. It
 - [Catalog Workspace Workflows](catalog-workspace-workflows.md): docked workspace, catalog managers, media intake, and daily review flow
 - [Code Registry Workflows](code-registry-workflows.md): internal business codes, external catalog identifiers, generation, linking, and Registry SHA-256 Keys
 - [Contract Template Workflows](contract-template-workflows.md): template import, symbol generation, fill-form drafting, live HTML preview, and PDF export
+- [Bundled HTML License Template Example](../HTML%20license%20template/README.md): print-safe starter package, placeholder list, asset rules, draft-generation notes, and legal disclaimer
 - [Import and Merge Workflows](import-and-merge-workflows.md): exchange import, XML review, mapping, match rules, and reviewed media attachment
 - [Repertoire Knowledge System](repertoire_knowledge_system.md): tracks, releases, works, parties, contracts, rights, documents, and assets
 

@@ -1,0 +1,1262 @@
+<!DOCTYPE html>
+
+<html class="document-html" lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1" name="viewport"/>
+<title>Example Remix license agreement semantic HTML</title>
+<style>
+    :root {
+      --sheet-width: 210mm;
+      --sheet-height: 297mm;
+      --print-sheet-height: 296.6mm;
+      --banner-height: 52.5mm;
+      --safari-print-sheet-height: 296mm;
+      --safari-page-content-top: 9.6mm;
+      --safari-page-content-bottom: 17.2mm;
+      --safari-page-footer-min-height: 11.8mm;
+      --safari-page-footer-padding-top: 2mm;
+      --safari-page-footer-padding-bottom: 3.4mm;
+      --safari-body-size: 9.25pt;
+      --safari-small-size: 7.45pt;
+      --safari-title-size: 13.2pt;
+      --safari-section-size: 10.35pt;
+      --safari-body-line-height: 1.19;
+      --page-margin-inline: 18mm;
+      --page-content-top: 10.75mm;
+      --page-content-bottom: 0;
+      --page-footer-min-height: 12.8mm;
+      --page-footer-padding-top: 2.4mm;
+      --page-footer-padding-bottom: 4mm;
+      --page-screen-gap: 24px;
+      --page-screen-padding-top: 24px;
+      --page-screen-padding-bottom: 40px;
+      --banner-aspect-ratio: 4 / 1;
+      --banner-background: #09131d;
+      --text-color: #111;
+      --muted-color: #555;
+      --paper-color: #fff;
+      --surface-color: #d7d7d7;
+      --border-color: #cfcfcf;
+      --rule-color: #727272;
+      --shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
+      --base-font: "Helvetica Neue", Helvetica, Arial, sans-serif;
+      --body-size: 9.6pt;
+      --small-size: 7.7pt;
+      --title-size: 13.5pt;
+      --section-size: 10.6pt;
+      --letterhead-line-height: 1.15;
+      --body-line-height: 1.22;
+      --heading-line-height: 1.12;
+      --footer-line-height: 1.15;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      min-width: var(--sheet-width);
+      background: var(--surface-color);
+      color: var(--text-color);
+      font-family: var(--base-font);
+      line-height: var(--body-line-height);
+    }
+
+    body {
+      padding: var(--page-screen-padding-top) 0 var(--page-screen-padding-bottom);
+    }
+
+    .document {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: var(--page-screen-gap);
+    }
+
+    .page {
+      width: var(--sheet-width);
+      min-height: var(--sheet-height);
+      height: var(--sheet-height);
+      background: var(--paper-color);
+      box-shadow: var(--shadow);
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      overflow: hidden;
+      isolation: isolate;
+    }
+
+    .page__content {
+      min-height: 0;
+      min-width: 0;
+      padding: var(--page-content-top) var(--page-margin-inline) var(--page-content-bottom);
+      overflow: hidden;
+    }
+
+    .page__footer {
+      min-height: var(--page-footer-min-height);
+      padding:
+        var(--page-footer-padding-top)
+        var(--page-margin-inline)
+        var(--page-footer-padding-bottom);
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: end;
+      column-gap: 12px;
+      font-size: var(--small-size);
+      line-height: var(--footer-line-height);
+      color: var(--muted-color);
+    }
+
+    .page__footer-license {
+      justify-self: start;
+      font-style: italic;
+    }
+
+    .page__footer-brand {
+      justify-self: center;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 1.4mm;
+      text-align: center;
+      color: var(--text-color);
+      font-style: normal;
+      white-space: nowrap;
+    }
+
+    .page__footer-brand-text {
+      display: inline-block;
+    }
+
+    .page__footer-logo {
+      display: block;
+      width: auto;
+      height: 3.15mm;
+      object-fit: contain;
+      flex: 0 0 auto;
+    }
+
+    .page__footer-page {
+      justify-self: end;
+      text-align: right;
+      white-space: nowrap;
+      font-style: italic;
+    }
+
+    .page__content > :first-child {
+      margin-top: 0;
+    }
+
+    .page__content > :last-child {
+      margin-bottom: 0;
+    }
+
+    .clause-group + .clause-group {
+      margin-top: 0.8mm;
+    }
+
+    .schedule-table td:first-child,
+    .schedule-table th:first-child {
+      width: 16mm;
+      white-space: nowrap;
+    }
+
+    .signature-card {
+      min-height: 45mm;
+      padding: 3.4mm 3.5mm 3.2mm;
+      border: 1px solid #000;
+      box-sizing: border-box;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    .signature-card__body {
+      min-height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .signature-row > div:first-child,
+    .signature-row__label {
+      white-space: nowrap;
+    }
+
+    .letterhead {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 3.4mm 14mm;
+      align-items: start;
+      margin: 0 0 5.75mm;
+      font-size: var(--small-size);
+      line-height: var(--letterhead-line-height);
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    .letterhead__left,
+    .letterhead__right {
+      display: flex;
+      flex-direction: column;
+      gap: 0.8mm;
+    }
+
+    .letterhead__left {
+      align-items: flex-start;
+      text-align: left;
+    }
+
+    .letterhead__right {
+      align-items: flex-end;
+      text-align: right;
+    }
+
+    .document-title {
+      margin: 0 0 3.8mm;
+      font-size: var(--title-size);
+      line-height: var(--heading-line-height);
+      font-style: italic;
+      font-weight: 700;
+      text-align: center;
+    }
+
+    .document-meta {
+      display: grid;
+      grid-template-columns: 22mm 1fr;
+      gap: 1.5mm 4.25mm;
+      margin: 0 0 4.75mm;
+      padding-bottom: 2.8mm;
+      border-bottom: 1px solid var(--rule-color);
+      font-size: var(--body-size);
+      align-items: baseline;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    .document-meta__label {
+      font-style: italic;
+    }
+
+    .salutation,
+    .closing {
+      margin: 0 0 2.75mm;
+    }
+
+    .paragraph {
+      margin: 0 0 2.6mm;
+      font-size: var(--body-size);
+      line-height: var(--body-line-height);
+      text-align: justify;
+      orphans: 3;
+      widows: 3;
+    }
+
+    .compact-paragraph {
+      margin: 0 0 1.75mm;
+      font-size: var(--body-size);
+      line-height: var(--body-line-height);
+      orphans: 3;
+      widows: 3;
+    }
+
+    .signature-intro {
+      margin-bottom: 1mm;
+      font-style: italic;
+      font-weight: 700;
+    }
+
+    .signature-note {
+      font-style: italic;
+    }
+
+    .toc-title,
+    .section-title,
+    .exhibit-title {
+      margin: 0 0 3mm;
+      line-height: var(--heading-line-height);
+      font-weight: 700;
+      break-after: avoid;
+      page-break-after: avoid;
+    }
+
+    .toc-title {
+      font-size: 15pt;
+    }
+
+    .section-title,
+    .exhibit-title {
+      font-size: var(--section-size);
+      margin-top: 0.5mm;
+    }
+
+    .section-title {
+      padding-left: 0;
+    }
+
+    .heading--section,
+    .heading--subsection,
+    .heading--nested-subsection {
+      text-indent: 0;
+    }
+
+    /* Root headings: single-digit numbered titles such as "1. Definitions" */
+    .heading--section {
+      margin-left: 0;
+      padding-left: 0;
+    }
+
+    /* Exhibit headings remain flush with the main document column */
+    .heading--subsection {
+      margin-left: 0;
+      padding-left: 0;
+    }
+
+    /* Single-digit headings inside exhibits, e.g. "1. Bandcamp Revenue Sharing" */
+    .heading--nested-subsection {
+      margin-left: 0;
+      padding-left: 0;
+    }
+
+    .toc {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: var(--body-size);
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    .toc td {
+      padding: 0.8mm 0;
+      line-height: var(--body-line-height);
+      vertical-align: top;
+    }
+
+    .toc tr {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    .toc td:first-child {
+      padding-right: 4mm;
+    }
+
+    .toc td:last-child {
+      text-align: right;
+      white-space: nowrap;
+      width: 12mm;
+    }
+
+    .clause-group {
+      margin-bottom: 3.8mm;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    .clause {
+      margin: 0 0 2.25mm;
+      font-size: var(--body-size);
+      line-height: var(--body-line-height);
+      text-align: justify;
+      display: grid;
+      grid-template-columns: 5ch minmax(0, 1fr);
+      column-gap: 2ch;
+      align-items: start;
+      width: 100%;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    .clause__number {
+      font-weight: 700;
+      display: block;
+      white-space: nowrap;
+      text-align: left;
+    }
+
+    .clause__text {
+      display: block;
+      min-width: 0;
+      overflow-wrap: anywhere;
+      word-break: normal;
+    }
+
+    .clause--child {
+      margin-left: 4ch;
+      width: calc(100% - 4ch);
+    }
+
+    .clause--continuation {
+      display: block;
+      margin-left: calc(4ch + 5ch + 2ch);
+      width: calc(100% - (4ch + 5ch + 2ch));
+      text-align: justify;
+    }
+
+    .credit-block {
+      margin: 1.5mm 0 3.6mm 13.5mm;
+      padding-left: 0;
+    }
+
+    .credit-block__line {
+      margin: 0 0 1mm;
+      font-size: var(--body-size);
+      line-height: var(--body-line-height);
+    }
+
+    .schedule-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: var(--body-size);
+      margin-top: 3mm;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    .schedule-table th,
+    .schedule-table td {
+      border: 1px solid var(--border-color);
+      padding: 2mm 2.6mm;
+      text-align: left;
+      vertical-align: top;
+      line-height: var(--body-line-height);
+    }
+
+    .schedule-table th {
+      background: #f6f6f6;
+      font-weight: 700;
+    }
+
+    .schedule-table tr {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    .signature-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 7mm;
+      margin-top: 6.5mm;
+      align-items: stretch;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    .signature-card__title {
+      font-weight: 700;
+      margin: 0 0 2.8mm;
+      font-size: var(--body-size);
+      line-height: var(--body-line-height);
+    }
+
+    .signature-fields {
+      display: grid;
+      gap: 1.5mm;
+    }
+
+    .signature-row {
+      display: grid;
+      grid-template-columns: 18mm 1fr;
+      gap: 3mm;
+      margin: 0;
+      font-size: var(--body-size);
+      line-height: var(--body-line-height);
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    .signature-line-block {
+      margin-top: auto;
+      padding-top: 12mm;
+    }
+
+    .signature-line-rule {
+      border-top: 1px solid #000;
+      min-height: 0;
+    }
+
+    .signature-line-label {
+      margin: 0 0 1.8mm;
+      font-size: var(--body-size);
+      line-height: var(--body-line-height);
+    }
+
+    .signature-grid + .clause-group {
+      margin-top: 5.5mm;
+    }
+
+    .dash-list {
+      margin: 0 0 2.2mm 0;
+      padding-left: 0;
+      list-style: none;
+      font-size: var(--body-size);
+      line-height: var(--body-line-height);
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    .dash-list li::before {
+      content: "- ";
+    }
+
+    .dash-list li {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    /* Reusable indentation helpers for content that belongs under a parent clause */
+    .indent-parent {
+      margin-left: calc(4ch + 5ch + 2ch);
+      width: calc(100% - (4ch + 5ch + 2ch));
+    }
+
+    .indent-parent-reset {
+      margin-left: 0;
+      width: 100%;
+    }
+
+    .list-under-parent {
+      margin-left: calc(4ch + 5ch + 2ch);
+      width: calc(100% - (4ch + 5ch + 2ch));
+    }
+
+    .list-under-parent + .clause--continuation,
+    .list-under-parent + .compact-paragraph,
+    .list-under-parent + .paragraph {
+      margin-left: calc(4ch + 5ch + 2ch);
+      width: calc(100% - (4ch + 5ch + 2ch));
+    }
+
+    .page-break {
+      break-before: auto;
+      page-break-before: auto;
+    }
+
+    @page {
+      size: A4;
+      margin: 0;
+    }
+
+    @media print {
+      html,
+      body {
+        background: #fff;
+        padding: 0;
+        margin: 0;
+        min-width: 0;
+      }
+
+      body {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+
+      .document {
+        gap: 0;
+        margin: 0;
+        padding: 0;
+      }
+
+      .page {
+        box-shadow: none;
+        margin: 0;
+        width: var(--sheet-width);
+        min-width: var(--sheet-width);
+        max-width: var(--sheet-width);
+        height: var(--print-sheet-height);
+        min-height: var(--print-sheet-height);
+        max-height: var(--print-sheet-height);
+        break-before: auto;
+        break-after: page;
+        page-break-before: auto;
+        page-break-after: always;
+        break-inside: avoid-page;
+        page-break-inside: avoid;
+      }
+
+      .page:last-child {
+        break-after: auto;
+        page-break-after: auto;
+      }
+
+      .browser-safari {
+        --body-size: var(--safari-body-size);
+        --small-size: var(--safari-small-size);
+        --title-size: var(--safari-title-size);
+        --section-size: var(--safari-section-size);
+        --body-line-height: var(--safari-body-line-height);
+      }
+
+      .browser-safari .page {
+        position: relative;
+        display: block;
+        height: var(--safari-print-sheet-height);
+        min-height: var(--safari-print-sheet-height);
+        max-height: var(--safari-print-sheet-height);
+        overflow: hidden;
+      }
+
+      .browser-safari .page__header-image-wrap {
+        height: var(--banner-height);
+      }
+
+      .browser-safari .page__content {
+        height: calc(var(--safari-print-sheet-height) - var(--banner-height));
+        padding:
+          var(--safari-page-content-top)
+          var(--page-margin-inline)
+          var(--safari-page-content-bottom);
+        overflow: hidden;
+      }
+
+      .browser-safari .page__footer {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        min-height: var(--safari-page-footer-min-height);
+        padding-top: var(--safari-page-footer-padding-top);
+        padding-bottom: var(--safari-page-footer-padding-bottom);
+      }
+    }
+
+    .page__header-image-wrap {
+      width: 100%;
+      height: var(--banner-height);
+      aspect-ratio: var(--banner-aspect-ratio);
+      overflow: hidden;
+      background: var(--banner-background);
+    }
+
+    .page__header-image {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center top;
+    }
+</style>
+</head>
+<body>
+<main class="document">
+<section class="page page--cover">
+<div class="page__header-image-wrap"><img alt="" class="page__header-image" data-banner-image="true"/></div><div class="page__content">
+<header class="letterhead">
+<div aria-label="Recipient block" class="letterhead__left">
+<div>{{db.party.artist_name}}</div>
+<div>{{db.party.legal_name}}</div>
+<div>{{db.party.street_name}} {{db.party.street_number}}</div>
+<div>{{db.party.postal_code}}, {{db.party.city}}</div>
+<div>{{db.party.country}}</div>
+<div>{{db.party.phone}}</div>
+<div>{{db.party.email}}</div>
+<div>KVK-nr.:{{db.party.chamber_of_commerce_number}}</div>
+<div>BTW-nr.:{{db.party.vat_number}}</div>
+<div>{{db.party.bank_account_number}}</div>
+</div>
+<div aria-label="Sender block" class="letterhead__right">
+<div>{{db.owner.company_name}}</div>
+<div>{{db.owner.display_name}}</div>
+<div>{{db.owner.street_name}} {{db.owner.street_number}}</div>
+<div>{{db.owner.postal_code}}, {{db.owner.city}}</div>
+<div>{{db.owner.country}}</div>
+<div>{{db.owner.phone}}</div>
+<div>{{db.owner.email}}</div>
+<div>KVK-nr.:{{db.owner.chamber_of_commerce_number}}</div>
+<div>BTW-nr.:{{db.owner.vat_number}}</div>
+<div>{{db.owner.bank_account_number}}</div>
+</div>
+</header>
+<h1 class="document-title">Example Remix license agreement</h1>
+<div class="document-meta">
+<div class="document-meta__label">Date:</div>
+<div>{{manual.date}}</div>
+<div class="document-meta__label">License:</div>
+<div>{{db.contract.license_number}}</div>
+</div>
+<p class="compact-paragraph salutation">Dear {{db.party.display_name}},</p>
+<p class="paragraph">Write this paragraph to introduce the license agreement and provide context for the parties involved.</p>
+<p class="paragraph">You can also include any specific instructions, requirements, or expectations for the remix project here.</p>
+<p class="paragraph">Make sure to clearly state the purpose of the agreement and any important details that the licensee should be aware of before proceeding with the remix.</p>
+<p class="paragraph">Feel free to customize this template to fit the specific needs of your remix license agreement and the relationship between the parties involved.</p>
+<p class="paragraph">You can also include any specific instructions, requirements, or expectations for the remix project here.</p>
+<p class="paragraph">Text edits should be done in the HTML file directly, and the content can be dynamically generated using the provided variables such as {{db.track.track_title}}, {{db.owner.artist_name}}, and {{db.owner.company_name}} to personalize the agreement for each licensee.</p>
+<p class="paragraph">This is an example remix license agreement for the track "{{db.track.track_title}}"</p>
+<p class="paragraph">Please review the terms and conditions outlined in this agreement carefully before proceeding with the remix project.</p>
+<p class="paragraph">Use this example at your own risk, this does not claim to be a legally binding document. and is provided for informational purposes only.</p>
+<p class="paragraph">closing statement, somthing like looking forward to collaboration between you and {{db.owner.artist_name}}</p>
+<p class="paragraph">{{db.owner.company_name}} will handle mastering, artwork, legal matters, and distribution.</p>
+<p class="compact-paragraph">Thank you very much and good luck!</p>
+<p class="compact-paragraph closing">Kind regards,</p>
+<p class="compact-paragraph">{{db.owner.display_name}}</p>
+<p class="compact-paragraph">{{db.owner.artist_name}}</p>
+<p class="compact-paragraph">{{db.owner.company_name}}</p>
+</div>
+<footer class="page__footer">
+<div class="page__footer-license">{{db.contract.license_number}}</div>
+<div class="page__footer-brand"><span class="page__footer-brand-text">©{{manual.year}}: {{db.owner.company_name}}</span><img alt="" class="page__footer-logo" data-footer-logo="true"/></div>
+<div class="page__footer-page">Page 1 of 7</div>
+</footer>
+</section>
+<section class="page page-break">
+<div class="page__header-image-wrap"><img alt="" class="page__header-image" data-banner-image="true"/></div><div class="page__content">
+<h2 class="toc-title">Table of contents</h2>
+<table aria-label="Table of contents" class="toc">
+<tbody>
+<tr><td>1. Definitions</td><td>3</td></tr>
+<tr><td>2. License Grant</td><td>3</td></tr>
+<tr><td>3. License Scope</td><td>3</td></tr>
+<tr><td>4. Intellectual Property and Rights Allocation</td><td>3</td></tr>
+<tr><td>5. Confidentiality</td><td>4</td></tr>
+<tr><td>6. Limitation of Liability</td><td>4</td></tr>
+<tr><td>7. Termination</td><td>4</td></tr>
+<tr><td>8. Governing Law</td><td>4</td></tr>
+<tr><td>9. Entire Agreement</td><td>4</td></tr>
+<tr><td>10. Signature</td><td>5</td></tr>
+<tr><td>Exhibit A – Schedule</td><td>5</td></tr>
+<tr><td>Exhibit B – Revenue &amp; Distribution Addendum</td><td>6</td></tr>
+<tr><td>1. Bandcamp Revenue Sharing</td><td>6</td></tr>
+<tr><td>2. Streaming and Other Distribution</td><td>6</td></tr>
+<tr><td>3. Administration and Taxes</td><td>6</td></tr>
+<tr><td>Exhibit C – Term and Reversion of Rights</td><td>7</td></tr>
+<tr><td>1. Term Limitation on Source Assets</td><td>7</td></tr>
+<tr><td>2. Duration of Rights in the Remix</td><td>7</td></tr>
+<tr><td>3. Survival</td><td>7</td></tr>
+<tr><td>4. Integration Clause</td><td>7</td></tr>
+<tr><td>5. Key</td><td>7</td></tr>
+</tbody>
+</table>
+</div>
+<footer class="page__footer">
+<div class="page__footer-license">{{db.contract.license_number}}</div>
+<div class="page__footer-brand"><span class="page__footer-brand-text">©{{manual.year}}: {{db.owner.company_name}}</span><img alt="" class="page__footer-logo" data-footer-logo="true"/></div>
+<div class="page__footer-page">Page 2 of 7</div>
+</footer>
+</section>
+<section class="page page-break">
+<div class="page__header-image-wrap"><img alt="" class="page__header-image" data-banner-image="true"/></div><div class="page__content">
+<section class="clause-group">
+<h2 class="section-title heading--section">1. Definitions</h2>
+<p class="clause clause--child"><span class="clause__number">1.1.</span><span class="clause__text">“Asset” means all audio, MIDI, and related files provided by Licensor, including but not limited to stems, samples, and project data, as described in Schedule Item 6.</span></p>
+<p class="clause clause--child"><span class="clause__number">1.2.</span><span class="clause__text">“Remix” means one derivative musical work produced by Licensee using the Asset.</span></p>
+<p class="clause clause--child"><span class="clause__number">1.3.</span><span class="clause__text">“Term” means the duration specified in Schedule Item 5.</span></p>
+<p class="clause clause--child"><span class="clause__number">1.4.</span><span class="clause__text">“Confidential Information” means all non-public material, data, and metadata shared in connection with this Agreement.</span></p>
+<p class="clause clause--child"><span class="clause__number">1.5.</span><span class="clause__text">“Intellectual Property Rights” include all copyrights, neighbouring rights, trade secrets, and other rights arising from creative activity.</span></p>
+</section>
+<section class="clause-group">
+<h2 class="section-title heading--section">2. License Grant</h2>
+<p class="clause clause--child"><span class="clause__number">2.1.</span><span class="clause__text">Licensor hereby grants to Licensee a non-exclusive, non-transferable, non-sublicensable, time-limited license to use the Asset solely for producing one (1) Remix of “{{db.track.track_title}}”</span></p>
+<p class="clause clause--child"><span class="clause__number">2.2.</span><span class="clause__text">The Asset may not be used for any other production, remix, or derivative work beyond the approved Remix.</span></p>
+<p class="clause clause--child"><span class="clause__number">2.3.</span><span class="clause__text">No ownership or intellectual-property rights in or to the Asset are transferred or assigned to Licensee.</span></p>
+<p class="clause clause--child"><span class="clause__number">2.4.</span><span class="clause__text">Upon expiry or termination, Licensee shall permanently delete all copies of the Asset and any derived material not used in the final Remix and confirm deletion in writing to Licensor.</span></p>
+</section>
+<section class="clause-group">
+<h2 class="section-title heading--section">3. License Scope</h2>
+<p class="clause clause--child"><span class="clause__number">3.1.</span><span class="clause__text">The license granted herein is exclusive to Licensee for their own use, but non-exclusive from Licensor’s perspective.</span></p>
+<p class="clause clause--child"><span class="clause__number">3.2.</span><span class="clause__text">{{db.owner.company_name}} retains the unrestricted right to license the same Asset to other parties under identical or similar agreements.</span></p>
+<p class="clause clause--child"><span class="clause__number">3.3.</span><span class="clause__text">The Licensee may not assign, sell, transfer, or sublicense this Agreement or any of the rights granted herein.</span></p>
+</section>
+<section class="clause-group">
+<h2 class="section-title heading--section">4. Intellectual Property and Rights Allocation</h2>
+<p class="clause clause--child"><span class="clause__number">4.1.</span><span class="clause__text">All copyrights, neighbouring rights, and publishing rights in and to the original musical composition "{{db.track.track_title}}" and all associated materials remain the sole and exclusive property of {{db.owner.company_name}}.</span></p>
+<p class="clause clause--child"><span class="clause__number">4.2.</span><span class="clause__text">The Remix constitutes a derivative work created under license. All rights in the Remix Master recording are fully owned by {{db.owner.company_name}}, including the producer’s share under Dutch and EU neighbouring-rights law.</span></p>
+<p class="clause clause--child"><span class="clause__number">4.3.</span><span class="clause__text">The Licensee retains only their personal performer’s rights, as recognised under Dutch law (SENA) or any worldwide equivalent in their respective territory, for any performance, recording, or execution they contribute to the Remix. The Licensee shall not claim, register, or assert any producer, publisher, authorship, or compositional rights in relation to the Remix or the underlying work. All such rights remain exclusively vested in {{db.owner.company_name}}.</span></p>
+<p class="clause clause--child"><span class="clause__number">4.4.</span><span class="clause__text">All publishing and authorship rights in the underlying composition—including any melodic, harmonic, or structural elements derived from or inspired by the Asset—remain 100 % owned and administered by {{db.owner.company_name}} and shall be registered accordingly with BUMA/STEMRA.</span></p>
+<p class="clause clause--child"><span class="clause__number">4.5.</span><span class="clause__text">{{db.owner.company_name}} retains the exclusive right to release, distribute, license, publish, broadcast, perform and monetise the Remix. The Licensee may not upload, sell, or otherwise distribute the Remix without prior written consent from {{db.owner.company_name}}. The Licensee is, however, permitted to perform the Remix live (including DJ sets, concerts, and broadcasts) and to collect any related performer or neighbouring-rights income, provided such performances do not involve the commercial sale or independent release of the Remix recording.</span></p>
+</section>
+</div>
+<footer class="page__footer">
+<div class="page__footer-license">{{db.contract.license_number}}</div>
+<div class="page__footer-brand"><span class="page__footer-brand-text">©{{manual.year}}: {{db.owner.company_name}}</span><img alt="" class="page__footer-logo" data-footer-logo="true"/></div>
+<div class="page__footer-page">Page 3 of 7</div>
+</footer>
+</section>
+<section class="page page-break">
+<div class="page__header-image-wrap"><img alt="" class="page__header-image" data-banner-image="true"/></div><div class="page__content">
+<section class="clause-group">
+<p class="clause clause--child"><span class="clause__number">4.6.</span><span class="clause__text">An exemption is granted for SoundCloud uploads only, allowing the Licensee to upload the Remix to their personal SoundCloud profile for promotional and non-commercial purposes. This exemption applies solely to the act of uploading and does not constitute permission for distribution, monetisation, licensing, or sharing through SoundCloud’s partner platforms or third-party services. All uploads must include credit to Aeon Cosmowyn and {{db.owner.company_name}}, and must be removed immediately upon written request from {{db.owner.company_name}}.</span></p>
+<p class="clause clause--child"><span class="clause__number">4.7.</span><span class="clause__text">The Remix shall be credited as:</span></p>
+<div class="credit-block">
+<p class="credit-block__line">“{{db.track.track_title}} ({{db.party.artist_name}} Remix)”</p>
+<p class="credit-block__line">© {{db.owner.company_name}} / ℗ {{db.owner.company_name}}</p>
+<p class="credit-block__line">Performer credit: Remixed by {{db.party.artist_name}}</p>
+</div>
+</section>
+<section class="clause-group">
+<h2 class="section-title heading--section">5. Confidentiality</h2>
+<p class="clause clause--child"><span class="clause__number">5.1.</span><span class="clause__text">All Asset files and related materials are confidential. Licensee must not disclose, share, or upload them publicly or privately outside the approved purpose.</span></p>
+</section>
+<section class="clause-group">
+<h2 class="section-title heading--section">6. Limitation of Liability</h2>
+<p class="clause clause--child"><span class="clause__number">6.1.</span><span class="clause__text">The Asset is provided “as is.” Licensor shall not be liable for any loss or damage arising from its use. Licensee uses the materials at their own risk.</span></p>
+</section>
+<section class="clause-group">
+<h2 class="section-title heading--section">7. Termination</h2>
+<p class="clause clause--child"><span class="clause__number">7.1.</span><span class="clause__text">Licensor may terminate this Agreement immediately if Licensee breaches any term herein.</span></p>
+<p class="clause clause--child"><span class="clause__number">7.2.</span><span class="clause__text">Upon termination or expiry, Licensee must delete all copies of the Asset and confirm deletion in writing.</span></p>
+<p class="clause clause--child"><span class="clause__number">7.3.</span><span class="clause__text">Any continued possession or use of the Asset beyond the Term constitutes a material breach and copyright infringement.</span></p>
+<p class="clause clause--child"><span class="clause__number">7.4.</span><span class="clause__text">Copies of the Asset that exist solely within the Licensee’s digital project files used to create the approved Remix shall be considered part of this Agreement. These copies do not need to be destroyed after expiry or termination, provided that they remain archived exclusively for documentation, personal reference, or live performance of the licensed Remix. The Licensee may not extract, reuse, or repurpose any portion of the original Asset from these project files for any other work, release, or derivative creation beyond the licensed Remix.</span></p>
+<p class="clause clause--child"><span class="clause__number">7.5.</span><span class="clause__text">A copy of this License Agreement must always be kept on record by the Licensee, preferably stored together with the Remix project files, to verify the legal origin and terms of use of the included source materials.</span></p>
+</section>
+<section class="clause-group">
+<h2 class="section-title heading--section">8. Governing Law</h2>
+<p class="clause clause--child"><span class="clause__number">8.1.</span><span class="clause__text">This Agreement is governed by and construed in accordance with the laws of The Netherlands.</span></p>
+<p class="clause clause--child"><span class="clause__number">8.2.</span><span class="clause__text">The Parties submit to the exclusive jurisdiction of the courts of The Netherlands.</span></p>
+</section>
+<section class="clause-group">
+<h2 class="section-title heading--section">9. Entire Agreement</h2>
+<p class="clause clause--child"><span class="clause__number">9.1.</span><span class="clause__text">This Agreement supersedes any previous understanding between the Parties and may be amended only in writing signed by both Parties.</span></p>
+</section>
+</div>
+<footer class="page__footer">
+<div class="page__footer-license">{{db.contract.license_number}}</div>
+<div class="page__footer-brand"><span class="page__footer-brand-text">©{{manual.year}}: {{db.owner.company_name}}</span><img alt="" class="page__footer-logo" data-footer-logo="true"/></div>
+<div class="page__footer-page">Page 4 of 7</div>
+</footer>
+</section>
+<section class="page page-break">
+<div class="page__header-image-wrap"><img alt="" class="page__header-image" data-banner-image="true"/></div><div class="page__content">
+<section class="clause-group">
+<h2 class="section-title heading--section">10. Signature</h2>
+<p class="compact-paragraph signature-intro"><strong><em>IN WITNESS WHEREOF</em></strong></p>
+<p class="compact-paragraph signature-note"><em>Both Parties agree to the terms of this License Agreement.</em></p>
+</section>
+<section class="signature-grid">
+<div class="signature-card">
+<div class="signature-card__body">
+<p class="signature-card__title">{{db.owner.company_name}}</p>
+<div class="signature-fields">
+<div class="signature-row"><div class="signature-row__label">Name:</div><div>{{db.owner.legal_name}}</div></div>
+<div class="signature-row"><div class="signature-row__label">Date:</div><div></div></div>
+</div>
+<div class="signature-line-block">
+<div class="signature-line-label">Signature:</div>
+<div aria-hidden="true" class="signature-line-rule"></div>
+</div>
+</div>
+</div>
+<div class="signature-card">
+<div class="signature-card__body">
+<p class="signature-card__title">Licensee (Remix Artist)</p>
+<div class="signature-fields">
+<div class="signature-row"><div class="signature-row__label">Name:</div><div>{{db.party.legal_name}}</div></div>
+<div class="signature-row"><div class="signature-row__label">Date:</div><div></div></div>
+</div>
+<div class="signature-line-block">
+<div class="signature-line-label">Signature:</div>
+<div aria-hidden="true" class="signature-line-rule"></div>
+</div>
+</div>
+</div>
+</section>
+<section class="clause-group">
+<h2 class="exhibit-title heading--subsection">Exhibit A – Schedule</h2>
+<table aria-label="Exhibit A Schedule" class="schedule-table">
+<thead>
+<tr>
+<th scope="col">Item</th>
+<th scope="col">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr><td>1</td><td>License Agreement Date: (as per signatures)</td></tr>
+<tr><td>2</td><td>Parties: {{db.owner.company_name}} / {{db.party.legal_name}}</td></tr>
+<tr><td>3</td><td>License Scope: One Remix only; non-exclusive license from Licensor</td></tr>
+<tr><td>4</td><td>Commencement Date: (as per signatures)</td></tr>
+<tr><td>5</td><td>Expiry Date: 365 days after commencement date</td></tr>
+<tr><td>6</td><td>Description of Asset: Archived Directory (.zip) from "{{db.track.track_title}}" containing stems, samples, and MIDI files</td></tr>
+<tr><td>7</td><td>Format: .zip  .wav  .mid  .tun</td></tr>
+<tr><td>8</td><td>Approved Purpose: Remix for Album release @ {{db.owner.company_name}}</td></tr>
+<tr><td>9</td><td>License Fee: N/A</td></tr>
+</tbody>
+</table>
+</section>
+</div>
+<footer class="page__footer">
+<div class="page__footer-license">{{db.contract.license_number}}</div>
+<div class="page__footer-brand"><span class="page__footer-brand-text">©{{manual.year}}: {{db.owner.company_name}}</span><img alt="" class="page__footer-logo" data-footer-logo="true"/></div>
+<div class="page__footer-page">Page 5 of 7</div>
+</footer>
+</section>
+<section class="page page-break">
+<div class="page__header-image-wrap"><img alt="" class="page__header-image" data-banner-image="true"/></div><div class="page__content">
+<section class="clause-group">
+<h2 class="exhibit-title heading--subsection">Exhibit B – Revenue &amp; Distribution Addendum</h2>
+<h3 class="section-title heading--nested-subsection">1. Bandcamp Revenue Sharing</h3>
+<p class="clause clause--child"><span class="clause__number">1.1.</span><span class="clause__text">All digital and physical sales, streaming, and licensing of the Remix are handled exclusively by {{db.owner.company_name}}.</span></p>
+<p class="clause clause--child"><span class="clause__number">1.2.</span><span class="clause__text">Only for transactions processed directly through {{db.owner.company_name}}’ official Bandcamp page (“Bandcamp Sales”), the Licensee shall receive a proportional share of net income generated by sales of the Remix, calculated solely for the portion of the Remix personally composed, arranged, or performed by the Licensee.</span></p>
+<p class="clause clause--child"><span class="clause__number">1.3.</span><span class="clause__text">“Net Income” means the gross amount actually received by {{db.owner.company_name}} from Bandcamp for the specific Remix track produced by the Licensee, after deduction of:</span></p>
+<ul class="dash-list list-under-parent">
+<li>Bandcamp fees and payment processing fees;</li>
+<li>applicable taxes or levies;</li>
+</ul>
+<p class="clause clause--continuation indent-parent">In cases where a purchaser acquires the entire album or bundle containing multiple remixes or tracks, the Net Income attributable to the Licensee shall be calculated per individual album sale transaction by dividing the Net Income from that specific sale equally among all participating contributors (one share per remixer or artist featured on the release).</p>
+<p class="clause clause--continuation indent-parent">The Licensee shall then receive fifty percent (50 %) of their allocated share from that transaction.</p>
+<p class="clause clause--continuation indent-parent">This calculation applies on a per-sale basis only and does not constitute a proportional share of total album revenue across all sales or contributors.</p>
+<p class="clause clause--child"><span class="clause__number">1.4.</span><span class="clause__text">Payment of the Licensee’s share shall be made quarterly within 30 days after the end of each calendar quarter, accompanied by a digital statement. Default split: 50 % of the net income attributable to the Licensee’s own contribution, unless otherwise agreed in writing.</span></p>
+<h3 class="section-title heading--nested-subsection">2. Streaming and Other Distribution</h3>
+<p class="clause clause--child"><span class="clause__number">2.1.</span><span class="clause__text">All streaming, licensing, and physical sales (CD, vinyl, USB, compilations, etc.) remain the exclusive property of {{db.owner.company_name}}.</span></p>
+<p class="clause clause--child"><span class="clause__number">2.2.</span><span class="clause__text">{{db.owner.company_name}} retains full ownership and control of distribution channels, aggregator accounts, and monetisation settings on all platforms.</span></p>
+<h3 class="section-title heading--nested-subsection">3. Administration and Taxes</h3>
+<p class="clause clause--child"><span class="clause__number">3.1.</span><span class="clause__text">All payments to Licensee shall be made by {{db.owner.company_name}} via electronic transfer in EUR.</span></p>
+<p class="clause clause--child"><span class="clause__number">3.2.</span><span class="clause__text">The Licensee is solely responsible for declaring and paying any taxes due on their revenue share.</span></p>
+</section>
+</div>
+<footer class="page__footer">
+<div class="page__footer-license">{{db.contract.license_number}}</div>
+<div class="page__footer-brand"><span class="page__footer-brand-text">©{{manual.year}}: {{db.owner.company_name}}</span><img alt="" class="page__footer-logo" data-footer-logo="true"/></div>
+<div class="page__footer-page">Page 6 of 7</div>
+</footer>
+</section>
+<section class="page page-break">
+<div class="page__header-image-wrap"><img alt="" class="page__header-image" data-banner-image="true"/></div><div class="page__content">
+<section class="clause-group">
+<h2 class="exhibit-title heading--subsection">Exhibit C – Term and Reversion of Rights</h2>
+<h3 class="section-title heading--nested-subsection">1. Term Limitation on Source Assets</h3>
+<p class="clause clause--child"><span class="clause__number">1.1.</span><span class="clause__text">The expiry date stated in Item 5 of Exhibit A applies only to the Licensee’s permission to access and use the source materials (“the Asset”) for creation of the Remix.</span></p>
+<p class="clause clause--child"><span class="clause__number">1.2.</span><span class="clause__text">After the expiry date, the Licensee must delete all copies of the Asset in accordance with Clause 2.4 of the License Agreement.</span></p>
+<p class="clause clause--child"><span class="clause__number">1.3.</span><span class="clause__text">The expiry of the Asset license does not affect or terminate any rights, ownership, or royalty arrangements established in relation to the completed Remix.</span></p>
+<h3 class="section-title heading--nested-subsection">2. Duration of Rights in the Remix</h3>
+<p class="clause clause--child"><span class="clause__number">2.1.</span><span class="clause__text">All rights and revenue arrangements relating to the completed Remix remain valid for a period of fifty (50) years from the original release date of the Remix, provided that {{db.owner.company_name}} continues to maintain the release in commercial distribution.</span></p>
+<p class="clause clause--child"><span class="clause__number">2.2.</span><span class="clause__text">After expiry of this fifty-year period, all rights, ownership shares, and royalty entitlements in or to the Remix shall automatically and irrevocably revert to {{db.owner.company_name}}, without need for further notice or assignment.</span></p>
+<p class="clause clause--child"><span class="clause__number">2.3.</span><span class="clause__text">This reversion includes any neighbouring rights, mechanical rights, and distribution rights that may have been held by the Licensee under the Remix agreement.</span></p>
+<h3 class="section-title heading--nested-subsection">3. Survival</h3>
+<p class="clause clause--child"><span class="clause__number">3.1.</span><span class="clause__text">The provisions of this Exhibit C shall survive the termination or expiry of the License Agreement and remain binding on both Parties for the duration specified above.</span></p>
+<h3 class="section-title heading--nested-subsection">4. Integration Clause</h3>
+<p class="clause clause--child"><span class="clause__number">4.1.</span><span class="clause__text">By signing or otherwise accepting this License Agreement and accessing the Asset, the Licensee confirms acknowledgment and acceptance that Exhibits A, B, and C form an integral and inseparable part of this Agreement.</span></p>
+<p class="clause clause--child"><span class="clause__number">4.2.</span><span class="clause__text">All Exhibits shall enter into full legal effect upon execution of the main License Agreement under Section 10, and their terms shall be binding on both Parties as if fully set forth in the main body of this Agreement.</span></p>
+<h3 class="section-title heading--nested-subsection">5. Key</h3>
+<p class="clause clause--child"><span class="clause__number">5.1.</span><span class="clause__text">{{db.contract.registry_sha256_key}}</span></p>
+<p class="clause clause--child"><span class="clause__number">5.2.</span><span class="clause__text">File name: {{db.party.artist_name}}_remix_pack.zip</span></p>
+</section>
+</div>
+<footer class="page__footer">
+<div class="page__footer-license">{{db.contract.license_number}}</div>
+<div class="page__footer-brand"><span class="page__footer-brand-text">©{{manual.year}}: {{db.owner.company_name}}</span><img alt="" class="page__footer-logo" data-footer-logo="true"/></div>
+<div class="page__footer-page">Page 7 of 7</div>
+</footer>
+</section>
+</main>
+
+  <script>
+    (function () {
+      const BANNER_SRC = './banner.png';
+      const FOOTER_LOGO_SRC = './footer-logo.png';
+      const userAgent = navigator.userAgent || '';
+      const vendor = navigator.vendor || '';
+      const isSafari =
+        vendor.indexOf('Apple') !== -1 &&
+        userAgent.indexOf('Chrome') === -1 &&
+        userAgent.indexOf('Chromium') === -1 &&
+        userAgent.indexOf('CriOS') === -1 &&
+        userAgent.indexOf('Edg') === -1 &&
+        userAgent.indexOf('OPR') === -1;
+
+      document.documentElement.classList.toggle('browser-safari', isSafari);
+
+      function applyBannerImageSource() {
+        Array.from(document.querySelectorAll('[data-banner-image]')).forEach(function (image) {
+          image.setAttribute('src', BANNER_SRC);
+        });
+      }
+
+      function applyFooterLogoSource() {
+        Array.from(document.querySelectorAll('[data-footer-logo]')).forEach(function (image) {
+          image.setAttribute('src', FOOTER_LOGO_SRC);
+        });
+      }
+
+      applyBannerImageSource();
+      applyFooterLogoSource();
+
+      const CONTINUATION_CLASS = 'clause-group--continued';
+      const ORIGIN_PAGE_ATTR = 'data-origin-page-index';
+      const ORIGIN_ORDER_ATTR = 'data-origin-order-index';
+      const GROUP_ID_ATTR = 'data-group-id';
+      const SOURCE_GROUP_ATTR = 'data-source-group-id';
+      let layoutInitialized = false;
+      let rebalanceScheduled = false;
+
+      function getPages() {
+        return Array.from(document.querySelectorAll('.page'));
+      }
+
+      function getPageContent(page) {
+        return page.querySelector('.page__content');
+      }
+
+      function getDirectMovables(container) {
+        return Array.from(container.children).filter(function (node) {
+          return node.nodeType === Node.ELEMENT_NODE;
+        });
+      }
+
+      function ensureLayoutMetadata() {
+        if (layoutInitialized) {
+          return;
+        }
+
+        getPages().forEach(function (page, pageIndex) {
+          const content = getPageContent(page);
+          Array.from(content.children).forEach(function (node, orderIndex) {
+            if (!node.hasAttribute(ORIGIN_PAGE_ATTR)) {
+              node.setAttribute(ORIGIN_PAGE_ATTR, String(pageIndex));
+            }
+            if (!node.hasAttribute(ORIGIN_ORDER_ATTR)) {
+              node.setAttribute(ORIGIN_ORDER_ATTR, String(orderIndex));
+            }
+            if (node.classList.contains('clause-group') && !node.hasAttribute(GROUP_ID_ATTR)) {
+              node.setAttribute(GROUP_ID_ATTR, 'clause-group-' + pageIndex + '-' + orderIndex);
+            }
+          });
+        });
+
+        layoutInitialized = true;
+      }
+
+      function getSourceGroupId(group) {
+        return group.getAttribute(SOURCE_GROUP_ATTR) || group.getAttribute(GROUP_ID_ATTR) || '';
+      }
+
+      function resetContinuationGroups() {
+        Array.from(document.querySelectorAll('.' + CONTINUATION_CLASS)).forEach(function (group) {
+          const sourceGroupId = group.getAttribute(SOURCE_GROUP_ATTR);
+          const sourceGroup = sourceGroupId
+            ? document.querySelector(
+                '.clause-group[data-group-id="' + sourceGroupId + '"]:not(.' + CONTINUATION_CLASS + ')'
+              )
+            : null;
+
+          if (sourceGroup) {
+            Array.from(group.children).forEach(function (child) {
+              sourceGroup.appendChild(child);
+            });
+          }
+
+          group.remove();
+        });
+      }
+
+      function restoreOriginalLayout() {
+        const pageContents = getPages().map(getPageContent);
+        const originalNodes = [];
+
+        pageContents.forEach(function (content) {
+          Array.from(content.children).forEach(function (node) {
+            if (node.classList.contains(CONTINUATION_CLASS)) {
+              return;
+            }
+            if (!node.hasAttribute(ORIGIN_PAGE_ATTR) || !node.hasAttribute(ORIGIN_ORDER_ATTR)) {
+              return;
+            }
+            originalNodes.push(node);
+          });
+        });
+
+        originalNodes
+          .sort(function (left, right) {
+            const pageDelta =
+              Number(left.getAttribute(ORIGIN_PAGE_ATTR)) -
+              Number(right.getAttribute(ORIGIN_PAGE_ATTR));
+            if (pageDelta !== 0) {
+              return pageDelta;
+            }
+            return (
+              Number(left.getAttribute(ORIGIN_ORDER_ATTR)) -
+              Number(right.getAttribute(ORIGIN_ORDER_ATTR))
+            );
+          })
+          .forEach(function (node) {
+            const targetContent = pageContents[Number(node.getAttribute(ORIGIN_PAGE_ATTR))];
+            if (targetContent) {
+              targetContent.appendChild(node);
+            }
+          });
+      }
+
+      function getOrCreateContinuationGroup(sourceGroup, nextContent) {
+        const sourceGroupId = getSourceGroupId(sourceGroup);
+        const first = nextContent.firstElementChild;
+        if (
+          first &&
+          first.classList &&
+          first.classList.contains('clause-group') &&
+          first.classList.contains(CONTINUATION_CLASS) &&
+          first.getAttribute(SOURCE_GROUP_ATTR) === sourceGroupId
+        ) {
+          return first;
+        }
+
+        const clone = sourceGroup.cloneNode(false);
+        clone.classList.add(CONTINUATION_CLASS);
+        clone.removeAttribute(ORIGIN_PAGE_ATTR);
+        clone.removeAttribute(ORIGIN_ORDER_ATTR);
+        clone.removeAttribute(GROUP_ID_ATTR);
+        clone.setAttribute(SOURCE_GROUP_ATTR, sourceGroupId);
+
+        nextContent.insertBefore(clone, nextContent.firstChild);
+        return clone;
+      }
+
+      function splitClauseGroup(group, nextContent) {
+        const movableChildren = Array.from(group.children).filter(function (child) {
+          return !child.matches('.section-title, .exhibit-title');
+        });
+
+        if (movableChildren.length === 0) {
+          return false;
+        }
+
+        if (movableChildren.length === 1) {
+          if (nextContent.firstChild) {
+            nextContent.insertBefore(group, nextContent.firstChild);
+          } else {
+            nextContent.appendChild(group);
+          }
+          return true;
+        }
+
+        const nodeToMove = movableChildren[movableChildren.length - 1];
+        const continuation = getOrCreateContinuationGroup(group, nextContent);
+
+        if (continuation.firstChild) {
+          continuation.insertBefore(nodeToMove, continuation.firstChild);
+        } else {
+          continuation.appendChild(nodeToMove);
+        }
+
+        return true;
+      }
+
+      function moveNodeToNextPage(node, nextContent) {
+        if (node.classList && node.classList.contains('clause-group')) {
+          return splitClauseGroup(node, nextContent);
+        }
+
+        if (nextContent.firstChild) {
+          nextContent.insertBefore(node, nextContent.firstChild);
+        } else {
+          nextContent.appendChild(node);
+        }
+        return true;
+      }
+
+      function contentOverflows(content) {
+        return content.scrollHeight > content.clientHeight + 1;
+      }
+
+      function rebalancePages() {
+        const pages = getPages();
+
+        for (let i = 0; i < pages.length - 1; i += 1) {
+          const page = pages[i];
+          const nextPage = pages[i + 1];
+          const content = getPageContent(page);
+          const nextContent = getPageContent(nextPage);
+
+          let guard = 0;
+          while (contentOverflows(content) && guard < 800) {
+            guard += 1;
+            const directMovables = getDirectMovables(content);
+            const last = directMovables[directMovables.length - 1];
+            if (!last) {
+              break;
+            }
+
+            const moved = moveNodeToNextPage(last, nextContent);
+            if (!moved) {
+              break;
+            }
+          }
+        }
+      }
+
+      function waitForImage(image) {
+        if (image.complete) {
+          if (typeof image.decode === 'function') {
+            return image.decode().catch(function () {});
+          }
+          return Promise.resolve();
+        }
+
+        return new Promise(function (resolve) {
+          function done() {
+            image.removeEventListener('load', done);
+            image.removeEventListener('error', done);
+            resolve();
+          }
+
+          image.addEventListener('load', done, { once: true });
+          image.addEventListener('error', done, { once: true });
+        }).then(function () {
+          if (typeof image.decode === 'function') {
+            return image.decode().catch(function () {});
+          }
+        });
+      }
+
+      function afterLayoutFrame() {
+        return new Promise(function (resolve) {
+          requestAnimationFrame(function () {
+            requestAnimationFrame(resolve);
+          });
+        });
+      }
+
+      function waitForAssets() {
+        const fontReady =
+          document.fonts && document.fonts.ready
+            ? document.fonts.ready.catch(function () {})
+            : Promise.resolve();
+        const imageReady = Promise.all(Array.from(document.images).map(waitForImage));
+
+        return Promise.all([fontReady, imageReady]).then(afterLayoutFrame);
+      }
+
+      function resetPaginatedLayout() {
+        resetContinuationGroups();
+        restoreOriginalLayout();
+      }
+
+      function runRebalanceCycle() {
+        ensureLayoutMetadata();
+        resetPaginatedLayout();
+        rebalancePages();
+      }
+
+      function scheduleRebalance() {
+        if (rebalanceScheduled) {
+          return;
+        }
+
+        rebalanceScheduled = true;
+        waitForAssets()
+          .then(function () {
+            runRebalanceCycle();
+          })
+          .catch(function (error) {
+            console.error('Page rebalance failed.', error);
+          })
+          .finally(function () {
+            rebalanceScheduled = false;
+          });
+      }
+
+      if (document.readyState === 'complete') {
+        scheduleRebalance();
+      } else {
+        window.addEventListener('load', scheduleRebalance, { once: true });
+      }
+
+      window.addEventListener('beforeprint', function () {
+        runRebalanceCycle();
+      });
+
+      window.addEventListener('resize', scheduleRebalance);
+    }());
+  </script>
+
+</body>
+</html>

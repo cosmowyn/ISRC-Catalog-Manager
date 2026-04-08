@@ -64,17 +64,35 @@ The `Fill Form` workspace resolves placeholders from:
 - parties and owner settings
 - manual fields when a value should be typed directly instead of selected from the catalog
 
-Registry-backed entity fields stay available in the fill form. That means template drafting can resolve and, where appropriate, generate:
+Registry-backed placeholders are also supported, but they are handled as authoritative draft-owned auto fields rather than vague hint-text values. That means template drafting can resolve and, where appropriate, generate:
 
-- track and release catalog numbers through their linked registry-aware fields
+- track and release catalog numbers
 - contract numbers
 - license numbers
 - `Registry SHA-256 Key` values
 
-Generation in the fill form creates the authoritative registry value immediately and links it back to the selected entity instead of inserting ad hoc text into the draft only.
+When one of those symbols is present, the fill workflow validates the required registry category and prefix first. If configuration is valid, the app can generate the authoritative value on the first saved draft when needed, link it to that document workflow, and then reuse the same value across later saves, previews, and exports for that draft lifecycle. If a required prefix is missing, generation is blocked with a clear nudge to finish configuration in `Code Registry Workspace > Categories`.
 
 The symbol catalog and generator are there so source templates can use the same canonical placeholder
 syntax the fill form understands.
+
+## Bundled example template
+
+The repository includes a bundled print-safe starter package at
+[`HTML license template/README.md`](../HTML%20license%20template/README.md).
+
+That example is a seven-page remix license bundle with:
+
+- one HTML entrypoint: `License Template.html`
+- one repeated banner image: `banner.png`
+- one repeated footer logo: `footer-logo.png`
+- canonical placeholders for owner, counterparty, track title, `manual.date`, `manual.year`, `db.contract.license_number`, and `db.contract.registry_sha256_key`
+
+Use the `.html` file directly when the PNG assets stay beside it, or zip the bundle when you want a portable HTML package. Because the app's preferred drafting path is print-safe HTML, this bundled example is the recommended starting point for new contract and license templates.
+
+## Legal and customization note
+
+The bundled example is a starting point only. It is not legal advice, carries no warranty, and must not be blindly copied into production use without review. Users are responsible for adapting the wording, rights positions, jurisdictional assumptions, and commercial terms to their own needs and for obtaining qualified legal advice where appropriate.
 
 ## Preview and export
 

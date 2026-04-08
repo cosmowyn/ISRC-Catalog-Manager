@@ -36,7 +36,7 @@ This separation is deliberate. Internal generated values remain strongly governe
 
 The docked `Code Registry Workspace` is organized into three tabs:
 
-- `Internal Registry`: search, filter by category/year, inspect usage, generate internal codes, generate Registry SHA-256 Keys, link unassigned values, and delete unused Registry SHA-256 Keys
+- `Internal Registry`: search, filter by category/year, inspect usage, generate internal codes, generate Registry SHA-256 Keys, link unassigned values, explicitly realign values where allowed, and delete unused unlinked values when safe
 - `External Catalogs`: review shared external identifiers, usage counts, provenance/classification notes, promote values into the internal registry, and reclassify canonical candidates after prefix setup changes
 - `Categories`: manage built-in and custom categories, edit allowed prefixes, activate/deactivate categories, and remove custom categories when safe
 
@@ -51,7 +51,7 @@ Registry-backed fields stay available directly in the natural editing workflows:
 - `Edit Track`
 - `Release Editor`
 - `Contract Editor`
-- contract-template `Fill Form` selectors for registry-backed entity fields
+- contract-template drafting through draft-owned registry placeholder generation
 
 Catalog identifier controls support two modes:
 
@@ -63,6 +63,8 @@ Bulk track edit can assign an existing internal value or an external/manual valu
 ## Generation and later linking
 
 Generating an internal code or Registry SHA-256 Key creates a real authoritative row immediately. That row is append-only and does not get mutated later.
+
+The same authoritative registry service is also used by the `Contract Template Workspace` when a template contains registry-backed symbols such as catalog numbers, contract numbers, license numbers, or `Registry SHA-256 Key` placeholders. In that workflow, the first saved draft can issue the value and persist it for the draft lifecycle instead of forcing users to pre-generate everything elsewhere.
 
 If a value is generated outside a specific editor context, it can still be assigned later:
 
@@ -88,7 +90,7 @@ It is not:
 
 It has separate naming, workspace actions, contract-template behavior, and tests so it stays distinct from the audio authenticity subsystem.
 
-Unused Registry SHA-256 Keys can be deleted from the workspace. Other immutable internal codes remain protected once issued.
+Unused unlinked registry entries can be deleted from the workspace where the current workflow allows it. Linked or otherwise in-use values remain protected.
 
 ## Import classification
 
@@ -119,7 +121,8 @@ That means:
 - generated rows can remain intentionally unlinked when an editor is cancelled after generation
 - unlinked rows stay visible in the workspace
 - relinking can be undone and redone safely
-- unused Registry SHA-256 Keys can be deleted manually when they are not linked anywhere
+- unused unlinked values can be deleted manually when they are not linked anywhere
+- template-generated draft-linked values stay protected while the draft remains in use
 
 ## Related docs
 
