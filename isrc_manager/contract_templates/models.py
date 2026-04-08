@@ -455,6 +455,22 @@ class ContractTemplateDraftRecord:
 
 
 @dataclass(slots=True)
+class ContractTemplateDraftRegistryAssignmentRecord:
+    assignment_id: int
+    draft_id: int
+    canonical_symbol: str
+    system_key: str
+    owner_kind: str
+    registry_entry_id: int
+    registry_value: str
+    created_at: str | None
+    updated_at: str | None
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
 class ContractTemplateResolvedSnapshotPayload:
     draft_id: int
     revision_id: int

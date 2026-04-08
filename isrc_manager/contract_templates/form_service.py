@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 
+from .catalog import registry_binding_for_symbol
 from .models import (
     ContractTemplateCatalogEntry,
     ContractTemplateFormAutoField,
@@ -339,6 +340,8 @@ class ContractTemplateFormService:
         binding: ContractTemplatePlaceholderBindingRecord | None,
         catalog_entry: ContractTemplateCatalogEntry | None,
     ) -> bool:
+        if registry_binding_for_symbol(placeholder.canonical_symbol) is not None:
+            return True
         token = parse_placeholder(placeholder.canonical_symbol)
         scope_policy = (
             (_clean_text(binding.scope_policy) if binding is not None else None)
@@ -354,20 +357,29 @@ class ContractTemplateFormService:
         binding: ContractTemplatePlaceholderBindingRecord | None,
         catalog_entry: ContractTemplateCatalogEntry | None,
     ) -> ContractTemplateFormAutoField:
+        registry_binding = registry_binding_for_symbol(placeholder.canonical_symbol)
         display_label = (
             placeholder.display_label
             or (catalog_entry.display_label if catalog_entry is not None else None)
             or _display_label_from_key(placeholder.placeholder_key)
         )
-        description = f"{display_label} resolves automatically from Current Owner Party."
-        if binding is not None and isinstance(binding.metadata, dict):
-            override = _clean_text(binding.metadata.get("catalog_label"))
-            if override:
-                description = f"{override} resolves automatically from Current Owner Party."
+        if registry_binding is not None:
+            description = (
+                f"{display_label} is issued and linked to the current draft the first time the "
+                "draft is saved or exported, then reused for that draft lifecycle."
+            )
+            source_label = "Draft Registry"
+        else:
+            description = f"{display_label} resolves automatically from Current Owner Party."
+            if binding is not None and isinstance(binding.metadata, dict):
+                override = _clean_text(binding.metadata.get("catalog_label"))
+                if override:
+                    description = f"{override} resolves automatically from Current Owner Party."
+            source_label = "Current Owner Party"
         return ContractTemplateFormAutoField(
             canonical_symbol=placeholder.canonical_symbol,
             display_label=display_label,
-            source_label="Current Owner Party",
+            source_label=source_label,
             required=placeholder.required,
             placeholder_count=placeholder.source_occurrence_count,
             description=description,

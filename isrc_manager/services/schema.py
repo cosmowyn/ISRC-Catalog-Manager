@@ -2009,29 +2009,28 @@ class DatabaseSchemaService:
             BEFORE DELETE ON CodeRegistryEntries
             FOR EACH ROW
             WHEN OLD.immutable_flag = 1
-              AND NOT (
+              AND (
                 EXISTS(
-                    SELECT 1
-                    FROM CodeRegistryCategories c
-                    WHERE c.id = OLD.category_id
-                      AND c.system_key = 'registry_sha256_key'
-                )
-                AND NOT EXISTS(
                     SELECT 1
                     FROM Tracks t
                     WHERE t.catalog_registry_entry_id = OLD.id
                 )
-                AND NOT EXISTS(
+                OR EXISTS(
                     SELECT 1
                     FROM Releases r
                     WHERE r.catalog_registry_entry_id = OLD.id
                 )
-                AND NOT EXISTS(
+                OR EXISTS(
                     SELECT 1
                     FROM Contracts c
                     WHERE c.contract_registry_entry_id = OLD.id
                        OR c.license_registry_entry_id = OLD.id
                        OR c.registry_sha256_key_entry_id = OLD.id
+                )
+                OR EXISTS(
+                    SELECT 1
+                    FROM ContractTemplateDraftRegistryAssignments a
+                    WHERE a.registry_entry_id = OLD.id
                 )
               )
             BEGIN
@@ -3221,6 +3220,36 @@ class DatabaseSchemaService:
                 FOREIGN KEY (draft_id) REFERENCES ContractTemplateDrafts(id) ON DELETE CASCADE,
                 FOREIGN KEY (revision_id) REFERENCES ContractTemplateRevisions(id) ON DELETE CASCADE
             )
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ContractTemplateDraftRegistryAssignments (
+                id INTEGER PRIMARY KEY,
+                draft_id INTEGER NOT NULL,
+                canonical_symbol TEXT NOT NULL,
+                system_key TEXT NOT NULL,
+                owner_kind TEXT NOT NULL,
+                registry_entry_id INTEGER NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(draft_id, canonical_symbol),
+                UNIQUE(registry_entry_id),
+                FOREIGN KEY (draft_id) REFERENCES ContractTemplateDrafts(id) ON DELETE CASCADE,
+                FOREIGN KEY (registry_entry_id) REFERENCES CodeRegistryEntries(id) ON DELETE RESTRICT
+            )
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_contract_template_draft_registry_assignments_draft_id
+            ON ContractTemplateDraftRegistryAssignments(draft_id)
+            """
+        )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_contract_template_draft_registry_assignments_entry_id
+            ON ContractTemplateDraftRegistryAssignments(registry_entry_id)
             """
         )
         self.cursor.execute(

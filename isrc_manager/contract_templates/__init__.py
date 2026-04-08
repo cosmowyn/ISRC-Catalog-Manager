@@ -27,6 +27,7 @@ from .ingestion import (
 from .models import (
     ContractTemplateDraftPayload,
     ContractTemplateDraftRecord,
+    ContractTemplateDraftRegistryAssignmentRecord,
     ContractTemplateExportResult,
     ContractTemplateFormAutoField,
     ContractTemplateFormChoice,
@@ -68,6 +69,7 @@ __all__ = [
     "ContractTemplateCatalogSection",
     "ContractTemplateCatalogService",
     "ContractTemplateDraftPayload",
+    "ContractTemplateDraftRegistryAssignmentRecord",
     "ContractTemplateDraftRecord",
     "ContractTemplateExportError",
     "ContractTemplateExportResult",

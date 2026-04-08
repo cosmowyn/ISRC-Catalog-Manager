@@ -153,6 +153,12 @@ class _RegistryFieldEditor(QWidget):
             return None, []
         return category, service.list_entries(category_id=category.id)
 
+    def _generation_unavailable_reason(self) -> str | None:
+        service = self._registry_service()
+        if service is None:
+            return "Open a profile to use registry generation."
+        return service.generation_unavailable_reason(system_key=self.system_key)
+
     def refresh_choices(self) -> None:
         category, entries = self._category_entries()
         current_text = self.combo.currentText().strip()
@@ -174,7 +180,9 @@ class _RegistryFieldEditor(QWidget):
                 self.combo.setCurrentIndex(0)
         finally:
             self.combo.blockSignals(previous)
-        self.generate_button.setEnabled(category is not None)
+        reason = self._generation_unavailable_reason()
+        self.generate_button.setEnabled(category is not None and reason is None)
+        self.generate_button.setToolTip(reason or "")
         self._sync_current_entry_id()
         self._refresh_status()
 
@@ -189,8 +197,9 @@ class _RegistryFieldEditor(QWidget):
 
     def _refresh_status(self) -> None:
         clean_value = self.combo.currentText().strip()
+        generation_reason = self._generation_unavailable_reason()
         if not clean_value:
-            self.status_label.setText("No registry value selected.")
+            self.status_label.setText(generation_reason or "No registry value selected.")
             return
         if self._current_entry_id is not None:
             self.status_label.setText("Selected existing immutable registry value.")
@@ -199,6 +208,9 @@ class _RegistryFieldEditor(QWidget):
             self.status_label.setText(
                 "Manual entry will be validated as a Registry SHA-256 Key when you save."
             )
+            return
+        if generation_reason:
+            self.status_label.setText(generation_reason)
             return
         self.status_label.setText(
             "Manual entry will be captured as a new immutable registry code when you save if it matches the configured category rules."
@@ -254,6 +266,10 @@ class _RegistryFieldEditor(QWidget):
         service = self._registry_service()
         if service is None:
             QMessageBox.warning(self, "Code Registry", "Open a profile first.")
+            return
+        reason = self._generation_unavailable_reason()
+        if reason:
+            QMessageBox.warning(self, "Code Registry", reason)
             return
         try:
             result = (

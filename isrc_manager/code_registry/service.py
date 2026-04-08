@@ -90,6 +90,24 @@ _OWNER_TABLES = {
     "contract": ("Contracts", "title"),
 }
 
+_CONTRACT_ENTRY_FIELDS = {
+    BUILTIN_CATEGORY_CONTRACT_NUMBER: (
+        "contract_registry_entry_id",
+        "contract_number",
+        "Contract Number",
+    ),
+    BUILTIN_CATEGORY_LICENSE_NUMBER: (
+        "license_registry_entry_id",
+        "license_number",
+        "License Number",
+    ),
+    BUILTIN_CATEGORY_REGISTRY_SHA256_KEY: (
+        "registry_sha256_key_entry_id",
+        "registry_sha256_key",
+        "Registry SHA-256 Key",
+    ),
+}
+
 
 class CodeRegistryService:
     """Owns internal registry categories, immutable entries, and external catalog IDs."""
@@ -504,11 +522,9 @@ class CodeRegistryService:
         entry = self.fetch_entry(int(entry_id))
         if entry is None:
             raise ValueError(f"Registry entry {int(entry_id)} was not found.")
-        if entry.category_system_key != BUILTIN_CATEGORY_REGISTRY_SHA256_KEY:
-            raise ValueError("Only unused Registry SHA-256 Keys can be deleted.")
         if self.usage_for_entry(int(entry_id)):
             raise ValueError(
-                "Registry SHA-256 Keys can only be deleted when they are not linked to any contract."
+                f"{entry.category_display_name} '{entry.value}' can only be deleted when it is not linked to any record."
             )
         try:
             with self.conn:
@@ -518,7 +534,7 @@ class CodeRegistryService:
                 )
         except sqlite3.DatabaseError as exc:
             raise ValueError(
-                "Registry SHA-256 Key could not be deleted. It may still be in use."
+                f"{entry.category_display_name} '{entry.value}' could not be deleted."
             ) from exc
 
     def _category_or_raise(
@@ -537,6 +553,32 @@ class CodeRegistryService:
         if not category.active_flag:
             raise ValueError(f"Code registry category '{category.display_name}' is inactive.")
         return category
+
+    def generation_unavailable_reason(
+        self,
+        *,
+        category_id: int | None = None,
+        system_key: str | None = None,
+    ) -> str | None:
+        category = (
+            self.fetch_category(int(category_id))
+            if category_id is not None
+            else self.fetch_category_by_system_key(str(system_key or ""))
+        )
+        if category is None:
+            return "Code registry category was not found."
+        if not category.active_flag:
+            return f"'{category.display_name}' is inactive."
+        if category.generation_strategy == GENERATION_STRATEGY_SHA256:
+            return None
+        if category.generation_strategy != GENERATION_STRATEGY_SEQUENTIAL:
+            return f"'{category.display_name}' does not support automatic generation."
+        if self.normalize_prefix(category.prefix):
+            return None
+        return (
+            f"Configure a prefix/namespace for '{category.display_name}' in "
+            "Code Registry > Categories before generating values."
+        )
 
     def fetch_entry(self, entry_id: int) -> CodeRegistryEntryRecord | None:
         row = self.conn.execute(
@@ -645,6 +687,10 @@ class CodeRegistryService:
                 FROM Contracts
                 WHERE registry_sha256_key_entry_id IS NOT NULL
                 GROUP BY registry_sha256_key_entry_id
+                UNION ALL
+                SELECT registry_entry_id AS entry_id, COUNT(*) AS usage_count
+                FROM ContractTemplateDraftRegistryAssignments
+                GROUP BY registry_entry_id
             ),
             usage_totals AS (
                 SELECT entry_id, SUM(usage_count) AS usage_count
@@ -1120,21 +1166,16 @@ class CodeRegistryService:
         category = self._category_or_raise(category_id=category_id, system_key=system_key)
         if category.generation_strategy != GENERATION_STRATEGY_SEQUENTIAL:
             raise ValueError(f"'{category.display_name}' does not use sequential generation.")
+        reason = self.generation_unavailable_reason(category_id=category.id)
+        if reason:
+            raise ValueError(reason)
         prefix = self.normalize_prefix(category.prefix)
         if not prefix:
             raise ValueError(
-                f"Set a prefix for '{category.display_name}' before generating values."
+                f"Configure a prefix/namespace for '{category.display_name}' before generating values."
             )
         sequence_year = datetime.now().year % 100
         with self._immediate_transaction() as cur:
-            last_row = cur.execute(
-                """
-                SELECT COALESCE(MAX(last_sequence_number), 0)
-                FROM CodeRegistrySequences
-                WHERE category_id=? AND sequence_year=?
-                """,
-                (int(category.id), int(sequence_year)),
-            ).fetchone()
             existing_row = cur.execute(
                 """
                 SELECT COALESCE(MAX(sequence_number), 0)
@@ -1143,7 +1184,7 @@ class CodeRegistryService:
                 """,
                 (int(category.id), int(sequence_year)),
             ).fetchone()
-            next_sequence = max(int(last_row[0] or 0), int(existing_row[0] or 0)) + 1
+            next_sequence = int(existing_row[0] or 0) + 1
             if next_sequence > 9999:
                 raise ValueError(
                     f"No free internal sequence remains for '{category.display_name}' in {sequence_year:02d}."
@@ -1726,27 +1767,27 @@ class CodeRegistryService:
                 source_label="workspace.assign",
             )
             return
-        contract_field_map = {
-            BUILTIN_CATEGORY_CONTRACT_NUMBER: (
-                "contract_registry_entry_id",
-                "contract_number",
-                "Contract Number",
-            ),
-            BUILTIN_CATEGORY_LICENSE_NUMBER: (
-                "license_registry_entry_id",
-                "license_number",
-                "License Number",
-            ),
-            BUILTIN_CATEGORY_REGISTRY_SHA256_KEY: (
-                "registry_sha256_key_entry_id",
-                "registry_sha256_key",
-                "Registry SHA-256 Key",
-            ),
-        }
-        field_config = contract_field_map.get(str(entry.category_system_key or ""))
+        field_config = _CONTRACT_ENTRY_FIELDS.get(str(entry.category_system_key or ""))
         if field_config is None or clean_owner_kind != "contract":
             raise ValueError("This registry value does not support direct workspace assignment.")
         entry_field, text_field, field_label = field_config
+        current_target = self.conn.execute(
+            f"""
+            SELECT {entry_field}, {text_field}
+            FROM Contracts
+            WHERE id=?
+            """,
+            (int(owner_id),),
+        ).fetchone()
+        if current_target is None:
+            raise ValueError(f"Contract #{int(owner_id)} was not found.")
+        current_target_entry_id = int(current_target[0]) if current_target[0] is not None else None
+        if current_target_entry_id not in (None, int(entry.id)):
+            current_value = self._clean_text(current_target[1]) or "another registry value"
+            raise ValueError(
+                f"Contract #{int(owner_id)} already has {field_label} '{current_value}'. "
+                "Use explicit realignment to move linked registry values between contracts."
+            )
         try:
             with self.conn:
                 self.conn.execute(
@@ -1762,6 +1803,181 @@ class CodeRegistryService:
             raise ValueError(
                 f"{field_label} '{entry.value}' is already linked to another contract."
             ) from exc
+
+    def reassign_entry_to_owner(self, entry_id: int, *, owner_kind: str, owner_id: int) -> None:
+        entry = self.fetch_entry(int(entry_id))
+        if entry is None:
+            raise ValueError(f"Registry entry {int(entry_id)} was not found.")
+        clean_owner_kind = str(owner_kind or "").strip().lower()
+        field_config = _CONTRACT_ENTRY_FIELDS.get(str(entry.category_system_key or ""))
+        if field_config is None or clean_owner_kind != "contract":
+            raise ValueError(
+                "Only Contract Number, License Number, and Registry SHA-256 Key entries "
+                "support explicit realignment."
+            )
+        current_usage = self.usage_for_entry(int(entry_id))
+        if not current_usage:
+            self.assign_entry_to_owner(
+                entry.id, owner_kind=clean_owner_kind, owner_id=int(owner_id)
+            )
+            return
+        if len(current_usage) != 1 or current_usage[0].subject_kind != "contract":
+            raise ValueError(
+                "This registry value cannot be realigned because it has multiple active links."
+            )
+        current_link = current_usage[0]
+        if int(current_link.subject_id) == int(owner_id):
+            return
+        entry_field, text_field, field_label = field_config
+        destination = self.conn.execute(
+            f"""
+            SELECT {entry_field}, {text_field}
+            FROM Contracts
+            WHERE id=?
+            """,
+            (int(owner_id),),
+        ).fetchone()
+        if destination is None:
+            raise ValueError(f"Contract #{int(owner_id)} was not found.")
+        destination_entry_id = int(destination[0]) if destination[0] is not None else None
+        if destination_entry_id not in (None, int(entry.id)):
+            destination_value = self._clean_text(destination[1]) or "another registry value"
+            raise ValueError(
+                f"Contract #{int(owner_id)} already has {field_label} '{destination_value}'. "
+                "Clear or reassign that value first."
+            )
+        with self.conn:
+            self.conn.execute(
+                f"""
+                UPDATE Contracts
+                SET {entry_field}=NULL,
+                    {text_field}=NULL,
+                    updated_at=datetime('now')
+                WHERE {entry_field}=?
+                """,
+                (int(entry.id),),
+            )
+            self.conn.execute(
+                f"""
+                UPDATE Contracts
+                SET {entry_field}=?,
+                    {text_field}=?,
+                    updated_at=datetime('now')
+                WHERE id=?
+                """,
+                (int(entry.id), entry.value, int(owner_id)),
+            )
+
+    def generate_and_assign_catalog_entry_to_owner(
+        self,
+        *,
+        owner_kind: str,
+        owner_id: int,
+        created_via: str = "ui.generate",
+    ) -> CodeRegistryEntryRecord:
+        result = self.generate_next_code(
+            system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+            created_via=created_via,
+        )
+        self.assign_catalog_to_owner(
+            owner_kind=owner_kind,
+            owner_id=int(owner_id),
+            resolution=CatalogIdentifierResolution(
+                mode=CATALOG_MODE_INTERNAL,
+                value=result.entry.value,
+                registry_entry_id=result.entry.id,
+                category_id=result.entry.category_id,
+                classification_status=CLASSIFICATION_INTERNAL,
+                classification_reason="Generated and assigned from the code registry workflow.",
+            ),
+            provenance_kind="generated",
+            source_label=created_via,
+        )
+        return result.entry
+
+    def ensure_catalog_value_for_owner(
+        self,
+        *,
+        owner_kind: str,
+        owner_id: int,
+        created_via: str = "ui.ensure",
+        generate_if_missing: bool = True,
+    ) -> str | None:
+        clean_owner_kind = str(owner_kind or "").strip().lower()
+        table_name = _OWNER_TABLES.get(clean_owner_kind, (None, None))[0]
+        if table_name not in {"Tracks", "Releases"}:
+            raise ValueError(f"Unsupported catalog owner kind '{owner_kind}'.")
+        row = self.conn.execute(
+            f"""
+            SELECT catalog_number, catalog_registry_entry_id, external_catalog_identifier_id
+            FROM {table_name}
+            WHERE id=?
+            """,
+            (int(owner_id),),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"{clean_owner_kind.title()} #{int(owner_id)} was not found.")
+        clean_value = self._clean_text(row[0])
+        registry_entry_id = int(row[1]) if row[1] is not None else None
+        external_identifier_id = int(row[2]) if row[2] is not None else None
+        if registry_entry_id is not None:
+            entry = self.fetch_entry(registry_entry_id)
+            if entry is None:
+                raise ValueError(
+                    f"Catalog registry entry {int(registry_entry_id)} is no longer available."
+                )
+            if clean_value != entry.value:
+                self.assign_catalog_to_owner(
+                    owner_kind=clean_owner_kind,
+                    owner_id=int(owner_id),
+                    resolution=CatalogIdentifierResolution(
+                        mode=CATALOG_MODE_INTERNAL,
+                        value=entry.value,
+                        registry_entry_id=entry.id,
+                        category_id=entry.category_id,
+                        classification_status=CLASSIFICATION_INTERNAL,
+                        classification_reason="Reused existing internal registry value.",
+                    ),
+                    provenance_kind="existing",
+                    source_label=created_via,
+                )
+            return entry.value
+        if clean_value:
+            classification = self.classify_catalog_identifier(clean_value)
+            if classification.classification == CLASSIFICATION_INTERNAL:
+                entry = self.create_or_capture_catalog_entry(
+                    clean_value,
+                    created_via=f"{created_via}.capture",
+                    entry_kind=ENTRY_KIND_MANUAL_CAPTURE,
+                )
+                self.assign_catalog_to_owner(
+                    owner_kind=clean_owner_kind,
+                    owner_id=int(owner_id),
+                    resolution=CatalogIdentifierResolution(
+                        mode=CATALOG_MODE_INTERNAL,
+                        value=entry.value,
+                        registry_entry_id=entry.id,
+                        category_id=entry.category_id,
+                        classification_status=classification.classification,
+                        classification_reason=classification.reason,
+                    ),
+                    provenance_kind="captured",
+                    source_label=created_via,
+                )
+                return entry.value
+            return clean_value
+        if external_identifier_id is not None:
+            record = self.fetch_external_catalog_identifier(external_identifier_id)
+            if record is not None and self._clean_text(record.value):
+                return self._clean_text(record.value)
+        if not generate_if_missing:
+            return None
+        entry = self.generate_and_assign_catalog_entry_to_owner(
+            owner_kind=clean_owner_kind,
+            owner_id=int(owner_id),
+            created_via=created_via,
+        )
+        return entry.value
 
     def usage_for_entry(self, entry_id: int) -> list[CodeRegistryUsageLink]:
         rows = self.conn.execute(
@@ -1785,9 +2001,21 @@ class CodeRegistryService:
             SELECT 'contract' AS subject_kind, c.id, COALESCE(c.title, ''), 'Registry SHA-256 Key'
             FROM Contracts c
             WHERE c.registry_sha256_key_entry_id=?
+            UNION ALL
+            SELECT 'draft' AS subject_kind, d.id, COALESCE(d.name, ''), a.canonical_symbol
+            FROM ContractTemplateDraftRegistryAssignments a
+            JOIN ContractTemplateDrafts d ON d.id = a.draft_id
+            WHERE a.registry_entry_id=?
             ORDER BY 1, 4, 2
             """,
-            (int(entry_id), int(entry_id), int(entry_id), int(entry_id), int(entry_id)),
+            (
+                int(entry_id),
+                int(entry_id),
+                int(entry_id),
+                int(entry_id),
+                int(entry_id),
+                int(entry_id),
+            ),
         ).fetchall()
         return [
             CodeRegistryUsageLink(

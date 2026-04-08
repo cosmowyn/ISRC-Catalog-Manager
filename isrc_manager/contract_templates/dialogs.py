@@ -46,9 +46,6 @@ from isrc_manager.code_registry import (
     BUILTIN_CATEGORY_CONTRACT_NUMBER,
     BUILTIN_CATEGORY_LICENSE_NUMBER,
     BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
-    CATALOG_MODE_INTERNAL,
-    CLASSIFICATION_INTERNAL,
-    CatalogIdentifierResolution,
 )
 from isrc_manager.workspace_debug import (
     digest_debug_value,
@@ -77,6 +74,7 @@ from isrc_manager.ui_common import (
     _create_standard_section,
 )
 
+from .catalog import registry_binding_for_symbol
 from .ingestion import detect_template_source_format
 from .models import (
     ContractTemplateCatalogEntry,
@@ -1864,9 +1862,13 @@ class _FillHtmlPreviewController(QWidget):
         request_key = self._latest_request_key
         try:
             session_root = export_service.create_html_preview_session_root()
+            draft_record = (
+                self.panel._loaded_draft_record() or self.panel._selected_fill_draft_record()
+            )
             root_path, html_path, _warnings = export_service.materialize_html_preview_session(
                 revision_id=revision_id,
                 editable_payload=payload,
+                draft_id=(int(draft_record.draft_id) if draft_record is not None else None),
                 session_root=session_root,
             )
         except Exception as exc:
@@ -2013,6 +2015,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         self._suspend_admin_updates = False
         self._fill_type_overrides: dict[str, str] = {}
         self._fill_payload_extras: dict[str, object] = {}
+        self._fill_generation_warnings: list[str] = []
         self.fill_html_preview_view = None
         self.fill_preview_stale_label = None
         self.fill_preview_zoom_label = None
@@ -3759,6 +3762,7 @@ class ContractTemplateWorkspacePanel(QWidget):
             f"Generated {', '.join(status_bits)}."
         )
         warning_lines = list(form_definition.warnings)
+        warning_lines.extend(self._fill_generation_warnings)
         if form_definition.unresolved_placeholders:
             warning_lines.append(
                 "Unresolved placeholders: " + ", ".join(form_definition.unresolved_placeholders)
@@ -3856,6 +3860,13 @@ class ContractTemplateWorkspacePanel(QWidget):
         if template_service is None or revision_id is None:
             self.fill_draft_status_label.setText("Choose a revision before saving a draft.")
             return False
+        if export_service is not None:
+            try:
+                export_service.validate_draft_registry_generation_for_revision(revision_id)
+            except Exception as exc:
+                self.fill_draft_status_label.setText(f"Unable to save draft: {exc}")
+                QMessageBox.warning(self, "Draft Workspace", str(exc))
+                return False
         draft_payload = self._draft_payload_for_revision(revision_id)
         selected = self._selected_fill_draft_record()
         target = None if save_as_new else (selected or self._loaded_draft_record())
@@ -3869,6 +3880,18 @@ class ContractTemplateWorkspacePanel(QWidget):
             self.fill_draft_status_label.setText(f"Unable to save draft: {exc}")
             QMessageBox.warning(self, "Draft Workspace", str(exc))
             return False
+        if export_service is not None:
+            try:
+                export_service.ensure_registry_assignments_for_draft(saved.draft_id)
+            except Exception as exc:
+                if target is None:
+                    try:
+                        template_service.delete_draft(saved.draft_id)
+                    except Exception:
+                        pass
+                self.fill_draft_status_label.setText(f"Unable to save draft: {exc}")
+                QMessageBox.warning(self, "Draft Workspace", str(exc))
+                return False
         html_synced = False
         if export_service is not None:
             revision = template_service.fetch_revision(saved.revision_id)
@@ -5654,11 +5677,26 @@ class ContractTemplateWorkspacePanel(QWidget):
 
     def _rebuild_fill_fields(self, form_definition: ContractTemplateFormDefinition) -> None:
         self._clear_fill_fields()
+        self._fill_generation_warnings = []
         for field in form_definition.auto_fields:
             widget = self._build_auto_field_widget(field)
+            self._fill_generation_warnings.extend(
+                [
+                    str(line)
+                    for line in list(widget.property("generation_warning_lines") or [])
+                    if str(line or "").strip()
+                ]
+            )
             self.fill_auto_form.addRow(field.display_label, widget)
         for field in form_definition.selector_fields:
             widget = self._build_selector_widget(field)
+            self._fill_generation_warnings.extend(
+                [
+                    str(line)
+                    for line in list(widget.property("generation_warning_lines") or [])
+                    if str(line or "").strip()
+                ]
+            )
             for placeholder_symbol in field.placeholder_symbols:
                 self.selector_widgets[placeholder_symbol] = widget
             self.fill_selector_form.addRow(field.display_label, widget)
@@ -5674,6 +5712,7 @@ class ContractTemplateWorkspacePanel(QWidget):
         self._clear_form_layout(self.fill_auto_form)
         self._clear_form_layout(self.fill_selector_form)
         self._clear_form_layout(self.fill_manual_form)
+        self._fill_generation_warnings = []
         self.selector_widgets = {}
         self.manual_widgets = {}
         self.fill_auto_empty_label.setVisible(True)
@@ -5688,32 +5727,22 @@ class ContractTemplateWorkspacePanel(QWidget):
     def _selector_generate_actions(
         field: ContractTemplateFormSelectorField,
     ) -> list[tuple[str, str]]:
-        symbols = {
-            str(symbol or "").strip()
-            for symbol in field.placeholder_symbols
-            if str(symbol or "").strip()
+        label_map = {
+            BUILTIN_CATEGORY_CATALOG_NUMBER: "Generate Catalog Number",
+            BUILTIN_CATEGORY_CONTRACT_NUMBER: "Generate Contract Number",
+            BUILTIN_CATEGORY_LICENSE_NUMBER: "Generate License Number",
+            BUILTIN_CATEGORY_REGISTRY_SHA256_KEY: "Generate Registry SHA-256 Key",
         }
-        normalized_symbols = {symbol.strip("{} ") for symbol in symbols}
         actions: list[tuple[str, str]] = []
-        if field.scope_entity_type == "track" and any(
-            symbol.endswith("catalog_number") and ".track." in symbol
-            for symbol in normalized_symbols
-        ):
-            actions.append(("Generate Catalog Number", BUILTIN_CATEGORY_CATALOG_NUMBER))
-        if field.scope_entity_type == "release" and any(
-            symbol.endswith("catalog_number") and ".release." in symbol
-            for symbol in normalized_symbols
-        ):
-            actions.append(("Generate Catalog Number", BUILTIN_CATEGORY_CATALOG_NUMBER))
-        if field.scope_entity_type == "contract":
-            if any(symbol.endswith("contract_number") for symbol in normalized_symbols):
-                actions.append(("Generate Contract Number", BUILTIN_CATEGORY_CONTRACT_NUMBER))
-            if any(symbol.endswith("license_number") for symbol in normalized_symbols):
-                actions.append(("Generate License Number", BUILTIN_CATEGORY_LICENSE_NUMBER))
-            if any(symbol.endswith("registry_sha256_key") for symbol in normalized_symbols):
-                actions.append(
-                    ("Generate Registry SHA-256 Key", BUILTIN_CATEGORY_REGISTRY_SHA256_KEY)
-                )
+        seen: set[str] = set()
+        for symbol in field.placeholder_symbols:
+            binding = registry_binding_for_symbol(symbol)
+            if binding is None or binding.owner_kind != field.scope_entity_type:
+                continue
+            if binding.system_key in seen:
+                continue
+            seen.add(binding.system_key)
+            actions.append((label_map[binding.system_key], binding.system_key))
         return actions
 
     def _build_selector_widget(self, field: ContractTemplateFormSelectorField) -> QWidget:
@@ -5744,9 +5773,18 @@ class ContractTemplateWorkspacePanel(QWidget):
         combo.currentIndexChanged.connect(self._mark_fill_dirty)
         container.setProperty("selector_combo", combo)
         row.addWidget(combo, 1)
+        generation_warning_lines: list[str] = []
         for label, system_key in self._selector_generate_actions(field):
             button = QPushButton(label, container)
             button.setProperty("registry_system_key", system_key)
+            reason = self._selector_generation_unavailable_reason(
+                scope_entity_type=field.scope_entity_type,
+                system_key=system_key,
+            )
+            button.setEnabled(reason is None)
+            button.setToolTip(reason or "")
+            if reason:
+                generation_warning_lines.append(f"{label} is unavailable: {reason}")
             button.clicked.connect(
                 partial(
                     self._handle_selector_generate_clicked,
@@ -5755,6 +5793,7 @@ class ContractTemplateWorkspacePanel(QWidget):
                 )
             )
             row.addWidget(button)
+        container.setProperty("generation_warning_lines", generation_warning_lines)
         return container
 
     def _handle_selector_generate_clicked(
@@ -5764,6 +5803,33 @@ class ContractTemplateWorkspacePanel(QWidget):
         _checked: bool = False,
     ) -> None:
         self._generate_selector_registry_value(widget, system_key=system_key)
+
+    def _selector_generation_unavailable_reason(
+        self,
+        *,
+        scope_entity_type: str,
+        system_key: str,
+    ) -> str | None:
+        export_service = self._export_service()
+        if export_service is None:
+            return "Open a profile to use registry generation in the fill workflow."
+        registry_service = None
+        if scope_entity_type == "contract":
+            contract_service = export_service.contract_service
+            if contract_service is None:
+                return "Contract service is unavailable for registry generation."
+            registry_service = contract_service.code_registry_service()
+        elif scope_entity_type == "track":
+            if export_service.track_service is None:
+                return "Track service is unavailable for registry generation."
+            registry_service = export_service.track_service.code_registry_service()
+        elif scope_entity_type == "release":
+            if export_service.release_service is None:
+                return "Release service is unavailable for registry generation."
+            registry_service = export_service.release_service.code_registry_service()
+        if registry_service is None:
+            return "Code registry service is unavailable."
+        return registry_service.generation_unavailable_reason(system_key=system_key)
 
     def _generate_selector_registry_value(self, widget: QWidget, *, system_key: str) -> None:
         combo = self._selector_combo(widget)
@@ -5780,6 +5846,14 @@ class ContractTemplateWorkspacePanel(QWidget):
         if export_service is None:
             QMessageBox.warning(self, "Fill Form", "Open a profile first.")
             return
+        reason = self._selector_generation_unavailable_reason(
+            scope_entity_type=scope_entity_type,
+            system_key=system_key,
+        )
+        if reason:
+            self.fill_warning_label.setText(reason)
+            QMessageBox.warning(self, "Fill Form", reason)
+            return
         try:
             if scope_entity_type in {"track", "release"}:
                 owner_service = (
@@ -5792,25 +5866,13 @@ class ContractTemplateWorkspacePanel(QWidget):
                 registry_service = owner_service.code_registry_service()
                 if registry_service is None:
                     raise ValueError("Code registry service is unavailable.")
-                result = registry_service.generate_next_code(
-                    system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
-                    created_via="contract_template.fill_form.generate",
-                )
-                registry_service.assign_catalog_to_owner(
+                entry = registry_service.generate_and_assign_catalog_entry_to_owner(
                     owner_kind=scope_entity_type,
                     owner_id=record_id,
-                    resolution=CatalogIdentifierResolution(
-                        mode=CATALOG_MODE_INTERNAL,
-                        value=result.entry.value,
-                        registry_entry_id=result.entry.id,
-                        category_id=result.entry.category_id,
-                        classification_status=CLASSIFICATION_INTERNAL,
-                    ),
-                    provenance_kind="generated",
-                    source_label="contract_template.fill_form.generate",
+                    created_via="contract_template.fill_form.generate",
                 )
                 self.fill_status_label.setText(
-                    f"Generated {result.entry.value} for {scope_entity_type} #{record_id}."
+                    f"Generated {entry.value} for {scope_entity_type} #{record_id}."
                 )
             elif scope_entity_type == "contract":
                 contract_service = export_service.contract_service
@@ -5837,8 +5899,27 @@ class ContractTemplateWorkspacePanel(QWidget):
         label.setWordWrap(True)
         label.setProperty("role", "secondary")
         tooltip_parts = [field.canonical_symbol]
+        generation_warning_lines: list[str] = []
+        registry_binding = registry_binding_for_symbol(field.canonical_symbol)
+        if registry_binding is not None:
+            label.setText("Draft Registry")
+            reason = self._selector_generation_unavailable_reason(
+                scope_entity_type=registry_binding.owner_kind,
+                system_key=registry_binding.system_key,
+            )
+            if reason:
+                generation_warning_lines.append(
+                    f"{field.display_label} cannot be issued for this draft yet: {reason}"
+                )
+                tooltip_parts.append(reason)
+            else:
+                tooltip_parts.append(
+                    "Issued and linked automatically when the first draft is saved or exported, "
+                    "then reused for this draft lifecycle."
+                )
         if field.description:
             tooltip_parts.append(field.description)
+        label.setProperty("generation_warning_lines", generation_warning_lines)
         label.setToolTip("\n".join(part for part in tooltip_parts if part))
         return label
 

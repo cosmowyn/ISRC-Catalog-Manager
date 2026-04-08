@@ -63,6 +63,15 @@ class CodeRegistryServiceTests(unittest.TestCase):
             )
         )
 
+    def _create_contract(self, *, title: str) -> int:
+        return self.contract_service.create_contract(
+            ContractPayload(
+                title=title,
+                contract_type="license",
+                status="draft",
+            )
+        )
+
     def test_builtin_categories_and_custom_categories_are_available(self):
         builtin_keys = {item.system_key for item in self.registry.list_categories()}
         self.assertEqual(
@@ -198,13 +207,7 @@ class CodeRegistryServiceTests(unittest.TestCase):
         self.assertIsNone(self.registry.fetch_entry(entry.id))
 
     def test_used_registry_sha256_key_cannot_be_deleted(self):
-        contract_id = self.contract_service.create_contract(
-            ContractPayload(
-                title="Linked Hash Contract",
-                contract_type="license",
-                status="draft",
-            )
-        )
+        contract_id = self._create_contract(title="Linked Hash Contract")
         entry = self.contract_service.generate_registry_value_for_contract(
             contract_id,
             system_key=BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
@@ -214,7 +217,7 @@ class CodeRegistryServiceTests(unittest.TestCase):
         with self.assertRaises(ValueError) as exc_info:
             self.registry.delete_entry(entry.id)
 
-        self.assertIn("not linked to any contract", str(exc_info.exception))
+        self.assertIn("not linked to any record", str(exc_info.exception))
 
     def test_external_catalog_rows_can_be_reclassified_after_prefix_setup(self):
         track_id = self._create_track(isrc="NL-TST-26-40001", title="Canonical Candidate")
@@ -345,13 +348,7 @@ class CodeRegistryServiceTests(unittest.TestCase):
     def test_contract_service_generates_and_assigns_registry_values(self):
         self._set_prefix(BUILTIN_CATEGORY_CONTRACT_NUMBER, "CTR")
         self._set_prefix(BUILTIN_CATEGORY_LICENSE_NUMBER, "LIC")
-        contract_id = self.contract_service.create_contract(
-            ContractPayload(
-                title="Registry Contract",
-                contract_type="license",
-                status="draft",
-            )
-        )
+        contract_id = self._create_contract(title="Registry Contract")
 
         contract_entry = self.contract_service.generate_registry_value_for_contract(
             contract_id,
@@ -381,6 +378,193 @@ class CodeRegistryServiceTests(unittest.TestCase):
         self.assertTrue(contract_entry.value.startswith("CTR"))
         self.assertTrue(license_entry.value.startswith("LIC"))
         self.assertRegex(hash_entry.value, r"^[0-9a-f]{64}$")
+
+    def test_generation_unavailable_reason_requires_prefix_for_sequential_categories(self):
+        reason = self.registry.generation_unavailable_reason(
+            system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER
+        )
+
+        self.assertIsNotNone(reason)
+        assert reason is not None
+        self.assertIn("Configure a prefix/namespace", reason)
+
+    def test_deleting_non_highest_sequence_does_not_reuse_lower_gap(self):
+        self._set_prefix(BUILTIN_CATEGORY_CATALOG_NUMBER, "ACR")
+
+        first = self.registry.generate_next_code(
+            system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+            created_via="test.sequence",
+        ).entry
+        middle = self.registry.generate_next_code(
+            system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+            created_via="test.sequence",
+        ).entry
+        highest = self.registry.generate_next_code(
+            system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+            created_via="test.sequence",
+        ).entry
+
+        self.registry.delete_entry(middle.id)
+        generated = self.registry.generate_next_code(
+            system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+            created_via="test.sequence",
+        ).entry
+
+        self.assertEqual(first.sequence_number, 1)
+        self.assertEqual(highest.sequence_number, 3)
+        self.assertEqual(generated.sequence_number, 4)
+
+    def test_deleting_highest_sequence_reuses_that_highest_slot(self):
+        self._set_prefix(BUILTIN_CATEGORY_CATALOG_NUMBER, "ACR")
+
+        first = self.registry.generate_next_code(
+            system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+            created_via="test.sequence",
+        ).entry
+        second = self.registry.generate_next_code(
+            system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+            created_via="test.sequence",
+        ).entry
+        highest = self.registry.generate_next_code(
+            system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+            created_via="test.sequence",
+        ).entry
+
+        self.registry.delete_entry(highest.id)
+        regenerated = self.registry.generate_next_code(
+            system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
+            created_via="test.sequence",
+        ).entry
+
+        self.assertEqual(first.sequence_number, 1)
+        self.assertEqual(second.sequence_number, 2)
+        self.assertEqual(regenerated.sequence_number, 3)
+        self.assertEqual(regenerated.value, highest.value)
+
+    def test_unused_sequential_entry_can_be_deleted(self):
+        self._set_prefix(BUILTIN_CATEGORY_CONTRACT_NUMBER, "CTR")
+        entry = self.registry.generate_next_code(
+            system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+            created_via="test.delete",
+        ).entry
+
+        self.registry.delete_entry(entry.id)
+
+        self.assertIsNone(self.registry.fetch_entry(entry.id))
+
+    def test_linked_sequential_entry_cannot_be_deleted(self):
+        self._set_prefix(BUILTIN_CATEGORY_CONTRACT_NUMBER, "CTR")
+        contract_id = self._create_contract(title="Protected Contract Number")
+        entry = self.contract_service.generate_registry_value_for_contract(
+            contract_id,
+            system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+            created_via="test.generate",
+        )
+
+        with self.assertRaises(ValueError) as exc_info:
+            self.registry.delete_entry(entry.id)
+
+        self.assertIn("not linked to any record", str(exc_info.exception))
+
+    def test_contract_registry_value_can_be_realigned_between_contracts(self):
+        self._set_prefix(BUILTIN_CATEGORY_CONTRACT_NUMBER, "CTR")
+        first_contract_id = self._create_contract(title="Original Contract")
+        second_contract_id = self._create_contract(title="Replacement Contract")
+        entry = self.contract_service.generate_registry_value_for_contract(
+            first_contract_id,
+            system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+            created_via="test.realign",
+        )
+
+        self.registry.reassign_entry_to_owner(
+            entry.id,
+            owner_kind="contract",
+            owner_id=second_contract_id,
+        )
+
+        first_contract = self.contract_service.fetch_contract(first_contract_id)
+        second_contract = self.contract_service.fetch_contract(second_contract_id)
+        self.assertIsNotNone(first_contract)
+        self.assertIsNotNone(second_contract)
+        assert first_contract is not None
+        assert second_contract is not None
+        self.assertIsNone(first_contract.contract_registry_entry_id)
+        self.assertIsNone(first_contract.contract_number)
+        self.assertEqual(second_contract.contract_registry_entry_id, entry.id)
+        self.assertEqual(second_contract.contract_number, entry.value)
+
+    def test_contract_registry_realign_rejects_destination_conflict(self):
+        self._set_prefix(BUILTIN_CATEGORY_CONTRACT_NUMBER, "CTR")
+        first_contract_id = self._create_contract(title="First Contract")
+        second_contract_id = self._create_contract(title="Second Contract")
+        entry = self.contract_service.generate_registry_value_for_contract(
+            first_contract_id,
+            system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+            created_via="test.realign",
+        )
+        other_entry = self.contract_service.generate_registry_value_for_contract(
+            second_contract_id,
+            system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+            created_via="test.realign",
+        )
+
+        with self.assertRaises(ValueError) as exc_info:
+            self.registry.reassign_entry_to_owner(
+                entry.id,
+                owner_kind="contract",
+                owner_id=second_contract_id,
+            )
+
+        self.assertIn(other_entry.value, str(exc_info.exception))
+
+    def test_ensure_registry_value_for_contract_reuses_existing_link(self):
+        self._set_prefix(BUILTIN_CATEGORY_LICENSE_NUMBER, "LIC")
+        contract_id = self._create_contract(title="Existing License Contract")
+        generated = self.contract_service.generate_registry_value_for_contract(
+            contract_id,
+            system_key=BUILTIN_CATEGORY_LICENSE_NUMBER,
+            created_via="test.generate",
+        )
+        count_before = self.conn.execute("SELECT COUNT(*) FROM CodeRegistryEntries").fetchone()[0]
+
+        ensured = self.contract_service.ensure_registry_value_for_contract(
+            contract_id,
+            system_key=BUILTIN_CATEGORY_LICENSE_NUMBER,
+            created_via="test.ensure",
+        )
+        count_after = self.conn.execute("SELECT COUNT(*) FROM CodeRegistryEntries").fetchone()[0]
+
+        self.assertEqual(ensured.id, generated.id)
+        self.assertEqual(count_after, count_before)
+
+    def test_ensure_registry_value_for_contract_captures_existing_valid_text(self):
+        self._set_prefix(BUILTIN_CATEGORY_CONTRACT_NUMBER, "CTR")
+        yy = datetime.now().year % 100
+        contract_id = self._create_contract(title="Captured Contract Number")
+        raw_value = f"CTR{yy:02d}0042"
+        with self.conn:
+            self.conn.execute(
+                """
+                UPDATE Contracts
+                SET contract_number=?,
+                    contract_registry_entry_id=NULL
+                WHERE id=?
+                """,
+                (raw_value, contract_id),
+            )
+
+        entry = self.contract_service.ensure_registry_value_for_contract(
+            contract_id,
+            system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+            created_via="test.capture",
+        )
+        contract = self.contract_service.fetch_contract(contract_id)
+
+        self.assertEqual(entry.value, raw_value)
+        self.assertIsNotNone(contract)
+        assert contract is not None
+        self.assertEqual(contract.contract_number, raw_value)
+        self.assertEqual(contract.contract_registry_entry_id, entry.id)
 
 
 if __name__ == "__main__":

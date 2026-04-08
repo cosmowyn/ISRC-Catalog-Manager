@@ -14,6 +14,8 @@ from isrc_manager.code_registry import (
     CodeRegistryWorkspacePanel,
 )
 from isrc_manager.code_registry.models import CodeRegistryCategoryPayload
+from isrc_manager.contracts import ContractPayload, ContractService
+from isrc_manager.parties import PartyService
 from isrc_manager.services import DatabaseSchemaService, TrackCreatePayload, TrackService
 from tests.qt_test_helpers import pump_events, require_qapplication
 
@@ -32,6 +34,12 @@ class CodeRegistryWorkspacePanelTests(unittest.TestCase):
         schema.init_db()
         schema.migrate_schema()
         self.track_service = TrackService(self.conn, self.root)
+        self.party_service = PartyService(self.conn)
+        self.contract_service = ContractService(
+            self.conn,
+            self.root,
+            party_service=self.party_service,
+        )
         self.registry = CodeRegistryService(self.conn)
         category = self.registry.fetch_category_by_system_key(BUILTIN_CATEGORY_CATALOG_NUMBER)
         assert category is not None
@@ -61,6 +69,15 @@ class CodeRegistryWorkspacePanelTests(unittest.TestCase):
                 upc=None,
                 genre="Ambient",
                 catalog_number=None,
+            )
+        )
+
+    def _create_contract(self, *, title: str) -> int:
+        return self.contract_service.create_contract(
+            ContractPayload(
+                title=title,
+                contract_type="license",
+                status="draft",
             )
         )
 
@@ -182,6 +199,36 @@ class CodeRegistryWorkspacePanelTests(unittest.TestCase):
         self.assertIsNone(row[2])
         self.assertIn("Promoted external catalog value", self.panel.status_label.text())
 
+    def test_workspace_can_generate_contract_numbers_for_selected_category(self):
+        contract_category = self.registry.fetch_category_by_system_key(
+            BUILTIN_CATEGORY_CONTRACT_NUMBER
+        )
+        self.assertIsNotNone(contract_category)
+        assert contract_category is not None
+        self.registry.update_category(contract_category.id, prefix="CTR")
+        self.panel.refresh()
+        pump_events(app=self.app, cycles=2)
+        self._select_category_row(system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER)
+
+        with mock.patch("isrc_manager.code_registry.workspace.QMessageBox.critical") as critical:
+            self.panel._generate_catalog_code()
+
+        critical.assert_not_called()
+        latest = self.conn.execute(
+            """
+            SELECT value
+            FROM CodeRegistryEntries
+            WHERE category_id=?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (contract_category.id,),
+        ).fetchone()
+        self.assertIsNotNone(latest)
+        assert latest is not None
+        self.assertTrue(str(latest[0]).startswith("CTR"))
+        self.assertIn("generated contract number", self.panel.status_label.text().lower())
+
     def test_workspace_external_catalog_tab_shows_shared_usage_counts(self):
         first_track_id = self._create_track(isrc="NL-TST-26-50003", title="Shared One")
         second_track_id = self._create_track(isrc="NL-TST-26-50004", title="Shared Two")
@@ -284,7 +331,66 @@ class CodeRegistryWorkspacePanelTests(unittest.TestCase):
         question.assert_called_once()
         critical.assert_not_called()
         self.assertIsNone(self.registry.fetch_entry(entry.id))
-        self.assertIn("Deleted unused Registry SHA-256 Key", self.panel.status_label.text())
+        self.assertIn("Deleted unlinked registry value", self.panel.status_label.text())
+
+    def test_workspace_disables_generation_and_shows_nudge_when_prefix_missing(self):
+        self._select_category_row(system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER)
+
+        self.assertFalse(self.panel.generate_code_button.isEnabled())
+        self.assertIn("Configure a prefix/namespace", self.panel.generate_code_button.toolTip())
+        self.assertIn("Code Registry > Categories", self.panel.entry_generation_hint_label.text())
+
+    def test_workspace_can_realign_selected_contract_registry_value(self):
+        contract_category = self.registry.fetch_category_by_system_key(
+            BUILTIN_CATEGORY_CONTRACT_NUMBER
+        )
+        self.assertIsNotNone(contract_category)
+        assert contract_category is not None
+        self.registry.update_category(contract_category.id, prefix="CTR")
+        first_contract_id = self._create_contract(title="Original Workspace Contract")
+        second_contract_id = self._create_contract(title="Replacement Workspace Contract")
+        entry = self.contract_service.generate_registry_value_for_contract(
+            first_contract_id,
+            system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER,
+            created_via="test.workspace.realign",
+        )
+        self.panel.refresh()
+        pump_events(app=self.app, cycles=2)
+
+        target_row = None
+        for row in range(self.panel.entry_table.rowCount()):
+            item = self.panel.entry_table.item(row, 0)
+            if item is not None and item.text() == str(entry.id):
+                target_row = row
+                break
+        self.assertIsNotNone(target_row)
+        self.panel.entry_table.selectRow(int(target_row))
+        pump_events(app=self.app, cycles=2)
+        self.assertTrue(self.panel.reassign_entry_button.isEnabled())
+
+        with mock.patch(
+            "isrc_manager.code_registry.workspace._RegistryOwnerAssignmentDialog"
+        ) as dialog_cls:
+            dialog = dialog_cls.return_value
+            dialog.exec.return_value = QDialog.Accepted
+            dialog.assignment.return_value = ("contract", second_contract_id)
+            with mock.patch(
+                "isrc_manager.code_registry.workspace.QMessageBox.critical"
+            ) as critical:
+                self.panel._reassign_selected_entry()
+
+        critical.assert_not_called()
+        first_contract = self.contract_service.fetch_contract(first_contract_id)
+        second_contract = self.contract_service.fetch_contract(second_contract_id)
+        self.assertIsNotNone(first_contract)
+        self.assertIsNotNone(second_contract)
+        assert first_contract is not None
+        assert second_contract is not None
+        self.assertIsNone(first_contract.contract_registry_entry_id)
+        self.assertIsNone(first_contract.contract_number)
+        self.assertEqual(second_contract.contract_registry_entry_id, entry.id)
+        self.assertEqual(second_contract.contract_number, entry.value)
+        self.assertIn("Realigned internal registry value", self.panel.status_label.text())
 
     def test_workspace_saves_builtin_prefix_without_warning(self):
         self._select_category_row(system_key=BUILTIN_CATEGORY_CONTRACT_NUMBER)

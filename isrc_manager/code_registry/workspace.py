@@ -37,6 +37,8 @@ from isrc_manager.ui_common import (
 
 from .models import (
     BUILTIN_CATEGORY_CATALOG_NUMBER,
+    BUILTIN_CATEGORY_CONTRACT_NUMBER,
+    BUILTIN_CATEGORY_LICENSE_NUMBER,
     BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
     GENERATION_STRATEGY_MANUAL,
     GENERATION_STRATEGY_SEQUENTIAL,
@@ -214,6 +216,13 @@ class CodeRegistryWorkspacePanel(QWidget):
     """Integrated management surface for internal codes, external catalogs, and categories."""
 
     close_requested = Signal()
+    _REALIGNABLE_SYSTEM_KEYS = frozenset(
+        {
+            BUILTIN_CATEGORY_CONTRACT_NUMBER,
+            BUILTIN_CATEGORY_LICENSE_NUMBER,
+            BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
+        }
+    )
 
     _SUBJECT_KIND_CHOICES = (
         ("Catalog", SUBJECT_KIND_CATALOG),
@@ -300,9 +309,9 @@ class CodeRegistryWorkspacePanel(QWidget):
         self.include_unused_checkbox.setChecked(True)
         self.include_unused_checkbox.toggled.connect(self.refresh_entries)
         toolbar.addWidget(self.include_unused_checkbox)
-        generate_code_button = QPushButton("Generate Code", page)
-        generate_code_button.clicked.connect(self._generate_catalog_code)
-        toolbar.addWidget(generate_code_button)
+        self.generate_code_button = QPushButton("Generate Code", page)
+        self.generate_code_button.clicked.connect(self._generate_catalog_code)
+        toolbar.addWidget(self.generate_code_button)
         generate_hash_button = QPushButton("Generate Registry SHA-256 Key", page)
         generate_hash_button.clicked.connect(self._generate_registry_hash)
         toolbar.addWidget(generate_hash_button)
@@ -310,6 +319,10 @@ class CodeRegistryWorkspacePanel(QWidget):
         refresh_button.clicked.connect(self.refresh)
         toolbar.addWidget(refresh_button)
         layout.addLayout(toolbar)
+        self.entry_generation_hint_label = QLabel("", page)
+        self.entry_generation_hint_label.setWordWrap(True)
+        self.entry_generation_hint_label.setProperty("role", "supportingText")
+        layout.addWidget(self.entry_generation_hint_label)
 
         splitter = QSplitter(Qt.Horizontal, page)
         splitter.setChildrenCollapsible(False)
@@ -366,6 +379,10 @@ class CodeRegistryWorkspacePanel(QWidget):
         self.assign_entry_button.clicked.connect(self._assign_selected_entry)
         self.assign_entry_button.setEnabled(False)
         details_layout.addWidget(self.assign_entry_button)
+        self.reassign_entry_button = QPushButton("Realign Selected Value", details_box)
+        self.reassign_entry_button.clicked.connect(self._reassign_selected_entry)
+        self.reassign_entry_button.setEnabled(False)
+        details_layout.addWidget(self.reassign_entry_button)
         self.delete_entry_button = QPushButton("Delete Selected Value", details_box)
         self.delete_entry_button.clicked.connect(self._delete_selected_entry)
         self.delete_entry_button.setEnabled(False)
@@ -573,12 +590,54 @@ class CodeRegistryWorkspacePanel(QWidget):
                 self.category_table.setItem(row, column, QTableWidgetItem(value))
             self.entry_category_filter.addItem(category.display_name, int(category.id))
         self.category_table.resizeColumnsToContents()
+        self._sync_entry_generation_action()
+
+    def _selected_generation_category(self):
+        service = self._service()
+        if service is None:
+            return None
+        selected_category_id = self.entry_category_filter.currentData()
+        if selected_category_id is None:
+            selected_category_id = self._selected_row_id(
+                self.category_table, self._category_row_ids
+            )
+        if selected_category_id is None:
+            return service.fetch_category_by_system_key(BUILTIN_CATEGORY_CATALOG_NUMBER)
+        return service.fetch_category(int(selected_category_id))
+
+    def _sync_entry_generation_action(self) -> None:
+        if not hasattr(self, "generate_code_button"):
+            return
+        service = self._service()
+        category = self._selected_generation_category()
+        if service is None or category is None:
+            self.generate_code_button.setText("Generate Code")
+            self.generate_code_button.setEnabled(False)
+            self.generate_code_button.setToolTip("Open a profile to generate registry values.")
+            if hasattr(self, "entry_generation_hint_label"):
+                self.entry_generation_hint_label.setText(
+                    "Choose a profile and a registry category before generating values."
+                )
+            return
+        if category.generation_strategy in {
+            GENERATION_STRATEGY_SEQUENTIAL,
+            GENERATION_STRATEGY_SHA256,
+        }:
+            reason = service.generation_unavailable_reason(category_id=category.id)
+        else:
+            reason = f"'{category.display_name}' does not support automatic generation."
+        self.generate_code_button.setText(f"Generate {category.display_name}")
+        self.generate_code_button.setEnabled(reason is None)
+        self.generate_code_button.setToolTip(reason or "")
+        if hasattr(self, "entry_generation_hint_label"):
+            self.entry_generation_hint_label.setText(reason or "")
 
     def refresh_entries(self) -> None:
         service = self._service()
         self.entry_table.setRowCount(0)
         self._entry_row_ids = []
         if service is None:
+            self._sync_entry_generation_action()
             return
         entries = service.list_entries(
             category_id=self.entry_category_filter.currentData(),
@@ -601,6 +660,7 @@ class CodeRegistryWorkspacePanel(QWidget):
             for column, value in enumerate(values):
                 self.entry_table.setItem(row, column, QTableWidgetItem(value))
         self.entry_table.resizeColumnsToContents()
+        self._sync_entry_generation_action()
         self._load_entry_details()
 
     def refresh_external(self) -> None:
@@ -648,6 +708,7 @@ class CodeRegistryWorkspacePanel(QWidget):
             self.entry_created_label.setText("")
             self.entry_usage_text.clear()
             self.assign_entry_button.setEnabled(False)
+            self.reassign_entry_button.setEnabled(False)
             self.delete_entry_button.setEnabled(False)
             return
         entry = service.fetch_entry(entry_id)
@@ -662,10 +723,17 @@ class CodeRegistryWorkspacePanel(QWidget):
         created_bits = [bit for bit in [entry.created_at, entry.created_via] if bit]
         self.entry_created_label.setText(" / ".join(created_bits))
         self.entry_usage_text.setPlainText(self._usage_text(usage))
-        self.assign_entry_button.setEnabled(True)
-        self.delete_entry_button.setEnabled(
-            entry.category_system_key == BUILTIN_CATEGORY_REGISTRY_SHA256_KEY and not usage
+        assignable_owner_kinds = service.assignment_owner_kinds_for_entry(entry.id)
+        supports_reassignment = (
+            bool(usage)
+            and entry.category_system_key in self._REALIGNABLE_SYSTEM_KEYS
+            and assignable_owner_kinds == ["contract"]
         )
+        self.assign_entry_button.setEnabled(
+            bool(assignable_owner_kinds) and not supports_reassignment
+        )
+        self.reassign_entry_button.setEnabled(supports_reassignment)
+        self.delete_entry_button.setEnabled(not usage)
 
     def _load_external_details(self) -> None:
         service = self._service()
@@ -729,6 +797,7 @@ class CodeRegistryWorkspacePanel(QWidget):
             self.delete_category_button.setEnabled(not bool(category.is_system))
         finally:
             self._suspend_category_form = False
+        self._sync_entry_generation_action()
 
     def _reset_category_form(self) -> None:
         self.category_name_edit.clear()
@@ -816,17 +885,35 @@ class CodeRegistryWorkspacePanel(QWidget):
         service = self._service()
         if service is None:
             return
+        category = self._selected_generation_category()
+        if category is None:
+            QMessageBox.information(
+                self,
+                "Code Registry",
+                "Choose a registry category before generating a value.",
+            )
+            return
         try:
-            result = service.generate_next_code(
-                system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,
-                created_via="workspace.generate",
+            result = (
+                service.generate_sha256_key(
+                    category_id=category.id,
+                    created_via="workspace.generate",
+                )
+                if category.generation_strategy == GENERATION_STRATEGY_SHA256
+                else service.generate_next_code(
+                    category_id=category.id,
+                    created_via="workspace.generate",
+                )
             )
         except Exception as exc:
             QMessageBox.critical(self, "Code Registry", str(exc))
             return
         self.refresh()
         self._focus_entry(result.entry.id)
-        self._set_status(f"Generated internal catalog code {result.entry.value}.")
+        if category.system_key == BUILTIN_CATEGORY_REGISTRY_SHA256_KEY:
+            self._set_status("Generated a new Registry SHA-256 Key.")
+            return
+        self._set_status(f"Generated {category.display_name.lower()} {result.entry.value}.")
 
     def _generate_registry_hash(self) -> None:
         service = self._service()
@@ -943,6 +1030,47 @@ class CodeRegistryWorkspacePanel(QWidget):
             f"Linked internal registry value {entry.value} to {str(owner_kind).title()} #{int(owner_id)}."
         )
 
+    def _reassign_selected_entry(self) -> None:
+        service = self._service()
+        entry_id = self._selected_entry_id
+        if service is None or entry_id is None:
+            return
+        entry = service.fetch_entry(int(entry_id))
+        if entry is None:
+            return
+        current_usage = service.usage_for_entry(entry.id)
+        dialog = _RegistryOwnerAssignmentDialog(
+            service_provider=self.service_provider,
+            entry_id=entry.id,
+            entry_value=entry.value,
+            parent=self,
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return
+        assignment = dialog.assignment()
+        if assignment is None:
+            return
+        owner_kind, owner_id = assignment
+        try:
+            service.reassign_entry_to_owner(
+                entry.id,
+                owner_kind=str(owner_kind),
+                owner_id=int(owner_id),
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, "Code Registry", str(exc))
+            return
+        self.refresh()
+        self._focus_entry(entry.id)
+        prior_label = (
+            f"{current_usage[0].subject_kind.title()} #{int(current_usage[0].subject_id)}"
+            if current_usage
+            else "no previous owner"
+        )
+        self._set_status(
+            f"Realigned internal registry value {entry.value} from {prior_label} to {str(owner_kind).title()} #{int(owner_id)}."
+        )
+
     def _delete_selected_entry(self) -> None:
         service = self._service()
         entry_id = self._selected_entry_id
@@ -955,8 +1083,8 @@ class CodeRegistryWorkspacePanel(QWidget):
             self,
             "Delete Registry Value",
             (
-                f"Delete unused Registry SHA-256 Key '{entry.value}'?\n\n"
-                "This is only allowed while the key is not linked to any contract."
+                f"Delete unlinked registry value '{entry.value}'?\n\n"
+                "This is only allowed while the value is not linked to any record."
             ),
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
@@ -971,7 +1099,7 @@ class CodeRegistryWorkspacePanel(QWidget):
         self.refresh()
         self.entry_table.clearSelection()
         self._load_entry_details()
-        self._set_status(f"Deleted unused Registry SHA-256 Key {entry.value}.")
+        self._set_status(f"Deleted unlinked registry value {entry.value}.")
 
     def _set_status(self, text: str) -> None:
         self.status_label.setText(str(text or "").strip())

@@ -255,6 +255,44 @@ class ContractTemplateFormGenerationTests(unittest.TestCase):
         self.assertEqual(binding.scope_policy, "track_context")
         self.assertEqual(binding.widget_hint, "track_selector")
 
+    def test_registry_backed_template_symbols_are_auto_resolved_for_draft_lifecycle(self):
+        template = self._create_template()
+        source_path = self.root / "registry-auto-form.docx"
+        source_path.write_bytes(
+            make_docx_bytes(
+                document_paragraphs=(
+                    ("Track Catalog ", "{{db.track.catalog_number}}"),
+                    ("Contract Number ", "{{db.contract.contract_number}}"),
+                    ("License Number ", "{{db.contract.license_number}}"),
+                    ("Registry Key ", "{{db.contract.registry_sha256_key}}"),
+                )
+            )
+        )
+
+        revision = self.template_service.import_revision_from_path(
+            template.template_id,
+            source_path,
+            payload=ContractTemplateRevisionPayload(source_filename=source_path.name),
+        ).revision
+        definition = self.form_service.build_form_definition(revision.revision_id)
+        auto_fields = {item.canonical_symbol: item for item in definition.auto_fields}
+
+        self.assertEqual(len(definition.selector_fields), 0)
+        self.assertEqual(
+            set(auto_fields),
+            {
+                "{{db.track.catalog_number}}",
+                "{{db.contract.contract_number}}",
+                "{{db.contract.license_number}}",
+                "{{db.contract.registry_sha256_key}}",
+            },
+        )
+        self.assertEqual(auto_fields["{{db.track.catalog_number}}"].source_label, "Draft Registry")
+        self.assertIn(
+            "first time the draft is saved or exported",
+            auto_fields["{{db.contract.contract_number}}"].description or "",
+        )
+
     def test_party_scope_fields_use_one_selector_and_fallback_party_labels(self):
         template = self._create_template()
         source_path = self.root / "party-form-generation.docx"

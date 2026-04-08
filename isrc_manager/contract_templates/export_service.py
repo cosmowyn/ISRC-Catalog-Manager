@@ -20,6 +20,7 @@ from PySide6.QtWidgets import QApplication
 
 from isrc_manager.file_storage import coalesce_filename, sha256_digest
 
+from .catalog import registry_binding_for_catalog_entry, registry_binding_for_symbol
 from .html_support import clone_html_package_tree, decode_html_bytes, replace_html_placeholders
 from .ingestion import DOCXHtmlAdapter, PagesTemplateAdapter
 from .models import (
@@ -306,6 +307,8 @@ class ContractTemplateExportService:
         editable_payload: dict[str, object],
         *,
         strict: bool = True,
+        draft_id: int | None = None,
+        allow_registry_generation: bool = False,
     ) -> tuple[dict[str, str], tuple[str, ...]]:
         placeholders = self.template_service.list_placeholders(revision_id)
         bindings = {
@@ -352,6 +355,8 @@ class ContractTemplateExportService:
                     resolved_value = self._resolve_catalog_value(
                         catalog_entry=catalog_entry,
                         selection_value=None,
+                        draft_id=draft_id,
+                        allow_registry_generation=allow_registry_generation,
                     )
                 except ContractTemplateExportError:
                     if strict:
@@ -379,16 +384,23 @@ class ContractTemplateExportService:
                 ),
                 db_selections.get(canonical),
             )
+            registry_binding = registry_binding_for_catalog_entry(
+                getattr(catalog_entry, "namespace", None),
+                getattr(catalog_entry, "key", None),
+            )
             if selection_value is None:
-                if strict:
+                if strict and not (registry_binding is not None and draft_id is not None):
                     raise ContractTemplateExportError(
                         f"Database-backed placeholder {canonical} does not have a selected record."
                     )
-                continue
+                if registry_binding is None or draft_id is None:
+                    continue
             try:
                 resolved_value = self._resolve_catalog_value(
                     catalog_entry=catalog_entry,
                     selection_value=selection_value,
+                    draft_id=draft_id,
+                    allow_registry_generation=allow_registry_generation,
                 )
             except ContractTemplateExportError:
                 if strict:
@@ -495,6 +507,8 @@ class ContractTemplateExportService:
         *,
         catalog_entry,
         selection_value: object | None,
+        draft_id: int | None = None,
+        allow_registry_generation: bool = False,
     ) -> Any:
         namespace = str(catalog_entry.namespace or "").strip().lower()
         key = str(catalog_entry.key or "").strip()
@@ -505,12 +519,28 @@ class ContractTemplateExportService:
                 )
             owner_settings = self.settings_reads.load_owner_party_settings()
             return getattr(owner_settings, key, None)
+        registry_binding = registry_binding_for_catalog_entry(namespace, key)
+        if registry_binding is not None and draft_id is not None:
+            return self._resolve_draft_registry_value(
+                draft_id=draft_id,
+                canonical_symbol=catalog_entry.canonical_symbol,
+                registry_binding=registry_binding,
+                allow_generation=allow_registry_generation,
+            )
         clean_selection = _clean_text(selection_value)
         if clean_selection is None:
             raise ContractTemplateExportError(
-                f"{catalog_entry.canonical_symbol} is missing a selected record."
+                f"{catalog_entry.canonical_symbol} does not have a selected record."
             )
         record_id = int(clean_selection)
+        if allow_registry_generation and registry_binding is not None:
+            try:
+                return self._generate_unlinked_registry_value(
+                    registry_binding=registry_binding,
+                    created_via="contract_template.export.generate",
+                )
+            except ValueError as exc:
+                raise ContractTemplateExportError(str(exc)) from exc
         if namespace == "track":
             if self.track_service is None:
                 raise ContractTemplateExportError("Track service is unavailable for export.")
@@ -570,6 +600,143 @@ class ContractTemplateExportService:
         raise ContractTemplateExportError(
             f"Unsupported placeholder namespace for export: {namespace}"
         )
+
+    def _registry_service_for_binding(self, registry_binding):
+        if registry_binding.owner_kind == "contract":
+            if self.contract_service is None:
+                raise ContractTemplateExportError(
+                    "Contract service is unavailable for draft-backed registry generation."
+                )
+            registry_service = self.contract_service.code_registry_service()
+        elif registry_binding.owner_kind == "track":
+            if self.track_service is None:
+                raise ContractTemplateExportError(
+                    "Track service is unavailable for draft-backed registry generation."
+                )
+            registry_service = self.track_service.code_registry_service()
+        elif registry_binding.owner_kind == "release":
+            if self.release_service is None:
+                raise ContractTemplateExportError(
+                    "Release service is unavailable for draft-backed registry generation."
+                )
+            registry_service = self.release_service.code_registry_service()
+        else:
+            registry_service = None
+        if registry_service is None:
+            raise ContractTemplateExportError("Code registry service is unavailable.")
+        return registry_service
+
+    def validate_draft_registry_generation_for_revision(self, revision_id: int) -> None:
+        seen: set[str] = set()
+        for placeholder in self.template_service.list_placeholders(int(revision_id)):
+            registry_binding = registry_binding_for_symbol(placeholder.canonical_symbol)
+            if registry_binding is None or registry_binding.system_key in seen:
+                continue
+            seen.add(registry_binding.system_key)
+            registry_service = self._registry_service_for_binding(registry_binding)
+            reason = registry_service.generation_unavailable_reason(
+                system_key=registry_binding.system_key
+            )
+            if reason:
+                raise ContractTemplateExportError(
+                    f"{placeholder.canonical_symbol} cannot be issued for this draft: {reason}"
+                )
+
+    def _generate_unlinked_registry_value(
+        self,
+        *,
+        registry_binding,
+        created_via: str,
+    ) -> str:
+        registry_service = self._registry_service_for_binding(registry_binding)
+        category = registry_service.fetch_category_by_system_key(registry_binding.system_key)
+        if category is None:
+            raise ContractTemplateExportError(
+                f"Registry category '{registry_binding.system_key}' is not available."
+            )
+        result = (
+            registry_service.generate_sha256_key(
+                category_id=category.id,
+                created_via=created_via,
+            )
+            if str(category.generation_strategy or "").strip().lower() == "sha256"
+            else registry_service.generate_next_code(
+                category_id=category.id,
+                created_via=created_via,
+            )
+        )
+        return result.entry.value
+
+    def _resolve_draft_registry_value(
+        self,
+        *,
+        draft_id: int,
+        canonical_symbol: str,
+        registry_binding,
+        allow_generation: bool,
+    ) -> str | None:
+        assignment = self.template_service.fetch_draft_registry_assignment(
+            int(draft_id),
+            canonical_symbol,
+        )
+        if assignment is not None:
+            return assignment.registry_value
+        if not allow_generation:
+            return None
+        try:
+            registry_service = self._registry_service_for_binding(registry_binding)
+            category = registry_service.fetch_category_by_system_key(registry_binding.system_key)
+            if category is None:
+                raise ContractTemplateExportError(
+                    f"Registry category '{registry_binding.system_key}' is not available."
+                )
+            result = (
+                registry_service.generate_sha256_key(
+                    category_id=category.id,
+                    created_via="contract_template.export.generate",
+                )
+                if str(category.generation_strategy or "").strip().lower() == "sha256"
+                else registry_service.generate_next_code(
+                    category_id=category.id,
+                    created_via="contract_template.export.generate",
+                )
+            )
+            created = self.template_service.ensure_draft_registry_assignment(
+                int(draft_id),
+                canonical_symbol=canonical_symbol,
+                system_key=registry_binding.system_key,
+                owner_kind=registry_binding.owner_kind,
+                registry_entry_id=result.entry.id,
+            )
+            return created.registry_value
+        except ValueError as exc:
+            raise ContractTemplateExportError(str(exc)) from exc
+
+    def ensure_registry_assignments_for_draft(
+        self,
+        draft_id: int,
+        *,
+        created_via: str = "contract_template.draft.generate",
+    ) -> dict[str, str]:
+        draft = self.template_service.fetch_draft(int(draft_id))
+        if draft is None:
+            raise ContractTemplateExportError(f"Contract template draft {int(draft_id)} not found")
+        self.validate_draft_registry_generation_for_revision(draft.revision_id)
+        values: dict[str, str] = {}
+        for placeholder in self.template_service.list_placeholders(draft.revision_id):
+            registry_binding = registry_binding_for_symbol(placeholder.canonical_symbol)
+            if registry_binding is None:
+                continue
+            values[placeholder.canonical_symbol] = (
+                self._resolve_draft_registry_value(
+                    draft_id=int(draft_id),
+                    canonical_symbol=placeholder.canonical_symbol,
+                    registry_binding=registry_binding,
+                    allow_generation=True,
+                )
+                or ""
+            )
+        return values
 
     def _missing_required_value_message(
         self,
@@ -688,6 +855,8 @@ class ContractTemplateExportService:
             revision=revision,
             editable_payload=editable_payload,
             strict=require_complete,
+            draft_id=int(draft_id),
+            allow_registry_generation=False,
         )
         return self._materialize_html_working_copy(
             draft_id=draft_id,
@@ -729,6 +898,7 @@ class ContractTemplateExportService:
         *,
         revision_id: int,
         editable_payload: object,
+        draft_id: int | None = None,
         session_root: str | Path | None = None,
         strict: bool = False,
     ) -> tuple[Path, Path, tuple[str, ...]]:
@@ -744,6 +914,8 @@ class ContractTemplateExportService:
             revision=revision,
             editable_payload=dict(editable_payload or {}),
             strict=bool(strict),
+            draft_id=draft_id,
+            allow_registry_generation=False,
         )
         target_root = (
             Path(session_root).resolve()
@@ -770,6 +942,8 @@ class ContractTemplateExportService:
         revision,
         editable_payload: dict[str, object],
         strict: bool,
+        draft_id: int | None = None,
+        allow_registry_generation: bool = False,
     ) -> tuple[str, Path, tuple[str, ...]]:
         source_html_path = self.template_service.ensure_html_revision_source_path(
             revision.revision_id
@@ -785,6 +959,8 @@ class ContractTemplateExportService:
             revision.revision_id,
             editable_payload,
             strict=strict,
+            draft_id=draft_id,
+            allow_registry_generation=allow_registry_generation,
         )
         rendered_html = replace_html_placeholders(
             decode_html_bytes(source_html_path.read_bytes()),
@@ -805,6 +981,8 @@ class ContractTemplateExportService:
             revision.revision_id,
             editable_payload,
             strict=True,
+            draft_id=int(draft_id),
+            allow_registry_generation=True,
         )
         resolved_docx_bytes = None
         resolved_docx_name = None
@@ -819,6 +997,8 @@ class ContractTemplateExportService:
             revision=revision,
             editable_payload=editable_payload,
             strict=True,
+            draft_id=int(draft_id),
+            allow_registry_generation=True,
         )
         source_html_path = self.template_service.ensure_html_revision_source_path(
             revision.revision_id

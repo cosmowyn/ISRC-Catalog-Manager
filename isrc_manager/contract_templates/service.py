@@ -46,6 +46,7 @@ from .ingestion import (
 from .models import (
     ContractTemplateDraftPayload,
     ContractTemplateDraftRecord,
+    ContractTemplateDraftRegistryAssignmentRecord,
     ContractTemplateImportResult,
     ContractTemplateOutputArtifactPayload,
     ContractTemplateOutputArtifactRecord,
@@ -2022,6 +2023,161 @@ class ContractTemplateService:
             updated_at=_clean_text(row[18]),
             stored_in_database=(mode == STORAGE_MODE_DATABASE),
         )
+
+    def fetch_draft_registry_assignment(
+        self,
+        draft_id: int,
+        canonical_symbol: str,
+    ) -> ContractTemplateDraftRegistryAssignmentRecord | None:
+        row = self.conn.execute(
+            """
+            SELECT
+                a.id,
+                a.draft_id,
+                a.canonical_symbol,
+                a.system_key,
+                a.owner_kind,
+                a.registry_entry_id,
+                COALESCE(e.value, ''),
+                a.created_at,
+                a.updated_at
+            FROM ContractTemplateDraftRegistryAssignments a
+            JOIN CodeRegistryEntries e ON e.id = a.registry_entry_id
+            WHERE a.draft_id=? AND a.canonical_symbol=?
+            """,
+            (int(draft_id), str(canonical_symbol or "").strip()),
+        ).fetchone()
+        if not row:
+            return None
+        return ContractTemplateDraftRegistryAssignmentRecord(
+            assignment_id=int(row[0]),
+            draft_id=int(row[1]),
+            canonical_symbol=str(row[2] or ""),
+            system_key=str(row[3] or ""),
+            owner_kind=str(row[4] or ""),
+            registry_entry_id=int(row[5]),
+            registry_value=str(row[6] or ""),
+            created_at=_clean_text(row[7]),
+            updated_at=_clean_text(row[8]),
+        )
+
+    def list_draft_registry_assignments(
+        self,
+        draft_id: int,
+    ) -> list[ContractTemplateDraftRegistryAssignmentRecord]:
+        rows = self.conn.execute(
+            """
+            SELECT a.id
+            FROM ContractTemplateDraftRegistryAssignments a
+            WHERE a.draft_id=?
+            ORDER BY a.created_at ASC, a.id ASC
+            """,
+            (int(draft_id),),
+        ).fetchall()
+        assignments: list[ContractTemplateDraftRegistryAssignmentRecord] = []
+        for row in rows:
+            assignment = self.fetch_draft_registry_assignment_by_id(int(row[0]))
+            if assignment is not None:
+                assignments.append(assignment)
+        return assignments
+
+    def fetch_draft_registry_assignment_by_id(
+        self, assignment_id: int
+    ) -> ContractTemplateDraftRegistryAssignmentRecord | None:
+        row = self.conn.execute(
+            """
+            SELECT
+                a.id,
+                a.draft_id,
+                a.canonical_symbol,
+                a.system_key,
+                a.owner_kind,
+                a.registry_entry_id,
+                COALESCE(e.value, ''),
+                a.created_at,
+                a.updated_at
+            FROM ContractTemplateDraftRegistryAssignments a
+            JOIN CodeRegistryEntries e ON e.id = a.registry_entry_id
+            WHERE a.id=?
+            """,
+            (int(assignment_id),),
+        ).fetchone()
+        if not row:
+            return None
+        return ContractTemplateDraftRegistryAssignmentRecord(
+            assignment_id=int(row[0]),
+            draft_id=int(row[1]),
+            canonical_symbol=str(row[2] or ""),
+            system_key=str(row[3] or ""),
+            owner_kind=str(row[4] or ""),
+            registry_entry_id=int(row[5]),
+            registry_value=str(row[6] or ""),
+            created_at=_clean_text(row[7]),
+            updated_at=_clean_text(row[8]),
+        )
+
+    def ensure_draft_registry_assignment(
+        self,
+        draft_id: int,
+        *,
+        canonical_symbol: str,
+        system_key: str,
+        owner_kind: str,
+        registry_entry_id: int,
+    ) -> ContractTemplateDraftRegistryAssignmentRecord:
+        draft = self.fetch_draft(int(draft_id))
+        if draft is None:
+            raise ValueError(f"Contract template draft {int(draft_id)} not found")
+        clean_symbol = str(canonical_symbol or "").strip()
+        if not clean_symbol:
+            raise ValueError("Canonical symbol is required for draft registry assignment.")
+        clean_system_key = str(system_key or "").strip()
+        clean_owner_kind = str(owner_kind or "").strip()
+        existing = self.fetch_draft_registry_assignment(int(draft_id), clean_symbol)
+        if existing is not None:
+            if (
+                int(existing.registry_entry_id) != int(registry_entry_id)
+                or existing.system_key != clean_system_key
+                or existing.owner_kind != clean_owner_kind
+            ):
+                raise ValueError(
+                    f"Draft #{int(draft_id)} already owns registry value "
+                    f"'{existing.registry_value}' for {clean_symbol}."
+                )
+            return existing
+        try:
+            with self.conn:
+                cur = self.conn.cursor()
+                cur.execute(
+                    """
+                    INSERT INTO ContractTemplateDraftRegistryAssignments (
+                        draft_id,
+                        canonical_symbol,
+                        system_key,
+                        owner_kind,
+                        registry_entry_id
+                    )
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        int(draft_id),
+                        clean_symbol,
+                        clean_system_key,
+                        clean_owner_kind,
+                        int(registry_entry_id),
+                    ),
+                )
+                assignment_id = int(cur.lastrowid)
+        except sqlite3.IntegrityError as exc:
+            raise ValueError(
+                f"Registry entry #{int(registry_entry_id)} is already linked to another draft."
+            ) from exc
+        assignment = self.fetch_draft_registry_assignment_by_id(assignment_id)
+        if assignment is None:
+            raise RuntimeError(
+                f"Contract template draft registry assignment {assignment_id} was not created"
+            )
+        return assignment
 
     def list_drafts(
         self,

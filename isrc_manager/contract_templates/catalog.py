@@ -9,6 +9,12 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from isrc_manager.assets import ASSET_TYPE_CHOICES
+from isrc_manager.code_registry import (
+    BUILTIN_CATEGORY_CATALOG_NUMBER,
+    BUILTIN_CATEGORY_CONTRACT_NUMBER,
+    BUILTIN_CATEGORY_LICENSE_NUMBER,
+    BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
+)
 from isrc_manager.contracts import CONTRACT_STATUS_CHOICES
 from isrc_manager.domain.standard_fields import STANDARD_FIELD_SPECS
 from isrc_manager.parties import PARTY_TYPE_CHOICES
@@ -63,6 +69,14 @@ _SCOPE_ENTITY_BY_NAMESPACE = {
     "custom": "track",
 }
 
+_REGISTRY_BINDINGS = {
+    ("track", "catalog_number"): (BUILTIN_CATEGORY_CATALOG_NUMBER, "track"),
+    ("release", "catalog_number"): (BUILTIN_CATEGORY_CATALOG_NUMBER, "release"),
+    ("contract", "contract_number"): (BUILTIN_CATEGORY_CONTRACT_NUMBER, "contract"),
+    ("contract", "license_number"): (BUILTIN_CATEGORY_LICENSE_NUMBER, "contract"),
+    ("contract", "registry_sha256_key"): (BUILTIN_CATEGORY_REGISTRY_SHA256_KEY, "contract"),
+}
+
 
 @dataclass(frozen=True, slots=True)
 class _CatalogSeed:
@@ -89,6 +103,12 @@ class ContractTemplateCatalogSection:
             "label": self.label,
             "entries": [item.to_dict() for item in self.entries],
         }
+
+
+@dataclass(frozen=True, slots=True)
+class ContractTemplateRegistryBinding:
+    system_key: str
+    owner_kind: str
 
 
 def _track_seeds() -> tuple[_CatalogSeed, ...]:
@@ -121,6 +141,26 @@ def _track_seeds() -> tuple[_CatalogSeed, ...]:
         )
     )
     return tuple(seeds)
+
+
+def registry_binding_for_catalog_entry(
+    namespace: str | None,
+    key: str | None,
+) -> ContractTemplateRegistryBinding | None:
+    binding = _REGISTRY_BINDINGS.get((str(namespace or "").strip().lower(), str(key or "").strip()))
+    if binding is None:
+        return None
+    system_key, owner_kind = binding
+    return ContractTemplateRegistryBinding(system_key=system_key, owner_kind=owner_kind)
+
+
+def registry_binding_for_symbol(
+    canonical_symbol: str | None,
+) -> ContractTemplateRegistryBinding | None:
+    token = parse_placeholder(str(canonical_symbol or ""))
+    if token.binding_kind != "db":
+        return None
+    return registry_binding_for_catalog_entry(token.namespace, token.key)
 
 
 _STATIC_SEEDS: tuple[_CatalogSeed, ...] = _track_seeds() + (

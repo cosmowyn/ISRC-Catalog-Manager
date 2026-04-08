@@ -109,6 +109,124 @@ class ContractService:
     def code_registry_service(self) -> CodeRegistryService | None:
         return self._code_registry_service()
 
+    @staticmethod
+    def _contract_registry_columns(system_key: str) -> tuple[str, str, str]:
+        column_map = {
+            BUILTIN_CATEGORY_CONTRACT_NUMBER: (
+                "contract_number",
+                "contract_registry_entry_id",
+                "Contract Number",
+            ),
+            BUILTIN_CATEGORY_LICENSE_NUMBER: (
+                "license_number",
+                "license_registry_entry_id",
+                "License Number",
+            ),
+            BUILTIN_CATEGORY_REGISTRY_SHA256_KEY: (
+                "registry_sha256_key",
+                "registry_sha256_key_entry_id",
+                "Registry SHA-256 Key",
+            ),
+        }
+        text_column, link_column, label = column_map.get(system_key, (None, None, None))
+        if not text_column or not link_column or not label:
+            raise ValueError(f"Unsupported contract registry category '{system_key}'.")
+        return text_column, link_column, label
+
+    def _assign_contract_registry_entry(
+        self,
+        *,
+        contract_id: int,
+        system_key: str,
+        entry: CodeRegistryEntryRecord,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> None:
+        text_column, link_column, _label = self._contract_registry_columns(system_key)
+        target = cursor or self.conn
+        target.execute(
+            f"""
+            UPDATE Contracts
+            SET {text_column}=?,
+                {link_column}=?,
+                updated_at=datetime('now')
+            WHERE id=?
+            """,
+            (entry.value, int(entry.id), int(contract_id)),
+        )
+
+    def ensure_registry_value_for_contract(
+        self,
+        contract_id: int,
+        *,
+        system_key: str,
+        created_via: str = "contract.template.ensure",
+    ) -> CodeRegistryEntryRecord:
+        service = self._code_registry_service()
+        if service is None:
+            raise ValueError("Code registry service is unavailable.")
+        contract = self.fetch_contract(int(contract_id))
+        if contract is None:
+            raise ValueError(f"Contract #{int(contract_id)} was not found.")
+        category = service.fetch_category_by_system_key(system_key)
+        if category is None:
+            raise ValueError(f"Registry category '{system_key}' is not available.")
+        text_column, link_column, label = self._contract_registry_columns(system_key)
+        existing_entry_id = getattr(contract, link_column, None)
+        existing_value = clean_text(getattr(contract, text_column, None))
+        if existing_entry_id is not None:
+            entry = service.fetch_entry(int(existing_entry_id))
+            if entry is None:
+                raise ValueError(f"{label} entry #{int(existing_entry_id)} is no longer available.")
+            if int(entry.category_id) != int(category.id):
+                raise ValueError(
+                    f"{label} entry #{int(existing_entry_id)} does not belong to '{category.display_name}'."
+                )
+            if existing_value != entry.value:
+                with self.conn:
+                    self._assign_contract_registry_entry(
+                        contract_id=int(contract_id),
+                        system_key=system_key,
+                        entry=entry,
+                    )
+            return entry
+        if existing_value:
+            try:
+                entry = service.capture_value_for_category(
+                    category_id=category.id,
+                    value=existing_value,
+                    created_via=f"{created_via}.capture",
+                    entry_kind=ENTRY_KIND_MANUAL_CAPTURE,
+                )
+            except ValueError as exc:
+                raise ValueError(
+                    f"{label} for contract #{int(contract_id)} is not valid for the configured registry rules: {exc}"
+                ) from exc
+            with self.conn:
+                self._assign_contract_registry_entry(
+                    contract_id=int(contract_id),
+                    system_key=system_key,
+                    entry=entry,
+                )
+            return entry
+        result = (
+            service.generate_sha256_key(
+                category_id=category.id,
+                created_via=created_via,
+            )
+            if category.generation_strategy == GENERATION_STRATEGY_SHA256
+            else service.generate_next_code(
+                category_id=category.id,
+                created_via=created_via,
+            )
+        )
+        with self.conn:
+            self._assign_contract_registry_entry(
+                contract_id=int(contract_id),
+                system_key=system_key,
+                entry=result.entry,
+            )
+        return result.entry
+
     def generate_registry_value_for_contract(
         self,
         contract_id: int,
@@ -119,6 +237,9 @@ class ContractService:
         service = self._code_registry_service()
         if service is None:
             raise ValueError("Code registry service is unavailable.")
+        contract = self.fetch_contract(int(contract_id))
+        if contract is None:
+            raise ValueError(f"Contract #{int(contract_id)} was not found.")
         category = service.fetch_category_by_system_key(system_key)
         if category is None:
             raise ValueError(f"Registry category '{system_key}' is not available.")
@@ -133,27 +254,11 @@ class ContractService:
                 created_via=created_via,
             )
         )
-        column_map = {
-            BUILTIN_CATEGORY_CONTRACT_NUMBER: ("contract_number", "contract_registry_entry_id"),
-            BUILTIN_CATEGORY_LICENSE_NUMBER: ("license_number", "license_registry_entry_id"),
-            BUILTIN_CATEGORY_REGISTRY_SHA256_KEY: (
-                "registry_sha256_key",
-                "registry_sha256_key_entry_id",
-            ),
-        }
-        text_column, link_column = column_map.get(system_key, (None, None))
-        if not text_column or not link_column:
-            raise ValueError(f"Unsupported contract registry category '{system_key}'.")
         with self.conn:
-            self.conn.execute(
-                f"""
-                UPDATE Contracts
-                SET {text_column}=?,
-                    {link_column}=?,
-                    updated_at=datetime('now')
-                WHERE id=?
-                """,
-                (result.entry.value, int(result.entry.id), int(contract_id)),
+            self._assign_contract_registry_entry(
+                contract_id=int(contract_id),
+                system_key=system_key,
+                entry=result.entry,
             )
         return result.entry
 

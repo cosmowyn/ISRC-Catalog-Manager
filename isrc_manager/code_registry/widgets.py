@@ -103,16 +103,28 @@ class CatalogIdentifierSelector(QWidget):
             return CATALOG_MODE_EXTERNAL
         return clean_mode
 
+    def _generation_unavailable_reason(self) -> str | None:
+        if not self.allow_generate or self._current_mode() != CATALOG_MODE_INTERNAL:
+            return None
+        service = self._service()
+        if service is None:
+            return "Open a profile to use internal catalog generation."
+        return service.generation_unavailable_reason(system_key=BUILTIN_CATEGORY_CATALOG_NUMBER)
+
     def refresh_choices(self) -> None:
         service = self._service()
         current_text = self.value_combo.currentText().strip()
+        self._internal_value_to_entry_id = (
+            {
+                str(choice.value): int(choice.entry_id)
+                for choice in service.list_choices_for_subject(subject_kind=SUBJECT_KIND_CATALOG)
+            }
+            if service is not None
+            else {}
+        )
         if service is None:
-            return
-        self._internal_value_to_entry_id = {
-            str(choice.value): int(choice.entry_id)
-            for choice in service.list_choices_for_subject(subject_kind=SUBJECT_KIND_CATALOG)
-        }
-        if self._current_mode() == CATALOG_MODE_INTERNAL:
+            values: list[str] = []
+        elif self._current_mode() == CATALOG_MODE_INTERNAL:
             values = sorted(self._internal_value_to_entry_id)
         else:
             values = service.external_catalog_suggestions()
@@ -135,9 +147,12 @@ class CatalogIdentifierSelector(QWidget):
                 self.value_combo.setCurrentIndex(0)
         finally:
             self.value_combo.blockSignals(previous)
+        generation_reason = self._generation_unavailable_reason()
         self.generate_button.setVisible(
             self.allow_generate and self._current_mode() == CATALOG_MODE_INTERNAL
         )
+        self.generate_button.setEnabled(generation_reason is None)
+        self.generate_button.setToolTip(generation_reason or "")
         self._sync_ids_from_text()
         self._refresh_status()
 
@@ -177,8 +192,9 @@ class CatalogIdentifierSelector(QWidget):
 
     def _refresh_status(self) -> None:
         clean_value = self.value_combo.currentText().strip()
+        generation_reason = self._generation_unavailable_reason()
         if not clean_value:
-            self.status_label.setText("No catalog identifier selected.")
+            self.status_label.setText(generation_reason or "No catalog identifier selected.")
             return
         service = self._service()
         if service is None:
@@ -188,6 +204,8 @@ class CatalogIdentifierSelector(QWidget):
             classification = service.classify_catalog_identifier(clean_value)
             if self._catalog_registry_entry_id is not None:
                 self.status_label.setText("Internal Registry value.")
+            elif generation_reason:
+                self.status_label.setText(generation_reason)
             elif classification.classification == CLASSIFICATION_INTERNAL:
                 self.status_label.setText(
                     "Matches the canonical internal format and will be captured as an immutable registry value on save."
@@ -324,6 +342,10 @@ class CatalogIdentifierSelector(QWidget):
     def generate_value(self) -> None:
         service = self._service()
         if service is None:
+            return
+        generation_reason = self._generation_unavailable_reason()
+        if generation_reason:
+            self.status_label.setText(generation_reason)
             return
         result = service.generate_next_code(
             system_key=BUILTIN_CATEGORY_CATALOG_NUMBER,

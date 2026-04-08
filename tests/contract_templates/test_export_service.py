@@ -5,6 +5,11 @@ from io import BytesIO
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
+from isrc_manager.code_registry import (
+    BUILTIN_CATEGORY_CATALOG_NUMBER,
+    BUILTIN_CATEGORY_CONTRACT_NUMBER,
+    BUILTIN_CATEGORY_LICENSE_NUMBER,
+)
 from isrc_manager.contract_templates import (
     ContractTemplateCatalogService,
     ContractTemplateExportError,
@@ -13,6 +18,8 @@ from isrc_manager.contract_templates import (
     ContractTemplateRevisionPayload,
     ContractTemplateService,
 )
+from isrc_manager.contracts import ContractPayload, ContractService
+from isrc_manager.releases import ReleasePayload, ReleaseService, ReleaseTrackPlacement
 from isrc_manager.services import (
     ContractTemplateDraftPayload,
     DatabaseSchemaService,
@@ -52,7 +59,7 @@ class ContractTemplateExportServiceTests(unittest.TestCase):
             """
         )
         self.track_service = TrackService(self.conn, self.root)
-        self.track_service.create_track(
+        self.primary_track_id = self.track_service.create_track(
             TrackCreatePayload(
                 isrc="NL-TST-26-00601",
                 track_title="Export Service Song",
@@ -67,7 +74,7 @@ class ContractTemplateExportServiceTests(unittest.TestCase):
                 catalog_number=None,
             )
         )
-        self.track_service.create_track(
+        self.legacy_track_id = self.track_service.create_track(
             TrackCreatePayload(
                 isrc="NL-TST-26-00602",
                 track_title="Legacy Conflict Song",
@@ -82,7 +89,13 @@ class ContractTemplateExportServiceTests(unittest.TestCase):
                 catalog_number=None,
             )
         )
+        self.release_service = ReleaseService(self.conn, self.root)
         self.party_service = PartyService(self.conn)
+        self.contract_service = ContractService(
+            self.conn,
+            self.root,
+            party_service=self.party_service,
+        )
         self.party_id = self.party_service.create_party(
             PartyPayload(
                 legal_name="Aeonium Holdings B.V.",
@@ -117,6 +130,21 @@ class ContractTemplateExportServiceTests(unittest.TestCase):
                 "INSERT INTO ApplicationOwnerBinding(id, party_id) VALUES(1, ?)",
                 (self.owner_party_id,),
             )
+        self.release_id = self.release_service.create_release(
+            ReleasePayload(
+                title="Export Coverage Release",
+                primary_artist="Moonwake",
+                release_date="2026-03-25",
+                placements=[ReleaseTrackPlacement(track_id=self.primary_track_id)],
+            )
+        )
+        self.contract_id = self.contract_service.create_contract(
+            ContractPayload(
+                title="Export Registry Contract",
+                contract_type="license",
+                status="draft",
+            )
+        )
         self.settings_reads = SettingsReadService(self.conn)
         self.catalog_service = ContractTemplateCatalogService(self.conn)
         self.template_service = ContractTemplateService(self.conn, data_root=self.root)
@@ -169,6 +197,8 @@ class ContractTemplateExportServiceTests(unittest.TestCase):
             catalog_service=self.catalog_service,
             settings_reads=self.settings_reads,
             track_service=self.track_service,
+            release_service=self.release_service,
+            contract_service=self.contract_service,
             party_service=self.party_service,
             html_adapter=self.html_adapter,
             html_pdf_adapter=self.html_pdf_adapter,
@@ -178,6 +208,50 @@ class ContractTemplateExportServiceTests(unittest.TestCase):
     def tearDown(self):
         self.conn.close()
         self.tmpdir.cleanup()
+
+    def _set_registry_prefix(self, system_key: str, prefix: str | None) -> None:
+        registry = self.track_service.code_registry_service()
+        category = registry.fetch_category_by_system_key(system_key)
+        self.assertIsNotNone(category)
+        assert category is not None
+        registry.update_category(category.id, prefix=prefix)
+
+    def _create_registry_draft(
+        self,
+        *,
+        name: str,
+        document_paragraphs: tuple[tuple[str, str], ...],
+        db_selections: dict[str, str],
+    ):
+        template = self.template_service.create_template(
+            ContractTemplatePayload(
+                name=name,
+                description="Registry-backed export coverage",
+                template_family="contract",
+                source_format="docx",
+            )
+        )
+        source_path = self.root / f"{name.lower().replace(' ', '-')}.docx"
+        source_path.write_bytes(make_docx_bytes(document_paragraphs=document_paragraphs))
+        revision = self.template_service.import_revision_from_path(
+            template.template_id,
+            source_path,
+            payload=ContractTemplateRevisionPayload(source_filename=source_path.name),
+        ).revision
+        draft = self.template_service.create_draft(
+            ContractTemplateDraftPayload(
+                revision_id=revision.revision_id,
+                name=f"{name} Draft",
+                editable_payload={
+                    "revision_id": revision.revision_id,
+                    "db_selections": dict(db_selections),
+                    "manual_values": {},
+                    "type_overrides": {},
+                },
+                storage_mode="database",
+            )
+        )
+        return revision, draft
 
     def test_export_draft_to_pdf_creates_snapshot_and_artifacts(self):
         result = self.export_service.export_draft_to_pdf(self.draft.draft_id)
@@ -691,6 +765,219 @@ class ContractTemplateExportServiceTests(unittest.TestCase):
         self.assertIsNotNone(result.resolved_html_artifact)
         self.assertEqual(len(self.html_pdf_adapter.file_calls), 1)
         self.assertEqual(len(pages_service.pages_adapter.pdf_calls), 0)
+
+    def test_export_generates_and_assigns_registry_backed_values_for_blank_records(self):
+        self._set_registry_prefix(BUILTIN_CATEGORY_CATALOG_NUMBER, "ACR")
+        self._set_registry_prefix(BUILTIN_CATEGORY_CONTRACT_NUMBER, "CTR")
+        self._set_registry_prefix(BUILTIN_CATEGORY_LICENSE_NUMBER, "LIC")
+        revision, draft = self._create_registry_draft(
+            name="Registry Export",
+            document_paragraphs=(
+                ("Track Catalog ", "{{db.track.catalog_number}}"),
+                ("Release Catalog ", "{{db.release.catalog_number}}"),
+                ("Contract Number ", "{{db.contract.contract_number}}"),
+                ("License Number ", "{{db.contract.license_number}}"),
+                ("Registry Key ", "{{db.contract.registry_sha256_key}}"),
+            ),
+            db_selections={},
+        )
+
+        result = self.export_service.export_draft_to_pdf(draft.draft_id)
+        assignments = self.template_service.list_draft_registry_assignments(draft.draft_id)
+        track = self.track_service.fetch_track_snapshot(self.primary_track_id)
+        release = self.release_service.fetch_release(self.release_id)
+        contract = self.contract_service.fetch_contract(self.contract_id)
+
+        self.assertIsNotNone(track)
+        self.assertIsNotNone(release)
+        self.assertIsNotNone(contract)
+        assert track is not None
+        assert release is not None
+        assert contract is not None
+        self.assertEqual(len(assignments), 5)
+        assignment_values = {
+            assignment.canonical_symbol: assignment.registry_value for assignment in assignments
+        }
+        self.assertEqual(
+            result.snapshot.resolved_values["{{db.track.catalog_number}}"],
+            assignment_values["{{db.track.catalog_number}}"],
+        )
+        self.assertEqual(
+            result.snapshot.resolved_values["{{db.release.catalog_number}}"],
+            assignment_values["{{db.release.catalog_number}}"],
+        )
+        self.assertEqual(
+            result.snapshot.resolved_values["{{db.contract.contract_number}}"],
+            assignment_values["{{db.contract.contract_number}}"],
+        )
+        self.assertEqual(
+            result.snapshot.resolved_values["{{db.contract.license_number}}"],
+            assignment_values["{{db.contract.license_number}}"],
+        )
+        self.assertEqual(
+            result.snapshot.resolved_values["{{db.contract.registry_sha256_key}}"],
+            assignment_values["{{db.contract.registry_sha256_key}}"],
+        )
+        self.assertTrue(assignment_values["{{db.track.catalog_number}}"].startswith("ACR"))
+        self.assertTrue(assignment_values["{{db.release.catalog_number}}"].startswith("ACR"))
+        self.assertTrue(assignment_values["{{db.contract.contract_number}}"].startswith("CTR"))
+        self.assertTrue(assignment_values["{{db.contract.license_number}}"].startswith("LIC"))
+        self.assertRegex(
+            assignment_values["{{db.contract.registry_sha256_key}}"],
+            r"^[0-9a-f]{64}$",
+        )
+        self.assertIsNone(track.catalog_registry_entry_id)
+        self.assertIsNone(release.catalog_registry_entry_id)
+        self.assertIsNone(contract.contract_registry_entry_id)
+        self.assertIsNone(contract.license_registry_entry_id)
+        self.assertIsNone(contract.registry_sha256_key_entry_id)
+        self.assertEqual(revision.revision_id, draft.revision_id)
+
+    def test_export_reuses_existing_registry_assignments_instead_of_generating_duplicates(self):
+        self._set_registry_prefix(BUILTIN_CATEGORY_CATALOG_NUMBER, "ACR")
+        self._set_registry_prefix(BUILTIN_CATEGORY_CONTRACT_NUMBER, "CTR")
+        self._set_registry_prefix(BUILTIN_CATEGORY_LICENSE_NUMBER, "LIC")
+        _, draft = self._create_registry_draft(
+            name="Registry Reuse Export",
+            document_paragraphs=(
+                ("Track Catalog ", "{{db.track.catalog_number}}"),
+                ("Release Catalog ", "{{db.release.catalog_number}}"),
+                ("Contract Number ", "{{db.contract.contract_number}}"),
+                ("License Number ", "{{db.contract.license_number}}"),
+                ("Registry Key ", "{{db.contract.registry_sha256_key}}"),
+            ),
+            db_selections={},
+        )
+        assignment_values = self.export_service.ensure_registry_assignments_for_draft(
+            draft.draft_id,
+            created_via="test.preassigned",
+        )
+        count_before = self.conn.execute("SELECT COUNT(*) FROM CodeRegistryEntries").fetchone()[0]
+
+        result = self.export_service.export_draft_to_pdf(draft.draft_id)
+        count_after = self.conn.execute("SELECT COUNT(*) FROM CodeRegistryEntries").fetchone()[0]
+
+        self.assertEqual(count_after, count_before)
+        self.assertEqual(
+            result.snapshot.resolved_values["{{db.track.catalog_number}}"],
+            assignment_values["{{db.track.catalog_number}}"],
+        )
+        self.assertEqual(
+            result.snapshot.resolved_values["{{db.release.catalog_number}}"],
+            assignment_values["{{db.release.catalog_number}}"],
+        )
+        self.assertEqual(
+            result.snapshot.resolved_values["{{db.contract.contract_number}}"],
+            assignment_values["{{db.contract.contract_number}}"],
+        )
+        self.assertEqual(
+            result.snapshot.resolved_values["{{db.contract.license_number}}"],
+            assignment_values["{{db.contract.license_number}}"],
+        )
+        self.assertEqual(
+            result.snapshot.resolved_values["{{db.contract.registry_sha256_key}}"],
+            assignment_values["{{db.contract.registry_sha256_key}}"],
+        )
+
+    def test_preview_session_does_not_generate_registry_values(self):
+        self._set_registry_prefix(BUILTIN_CATEGORY_CATALOG_NUMBER, "ACR")
+        self._set_registry_prefix(BUILTIN_CATEGORY_CONTRACT_NUMBER, "CTR")
+        self._set_registry_prefix(BUILTIN_CATEGORY_LICENSE_NUMBER, "LIC")
+        revision, _draft = self._create_registry_draft(
+            name="Registry Preview",
+            document_paragraphs=(
+                ("Track Catalog ", "{{db.track.catalog_number}}"),
+                ("Release Catalog ", "{{db.release.catalog_number}}"),
+                ("Contract Number ", "{{db.contract.contract_number}}"),
+                ("License Number ", "{{db.contract.license_number}}"),
+                ("Registry Key ", "{{db.contract.registry_sha256_key}}"),
+            ),
+            db_selections={},
+        )
+        count_before = self.conn.execute("SELECT COUNT(*) FROM CodeRegistryEntries").fetchone()[0]
+
+        preview_root, preview_html, warnings = self.export_service.materialize_html_preview_session(
+            revision_id=revision.revision_id,
+            editable_payload={
+                "revision_id": revision.revision_id,
+                "db_selections": {},
+                "manual_values": {},
+                "type_overrides": {},
+            },
+            strict=False,
+        )
+
+        count_after = self.conn.execute("SELECT COUNT(*) FROM CodeRegistryEntries").fetchone()[0]
+        track = self.track_service.fetch_track_snapshot(self.primary_track_id)
+        release = self.release_service.fetch_release(self.release_id)
+        contract = self.contract_service.fetch_contract(self.contract_id)
+        self.assertTrue(preview_root.exists())
+        self.assertTrue(preview_html.exists())
+        self.assertIsInstance(warnings, tuple)
+        self.assertEqual(count_after, count_before)
+        self.assertIsNotNone(track)
+        self.assertIsNotNone(release)
+        self.assertIsNotNone(contract)
+        assert track is not None
+        assert release is not None
+        assert contract is not None
+        self.assertEqual(
+            self.template_service.list_draft_registry_assignments(_draft.draft_id),
+            [],
+        )
+        self.assertIsNone(track.catalog_registry_entry_id)
+        self.assertIsNone(release.catalog_registry_entry_id)
+        self.assertIsNone(contract.contract_registry_entry_id)
+        self.assertIsNone(contract.license_registry_entry_id)
+        self.assertIsNone(contract.registry_sha256_key_entry_id)
+
+    def test_export_blocks_registry_generation_when_required_prefix_is_missing(self):
+        self._set_registry_prefix(BUILTIN_CATEGORY_CATALOG_NUMBER, "ACR")
+        self._set_registry_prefix(BUILTIN_CATEGORY_CONTRACT_NUMBER, None)
+        _, draft = self._create_registry_draft(
+            name="Registry Prefix Required",
+            document_paragraphs=(("Contract Number ", "{{db.contract.contract_number}}"),),
+            db_selections={},
+        )
+
+        with self.assertRaises(ContractTemplateExportError) as exc_info:
+            self.export_service.export_draft_to_pdf(draft.draft_id)
+
+        self.assertIn("Configure a prefix/namespace", str(exc_info.exception))
+        self.assertIn("Contract Number", str(exc_info.exception))
+
+    def test_draft_linked_registry_entries_are_protected_from_deletion(self):
+        self._set_registry_prefix(BUILTIN_CATEGORY_CATALOG_NUMBER, "ACR")
+        self._set_registry_prefix(BUILTIN_CATEGORY_CONTRACT_NUMBER, "CTR")
+        self._set_registry_prefix(BUILTIN_CATEGORY_LICENSE_NUMBER, "LIC")
+        _, draft = self._create_registry_draft(
+            name="Registry Draft Protection",
+            document_paragraphs=(
+                ("Contract Number ", "{{db.contract.contract_number}}"),
+                ("Registry Key ", "{{db.contract.registry_sha256_key}}"),
+            ),
+            db_selections={},
+        )
+        self.export_service.ensure_registry_assignments_for_draft(draft.draft_id)
+        assignment = self.template_service.fetch_draft_registry_assignment(
+            draft.draft_id,
+            "{{db.contract.contract_number}}",
+        )
+        self.assertIsNotNone(assignment)
+        assert assignment is not None
+        registry = self.track_service.code_registry_service()
+
+        with self.assertRaises(ValueError) as exc_info:
+            registry.delete_entry(assignment.registry_entry_id)
+
+        usage = registry.usage_for_entry(assignment.registry_entry_id)
+        self.assertIn("not linked to any record", str(exc_info.exception))
+        self.assertTrue(
+            any(
+                link.subject_kind == "draft" and int(link.subject_id) == int(draft.draft_id)
+                for link in usage
+            )
+        )
 
     def _docx_with_owner_attribute(self, token: str) -> bytes:
         base_bytes = make_docx_bytes(document_paragraphs=(("Owner ", token),))

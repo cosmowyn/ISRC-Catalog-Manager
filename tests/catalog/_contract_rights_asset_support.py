@@ -1043,6 +1043,27 @@ class ContractRightsAssetServiceTestCase(unittest.TestCase):
         finally:
             dialog.close()
 
+    def case_contract_editor_disables_sequential_generation_until_prefixes_are_configured(self):
+        if ContractEditorDialog is None:
+            self.skipTest("Contract editor dialog unavailable")
+        require_qapplication()
+
+        dialog = ContractEditorDialog(contract_service=self.contract_service)
+        try:
+            self.assertFalse(dialog.contract_number_edit.generate_button.isEnabled())
+            self.assertFalse(dialog.license_number_edit.generate_button.isEnabled())
+            self.assertTrue(dialog.registry_sha256_key_edit.generate_button.isEnabled())
+            self.assertIn(
+                "Configure a prefix/namespace",
+                dialog.contract_number_edit.generate_button.toolTip(),
+            )
+            self.assertIn(
+                "Configure a prefix/namespace",
+                dialog.license_number_edit.status_label.text(),
+            )
+        finally:
+            dialog.close()
+
     def case_contract_editor_party_editor_guides_near_duplicates_without_extra_clutter(self):
         if ContractEditorDialog is None:
             self.skipTest("Contract editor dialog unavailable")

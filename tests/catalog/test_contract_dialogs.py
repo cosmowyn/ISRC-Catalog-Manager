@@ -26,6 +26,9 @@ class ContractDialogTests(ContractRightsAssetServiceTestCase):
     test_contract_editor_generates_registry_values_and_keeps_sha256_distinct = (
         ContractRightsAssetServiceTestCase.case_contract_editor_generates_registry_values_and_keeps_sha256_distinct
     )
+    test_contract_editor_disables_sequential_generation_until_prefixes_are_configured = (
+        ContractRightsAssetServiceTestCase.case_contract_editor_disables_sequential_generation_until_prefixes_are_configured
+    )
     test_contract_editor_party_editor_guides_near_duplicates_without_extra_clutter = (
         ContractRightsAssetServiceTestCase.case_contract_editor_party_editor_guides_near_duplicates_without_extra_clutter
     )
