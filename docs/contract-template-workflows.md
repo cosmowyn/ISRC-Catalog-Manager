@@ -79,7 +79,7 @@ syntax the fill form understands.
 ## Bundled example template
 
 The repository includes a bundled print-safe starter package at
-[`HTML license template/README.md`](../HTML%20license%20template/README.md).
+[`HTML license template/README.md`](../HTML license template/README.md).
 
 That example is a seven-page remix license bundle with:
 

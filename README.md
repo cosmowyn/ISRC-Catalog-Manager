@@ -140,7 +140,7 @@ they are normalized into HTML working drafts behind the scenes so preview and ex
 consistent.
 
 The repository also includes a bundled print-safe starter package at
-[HTML license template/README.md](HTML%20license%20template/README.md). It ships as a seven-page
+[HTML license template/README.md](HTML license template/README.md). It ships as a seven-page
 HTML remix-license example with companion `banner.png` and `footer-logo.png` assets, and it
 demonstrates owner, party, track, manual, `db.contract.license_number`, and
 `db.contract.registry_sha256_key` placeholders on the app's preferred HTML-native path. Use it as

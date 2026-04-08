@@ -8,7 +8,7 @@ This pass adds the new repository-bundled HTML license template example, documen
 
 The source of truth for the documentation in this pass is:
 
-- [`HTML license template/License Template.html`](../../HTML%20license%20template/License%20Template.html)
+- [`HTML license template/License Template.html`](../../HTML license template/License Template.html)
 
 The HTML itself establishes the real bundle requirements:
 
@@ -21,7 +21,7 @@ The HTML itself establishes the real bundle requirements:
 
 ## Files Added In The Main Repo
 
-- [`HTML license template/README.md`](../../HTML%20license%20template/README.md)
+- [`HTML license template/README.md`](../../HTML license template/README.md)
 - [`docs/implementation_handoffs/bundled-html-license-template-example.md`](./bundled-html-license-template-example.md)
 
 The bundle assets themselves were also added to the tracked repository contents:
