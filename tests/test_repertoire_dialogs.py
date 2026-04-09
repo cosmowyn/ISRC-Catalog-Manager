@@ -736,6 +736,109 @@ class RepertoireDialogSmokeTests(unittest.TestCase):
         finally:
             dialog.close()
 
+    def test_release_editor_refreshes_artist_combos_and_payload_uses_party_authority(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_root = Path(tmpdir)
+            conn = sqlite3.connect(":memory:")
+            try:
+                schema = DatabaseSchemaService(conn, data_root=data_root)
+                schema.init_db()
+                schema.migrate_schema()
+                party_service = PartyService(conn)
+                release_service = ReleaseService(conn, data_root=data_root)
+                party_id = party_service.create_party(
+                    PartyPayload(
+                        legal_name="Signal Stage LLC",
+                        display_name="Signal Stage",
+                        artist_name="Signal Stage",
+                        party_type="artist",
+                        artist_aliases=["Signal Alias"],
+                    )
+                )
+
+                dialog = ReleaseEditorDialog(
+                    release_service=release_service,
+                    track_title_resolver=lambda track_id: f"Track {track_id}",
+                    selected_track_ids_provider=lambda: [],
+                    party_service=party_service,
+                )
+                try:
+                    initial_values = {
+                        dialog.primary_artist_edit.itemText(index)
+                        for index in range(dialog.primary_artist_edit.count())
+                    }
+                    self.assertIn("Signal Stage", initial_values)
+
+                    party_service.update_party(
+                        party_id,
+                        PartyPayload(
+                            legal_name="Signal Stage LLC",
+                            display_name="Signal Stage",
+                            artist_name="Renamed Stage",
+                            party_type="artist",
+                            artist_aliases=["Signal Alias"],
+                        ),
+                    )
+                    self.app.processEvents()
+
+                    refreshed_values = {
+                        dialog.primary_artist_edit.itemText(index)
+                        for index in range(dialog.primary_artist_edit.count())
+                    }
+                    self.assertIn("Renamed Stage", refreshed_values)
+                    self.assertIn("Signal Alias", refreshed_values)
+                    self.assertNotIn("Signal Stage", refreshed_values)
+
+                    dialog.primary_artist_edit.setCurrentText("Signal Alias")
+                    payload = dialog.payload()
+                    self.assertEqual(payload.primary_artist, "Renamed Stage")
+                finally:
+                    dialog.close()
+            finally:
+                conn.close()
+
+    def test_work_editor_refreshes_contributor_party_choices_when_party_changes(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_root = Path(tmpdir)
+            conn = sqlite3.connect(":memory:")
+            try:
+                schema = DatabaseSchemaService(conn, data_root=data_root)
+                schema.init_db()
+                schema.migrate_schema()
+                party_service = PartyService(conn)
+                work_service = WorkService(conn, party_service=party_service)
+
+                dialog = WorkEditorDialog(
+                    work_service=work_service,
+                    track_title_resolver=lambda track_id: f"Track {track_id}",
+                    selected_track_ids_provider=lambda: [],
+                )
+                try:
+                    dialog._add_contributor_row()
+                    contributor_combo = dialog.contributors_table.cellWidget(0, 0)
+                    self.assertIsInstance(contributor_combo, QComboBox)
+                    initial_count = contributor_combo.count()
+
+                    party_service.create_party(
+                        PartyPayload(
+                            legal_name="New Writer",
+                            display_name="New Writer",
+                            party_type="person",
+                        )
+                    )
+                    self.app.processEvents()
+
+                    refreshed_values = {
+                        contributor_combo.itemText(index)
+                        for index in range(contributor_combo.count())
+                    }
+                    self.assertGreater(contributor_combo.count(), initial_count)
+                    self.assertIn("New Writer", refreshed_values)
+                finally:
+                    dialog.close()
+            finally:
+                conn.close()
+
     def test_asset_browser_exposes_derivative_ledger_drill_ins(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             data_root = Path(tmpdir)

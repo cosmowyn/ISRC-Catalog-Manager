@@ -35,6 +35,7 @@ from isrc_manager.file_storage import (
     normalize_storage_mode,
 )
 from isrc_manager.media.derivatives import DerivativeLedgerRecord, DerivativeLedgerService
+from isrc_manager.services.track_artist_sql import track_main_artist_join_sql
 from isrc_manager.ui_common import (
     _add_standard_dialog_header,
     _apply_compact_dialog_control_heights,
@@ -213,14 +214,19 @@ class AssetEditorDialog(QDialog):
         conn = getattr(self.asset_service, "conn", None)
         if conn is None:
             return
+        main_artist_join_sql, main_artist_name_expr = track_main_artist_join_sql(
+            conn,
+            track_alias="t",
+            artist_alias="main_artist",
+        )
         for track_id, track_title, artist_name in conn.execute(
-            """
+            f"""
             SELECT
                 t.id,
                 t.track_title,
-                COALESCE(a.name, '')
+                COALESCE({main_artist_name_expr}, '')
             FROM Tracks t
-            LEFT JOIN Artists a ON a.id = t.main_artist_id
+            {main_artist_join_sql}
             ORDER BY t.track_title, t.id
             """
         ).fetchall():

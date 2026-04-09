@@ -121,6 +121,7 @@ class PartyDuplicate:
 
 @dataclass(slots=True)
 class PartyUsageSummary:
+    track_count: int = 0
     work_count: int = 0
     contract_count: int = 0
     rights_count: int = 0

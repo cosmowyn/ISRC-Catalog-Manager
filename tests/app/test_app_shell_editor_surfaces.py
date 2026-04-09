@@ -48,6 +48,12 @@ class AppShellEditorSurfaceTests(AppShellTestCase):
     test_add_track_creates_new_work_from_track_with_seeded_work_metadata_and_party_artist = (
         AppShellTestCase.case_add_track_creates_new_work_from_track_with_seeded_work_metadata_and_party_artist
     )
+    test_party_created_artist_appears_in_add_track_selector_and_renames_live = (
+        AppShellTestCase.case_party_created_artist_appears_in_add_track_selector_and_renames_live
+    )
+    test_track_first_artist_entry_creates_party_authority_and_reuses_selectors = (
+        AppShellTestCase.case_track_first_artist_entry_creates_party_authority_and_reuses_selectors
+    )
     test_album_entry_can_mix_existing_and_new_work_governance_per_row = (
         AppShellTestCase.case_album_entry_can_mix_existing_and_new_work_governance_per_row
     )

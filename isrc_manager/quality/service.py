@@ -27,6 +27,7 @@ from isrc_manager.services.tracks import TrackService
 from isrc_manager.works import WorkContributorPayload, WorkPayload, WorkService
 
 from .models import QualityIssue, QualityScanResult
+from ..services.track_artist_sql import track_main_artist_join_sql
 
 
 class QualityDashboardService:
@@ -158,12 +159,17 @@ class QualityDashboardService:
 
     def _track_metadata_issues(self) -> list[QualityIssue]:
         issues: list[QualityIssue] = []
+        main_artist_join_sql, main_artist_name_expr = track_main_artist_join_sql(
+            self.conn,
+            track_alias="t",
+            artist_alias="main_artist",
+        )
         rows = self.conn.execute(
-            """
+            f"""
             SELECT
                 t.id,
                 COALESCE(t.track_title, ''),
-                COALESCE(a.name, ''),
+                COALESCE({main_artist_name_expr}, ''),
                 COALESCE(t.isrc, ''),
                 COALESCE(t.release_date, ''),
                 COALESCE(t.audio_file_path, ''),
@@ -173,7 +179,7 @@ class QualityDashboardService:
                 COALESCE(t.catalog_number, ''),
                 COALESCE(t.isrc_compact, '')
             FROM Tracks t
-            LEFT JOIN Artists a ON a.id = t.main_artist_id
+            {main_artist_join_sql}
             ORDER BY t.id
             """
         ).fetchall()

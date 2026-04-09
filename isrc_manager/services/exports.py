@@ -9,6 +9,8 @@ from pathlib import Path
 from isrc_manager.domain.codes import to_compact_isrc, to_iso_isrc
 from isrc_manager.domain.timecode import seconds_to_hms
 
+from .track_artist_sql import track_additional_artists_expr, track_main_artist_join_sql
+
 
 class XMLExportService:
     """Centralizes full and selected-track XML exports."""
@@ -155,6 +157,12 @@ class XMLExportService:
             if "registration_number" in work_columns
             else "COALESCE(t.buma_work_number, '') AS buma_work_number"
         )
+        main_artist_join_sql, main_artist_name_expr = track_main_artist_join_sql(
+            self.conn,
+            track_alias="t",
+            artist_alias="main_artist",
+        )
+        additional_artists_sql = track_additional_artists_expr(self.conn, track_id_expr="t.id")
 
         rows = self.conn.execute(
             f"""
@@ -163,13 +171,8 @@ class XMLExportService:
                 t.isrc,
                 COALESCE(t.db_entry_date, '') AS db_entry_date,
                 t.track_title,
-                COALESCE(a.name, '') AS artist_name,
-                COALESCE((
-                    SELECT GROUP_CONCAT(ar.name, ', ')
-                    FROM TrackArtists ta
-                    JOIN Artists ar ON ar.id = ta.artist_id
-                    WHERE ta.track_id = t.id AND ta.role = 'additional'
-                ), '') AS additional_artists,
+                COALESCE({main_artist_name_expr}, '') AS artist_name,
+                {additional_artists_sql} AS additional_artists,
                 COALESCE(al.title, '') AS album_title,
                 COALESCE(t.release_date, '') AS release_date,
                 COALESCE(t.track_length_sec, 0) AS track_length_sec,
@@ -197,7 +200,7 @@ class XMLExportService:
                     ELSE COALESCE(t.album_art_size_bytes, 0)
                 END AS album_art_size_bytes
             FROM Tracks t
-            LEFT JOIN Artists a ON a.id = t.main_artist_id
+            {main_artist_join_sql}
             LEFT JOIN Albums al ON al.id = t.album_id
             {work_join_sql}
             {where_clause}

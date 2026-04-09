@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Protocol
 
-from PySide6.QtCore import QRect, Qt
+from PySide6.QtCore import QObject, QRect, Qt, QThread, Signal, Slot
 from PySide6.QtGui import QColor, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QSplashScreen
 
@@ -71,7 +71,7 @@ class _ReadableSplashScreen(QSplashScreen):
 
     def set_progress(self, value: int) -> None:
         self._progress = max(0, min(100, int(value)))
-        self.repaint()
+        self.update()
 
     def drawContents(self, painter: QPainter) -> None:
         message = self.message()
@@ -144,12 +144,74 @@ class _ReadableSplashScreen(QSplashScreen):
         painter.restore()
 
 
+class _SplashThreadBridge(QObject):
+    """Marshals splash updates back onto the splash object's GUI thread."""
+
+    request_show = Signal()
+    request_phase = Signal(object, object)
+    request_status = Signal(str)
+    request_progress = Signal(int, object, object)
+    request_suspend = Signal()
+    request_resume = Signal()
+    request_finish = Signal(object)
+
+    def __init__(self, controller: "StartupSplashController", target_thread: QThread | None):
+        super().__init__()
+        self._controller = controller
+        if target_thread is not None:
+            self.moveToThread(target_thread)
+        self.request_show.connect(self._handle_show, Qt.QueuedConnection)
+        self.request_phase.connect(self._handle_phase, Qt.QueuedConnection)
+        self.request_status.connect(self._handle_status, Qt.QueuedConnection)
+        self.request_progress.connect(self._handle_progress, Qt.QueuedConnection)
+        self.request_suspend.connect(self._handle_suspend, Qt.QueuedConnection)
+        self.request_resume.connect(self._handle_resume, Qt.QueuedConnection)
+        self.request_finish.connect(self._handle_finish, Qt.QueuedConnection)
+
+    @Slot()
+    def _handle_show(self) -> None:
+        self._controller._show_now()
+
+    @Slot(object, object)
+    def _handle_phase(self, phase: object, message_override: object) -> None:
+        self._controller._set_phase_now(phase, message_override)
+
+    @Slot(str)
+    def _handle_status(self, message: str) -> None:
+        self._controller._set_status_now(message)
+
+    @Slot(int, object, object)
+    def _handle_progress(
+        self,
+        progress: int,
+        message_override: object,
+        phase: object,
+    ) -> None:
+        self._controller._report_progress_now(
+            progress,
+            message_override=message_override,
+            phase=phase,
+        )
+
+    @Slot()
+    def _handle_suspend(self) -> None:
+        self._controller._suspend_now()
+
+    @Slot()
+    def _handle_resume(self) -> None:
+        self._controller._resume_now()
+
+    @Slot(object)
+    def _handle_finish(self, window: object) -> None:
+        self._controller._finish_now(window)
+
 class StartupSplashController:
     """Thin controller around QSplashScreen for pre-event-loop startup."""
 
     def __init__(self, app: QApplication, splash: QSplashScreen):
         self._app = app
         self._splash = splash
+        self._bridge = _SplashThreadBridge(self, splash.thread())
         self._finished = False
         self._shown = False
         self._suspended = False
@@ -170,6 +232,12 @@ class StartupSplashController:
         return self._progress
 
     def show(self) -> None:
+        if not self._is_splash_thread():
+            self._bridge.request_show.emit()
+            return
+        self._show_now()
+
+    def _show_now(self) -> None:
         if self._finished:
             return
         self._shown = True
@@ -184,6 +252,16 @@ class StartupSplashController:
         phase: StartupPhase,
         message_override: str | None = None,
     ) -> None:
+        if not self._is_splash_thread():
+            self._bridge.request_phase.emit(StartupPhase(phase), message_override)
+            return
+        self._set_phase_now(phase, message_override)
+
+    def _set_phase_now(
+        self,
+        phase: StartupPhase,
+        message_override: str | None = None,
+    ) -> None:
         if self._finished:
             return
         self._phase = StartupPhase(phase)
@@ -191,12 +269,34 @@ class StartupSplashController:
         self._render_current_state()
 
     def set_status(self, message: str) -> None:
+        if not self._is_splash_thread():
+            self._bridge.request_status.emit(str(message or ""))
+            return
+        self._set_status_now(message)
+
+    def _set_status_now(self, message: str) -> None:
         if self._finished:
             return
         self._message = str(message)
         self._render_current_state()
 
     def report_progress(
+        self,
+        progress: int,
+        message_override: str | None = None,
+        *,
+        phase: StartupPhase | None = None,
+    ) -> None:
+        if not self._is_splash_thread():
+            self._bridge.request_progress.emit(
+                int(progress),
+                message_override,
+                StartupPhase(phase) if phase is not None else None,
+            )
+            return
+        self._report_progress_now(progress, message_override=message_override, phase=phase)
+
+    def _report_progress_now(
         self,
         progress: int,
         message_override: str | None = None,
@@ -215,6 +315,12 @@ class StartupSplashController:
         self._render_current_state()
 
     def suspend(self) -> None:
+        if not self._is_splash_thread():
+            self._bridge.request_suspend.emit()
+            return
+        self._suspend_now()
+
+    def _suspend_now(self) -> None:
         if self._finished or self._suspended:
             return
         self._suspended = True
@@ -223,6 +329,12 @@ class StartupSplashController:
         self._process_events()
 
     def resume(self) -> None:
+        if not self._is_splash_thread():
+            self._bridge.request_resume.emit()
+            return
+        self._resume_now()
+
+    def _resume_now(self) -> None:
         if self._finished or not self._suspended:
             return
         self._suspended = False
@@ -232,6 +344,12 @@ class StartupSplashController:
         self._process_events()
 
     def finish(self, window) -> None:
+        if not self._is_splash_thread():
+            self._bridge.request_finish.emit(window)
+            return
+        self._finish_now(window)
+
+    def _finish_now(self, window) -> None:
         if self._finished:
             return
         self._finished = True
@@ -265,9 +383,16 @@ class StartupSplashController:
             self._process_events()
 
     def _process_events(self) -> None:
+        if not self._is_splash_thread():
+            return
         process_events = getattr(self._app, "processEvents", None)
         if callable(process_events):
             process_events()
+
+    def _is_splash_thread(self) -> bool:
+        splash_thread = self._splash.thread()
+        current_thread = QThread.currentThread()
+        return splash_thread is None or current_thread == splash_thread
 
 
 def create_startup_splash_controller(

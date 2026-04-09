@@ -35,6 +35,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from isrc_manager.services.track_artist_sql import track_main_artist_join_sql
+
 from isrc_manager.code_registry import (
     BUILTIN_CATEGORY_CONTRACT_NUMBER,
     BUILTIN_CATEGORY_LICENSE_NUMBER,
@@ -2660,6 +2662,18 @@ class ContractEditorDialog(QDialog):
         return choices
 
     def _populate_reference_editors(self) -> None:
+        conn = getattr(self.contract_service, "conn", None)
+        if conn is None:
+            self.work_ids_edit.set_choices([])
+            self.track_ids_edit.set_choices([])
+            self.release_ids_edit.set_choices([])
+            self.parties_edit.set_choices([])
+            return
+        main_artist_join_sql, main_artist_name_expr = track_main_artist_join_sql(
+            conn,
+            track_alias="t",
+            artist_alias="main_artist",
+        )
         self.work_ids_edit.set_choices(
             self._reference_choices_from_query(
                 """
@@ -2675,13 +2689,13 @@ class ContractEditorDialog(QDialog):
         )
         self.track_ids_edit.set_choices(
             self._reference_choices_from_query(
-                """
+                f"""
                 SELECT
                     t.id,
                     t.track_title,
-                    COALESCE(a.name, '')
+                    COALESCE({main_artist_name_expr}, '')
                 FROM Tracks t
-                LEFT JOIN Artists a ON a.id = t.main_artist_id
+                {main_artist_join_sql}
                 ORDER BY t.track_title, t.id
                 """,
                 lambda row: " / ".join(

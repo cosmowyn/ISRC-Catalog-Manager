@@ -6,6 +6,7 @@ import sqlite3
 
 from isrc_manager.domain.repertoire import clean_text, normalized_name
 
+from .authority import artist_primary_label, emit_party_authority_changed
 from .models import (
     PARTY_TYPE_CHOICES,
     PartyArtistAliasRecord,
@@ -21,6 +22,97 @@ class PartyService:
 
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
+
+    def _table_names(self, *, cursor: sqlite3.Cursor | None = None) -> set[str]:
+        cur = cursor or self.conn.cursor()
+        return {
+            str(row[0])
+            for row in cur.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+            if row and row[0]
+        }
+
+    def _table_columns(
+        self,
+        table_name: str,
+        *,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> set[str]:
+        cur = cursor or self.conn.cursor()
+        return {
+            str(row[1])
+            for row in cur.execute(f"PRAGMA table_info({table_name})").fetchall()
+            if row and row[1]
+        }
+
+    def _track_artist_columns(self, *, cursor: sqlite3.Cursor | None = None) -> tuple[str, str] | None:
+        table_names = self._table_names(cursor=cursor)
+        if "Tracks" not in table_names or "TrackArtists" not in table_names:
+            return None
+        track_columns = self._table_columns("Tracks", cursor=cursor)
+        additional_columns = self._table_columns("TrackArtists", cursor=cursor)
+        if "main_artist_party_id" in track_columns and "party_id" in additional_columns:
+            return "main_artist_party_id", "party_id"
+        if "main_artist_id" in track_columns and "artist_id" in additional_columns:
+            return "main_artist_id", "artist_id"
+        return None
+
+    @staticmethod
+    def _is_artist_relevant_record(record: PartyRecord) -> bool:
+        if str(record.party_type or "").strip().lower() == "artist":
+            return True
+        if str(record.artist_name or "").strip():
+            return True
+        return any(str(alias or "").strip() for alias in record.artist_aliases)
+
+    def _promote_party_to_artist_authority(
+        self,
+        party_id: int,
+        artist_name: str,
+        *,
+        cursor: sqlite3.Cursor,
+    ) -> None:
+        record = self.fetch_party(int(party_id))
+        if record is None:
+            raise ValueError(f"Party {int(party_id)} was not found.")
+        clean_artist_name = clean_text(artist_name)
+        alias_values = list(record.artist_aliases)
+        current_primary = artist_primary_label(record)
+        if clean_artist_name and current_primary and current_primary.casefold() != clean_artist_name.casefold():
+            alias_values.append(clean_artist_name)
+        payload = PartyPayload(
+            legal_name=record.legal_name,
+            display_name=record.display_name,
+            artist_name=clean_artist_name or record.artist_name or record.display_name or record.legal_name,
+            company_name=record.company_name,
+            first_name=record.first_name,
+            middle_name=record.middle_name,
+            last_name=record.last_name,
+            party_type="artist",
+            contact_person=record.contact_person,
+            email=record.email,
+            alternative_email=record.alternative_email,
+            phone=record.phone,
+            website=record.website,
+            street_name=record.street_name,
+            street_number=record.street_number,
+            address_line1=record.address_line1,
+            address_line2=record.address_line2,
+            city=record.city,
+            region=record.region,
+            postal_code=record.postal_code,
+            country=record.country,
+            bank_account_number=record.bank_account_number,
+            chamber_of_commerce_number=record.chamber_of_commerce_number,
+            tax_id=record.tax_id,
+            vat_number=record.vat_number,
+            pro_affiliation=record.pro_affiliation,
+            pro_number=record.pro_number,
+            ipi_cae=record.ipi_cae,
+            notes=record.notes,
+            profile_name=record.profile_name,
+            artist_aliases=alias_values,
+        )
+        self.update_party(int(party_id), payload, cursor=cursor)
 
     @staticmethod
     def _clean_party_type(value: str | None) -> str:
@@ -481,6 +573,7 @@ class PartyService:
         self._replace_artist_aliases(party_id, payload.artist_aliases, cursor=cur)
         if cursor is None:
             self.conn.commit()
+            emit_party_authority_changed()
         return party_id
 
     def update_party(
@@ -568,11 +661,13 @@ class PartyService:
         self._replace_artist_aliases(int(party_id), payload.artist_aliases, cursor=cur)
         if cursor is None:
             self.conn.commit()
+            emit_party_authority_changed()
 
     def delete_party(self, party_id: int) -> None:
         try:
             with self.conn:
                 self.conn.execute("DELETE FROM Parties WHERE id=?", (int(party_id),))
+            emit_party_authority_changed()
         except sqlite3.IntegrityError as exc:
             try:
                 owner_binding = self.conn.execute(
@@ -662,6 +757,75 @@ class PartyService:
         )
         return records
 
+    def list_artist_parties(self, *, search_text: str | None = None) -> list[PartyRecord]:
+        records = self.list_parties(search_text=search_text)
+        table_names = self._table_names()
+        if "Tracks" not in table_names or "TrackArtists" not in table_names:
+            return [record for record in records if self._is_artist_relevant_record(record)]
+        track_columns = self._table_columns("Tracks")
+        additional_columns = self._table_columns("TrackArtists")
+        if "main_artist_party_id" not in track_columns or "party_id" not in additional_columns:
+            return [record for record in records if self._is_artist_relevant_record(record)]
+        used_party_ids = {
+            int(row[0])
+            for row in self.conn.execute(
+                """
+                SELECT main_artist_party_id
+                FROM Tracks
+                WHERE main_artist_party_id IS NOT NULL
+                UNION
+                SELECT party_id
+                FROM TrackArtists
+                WHERE party_id IS NOT NULL
+                """
+            ).fetchall()
+            if row and row[0] is not None
+        }
+        filtered = [
+            record
+            for record in records
+            if self._is_artist_relevant_record(record) or int(record.id) in used_party_ids
+        ]
+        return sorted(filtered, key=lambda record: (artist_primary_label(record).casefold(), int(record.id)))
+
+    def find_artist_party_id_by_name(
+        self,
+        name: str,
+        *,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> int | None:
+        clean_name = clean_text(name)
+        if not clean_name:
+            return None
+        cur = cursor or self.conn.cursor()
+        party_id = self.find_party_id_by_name(clean_name, cursor=cur)
+        if party_id is None:
+            return None
+        record = self.fetch_party(int(party_id))
+        if record is None:
+            return None
+        if self._is_artist_relevant_record(record):
+            return int(record.id)
+        track_columns = self._track_artist_columns(cursor=cur)
+        if track_columns == ("main_artist_party_id", "party_id"):
+            main_column, additional_column = track_columns
+            usage_row = cur.execute(
+                f"""
+                SELECT 1
+                FROM Tracks
+                WHERE {main_column}=?
+                UNION
+                SELECT 1
+                FROM TrackArtists
+                WHERE {additional_column}=?
+                LIMIT 1
+                """,
+                (int(record.id), int(record.id)),
+            ).fetchone()
+            if usage_row is not None:
+                return int(record.id)
+        return None
+
     def find_party_id_by_name(
         self,
         name: str,
@@ -747,14 +911,38 @@ class PartyService:
             cursor=cur,
         )
 
+    def ensure_artist_party_by_name(
+        self,
+        name: str,
+        *,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> int:
+        clean_name = clean_text(name)
+        if not clean_name:
+            raise ValueError("Artist name is required.")
+        cur = cursor or self.conn.cursor()
+        party_id = self.find_party_id_by_name(clean_name, cursor=cur)
+        if party_id is not None:
+            record = self.fetch_party(int(party_id))
+            if record is None:
+                raise ValueError(f"Party {int(party_id)} was not found.")
+            if not self._is_artist_relevant_record(record):
+                self._promote_party_to_artist_authority(int(party_id), clean_name, cursor=cur)
+            elif str(record.artist_name or "").strip() == "" or str(record.party_type or "").strip().lower() != "artist":
+                self._promote_party_to_artist_authority(int(party_id), clean_name, cursor=cur)
+            return int(party_id)
+        return self.create_party(
+            PartyPayload(
+                legal_name=clean_name,
+                display_name=clean_name,
+                artist_name=clean_name,
+                party_type="artist",
+            ),
+            cursor=cur,
+        )
+
     def usage_summary(self, party_id: int) -> PartyUsageSummary:
-        table_names = {
-            str(row[0])
-            for row in self.conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
-            if row and row[0]
-        }
+        table_names = self._table_names()
         work_queries = ["SELECT work_id FROM WorkContributors WHERE party_id=?"]
         work_params: list[object] = [int(party_id)]
         if "WorkContributionEntries" in table_names:
@@ -779,7 +967,27 @@ class PartyService:
             """,
             (int(party_id), int(party_id), int(party_id)),
         ).fetchone()
+        track_count = (0,)
+        track_columns = self._track_artist_columns()
+        if track_columns == ("main_artist_party_id", "party_id"):
+            main_column, additional_column = track_columns
+            track_count = self.conn.execute(
+                f"""
+                SELECT COUNT(DISTINCT track_id)
+                FROM (
+                    SELECT id AS track_id
+                    FROM Tracks
+                    WHERE {main_column}=?
+                    UNION
+                    SELECT track_id
+                    FROM TrackArtists
+                    WHERE {additional_column}=?
+                )
+                """,
+                (int(party_id), int(party_id)),
+            ).fetchone()
         return PartyUsageSummary(
+            track_count=int(track_count[0] or 0),
             work_count=int(work_count[0] or 0),
             contract_count=int(contract_count[0] or 0),
             rights_count=int(rights_count[0] or 0),
@@ -888,13 +1096,7 @@ class PartyService:
 
         with self.conn:
             cur = self.conn.cursor()
-            table_names = {
-                str(row[0])
-                for row in cur.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                ).fetchall()
-                if row and row[0]
-            }
+            table_names = self._table_names(cursor=cur)
             for duplicate_id in duplicates:
                 duplicate_record = self.fetch_party(duplicate_id)
                 if duplicate_record is None:
@@ -912,6 +1114,27 @@ class PartyService:
                     "UPDATE WorkContributors SET party_id=? WHERE party_id=?",
                     (primary_party_id, duplicate_id),
                 )
+                track_columns = self._track_artist_columns(cursor=cur)
+                if track_columns == ("main_artist_party_id", "party_id"):
+                    main_column, additional_column = track_columns
+                    cur.execute(
+                        f"UPDATE Tracks SET {main_column}=? WHERE {main_column}=?",
+                        (primary_party_id, duplicate_id),
+                    )
+                    cur.execute(
+                        f"UPDATE TrackArtists SET {additional_column}=? WHERE {additional_column}=?",
+                        (primary_party_id, duplicate_id),
+                    )
+                    cur.execute(
+                        f"""
+                        DELETE FROM TrackArtists
+                        WHERE rowid NOT IN (
+                            SELECT MIN(rowid)
+                            FROM TrackArtists
+                            GROUP BY track_id, {additional_column}, role
+                        )
+                        """
+                    )
                 if "WorkContributionEntries" in table_names:
                     cur.execute(
                         "UPDATE WorkContributionEntries SET party_id=? WHERE party_id=?",
@@ -1013,6 +1236,7 @@ class PartyService:
                 (merged_artist_name, primary_party_id),
             )
             self._replace_artist_aliases(primary_party_id, merged_alias_values, cursor=cur)
+        emit_party_authority_changed()
         merged = self.fetch_party(primary_party_id)
         if merged is None:
             raise ValueError("Merged party could not be loaded.")

@@ -8,7 +8,7 @@ import mimetypes
 import sqlite3
 import tempfile
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Iterable
 
@@ -33,12 +33,16 @@ from isrc_manager.file_storage import (
     infer_storage_mode,
     normalize_storage_mode,
 )
+from isrc_manager.parties import artist_primary_label
+from isrc_manager.parties.authority import emit_party_authority_changed
+from isrc_manager.parties.service import PartyService
 from isrc_manager.media.audio_formats import classify_audio_format
 from isrc_manager.media.blob_files import (
     _is_valid_audio_path,
     _is_valid_image_path,
     _read_blob_from_path,
 )
+from .track_artist_sql import track_main_artist_join_sql
 
 TRACK_RELATIONSHIP_TYPES = frozenset(
     {
@@ -173,6 +177,8 @@ class TrackSnapshot:
     album_art_blob_b64: str | None = None
     album_art_mime_type: str | None = None
     album_art_size_bytes: int = 0
+    main_artist_party_id: int | None = None
+    additional_artist_party_ids: list[int] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -263,6 +269,7 @@ class TrackService:
         self.media_root = self.data_root / "track_media" if self.data_root is not None else None
         self.media_store = ManagedFileStorage(data_root=data_root, relative_root="track_media")
         self.asset_service = AssetService(self.conn, data_root)
+        self.party_service = PartyService(self.conn)
         self.require_governed_creation = bool(require_governed_creation)
         self._code_registry_service_instance: CodeRegistryService | None = None
         self._ensure_storage_columns()
@@ -443,6 +450,54 @@ class TrackService:
             and "work_id" in self._track_columns()
         )
 
+    def _track_artist_columns(self) -> tuple[str, str] | None:
+        table_names = self._table_names()
+        if "Tracks" not in table_names or "TrackArtists" not in table_names:
+            return None
+        track_columns = self._track_columns()
+        additional_columns = {
+            str(row[1])
+            for row in self.conn.execute("PRAGMA table_info(TrackArtists)").fetchall()
+            if row and row[1]
+        }
+        if "main_artist_party_id" in track_columns and "party_id" in additional_columns:
+            return "main_artist_party_id", "party_id"
+        if "main_artist_id" in track_columns and "artist_id" in additional_columns:
+            return "main_artist_id", "artist_id"
+        return None
+
+    def _uses_party_artist_authority(self) -> bool:
+        return self._track_artist_columns() == ("main_artist_party_id", "party_id")
+
+    def _fetch_artist_record(
+        self,
+        artist_id: int,
+        *,
+        cursor: sqlite3.Cursor | None = None,
+    ):
+        cur = cursor or self.conn.cursor()
+        if self._uses_party_artist_authority():
+            return self.party_service.fetch_party(int(artist_id))
+        row = cur.execute("SELECT id, name FROM Artists WHERE id=?", (int(artist_id),)).fetchone()
+        if row is None:
+            return None
+        return type("LegacyArtistRecord", (), {"id": int(row[0]), "name": str(row[1] or "")})()
+
+    def _artist_display_name(
+        self,
+        artist_id: int | None,
+        *,
+        cursor: sqlite3.Cursor | None = None,
+    ) -> str:
+        if artist_id is None:
+            return ""
+        record = self._fetch_artist_record(int(artist_id), cursor=cursor)
+        if record is None:
+            return ""
+        if self._uses_party_artist_authority():
+            return artist_primary_label(record)
+        return str(getattr(record, "name", "") or "").strip()
+
     @staticmethod
     def _work_exists(work_id: int, *, cursor: sqlite3.Cursor) -> bool:
         row = cursor.execute("SELECT 1 FROM Works WHERE id=? LIMIT 1", (int(work_id),)).fetchone()
@@ -558,6 +613,8 @@ class TrackService:
         name = (name or "").strip()
         if is_blank(name):
             raise ValueError("Artist name is required")
+        if self._uses_party_artist_authority():
+            return int(self.party_service.ensure_artist_party_by_name(name, cursor=cursor))
         cur = cursor or self.conn.cursor()
         row = cur.execute(
             "SELECT id FROM Artists WHERE name=? ORDER BY id LIMIT 1", (name,)
@@ -586,6 +643,8 @@ class TrackService:
         clean_name = (name or "").strip()
         if is_blank(clean_name):
             return False
+        if self._uses_party_artist_authority():
+            return self.party_service.find_artist_party_id_by_name(clean_name, cursor=cursor) is not None
         cur = cursor or self.conn.cursor()
         row = cur.execute("SELECT 1 FROM Artists WHERE name=? LIMIT 1", (clean_name,)).fetchone()
         return bool(row)
@@ -606,12 +665,16 @@ class TrackService:
         cursor: sqlite3.Cursor | None = None,
     ) -> None:
         cur = cursor or self.conn.cursor()
+        artist_columns = self._track_artist_columns()
+        if artist_columns is None:
+            return
+        _main_column, additional_column = artist_columns
         cur.execute("DELETE FROM TrackArtists WHERE track_id=? AND role='additional'", (track_id,))
         for name in names:
             try:
                 artist_id = self.get_or_create_artist(name, cursor=cur)
                 cur.execute(
-                    "INSERT OR IGNORE INTO TrackArtists (track_id, artist_id, role) VALUES (?, ?, 'additional')",
+                    f"INSERT OR IGNORE INTO TrackArtists (track_id, {additional_column}, role) VALUES (?, ?, 'additional')",
                     (track_id, artist_id),
                 )
             except ValueError:
@@ -1613,6 +1676,11 @@ class TrackService:
             if "external_catalog_identifier_id" in track_columns
             else "NULL"
         )
+        main_artist_join_sql, main_artist_name_expr = track_main_artist_join_sql(
+            self.conn,
+            track_alias="t",
+            artist_alias="main_artist",
+        )
         row = cur.execute(
             f"""
             SELECT
@@ -1621,7 +1689,7 @@ class TrackService:
                 t.isrc,
                 t.track_title,
                 t.catalog_number,
-                main_artist.name,
+                {main_artist_name_expr},
                 t.buma_work_number,
                 album.title,
                 t.release_date,
@@ -1642,9 +1710,10 @@ class TrackService:
                 {external_catalog_expr},
                 {work_expr},
                 {parent_expr},
-                {relationship_expr}
+                {relationship_expr},
+                t.{"main_artist_party_id" if self._uses_party_artist_authority() else "main_artist_id"}
             FROM Tracks t
-            JOIN Artists main_artist ON main_artist.id = t.main_artist_id
+            {main_artist_join_sql}
             LEFT JOIN Albums album ON album.id = t.album_id
             WHERE t.id=?
             """,
@@ -1652,17 +1721,26 @@ class TrackService:
         ).fetchone()
         if not row:
             return None
-
+        main_artist_id = int(row[27]) if row[27] is not None else None
+        main_artist_name = self._artist_display_name(main_artist_id, cursor=cur)
+        additional_column = "party_id" if self._uses_party_artist_authority() else "artist_id"
         additional_rows = cur.execute(
-            """
-            SELECT a.name
-            FROM TrackArtists ta
-            JOIN Artists a ON a.id = ta.artist_id
-            WHERE ta.track_id=? AND ta.role='additional'
-            ORDER BY a.name
+            f"""
+            SELECT {additional_column}
+            FROM TrackArtists
+            WHERE track_id=? AND role='additional'
+            ORDER BY {additional_column}
             """,
             (int(track_id),),
         ).fetchall()
+        additional_artist_ids = [int(artist_id) for (artist_id,) in additional_rows if artist_id is not None]
+        additional_artist_names = [
+            name
+            for name in (
+                self._artist_display_name(artist_id, cursor=cur) for artist_id in additional_artist_ids
+            )
+            if name
+        ]
         audio_meta = self._get_track_row_media_meta(track_id, "audio_file", cursor=cur)
         album_art_meta = self.get_media_meta(track_id, "album_art", cursor=cur)
         audio_blob_b64 = None
@@ -1681,8 +1759,12 @@ class TrackService:
             db_entry_date=row[1],
             isrc=row[2] or "",
             track_title=row[3] or "",
-            artist_name=row[5] or "",
-            additional_artists=[name for (name,) in additional_rows if name],
+            artist_name=main_artist_name,
+            additional_artists=additional_artist_names,
+            main_artist_party_id=main_artist_id if self._uses_party_artist_authority() else None,
+            additional_artist_party_ids=(
+                additional_artist_ids if self._uses_party_artist_authority() else []
+            ),
             album_title=row[7],
             release_date=row[8],
             track_length_sec=int(row[9] or 0),
@@ -1719,7 +1801,15 @@ class TrackService:
     ) -> None:
         cur = cursor or self.conn.cursor()
         track_columns = self._track_columns()
-        main_artist_id = self.get_or_create_artist(snapshot.artist_name, cursor=cur)
+        artist_columns = self._track_artist_columns()
+        if artist_columns is None:
+            raise ValueError("Track artist authority columns are unavailable.")
+        main_artist_column, _additional_artist_column = artist_columns
+        main_artist_id = (
+            int(snapshot.main_artist_party_id)
+            if self._uses_party_artist_authority() and snapshot.main_artist_party_id is not None
+            else self.get_or_create_artist(snapshot.artist_name, cursor=cur)
+        )
         album_id = self.get_or_create_album(snapshot.album_title, cursor=cur)
         compact_isrc = to_compact_isrc(snapshot.isrc)
         audio_blob = self._decode_blob_b64(snapshot.audio_file_blob_b64)
@@ -1745,7 +1835,7 @@ class TrackService:
             "album_art_filename=?",
             "album_art_mime_type=?",
             "album_art_size_bytes=?",
-            "main_artist_id=?",
+            f"{main_artist_column}=?",
             "buma_work_number=?",
             "album_id=?",
             "release_date=?",
@@ -1829,7 +1919,7 @@ class TrackService:
                 "album_art_filename",
                 "album_art_mime_type",
                 "album_art_size_bytes",
-                "main_artist_id",
+                main_artist_column,
                 "buma_work_number",
                 "album_id",
                 "release_date",
@@ -1930,6 +2020,8 @@ class TrackService:
     def delete_unused_artists_by_names(
         self, names: Iterable[str], *, cursor: sqlite3.Cursor | None = None
     ) -> None:
+        if self._uses_party_artist_authority():
+            return
         cur = cursor or self.conn.cursor()
         cleaned_names = sorted({(name or "").strip() for name in names if not is_blank(name)})
         for name in cleaned_names:
@@ -1978,6 +2070,10 @@ class TrackService:
         cur = cursor
         self._validate_track_creation_governance(payload, cursor=cur)
         track_columns = self._track_columns()
+        artist_columns = self._track_artist_columns()
+        if artist_columns is None:
+            raise ValueError("Track artist authority columns are unavailable.")
+        main_artist_column, _additional_artist_column = artist_columns
         main_artist_id = self.get_or_create_artist(payload.artist_name, cursor=cur)
         album_id = self.get_or_create_album(payload.album_title, cursor=cur)
         clean_isrc = str(payload.isrc or "").strip()
@@ -1999,7 +2095,7 @@ class TrackService:
             "album_art_filename",
             "album_art_mime_type",
             "album_art_size_bytes",
-            "main_artist_id",
+            main_artist_column,
             "buma_work_number",
             "album_id",
             "release_date",
@@ -2100,10 +2196,17 @@ class TrackService:
 
         with self.conn:
             cur = self.conn.cursor()
-            return self._create_track_row(payload, cursor=cur)
+            track_id = self._create_track_row(payload, cursor=cur)
+        if self._uses_party_artist_authority():
+            emit_party_authority_changed()
+        return track_id
 
     def _update_track_row(self, payload: TrackUpdatePayload, *, cursor: sqlite3.Cursor) -> None:
         track_columns = self._track_columns()
+        artist_columns = self._track_artist_columns()
+        if artist_columns is None:
+            raise ValueError("Track artist authority columns are unavailable.")
+        main_artist_column, _additional_artist_column = artist_columns
         main_artist_id = self.get_or_create_artist(payload.artist_name, cursor=cursor)
         album_id = self.get_or_create_album(payload.album_title, cursor=cursor)
         clean_isrc = str(payload.isrc or "").strip()
@@ -2160,7 +2263,7 @@ class TrackService:
             "album_art_filename=?",
             "album_art_mime_type=?",
             "album_art_size_bytes=?",
-            "main_artist_id=?",
+            f"{main_artist_column}=?",
             "buma_work_number=?",
             "album_id=?",
             "release_date=?",
@@ -2305,6 +2408,8 @@ class TrackService:
         with self.conn:
             cur = self.conn.cursor()
             self._update_track_row(payload, cursor=cur)
+        if self._uses_party_artist_authority():
+            emit_party_authority_changed()
 
     def apply_album_metadata_to_tracks(
         self,

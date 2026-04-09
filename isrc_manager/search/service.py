@@ -8,6 +8,7 @@ import sqlite3
 from isrc_manager.domain.repertoire import clean_text
 
 from .models import GlobalSearchResult, RelationshipSection, SavedSearchRecord
+from ..services.track_artist_sql import track_main_artist_join_sql
 
 
 class GlobalSearchService:
@@ -26,6 +27,13 @@ class GlobalSearchService:
 
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
+
+    def _track_artist_join(self, *, track_alias: str = "t", artist_alias: str = "artist_record"):
+        return track_main_artist_join_sql(
+            self.conn,
+            track_alias=track_alias,
+            artist_alias=artist_alias,
+        )
 
     @staticmethod
     def _normalized_entity_types(entity_types: list[str] | None) -> set[str]:
@@ -81,17 +89,21 @@ class GlobalSearchService:
                     )
                 )
         if include("track"):
+            track_artist_join_sql, track_artist_name_expr = self._track_artist_join(
+                track_alias="t",
+                artist_alias="track_artist",
+            )
             for row in self.conn.execute(
-                """
+                f"""
                 SELECT
                     t.id,
                     t.track_title,
-                    COALESCE(a.name, ''),
+                    COALESCE({track_artist_name_expr}, ''),
                     COALESCE(t.isrc, ''),
                     COALESCE(t.repertoire_status, '')
                 FROM Tracks t
-                LEFT JOIN Artists a ON a.id = t.main_artist_id
-                WHERE t.track_title LIKE ? OR COALESCE(a.name, '') LIKE ? OR COALESCE(t.isrc, '') LIKE ?
+                {track_artist_join_sql}
+                WHERE t.track_title LIKE ? OR COALESCE({track_artist_name_expr}, '') LIKE ? OR COALESCE(t.isrc, '') LIKE ?
                 ORDER BY t.track_title, t.id
                 LIMIT ?
                 """,
@@ -275,17 +287,21 @@ class GlobalSearchService:
                 ),
             )
         if include("track"):
+            track_artist_join_sql, track_artist_name_expr = self._track_artist_join(
+                track_alias="t",
+                artist_alias="track_artist",
+            )
             extend(
                 self.conn.execute(
-                    """
+                    f"""
                     SELECT
                         t.id,
                         t.track_title,
-                        COALESCE(a.name, ''),
+                        COALESCE({track_artist_name_expr}, ''),
                         COALESCE(t.isrc, ''),
                         COALESCE(t.repertoire_status, '')
                     FROM Tracks t
-                    LEFT JOIN Artists a ON a.id = t.main_artist_id
+                    {track_artist_join_sql}
                     ORDER BY t.track_title, t.id
                     LIMIT ?
                     """,
@@ -483,6 +499,13 @@ class RelationshipExplorerService:
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
 
+    def _track_artist_join(self, *, track_alias: str = "t", artist_alias: str = "artist_record"):
+        return track_main_artist_join_sql(
+            self.conn,
+            track_alias=track_alias,
+            artist_alias=artist_alias,
+        )
+
     @staticmethod
     def _result(
         entity_type: str, entity_id: int, title: str, subtitle: str, status: str | None = None
@@ -511,16 +534,20 @@ class RelationshipExplorerService:
         return []
 
     def _work_track_rows(self, work_id: int) -> list[tuple[int, str, str]]:
+        track_artist_join_sql, track_artist_name_expr = self._track_artist_join(
+            track_alias="t",
+            artist_alias="track_artist",
+        )
         rows = self.conn.execute(
-            """
+            f"""
             SELECT DISTINCT
                 t.id,
                 t.track_title,
-                COALESCE(a.name, '') AS artist_name,
+                COALESCE({track_artist_name_expr}, '') AS artist_name,
                 CASE WHEN t.work_id=? THEN 0 ELSE 1 END AS authority_rank,
                 COALESCE(wt.is_primary, 0) AS compatibility_primary
             FROM Tracks t
-            LEFT JOIN Artists a ON a.id = t.main_artist_id
+            {track_artist_join_sql}
             LEFT JOIN WorkTrackLinks wt
               ON wt.track_id = t.id
              AND wt.work_id = ?
@@ -667,14 +694,18 @@ class RelationshipExplorerService:
         ]
 
     def _for_release(self, release_id: int) -> list[RelationshipSection]:
+        track_artist_join_sql, track_artist_name_expr = self._track_artist_join(
+            track_alias="t",
+            artist_alias="track_artist",
+        )
         tracks = [
             self._result("track", row[0], row[1], row[2])
             for row in self.conn.execute(
-                """
-                SELECT t.id, t.track_title, COALESCE(a.name, '')
+                f"""
+                SELECT t.id, t.track_title, COALESCE({track_artist_name_expr}, '')
                 FROM ReleaseTracks rt
                 JOIN Tracks t ON t.id = rt.track_id
-                LEFT JOIN Artists a ON a.id = t.main_artist_id
+                {track_artist_join_sql}
                 WHERE rt.release_id=?
                 ORDER BY rt.sequence_number, t.id
                 """,
@@ -726,6 +757,10 @@ class RelationshipExplorerService:
         ]
 
     def _for_contract(self, contract_id: int) -> list[RelationshipSection]:
+        track_artist_join_sql, track_artist_name_expr = self._track_artist_join(
+            track_alias="t",
+            artist_alias="track_artist",
+        )
         parties = [
             self._result("party", row[0], row[1], row[2])
             for row in self.conn.execute(
@@ -755,11 +790,11 @@ class RelationshipExplorerService:
         tracks = [
             self._result("track", row[0], row[1], row[2])
             for row in self.conn.execute(
-                """
-                SELECT t.id, t.track_title, COALESCE(a.name, '')
+                f"""
+                SELECT t.id, t.track_title, COALESCE({track_artist_name_expr}, '')
                 FROM ContractTrackLinks ct
                 JOIN Tracks t ON t.id = ct.track_id
-                LEFT JOIN Artists a ON a.id = t.main_artist_id
+                {track_artist_join_sql}
                 WHERE ct.contract_id=?
                 ORDER BY t.track_title
                 """,
@@ -889,11 +924,15 @@ class RelationshipExplorerService:
                     )
                 )
         if row[1] is not None:
+            track_artist_join_sql, track_artist_name_expr = self._track_artist_join(
+                track_alias="t",
+                artist_alias="track_artist",
+            )
             track = self.conn.execute(
-                """
-                SELECT t.id, t.track_title, COALESCE(a.name, '')
+                f"""
+                SELECT t.id, t.track_title, COALESCE({track_artist_name_expr}, '')
                 FROM Tracks t
-                LEFT JOIN Artists a ON a.id = t.main_artist_id
+                {track_artist_join_sql}
                 WHERE t.id=?
                 """,
                 (int(row[1]),),

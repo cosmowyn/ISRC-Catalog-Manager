@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from isrc_manager.parties import PartyService, artist_primary_label, party_authority_notifier
 from isrc_manager.code_registry import CatalogIdentifierSelector
 from isrc_manager.file_storage import (
     STORAGE_MODE_DATABASE,
@@ -70,6 +71,7 @@ class ReleaseEditorDialog(QDialog):
         release: ReleaseRecord | None = None,
         placements: list[ReleaseTrackPlacement] | None = None,
         profile_name: str | None = None,
+        party_service: PartyService | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -78,6 +80,7 @@ class ReleaseEditorDialog(QDialog):
         self.selected_track_ids_provider = selected_track_ids_provider
         self.release = release
         self.profile_name = profile_name
+        self.party_service = party_service
         self.setObjectName("releaseEditorDialog")
         self.setWindowTitle("Edit Release" if release is not None else "Create Release")
         self.resize(960, 720)
@@ -105,25 +108,70 @@ class ReleaseEditorDialog(QDialog):
         metadata_scroll, _, metadata_layout = _create_scrollable_dialog_content(splitter)
         metadata_layout.setSpacing(12)
 
-        def stored_value_combo(query: str) -> FocusWheelComboBox:
+        def stored_value_combo(
+            query: str,
+            *,
+            values: list[str] | None = None,
+        ) -> FocusWheelComboBox:
             combo = FocusWheelComboBox(self)
             combo.setEditable(True)
             combo.addItem("")
-            values: list[str] = []
+            option_values: list[str] = []
             seen: set[str] = set()
-            conn = getattr(self.release_service, "conn", None)
-            if conn is not None:
-                for row in conn.execute(query).fetchall():
-                    value = str(row[0] or "").strip()
-                    if not value or value in seen:
+            if values is not None:
+                for raw_value in values:
+                    clean_value = str(raw_value or "").strip()
+                    if not clean_value or clean_value in seen:
                         continue
-                    seen.add(value)
-                    values.append(value)
-            combo.addItems(values)
-            completer = QCompleter(values, combo)
+                    seen.add(clean_value)
+                    option_values.append(clean_value)
+            else:
+                conn = getattr(self.release_service, "conn", None)
+                if conn is not None:
+                    for row in conn.execute(query).fetchall():
+                        value = str(row[0] or "").strip()
+                        if not value or value in seen:
+                            continue
+                        seen.add(value)
+                        option_values.append(value)
+            combo.addItems(option_values)
+            completer = QCompleter(option_values, combo)
             completer.setCaseSensitivity(Qt.CaseInsensitive)
             combo.setCompleter(completer)
             return combo
+
+        def artist_lookup_values() -> list[str]:
+            values: list[str] = []
+            seen: set[str] = set()
+            if self.party_service is not None:
+                for record in self.party_service.list_artist_parties():
+                    primary = artist_primary_label(record)
+                    for candidate in (primary, *list(getattr(record, "artist_aliases", ()) or ())):
+                        clean_value = str(candidate or "").strip()
+                        if not clean_value or clean_value in seen:
+                            continue
+                        seen.add(clean_value)
+                        values.append(clean_value)
+            conn = getattr(self.release_service, "conn", None)
+            if conn is not None:
+                for row in conn.execute(
+                    """
+                    SELECT primary_artist AS value
+                    FROM Releases
+                    WHERE primary_artist IS NOT NULL AND primary_artist != ''
+                    UNION
+                    SELECT album_artist AS value
+                    FROM Releases
+                    WHERE album_artist IS NOT NULL AND album_artist != ''
+                    ORDER BY value
+                    """
+                ).fetchall():
+                    clean_value = str(row[0] or "").strip()
+                    if not clean_value or clean_value in seen:
+                        continue
+                    seen.add(clean_value)
+                    values.append(clean_value)
+            return values
 
         metadata_box = QGroupBox("Release Metadata", metadata_scroll)
         metadata_box_layout = QVBoxLayout(metadata_box)
@@ -148,46 +196,10 @@ class ReleaseEditorDialog(QDialog):
         self.subtitle_edit = QLineEdit()
         identity_form.addRow("Version / Subtitle", self.subtitle_edit)
 
-        self.primary_artist_edit = stored_value_combo(
-            """
-            SELECT value
-            FROM (
-                SELECT name AS value
-                FROM Artists
-                WHERE name IS NOT NULL AND name != ''
-                UNION
-                SELECT primary_artist AS value
-                FROM Releases
-                WHERE primary_artist IS NOT NULL AND primary_artist != ''
-                UNION
-                SELECT album_artist AS value
-                FROM Releases
-                WHERE album_artist IS NOT NULL AND album_artist != ''
-            )
-            ORDER BY value
-            """
-        )
+        self.primary_artist_edit = stored_value_combo("", values=artist_lookup_values())
         identity_form.addRow("Primary Artist", self.primary_artist_edit)
 
-        self.album_artist_edit = stored_value_combo(
-            """
-            SELECT value
-            FROM (
-                SELECT name AS value
-                FROM Artists
-                WHERE name IS NOT NULL AND name != ''
-                UNION
-                SELECT primary_artist AS value
-                FROM Releases
-                WHERE primary_artist IS NOT NULL AND primary_artist != ''
-                UNION
-                SELECT album_artist AS value
-                FROM Releases
-                WHERE album_artist IS NOT NULL AND album_artist != ''
-            )
-            ORDER BY value
-            """
-        )
+        self.album_artist_edit = stored_value_combo("", values=artist_lookup_values())
         identity_form.addRow("Album Artist", self.album_artist_edit)
 
         self.release_type_combo = QComboBox()
@@ -389,10 +401,45 @@ class ReleaseEditorDialog(QDialog):
         buttons.addWidget(cancel_button)
         root.addLayout(buttons)
         _apply_compact_dialog_control_heights(self)
+        if self.party_service is not None:
+            party_authority_notifier().changed.connect(self._refresh_artist_choice_combos)
 
         self._clear_artwork_requested = False
         self._original_artwork_display_path = ""
         self._populate(release, placements or [])
+
+    def _refresh_artist_choice_combos(self) -> None:
+        if self.party_service is None:
+            return
+        current_primary = self.primary_artist_edit.currentText().strip()
+        current_album = self.album_artist_edit.currentText().strip()
+        values: list[str] = []
+        seen: set[str] = set()
+        try:
+            artist_records = self.party_service.list_artist_parties()
+        except Exception:
+            return
+        for record in artist_records:
+            primary = artist_primary_label(record)
+            for candidate in (primary, *list(getattr(record, "artist_aliases", ()) or ())):
+                clean_value = str(candidate or "").strip()
+                if not clean_value or clean_value in seen:
+                    continue
+                seen.add(clean_value)
+                values.append(clean_value)
+        for combo, current_text in (
+            (self.primary_artist_edit, current_primary),
+            (self.album_artist_edit, current_album),
+        ):
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItem("")
+            combo.addItems(values)
+            completer = QCompleter(values, combo)
+            completer.setCaseSensitivity(Qt.CaseInsensitive)
+            combo.setCompleter(completer)
+            combo.setCurrentText(current_text)
+            combo.blockSignals(False)
 
     def _populate(
         self, release: ReleaseRecord | None, placements: list[ReleaseTrackPlacement]
@@ -571,11 +618,22 @@ class ReleaseEditorDialog(QDialog):
         artwork_storage_mode = self.artwork_storage_mode_combo.currentData()
         if not artwork_source_path and self._clear_artwork_requested:
             artwork_storage_mode = None
+        primary_artist = self.primary_artist_edit.currentText().strip() or None
+        album_artist = self.album_artist_edit.currentText().strip() or None
+        if self.party_service is not None:
+            if primary_artist:
+                primary_party_id = self.party_service.ensure_artist_party_by_name(primary_artist)
+                primary_record = self.party_service.fetch_party(int(primary_party_id))
+                primary_artist = artist_primary_label(primary_record) if primary_record is not None else primary_artist
+            if album_artist:
+                album_party_id = self.party_service.ensure_artist_party_by_name(album_artist)
+                album_record = self.party_service.fetch_party(int(album_party_id))
+                album_artist = artist_primary_label(album_record) if album_record is not None else album_artist
         return ReleasePayload(
             title=self.title_edit.text().strip(),
             version_subtitle=self.subtitle_edit.text().strip() or None,
-            primary_artist=self.primary_artist_edit.currentText().strip() or None,
-            album_artist=self.album_artist_edit.currentText().strip() or None,
+            primary_artist=primary_artist,
+            album_artist=album_artist,
             release_type=release_type,
             release_date=self.release_date_edit.text().strip() or None,
             original_release_date=self.original_release_date_edit.text().strip() or None,

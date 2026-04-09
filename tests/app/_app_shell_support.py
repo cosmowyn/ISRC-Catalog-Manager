@@ -6413,6 +6413,86 @@ class AppShellTestCase(unittest.TestCase):
         }
         self.assertNotIn(int(track_id), linked_track_ids)
 
+    def case_party_created_artist_appears_in_add_track_selector_and_renames_live(self):
+        self.window.open_add_track_entry()
+        self.app.processEvents()
+
+        party_id = self.window.party_service.create_party(
+            PartyPayload(
+                legal_name="Authority Artist LLC",
+                display_name="Authority Artist",
+                artist_name="Authority Artist",
+                party_type="artist",
+            )
+        )
+        self.app.processEvents()
+
+        self.assertIn("Authority Artist", self.window._artist_lookup_values())
+        wait_for(
+            lambda: self.window.artist_field.findData(party_id) >= 0,
+            timeout_ms=1500,
+            interval_ms=10,
+            app=self.app,
+            description="authority artist to appear in add-track selector",
+        )
+        artist_index = self.window.artist_field.findData(party_id)
+        self.assertGreaterEqual(artist_index, 0)
+        self.window.artist_field.setCurrentIndex(artist_index)
+
+        self.window.party_service.update_party(
+            party_id,
+            PartyPayload(
+                legal_name="Authority Artist LLC",
+                display_name="Authority Artist",
+                artist_name="Authority Artist Renamed",
+                party_type="artist",
+            ),
+        )
+        self.app.processEvents()
+
+        self.assertIn("Authority Artist Renamed", self.window._artist_lookup_values())
+        wait_for(
+            lambda: self.window.artist_field.currentText() == "Authority Artist Renamed",
+            timeout_ms=1500,
+            interval_ms=10,
+            app=self.app,
+            description="renamed authority artist to refresh in add-track selector",
+        )
+        self.assertEqual(self.window.artist_field.currentText(), "Authority Artist Renamed")
+
+    def case_track_first_artist_entry_creates_party_authority_and_reuses_selectors(self):
+        typed_artist = "Typed Authority Artist"
+        self.assertIsNone(self.window.party_service.find_artist_party_id_by_name(typed_artist))
+
+        self.window.open_add_track_entry()
+        self.app.processEvents()
+        self.window.track_title_field.setText("Typed Authority Track")
+        self.window.artist_field.setCurrentText(typed_artist)
+        self.window.album_title_field.setCurrentText("Typed Authority Album")
+
+        with mock.patch.object(
+            app_module.QMessageBox,
+            "information",
+            return_value=app_module.QMessageBox.Ok,
+        ):
+            self.window.save()
+            self.app.processEvents()
+
+        party_id = self.window.party_service.find_artist_party_id_by_name(typed_artist)
+        self.assertIsNotNone(party_id)
+        assert party_id is not None
+        self.assertIn(typed_artist, self.window._artist_lookup_values())
+
+        track_id = self.window.conn.execute(
+            "SELECT id FROM Tracks WHERE track_title=? ORDER BY id DESC LIMIT 1",
+            ("Typed Authority Track",),
+        ).fetchone()[0]
+        snapshot = self.window.track_service.fetch_track_snapshot(track_id)
+        self.assertIsNotNone(snapshot)
+        assert snapshot is not None
+        self.assertEqual(snapshot.artist_name, typed_artist)
+        self.assertEqual(snapshot.main_artist_party_id, int(party_id))
+
     def case_album_entry_can_mix_existing_and_new_work_governance_per_row(self):
         existing_work_id = self.window.work_service.create_work(
             app_module.WorkPayload(title="Existing Batch Work", iswc="T-123.456.710-0")

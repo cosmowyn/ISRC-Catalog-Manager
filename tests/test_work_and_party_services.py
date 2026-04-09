@@ -73,7 +73,7 @@ class WorkAndPartyServiceTests(unittest.TestCase):
         assert detail is not None
         self.assertEqual(detail.track_ids, [track_id])
         self.assertEqual(len(detail.contributors), 3)
-        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Parties").fetchone()[0], 3)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Parties").fetchone()[0], 4)
         self.assertEqual(
             self.conn.execute(
                 "SELECT COUNT(*) FROM WorkTrackLinks WHERE work_id=?",
@@ -397,6 +397,15 @@ class WorkAndPartyServiceTests(unittest.TestCase):
                 )
             ],
         )
+        duplicate_track_id = self._create_track("NL-ABC-26-00015", "Signal Duplicate Track")
+        self.conn.execute(
+            "UPDATE Tracks SET main_artist_party_id=? WHERE id=?",
+            (duplicate_id, duplicate_track_id),
+        )
+        self.conn.execute(
+            "INSERT OR IGNORE INTO TrackArtists(track_id, party_id, role) VALUES (?, ?, 'additional')",
+            (duplicate_track_id, duplicate_id),
+        )
         self.assertGreater(contract_id, 0)
         self.assertGreater(right_id, 0)
 
@@ -415,6 +424,7 @@ class WorkAndPartyServiceTests(unittest.TestCase):
         self.assertEqual(usage_before_merge.work_count, 1)
         self.assertEqual(usage_before_merge.contract_count, 1)
         self.assertEqual(usage_before_merge.rights_count, 1)
+        self.assertEqual(usage_before_merge.track_count, 1)
 
         merged = self.party_service.merge_parties(primary_id, [duplicate_id, mirrored_email_id])
         self.assertEqual(merged.id, primary_id)
@@ -459,6 +469,20 @@ class WorkAndPartyServiceTests(unittest.TestCase):
                 (primary_id,),
             ).fetchone()[0],
             1,
+        )
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT main_artist_party_id FROM Tracks WHERE id=?",
+                (duplicate_track_id,),
+            ).fetchone()[0],
+            primary_id,
+        )
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT party_id FROM TrackArtists WHERE track_id=? AND role='additional'",
+                (duplicate_track_id,),
+            ).fetchone()[0],
+            primary_id,
         )
         self.assertEqual(merged.artist_aliases, ())
 

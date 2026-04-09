@@ -34,6 +34,10 @@ from isrc_manager.services.custom_fields import CustomFieldDefinitionService
 from isrc_manager.services.import_governance import GovernedImportCoordinator
 from isrc_manager.services.import_repair_queue import TrackImportRepairQueueService
 from isrc_manager.services.imports import XMLImportService
+from isrc_manager.services.track_artist_sql import (
+    track_additional_artists_expr,
+    track_main_artist_join_sql,
+)
 from isrc_manager.services.tracks import TrackCreatePayload, TrackService, TrackUpdatePayload
 from isrc_manager.works import WorkService
 
@@ -569,6 +573,12 @@ class ExchangeService:
             placeholders = ",".join("?" * len(track_ids))
             where_clause = f"WHERE t.id IN ({placeholders})"
             params.extend(int(track_id) for track_id in track_ids)
+        main_artist_join_sql, main_artist_name_expr = track_main_artist_join_sql(
+            self.conn,
+            track_alias="t",
+            artist_alias="main_artist",
+        )
+        additional_artists_sql = track_additional_artists_expr(self.conn, track_id_expr="t.id")
 
         rows = self.conn.execute(
             f"""
@@ -576,13 +586,8 @@ class ExchangeService:
                 t.id,
                 t.isrc,
                 t.track_title,
-                COALESCE(a.name, '') AS artist_name,
-                COALESCE((
-                    SELECT GROUP_CONCAT(ar.name, ', ')
-                    FROM TrackArtists ta
-                    JOIN Artists ar ON ar.id = ta.artist_id
-                    WHERE ta.track_id = t.id AND ta.role = 'additional'
-                ), '') AS additional_artists,
+                COALESCE({main_artist_name_expr}, '') AS artist_name,
+                {additional_artists_sql} AS additional_artists,
                 COALESCE(al.title, '') AS album_title,
                 COALESCE(t.release_date, '') AS release_date,
                 COALESCE(t.track_length_sec, 0) AS track_length_sec,
@@ -598,7 +603,7 @@ class ExchangeService:
                 COALESCE(t.audio_file_path, '') AS audio_file_path,
                 COALESCE(t.album_art_path, '') AS album_art_path
             FROM Tracks t
-            LEFT JOIN Artists a ON a.id = t.main_artist_id
+            {main_artist_join_sql}
             LEFT JOIN Albums al ON al.id = t.album_id
             {where_clause}
             ORDER BY t.id
@@ -1474,12 +1479,17 @@ class ExchangeService:
         clean_artist = str(artist or "").strip()
         if not clean_title or not clean_artist:
             return []
+        main_artist_join_sql, main_artist_name_expr = track_main_artist_join_sql(
+            self.conn,
+            track_alias="t",
+            artist_alias="main_artist",
+        )
         rows = self.conn.execute(
-            """
+            f"""
             SELECT t.id
             FROM Tracks t
-            JOIN Artists a ON a.id = t.main_artist_id
-            WHERE lower(t.track_title)=lower(?) AND lower(a.name)=lower(?)
+            {main_artist_join_sql}
+            WHERE lower(t.track_title)=lower(?) AND lower({main_artist_name_expr})=lower(?)
             ORDER BY t.id
             """,
             (clean_title, clean_artist),

@@ -720,6 +720,15 @@ class BackgroundTaskManager(QObject):
                 candidate_dialog = current.dialog
                 if candidate_dialog is not None and _qt_object_is_valid(candidate_dialog):
                     dialog_to_cleanup = candidate_dialog
+            if current is not None:
+                try:
+                    current.thread.started.disconnect(current.worker.run)
+                except Exception:
+                    pass
+                try:
+                    current.worker.finished.disconnect(current.thread.quit)
+                except Exception:
+                    pass
             if dialog_to_cleanup is not None:
                 try:
                     dialog_to_cleanup.close()
@@ -764,7 +773,9 @@ class BackgroundTaskManager(QObject):
         worker.succeeded.connect(relay.handle_success, Qt.QueuedConnection)
         worker.failed.connect(relay.handle_error, Qt.QueuedConnection)
         worker.cancelled.connect(relay.handle_cancelled, Qt.QueuedConnection)
-        worker.finished.connect(worker.deleteLater)
+        # Avoid deleting Python QObject workers inside their own QThread.
+        # PySide/Shiboken can crash during wrapper teardown on newer runtimes,
+        # so we let the wrapper fall out of scope on the manager thread instead.
         worker.finished.connect(thread.quit)
         thread.finished.connect(relay.handle_cleanup, Qt.QueuedConnection)
         thread.start()

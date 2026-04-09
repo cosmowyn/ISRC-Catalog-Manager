@@ -5,6 +5,8 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Callable
 
+from .track_artist_sql import track_additional_artists_expr, track_main_artist_join_sql
+
 
 class CatalogReadService:
     """Centralizes common read-only catalog queries."""
@@ -49,6 +51,12 @@ class CatalogReadService:
             if "iswc" in work_columns
             else "COALESCE(t.iswc, '') AS iswc"
         )
+        main_artist_join_sql, main_artist_name_expr = track_main_artist_join_sql(
+            self.conn,
+            track_alias="t",
+            artist_alias="main_artist",
+        )
+        additional_artists_sql = track_additional_artists_expr(self.conn, track_id_expr="t.id")
         base_rows = self.conn.execute(
             f"""
             SELECT
@@ -58,13 +66,8 @@ class CatalogReadService:
                 COALESCE(t.track_length_sec, 0) AS track_length_sec,
                 COALESCE(al.title, '') AS album_title,
                 '' AS album_art,
-                COALESCE(a.name, '') AS artist_name,
-                COALESCE((
-                    SELECT GROUP_CONCAT(ar.name, ', ')
-                    FROM TrackArtists ta
-                    JOIN Artists ar ON ar.id = ta.artist_id
-                    WHERE ta.track_id = t.id AND ta.role = 'additional'
-                ), '') AS additional_artists,
+                COALESCE({main_artist_name_expr}, '') AS artist_name,
+                {additional_artists_sql} AS additional_artists,
                 t.isrc,
                 {work_registration_sql},
                 {work_iswc_sql},
@@ -74,7 +77,7 @@ class CatalogReadService:
                 COALESCE(t.release_date, '') AS release_date,
                 COALESCE(t.genre, '') AS genre
             FROM Tracks t
-            LEFT JOIN Artists a ON a.id = t.main_artist_id
+            {main_artist_join_sql}
             LEFT JOIN Albums al ON al.id = t.album_id
             LEFT JOIN Works w ON w.id = t.work_id
             ORDER BY t.id

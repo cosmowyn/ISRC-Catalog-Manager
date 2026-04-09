@@ -6,6 +6,9 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Iterable
 
+from isrc_manager.parties import PartyService, artist_primary_label
+
+from .track_artist_sql import uses_party_artist_authority
 
 @dataclass(slots=True)
 class ArtistUsage:
@@ -35,8 +38,41 @@ class CatalogAdminService:
 
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
+        self.party_service = PartyService(conn)
 
     def list_artists_with_usage(self) -> list[ArtistUsage]:
+        if uses_party_artist_authority(self.conn):
+            rows = self.conn.execute(
+                """
+                SELECT
+                    p.id,
+                    COUNT(DISTINCT CASE WHEN t.main_artist_party_id = p.id THEN t.id END) AS main_uses,
+                    COUNT(DISTINCT CASE WHEN ta.party_id = p.id THEN ta.track_id END) AS extra_uses
+                FROM Parties p
+                LEFT JOIN Tracks t ON t.main_artist_party_id = p.id
+                LEFT JOIN TrackArtists ta ON ta.party_id = p.id AND ta.role='additional'
+                GROUP BY p.id
+                """
+            ).fetchall()
+            usage_by_id = {
+                int(party_id): (
+                    int(main_uses or 0),
+                    int(extra_uses or 0),
+                )
+                for party_id, main_uses, extra_uses in rows
+            }
+            artist_records = self.party_service.list_artist_parties()
+            artist_usages = [
+                ArtistUsage(
+                    artist_id=int(record.id),
+                    name=artist_primary_label(record),
+                    main_uses=usage_by_id.get(int(record.id), (0, 0))[0],
+                    extra_uses=usage_by_id.get(int(record.id), (0, 0))[1],
+                    total_uses=sum(usage_by_id.get(int(record.id), (0, 0))),
+                )
+                for record in artist_records
+            ]
+            return sorted(artist_usages, key=lambda artist: artist.name.casefold())
         rows = self.conn.execute(
             """
             SELECT
@@ -84,6 +120,10 @@ class CatalogAdminService:
                 "Artist still linked to tracks: "
                 + ", ".join(sorted(set(blocked), key=str.casefold))
             )
+        if uses_party_artist_authority(self.conn):
+            for artist_id in normalized_ids:
+                self.party_service.delete_party(int(artist_id))
+            return
         ids = [(artist_id,) for artist_id in normalized_ids]
         with self.conn:
             self.conn.executemany("DELETE FROM Artists WHERE id=?", ids)

@@ -11,10 +11,12 @@ from typing import Callable
 
 from isrc_manager.constants import PROMOTED_CUSTOM_FIELDS, SCHEMA_BASELINE, SCHEMA_TARGET
 from isrc_manager.domain.codes import barcode_validation_status, to_compact_isrc
+from isrc_manager.parties.service import PartyService
 from isrc_manager.file_storage import (
     STORAGE_MODE_DATABASE,
     STORAGE_MODE_MANAGED_FILE,
 )
+from isrc_manager.services.track_artist_sql import track_main_artist_join_sql
 
 
 class DatabaseSchemaService:
@@ -41,6 +43,15 @@ class DatabaseSchemaService:
             row[1] for row in self.cursor.execute(f"PRAGMA table_info({table_name})").fetchall()
         }
 
+    def _table_names(self) -> set[str]:
+        return {
+            str(row[0])
+            for row in self.cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+            if row and row[0]
+        }
+
     def _table_exists(self, table_name: str) -> bool:
         row = self.cursor.execute(
             """
@@ -53,38 +64,10 @@ class DatabaseSchemaService:
         ).fetchone()
         return row is not None
 
-    def init_db(self) -> None:
-        # Core entities
+    def _create_current_tracks_table(self, table_name: str = "Tracks") -> None:
         self.cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS Artists (
-                id INTEGER PRIMARY KEY,
-                name TEXT NOT NULL
-            )
-            """
-        )
-        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_name ON Artists(name)")
-
-        self.cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS Albums (
-                id INTEGER PRIMARY KEY,
-                title TEXT NOT NULL,
-                album_art_path TEXT,
-                album_art_storage_mode TEXT,
-                album_art_blob BLOB,
-                album_art_filename TEXT,
-                album_art_mime_type TEXT,
-                album_art_size_bytes INTEGER NOT NULL DEFAULT 0
-            )
-            """
-        )
-        self._ensure_current_album_columns()
-        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_title ON Albums(title)")
-
-        self.cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS Tracks (
+            f"""
+            CREATE TABLE IF NOT EXISTS {table_name} (
                 id INTEGER PRIMARY KEY,
                 isrc TEXT NOT NULL,
                 isrc_compact TEXT,
@@ -97,13 +80,15 @@ class DatabaseSchemaService:
                 audio_file_size_bytes INTEGER NOT NULL DEFAULT 0,
                 track_title TEXT NOT NULL,
                 catalog_number TEXT,
+                catalog_registry_entry_id INTEGER REFERENCES CodeRegistryEntries(id) ON DELETE SET NULL,
+                external_catalog_identifier_id INTEGER REFERENCES ExternalCatalogIdentifiers(id) ON DELETE SET NULL,
                 album_art_path TEXT,
                 album_art_storage_mode TEXT,
                 album_art_blob BLOB,
                 album_art_filename TEXT,
                 album_art_mime_type TEXT,
                 album_art_size_bytes INTEGER NOT NULL DEFAULT 0,
-                main_artist_id INTEGER NOT NULL,
+                main_artist_party_id INTEGER NOT NULL,
                 buma_work_number TEXT,
                 album_id INTEGER,
                 work_id INTEGER,
@@ -118,14 +103,40 @@ class DatabaseSchemaService:
                 publisher TEXT,
                 comments TEXT,
                 lyrics TEXT,
-                FOREIGN KEY (main_artist_id) REFERENCES Artists(id) ON DELETE RESTRICT,
+                repertoire_status TEXT,
+                metadata_complete INTEGER NOT NULL DEFAULT 0,
+                contract_signed INTEGER NOT NULL DEFAULT 0,
+                rights_verified INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (main_artist_party_id) REFERENCES Parties(id) ON DELETE RESTRICT,
                 FOREIGN KEY (album_id) REFERENCES Albums(id) ON DELETE SET NULL,
                 FOREIGN KEY (work_id) REFERENCES Works(id) ON DELETE SET NULL,
                 FOREIGN KEY (parent_track_id) REFERENCES Tracks(id) ON DELETE SET NULL
             )
             """
         )
-        self._ensure_current_track_columns()
+
+    def _create_current_track_artists_table(self, table_name: str = "TrackArtists") -> None:
+        self.cursor.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {table_name} (
+                track_id INTEGER NOT NULL,
+                party_id INTEGER NOT NULL,
+                role TEXT NOT NULL DEFAULT 'additional',
+                PRIMARY KEY (track_id, party_id, role),
+                FOREIGN KEY (track_id) REFERENCES Tracks(id) ON DELETE CASCADE,
+                FOREIGN KEY (party_id) REFERENCES Parties(id) ON DELETE RESTRICT
+            )
+            """
+        )
+        if "party_id" in self._table_columns(table_name):
+            self.cursor.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_track_artists_party_id
+                ON {table_name}(party_id)
+                """
+            )
+
+    def _ensure_current_track_indexes_and_triggers(self) -> None:
         track_columns = self._table_columns("Tracks")
         self._ensure_optional_isrc_constraints()
         if "track_title" in track_columns:
@@ -156,6 +167,29 @@ class DatabaseSchemaService:
                 END
                 """
             )
+
+    def init_db(self) -> None:
+        # Core entities
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS Albums (
+                id INTEGER PRIMARY KEY,
+                title TEXT NOT NULL,
+                album_art_path TEXT,
+                album_art_storage_mode TEXT,
+                album_art_blob BLOB,
+                album_art_filename TEXT,
+                album_art_mime_type TEXT,
+                album_art_size_bytes INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+        self._ensure_current_album_columns()
+        self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_title ON Albums(title)")
+
+        self._create_current_tracks_table()
+        self._ensure_current_track_columns()
+        self._ensure_current_track_indexes_and_triggers()
 
         # Licenses & Licensees
         self.cursor.execute(
@@ -202,18 +236,7 @@ class DatabaseSchemaService:
             """
         )
 
-        self.cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS TrackArtists (
-                track_id INTEGER NOT NULL,
-                artist_id INTEGER NOT NULL,
-                role TEXT NOT NULL DEFAULT 'additional',
-                PRIMARY KEY (track_id, artist_id, role),
-                FOREIGN KEY (track_id) REFERENCES Tracks(id) ON DELETE CASCADE,
-                FOREIGN KEY (artist_id) REFERENCES Artists(id) ON DELETE RESTRICT
-            )
-            """
-        )
+        self._create_current_track_artists_table()
 
         # Custom fields (definitions + values) with type + options
         self.cursor.execute(
@@ -530,6 +553,9 @@ class DatabaseSchemaService:
             elif version == 37:
                 self._apply_migration(37, self._mig_37_to_38)
                 version = 38
+            elif version == 38:
+                self._apply_migration(38, self._mig_38_to_39)
+                version = 39
             else:
                 self.logger.warning("Unknown migration path from version %s", version)
                 break
@@ -973,6 +999,9 @@ class DatabaseSchemaService:
     def _mig_37_to_38(self) -> None:
         self._ensure_code_registry_entry_immutability_triggers()
 
+    def _mig_38_to_39(self) -> None:
+        self._migrate_tracks_artist_authority_to_parties()
+
     def _ensure_current_custom_field_value_schema(self) -> None:
         cols = self._table_columns("CustomFieldValues")
         additions = (
@@ -1366,6 +1395,7 @@ class DatabaseSchemaService:
             ("album_art_filename", "TEXT"),
             ("album_art_mime_type", "TEXT"),
             ("album_art_size_bytes", "INTEGER NOT NULL DEFAULT 0"),
+            ("main_artist_party_id", "INTEGER REFERENCES Parties(id) ON DELETE RESTRICT"),
             ("buma_work_number", "TEXT"),
             ("work_id", "INTEGER"),
             ("parent_track_id", "INTEGER"),
@@ -1405,6 +1435,12 @@ class DatabaseSchemaService:
             ON Tracks(relationship_type)
             """
         )
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_tracks_main_artist_party_id
+            ON Tracks(main_artist_party_id)
+            """
+        )
         if "relationship_type" in self._table_columns("Tracks"):
             self.cursor.execute(
                 """
@@ -1413,6 +1449,173 @@ class DatabaseSchemaService:
                 WHERE relationship_type IS NULL OR trim(relationship_type)=''
                 """
             )
+
+    def _migrate_tracks_artist_authority_to_parties(self) -> None:
+        tables = self._table_names()
+        if "Tracks" not in tables:
+            return
+        self._ensure_repertoire_tables()
+        track_columns = self._table_columns("Tracks")
+        track_artist_columns = self._table_columns("TrackArtists") if "TrackArtists" in tables else set()
+        if "main_artist_party_id" in track_columns and "party_id" in track_artist_columns:
+            if "Artists" in tables:
+                self.cursor.execute("DROP TABLE IF EXISTS Artists")
+            return
+
+        party_service = PartyService(self.conn)
+        legacy_artist_names: dict[int, str] = {}
+        if "Artists" in tables:
+            legacy_artist_names = {
+                int(row[0]): str(row[1] or "").strip()
+                for row in self.cursor.execute("SELECT id, name FROM Artists").fetchall()
+                if row and row[0] is not None
+            }
+
+        track_rows = self.cursor.execute("SELECT * FROM Tracks").fetchall()
+        track_column_names = [str(column[1]) for column in self.cursor.execute("PRAGMA table_info(Tracks)").fetchall()]
+        migrated_track_rows: list[dict[str, object]] = []
+        for row in track_rows:
+            payload = dict(zip(track_column_names, row))
+            if "main_artist_party_id" in payload and payload["main_artist_party_id"] is not None:
+                party_id = int(payload["main_artist_party_id"])
+            else:
+                artist_name = legacy_artist_names.get(int(payload.get("main_artist_id") or 0), "")
+                if not artist_name:
+                    raise ValueError(f"Track {int(payload.get('id') or 0)} has no resolvable artist for migration.")
+                party_id = int(
+                    party_service.ensure_artist_party_by_name(
+                        artist_name,
+                        cursor=self.cursor,
+                    )
+                )
+            payload["main_artist_party_id"] = party_id
+            migrated_track_rows.append(payload)
+
+        migrated_additional_rows: list[tuple[int, int, str]] = []
+        if "TrackArtists" in tables:
+            additional_rows = self.cursor.execute("SELECT * FROM TrackArtists").fetchall()
+            additional_column_names = [
+                str(column[1]) for column in self.cursor.execute("PRAGMA table_info(TrackArtists)").fetchall()
+            ]
+            for row in additional_rows:
+                payload = dict(zip(additional_column_names, row))
+                if payload.get("party_id") is not None:
+                    party_id = int(payload["party_id"])
+                else:
+                    artist_name = legacy_artist_names.get(int(payload.get("artist_id") or 0), "")
+                    if not artist_name:
+                        raise ValueError(
+                            "Track additional artist migration failed because "
+                            f"legacy artist #{int(payload.get('artist_id') or 0)} "
+                            "could not be resolved."
+                        )
+                    party_id = int(
+                        party_service.ensure_artist_party_by_name(
+                            artist_name,
+                            cursor=self.cursor,
+                        )
+                    )
+                migrated_additional_rows.append(
+                    (
+                        int(payload["track_id"]),
+                        int(party_id),
+                        str(payload.get("role") or "additional"),
+                    )
+                )
+
+        self.cursor.execute("PRAGMA foreign_keys=OFF")
+        self.cursor.execute("DROP VIEW IF EXISTS vw_Licenses")
+        self.cursor.execute("DROP TABLE IF EXISTS TrackArtists")
+        self.cursor.execute("DROP TABLE IF EXISTS Tracks")
+        self._create_current_tracks_table()
+        self._ensure_current_track_columns()
+        self._ensure_current_track_indexes_and_triggers()
+        self._create_current_track_artists_table()
+        self.cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_track_artists_party_id
+            ON TrackArtists(party_id)
+            """
+        )
+
+        track_insert_columns = [
+            "id",
+            "isrc",
+            "isrc_compact",
+            "db_entry_date",
+            "audio_file_path",
+            "audio_file_storage_mode",
+            "audio_file_blob",
+            "audio_file_filename",
+            "audio_file_mime_type",
+            "audio_file_size_bytes",
+            "track_title",
+            "catalog_number",
+            "catalog_registry_entry_id",
+            "external_catalog_identifier_id",
+            "album_art_path",
+            "album_art_storage_mode",
+            "album_art_blob",
+            "album_art_filename",
+            "album_art_mime_type",
+            "album_art_size_bytes",
+            "main_artist_party_id",
+            "buma_work_number",
+            "album_id",
+            "work_id",
+            "parent_track_id",
+            "relationship_type",
+            "release_date",
+            "track_length_sec",
+            "iswc",
+            "upc",
+            "genre",
+            "composer",
+            "publisher",
+            "comments",
+            "lyrics",
+            "repertoire_status",
+            "metadata_complete",
+            "contract_signed",
+            "rights_verified",
+        ]
+        track_insert_defaults: dict[str, object] = {
+            "audio_file_size_bytes": 0,
+            "album_art_size_bytes": 0,
+            "relationship_type": "original",
+            "track_length_sec": 0,
+            "metadata_complete": 0,
+            "contract_signed": 0,
+            "rights_verified": 0,
+        }
+        for payload in migrated_track_rows:
+            insert_values: list[object] = []
+            for column_name in track_insert_columns:
+                value = payload.get(column_name)
+                if value is None and column_name in track_insert_defaults:
+                    value = track_insert_defaults[column_name]
+                insert_values.append(value)
+            self.cursor.execute(
+                f"""
+                INSERT INTO Tracks ({", ".join(track_insert_columns)})
+                VALUES ({", ".join("?" for _ in track_insert_columns)})
+                """,
+                insert_values,
+            )
+
+        for track_id, party_id, role in migrated_additional_rows:
+            self.cursor.execute(
+                """
+                INSERT OR IGNORE INTO TrackArtists(track_id, party_id, role)
+                VALUES (?, ?, ?)
+                """,
+                (int(track_id), int(party_id), str(role or "additional")),
+            )
+
+        self.cursor.execute("DROP TABLE IF EXISTS Artists")
+        self.cursor.execute("PRAGMA foreign_keys=ON")
+        self._ensure_code_registry_tables()
+        self._ensure_license_columns()
 
     def _ensure_optional_isrc_constraints(self) -> None:
         self.cursor.execute("DROP INDEX IF EXISTS idx_tracks_isrc_unique")
@@ -3804,18 +4007,23 @@ class DatabaseSchemaService:
                 "SELECT name FROM sqlite_master WHERE type='table'"
             ).fetchall()
         }
-        if "Tracks" not in tables or "Artists" not in tables:
+        if "Tracks" not in tables:
             return
         existing = self.cursor.execute("SELECT COUNT(*) FROM Releases").fetchone()
         if existing and int(existing[0] or 0) > 0:
             return
+        main_artist_join_sql, main_artist_name_expr = track_main_artist_join_sql(
+            self.conn,
+            track_alias="t",
+            artist_alias="main_artist",
+        )
 
         rows = self.cursor.execute(
-            """
+            f"""
             SELECT
                 t.id,
                 t.track_title,
-                COALESCE(a.name, '') AS artist_name,
+                COALESCE({main_artist_name_expr}, '') AS artist_name,
                 COALESCE(al.id, 0) AS album_id,
                 COALESCE(al.title, '') AS album_title,
                 COALESCE(t.release_date, '') AS release_date,
@@ -3828,7 +4036,7 @@ class DatabaseSchemaService:
                 COALESCE(t.album_art_mime_type, '') AS track_album_art_mime_type,
                 COALESCE(t.album_art_size_bytes, 0) AS track_album_art_size_bytes
             FROM Tracks t
-            LEFT JOIN Artists a ON a.id = t.main_artist_id
+            {main_artist_join_sql}
             LEFT JOIN Albums al ON al.id = t.album_id
             ORDER BY t.id
             """

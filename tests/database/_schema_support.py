@@ -40,6 +40,9 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
         track_columns = {
             row[1] for row in self.conn.execute("PRAGMA table_info(Tracks)").fetchall()
         }
+        track_artist_columns = {
+            row[1] for row in self.conn.execute("PRAGMA table_info(TrackArtists)").fetchall()
+        }
         release_columns = {
             row[1] for row in self.conn.execute("PRAGMA table_info(Releases)").fetchall()
         }
@@ -122,6 +125,9 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
         }
         track_indexes = {
             row[1] for row in self.conn.execute("PRAGMA index_list(Tracks)").fetchall()
+        }
+        track_artist_indexes = {
+            row[1] for row in self.conn.execute("PRAGMA index_list(TrackArtists)").fetchall()
         }
         gs1_indexes = {
             row[1] for row in self.conn.execute("PRAGMA index_list(GS1Metadata)").fetchall()
@@ -474,9 +480,11 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                 "metadata_complete",
                 "contract_signed",
                 "rights_verified",
+                "main_artist_party_id",
             }
             <= track_columns
         )
+        self.assertIn("party_id", track_artist_columns)
         self.assertTrue(
             {"catalog_registry_entry_id", "external_catalog_identifier_id"} <= track_columns
         )
@@ -541,6 +549,8 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
         self.assertIn("idx_tracks_work_id", track_indexes)
         self.assertIn("idx_tracks_parent_track_id", track_indexes)
         self.assertIn("idx_tracks_relationship_type", track_indexes)
+        self.assertIn("idx_tracks_main_artist_party_id", track_indexes)
+        self.assertIn("idx_track_artists_party_id", track_artist_indexes)
         self.assertIn("idx_work_track_links_unique_track", work_track_link_indexes)
         self.assertIn("idx_gs1_metadata_export_enabled", gs1_indexes)
         self.assertIn("idx_gs1_metadata_contract_number", gs1_indexes)
@@ -1561,16 +1571,21 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
         self.service.init_db()
         self.service.migrate_schema()
 
-        self.conn.execute("INSERT INTO Artists(id, name) VALUES (1, 'Schema Artist')")
         self.conn.execute(
             """
-            INSERT INTO Tracks (isrc, isrc_compact, track_title, main_artist_id, track_length_sec)
+            INSERT INTO Parties(id, legal_name, display_name, artist_name, party_type)
+            VALUES (1, 'Schema Artist', 'Schema Artist', 'Schema Artist', 'artist')
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO Tracks (isrc, isrc_compact, track_title, main_artist_party_id, track_length_sec)
             VALUES ('', '', 'Blank ISRC One', 1, 0)
             """
         )
         self.conn.execute(
             """
-            INSERT INTO Tracks (isrc, isrc_compact, track_title, main_artist_id, track_length_sec)
+            INSERT INTO Tracks (isrc, isrc_compact, track_title, main_artist_party_id, track_length_sec)
             VALUES ('', '', 'Blank ISRC Two', 1, 0)
             """
         )

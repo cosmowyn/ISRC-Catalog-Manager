@@ -65,9 +65,9 @@ class GovernedTrackCreationServiceTests(unittest.TestCase):
         self.assertEqual(result.work_id, result.created_work_id)
         track_row = self.conn.execute(
             """
-            SELECT t.work_id, t.track_title, t.iswc, t.buma_work_number, a.name
+            SELECT t.work_id, t.track_title, t.iswc, t.buma_work_number, p.artist_name
             FROM Tracks t
-            JOIN Artists a ON a.id = t.main_artist_id
+            JOIN Parties p ON p.id = t.main_artist_party_id
             WHERE t.id=?
             """,
             (result.track_id,),
@@ -112,6 +112,7 @@ class GovernedTrackCreationServiceTests(unittest.TestCase):
                 1,
             ),
         )
+        self.assertIsNotNone(self.party_service.find_artist_party_id_by_name("Aurora Echo"))
         self.assertEqual(
             contributors,
             [
@@ -121,15 +122,16 @@ class GovernedTrackCreationServiceTests(unittest.TestCase):
         )
         additional_artists = self.conn.execute(
             """
-            SELECT a.name
+            SELECT p.artist_name
             FROM TrackArtists ta
-            JOIN Artists a ON a.id = ta.artist_id
+            JOIN Parties p ON p.id = ta.party_id
             WHERE ta.track_id=?
-            ORDER BY a.name
+            ORDER BY p.artist_name
             """,
             (result.track_id,),
         ).fetchall()
         self.assertEqual(additional_artists, [("Guest Voice",)])
+        self.assertIsNotNone(self.party_service.find_artist_party_id_by_name("Guest Voice"))
 
     def test_create_governed_track_requires_existing_work_for_link_mode(self):
         with self.assertRaisesRegex(ValueError, "existing Work selection"):

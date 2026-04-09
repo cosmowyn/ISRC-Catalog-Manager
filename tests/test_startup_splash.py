@@ -1,8 +1,9 @@
+import threading
 import tempfile
 import unittest
 from pathlib import Path
 
-from tests.qt_test_helpers import require_qapplication
+from tests.qt_test_helpers import join_thread_or_fail, require_qapplication, wait_for
 
 try:
     from PySide6.QtGui import QColor, QImage, QPixmap
@@ -171,6 +172,49 @@ class StartupSplashHelperTests(unittest.TestCase):
         self.assertEqual(controller.current_phase, StartupPhase.LOADING_CATALOG)
         self.assertEqual(controller.current_progress, 64)
         self.assertEqual(controller.current_message, "Older progress should not win.")
+
+    def test_controller_queues_background_thread_updates_to_splash_thread(self):
+        pixmap = QPixmap(32, 18)
+        pixmap.fill(QColor("#204b6f"))
+        splash = startup_splash._ReadableSplashScreen(pixmap)
+        controller = startup_splash.StartupSplashController(self.app, splash)
+        window = QWidget()
+        try:
+            controller.show()
+
+            worker = threading.Thread(
+                target=lambda: (
+                    controller.set_phase(
+                        StartupPhase.LOADING_CATALOG,
+                        "Loading catalog rows from a worker thread…",
+                    ),
+                    controller.report_progress(
+                        42,
+                        "Worker-thread splash update delivered.",
+                        phase=StartupPhase.LOADING_CATALOG,
+                    ),
+                )
+            )
+            worker.start()
+            join_thread_or_fail(worker, description="startup splash worker thread")
+
+            wait_for(
+                lambda: controller.current_progress == 42,
+                timeout_ms=1000,
+                interval_ms=10,
+                app=self.app,
+                description="worker-thread splash progress propagation",
+            )
+
+            self.assertEqual(controller.current_phase, StartupPhase.LOADING_CATALOG)
+            self.assertEqual(controller.current_message, "Worker-thread splash update delivered.")
+
+            controller.finish(window)
+        finally:
+            window.close()
+            window.deleteLater()
+            splash.close()
+            self.app.processEvents()
 
 
 if __name__ == "__main__":

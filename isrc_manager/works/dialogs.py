@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from isrc_manager.parties import PartyRecord
+from isrc_manager.parties import PartyRecord, party_authority_notifier
 from isrc_manager.parties.dialogs import PartyEditorDialog
 from isrc_manager.selection_scope import (
     SelectionScopeBanner,
@@ -317,6 +317,8 @@ class WorkEditorDialog(QDialog):
         for track_id in track_ids or []:
             self._append_track_row(int(track_id))
         self._refresh_contributor_party_action_state()
+        if self.party_service is not None:
+            party_authority_notifier().changed.connect(self._handle_party_authority_changed)
 
     @staticmethod
     def _contributor_party_primary_label(record: PartyRecord) -> str:
@@ -431,6 +433,9 @@ class WorkEditorDialog(QDialog):
                 current_text=current_text,
             )
         self._refresh_contributor_party_action_state()
+
+    def _handle_party_authority_changed(self) -> None:
+        self._refresh_all_contributor_party_combos()
 
     def _refresh_contributor_party_action_state(self) -> None:
         has_party_service = self.party_service is not None

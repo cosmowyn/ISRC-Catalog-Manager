@@ -26,6 +26,7 @@ from isrc_manager.file_storage import (
     STORAGE_MODE_MANAGED_FILE,
     normalize_storage_mode,
 )
+from isrc_manager.parties import PartyService, artist_primary_label, party_authority_notifier
 from isrc_manager.ui_common import (
     _add_standard_dialog_header,
     _apply_compact_dialog_control_heights,
@@ -138,6 +139,7 @@ class BulkAudioAttachDialog(QDialog):
         track_choices: list[tuple[int, str, str | None]],
         media_label: str = "audio file",
         suggested_artist: str | None = None,
+        party_service: PartyService | None = None,
         default_storage_mode: str | None = STORAGE_MODE_MANAGED_FILE,
         attach_button_text: str = "Attach Files",
         create_track_button_text: str = "Open Add Track Instead…",
@@ -153,6 +155,7 @@ class BulkAudioAttachDialog(QDialog):
         self._allow_artist_name_update = bool(allow_artist_name_update)
         self._allow_create_track = bool(allow_create_track)
         self._create_track_requested = False
+        self.party_service = party_service
         self._track_choices = list(track_choices)
         self._track_choice_map = {
             int(track_id): {"label": label, "artist": artist}
@@ -191,9 +194,11 @@ class BulkAudioAttachDialog(QDialog):
         self.apply_artist_checkbox.setChecked(
             bool(suggested_artist) and self._allow_artist_name_update
         )
-        self.artist_edit = QLineEdit()
+        self.artist_edit = QComboBox(self)
+        self.artist_edit.setEditable(True)
+        self.artist_edit.setInsertPolicy(QComboBox.NoInsert)
         self.artist_edit.setPlaceholderText("Optional artist name for all matched tracks")
-        self.artist_edit.setText(str(suggested_artist or ""))
+        self._refresh_artist_choice_combo(str(suggested_artist or ""))
         self.artist_edit.setEnabled(self.apply_artist_checkbox.isChecked())
         self.apply_artist_checkbox.toggled.connect(self.artist_edit.setEnabled)
         if self._allow_artist_name_update:
@@ -245,6 +250,8 @@ class BulkAudioAttachDialog(QDialog):
 
         self.populate_rows(self._items)
         _apply_compact_dialog_control_heights(self)
+        if self.party_service is not None:
+            party_authority_notifier().changed.connect(self._refresh_artist_choice_combo)
 
     @staticmethod
     def _display_text_for_choice(track_id: int, label: str) -> str:
@@ -410,6 +417,49 @@ class BulkAudioAttachDialog(QDialog):
             )
         self.summary_label.setText(summary)
 
+    def _artist_choice_values(self) -> list[str]:
+        values: list[str] = []
+        seen: set[str] = set()
+        if self.party_service is None:
+            return values
+        for record in self.party_service.list_artist_parties():
+            primary = artist_primary_label(record)
+            for candidate in (primary, *list(getattr(record, "artist_aliases", ()) or ())):
+                clean_value = str(candidate or "").strip()
+                if not clean_value or clean_value in seen:
+                    continue
+                seen.add(clean_value)
+                values.append(clean_value)
+        return values
+
+    def _refresh_artist_choice_combo(self, current_text: str | None = None) -> None:
+        if not isinstance(self.artist_edit, QComboBox):
+            return
+        desired_text = str(
+            current_text if current_text is not None else self.artist_edit.currentText()
+        ).strip()
+        if desired_text and self.party_service is not None:
+            party_id = self.party_service.find_artist_party_id_by_name(desired_text)
+            if party_id is not None:
+                record = self.party_service.fetch_party(int(party_id))
+                if record is not None:
+                    desired_text = artist_primary_label(record)
+        values = self._artist_choice_values()
+        previous_state = self.artist_edit.blockSignals(True)
+        try:
+            self.artist_edit.clear()
+            self.artist_edit.addItems(values)
+            completer = QCompleter(values, self.artist_edit)
+            completer.setCaseSensitivity(Qt.CaseInsensitive)
+            completer.setCompletionMode(QCompleter.PopupCompletion)
+            completer.setFilterMode(Qt.MatchContains)
+            self.artist_edit.setCompleter(completer)
+            if desired_text:
+                self.artist_edit.setCurrentIndex(-1)
+                self.artist_edit.setEditText(desired_text)
+        finally:
+            self.artist_edit.blockSignals(previous_state)
+
     def selected_matches(self) -> list[dict[str, object]]:
         matches: list[dict[str, object]] = []
         for row_index, item in enumerate(self._items):
@@ -431,7 +481,7 @@ class BulkAudioAttachDialog(QDialog):
     def selected_artist_name(self) -> str | None:
         if not self._allow_artist_name_update or not self.apply_artist_checkbox.isChecked():
             return None
-        text = self.artist_edit.text().strip()
+        text = self.artist_edit.currentText().strip()
         return text or None
 
     def selected_storage_mode(self) -> str:

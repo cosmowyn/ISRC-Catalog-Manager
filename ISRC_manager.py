@@ -275,6 +275,9 @@ from isrc_manager.parties import (
     PartyPayload,
     PartyRecord,
     PartyService,
+    artist_choice_label,
+    artist_primary_label,
+    party_authority_notifier,
 )
 from isrc_manager.parties.dialogs import (
     OwnerBootstrapDialog,
@@ -364,6 +367,7 @@ from isrc_manager.services.gs1_mapping import (
 )
 from isrc_manager.services.import_governance import GovernedImportCoordinator
 from isrc_manager.services.sqlite_utils import safe_wal_checkpoint
+from isrc_manager.services.track_artist_sql import track_main_artist_join_sql
 from isrc_manager.services.tracks import TRACK_RELATIONSHIP_TYPES
 from isrc_manager.settings import enforce_single_instance, init_settings
 from isrc_manager.starter_themes import (
@@ -3644,27 +3648,17 @@ class ApplicationSettingsDialog(QDialog):
 
     @staticmethod
     def _artist_party_primary_label(record: PartyRecord) -> str:
-        return (
-            str(record.artist_name or "").strip()
-            or str(record.display_name or "").strip()
-            or str(record.company_name or "").strip()
-            or str(record.legal_name or "").strip()
-            or f"Party #{int(record.id)}"
-        )
+        return artist_primary_label(record)
 
     @classmethod
     def _artist_party_choice_label(cls, record: PartyRecord) -> str:
-        primary = cls._artist_party_primary_label(record)
-        legal_name = str(record.legal_name or "").strip()
-        if legal_name and legal_name.casefold() != primary.casefold():
-            return f"{primary} ({legal_name})"
-        return primary
+        return artist_choice_label(record)
 
     def _artist_party_records(self) -> list[PartyRecord]:
         if self.party_service is None:
             return []
         try:
-            return list(self.party_service.list_parties() or [])
+            return list(self.party_service.list_artist_parties() or [])
         except Exception:
             return []
 
@@ -3751,14 +3745,16 @@ class ApplicationSettingsDialog(QDialog):
             return clean_name, None
         party_id = int(selected_party_id) if selected_party_id not in (None, "") else None
         if party_id is None:
-            existing_id = self.party_service.find_party_id_by_name(clean_name, cursor=cursor)
+            existing_id = self.party_service.find_artist_party_id_by_name(
+                clean_name,
+                cursor=cursor,
+            )
             if existing_id is not None:
                 party_id = int(existing_id)
             else:
                 party_id = int(
-                    self.party_service.ensure_party_by_name(
+                    self.party_service.ensure_artist_party_by_name(
                         clean_name,
-                        party_type="artist",
                         cursor=cursor,
                     )
                 )
@@ -4109,6 +4105,7 @@ class _ManageArtistsDialog(QDialog):
         btn_purge.clicked.connect(self._purge_unused)
         btn_delete.clicked.connect(self._delete_selected)
         btn_close.clicked.connect(self.accept)
+        party_authority_notifier().changed.connect(self._load)
 
         self._load()
 
@@ -5413,6 +5410,7 @@ class _CatalogArtistsPane(_CatalogManagerPaneBase):
         self.refresh_btn.clicked.connect(self.reload)
         self.purge_btn.clicked.connect(self._purge_unused)
         self.delete_btn.clicked.connect(self._delete_selected)
+        party_authority_notifier().changed.connect(self.reload)
 
         self.reload()
 
@@ -6122,6 +6120,7 @@ class App(QMainWindow):
 
     def __init__(self, *, startup_feedback: StartupFeedbackProtocol | None = None):
         super().__init__()
+        party_authority_notifier().changed.connect(self._on_party_authority_changed)
         self.setObjectName("mainWindow")
         configure_qt_application_identity(self)
         self._startup_feedback = startup_feedback
@@ -8045,7 +8044,7 @@ class App(QMainWindow):
             )
             required_tables = {
                 "Tracks",
-                "Artists",
+                "Parties",
                 "Albums",
                 "TrackArtists",
                 "CustomFieldDefs",
@@ -8080,7 +8079,7 @@ class App(QMainWindow):
                 "album_art_path",
                 "album_art_mime_type",
                 "album_art_size_bytes",
-                "main_artist_id",
+                "main_artist_party_id",
                 "buma_work_number",
                 "album_id",
                 "release_date",
@@ -11420,7 +11419,11 @@ class App(QMainWindow):
                 target_path,
                 exc,
             )
-            self.logger.debug(traceback.format_exc())
+            self.logger.debug(
+                "Database preparation traceback for %s",
+                target_path,
+                exc_info=True,
+            )
             return False
         return str(prepared_path or "").strip() == target_path
 
@@ -15036,6 +15039,9 @@ class App(QMainWindow):
         *,
         progress_callback=None,
     ) -> dict[str, list[str]]:
+        artist_values: list[str] = []
+        seen_artist_values: set[str] = set()
+
         def _values(query: str) -> list[str]:
             try:
                 return [
@@ -15046,13 +15052,21 @@ class App(QMainWindow):
             except sqlite3.OperationalError:
                 return []
 
+        try:
+            party_service = PartyService(conn)
+            for record in party_service.list_artist_parties():
+                primary = artist_primary_label(record)
+                for candidate in (primary, *list(getattr(record, "artist_aliases", ()) or ())):
+                    clean_value = str(candidate or "").strip()
+                    if not clean_value or clean_value in seen_artist_values:
+                        continue
+                    seen_artist_values.add(clean_value)
+                    artist_values.append(clean_value)
+        except Exception:
+            artist_values = []
+
         combo_values = {
-            "artists": [
-                r[0]
-                for r in conn.execute(
-                    "SELECT DISTINCT name FROM Artists WHERE name IS NOT NULL AND name != '' ORDER BY name"
-                ).fetchall()
-            ]
+            "artists": sorted(artist_values, key=str.casefold)
         }
         if callable(progress_callback):
             progress_callback(1, 5, "Loaded Artist lookup values.")
@@ -15133,6 +15147,11 @@ class App(QMainWindow):
         self._apply_catalog_combo_values(self._catalog_combo_values_from_connection(self.conn))
         self._refresh_add_track_artist_party_choices()
 
+    def _artist_lookup_values(self) -> list[str]:
+        if self.conn is None:
+            return []
+        return list(self._catalog_combo_values_from_connection(self.conn).get("artists", []))
+
     @staticmethod
     def _populate_combobox(combo: QComboBox, items, allow_empty=False):
         combo.clear()
@@ -15145,27 +15164,17 @@ class App(QMainWindow):
 
     @staticmethod
     def _artist_party_primary_label(record: PartyRecord) -> str:
-        return (
-            str(record.artist_name or "").strip()
-            or str(record.display_name or "").strip()
-            or str(record.company_name or "").strip()
-            or str(record.legal_name or "").strip()
-            or f"Party #{int(record.id)}"
-        )
+        return artist_primary_label(record)
 
     @classmethod
     def _artist_party_choice_label(cls, record: PartyRecord) -> str:
-        primary = cls._artist_party_primary_label(record)
-        legal_name = str(record.legal_name or "").strip()
-        if legal_name and legal_name.casefold() != primary.casefold():
-            return f"{primary} ({legal_name})"
-        return primary
+        return artist_choice_label(record)
 
     def _artist_party_records(self) -> list[PartyRecord]:
         if self.party_service is None:
             return []
         try:
-            return list(self.party_service.list_parties() or [])
+            return list(self.party_service.list_artist_parties() or [])
         except Exception:
             return []
 
@@ -15254,14 +15263,16 @@ class App(QMainWindow):
             return clean_name, None
         party_id = int(selected_party_id) if selected_party_id not in (None, "") else None
         if party_id is None:
-            existing_id = self.party_service.find_party_id_by_name(clean_name, cursor=cursor)
+            existing_id = self.party_service.find_artist_party_id_by_name(
+                clean_name,
+                cursor=cursor,
+            )
             if existing_id is not None:
                 party_id = int(existing_id)
             else:
                 party_id = int(
-                    self.party_service.ensure_party_by_name(
+                    self.party_service.ensure_artist_party_by_name(
                         clean_name,
-                        party_type="artist",
                         cursor=cursor,
                     )
                 )
@@ -16928,15 +16939,20 @@ class App(QMainWindow):
         active_conn = conn or self.conn
         if active_conn is None:
             return []
+        main_artist_join_sql, main_artist_name_expr = track_main_artist_join_sql(
+            active_conn,
+            track_alias="t",
+            artist_alias="main_artist",
+        )
         rows = active_conn.execute(
-            """
+            f"""
             SELECT
                 t.id,
                 COALESCE(t.track_title, ''),
-                COALESCE(a.name, ''),
+                COALESCE({main_artist_name_expr}, ''),
                 COALESCE(al.title, '')
             FROM Tracks t
-            LEFT JOIN Artists a ON a.id = t.main_artist_id
+            {main_artist_join_sql}
             LEFT JOIN Albums al ON al.id = t.album_id
             ORDER BY t.track_title COLLATE NOCASE, t.id
             """
@@ -16956,6 +16972,58 @@ class App(QMainWindow):
                 TrackChoice(track_id=int(track_id), title=clean_title, subtitle=subtitle)
             )
         return choices
+
+    def _on_party_authority_changed(self) -> None:
+        if self.conn is None:
+            return
+        artist_combo_states: list[tuple[QComboBox, bool, str, int | None]] = []
+        for combo, allow_empty in (
+            (getattr(self, "artist_field", None), False),
+            (getattr(self, "additional_artist_field", None), True),
+        ):
+            if not isinstance(combo, QComboBox):
+                continue
+            current_text, selected_party_id = self._resolve_artist_party_choice(combo)
+            artist_combo_states.append((combo, allow_empty, current_text, selected_party_id))
+        try:
+            self.populate_all_comboboxes()
+        except Exception:
+            pass
+        for combo, allow_empty, current_text, selected_party_id in artist_combo_states:
+            try:
+                self._configure_artist_party_combo(
+                    combo,
+                    allow_empty=allow_empty,
+                    selected_party_id=selected_party_id,
+                    current_text=current_text,
+                )
+            except Exception:
+                pass
+        try:
+            self.refresh_table_preserve_view()
+        except Exception:
+            pass
+        try:
+            self._refresh_work_manager_panel()
+        except Exception:
+            pass
+        try:
+            self._refresh_party_manager_panel()
+        except Exception:
+            pass
+        try:
+            if self.release_browser_dialog is not None and self.release_browser_dialog.isVisible():
+                self.release_browser_dialog.refresh()
+        except Exception:
+            pass
+        try:
+            self._refresh_catalog_workspace_docks()
+        except Exception:
+            pass
+        try:
+            self._refresh_add_track_artist_party_choices()
+        except Exception:
+            pass
 
     @staticmethod
     def _track_choice_tuple(choice: TrackChoice) -> tuple[int, str, str | None]:
@@ -19552,6 +19620,7 @@ class App(QMainWindow):
             release=summary.release if summary is not None else None,
             placements=list(summary.tracks) if summary is not None else None,
             profile_name=self._current_profile_name(),
+            party_service=self.party_service,
             parent=self,
         )
         if dlg.exec() != QDialog.Accepted:
@@ -20604,6 +20673,7 @@ class App(QMainWindow):
                 track_choices=track_choices,
                 media_label="audio file",
                 suggested_artist=getattr(plan, "suggested_artist", None),
+                party_service=self.party_service,
                 default_storage_mode=STORAGE_MODE_MANAGED_FILE,
                 attach_button_text="Attach Audio",
                 allow_create_track=(len(file_paths) == 1),
@@ -20917,6 +20987,7 @@ class App(QMainWindow):
                 items=dialog_items,
                 track_choices=track_choices,
                 media_label="album art file",
+                party_service=self.party_service,
                 default_storage_mode=STORAGE_MODE_MANAGED_FILE,
                 attach_button_text="Attach Artwork",
                 allow_artist_name_update=False,
@@ -28185,6 +28256,7 @@ class AlbumEntryDialog(QDialog):
         buttons.addWidget(self.save_button)
         buttons.addWidget(self.cancel_button)
         main_layout.addLayout(buttons)
+        party_authority_notifier().changed.connect(self._refresh_artist_party_combos)
 
     def _combo_from_query(self, query: str, *, allow_empty: bool = True) -> FocusWheelComboBox:
         combo = FocusWheelComboBox()
@@ -28208,6 +28280,22 @@ class AlbumEntryDialog(QDialog):
         self.app._configure_artist_party_combo(combo, allow_empty=allow_empty)
         self._apply_input_height(combo)
         return combo
+
+    def _refresh_artist_party_combos(self) -> None:
+        for section in self._track_sections:
+            for combo, allow_empty in (
+                (getattr(section, "artist_name", None), True),
+                (getattr(section, "additional_artists", None), True),
+            ):
+                if not isinstance(combo, QComboBox):
+                    continue
+                current_text, selected_party_id = self.app._resolve_artist_party_choice(combo)
+                self.app._configure_artist_party_combo(
+                    combo,
+                    allow_empty=allow_empty,
+                    selected_party_id=selected_party_id,
+                    current_text=current_text,
+                )
 
     def _build_album_combo(self) -> FocusWheelComboBox:
         return self._combo_from_query(
@@ -28763,17 +28851,33 @@ class EditDialog(QDialog):
             row.addWidget(widget)
             target_layout.addLayout(row)
 
-        def combo(target_layout, label, field_name, value, source_query, allow_empty=True):
+        def combo(
+            target_layout,
+            label,
+            field_name,
+            value,
+            source_query=None,
+            allow_empty=True,
+            source_values: list[str] | None = None,
+        ):
             cb = FocusWheelComboBox()
             cb.setEditable(True)
             items: list[str] = []
             seen: set[str] = set()
-            for row in self.parent.cursor.execute(source_query).fetchall():
-                text = str(row[0] or "").strip()
-                if not text or text in seen:
-                    continue
-                seen.add(text)
-                items.append(text)
+            if source_values is not None:
+                for raw_text in source_values:
+                    text = str(raw_text or "").strip()
+                    if not text or text in seen:
+                        continue
+                    seen.add(text)
+                    items.append(text)
+            elif source_query:
+                for row in self.parent.cursor.execute(source_query).fetchall():
+                    text = str(row[0] or "").strip()
+                    if not text or text in seen:
+                        continue
+                    seen.add(text)
+                    items.append(text)
             display_value = self._display_value_for_field(field_name, value).strip()
             if (
                 display_value
@@ -28872,15 +28976,15 @@ class EditDialog(QDialog):
             "Artist",
             "artist_name",
             self.snapshot.artist_name,
-            "SELECT DISTINCT name FROM Artists ORDER BY name",
             allow_empty=False,
+            source_values=self.parent._artist_lookup_values(),
         )
         self.additional_artist = combo(
             core_layout,
             "Additional Artist(s)",
             "additional_artists",
             ", ".join(self.snapshot.additional_artists),
-            "SELECT DISTINCT name FROM Artists ORDER BY name",
+            source_values=self.parent._artist_lookup_values(),
         )
         self.album_title = combo(
             album_release_layout,
@@ -29179,6 +29283,7 @@ class EditDialog(QDialog):
             self.btn_iswc_copy_compact.setEnabled(False)
 
         self._bulk_loading = False
+        party_authority_notifier().changed.connect(self._handle_party_authority_changed)
 
     @staticmethod
     def _normalize_batch_track_ids(track_id: int, batch_track_ids: list[int] | None) -> list[int]:
@@ -29217,6 +29322,97 @@ class EditDialog(QDialog):
             snapshot.track_id: track_service.describe_album_art_edit_state(snapshot.track_id)
             for snapshot in self._bulk_snapshots
         }
+
+    @staticmethod
+    def _refresh_editable_combo_items(
+        combo: QComboBox,
+        source_values: list[str],
+        *,
+        current_text: str,
+        allow_empty: bool,
+    ) -> None:
+        items: list[str] = []
+        seen: set[str] = set()
+        for raw_value in source_values:
+            clean_value = str(raw_value or "").strip()
+            if not clean_value or clean_value in seen:
+                continue
+            seen.add(clean_value)
+            items.append(clean_value)
+        previous_state = combo.blockSignals(True)
+        try:
+            combo.clear()
+            combo.setEditable(True)
+            combo.setInsertPolicy(QComboBox.NoInsert)
+            if allow_empty:
+                combo.addItem("")
+            combo.addItems(items)
+            completer = QCompleter(items, combo)
+            completer.setCaseSensitivity(Qt.CaseInsensitive)
+            combo.setCompleter(completer)
+            clean_current = str(current_text or "").strip()
+            if clean_current:
+                combo.setCurrentIndex(-1)
+                combo.setEditText(clean_current)
+            elif allow_empty:
+                combo.setCurrentIndex(0)
+            else:
+                combo.setCurrentIndex(-1)
+        finally:
+            combo.blockSignals(previous_state)
+
+    def _party_backed_artist_field_text(self) -> str:
+        current_text = str(self.artist_name.currentText() or "").strip()
+        if self._is_bulk_edit:
+            return current_text
+        snapshot_text = str(self.snapshot.artist_name or "").strip()
+        party_id = getattr(self.snapshot, "main_artist_party_id", None)
+        if party_id not in (None, "") and (not current_text or current_text == snapshot_text):
+            record = self.parent.party_service.fetch_party(int(party_id))
+            if record is not None:
+                return self.parent._artist_party_primary_label(record)
+        return current_text or snapshot_text
+
+    def _party_backed_additional_artist_text(self) -> str:
+        current_text = str(self.additional_artist.currentText() or "").strip()
+        if self._is_bulk_edit:
+            return current_text
+        snapshot_text = ", ".join(self.snapshot.additional_artists)
+        party_ids = list(getattr(self.snapshot, "additional_artist_party_ids", []) or [])
+        if party_ids and (not current_text or current_text == snapshot_text):
+            labels: list[str] = []
+            seen: set[str] = set()
+            for party_id in party_ids:
+                record = self.parent.party_service.fetch_party(int(party_id))
+                if record is None:
+                    continue
+                label = self.parent._artist_party_primary_label(record)
+                normalized = label.casefold()
+                if not label or normalized in seen:
+                    continue
+                seen.add(normalized)
+                labels.append(label)
+            if labels:
+                return ", ".join(labels)
+        return current_text or snapshot_text
+
+    def _refresh_artist_combo_sources(self) -> None:
+        source_values = self.parent._artist_lookup_values()
+        self._refresh_editable_combo_items(
+            self.artist_name,
+            source_values,
+            current_text=self._party_backed_artist_field_text(),
+            allow_empty=False,
+        )
+        self._refresh_editable_combo_items(
+            self.additional_artist,
+            source_values,
+            current_text=self._party_backed_additional_artist_text(),
+            allow_empty=True,
+        )
+
+    def _handle_party_authority_changed(self) -> None:
+        self._refresh_artist_combo_sources()
 
     def _resolve_snapshot_media_display(self, stored_path: str | None) -> str:
         return str(self.parent.track_service.resolve_media_path(stored_path) or "")
@@ -29705,6 +29901,22 @@ class EditDialog(QDialog):
                 else self.additional_artist.text()
             ).strip()
         )
+        selected_artist_name, selected_artist_party_id = self.parent._resolve_artist_party_choice(
+            self.artist_name
+        )
+        resolved_artist_name, _artist_party_id = self.parent._resolve_party_backed_artist_name(
+            selected_artist_name or new_artist_name,
+            selected_party_id=selected_artist_party_id,
+            cursor=self.parent.cursor,
+        )
+        resolved_additional_artists = self.parent._resolve_party_backed_additional_artist_names(
+            new_additional_artist,
+            cursor=self.parent.cursor,
+        )
+        new_artist_name = resolved_artist_name
+        new_additional_artist = resolved_additional_artists
+        self.artist_name.setCurrentText(resolved_artist_name)
+        self.additional_artist.setCurrentText(", ".join(resolved_additional_artists))
 
         iso_isrc = ""
         if new_isrc_raw:
@@ -30051,6 +30263,22 @@ class EditDialog(QDialog):
         new_additional_artist = self.parent._parse_additional_artists(
             self.additional_artist.currentText().strip()
         )
+        if self._bulk_field_should_apply("artist_name", new_artist_name):
+            selected_artist_name, selected_artist_party_id = self.parent._resolve_artist_party_choice(
+                self.artist_name
+            )
+            new_artist_name, _artist_party_id = self.parent._resolve_party_backed_artist_name(
+                selected_artist_name or new_artist_name,
+                selected_party_id=selected_artist_party_id,
+                cursor=self.parent.cursor,
+            )
+            self.artist_name.setCurrentText(new_artist_name)
+        if self._bulk_field_should_apply("additional_artists", tuple(new_additional_artist)):
+            new_additional_artist = self.parent._resolve_party_backed_additional_artist_names(
+                new_additional_artist,
+                cursor=self.parent.cursor,
+            )
+            self.additional_artist.setCurrentText(", ".join(new_additional_artist))
         new_album_title = self.album_title.currentText().strip()
         new_genre = self.genre.currentText().strip()
         new_upc_raw = (

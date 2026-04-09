@@ -1,5 +1,12 @@
 """Party/contact registry package."""
 
+from .authority import (
+    artist_choice_label,
+    artist_display_name_from_values,
+    artist_primary_label,
+    emit_party_authority_changed,
+    party_authority_notifier,
+)
 from .exchange_service import (
     PartyExchangeInspection,
     PartyExchangeService,
@@ -28,4 +35,9 @@ __all__ = [
     "PartyRecord",
     "PartyService",
     "PartyUsageSummary",
+    "artist_choice_label",
+    "artist_display_name_from_values",
+    "artist_primary_label",
+    "emit_party_authority_changed",
+    "party_authority_notifier",
 ]
