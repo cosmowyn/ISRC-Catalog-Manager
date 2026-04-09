@@ -35,8 +35,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from isrc_manager.services.track_artist_sql import track_main_artist_join_sql
-
 from isrc_manager.code_registry import (
     BUILTIN_CATEGORY_CONTRACT_NUMBER,
     BUILTIN_CATEGORY_LICENSE_NUMBER,
@@ -52,6 +50,7 @@ from isrc_manager.file_storage import (
 )
 from isrc_manager.parties.dialogs import PartyEditorDialog
 from isrc_manager.paths import EXPORTS_SUBDIR
+from isrc_manager.services.track_artist_sql import track_main_artist_join_sql
 from isrc_manager.ui_common import (
     FocusWheelComboBox,
     _add_standard_dialog_header,

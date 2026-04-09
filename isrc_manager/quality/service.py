@@ -26,8 +26,8 @@ from isrc_manager.services.repertoire_status import RepertoireWorkflowService
 from isrc_manager.services.tracks import TrackService
 from isrc_manager.works import WorkContributorPayload, WorkPayload, WorkService
 
-from .models import QualityIssue, QualityScanResult
 from ..services.track_artist_sql import track_main_artist_join_sql
+from .models import QualityIssue, QualityScanResult
 
 
 class QualityDashboardService:

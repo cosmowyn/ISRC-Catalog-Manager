@@ -83,6 +83,7 @@ GROUP_MODULES: dict[str, tuple[str, ...]] = {
         "tests.database.test_schema_migrations_35_36",
         "tests.database.test_schema_migrations_36_37",
         "tests.database.test_schema_migrations_37_38",
+        "tests.database.test_schema_migrations_38_39",
         "tests.database.test_schema_migrations_12_14",
         "tests.database.test_schema_migrations_20_24",
         "tests.database.test_schema_migrations_25_26",

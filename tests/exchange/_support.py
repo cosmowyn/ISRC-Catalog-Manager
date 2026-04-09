@@ -20,6 +20,7 @@ from isrc_manager.services import (
     TrackCreatePayload,
     TrackService,
 )
+from isrc_manager.services.track_artist_sql import track_main_artist_join_sql
 from isrc_manager.works import WorkContributorPayload, WorkPayload, WorkService
 
 
@@ -129,6 +130,53 @@ class ExchangeServiceTestCase(unittest.TestCase):
             (track_id, field_name),
         ).fetchone()
         return None if row is None else str(row[0] or "")
+
+    def _fetch_track_artist_snapshot(
+        self,
+        *,
+        track_id: int | None = None,
+    ) -> tuple[str, str, str, str] | None:
+        main_artist_join_sql, main_artist_name_expr = track_main_artist_join_sql(
+            self.conn,
+            track_alias="t",
+            artist_alias="main_artist",
+        )
+        sql = f"""
+            SELECT
+                t.track_title,
+                COALESCE({main_artist_name_expr}, ''),
+                COALESCE(t.isrc, ''),
+                COALESCE(t.comments, '')
+            FROM Tracks t
+            {main_artist_join_sql}
+        """
+        params: tuple[object, ...] = ()
+        if track_id is not None:
+            sql += " WHERE t.id=?"
+            params = (track_id,)
+        sql += " ORDER BY t.id LIMIT 1"
+        return self.conn.execute(sql, params).fetchone()
+
+    def _count_artist_parties_named(self, name: str) -> int:
+        return int(
+            self.conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM Parties
+                WHERE lower(
+                    trim(
+                        coalesce(
+                            nullif(artist_name, ''),
+                            nullif(display_name, ''),
+                            legal_name,
+                            ''
+                        )
+                    )
+                ) = lower(trim(?))
+                """,
+                (name,),
+            ).fetchone()[0]
+        )
 
     def _govern_track_with_work(
         self,
@@ -459,13 +507,7 @@ class ExchangeServiceTestCase(unittest.TestCase):
         self.assertEqual(report.failed, 0)
         self.assertEqual(len(report.created_tracks), 1)
         self.assertEqual(
-            self.conn.execute(
-                """
-                SELECT t.track_title, COALESCE(a.name, ''), t.isrc, t.comments
-                FROM Tracks t
-                LEFT JOIN Artists a ON a.id = t.main_artist_id
-                """
-            ).fetchone(),
+            self._fetch_track_artist_snapshot(),
             ("Orbit", "Moonwake", "NL-ABC-26-00031", "Demo import"),
         )
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Works").fetchone()[0], 1)
@@ -581,15 +623,7 @@ class ExchangeServiceTestCase(unittest.TestCase):
         self.assertEqual(report.failed, 0)
         self.assertEqual(len(report.created_tracks), 1)
         self.assertEqual(
-            self.conn.execute(
-                """
-                SELECT t.track_title, COALESCE(a.name, ''), t.isrc, t.comments
-                FROM Tracks t
-                LEFT JOIN Artists a ON a.id = t.main_artist_id
-                WHERE t.id=?
-                """,
-                (report.created_tracks[0],),
-            ).fetchone(),
+            self._fetch_track_artist_snapshot(track_id=report.created_tracks[0]),
             ("Orbit", "Moonwake", "NL-ABC-26-00032", "Semicolon import"),
         )
 
@@ -1423,16 +1457,8 @@ class ExchangeServiceTestCase(unittest.TestCase):
 
         self.assertEqual(report.passed, 1)
         self.assertEqual(
-            self.conn.execute(
-                """
-                SELECT t.track_title, COALESCE(a.name, ''), t.comments
-                FROM Tracks t
-                LEFT JOIN Artists a ON a.id = t.main_artist_id
-                WHERE t.id=?
-                """,
-                (report.created_tracks[0],),
-            ).fetchone(),
-            ("Orbit", "Moonwake", "Pipe import"),
+            self._fetch_track_artist_snapshot(track_id=report.created_tracks[0]),
+            ("Orbit", "Moonwake", "NL-ABC-26-00034", "Pipe import"),
         )
 
     def case_custom_csv_delimiter_refresh_and_import_preserve_quoted_values(self):
@@ -1997,17 +2023,10 @@ class ExchangeServiceTestCase(unittest.TestCase):
 
         self.assertEqual(report.updated_tracks, [track_id])
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Tracks").fetchone()[0], 1)
-        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Artists").fetchone()[0], 1)
+        self.assertEqual(self._count_artist_parties_named("Moonwake"), 1)
         self.assertEqual(
-            self.conn.execute(
-                """
-                SELECT t.track_title, a.name, t.comments
-                FROM Tracks t
-                JOIN Artists a ON a.id = t.main_artist_id
-                WHERE t.id=?
-                """,
-                (track_id,),
-            ).fetchone(),
+            self._fetch_track_artist_snapshot(track_id=track_id)[0:2]
+            + self._fetch_track_artist_snapshot(track_id=track_id)[3:4],
             ("Orbit", "Moonwake", "Imported note"),
         )
 
@@ -2053,15 +2072,8 @@ class ExchangeServiceTestCase(unittest.TestCase):
         self.assertEqual(report.updated_tracks, [track_id])
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM Tracks").fetchone()[0], 1)
         self.assertEqual(
-            self.conn.execute(
-                """
-                SELECT t.track_title, a.name, t.comments
-                FROM Tracks t
-                JOIN Artists a ON a.id = t.main_artist_id
-                WHERE t.id=?
-                """,
-                (track_id,),
-            ).fetchone(),
+            self._fetch_track_artist_snapshot(track_id=track_id)[0:2]
+            + self._fetch_track_artist_snapshot(track_id=track_id)[3:4],
             ("Orbit", "Moonwake", "UPC title match"),
         )
 

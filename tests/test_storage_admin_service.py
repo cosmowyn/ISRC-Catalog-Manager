@@ -57,8 +57,13 @@ class StorageAdminServiceTests(unittest.TestCase):
         )
         self.service = ApplicationStorageAdminService(self.layout)
 
-        self.conn.execute("INSERT INTO Artists(name) VALUES ('Test Artist')")
-        artist_id = int(self.conn.execute("SELECT id FROM Artists").fetchone()[0])
+        self.conn.execute(
+            """
+            INSERT INTO Parties(legal_name, display_name, artist_name, party_type)
+            VALUES ('Test Artist', 'Test Artist', 'Test Artist', 'artist')
+            """
+        )
+        artist_id = int(self.conn.execute("SELECT id FROM Parties").fetchone()[0])
 
         self.live_audio_path = self.layout.data_root / "track_media" / "live_audio.wav"
         self.live_audio_path.write_bytes(b"live-audio")
@@ -70,7 +75,7 @@ class StorageAdminServiceTests(unittest.TestCase):
                 isrc,
                 isrc_compact,
                 track_title,
-                main_artist_id,
+                main_artist_party_id,
                 audio_file_path,
                 audio_file_storage_mode,
                 audio_file_size_bytes

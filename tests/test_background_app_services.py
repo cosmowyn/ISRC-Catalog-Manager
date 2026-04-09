@@ -93,7 +93,13 @@ class BackgroundAppServiceIntegrationTests(unittest.TestCase):
         def _task(ctx):
             with self.factory.open_bundle() as bundle:
                 ctx.report_progress(0, 2, message="Starting")
-                bundle.conn.execute("INSERT INTO Artists(name) VALUES ('Background Artist')")
+                bundle.conn.execute(
+                    """
+                    INSERT INTO Parties(legal_name, display_name, artist_name, party_type)
+                    VALUES (?, ?, ?, 'artist')
+                    """,
+                    ("Background Artist", "Background Artist", "Background Artist"),
+                )
                 ctx.report_progress(2, 2, message="Finished")
                 return "done"
 
@@ -122,7 +128,14 @@ class BackgroundAppServiceIntegrationTests(unittest.TestCase):
 
         verify_conn = sqlite3.connect(str(self.db_path))
         try:
-            count = verify_conn.execute("SELECT COUNT(*) FROM Artists").fetchone()[0]
+            count = verify_conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM Parties
+                WHERE lower(trim(coalesce(artist_name, display_name, legal_name, ''))) = lower(?)
+                """,
+                ("Background Artist",),
+            ).fetchone()[0]
         finally:
             verify_conn.close()
         self.assertEqual(count, 1)
@@ -133,7 +146,13 @@ class BackgroundAppServiceIntegrationTests(unittest.TestCase):
 
         def _task(_ctx):
             with self.factory.open_bundle() as bundle:
-                bundle.conn.execute("INSERT INTO Artists(name) VALUES ('Rolled Back')")
+                bundle.conn.execute(
+                    """
+                    INSERT INTO Parties(legal_name, display_name, artist_name, party_type)
+                    VALUES (?, ?, ?, 'artist')
+                    """,
+                    ("Rolled Back", "Rolled Back", "Rolled Back"),
+                )
                 raise RuntimeError("explode")
 
         self.manager.submit(
@@ -153,7 +172,14 @@ class BackgroundAppServiceIntegrationTests(unittest.TestCase):
         self.assertEqual(captured.get("message"), "explode")
         verify_conn = sqlite3.connect(str(self.db_path))
         try:
-            count = verify_conn.execute("SELECT COUNT(*) FROM Artists").fetchone()[0]
+            count = verify_conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM Parties
+                WHERE lower(trim(coalesce(artist_name, display_name, legal_name, ''))) = lower(?)
+                """,
+                ("Rolled Back",),
+            ).fetchone()[0]
         finally:
             verify_conn.close()
         self.assertEqual(count, 0)

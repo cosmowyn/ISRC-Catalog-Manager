@@ -27,13 +27,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from isrc_manager.parties import PartyService, artist_primary_label, party_authority_notifier
 from isrc_manager.code_registry import CatalogIdentifierSelector
 from isrc_manager.file_storage import (
     STORAGE_MODE_DATABASE,
     STORAGE_MODE_MANAGED_FILE,
     normalize_storage_mode,
 )
+from isrc_manager.parties import PartyService, artist_primary_label, party_authority_notifier
 from isrc_manager.selection_scope import (
     SelectionScopeBanner,
     SelectionScopeState,
@@ -624,11 +624,17 @@ class ReleaseEditorDialog(QDialog):
             if primary_artist:
                 primary_party_id = self.party_service.ensure_artist_party_by_name(primary_artist)
                 primary_record = self.party_service.fetch_party(int(primary_party_id))
-                primary_artist = artist_primary_label(primary_record) if primary_record is not None else primary_artist
+                primary_artist = (
+                    artist_primary_label(primary_record)
+                    if primary_record is not None
+                    else primary_artist
+                )
             if album_artist:
                 album_party_id = self.party_service.ensure_artist_party_by_name(album_artist)
                 album_record = self.party_service.fetch_party(int(album_party_id))
-                album_artist = artist_primary_label(album_record) if album_record is not None else album_artist
+                album_artist = (
+                    artist_primary_label(album_record) if album_record is not None else album_artist
+                )
         return ReleasePayload(
             title=self.title_edit.text().strip(),
             version_subtitle=self.subtitle_edit.text().strip() or None,

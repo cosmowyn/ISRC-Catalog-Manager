@@ -9,11 +9,16 @@ def make_catalog_conn():
     schema = DatabaseSchemaService(conn)
     schema.init_db()
     schema.migrate_schema()
-    conn.execute("INSERT INTO Artists(id, name) VALUES (1, 'Main Artist')")
+    conn.execute(
+        """
+        INSERT INTO Parties(id, legal_name, display_name, artist_name, party_type)
+        VALUES (1, 'Main Artist', 'Main Artist', 'Main Artist', 'artist')
+        """
+    )
     conn.execute(
         """
         INSERT INTO Tracks(
-            id, isrc, isrc_compact, track_title, main_artist_id, album_id, release_date, track_length_sec, iswc, upc, genre
+            id, isrc, isrc_compact, track_title, main_artist_party_id, album_id, release_date, track_length_sec, iswc, upc, genre
         )
         VALUES(1, 'NL-ABC-26-00001', 'NLABC2600001', 'Test Release', 1, NULL, '2026-03-14', 180, NULL, '123456789012', 'Pop')
         """

@@ -33,15 +33,16 @@ from isrc_manager.file_storage import (
     infer_storage_mode,
     normalize_storage_mode,
 )
-from isrc_manager.parties import artist_primary_label
-from isrc_manager.parties.authority import emit_party_authority_changed
-from isrc_manager.parties.service import PartyService
 from isrc_manager.media.audio_formats import classify_audio_format
 from isrc_manager.media.blob_files import (
     _is_valid_audio_path,
     _is_valid_image_path,
     _read_blob_from_path,
 )
+from isrc_manager.parties import artist_primary_label
+from isrc_manager.parties.authority import emit_party_authority_changed
+from isrc_manager.parties.service import PartyService
+
 from .track_artist_sql import track_main_artist_join_sql
 
 TRACK_RELATIONSHIP_TYPES = frozenset(
@@ -644,7 +645,10 @@ class TrackService:
         if is_blank(clean_name):
             return False
         if self._uses_party_artist_authority():
-            return self.party_service.find_artist_party_id_by_name(clean_name, cursor=cursor) is not None
+            return (
+                self.party_service.find_artist_party_id_by_name(clean_name, cursor=cursor)
+                is not None
+            )
         cur = cursor or self.conn.cursor()
         row = cur.execute("SELECT 1 FROM Artists WHERE name=? LIMIT 1", (clean_name,)).fetchone()
         return bool(row)
@@ -1733,11 +1737,14 @@ class TrackService:
             """,
             (int(track_id),),
         ).fetchall()
-        additional_artist_ids = [int(artist_id) for (artist_id,) in additional_rows if artist_id is not None]
+        additional_artist_ids = [
+            int(artist_id) for (artist_id,) in additional_rows if artist_id is not None
+        ]
         additional_artist_names = [
             name
             for name in (
-                self._artist_display_name(artist_id, cursor=cur) for artist_id in additional_artist_ids
+                self._artist_display_name(artist_id, cursor=cur)
+                for artist_id in additional_artist_ids
             )
             if name
         ]

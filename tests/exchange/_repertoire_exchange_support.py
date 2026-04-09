@@ -358,7 +358,7 @@ class SearchAndRepertoireExchangeTestCase(unittest.TestCase):
             self.assertEqual(imported_release_id, 1)
             new_services["exchange_service"].import_json(export_path)
 
-            self.assertEqual(new_conn.execute("SELECT COUNT(*) FROM Parties").fetchone()[0], 2)
+            self.assertEqual(new_conn.execute("SELECT COUNT(*) FROM Parties").fetchone()[0], 3)
             self.assertEqual(new_conn.execute("SELECT COUNT(*) FROM Works").fetchone()[0], 1)
             self.assertEqual(new_conn.execute("SELECT COUNT(*) FROM Contracts").fetchone()[0], 1)
             self.assertEqual(
@@ -665,10 +665,10 @@ class SearchAndRepertoireExchangeTestCase(unittest.TestCase):
         try:
             inspection = new_services["exchange_service"].inspect_json(json_path)
             self.assertEqual(inspection.format_name, "json")
-            self.assertEqual(inspection.entity_counts["parties"], 2)
+            self.assertEqual(inspection.entity_counts["parties"], 3)
             self.assertEqual(inspection.entity_counts["works"], 1)
             self.assertGreaterEqual(len(inspection.preview_rows), 1)
-            self.assertEqual(new_conn.execute("SELECT COUNT(*) FROM Parties").fetchone()[0], 0)
+            self.assertEqual(new_conn.execute("SELECT COUNT(*) FROM Parties").fetchone()[0], 1)
             self.assertEqual(new_conn.execute("SELECT COUNT(*) FROM Works").fetchone()[0], 0)
             self.assertEqual(new_conn.execute("SELECT COUNT(*) FROM Contracts").fetchone()[0], 0)
             self.assertEqual(

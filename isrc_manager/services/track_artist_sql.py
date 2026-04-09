@@ -17,7 +17,9 @@ def table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
     if table_name not in table_names(conn):
         return set()
     return {
-        str(row[1]) for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall() if row and row[1]
+        str(row[1])
+        for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        if row and row[1]
     }
 
 
@@ -52,6 +54,10 @@ def track_main_artist_join_sql(
             f"LEFT JOIN Parties {artist_alias} ON {artist_alias}.id = {track_alias}.main_artist_party_id",
             artist_display_name_sql(artist_alias),
         )
+    tables = table_names(conn)
+    track_columns = table_columns(conn, "Tracks")
+    if "Artists" not in tables or "main_artist_id" not in track_columns:
+        return ("", "''")
     return (
         f"LEFT JOIN Artists {artist_alias} ON {artist_alias}.id = {track_alias}.main_artist_id",
         f"COALESCE({artist_alias}.name, '')",
@@ -66,12 +72,16 @@ def track_additional_artists_expr(
     artist_alias: str = "artist_record",
     separator: str = ", ",
 ) -> str:
+    tables = table_names(conn)
+    track_artist_columns = table_columns(conn, "TrackArtists")
+    if "TrackArtists" not in tables:
+        return "''"
     if uses_party_artist_authority(conn):
+        if "Parties" not in tables or "party_id" not in track_artist_columns:
+            return "''"
         return (
             "("
-            "SELECT COALESCE(group_concat(name_value, "
-            + repr(separator)
-            + "), '') "
+            "SELECT COALESCE(group_concat(name_value, " + repr(separator) + "), '') "
             "FROM ("
             f"SELECT {artist_display_name_sql(artist_alias)} AS name_value "
             f"FROM TrackArtists {track_artist_alias} "
@@ -82,11 +92,11 @@ def track_additional_artists_expr(
             ")"
             ")"
         )
+    if "Artists" not in tables or "artist_id" not in track_artist_columns:
+        return "''"
     return (
         "("
-        "SELECT COALESCE(group_concat(name_value, "
-        + repr(separator)
-        + "), '') "
+        "SELECT COALESCE(group_concat(name_value, " + repr(separator) + "), '') "
         "FROM ("
         f"SELECT COALESCE({artist_alias}.name, '') AS name_value "
         f"FROM TrackArtists {track_artist_alias} "

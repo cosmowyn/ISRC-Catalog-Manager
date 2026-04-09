@@ -202,7 +202,7 @@ class XMLImportServiceTests(unittest.TestCase):
             SELECT
                 t.isrc,
                 t.track_title,
-                a.name,
+                COALESCE(a.display_name, a.artist_name, a.legal_name),
                 al.title,
                 t.release_date,
                 t.track_length_sec,
@@ -214,7 +214,7 @@ class XMLImportServiceTests(unittest.TestCase):
                 t.work_id,
                 w.title
             FROM Tracks t
-            JOIN Artists a ON a.id = t.main_artist_id
+            JOIN Parties a ON a.id = t.main_artist_party_id
             LEFT JOIN Albums al ON al.id = t.album_id
             LEFT JOIN Works w ON w.id = t.work_id
             WHERE t.isrc_compact='NLABC2600002'
@@ -222,11 +222,11 @@ class XMLImportServiceTests(unittest.TestCase):
         ).fetchone()
         extras = self.conn.execute(
             """
-            SELECT a.name
+            SELECT COALESCE(a.display_name, a.artist_name, a.legal_name)
             FROM TrackArtists ta
-            JOIN Artists a ON a.id = ta.artist_id
+            JOIN Parties a ON a.id = ta.party_id
             WHERE ta.track_id = (SELECT id FROM Tracks WHERE isrc_compact='NLABC2600002')
-            ORDER BY a.name
+            ORDER BY COALESCE(a.display_name, a.artist_name, a.legal_name)
             """
         ).fetchall()
         custom = self.conn.execute(

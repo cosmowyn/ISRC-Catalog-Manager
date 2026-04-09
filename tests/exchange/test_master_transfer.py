@@ -158,7 +158,6 @@ class MasterTransferServiceTests(unittest.TestCase):
             PartyPayload(
                 legal_name="Nova Music",
                 display_name="Nova Music",
-                artist_name="Nova",
                 company_name="Nova Music Group",
             )
         )
@@ -755,7 +754,22 @@ class MasterTransferServiceTests(unittest.TestCase):
         self.assertIsNotNone(result.repertoire_party_phase)
         self.assertIsNone(result.catalog_report)
         self.assertIsNone(result.repertoire_report)
-        self.assertEqual(self._count(target, "Parties"), 2)
+        imported_parties = (
+            target["conn"]
+            .execute(
+                "SELECT legal_name, display_name, artist_name, party_type FROM Parties ORDER BY id"
+            )
+            .fetchall()
+        )
+        self.assertEqual(
+            imported_parties,
+            [
+                ("Control", "Control", "Control", "artist"),
+                ("Nova", "Nova", "Nova", "artist"),
+                ("Nova Music", "Nova Music", None, "organization"),
+                ("Orbit Rights Control", None, None, "organization"),
+            ],
+        )
         self.assertEqual(self._count(target, "Works"), 0)
         self.assertEqual(self._count(target, "Contracts"), 0)
         self.assertEqual(self._count(target, "RightsRecords"), 0)

@@ -10,6 +10,7 @@ from isrc_manager.parties import PartyService, artist_primary_label
 
 from .track_artist_sql import uses_party_artist_authority
 
+
 @dataclass(slots=True)
 class ArtistUsage:
     artist_id: int

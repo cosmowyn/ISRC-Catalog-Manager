@@ -1889,15 +1889,14 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                 service = DatabaseSchemaService(conn, data_root=Path(tmpdir))
                 service.init_db()
 
-                conn.execute("INSERT INTO Artists(name) VALUES ('Migration Artist')")
-                artist_id = int(conn.execute("SELECT id FROM Artists").fetchone()[0])
+                artist_id = int(PartyService(conn).ensure_artist_party_by_name("Migration Artist"))
                 conn.execute(
                     """
                     INSERT INTO Tracks(
                         isrc,
                         isrc_compact,
                         track_title,
-                        main_artist_id,
+                        main_artist_party_id,
                         catalog_number
                     )
                     VALUES (?, ?, ?, ?, ?)
@@ -2015,8 +2014,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                     "DROP INDEX IF EXISTS idx_external_catalog_identifiers_normalized_value"
                 )
 
-                conn.execute("INSERT INTO Artists(name) VALUES ('Migration Artist')")
-                artist_id = int(conn.execute("SELECT id FROM Artists").fetchone()[0])
+                artist_id = int(PartyService(conn).ensure_artist_party_by_name("Migration Artist"))
                 conn.execute(
                     """
                     INSERT INTO ExternalCatalogIdentifiers(
@@ -2041,7 +2039,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                         isrc,
                         isrc_compact,
                         track_title,
-                        main_artist_id,
+                        main_artist_party_id,
                         external_catalog_identifier_id,
                         catalog_number
                     )
@@ -2055,7 +2053,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                         isrc,
                         isrc_compact,
                         track_title,
-                        main_artist_id,
+                        main_artist_party_id,
                         external_catalog_identifier_id,
                         catalog_number
                     )

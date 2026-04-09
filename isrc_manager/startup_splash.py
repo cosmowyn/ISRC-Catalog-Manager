@@ -205,6 +205,7 @@ class _SplashThreadBridge(QObject):
     def _handle_finish(self, window: object) -> None:
         self._controller._finish_now(window)
 
+
 class StartupSplashController:
     """Thin controller around QSplashScreen for pre-event-loop startup."""
 

@@ -11,11 +11,11 @@ from typing import Callable
 
 from isrc_manager.constants import PROMOTED_CUSTOM_FIELDS, SCHEMA_BASELINE, SCHEMA_TARGET
 from isrc_manager.domain.codes import barcode_validation_status, to_compact_isrc
-from isrc_manager.parties.service import PartyService
 from isrc_manager.file_storage import (
     STORAGE_MODE_DATABASE,
     STORAGE_MODE_MANAGED_FILE,
 )
+from isrc_manager.parties.service import PartyService
 from isrc_manager.services.track_artist_sql import track_main_artist_join_sql
 
 
@@ -1451,12 +1451,15 @@ class DatabaseSchemaService:
             )
 
     def _migrate_tracks_artist_authority_to_parties(self) -> None:
+        self._ensure_repertoire_tables()
+        self._ensure_release_tables()
         tables = self._table_names()
         if "Tracks" not in tables:
             return
-        self._ensure_repertoire_tables()
         track_columns = self._table_columns("Tracks")
-        track_artist_columns = self._table_columns("TrackArtists") if "TrackArtists" in tables else set()
+        track_artist_columns = (
+            self._table_columns("TrackArtists") if "TrackArtists" in tables else set()
+        )
         if "main_artist_party_id" in track_columns and "party_id" in track_artist_columns:
             if "Artists" in tables:
                 self.cursor.execute("DROP TABLE IF EXISTS Artists")
@@ -1471,17 +1474,30 @@ class DatabaseSchemaService:
                 if row and row[0] is not None
             }
 
+        def _resolve_legacy_artist_name(legacy_artist_id: object) -> str:
+            artist_id = int(legacy_artist_id or 0)
+            artist_name = legacy_artist_names.get(artist_id, "")
+            if artist_name:
+                return artist_name
+            if artist_id > 0:
+                return f"Legacy Artist #{artist_id}"
+            return ""
+
         track_rows = self.cursor.execute("SELECT * FROM Tracks").fetchall()
-        track_column_names = [str(column[1]) for column in self.cursor.execute("PRAGMA table_info(Tracks)").fetchall()]
+        track_column_names = [
+            str(column[1]) for column in self.cursor.execute("PRAGMA table_info(Tracks)").fetchall()
+        ]
         migrated_track_rows: list[dict[str, object]] = []
         for row in track_rows:
             payload = dict(zip(track_column_names, row))
             if "main_artist_party_id" in payload and payload["main_artist_party_id"] is not None:
                 party_id = int(payload["main_artist_party_id"])
             else:
-                artist_name = legacy_artist_names.get(int(payload.get("main_artist_id") or 0), "")
+                artist_name = _resolve_legacy_artist_name(payload.get("main_artist_id"))
                 if not artist_name:
-                    raise ValueError(f"Track {int(payload.get('id') or 0)} has no resolvable artist for migration.")
+                    raise ValueError(
+                        f"Track {int(payload.get('id') or 0)} has no resolvable artist for migration."
+                    )
                 party_id = int(
                     party_service.ensure_artist_party_by_name(
                         artist_name,
@@ -1492,17 +1508,19 @@ class DatabaseSchemaService:
             migrated_track_rows.append(payload)
 
         migrated_additional_rows: list[tuple[int, int, str]] = []
+        preserved_release_track_rows: list[tuple[int, int, int, int, int]] = []
         if "TrackArtists" in tables:
             additional_rows = self.cursor.execute("SELECT * FROM TrackArtists").fetchall()
             additional_column_names = [
-                str(column[1]) for column in self.cursor.execute("PRAGMA table_info(TrackArtists)").fetchall()
+                str(column[1])
+                for column in self.cursor.execute("PRAGMA table_info(TrackArtists)").fetchall()
             ]
             for row in additional_rows:
                 payload = dict(zip(additional_column_names, row))
                 if payload.get("party_id") is not None:
                     party_id = int(payload["party_id"])
                 else:
-                    artist_name = legacy_artist_names.get(int(payload.get("artist_id") or 0), "")
+                    artist_name = _resolve_legacy_artist_name(payload.get("artist_id"))
                     if not artist_name:
                         raise ValueError(
                             "Track additional artist migration failed because "
@@ -1520,6 +1538,23 @@ class DatabaseSchemaService:
                         int(payload["track_id"]),
                         int(party_id),
                         str(payload.get("role") or "additional"),
+                    )
+                )
+        if "ReleaseTracks" in tables:
+            release_track_rows = self.cursor.execute("SELECT * FROM ReleaseTracks").fetchall()
+            release_track_column_names = [
+                str(column[1])
+                for column in self.cursor.execute("PRAGMA table_info(ReleaseTracks)").fetchall()
+            ]
+            for row in release_track_rows:
+                payload = dict(zip(release_track_column_names, row))
+                preserved_release_track_rows.append(
+                    (
+                        int(payload["release_id"]),
+                        int(payload["track_id"]),
+                        int(payload.get("disc_number") or 1),
+                        int(payload.get("track_number") or 1),
+                        int(payload.get("sequence_number") or 1),
                     )
                 )
 
@@ -1610,6 +1645,33 @@ class DatabaseSchemaService:
                 VALUES (?, ?, ?)
                 """,
                 (int(track_id), int(party_id), str(role or "additional")),
+            )
+
+        for (
+            release_id,
+            track_id,
+            disc_number,
+            track_number,
+            sequence_number,
+        ) in preserved_release_track_rows:
+            self.cursor.execute(
+                """
+                INSERT OR IGNORE INTO ReleaseTracks(
+                    release_id,
+                    track_id,
+                    disc_number,
+                    track_number,
+                    sequence_number
+                )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    int(release_id),
+                    int(track_id),
+                    int(disc_number),
+                    int(track_number),
+                    int(sequence_number),
+                ),
             )
 
         self.cursor.execute("DROP TABLE IF EXISTS Artists")

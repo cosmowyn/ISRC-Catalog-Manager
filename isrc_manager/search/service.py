@@ -7,8 +7,8 @@ import sqlite3
 
 from isrc_manager.domain.repertoire import clean_text
 
-from .models import GlobalSearchResult, RelationshipSection, SavedSearchRecord
 from ..services.track_artist_sql import track_main_artist_join_sql
+from .models import GlobalSearchResult, RelationshipSection, SavedSearchRecord
 
 
 class GlobalSearchService:

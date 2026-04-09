@@ -44,7 +44,9 @@ class PartyService:
             if row and row[1]
         }
 
-    def _track_artist_columns(self, *, cursor: sqlite3.Cursor | None = None) -> tuple[str, str] | None:
+    def _track_artist_columns(
+        self, *, cursor: sqlite3.Cursor | None = None
+    ) -> tuple[str, str] | None:
         table_names = self._table_names(cursor=cursor)
         if "Tracks" not in table_names or "TrackArtists" not in table_names:
             return None
@@ -77,12 +79,19 @@ class PartyService:
         clean_artist_name = clean_text(artist_name)
         alias_values = list(record.artist_aliases)
         current_primary = artist_primary_label(record)
-        if clean_artist_name and current_primary and current_primary.casefold() != clean_artist_name.casefold():
+        if (
+            clean_artist_name
+            and current_primary
+            and current_primary.casefold() != clean_artist_name.casefold()
+        ):
             alias_values.append(clean_artist_name)
         payload = PartyPayload(
             legal_name=record.legal_name,
             display_name=record.display_name,
-            artist_name=clean_artist_name or record.artist_name or record.display_name or record.legal_name,
+            artist_name=clean_artist_name
+            or record.artist_name
+            or record.display_name
+            or record.legal_name,
             company_name=record.company_name,
             first_name=record.first_name,
             middle_name=record.middle_name,
@@ -786,7 +795,9 @@ class PartyService:
             for record in records
             if self._is_artist_relevant_record(record) or int(record.id) in used_party_ids
         ]
-        return sorted(filtered, key=lambda record: (artist_primary_label(record).casefold(), int(record.id)))
+        return sorted(
+            filtered, key=lambda record: (artist_primary_label(record).casefold(), int(record.id))
+        )
 
     def find_artist_party_id_by_name(
         self,
@@ -928,7 +939,10 @@ class PartyService:
                 raise ValueError(f"Party {int(party_id)} was not found.")
             if not self._is_artist_relevant_record(record):
                 self._promote_party_to_artist_authority(int(party_id), clean_name, cursor=cur)
-            elif str(record.artist_name or "").strip() == "" or str(record.party_type or "").strip().lower() != "artist":
+            elif (
+                str(record.artist_name or "").strip() == ""
+                or str(record.party_type or "").strip().lower() != "artist"
+            ):
                 self._promote_party_to_artist_authority(int(party_id), clean_name, cursor=cur)
             return int(party_id)
         return self.create_party(
