@@ -359,6 +359,7 @@ class QssAutocompleteTests(unittest.TestCase):
         )
         try:
             self.assertIsInstance(dialog.theme_custom_qss_edit, QssCodeEditor)
+            self.assertEqual(dialog.gs1_contracts_export_btn.text(), "Export…")
             dialog.qss_reference_filter_edit.setText("#applicationSettingsDialog")
             self.app.processEvents()
             self.assertGreaterEqual(dialog.qss_reference_table.rowCount(), 1)

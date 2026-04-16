@@ -121,6 +121,53 @@ class GS1SettingsServiceTests(unittest.TestCase):
             ["10064976", "10070050"],
         )
 
+    def test_export_stored_contracts_preserves_imported_csv_bytes(self):
+        entries = (
+            GS1ContractEntry(
+                contract_number="10064976",
+                product="GS1 codepakket 10",
+                company_number="87208927246",
+                start_number="8720892724601",
+                end_number="8720892724694",
+                status="Actief",
+            ),
+        )
+        csv_path = Path(self.tmpdir.name) / "contracts-export.csv"
+        original_bytes = (
+            b"Contract Number,Product,Company Number,Start Number,End Number,Status\r\n"
+            b"10064976,GS1 codepakket 10,87208927246,8720892724601,8720892724694,Actief\r\n"
+        )
+        csv_path.write_bytes(original_bytes)
+
+        self.service.set_contracts(entries, source_path=str(csv_path))
+
+        exported_path = Path(self.tmpdir.name) / "stored-contracts.csv"
+        saved_path = self.service.export_stored_contracts(exported_path)
+
+        self.assertEqual(saved_path, exported_path)
+        self.assertEqual(exported_path.read_bytes(), original_bytes)
+
+    def test_export_stored_contracts_falls_back_to_canonical_csv(self):
+        self.service.set_contracts(
+            (
+                GS1ContractEntry(
+                    contract_number="10070050",
+                    product="GS1 codepakket 100",
+                    company_number="8721398389",
+                    start_number="8721398389004",
+                    end_number="8721398389998",
+                    status="Actief",
+                ),
+            )
+        )
+
+        exported_path = Path(self.tmpdir.name) / "canonical-contracts.csv"
+        self.service.export_stored_contracts(exported_path)
+        exported_text = exported_path.read_text(encoding="utf-8-sig")
+
+        self.assertIn("Contract Number,Product,Company Number", exported_text)
+        self.assertIn("10070050,GS1 codepakket 100,8721398389", exported_text)
+
     def test_template_workbook_round_trips_through_profile_database(self):
         template_path = Path(self.tmpdir.name) / "official-gs1-template.xlsx"
         build_template(template_path)

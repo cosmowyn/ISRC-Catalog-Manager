@@ -401,7 +401,7 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     app.party_manager_action = app._create_action(
         "Party Manager…",
         slot=app.open_party_manager,
-        shortcuts=("Ctrl+Alt+P", "Meta+Alt+P"),
+        shortcuts=("Ctrl+Alt+Shift+P", "Meta+Alt+Shift+P"),
     )
     workspace_create_menu.addAction(app.party_manager_action)
     app.contract_manager_action = app._create_action(

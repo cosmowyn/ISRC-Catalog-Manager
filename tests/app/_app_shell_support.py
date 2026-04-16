@@ -37,7 +37,7 @@ from tests.qt_test_helpers import pump_events, require_qapplication, wait_for
 
 try:
     from PySide6.QtCore import QBuffer, QDate, QIODevice, QPoint, Qt
-    from PySide6.QtGui import QColor, QImage
+    from PySide6.QtGui import QColor, QImage, QKeySequence
     from PySide6.QtWidgets import QScrollArea, QTabBar
 
     import ISRC_manager as app_module
@@ -2142,7 +2142,9 @@ class AppShellTestCase(unittest.TestCase):
     def case_main_window_shortcuts_cover_help_media_and_workspace_actions(self):
         def _shortcut_texts(action):
             return {
-                shortcut.toString() for shortcut in action.shortcuts() if not shortcut.isEmpty()
+                shortcut.toString(QKeySequence.PortableText)
+                for shortcut in action.shortcuts()
+                if not shortcut.isEmpty()
             }
 
         self.assertEqual(_shortcut_texts(self.window.help_contents_action), {"F1"})
@@ -2153,6 +2155,10 @@ class AppShellTestCase(unittest.TestCase):
         self.assertEqual(
             _shortcut_texts(self.window.bulk_attach_audio_action),
             {"Ctrl+Alt+U", "Meta+Alt+U"},
+        )
+        self.assertEqual(
+            _shortcut_texts(self.window.party_manager_action),
+            {"Ctrl+Alt+Shift+P", "Meta+Alt+Shift+P"},
         )
         self.assertEqual(
             _shortcut_texts(self.window.attach_album_art_action),
@@ -2179,6 +2185,22 @@ class AppShellTestCase(unittest.TestCase):
             {"Ctrl+Alt+F", "Meta+Alt+F"},
         )
         self.assertIs(self.window.workspace_global_search_action, self.window.global_search_action)
+        self.assertEqual(
+            self.window.add_track_action.shortcut().toString(QKeySequence.PortableText),
+            "Ctrl+Alt+N",
+        )
+        self.assertEqual(
+            self.window.bulk_attach_audio_action.shortcut().toString(QKeySequence.PortableText),
+            "Ctrl+Alt+U",
+        )
+        self.assertEqual(
+            self.window.global_search_action.shortcut().toString(QKeySequence.PortableText),
+            "Ctrl+Alt+F",
+        )
+        self.assertEqual(
+            self.window.delete_entry_action.shortcut().toString(QKeySequence.PortableText),
+            QKeySequence("Delete").toString(QKeySequence.PortableText),
+        )
 
     def case_startup_can_defer_legacy_storage_migration_and_keep_current_folder(self):
         self._close_window()

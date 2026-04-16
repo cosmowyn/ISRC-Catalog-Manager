@@ -156,6 +156,21 @@ class GS1IntegrationService:
         contracts = self.contract_import_service.load_contracts(csv_path)
         return self.settings_service.set_contracts(contracts, source_path=str(csv_path))
 
+    def export_contracts_csv(
+        self,
+        destination_path: str | Path,
+        *,
+        contracts: tuple[GS1ContractEntry, ...] | list[GS1ContractEntry] | None = None,
+        source_path: str = "",
+        source_bytes: bytes | None = None,
+    ) -> Path:
+        return self.settings_service.export_stored_contracts(
+            destination_path,
+            contracts=contracts,
+            source_path=source_path,
+            source_bytes=source_bytes,
+        )
+
     def save_metadata(self, record: GS1MetadataRecord) -> GS1MetadataRecord:
         validation = self.validation_service.validate(record, for_export=False)
         if not validation.is_valid:

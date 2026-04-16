@@ -141,6 +141,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Add Track</strong>: <code>Ctrl+Alt+N</code> / <code>Cmd+Option+N</code></li>
           <li><strong>Add Album</strong>: <code>Ctrl+Alt+Shift+N</code> / <code>Cmd+Option+Shift+N</code></li>
           <li><strong>Work Manager</strong>: <code>Ctrl+Alt+W</code> / <code>Cmd+Option+W</code></li>
+          <li><strong>Party Manager</strong>: <code>Ctrl+Alt+Shift+P</code> / <code>Cmd+Option+Shift+P</code></li>
           <li><strong>Release Browser</strong>: <code>Ctrl+Alt+Shift+R</code> / <code>Cmd+Option+Shift+R</code></li>
           <li><strong>Global Search and Relationships</strong>: <code>Ctrl+Alt+F</code> / <code>Cmd+Option+F</code></li>
           <li><strong>Deliverables and Asset Versions</strong>: <code>Ctrl+Alt+A</code> / <code>Cmd+Option+A</code></li>

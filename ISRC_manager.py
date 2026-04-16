@@ -792,6 +792,8 @@ class ApplicationSettingsDialog(QDialog):
         self._gs1_default_option_combos: dict[str, QComboBox] = {}
         self._gs1_contract_entries = tuple(gs1_contract_entries or ())
         self._gs1_contracts_csv_path = str(gs1_contracts_csv_path or "").strip()
+        self._pending_gs1_contracts_csv_bytes: bytes | None = None
+        self._pending_gs1_contracts_csv_filename = ""
         self.setProperty("role", "panel")
         self.setAttribute(Qt.WA_StyledBackground, True)
 
@@ -1245,11 +1247,14 @@ class ApplicationSettingsDialog(QDialog):
 
         self.gs1_contracts_csv_edit = QLineEdit(self._gs1_contracts_csv_path)
         self.gs1_contracts_csv_edit.setClearButtonEnabled(True)
-        self.gs1_contracts_csv_edit.setPlaceholderText("GS1 contracts CSV export path")
+        self.gs1_contracts_csv_edit.setPlaceholderText("Imported GS1 contracts CSV path")
         self.gs1_contracts_csv_edit.setMinimumWidth(420)
         gs1_contracts_browse_btn = QPushButton("Import CSV…")
         gs1_contracts_browse_btn.setAutoDefault(False)
         gs1_contracts_browse_btn.clicked.connect(self._browse_gs1_contracts_csv)
+        self.gs1_contracts_export_btn = QPushButton("Export…")
+        self.gs1_contracts_export_btn.setAutoDefault(False)
+        self.gs1_contracts_export_btn.clicked.connect(self._export_gs1_contracts_csv)
         gs1_contracts_reload_btn = QPushButton("Reload")
         gs1_contracts_reload_btn.setAutoDefault(False)
         gs1_contracts_reload_btn.clicked.connect(self._reload_gs1_contracts_csv)
@@ -1262,6 +1267,7 @@ class ApplicationSettingsDialog(QDialog):
         gs1_contracts_row.setSpacing(8)
         gs1_contracts_row.addWidget(self.gs1_contracts_csv_edit, 1)
         gs1_contracts_row.addWidget(gs1_contracts_browse_btn)
+        gs1_contracts_row.addWidget(self.gs1_contracts_export_btn)
         gs1_contracts_row.addWidget(gs1_contracts_reload_btn)
         gs1_contracts_row.addWidget(gs1_contracts_clear_btn)
         self._add_row(
@@ -1269,7 +1275,7 @@ class ApplicationSettingsDialog(QDialog):
             0,
             "Contracts CSV",
             gs1_contracts_widget,
-            "Import the contracts export from your GS1 portal. GTIN contract numbers from that file become available for defaults and export routing.",
+            "Import the contracts export from your GS1 portal. GTIN contract numbers from that file become available for defaults and export routing, and Export saves the stored CSV back to disk when you need to reuse it.",
         )
 
         self.gs1_active_contract_edit = self._create_gs1_contract_combo(
@@ -3584,6 +3590,52 @@ class ApplicationSettingsDialog(QDialog):
         if path:
             self._import_gs1_contracts_csv(path, show_errors=True)
 
+    def _export_gs1_contracts_csv(self):
+        if self.gs1_integration_service is None:
+            return
+        suggested_filename = (
+            self._pending_gs1_contracts_csv_filename
+            or Path(self.gs1_contracts_csv_edit.text().strip() or "").name
+            or self.gs1_integration_service.settings_service.load_stored_contracts_filename()
+            or "gs1-contracts.csv"
+        )
+        suggested_path = str(Path.home() / suggested_filename)
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Stored GS1 Contracts CSV",
+            suggested_path,
+            "CSV File (*.csv)",
+        )
+        if not path:
+            return
+        destination = Path(path)
+        if destination.suffix.lower() != ".csv":
+            destination = destination.with_suffix(".csv")
+        if destination.exists():
+            overwrite = QMessageBox.question(
+                self,
+                "Overwrite File?",
+                f"The file already exists:\n{destination}\n\nOverwrite it?",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            if overwrite != QMessageBox.Yes:
+                return
+        try:
+            saved_path = self.gs1_integration_service.export_contracts_csv(
+                destination,
+                contracts=tuple(self._gs1_contract_entries),
+                source_path=self.gs1_contracts_csv_edit.text().strip(),
+                source_bytes=self._pending_gs1_contracts_csv_bytes,
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "GS1 Contracts", str(exc))
+            return
+        QMessageBox.information(
+            self,
+            "GS1 Contracts",
+            f"Saved the GTIN contracts CSV to:\n{saved_path}",
+        )
+
     def _reload_gs1_contracts_csv(self):
         path = self.gs1_contracts_csv_edit.text().strip()
         if not path:
@@ -3603,6 +3655,11 @@ class ApplicationSettingsDialog(QDialog):
         self._gs1_contract_entries = tuple(entries)
         self._gs1_contracts_csv_path = str(path)
         self.gs1_contracts_csv_edit.setText(str(path))
+        try:
+            self._pending_gs1_contracts_csv_bytes = Path(path).read_bytes()
+        except OSError:
+            self._pending_gs1_contracts_csv_bytes = None
+        self._pending_gs1_contracts_csv_filename = Path(path).name
         current_contract = self.gs1_active_contract_edit.currentText().strip()
         if not current_contract:
             active_entry = next(
@@ -3616,6 +3673,8 @@ class ApplicationSettingsDialog(QDialog):
     def _clear_gs1_contracts(self):
         self._gs1_contract_entries = ()
         self._gs1_contracts_csv_path = ""
+        self._pending_gs1_contracts_csv_bytes = None
+        self._pending_gs1_contracts_csv_filename = ""
         self.gs1_contracts_csv_edit.clear()
         self.gs1_active_contract_edit.setCurrentText("")
         self._configure_gs1_contract_combo()
@@ -3925,6 +3984,8 @@ class ApplicationSettingsDialog(QDialog):
             "gs1_template_storage_mode": self.gs1_template_storage_combo.currentData(),
             "gs1_contracts_csv_path": self.gs1_contracts_csv_edit.text().strip(),
             "gs1_contract_entries": tuple(self._gs1_contract_entries),
+            "gs1_contracts_csv_bytes": self._pending_gs1_contracts_csv_bytes,
+            "gs1_contracts_csv_filename": self._pending_gs1_contracts_csv_filename,
             "gs1_active_contract_number": self.gs1_active_contract_edit.currentText().strip(),
             "gs1_target_market": self.gs1_target_market_edit.currentText().strip(),
             "gs1_language": self.gs1_language_edit.currentText().strip(),
@@ -7173,13 +7234,152 @@ class App(QMainWindow):
         if standard_key is not None:
             action.setShortcuts(QKeySequence.keyBindings(standard_key))
         elif shortcuts:
-            action.setShortcuts([QKeySequence(seq) for seq in shortcuts])
+            ordered_shortcuts = self._ordered_custom_shortcuts(shortcuts)
+            action.setShortcuts(ordered_shortcuts)
+            if self._should_register_explicit_action_shortcuts(ordered_shortcuts):
+                action.setShortcutContext(Qt.WidgetShortcut)
+                self._install_explicit_action_shortcuts(action, ordered_shortcuts)
         if slot is not None:
             action.triggered.connect(slot)
         if toggled_slot is not None:
             action.toggled.connect(toggled_slot)
         self.addAction(action)
         return action
+
+    def _should_register_explicit_action_shortcuts(
+        self, shortcuts: tuple[QKeySequence, ...] | list[QKeySequence]
+    ) -> bool:
+        portable_texts = [
+            shortcut.toString(QKeySequence.PortableText)
+            for shortcut in shortcuts
+            if not shortcut.isEmpty()
+        ]
+        return bool(portable_texts) and all(
+            any(modifier in portable_text for modifier in ("Ctrl+", "Meta+"))
+            for portable_text in portable_texts
+        )
+
+    def _install_explicit_action_shortcuts(
+        self, action: QAction, shortcuts: tuple[QKeySequence, ...] | list[QKeySequence]
+    ) -> None:
+        registry = getattr(self, "_explicit_action_shortcut_registry", None)
+        if registry is None:
+            registry = {}
+            self._explicit_action_shortcut_registry = registry
+
+        action_shortcuts = getattr(self, "_explicit_action_shortcut_objects", None)
+        if action_shortcuts is None:
+            action_shortcuts = {}
+            self._explicit_action_shortcut_objects = action_shortcuts
+
+        registered_shortcuts: list[QShortcut] = []
+        for shortcut_sequence in shortcuts:
+            portable_text = shortcut_sequence.toString(QKeySequence.PortableText)
+            if not portable_text:
+                continue
+            existing_action = registry.get(portable_text)
+            if existing_action is not None and existing_action is not action:
+                self._log_event(
+                    "shortcut.duplicate_custom_binding",
+                    "Skipping duplicate explicit shortcut binding.",
+                    level=logging.WARNING,
+                    shortcut=portable_text,
+                    kept_action=str(existing_action.text() or ""),
+                    skipped_action=str(action.text() or ""),
+                )
+                continue
+            shortcut = QShortcut(shortcut_sequence, self)
+            shortcut.setContext(Qt.WindowShortcut)
+            shortcut.activated.connect(
+                lambda active_action=action: self._trigger_explicit_action_shortcut(active_action)
+            )
+            registry[portable_text] = action
+            registered_shortcuts.append(shortcut)
+
+        if registered_shortcuts:
+            action_shortcuts[action] = registered_shortcuts
+
+    def _trigger_explicit_action_shortcut(self, action: QAction) -> None:
+        if action is None or not action.isEnabled():
+            return
+        action.trigger()
+
+    def _ordered_custom_shortcuts(
+        self, shortcuts: tuple[str, ...] | list[str] | tuple[QKeySequence, ...] | list[QKeySequence]
+    ) -> list[QKeySequence]:
+        """Keep menu-visible primary shortcuts aligned with the active platform."""
+
+        parsed_shortcuts: list[
+            tuple[int, QKeySequence, str, tuple[tuple[str, ...], str] | None]
+        ] = []
+        seen_texts: set[str] = set()
+        for index, raw_shortcut in enumerate(shortcuts):
+            shortcut = (
+                raw_shortcut
+                if isinstance(raw_shortcut, QKeySequence)
+                else QKeySequence(str(raw_shortcut))
+            )
+            portable_text = shortcut.toString(QKeySequence.PortableText)
+            if not portable_text or portable_text in seen_texts:
+                continue
+            seen_texts.add(portable_text)
+            parsed_shortcuts.append(
+                (
+                    index,
+                    shortcut,
+                    portable_text,
+                    self._platform_variant_shortcut_group(portable_text),
+                )
+            )
+
+        # QKeySequence portable text uses Ctrl for the platform primary modifier
+        # (Command on macOS), while Meta maps to the native Control key there.
+        preferred_variant = "Ctrl"
+        variant_groups: dict[
+            tuple[str, ...],
+            list[tuple[int, QKeySequence, str, tuple[tuple[str, ...], str]]],
+        ] = {}
+        for index, shortcut, portable_text, group in parsed_shortcuts:
+            if group is None:
+                continue
+            variant_groups.setdefault(group[0], []).append((index, shortcut, portable_text, group))
+
+        dual_variant_groups = {
+            normalized_parts
+            for normalized_parts, members in variant_groups.items()
+            if {group[1] for _, _, _, group in members} == {"Ctrl", "Meta"}
+        }
+
+        ordered_shortcuts: list[QKeySequence] = []
+        emitted_groups: set[tuple[str, ...]] = set()
+        for _, shortcut, _, group in parsed_shortcuts:
+            if group is None or group[0] not in dual_variant_groups:
+                ordered_shortcuts.append(shortcut)
+                continue
+            normalized_parts = group[0]
+            if normalized_parts in emitted_groups:
+                continue
+            emitted_groups.add(normalized_parts)
+            members = variant_groups[normalized_parts]
+            members.sort(
+                key=lambda member: (0 if member[3][1] == preferred_variant else 1, member[0])
+            )
+            ordered_shortcuts.extend(member[1] for member in members)
+        return ordered_shortcuts
+
+    def _platform_variant_shortcut_group(
+        self, portable_text: str
+    ) -> tuple[tuple[str, ...], str] | None:
+        parts = tuple(part for part in portable_text.split("+") if part)
+        has_ctrl = "Ctrl" in parts
+        has_meta = "Meta" in parts
+        if has_ctrl == has_meta:
+            return None
+        variant = "Meta" if has_meta else "Ctrl"
+        normalized_parts = tuple(
+            "PrimaryModifier" if part in {"Ctrl", "Meta"} else part for part in parts
+        )
+        return normalized_parts, variant
 
     def _app_version_text(self) -> str:
         for package_name in ("isrc-catalog-manager", APP_NAME):
@@ -10730,7 +10930,12 @@ class App(QMainWindow):
                 ):
                     if after_contracts:
                         self.gs1_settings_service.set_contracts(
-                            after_contracts, source_path=after_contracts_csv
+                            after_contracts,
+                            source_path=after_contracts_csv,
+                            source_bytes=after_values.get("gs1_contracts_csv_bytes"),
+                            source_filename=str(
+                                after_values.get("gs1_contracts_csv_filename") or ""
+                            ).strip(),
                         )
                     else:
                         self.gs1_settings_service.clear_contracts()
@@ -15078,9 +15283,7 @@ class App(QMainWindow):
         except Exception:
             artist_values = []
 
-        combo_values = {
-            "artists": sorted(artist_values, key=str.casefold)
-        }
+        combo_values = {"artists": sorted(artist_values, key=str.casefold)}
         if callable(progress_callback):
             progress_callback(1, 5, "Loaded Artist lookup values.")
         combo_values["albums"] = [
@@ -16879,7 +17082,9 @@ class App(QMainWindow):
             dialog.close()
 
     def _start_conversion_export(self, preview, output_path: str | Path) -> None:
-        format_name = str(preview.template_profile.format_name or "").strip().lower() or "conversion"
+        format_name = (
+            str(preview.template_profile.format_name or "").strip().lower() or "conversion"
+        )
         default_name = Path(str(output_path or "")).name or (
             f"conversion_output{preview.template_profile.output_suffix or f'.{format_name}'}"
         )
@@ -17983,7 +18188,9 @@ class App(QMainWindow):
 
         def mutation():
             with self.conn:
-                return int(self.contract_service.create_contract(payload, cursor=self.conn.cursor()))
+                return int(
+                    self.contract_service.create_contract(payload, cursor=self.conn.cursor())
+                )
 
         contract_id = int(
             self._run_snapshot_history_action(
@@ -29332,7 +29539,9 @@ class EditDialog(QDialog):
             )
         else:
             self.catalog_number.set_assignment(
-                value=self._display_value_for_field("catalog_number", self.snapshot.catalog_number or ""),
+                value=self._display_value_for_field(
+                    "catalog_number", self.snapshot.catalog_number or ""
+                ),
                 registry_entry_id=None,
                 external_identifier_id=None,
                 mode=None,
@@ -30507,8 +30716,8 @@ class EditDialog(QDialog):
             self.additional_artist.currentText().strip()
         )
         if self._bulk_field_should_apply("artist_name", new_artist_name):
-            selected_artist_name, selected_artist_party_id = self.parent._resolve_artist_party_choice(
-                self.artist_name
+            selected_artist_name, selected_artist_party_id = (
+                self.parent._resolve_artist_party_choice(self.artist_name)
             )
             new_artist_name, _artist_party_id = self.parent._resolve_party_backed_artist_name(
                 selected_artist_name or new_artist_name,

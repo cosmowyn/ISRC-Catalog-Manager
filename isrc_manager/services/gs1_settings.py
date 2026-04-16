@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import sqlite3
 from pathlib import Path
@@ -34,7 +36,20 @@ class GS1SettingsService:
     CONTRACTS_JSON_KEY = "gs1/contracts_json"
     CONTRACTS_CSV_PATH_KEY = "gs1/contracts_csv_path"
     TEMPLATE_STORAGE_TABLE = "GS1TemplateStorage"
+    CONTRACTS_STORAGE_TABLE = "GS1ContractsStorage"
     ALLOWED_TEMPLATE_SUFFIXES = {".xlsx", ".xlsm", ".xltx", ".xltm"}
+    CONTRACTS_DEFAULT_FILENAME = "gs1-contracts.csv"
+    CONTRACTS_EXPORT_HEADERS = (
+        "Contract Number",
+        "Product",
+        "Company Number",
+        "Start Number",
+        "End Number",
+        "Renewal Date",
+        "End Date",
+        "Status",
+        "Tier",
+    )
 
     PROFILE_KEY_MAP = {
         "contract_number": "gs1/default_contract_number",
@@ -59,6 +74,7 @@ class GS1SettingsService:
             data_root=self.data_root, relative_root="gs1_templates"
         )
         self._ensure_template_storage_table()
+        self._ensure_contract_storage_table()
 
     def _resolve_data_root(self, data_root: str | Path | None) -> Path | None:
         if data_root is not None:
@@ -110,6 +126,23 @@ class GS1SettingsService:
                 self.conn.execute(
                     f"ALTER TABLE {self.TEMPLATE_STORAGE_TABLE} ADD COLUMN workbook_blob BLOB"
                 )
+
+    def _ensure_contract_storage_table(self) -> None:
+        with self.conn:
+            self.conn.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {self.CONTRACTS_STORAGE_TABLE} (
+                    id INTEGER PRIMARY KEY CHECK(id = 1),
+                    filename TEXT NOT NULL,
+                    source_path TEXT,
+                    csv_blob BLOB,
+                    mime_type TEXT,
+                    size_bytes INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+                """
+            )
 
     def _profile_get(self, key: str) -> str:
         row = self.conn.execute("SELECT value FROM app_kv WHERE key=?", (key,)).fetchone()
@@ -441,11 +474,113 @@ class GS1SettingsService:
             )
         return tuple(contracts)
 
+    def _stored_contracts_row(self) -> tuple[object, ...] | None:
+        return self.conn.execute(
+            f"""
+            SELECT filename, source_path, csv_blob, mime_type, size_bytes, created_at, updated_at
+            FROM {self.CONTRACTS_STORAGE_TABLE}
+            WHERE id = 1
+            """
+        ).fetchone()
+
+    def _contracts_filename(
+        self,
+        *,
+        source_filename: str = "",
+        source_path: str = "",
+    ) -> str:
+        explicit_filename = str(source_filename or "").strip()
+        if explicit_filename:
+            return explicit_filename
+        clean_source_path = str(source_path or "").strip()
+        if clean_source_path:
+            return Path(clean_source_path).name or self.CONTRACTS_DEFAULT_FILENAME
+        row = self._stored_contracts_row()
+        if row:
+            filename = str(row[0] or "").strip()
+            if filename:
+                return filename
+        return self.CONTRACTS_DEFAULT_FILENAME
+
+    def _serialize_contracts_csv(
+        self,
+        contracts: tuple[GS1ContractEntry, ...] | list[GS1ContractEntry],
+    ) -> bytes:
+        buffer = io.StringIO(newline="")
+        writer = csv.DictWriter(buffer, fieldnames=self.CONTRACTS_EXPORT_HEADERS)
+        writer.writeheader()
+        for contract in contracts:
+            writer.writerow(
+                {
+                    "Contract Number": str(contract.contract_number or "").strip(),
+                    "Product": str(contract.product or "").strip(),
+                    "Company Number": str(contract.company_number or "").strip(),
+                    "Start Number": str(contract.start_number or "").strip(),
+                    "End Number": str(contract.end_number or "").strip(),
+                    "Renewal Date": str(contract.renewal_date or "").strip(),
+                    "End Date": str(contract.end_date or "").strip(),
+                    "Status": str(contract.status or "").strip(),
+                    "Tier": str(contract.tier or "").strip(),
+                }
+            )
+        return buffer.getvalue().encode("utf-8-sig")
+
+    def _resolve_contract_bytes(
+        self,
+        *,
+        contracts: tuple[GS1ContractEntry, ...] | list[GS1ContractEntry] | None = None,
+        source_path: str = "",
+        source_bytes: bytes | None = None,
+    ) -> bytes | None:
+        if source_bytes is not None:
+            return bytes(source_bytes)
+        clean_source_path = str(source_path or "").strip()
+        if clean_source_path:
+            path = Path(clean_source_path)
+            if path.exists() and path.is_file():
+                return path.read_bytes()
+        normalized_contracts = tuple(contracts or ())
+        if normalized_contracts:
+            return self._serialize_contracts_csv(normalized_contracts)
+        row = self._stored_contracts_row()
+        if row and row[2] is not None:
+            return bytes(row[2])
+        legacy_source_path = self.load_contracts_csv_path()
+        if legacy_source_path:
+            legacy_path = Path(legacy_source_path)
+            if legacy_path.exists() and legacy_path.is_file():
+                return legacy_path.read_bytes()
+        stored_contracts = self.load_contracts()
+        if stored_contracts:
+            return self._serialize_contracts_csv(stored_contracts)
+        return None
+
+    def load_stored_contracts_filename(self) -> str:
+        row = self._stored_contracts_row()
+        if row:
+            filename = str(row[0] or "").strip()
+            if filename:
+                return filename
+            source_path = str(row[1] or "").strip()
+            if source_path:
+                return Path(source_path).name or self.CONTRACTS_DEFAULT_FILENAME
+        source_path = self.load_contracts_csv_path()
+        if source_path:
+            return Path(source_path).name or self.CONTRACTS_DEFAULT_FILENAME
+        if self.load_contracts():
+            return self.CONTRACTS_DEFAULT_FILENAME
+        return ""
+
+    def load_stored_contracts_bytes(self) -> bytes | None:
+        return self._resolve_contract_bytes()
+
     def set_contracts(
         self,
         contracts: tuple[GS1ContractEntry, ...] | list[GS1ContractEntry],
         *,
         source_path: str = "",
+        source_bytes: bytes | None = None,
+        source_filename: str = "",
     ) -> tuple[GS1ContractEntry, ...]:
         normalized = tuple(
             GS1ContractEntry(
@@ -480,13 +615,92 @@ class GS1SettingsService:
             ensure_ascii=True,
             separators=(",", ":"),
         )
+        clean_source_path = str(source_path or "").strip()
+        contracts_bytes = self._resolve_contract_bytes(
+            contracts=normalized,
+            source_path=clean_source_path,
+            source_bytes=source_bytes,
+        )
+        filename = self._contracts_filename(
+            source_filename=source_filename,
+            source_path=clean_source_path,
+        )
         self._profile_set(self.CONTRACTS_JSON_KEY, payload)
-        self._profile_set(self.CONTRACTS_CSV_PATH_KEY, source_path)
+        self._profile_set(self.CONTRACTS_CSV_PATH_KEY, clean_source_path)
+        with self.conn:
+            if normalized and contracts_bytes is not None:
+                self.conn.execute(
+                    f"""
+                    INSERT INTO {self.CONTRACTS_STORAGE_TABLE} (
+                        id,
+                        filename,
+                        source_path,
+                        csv_blob,
+                        mime_type,
+                        size_bytes,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (
+                        1,
+                        ?,
+                        ?,
+                        ?,
+                        ?,
+                        ?,
+                        COALESCE(
+                            (SELECT created_at FROM {self.CONTRACTS_STORAGE_TABLE} WHERE id = 1),
+                            datetime('now')
+                        ),
+                        datetime('now')
+                    )
+                    ON CONFLICT(id) DO UPDATE SET
+                        filename = excluded.filename,
+                        source_path = excluded.source_path,
+                        csv_blob = excluded.csv_blob,
+                        mime_type = excluded.mime_type,
+                        size_bytes = excluded.size_bytes,
+                        updated_at = datetime('now')
+                    """,
+                    (
+                        filename,
+                        clean_source_path,
+                        sqlite3.Binary(contracts_bytes),
+                        guess_mime_type(filename),
+                        len(contracts_bytes),
+                    ),
+                )
+            else:
+                self.conn.execute(f"DELETE FROM {self.CONTRACTS_STORAGE_TABLE} WHERE id = 1")
         return self.load_contracts()
 
     def clear_contracts(self) -> None:
         self._profile_set(self.CONTRACTS_JSON_KEY, "")
         self._profile_set(self.CONTRACTS_CSV_PATH_KEY, "")
+        with self.conn:
+            self.conn.execute(f"DELETE FROM {self.CONTRACTS_STORAGE_TABLE} WHERE id = 1")
+
+    def export_stored_contracts(
+        self,
+        destination_path: str | Path,
+        *,
+        contracts: tuple[GS1ContractEntry, ...] | list[GS1ContractEntry] | None = None,
+        source_path: str = "",
+        source_bytes: bytes | None = None,
+    ) -> Path:
+        contracts_bytes = self._resolve_contract_bytes(
+            contracts=contracts,
+            source_path=source_path,
+            source_bytes=source_bytes,
+        )
+        if contracts_bytes is None:
+            raise GS1TemplateVerificationError(
+                "No GTIN contracts CSV has been stored in this profile yet."
+            )
+        destination = Path(destination_path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(contracts_bytes)
+        return destination
 
     def load_contracts_csv_path(self) -> str:
         return self._profile_get(self.CONTRACTS_CSV_PATH_KEY)
