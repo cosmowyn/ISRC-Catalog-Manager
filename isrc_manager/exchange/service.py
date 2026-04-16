@@ -1100,8 +1100,7 @@ class ExchangeService:
 
     def _suggest_mapping(self, headers: list[str]) -> dict[str, str]:
         supported = {
-            self._normalize_header_name(name): name
-            for name in self._supported_import_targets()
+            self._normalize_header_name(name): name for name in self._supported_import_targets()
         }
         mapping: dict[str, str] = {}
         for header in headers:
@@ -1932,16 +1931,13 @@ class ExchangeService:
             else None
         )
         reason = (
-            (
-                service._classification_reason_for_external_storage(
-                    system_key=system_key,
-                    classification=classification,
-                )
-                if service is not None and classification is not None
-                else "Stored in External Identifiers from exchange import."
+            service._classification_reason_for_external_storage(
+                system_key=system_key,
+                classification=classification,
             )
-            or "Stored in External Identifiers from exchange import."
-        )
+            if service is not None and classification is not None
+            else "Stored in External Identifiers from exchange import."
+        ) or "Stored in External Identifiers from exchange import."
         outcome = ExchangeIdentifierClassificationOutcome(
             row_index=int(row_index),
             field_name=str(field_name or "").strip(),
@@ -2309,9 +2305,7 @@ class ExchangeService:
                 for field_name in _UNBOUND_IDENTIFIER_IMPORT_FIELDS:
                     self._store_unbound_external_identifier(
                         row_index=index,
-                        source_header=(
-                            source_headers_by_target.get(field_name, [field_name])[0]
-                        ),
+                        source_header=(source_headers_by_target.get(field_name, [field_name])[0]),
                         field_name=field_name,
                         value=row.get(field_name),
                         options=opts,

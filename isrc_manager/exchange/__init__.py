@@ -10,9 +10,9 @@ from .master_transfer import (
     MasterTransferService,
 )
 from .models import (
+    ExchangeCatalogClassificationOutcome,
     ExchangeIdentifierClassificationOutcome,
     ExchangeIdentifierReviewRow,
-    ExchangeCatalogClassificationOutcome,
     ExchangeImportOptions,
     ExchangeImportReport,
     ExchangeInspection,

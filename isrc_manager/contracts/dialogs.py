@@ -39,6 +39,7 @@ from isrc_manager.code_registry import (
     BUILTIN_CATEGORY_CONTRACT_NUMBER,
     BUILTIN_CATEGORY_LICENSE_NUMBER,
     BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
+    CATALOG_MODE_INTERNAL,
     CodeIdentifierSelector,
     CodeRegistryService,
 )
@@ -2608,6 +2609,24 @@ class ContractEditorDialog(QDialog):
 
         if detail is not None:
             contract = detail.contract
+
+            def _initial_identifier_mode(
+                *,
+                value: str | None,
+                mode: str | None,
+                registry_entry_id: int | None,
+                external_identifier_id: int | None,
+            ) -> str | None:
+                if str(mode or "").strip():
+                    return mode
+                if (
+                    registry_entry_id is not None
+                    or external_identifier_id is not None
+                    or str(value or "").strip()
+                ):
+                    return None
+                return CATALOG_MODE_INTERNAL
+
             self.title_edit.setText(contract.title)
             self.type_edit.setText(contract.contract_type or "")
             self.status_combo.setCurrentText(contract.status.replace("_", " ").title())
@@ -2623,19 +2642,34 @@ class ContractEditorDialog(QDialog):
             self.termination_edit.setText(contract.termination_date or "")
             self.contract_number_edit.set_value(
                 value=contract.contract_number,
-                mode=contract.contract_number_mode,
+                mode=_initial_identifier_mode(
+                    value=contract.contract_number,
+                    mode=contract.contract_number_mode,
+                    registry_entry_id=contract.contract_registry_entry_id,
+                    external_identifier_id=contract.contract_external_code_identifier_id,
+                ),
                 registry_entry_id=contract.contract_registry_entry_id,
                 external_identifier_id=contract.contract_external_code_identifier_id,
             )
             self.license_number_edit.set_value(
                 value=contract.license_number,
-                mode=contract.license_number_mode,
+                mode=_initial_identifier_mode(
+                    value=contract.license_number,
+                    mode=contract.license_number_mode,
+                    registry_entry_id=contract.license_registry_entry_id,
+                    external_identifier_id=contract.license_external_code_identifier_id,
+                ),
                 registry_entry_id=contract.license_registry_entry_id,
                 external_identifier_id=contract.license_external_code_identifier_id,
             )
             self.registry_sha256_key_edit.set_value(
                 value=contract.registry_sha256_key,
-                mode=contract.registry_sha256_key_mode,
+                mode=_initial_identifier_mode(
+                    value=contract.registry_sha256_key,
+                    mode=contract.registry_sha256_key_mode,
+                    registry_entry_id=contract.registry_sha256_key_entry_id,
+                    external_identifier_id=contract.registry_sha256_key_external_code_identifier_id,
+                ),
                 registry_entry_id=contract.registry_sha256_key_entry_id,
                 external_identifier_id=contract.registry_sha256_key_external_code_identifier_id,
             )
@@ -2648,9 +2682,21 @@ class ContractEditorDialog(QDialog):
             self.obligations_editor.load_obligations(detail.obligations)
             self.documents_editor.load_documents(detail.documents)
         else:
-            self.contract_number_edit.set_value(value=None, mode=None, registry_entry_id=None)
-            self.license_number_edit.set_value(value=None, mode=None, registry_entry_id=None)
-            self.registry_sha256_key_edit.set_value(value=None, mode=None, registry_entry_id=None)
+            self.contract_number_edit.set_value(
+                value=None,
+                mode=CATALOG_MODE_INTERNAL,
+                registry_entry_id=None,
+            )
+            self.license_number_edit.set_value(
+                value=None,
+                mode=CATALOG_MODE_INTERNAL,
+                registry_entry_id=None,
+            )
+            self.registry_sha256_key_edit.set_value(
+                value=None,
+                mode=CATALOG_MODE_INTERNAL,
+                registry_entry_id=None,
+            )
             self.obligations_editor.load_obligations([])
             self.documents_editor.load_documents([])
 

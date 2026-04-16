@@ -466,9 +466,11 @@ class ReleaseEditorDialog(QDialog):
             value=release.catalog_number,
             mode=release.catalog_number_mode,
             registry_entry_id=release.catalog_registry_entry_id,
-            external_identifier_id=release.catalog_external_code_identifier_id
-            if release.catalog_external_code_identifier_id is not None
-            else release.external_catalog_identifier_id,
+            external_identifier_id=(
+                release.catalog_external_code_identifier_id
+                if release.catalog_external_code_identifier_id is not None
+                else release.external_catalog_identifier_id
+            ),
         )
         self.upc_edit.setCurrentText(release.upc or "")
         self.territory_edit.setText(release.territory or "")

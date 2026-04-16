@@ -15,12 +15,8 @@ from typing import Iterable
 from isrc_manager.assets import AssetService
 from isrc_manager.code_registry import (
     BUILTIN_CATEGORY_CATALOG_NUMBER,
-    CATALOG_MODE_EMPTY,
     CATALOG_MODE_EXTERNAL,
     CATALOG_MODE_INTERNAL,
-    CLASSIFICATION_INTERNAL,
-    ENTRY_KIND_MANUAL_CAPTURE,
-    CatalogIdentifierResolution,
     CodeRegistryService,
 )
 from isrc_manager.domain.codes import is_blank, to_compact_isrc

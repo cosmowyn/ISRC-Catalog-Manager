@@ -645,9 +645,14 @@ class ExchangeImportDialog(QDialog):
         rows = self._identifier_review_rows()
         self.identifier_review_table.clearContents()
         self.identifier_review_table.setRowCount(len(rows))
-        for row_index, (review_key, source_row, source_header, target_name, value, reason) in enumerate(
-            rows
-        ):
+        for row_index, (
+            review_key,
+            source_row,
+            source_header,
+            target_name,
+            value,
+            reason,
+        ) in enumerate(rows):
             row_item = QTableWidgetItem(str(source_row))
             row_item.setData(0x0100, review_key)
             self.identifier_review_table.setItem(row_index, 0, row_item)

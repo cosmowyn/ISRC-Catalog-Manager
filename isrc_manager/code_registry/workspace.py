@@ -769,7 +769,9 @@ class CodeRegistryWorkspacePanel(QWidget):
         usage = service.usage_for_external_identifier(external_id)
         if record is None:
             return
-        self.external_type_label.setText(self._external_identifier_label(record.category_system_key))
+        self.external_type_label.setText(
+            self._external_identifier_label(record.category_system_key)
+        )
         self.external_value_label.setText(record.value)
         self.external_status_label.setText(record.classification_status)
         self.external_usage_label.setText(str(record.usage_count))

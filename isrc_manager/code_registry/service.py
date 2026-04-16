@@ -18,8 +18,6 @@ from .models import (
     CATALOG_MODE_EMPTY,
     CATALOG_MODE_EXTERNAL,
     CATALOG_MODE_INTERNAL,
-    CatalogIdentifierClassification,
-    CatalogIdentifierResolution,
     CLASSIFICATION_CANONICAL_CANDIDATE,
     CLASSIFICATION_EXTERNAL,
     CLASSIFICATION_INTERNAL,
@@ -37,6 +35,7 @@ from .models import (
     SUBJECT_KIND_GENERIC,
     SUBJECT_KIND_KEY,
     SUBJECT_KIND_LICENSE,
+    CatalogIdentifierResolution,
     CodeIdentifierClassification,
     CodeIdentifierResolution,
     CodeRegistryAssignmentTarget,
@@ -46,7 +45,6 @@ from .models import (
     CodeRegistryEntryGenerationResult,
     CodeRegistryEntryRecord,
     CodeRegistryUsageLink,
-    ExternalCatalogIdentifierRecord,
     ExternalCodeIdentifierRecord,
 )
 
@@ -964,7 +962,9 @@ class CodeRegistryService:
                 params.append(clean_system_key)
         if search_text:
             needle = f"%{str(search_text).strip()}%"
-            where.append("(e.value LIKE ? OR e.source_label LIKE ? OR e.classification_status LIKE ?)")
+            where.append(
+                "(e.value LIKE ? OR e.source_label LIKE ? OR e.classification_status LIKE ?)"
+            )
             params.extend([needle, needle, needle])
         where_sql = f"WHERE {' AND '.join(where)}" if where else ""
         if self._using_legacy_external_catalog_schema():
@@ -1046,7 +1046,10 @@ class CodeRegistryService:
                 """
             )
             params.append(clean_system_key)
-        elif table_name == "ExternalCatalogIdentifiers" and clean_system_key == BUILTIN_CATEGORY_CATALOG_NUMBER:
+        elif (
+            table_name == "ExternalCatalogIdentifiers"
+            and clean_system_key == BUILTIN_CATEGORY_CATALOG_NUMBER
+        ):
             values_sql.append(
                 """
                 SELECT value
@@ -1073,11 +1076,15 @@ class CodeRegistryService:
                     ),
                 ]
             )
-        elif clean_system_key in {
-            BUILTIN_CATEGORY_CONTRACT_NUMBER,
-            BUILTIN_CATEGORY_LICENSE_NUMBER,
-            BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
-        } and "Contracts" in self._table_names():
+        elif (
+            clean_system_key
+            in {
+                BUILTIN_CATEGORY_CONTRACT_NUMBER,
+                BUILTIN_CATEGORY_LICENSE_NUMBER,
+                BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
+            }
+            and "Contracts" in self._table_names()
+        ):
             contract_mapping = {
                 BUILTIN_CATEGORY_CONTRACT_NUMBER: (
                     "contract_number",
@@ -1324,16 +1331,22 @@ class CodeRegistryService:
                     else CATALOG_MODE_EXTERNAL
                 )
         if clean_mode == CATALOG_MODE_EMPTY:
-            return CodeIdentifierResolution(mode=CATALOG_MODE_EMPTY, category_system_key=clean_system_key)
+            return CodeIdentifierResolution(
+                mode=CATALOG_MODE_EMPTY, category_system_key=clean_system_key
+            )
         if clean_mode == CATALOG_MODE_INTERNAL:
             if external_identifier_id is not None:
-                raise ValueError("Internal identifier mode cannot carry an external identifier link.")
+                raise ValueError(
+                    "Internal identifier mode cannot carry an external identifier link."
+                )
             if registry_entry_id is not None:
                 entry = self.fetch_entry(int(registry_entry_id))
                 if entry is None:
                     raise ValueError("Selected internal registry value was not found.")
                 if str(entry.category_system_key or "").strip() != clean_system_key:
-                    raise ValueError("Selected internal registry value belongs to a different category.")
+                    raise ValueError(
+                        "Selected internal registry value belongs to a different category."
+                    )
                 return CodeIdentifierResolution(
                     mode=CATALOG_MODE_INTERNAL,
                     category_system_key=clean_system_key,
@@ -1377,7 +1390,9 @@ class CodeRegistryService:
                 classification_reason=record.classification_reason,
             )
         if not clean_value:
-            return CodeIdentifierResolution(mode=CATALOG_MODE_EMPTY, category_system_key=clean_system_key)
+            return CodeIdentifierResolution(
+                mode=CATALOG_MODE_EMPTY, category_system_key=clean_system_key
+            )
         classification = self.classify_identifier_value(
             system_key=clean_system_key,
             value=clean_value,
@@ -1604,12 +1619,21 @@ class CodeRegistryService:
         if config is None:
             raise ValueError("Unsupported identifier owner/category combination.")
         table_name, text_column, internal_column, external_column, field_label = config
-        if resolution.mode == CATALOG_MODE_INTERNAL and resolution.external_identifier_id is not None:
-            raise ValueError(f"{field_label} cannot carry both internal and external authority links.")
+        if (
+            resolution.mode == CATALOG_MODE_INTERNAL
+            and resolution.external_identifier_id is not None
+        ):
+            raise ValueError(
+                f"{field_label} cannot carry both internal and external authority links."
+            )
         if resolution.mode == CATALOG_MODE_EXTERNAL and resolution.registry_entry_id is not None:
-            raise ValueError(f"{field_label} cannot carry both internal and external authority links.")
+            raise ValueError(
+                f"{field_label} cannot carry both internal and external authority links."
+            )
         if resolution.mode == CATALOG_MODE_EXTERNAL and external_column is None:
-            raise ValueError(f"{field_label} does not support external identifier storage in this schema.")
+            raise ValueError(
+                f"{field_label} does not support external identifier storage in this schema."
+            )
         cur = cursor or self.conn.cursor()
         if resolution.mode == CATALOG_MODE_EMPTY:
             if external_column is None:
@@ -1698,7 +1722,9 @@ class CodeRegistryService:
             self.conn.commit()
         return None, external_id, clean_value
 
-    def fetch_external_code_identifier(self, external_id: int) -> ExternalCodeIdentifierRecord | None:
+    def fetch_external_code_identifier(
+        self, external_id: int
+    ) -> ExternalCodeIdentifierRecord | None:
         table_name = self._external_identifier_table_name()
         if table_name is None:
             return None
@@ -2824,9 +2850,13 @@ class CodeRegistryService:
             )
             params.append(int(external_id))
         contract_column_map = {
-            self._contract_external_column_name(BUILTIN_CATEGORY_CONTRACT_NUMBER): "Contract Number",
+            self._contract_external_column_name(
+                BUILTIN_CATEGORY_CONTRACT_NUMBER
+            ): "Contract Number",
             self._contract_external_column_name(BUILTIN_CATEGORY_LICENSE_NUMBER): "License Number",
-            self._contract_external_column_name(BUILTIN_CATEGORY_REGISTRY_SHA256_KEY): "Registry SHA-256 Key",
+            self._contract_external_column_name(
+                BUILTIN_CATEGORY_REGISTRY_SHA256_KEY
+            ): "Registry SHA-256 Key",
         }
         for column_name, label in contract_column_map.items():
             if column_name is None:

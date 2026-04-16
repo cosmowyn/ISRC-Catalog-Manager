@@ -240,12 +240,11 @@ class ContractService:
         category = service.fetch_category_by_system_key(system_key)
         if category is None:
             raise ValueError(f"Registry category '{system_key}' is not available.")
-        text_column, mode_attr, link_column, external_column, label = self._contract_identifier_spec(
-            system_key
+        text_column, _mode_attr, link_column, external_column, label = (
+            self._contract_identifier_spec(system_key)
         )
         existing_entry_id = getattr(contract, link_column, None)
         existing_external_id = getattr(contract, external_column, None)
-        existing_mode = getattr(contract, mode_attr, None)
         existing_value = clean_text(getattr(contract, text_column, None))
         if existing_entry_id is not None:
             entry = service.fetch_entry(int(existing_entry_id))
@@ -433,9 +432,9 @@ class ContractService:
             registry_sha256_key=clean_text(row[11]),
             registry_sha256_key_mode=str(row[12] or "").strip() or None,
             registry_sha256_key_entry_id=int(row[13]) if row[13] is not None else None,
-            registry_sha256_key_external_code_identifier_id=int(row[14])
-            if row[14] is not None
-            else None,
+            registry_sha256_key_external_code_identifier_id=(
+                int(row[14]) if row[14] is not None else None
+            ),
             draft_date=clean_text(row[15]),
             signature_date=clean_text(row[16]),
             effective_date=clean_text(row[17]),
@@ -590,7 +589,6 @@ class ContractService:
         if resolved is None or not resolved.exists():
             raise FileNotFoundError(row[12] or filename or document_id)
         return resolved.read_bytes(), mime_type
-
 
     def _hash_file(self, path: Path) -> str:
         digest = hashlib.sha256()
@@ -923,8 +921,8 @@ class ContractService:
             BUILTIN_CATEGORY_LICENSE_NUMBER,
             BUILTIN_CATEGORY_REGISTRY_SHA256_KEY,
         ):
-            text_attr, mode_attr, internal_attr, external_attr, label = self._contract_identifier_spec(
-                system_key
+            text_attr, mode_attr, internal_attr, external_attr, label = (
+                self._contract_identifier_spec(system_key)
             )
             internal_id = getattr(payload, internal_attr, None)
             external_id = getattr(payload, external_attr, None)
@@ -1468,15 +1466,11 @@ class ContractService:
         license_external_sql = self._contract_identifier_select_sql(
             BUILTIN_CATEGORY_LICENSE_NUMBER, "c"
         )
-        license_mode_sql = self._contract_identifier_mode_sql(
-            BUILTIN_CATEGORY_LICENSE_NUMBER, "c"
-        )
+        license_mode_sql = self._contract_identifier_mode_sql(BUILTIN_CATEGORY_LICENSE_NUMBER, "c")
         key_external_sql = self._contract_identifier_select_sql(
             BUILTIN_CATEGORY_REGISTRY_SHA256_KEY, "c"
         )
-        key_mode_sql = self._contract_identifier_mode_sql(
-            BUILTIN_CATEGORY_REGISTRY_SHA256_KEY, "c"
-        )
+        key_mode_sql = self._contract_identifier_mode_sql(BUILTIN_CATEGORY_REGISTRY_SHA256_KEY, "c")
         row = self.conn.execute(
             f"""
             SELECT
@@ -1658,15 +1652,11 @@ class ContractService:
         license_external_sql = self._contract_identifier_select_sql(
             BUILTIN_CATEGORY_LICENSE_NUMBER, "c"
         )
-        license_mode_sql = self._contract_identifier_mode_sql(
-            BUILTIN_CATEGORY_LICENSE_NUMBER, "c"
-        )
+        license_mode_sql = self._contract_identifier_mode_sql(BUILTIN_CATEGORY_LICENSE_NUMBER, "c")
         key_external_sql = self._contract_identifier_select_sql(
             BUILTIN_CATEGORY_REGISTRY_SHA256_KEY, "c"
         )
-        key_mode_sql = self._contract_identifier_mode_sql(
-            BUILTIN_CATEGORY_REGISTRY_SHA256_KEY, "c"
-        )
+        key_mode_sql = self._contract_identifier_mode_sql(BUILTIN_CATEGORY_REGISTRY_SHA256_KEY, "c")
         rows = self.conn.execute(
             f"""
             SELECT

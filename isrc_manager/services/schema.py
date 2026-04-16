@@ -1332,9 +1332,7 @@ class DatabaseSchemaService:
         release_rows = _table_rows("Releases") if self._table_exists("Releases") else []
         contract_rows = _table_rows("Contracts") if self._table_exists("Contracts") else []
 
-        original_foreign_keys = int(
-            self.conn.execute("PRAGMA foreign_keys").fetchone()[0] or 0
-        )
+        original_foreign_keys = int(self.conn.execute("PRAGMA foreign_keys").fetchone()[0] or 0)
         self.cursor.execute("PRAGMA foreign_keys=OFF")
         try:
             self.cursor.execute("DROP VIEW IF EXISTS vw_Licenses")
@@ -1399,9 +1397,11 @@ class DatabaseSchemaService:
                         owner_id=int(payload.get("id") or 0),
                         text_value=payload.get("catalog_number"),
                         internal_id=payload.get("catalog_registry_entry_id"),
-                        external_id=payload.get("catalog_external_code_identifier_id")
-                        if payload.get("catalog_external_code_identifier_id") is not None
-                        else payload.get("external_catalog_identifier_id"),
+                        external_id=(
+                            payload.get("catalog_external_code_identifier_id")
+                            if payload.get("catalog_external_code_identifier_id") is not None
+                            else payload.get("external_catalog_identifier_id")
+                        ),
                     )
                     insert_payload = dict(payload)
                     insert_payload["catalog_number"] = catalog_value
@@ -1475,9 +1475,11 @@ class DatabaseSchemaService:
                         owner_id=int(payload.get("id") or 0),
                         text_value=payload.get("catalog_number"),
                         internal_id=payload.get("catalog_registry_entry_id"),
-                        external_id=payload.get("catalog_external_code_identifier_id")
-                        if payload.get("catalog_external_code_identifier_id") is not None
-                        else payload.get("external_catalog_identifier_id"),
+                        external_id=(
+                            payload.get("catalog_external_code_identifier_id")
+                            if payload.get("catalog_external_code_identifier_id") is not None
+                            else payload.get("external_catalog_identifier_id")
+                        ),
                     )
                     insert_payload = dict(payload)
                     insert_payload["catalog_number"] = catalog_value
@@ -1591,9 +1593,7 @@ class DatabaseSchemaService:
                 self._ensure_repertoire_tables()
 
         finally:
-            self.cursor.execute(
-                f"PRAGMA foreign_keys={'ON' if original_foreign_keys else 'OFF'}"
-            )
+            self.cursor.execute(f"PRAGMA foreign_keys={'ON' if original_foreign_keys else 'OFF'}")
 
         self._ensure_license_columns()
         self._ensure_code_registry_tables(backfill_catalog_links=False)
@@ -2224,13 +2224,7 @@ class DatabaseSchemaService:
         for payload in migrated_track_rows:
             insert_values: list[object] = []
             for column_name in track_insert_columns:
-                if (
-                    column_name == "catalog_external_code_identifier_id"
-                    and payload.get(column_name) is None
-                ):
-                    value = payload.get("external_catalog_identifier_id")
-                else:
-                    value = payload.get(column_name)
+                value = payload.get(column_name)
                 if value is None and column_name in track_insert_defaults:
                     value = track_insert_defaults[column_name]
                 insert_values.append(value)
@@ -2600,7 +2594,10 @@ class DatabaseSchemaService:
             ON Releases(catalog_number)
             """
         )
-        if "catalog_registry_entry_id" in release_columns or "catalog_registry_entry_id" in self._table_columns("Releases"):
+        if (
+            "catalog_registry_entry_id" in release_columns
+            or "catalog_registry_entry_id" in self._table_columns("Releases")
+        ):
             self.cursor.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_releases_catalog_registry_entry_id
@@ -2899,9 +2896,12 @@ class DatabaseSchemaService:
     def _ensure_code_registry_entry_immutability_triggers(self) -> None:
         self.cursor.execute("DROP TRIGGER IF EXISTS trg_code_registry_entries_no_update")
         self.cursor.execute("DROP TRIGGER IF EXISTS trg_code_registry_entries_no_delete")
-        tables = {str(row[0] or "") for row in self.cursor.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        ).fetchall()}
+        tables = {
+            str(row[0] or "")
+            for row in self.cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
         self.cursor.execute(
             """
             CREATE TRIGGER IF NOT EXISTS trg_code_registry_entries_no_update
@@ -3006,23 +3006,29 @@ class DatabaseSchemaService:
                 continue
             keep_id = int(rows[0][0])
             duplicate_ids = [int(row[0]) for row in rows[1:]]
+            track_columns = self._table_columns("Tracks") if self._table_exists("Tracks") else set()
+            release_columns = (
+                self._table_columns("Releases") if self._table_exists("Releases") else set()
+            )
             for duplicate_id in duplicate_ids:
-                self.cursor.execute(
-                    """
-                    UPDATE Tracks
-                    SET external_catalog_identifier_id=?
-                    WHERE external_catalog_identifier_id=?
-                    """,
-                    (keep_id, duplicate_id),
-                )
-                self.cursor.execute(
-                    """
-                    UPDATE Releases
-                    SET external_catalog_identifier_id=?
-                    WHERE external_catalog_identifier_id=?
-                    """,
-                    (keep_id, duplicate_id),
-                )
+                if "external_catalog_identifier_id" in track_columns:
+                    self.cursor.execute(
+                        """
+                        UPDATE Tracks
+                        SET external_catalog_identifier_id=?
+                        WHERE external_catalog_identifier_id=?
+                        """,
+                        (keep_id, duplicate_id),
+                    )
+                if "external_catalog_identifier_id" in release_columns:
+                    self.cursor.execute(
+                        """
+                        UPDATE Releases
+                        SET external_catalog_identifier_id=?
+                        WHERE external_catalog_identifier_id=?
+                        """,
+                        (keep_id, duplicate_id),
+                    )
             if duplicate_ids:
                 placeholders = ",".join("?" for _ in duplicate_ids)
                 self.cursor.execute(

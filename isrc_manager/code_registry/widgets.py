@@ -142,7 +142,9 @@ class CodeIdentifierSelector(QWidget):
             values: list[str] = []
         elif self._current_mode() == CATALOG_MODE_INTERNAL:
             entries = service.list_entries(category_id=category.id)
-            self._internal_value_to_entry_id = {str(entry.value): int(entry.id) for entry in entries}
+            self._internal_value_to_entry_id = {
+                str(entry.value): int(entry.id) for entry in entries
+            }
             values = sorted(self._internal_value_to_entry_id)
         else:
             self._internal_value_to_entry_id = {}
@@ -167,10 +169,11 @@ class CodeIdentifierSelector(QWidget):
         finally:
             self.value_combo.blockSignals(previous)
         generation_reason = self._generation_unavailable_reason()
-        self.generate_button.setVisible(
+        internal_generation_mode = (
             self.allow_generate and self._current_mode() == CATALOG_MODE_INTERNAL
         )
-        self.generate_button.setEnabled(generation_reason is None)
+        self.generate_button.setVisible(internal_generation_mode)
+        self.generate_button.setEnabled(internal_generation_mode and generation_reason is None)
         self.generate_button.setToolTip(generation_reason or "")
         self._sync_ids_from_text()
         self._refresh_status()

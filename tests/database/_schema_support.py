@@ -486,10 +486,10 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
         )
         self.assertIn("party_id", track_artist_columns)
         self.assertTrue(
-            {"catalog_registry_entry_id", "external_catalog_identifier_id"} <= track_columns
+            {"catalog_registry_entry_id", "catalog_external_code_identifier_id"} <= track_columns
         )
         self.assertTrue(
-            {"catalog_registry_entry_id", "external_catalog_identifier_id"} <= release_columns
+            {"catalog_registry_entry_id", "catalog_external_code_identifier_id"} <= release_columns
         )
         self.assertTrue(
             {
@@ -497,8 +497,11 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                 "license_number",
                 "registry_sha256_key",
                 "contract_registry_entry_id",
+                "contract_external_code_identifier_id",
                 "license_registry_entry_id",
+                "license_external_code_identifier_id",
                 "registry_sha256_key_entry_id",
+                "registry_sha256_key_external_code_identifier_id",
             }
             <= contract_columns
         )
@@ -1939,10 +1942,11 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                 self.assertIn("CodeRegistryEntries", tables)
                 self.assertIn("ExternalCatalogIdentifiers", tables)
                 self.assertTrue(
-                    {"catalog_registry_entry_id", "external_catalog_identifier_id"} <= track_columns
+                    {"catalog_registry_entry_id", "catalog_external_code_identifier_id"}
+                    <= track_columns
                 )
                 self.assertTrue(
-                    {"catalog_registry_entry_id", "external_catalog_identifier_id"}
+                    {"catalog_registry_entry_id", "catalog_external_code_identifier_id"}
                     <= release_columns
                 )
                 self.assertTrue(
@@ -1951,8 +1955,11 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                         "license_number",
                         "registry_sha256_key",
                         "contract_registry_entry_id",
+                        "contract_external_code_identifier_id",
                         "license_registry_entry_id",
+                        "license_external_code_identifier_id",
                         "registry_sha256_key_entry_id",
+                        "registry_sha256_key_external_code_identifier_id",
                     }
                     <= contract_columns
                 )
@@ -1978,12 +1985,19 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                 )
                 self.assertEqual(
                     conn.execute("SELECT COUNT(*) FROM ExternalCatalogIdentifiers").fetchone()[0],
+                    0,
+                )
+                self.assertEqual(
+                    conn.execute("SELECT COUNT(*) FROM ExternalCodeIdentifiers").fetchone()[0],
                     2,
                 )
                 self.assertEqual(
                     conn.execute(
                         """
-                        SELECT catalog_number, catalog_registry_entry_id, external_catalog_identifier_id
+                        SELECT
+                            catalog_number,
+                            catalog_registry_entry_id,
+                            catalog_external_code_identifier_id
                         FROM Tracks
                         """
                     ).fetchone(),
@@ -1992,7 +2006,10 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                 self.assertEqual(
                     conn.execute(
                         """
-                        SELECT catalog_number, catalog_registry_entry_id, external_catalog_identifier_id
+                        SELECT
+                            catalog_number,
+                            catalog_registry_entry_id,
+                            catalog_external_code_identifier_id
                         FROM Releases
                         """
                     ).fetchone(),
@@ -2009,6 +2026,25 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                 service = DatabaseSchemaService(conn, data_root=Path(tmpdir))
                 service.init_db()
                 service._mig_35_to_36()
+                conn.commit()
+                conn.execute("PRAGMA foreign_keys = OFF")
+                conn.execute("DROP TABLE IF EXISTS ReleaseTracks")
+                conn.execute("DROP TABLE IF EXISTS TrackArtists")
+                conn.execute("DROP TABLE IF EXISTS Tracks")
+                conn.execute(
+                    """
+                    CREATE TABLE Tracks (
+                        id INTEGER PRIMARY KEY,
+                        isrc TEXT NOT NULL,
+                        isrc_compact TEXT,
+                        track_title TEXT NOT NULL,
+                        catalog_number TEXT,
+                        external_catalog_identifier_id INTEGER,
+                        main_artist_party_id INTEGER NOT NULL
+                    )
+                    """
+                )
+                conn.execute("PRAGMA foreign_keys = ON")
                 conn.execute("PRAGMA user_version = 36")
                 conn.execute(
                     "DROP INDEX IF EXISTS idx_external_catalog_identifiers_normalized_value"
@@ -2072,7 +2108,7 @@ class DatabaseSchemaServiceTestCase(unittest.TestCase):
                 )
                 rows = conn.execute(
                     """
-                    SELECT external_catalog_identifier_id
+                    SELECT catalog_external_code_identifier_id
                     FROM Tracks
                     ORDER BY id
                     """
