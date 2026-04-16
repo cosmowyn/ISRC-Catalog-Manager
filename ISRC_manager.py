@@ -212,6 +212,8 @@ from isrc_manager.domain.standard_fields import (
 )
 from isrc_manager.domain.timecode import hms_to_seconds, parse_hms_text, seconds_to_hms
 from isrc_manager.diagnostics_progress import DiagnosticsProgressTracker
+from isrc_manager.conversion import ConversionService, ConversionTemplateStoreService
+from isrc_manager.conversion.dialogs import ConversionDialog
 from isrc_manager.exchange.dialogs import ExchangeImportDialog
 from isrc_manager.exchange.models import (
     ExchangeImportOptions,
@@ -6299,6 +6301,8 @@ class App(QMainWindow):
         self.audio_tag_service = None
         self.tagged_audio_export_service = None
         self.exchange_service = None
+        self.conversion_service = ConversionService()
+        self.conversion_template_store_service = None
         self.party_exchange_service = None
         self.quality_service = None
         self.release_browser_dialog = None
@@ -7185,7 +7189,7 @@ class App(QMainWindow):
                 continue
             except Exception:
                 break
-        return "3.1.0"
+        return "3.1.1"
 
     def _help_html(self) -> str:
         return render_help_html(
@@ -9371,6 +9375,13 @@ class App(QMainWindow):
             )
             else None
         )
+        self.conversion_service = ConversionService(
+            exchange_service=self.exchange_service,
+            settings_read_service=self.settings_reads,
+        )
+        self.conversion_template_store_service = (
+            ConversionTemplateStoreService(self.conn) if self.conn is not None else None
+        )
         self.party_exchange_service = (
             PartyExchangeService(
                 self.conn,
@@ -11128,6 +11139,8 @@ class App(QMainWindow):
         self.audio_tag_service = None
         self.tagged_audio_export_service = None
         self.exchange_service = None
+        self.conversion_service = ConversionService()
+        self.conversion_template_store_service = None
         self.party_exchange_service = None
         self.repertoire_exchange_service = None
         self.quality_service = None
@@ -16844,6 +16857,159 @@ class App(QMainWindow):
             return
         dlg.exec()
 
+    def open_conversion_dialog(self) -> None:
+        dialog = ConversionDialog(
+            service=self.conversion_service
+            or ConversionService(
+                exchange_service=self.exchange_service,
+                settings_read_service=self.settings_reads,
+            ),
+            settings=self.settings,
+            template_store_service=self.conversion_template_store_service,
+            export_callback=self._start_conversion_export,
+            exports_dir=self.exports_dir,
+            profile_available=bool(self.conn is not None and self.exchange_service is not None),
+            default_database_track_ids_provider=self._default_conversion_track_ids,
+            track_choices_provider=self._all_catalog_track_choices,
+            parent=self,
+        )
+        try:
+            dialog.exec()
+        finally:
+            dialog.close()
+
+    def _start_conversion_export(self, preview, output_path: str | Path) -> None:
+        format_name = str(preview.template_profile.format_name or "").strip().lower() or "conversion"
+        default_name = Path(str(output_path or "")).name or (
+            f"conversion_output{preview.template_profile.output_suffix or f'.{format_name}'}"
+        )
+        try:
+            resolved_path = self._resolve_file_export_target(
+                output_path,
+                default_filename=default_name,
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "Template Conversion", str(exc))
+            return
+        expected_suffix = str(preview.template_profile.output_suffix or "").strip()
+        if expected_suffix and resolved_path.suffix.lower() != expected_suffix.lower():
+            resolved_path = resolved_path.with_suffix(expected_suffix)
+        if (
+            preview.template_profile.template_bytes is None
+            and resolved_path.resolve() == preview.template_profile.template_path.resolve()
+        ):
+            QMessageBox.warning(
+                self,
+                "Template Conversion",
+                "Choose a new output file. Conversion export never overwrites the source template.",
+            )
+            return
+
+        use_history = (
+            self.history_manager is not None
+            and str(getattr(self, "current_db_path", "") or "").strip()
+            and self.background_service_factory is not None
+        )
+
+        def _worker(bundle, ctx):
+            export_progress = self._scaled_progress_callback(ctx.report_progress, start=0, end=92)
+
+            def _mutation():
+                return bundle.conversion_service.export_preview(
+                    preview,
+                    resolved_path,
+                    progress_callback=export_progress,
+                )
+
+            return run_file_history_action(
+                history_manager=bundle.history_manager,
+                action_label=lambda result: (
+                    f"Export Conversion {result.target_format.upper()}: {result.exported_row_count} rows"
+                ),
+                action_type="file.conversion_export",
+                target_path=resolved_path,
+                mutation=_mutation,
+                entity_type="ConversionExport",
+                entity_id=str(resolved_path),
+                payload=lambda result: {
+                    "path": str(resolved_path),
+                    "format": result.target_format,
+                    "row_count": result.exported_row_count,
+                    "template_path": str(preview.template_profile.template_path),
+                    "source_mode": preview.source_profile.source_mode,
+                },
+                progress_callback=ctx.report_progress,
+                post_mutation_progress=(95, "Capturing conversion export history..."),
+                record_progress=(97, "Recording conversion export history..."),
+                logger=self.logger,
+            )
+
+        def _direct_worker(ctx):
+            export_progress = self._scaled_progress_callback(ctx.report_progress, start=0, end=96)
+            return self.conversion_service.export_preview(
+                preview,
+                resolved_path,
+                progress_callback=export_progress,
+            )
+
+        def _success(result) -> None:
+            if self.history_manager is not None:
+                self._refresh_history_actions()
+            self._log_event(
+                "conversion.export",
+                "Exported template conversion output",
+                path=str(resolved_path),
+                format=result.target_format,
+                exported_rows=result.exported_row_count,
+                template_path=str(preview.template_profile.template_path),
+                source_mode=preview.source_profile.source_mode,
+            )
+            if self.conn is not None:
+                self._audit(
+                    "EXPORT",
+                    "ConversionExport",
+                    ref_id=str(resolved_path),
+                    details=(
+                        f"format={result.target_format}; rows={result.exported_row_count}; "
+                        f"template={preview.template_profile.template_path.name}"
+                    ),
+                )
+                self._audit_commit()
+            message_lines = [
+                f"Converted output written to:\n{resolved_path}",
+                "",
+                f"Format: {result.target_format.upper()}",
+                f"Rows written: {result.exported_row_count}",
+            ]
+            if result.summary_lines:
+                message_lines.extend(["", *result.summary_lines])
+            QMessageBox.information(self, "Template Conversion", "\n".join(message_lines))
+
+        submit_kwargs = {
+            "title": f"Export Conversion {format_name.upper()}",
+            "description": "Rendering the converted output from the compiled template preview...",
+            "kind": "read",
+            "unique_key": f"conversion.export.{format_name}",
+            "worker_completion_progress": (100, "Conversion export complete."),
+            "on_success_after_cleanup": _success,
+            "on_error": lambda failure: self._show_background_task_error(
+                "Template Conversion",
+                failure,
+                user_message="Could not export the converted output:",
+            ),
+        }
+        if use_history:
+            self._submit_background_bundle_task(
+                task_fn=_worker,
+                **submit_kwargs,
+            )
+        else:
+            self._submit_background_task(
+                task_fn=_direct_worker,
+                requires_profile=False,
+                **submit_kwargs,
+            )
+
     def _current_profile_name(self) -> str | None:
         path = str(getattr(self, "current_db_path", "") or "").strip()
         return Path(path).name if path else None
@@ -16886,6 +17052,15 @@ class App(QMainWindow):
                     visible_ids.append(track_id)
             return self._normalize_track_ids(visible_ids)
         return self._normalize_track_ids(self._selected_track_ids())
+
+    def _default_conversion_track_ids(self) -> list[int]:
+        selected_ids = self._normalize_track_ids(self._selected_track_ids())
+        if selected_ids:
+            return selected_ids
+        row_count = self.table.rowCount()
+        if any(self.table.isRowHidden(row) for row in range(row_count)):
+            return self._current_visible_track_ids()
+        return []
 
     def _current_visible_track_ids(self) -> list[int]:
         visible_ids: list[int] = []

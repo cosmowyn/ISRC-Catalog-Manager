@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "isrc-catalog-manager"
-version = "3.1.0"
+version = "3.1.1"
 description = "Desktop ISRC catalog manager for tracks, metadata, licensing, and exports."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -45,6 +45,8 @@ packages = [
   "isrc_manager.assets",
   "isrc_manager.contracts",
   "isrc_manager.contract_templates",
+  "isrc_manager.conversion",
+  "isrc_manager.conversion.adapters",
   "isrc_manager.domain",
   "isrc_manager.exchange",
   "isrc_manager.forensics",

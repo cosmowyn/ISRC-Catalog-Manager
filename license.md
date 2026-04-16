@@ -1,6 +1,6 @@
 Copyright (c) 2025 M. van de Kleut
 
-Current product version: `3.1.0`
+Current product version: `3.1.1`
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to use,

@@ -69,7 +69,7 @@ class _DiagnosticsDialogHost(QWidget):
         self.progress_updates = []
         self._report = {
             "environment": {
-                "App version": "3.1.0",
+                "App version": "3.1.1",
                 "Schema version": "77",
                 "Current profile": "catalog.db",
                 "Database path": "/tmp/catalog.db",
@@ -527,7 +527,7 @@ class AppDialogsTests(unittest.TestCase):
                 ["Health", "Catalog Cleanup"],
             )
             self.assertIsNotNone(dialog.body_scroll.widget())
-            self.assertEqual(dialog.environment_labels["App version"].text(), "3.1.0")
+            self.assertEqual(dialog.environment_labels["App version"].text(), "3.1.1")
             self.assertIn("1.8 GB", dialog.history_storage_summary_label.text())
             self.assertIn("3.2 GB", dialog.application_storage_summary_label.text())
             self.assertEqual(dialog.history_storage_metric_labels["budget"].text(), "1.0 GB")

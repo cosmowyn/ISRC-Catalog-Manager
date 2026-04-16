@@ -41,6 +41,8 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "csv",
             "json",
             "xlsx",
+            "conversion",
+            "template conversion",
             "bulk attach audio",
             "retention",
             "startup splash",
@@ -58,7 +60,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Add Album</strong>: the primary batch-entry surface. It behaves as batch Add Track, so each populated row resolves Work governance before the album save completes.</li>
           <li><strong>Work Manager</strong>: the parent governance and management surface for work metadata, ownership, contributions, and linked tracks after or alongside track-first entry.</li>
           <li><strong>Releases</strong>: first-class product records for UPC/EAN, release artwork, ordering, and release-level metadata.</li>
-          <li><strong>Code Registry Workspace</strong>: the central workspace for internal catalog, contract, and license numbers plus the separate Registry SHA-256 Key and external catalog identifiers.</li>
+          <li><strong>Code Registry Workspace</strong>: the central workspace for internal catalog, contract, and license numbers plus the separate Registry SHA-256 Key and external identifiers.</li>
           <li><strong>Works</strong>: a composition layer that stays distinct from recordings so the same work can connect to multiple tracks.</li>
           <li><strong>Parties</strong>: reusable people and companies for writers, publishers, labels, managers, licensees, and organizations.</li>
           <li><strong>Contracts and rights</strong>: lifecycle-aware agreement records, obligations, document versions, and explicit rights positions linked back to the catalog.</li>
@@ -66,7 +68,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Catalog Table</strong>: the central browser for searching, selecting, bulk editing, and reviewing recording data.</li>
           <li><strong>Global Search</strong>: a relationship-aware search surface across works, tracks, releases, contracts, rights, parties, documents, and assets.</li>
           <li><strong>Docked catalog workspace</strong>: code registry, release, work, license, party, contract, rights, deliverables, and search panels can stay open as tabbed workspace surfaces beside the catalog table.</li>
-          <li><strong>Import and exchange</strong>: CSV, XLSX, JSON, XML, ZIP, audio-tag, bulk audio attach, and GS1 workflows for bringing data in, classifying internal versus external identifiers, reconciling it, attaching media, exporting it, and archiving it safely.</li>
+          <li><strong>Import, exchange, and conversion</strong>: CSV, XLSX, JSON, XML, ZIP, audio-tag, template conversion, bulk audio attach, and GS1 workflows for bringing data in, classifying internal versus external identifiers, reconciling it, filling external templates, attaching media, exporting it, and archiving it safely.</li>
           <li><strong>Quality Dashboard</strong>: a practical readiness view for metadata gaps, identifier conflicts, broken media links, rights risks, and operational blockers.</li>
           <li><strong>Diagnostics and recovery</strong>: snapshots, backups, cleanup, trim, diagnostics, repair paths, and logs keep heavier workflows recoverable.</li>
           <li><strong>Action Ribbon</strong>: a customizable quick-action strip for your most-used commands.</li>
@@ -76,7 +78,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Flexible file storage</strong>: file-backed records can be kept as database BLOBs or as managed local files without changing the surrounding UI workflow.</li>
           <li><strong>Media badge icons</strong>: separate visual indicators for stored audio and image BLOBs can be configured with system icons, emoji, or compressed custom images.</li>
         </ul>
-        <p>The menu bar mirrors those workflows. <strong>File</strong> handles profiles and exchange, <strong>Edit</strong> starts governed musical entry with <strong>Add Track</strong> and <strong>Add Album</strong> and edits the current selection, <strong>Catalog</strong> opens the richer repertoire tools, <strong>Settings</strong> controls app and profile configuration, <strong>View</strong> manages layout and helper surfaces, <strong>History</strong> protects recoverability, and <strong>Help</strong> gives you diagnostics, logs, and this manual.</p>
+        <p>The menu bar mirrors those workflows. <strong>File</strong> handles profiles, exchange, and template conversion, <strong>Edit</strong> starts governed musical entry with <strong>Add Track</strong> and <strong>Add Album</strong> and edits the current selection, <strong>Catalog</strong> opens the richer repertoire tools, <strong>Settings</strong> controls app and profile configuration, <strong>View</strong> manages layout and helper surfaces, <strong>History</strong> protects recoverability, and <strong>Help</strong> gives you diagnostics, logs, and this manual.</p>
         """,
     ),
     HelpChapter(
@@ -439,12 +441,12 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
     HelpChapter(
         chapter_id="code-registry",
         title="Code Registry Workspace",
-        summary="Manage app-owned business codes and separate external catalog identifiers from one docked workspace.",
+        summary="Manage app-owned business codes and separate external identifiers from one docked workspace.",
         keywords=(
             "code registry",
             "catalog identifier",
             "internal registry",
-            "external catalog",
+            "external identifier",
             "registry sha-256 key",
             "contract number",
             "license number",
@@ -454,7 +456,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
             "link selected value",
         ),
         content_html="""
-        <p>The <strong>Code Registry Workspace</strong> is the authoritative home for app-managed business codes and generated keys. It keeps internal registry values separate from external catalog identifiers so the app can govern its own numbering without rejecting real third-party catalog data.</p>
+        <p>The <strong>Code Registry Workspace</strong> is the authoritative home for app-managed business codes and generated keys. It keeps internal registry values separate from external identifiers so the app can govern its own numbering without rejecting real third-party catalog data.</p>
         <ul>
           <li><strong>Internal Registry</strong>: search and filter issued internal values, review where they are linked, generate the next internal code for a category, generate a <strong>Registry SHA-256 Key</strong>, link a generated value later with <strong>Link Selected Value</strong>, and delete an unused Registry SHA-256 Key when it is not linked anywhere.</li>
           <li><strong>External Identifiers</strong>: review foreign or non-conforming identifier values, including migration and import outcomes, shared usage counts, and promotion or reclassification actions.</li>
@@ -531,6 +533,38 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         """,
     ),
     HelpChapter(
+        chapter_id="conversion",
+        title="Template Conversion",
+        summary="Load rigid CSV, XLSX, or repeat-node XML templates, map either source files or current-profile track rows into them, preview the real output, and export a faithful new artifact.",
+        keywords=(
+            "conversion",
+            "template conversion",
+            "file menu conversion",
+            "mapping",
+            "preview",
+            "template",
+            "csv",
+            "xlsx",
+            "xml",
+            "json",
+            "sena",
+            "record selection",
+        ),
+        content_html="""
+        <p><strong>File &gt; Conversion…</strong> is the template-driven export workflow for rigid third-party import sheets and registration files. It is designed for real-world cases where an organization gives you a fixed CSV, XLSX, or XML structure and expects your output to match that structure closely. A common example is preparing upload sheets for PRO or collection-society registration work, such as SENA-style work registration spreadsheets.</p>
+        <ul>
+          <li><strong>Target template</strong>: load a CSV, XLSX, XLSM/XLTX/XLTM workbook, or repeat-node XML template and let the app inspect its writable target fields, chosen sheet/node scope, and required-versus-optional targets where that can be inferred safely.</li>
+          <li><strong>Source modes</strong>: use a structured source file (<code>CSV</code>, <code>XLSX</code>, <code>XML</code>, or <code>JSON</code>) or use <strong>Current Profile Tracks</strong> for track-centric export rows based on the catalog selection and release-aware exchange export view.</li>
+          <li><strong>Selection control</strong>: database mode starts from the current selected catalog rows when possible, otherwise the current filtered visible rows, and can be overridden explicitly with the shared track chooser. Every parsed source row also has its own <strong>Use</strong> checkbox in the source preview.</li>
+          <li><strong>Mapping</strong>: the app auto-suggests mappings by normalized field names and common aliases, but every target can be switched to a different source field, a constant value, or <strong>Unmapped</strong>. Supported transforms are explicit and limited to safe built-ins such as duration-to-HMS, year extraction, yes/no conversion, and comma joins.</li>
+          <li><strong>Saved templates</strong>: you can save a reviewed template into the open profile database and optionally store the current mapping with it. That makes recurring PRO upload sheets faster to reuse because the template file and its mapping can be loaded together later without rebuilding the setup from scratch.</li>
+          <li><strong>Preview</strong>: review the template structure, the parsed source rows, the active mapping, and the final rendered output before any file is written. Required unmapped targets block export; optional or XML-unknown empty targets warn instead.</li>
+          <li><strong>Export</strong>: Conversion always writes a new output artifact. It never overwrites the original template in place, and it preserves the selected template structure as faithfully as the target format allows.</li>
+        </ul>
+        <p>This workflow is separate from plain external audio conversion. Template Conversion is for structured registration and exchange files, not for rewriting media containers. It also differs from exchange import: exchange import writes into the catalog, while template conversion compiles catalog or source-file data into an external target template and writes a new file only. It is template-and-mapping driven rather than being a hardcoded direct integration for any single PRO.</p>
+        """,
+    ),
+    HelpChapter(
         chapter_id="exchange-formats",
         title="Exchange Formats",
         summary="How the app moves metadata in and out safely through exchange formats built for both daily operations and durable archives.",
@@ -552,6 +586,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
         <ul>
           <li><strong>Export formats</strong>: CSV, XLSX, JSON, XML, and ZIP packages containing a JSON manifest plus materialized attachment copies.</li>
           <li><strong>Import formats</strong>: CSV, XLSX, JSON, ZIP packages, and XML.</li>
+          <li><strong>Template conversion</strong>: <strong>File &gt; Conversion…</strong> uses a separate template-driven export workflow when the target must conform to a third-party CSV, XLSX, or repeat-node XML layout rather than to the app's own exchange schema. Reviewed templates can also be saved into the profile database with an optional saved mapping for recurring upload sheets.</li>
           <li><strong>Import setup</strong>: CSV, XLSX, JSON, ZIP package, and XML imports all open the same exchange setup surface so you can review preview rows, match rules, and field targets before running the job.</li>
           <li><strong>Saved mapping presets</strong>: frequently used column mappings can be saved per format and reused later.</li>
           <li><strong>Saved choices</strong>: per-format import choices can be remembered and later cleared from <strong>File &gt; Import &amp; Exchange &gt; Catalog Exchange &gt; Reset Saved Import Choices…</strong>.</li>
@@ -562,7 +597,7 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>JSON schema versioning</strong>: exported JSON includes an explicit schema version so future migrations stay manageable.</li>
           <li><strong>Repertoire Exchange</strong>: a separate import/export workflow covers parties, works, contracts, rights, asset versions, and their relationship references as JSON, XLSX, CSV bundles, or ZIP packages with managed files.</li>
         </ul>
-        <p>Binary media is referenced in plain tabular exports, while ZIP packages materialize both database-backed and managed-file-backed records into portable files and preserve the recorded storage mode on import. Import preview, mapping, packaging, export, and extraction all run in the background so larger exchange jobs stay practical. For the matching, merge, delimiter, and XML specifics, see <strong>Import and Merge Workflows</strong> in this manual.</p>
+        <p>Binary media is referenced in plain tabular exports, while ZIP packages materialize both database-backed and managed-file-backed records into portable files and preserve the recorded storage mode on import. Import preview, mapping, packaging, export, extraction, and template-conversion export all run in the background so larger jobs stay practical. For the matching, merge, delimiter, and XML specifics, see <strong>Import and Merge Workflows</strong> and <strong>Template Conversion</strong> in this manual.</p>
         """,
     ),
     HelpChapter(
@@ -591,9 +626,10 @@ HELP_CHAPTERS: tuple[HelpChapter, ...] = (
           <li><strong>Exchange modes</strong>: <code>dry_run</code> checks setup without writing, <code>create</code> creates new tracks, <code>update</code> updates matched tracks only, <code>merge</code> updates matched tracks while preserving many existing populated values, and <code>insert_new</code> creates only unmatched rows and skips duplicates.</li>
           <li><strong>Exchange matching</strong>: matching can use internal ID, ISRC, UPC plus title, and optional title/artist heuristics. The importer is deterministic and does not provide a row-by-row manual assignment queue.</li>
           <li><strong>Release upsert and package restore</strong>: exchange import can update or create linked releases from supplied release fields, while ZIP package import restores packaged files and their recorded storage mode.</li>
-          <li><strong>Catalog identifier outcomes</strong>: import reporting now distinguishes values that were accepted as internal registry entries, stored as external catalog identifiers, flagged as mismatches, skipped, merged, or conflicted. Reused external identifiers are shared and counted rather than duplicated once per owner.</li>
+          <li><strong>Catalog identifier outcomes</strong>: import reporting now distinguishes values that were accepted as internal registry entries, stored as external identifiers, flagged as mismatches, skipped, merged, or conflicted. Reused external identifiers are shared and counted rather than duplicated once per owner.</li>
           <li><strong>XML import</strong>: supported catalog XML shapes flow through the same exchange setup surface as the tabular formats. The XML parser still performs schema-aware inspection first, surfaces duplicate ISRCs and custom-field conflicts, and can create missing custom fields when allowed before the mapped import runs.</li>
           <li><strong>Bulk audio attach</strong>: <strong>Catalog &gt; Audio &gt; Import &amp; Attach &gt; Bulk Attach Audio Files…</strong> is the better fit when track rows already exist and you need to match local files onto them in one reviewed batch.</li>
+          <li><strong>Template conversion is export-only</strong>: <strong>File &gt; Conversion…</strong> reuses the same preview-first discipline for rigid third-party templates, but it does not write into the catalog database.</li>
           <li><strong>Audio tags</strong>: read embedded tags from supported audio files and preview conflicts before writing to the catalog. Catalog-backed audio export workflows embed metadata automatically, while the plain external conversion workflow stays metadata-free.</li>
         </ul>
         <p>This workflow is useful for structured exports from labels, catalog administrators, collection societies, and PRO-style sources such as BUMA, STEMRA, SENA, and similar organizations, provided the data can be exported into a supported format. That support is format-based and mapping-based, not a direct third-party integration.</p>
@@ -894,6 +930,7 @@ HELP_SECTION_MAP: dict[str, str] = {
     "storage-modes": "Deep Dives",
     "exchange-formats": "Deep Dives",
     "import-workflows": "Deep Dives",
+    "conversion": "Deep Dives",
     "catalog-managers": "Deep Dives",
     "audio-authenticity": "Deep Dives",
     "gs1-metadata": "Deep Dives",

@@ -1,6 +1,6 @@
 # ISRC Catalog Manager
 
-Current product version: `3.1.0`
+Current product version: `3.1.1`
 
 ISRC Catalog Manager is a local-first desktop catalog and repertoire operations workspace for artists, labels, managers, and catalog owners who need more than a basic track list.
 
@@ -86,7 +86,7 @@ It supports:
 - internal catalog, contract, and license number categories with configurable prefixes
 - generated internal codes in the `<PREFIX><YY><NNNN>` format
 - a separate `Registry SHA-256 Key` category for secure generated registry keys
-- external catalog identifiers that do not match the internal format
+- external identifiers that do not match the internal format
 - shared usage counts when the same catalog identifier is linked to multiple tracks or releases
 - linking unassigned generated values later from the workspace itself
 
@@ -115,6 +115,7 @@ The authenticity claim comes from the signed manifest. The keyed watermark links
 The import layer is a reviewed workflow surface rather than a blind file picker. The app supports:
 
 - catalog exchange import for XML, CSV, XLSX, JSON, and ZIP package sources
+- template-driven conversion for external CSV, XLSX, and repeat-node XML import sheets, including recurring PRO upload sheets such as SENA work-registration layouts
 - Party import
 - Contracts and Rights import
 - audio-tag import
@@ -199,7 +200,7 @@ Advanced users can go further with a selector reference and syntax-aware QSS edi
 Some of the strongest workflow features are easy to underestimate from a quick skim:
 
 - the docked workspace keeps Code Registry Workspace, Release Browser, Work Manager, Party Manager, Contract Manager, Rights Matrix, Asset Registry, Global Search, and Catalog Managers open beside the table as tabbed panels
-- the Code Registry Workspace separates app-managed internal codes from external catalog identifiers, shows shared usage counts, and lets you link an unassigned generated value later
+- the Code Registry Workspace separates app-managed internal codes from external identifiers, shows shared usage counts, and lets you link an unassigned generated value later
 - the Contract Template Workspace can import Pages, DOCX, HTML, and HTML packages, keep the original source untouched, and drive drafting, preview, and PDF export from one HTML working draft
 - exchange import can classify canonical internal-looking catalog values into the internal registry, keep non-conforming values as external identifiers, and report accepted, external, mismatch, skipped, merged, and conflicted outcomes explicitly
 - the deliverables workspace pairs the Asset Registry with a Derivative Ledger for managed export batches, lineage review, and safe cleanup

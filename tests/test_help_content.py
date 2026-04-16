@@ -19,6 +19,7 @@ class HelpContentTests(unittest.TestCase):
         self.assertIn("overview", HELP_CHAPTERS_BY_ID)
         self.assertIn("audio-authenticity", HELP_CHAPTERS_BY_ID)
         self.assertIn("code-registry", HELP_CHAPTERS_BY_ID)
+        self.assertIn("conversion", HELP_CHAPTERS_BY_ID)
         self.assertIn("settings", HELP_CHAPTERS_BY_ID)
         self.assertIn("history", HELP_CHAPTERS_BY_ID)
         self.assertIn("keyboard-shortcuts", HELP_CHAPTERS_BY_ID)
@@ -77,6 +78,21 @@ class HelpContentTests(unittest.TestCase):
         self.assertIn("Registry SHA-256 Key", chapter.content_html)
         self.assertIn("not an audio-authenticity key", chapter.content_html.lower())
 
+    def test_conversion_help_chapter_covers_template_mapping_and_export_scope(self):
+        chapter = HELP_CHAPTERS_BY_ID["conversion"]
+
+        self.assertIn("File &gt; Conversion…", chapter.content_html)
+        self.assertIn("Current Profile Tracks", chapter.content_html)
+        self.assertIn("Saved templates", chapter.content_html)
+        self.assertIn("SENA", chapter.content_html)
+        self.assertIn("CSV", chapter.content_html)
+        self.assertIn("XLSX", chapter.content_html)
+        self.assertIn("XML", chapter.content_html)
+        self.assertIn(
+            "does not write into the catalog database",
+            HELP_CHAPTERS_BY_ID["import-workflows"].content_html,
+        )
+
     def test_help_chapters_are_grouped_into_layered_sections(self):
         grouped = list(iter_help_sections())
 
@@ -88,6 +104,7 @@ class HelpContentTests(unittest.TestCase):
         self.assertIn("keyboard-shortcuts", grouped_ids["Quick Start"])
         self.assertIn("code-registry", grouped_ids["Daily Workflows"])
         self.assertIn("repertoire-knowledge", grouped_ids["Deep Dives"])
+        self.assertIn("conversion", grouped_ids["Deep Dives"])
         self.assertIn("diagnostics", grouped_ids["Operations & Recovery"])
         self.assertEqual(help_section_for_chapter("theme-settings"), "Settings & Reference")
 

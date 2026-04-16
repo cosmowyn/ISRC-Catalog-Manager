@@ -346,6 +346,12 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
     )
     repertoire_export_menu.addAction(app.export_repertoire_package_action)
 
+    app.conversion_action = app._create_action(
+        "Conversion…",
+        slot=app.open_conversion_dialog,
+    )
+    file_menu.addAction(app.conversion_action)
+
     file_menu.addSeparator()
 
     profiles_menu.addSeparator()

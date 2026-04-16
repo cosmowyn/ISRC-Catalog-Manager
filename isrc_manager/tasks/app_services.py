@@ -19,6 +19,7 @@ from isrc_manager.authenticity import (
 )
 from isrc_manager.contract_templates import ContractTemplateService
 from isrc_manager.contracts import ContractService
+from isrc_manager.conversion import ConversionService
 from isrc_manager.exchange import MasterTransferService
 from isrc_manager.exchange.repertoire_service import RepertoireExchangeService
 from isrc_manager.exchange.service import ExchangeService
@@ -63,7 +64,7 @@ def _app_version_text() -> str:
             continue
         except Exception:
             break
-    return "3.1.0"
+    return "3.1.1"
 
 
 @dataclass(slots=True)
@@ -80,6 +81,7 @@ class BackgroundAppServiceBundle:
     xml_export_service: XMLExportService
     xml_import_service: XMLImportService
     exchange_service: ExchangeService
+    conversion_service: ConversionService
     repertoire_exchange_service: RepertoireExchangeService
     party_exchange_service: PartyExchangeService
     master_transfer_service: MasterTransferService
@@ -247,6 +249,10 @@ class BackgroundAppServiceFactory:
             profile_name=Path(self.db_path).name,
             repair_queue_service=track_import_repair_queue,
         )
+        conversion_service = ConversionService(
+            exchange_service=exchange_service,
+            settings_read_service=settings_reads,
+        )
         repertoire_exchange_service = RepertoireExchangeService(
             conn,
             party_service=party_service,
@@ -317,6 +323,7 @@ class BackgroundAppServiceFactory:
             xml_export_service=xml_export_service,
             xml_import_service=xml_import_service,
             exchange_service=exchange_service,
+            conversion_service=conversion_service,
             repertoire_exchange_service=repertoire_exchange_service,
             party_exchange_service=party_exchange_service,
             master_transfer_service=MasterTransferService(
