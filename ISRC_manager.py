@@ -322,6 +322,7 @@ from isrc_manager.search import GlobalSearchService, RelationshipExplorerService
 from isrc_manager.search.dialogs import GlobalSearchPanel
 from isrc_manager.selection_scope import TrackChoice
 from isrc_manager.services import (
+    ApplicationSettingsTransferService,
     CatalogAdminService,
     CatalogReadService,
     CodeRegistryService,
@@ -6319,6 +6320,9 @@ class App(QMainWindow):
         self.auto_snapshot_timer.timeout.connect(self._on_auto_snapshot_timer)
         self._last_auto_snapshot_marker = None
         self._last_history_budget_warning_signature = None
+        self._history_budget_enforcement_scheduled = False
+        self._history_budget_enforcement_running = False
+        self._history_budget_enforcement_trigger_label = "history update"
         self._suspend_layout_history = False
         self._suspend_dock_state_sync = False
         self._is_closing = False
@@ -9252,6 +9256,14 @@ class App(QMainWindow):
             if self.conn is not None
             else None
         )
+        self.settings_transfer_service = (
+            ApplicationSettingsTransferService(
+                gs1_settings_service=self.gs1_settings_service,
+                data_root=self.data_root,
+            )
+            if self.conn is not None
+            else None
+        )
         self.catalog_service = CatalogAdminService(self.conn) if self.conn is not None else None
         self.catalog_reads = CatalogReadService(self.conn) if self.conn is not None else None
         self.code_registry_service = (
@@ -10079,16 +10091,26 @@ class App(QMainWindow):
             return 0
         try:
             if candidate.is_dir():
-                return sum(
-                    file_path.stat().st_size
-                    for file_path in candidate.rglob("*")
-                    if file_path.is_file()
-                )
+                total = App._allocated_path_size(candidate)
+                for child_path in candidate.rglob("*"):
+                    total += App._allocated_path_size(child_path)
+                return total
             if candidate.exists():
-                return int(candidate.stat().st_size)
+                return App._allocated_path_size(candidate)
         except Exception:
             return 0
         return 0
+
+    @staticmethod
+    def _allocated_path_size(path: Path) -> int:
+        try:
+            stat_result = path.stat()
+        except Exception:
+            return 0
+        blocks = getattr(stat_result, "st_blocks", 0)
+        if blocks:
+            return int(blocks) * 512
+        return int(stat_result.st_size or 0)
 
     def _estimate_history_snapshot_capture_bytes(self) -> int:
         if self.history_manager is None:
@@ -10848,6 +10870,11 @@ class App(QMainWindow):
                 pending_template_path = str(
                     after_values.get("gs1_template_import_path") or ""
                 ).strip()
+                pending_template_bytes = after_values.get("gs1_template_import_bytes")
+                pending_template_filename = str(
+                    after_values.get("gs1_template_import_filename") or ""
+                ).strip()
+                clear_template_storage = bool(after_values.get("gs1_template_clear_existing"))
                 requested_template_storage_mode = normalize_storage_mode(
                     after_values.get("gs1_template_storage_mode"),
                     default=STORAGE_MODE_DATABASE,
@@ -10857,7 +10884,20 @@ class App(QMainWindow):
                     getattr(before_template_asset, "storage_mode", None),
                     default=STORAGE_MODE_DATABASE if before_template_asset is not None else None,
                 )
-                if pending_template_path:
+                if pending_template_bytes:
+                    stored_template = self.gs1_settings_service.import_template_from_bytes(
+                        bytes(pending_template_bytes),
+                        filename=pending_template_filename or "gs1-template.xlsx",
+                        storage_mode=requested_template_storage_mode,
+                    )
+                    self._log_event(
+                        "settings.gs1_template_workbook",
+                        "GS1 template workbook imported from settings bundle",
+                        stored_filename=stored_template.filename,
+                        storage_mode=stored_template.storage_mode,
+                    )
+                    changed_count += 1
+                elif pending_template_path:
                     if self.gs1_integration_service is not None:
                         stored_template = self.gs1_integration_service.import_template_workbook(
                             pending_template_path,
@@ -10874,6 +10914,13 @@ class App(QMainWindow):
                         template_path=stored_template.source_path,
                         stored_filename=stored_template.filename,
                         storage_mode=stored_template.storage_mode,
+                    )
+                    changed_count += 1
+                elif clear_template_storage and before_template_asset is not None:
+                    self.gs1_settings_service.clear_stored_template()
+                    self._log_event(
+                        "settings.gs1_template_workbook",
+                        "GS1 template workbook cleared",
                     )
                     changed_count += 1
                 elif (
@@ -10924,18 +10971,22 @@ class App(QMainWindow):
                     before_values.get("gs1_contracts_csv_path") or ""
                 ).strip()
                 after_contracts_csv = str(after_values.get("gs1_contracts_csv_path") or "").strip()
+                pending_contract_bytes = after_values.get("gs1_contracts_csv_bytes")
+                pending_contract_filename = str(
+                    after_values.get("gs1_contracts_csv_filename") or ""
+                ).strip()
                 if (
-                    after_contracts != before_contracts
+                    pending_contract_bytes is not None
+                    or bool(pending_contract_filename)
+                    or after_contracts != before_contracts
                     or after_contracts_csv != before_contracts_csv
                 ):
                     if after_contracts:
                         self.gs1_settings_service.set_contracts(
                             after_contracts,
                             source_path=after_contracts_csv,
-                            source_bytes=after_values.get("gs1_contracts_csv_bytes"),
-                            source_filename=str(
-                                after_values.get("gs1_contracts_csv_filename") or ""
-                            ).strip(),
+                            source_bytes=pending_contract_bytes,
+                            source_filename=pending_contract_filename,
                         )
                     else:
                         self.gs1_settings_service.clear_contracts()
@@ -11026,6 +11077,92 @@ class App(QMainWindow):
         except Exception as e:
             self.logger.exception(f"Settings update failed: {e}")
             QMessageBox.critical(self, "Settings Error", f"Could not save settings:\n{e}")
+
+    def export_application_settings_bundle(self):
+        if self.conn is None or self.settings_transfer_service is None:
+            QMessageBox.warning(self, "Export Settings", "Open a profile first.")
+            return
+        before_values = self._current_settings_values()
+        profile_stem = sanitize_export_basename(
+            Path(str(getattr(self, "current_db_path", "") or "")).stem or "profile",
+            default_stem="profile",
+        )
+        suggested_name = (
+            f"{profile_stem}_application_settings_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+        )
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Application Settings",
+            str(Path.home() / suggested_name),
+            "ZIP Archive (*.zip)",
+        )
+        if not path:
+            return
+        try:
+            saved_path = self.settings_transfer_service.export_bundle(
+                path,
+                current_values=before_values,
+                app_version=self._app_version_text(),
+            )
+        except Exception as exc:
+            self.logger.exception("Application settings export failed: %s", exc)
+            QMessageBox.warning(self, "Export Settings", str(exc))
+            return
+        self.statusBar().showMessage(f"Settings export saved to {saved_path}", 5000)
+        QMessageBox.information(
+            self,
+            "Export Settings",
+            f"Saved the application settings bundle to:\n{saved_path}",
+        )
+
+    def import_application_settings_bundle(self):
+        if self.conn is None or self.settings_transfer_service is None:
+            QMessageBox.warning(self, "Import Settings", "Open a profile first.")
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Application Settings",
+            str(Path.home()),
+            "ZIP Archive (*.zip)",
+        )
+        if not path:
+            return
+        confirm = QMessageBox.question(
+            self,
+            "Import Settings",
+            "Import the selected settings bundle into the current profile?\n\n"
+            "This replaces the current General, GS1, and Theme settings for this profile.",
+            QMessageBox.Yes | QMessageBox.No,
+        )
+        if confirm != QMessageBox.Yes:
+            return
+        before_values = self._current_settings_values()
+        try:
+            import_result = self.settings_transfer_service.prepare_import(
+                path,
+                current_values=before_values,
+            )
+            changed_count = self._apply_settings_changes(
+                before_values,
+                import_result.values,
+                show_confirmation=False,
+            )
+        except Exception as exc:
+            self.logger.exception("Application settings import failed: %s", exc)
+            QMessageBox.warning(self, "Import Settings", str(exc))
+            return
+
+        message = (
+            "Imported the application settings bundle."
+            if changed_count
+            else "Imported the application settings bundle. No persisted settings needed to change."
+        )
+        if import_result.warnings:
+            message += "\n\nWarnings:\n" + "\n".join(
+                f"- {warning}" for warning in import_result.warnings
+            )
+        self.statusBar().showMessage("Application settings imported.", 5000)
+        QMessageBox.information(self, "Import Settings", message)
 
     def _apply_single_setting_value(self, field_name: str, value: str) -> int:
         before_values = self._current_settings_values()
@@ -11311,6 +11448,7 @@ class App(QMainWindow):
         self.settings_reads = None
         self.settings_mutations = None
         self.blob_icon_settings_service = None
+        self.settings_transfer_service = None
         self.code_registry_service = None
         self.contract_template_catalog_service = None
         self.contract_template_service = None
@@ -11785,6 +11923,28 @@ class App(QMainWindow):
 
         if self.history_dialog is not None and self.history_dialog.isVisible():
             self.history_dialog.refresh_data()
+        self._schedule_history_storage_budget_enforcement(trigger_label="history update")
+
+    def _schedule_history_storage_budget_enforcement(self, *, trigger_label: str) -> None:
+        self._history_budget_enforcement_trigger_label = str(trigger_label or "history update")
+        if self._history_budget_enforcement_scheduled or self._history_budget_enforcement_running:
+            return
+        self._history_budget_enforcement_scheduled = True
+
+        def _run() -> None:
+            self._history_budget_enforcement_scheduled = False
+            if self._history_budget_enforcement_running:
+                return
+            self._history_budget_enforcement_running = True
+            try:
+                self._enforce_history_storage_budget(
+                    trigger_label=self._history_budget_enforcement_trigger_label,
+                    interactive=False,
+                )
+            finally:
+                self._history_budget_enforcement_running = False
+
+        QTimer.singleShot(0, _run)
 
     @contextmanager
     def _suspend_table_layout_history(self):
@@ -14076,6 +14236,20 @@ class App(QMainWindow):
                 "description": "Open the consolidated application and profile settings dialog.",
                 "action": self.settings_action,
                 "default": True,
+            },
+            {
+                "id": "export_settings",
+                "label": "Export Settings",
+                "category": "Settings",
+                "description": "Export the current General, GS1, and Theme settings into a portable ZIP bundle.",
+                "action": self.export_settings_action,
+            },
+            {
+                "id": "import_settings",
+                "label": "Import Settings",
+                "category": "Settings",
+                "description": "Import a portable ZIP bundle and apply its General, GS1, and Theme settings to the current profile.",
+                "action": self.import_settings_action,
             },
             {
                 "id": "authenticity_keys",

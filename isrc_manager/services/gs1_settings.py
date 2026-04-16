@@ -260,24 +260,20 @@ class GS1SettingsService:
             return None
         return Path(path).read_bytes()
 
-    def import_template_from_path(
+    def _store_template_bytes(
         self,
-        template_path: str | Path,
+        workbook_bytes: bytes,
         *,
+        filename: str,
+        source_path: str = "",
         storage_mode: str | None = None,
     ) -> GS1TemplateAsset:
-        source = Path(str(template_path or "").strip())
-        if not str(source):
-            raise GS1TemplateVerificationError("Choose an official GS1 workbook first.")
-        if not source.exists():
-            raise GS1TemplateVerificationError(f"Configured GS1 workbook was not found:\n{source}")
-        if source.suffix.lower() not in self.ALLOWED_TEMPLATE_SUFFIXES:
-            raise GS1TemplateVerificationError(
-                "The selected file is not a supported Excel workbook. Choose an .xlsx, .xlsm, .xltx, or .xltm file."
-            )
-
-        workbook_bytes = _read_blob_from_path(str(source))
-        mime_type = guess_mime_type(source.name)
+        clean_filename = coalesce_filename(
+            filename,
+            default_stem="gs1-template",
+            default_suffix=".xlsx",
+        )
+        mime_type = guess_mime_type(clean_filename)
         clean_mode = normalize_storage_mode(storage_mode, default=STORAGE_MODE_DATABASE)
         managed_file_path = None
         if clean_mode == STORAGE_MODE_MANAGED_FILE:
@@ -287,7 +283,7 @@ class GS1SettingsService:
                 )
             managed_file_path = self.template_store.write_bytes(
                 workbook_bytes,
-                filename=coalesce_filename(source.name, default_stem="gs1-template"),
+                filename=clean_filename,
                 subdir="templates",
             )
         with self.conn:
@@ -331,8 +327,8 @@ class GS1SettingsService:
                     updated_at = datetime('now')
                 """,
                 (
-                    source.name,
-                    str(source),
+                    clean_filename,
+                    str(source_path or "").strip(),
                     managed_file_path,
                     clean_mode,
                     sqlite3.Binary(workbook_bytes) if clean_mode == STORAGE_MODE_DATABASE else None,
@@ -345,6 +341,56 @@ class GS1SettingsService:
         if stored is None:
             raise RuntimeError("Failed to store the GS1 workbook in the profile database.")
         return stored
+
+    def import_template_from_path(
+        self,
+        template_path: str | Path,
+        *,
+        storage_mode: str | None = None,
+    ) -> GS1TemplateAsset:
+        source = Path(str(template_path or "").strip())
+        if not str(source):
+            raise GS1TemplateVerificationError("Choose an official GS1 workbook first.")
+        if not source.exists():
+            raise GS1TemplateVerificationError(f"Configured GS1 workbook was not found:\n{source}")
+        if source.suffix.lower() not in self.ALLOWED_TEMPLATE_SUFFIXES:
+            raise GS1TemplateVerificationError(
+                "The selected file is not a supported Excel workbook. Choose an .xlsx, .xlsm, .xltx, or .xltm file."
+            )
+
+        workbook_bytes = _read_blob_from_path(str(source))
+        return self._store_template_bytes(
+            workbook_bytes,
+            filename=source.name,
+            source_path=str(source),
+            storage_mode=storage_mode,
+        )
+
+    def import_template_from_bytes(
+        self,
+        workbook_bytes: bytes,
+        *,
+        filename: str,
+        source_path: str = "",
+        storage_mode: str | None = None,
+    ) -> GS1TemplateAsset:
+        if not workbook_bytes:
+            raise GS1TemplateVerificationError("The imported GS1 workbook is empty.")
+        clean_filename = coalesce_filename(
+            filename,
+            default_stem="gs1-template",
+            default_suffix=".xlsx",
+        )
+        if Path(clean_filename).suffix.lower() not in self.ALLOWED_TEMPLATE_SUFFIXES:
+            raise GS1TemplateVerificationError(
+                "The imported GS1 workbook must be an .xlsx, .xlsm, .xltx, or .xltm file."
+            )
+        return self._store_template_bytes(
+            bytes(workbook_bytes),
+            filename=clean_filename,
+            source_path=source_path,
+            storage_mode=storage_mode,
+        )
 
     def export_stored_template(self, destination_path: str | Path) -> Path:
         workbook_bytes = self.load_stored_template_bytes()
@@ -418,6 +464,19 @@ class GS1SettingsService:
         if updated is None:
             raise RuntimeError("Failed to convert GS1 workbook storage mode.")
         return updated
+
+    def clear_stored_template(self) -> None:
+        stored = self.load_stored_template_info()
+        if stored is not None and stored.managed_file_path:
+            path = self.template_store.resolve(stored.managed_file_path)
+            if path is not None and path.exists():
+                try:
+                    path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+        with self.conn:
+            self.conn.execute(f"DELETE FROM {self.TEMPLATE_STORAGE_TABLE} WHERE id = 1")
+        self.set_template_path("")
 
     def load_profile_defaults(self) -> GS1ProfileDefaults:
         return GS1ProfileDefaults(

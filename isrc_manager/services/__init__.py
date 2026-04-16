@@ -205,6 +205,11 @@ from .settings_reads import (
     RegistrationSettings,
     SettingsReadService,
 )
+from .settings_transfer import (
+    ApplicationSettingsImportResult,
+    ApplicationSettingsTransferError,
+    ApplicationSettingsTransferService,
+)
 from .tracks import (
     TrackCreatePayload,
     TrackMediaSourceHandle,
@@ -217,6 +222,9 @@ __all__ = [
     "AlbumUsage",
     "ASSET_TYPE_CHOICES",
     "ArtistUsage",
+    "ApplicationSettingsImportResult",
+    "ApplicationSettingsTransferError",
+    "ApplicationSettingsTransferService",
     "AutoSnapshotSettings",
     "BackupResult",
     "BUILTIN_CATEGORY_CATALOG_NUMBER",

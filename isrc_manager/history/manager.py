@@ -53,6 +53,7 @@ class HistoryManager:
         "contract_template_artifacts",
     )
     FILE_COMPANION_SUFFIXES = (".wal", ".shm")
+    DATABASE_ARTIFACT_COMPANION_SUFFIXES = ("-wal", "-shm", "-journal")
     SETTINGS_COALESCE_WINDOW_SECONDS = 2.0
     STATUS_APPLIED = "applied"
     STATUS_BROKEN = "broken"
@@ -199,6 +200,8 @@ class HistoryManager:
         backup_path = Path(backup.backup_path)
         self._remove_path(backup_path)
         self._remove_path(self._backup_sidecar_path(backup_path))
+        for companion_path in self._database_artifact_companion_paths(backup_path):
+            self._remove_path(companion_path)
 
     def can_undo(self) -> bool:
         self._ensure_history_invariants()
@@ -846,6 +849,9 @@ class HistoryManager:
         snapshot_path = Path(snapshot.db_snapshot_path)
         self._remove_path(snapshot_path)
         self._remove_path(self._snapshot_sidecar_path(snapshot_path))
+        for companion_path in self._database_artifact_companion_paths(snapshot_path):
+            self._remove_path(companion_path)
+        self._remove_path(self._snapshot_assets_root(snapshot_path))
         for state in (snapshot.manifest or {}).get("managed_directories", {}).values():
             snapshot_asset_path = state.get("snapshot_path")
             if snapshot_asset_path:
@@ -2480,6 +2486,14 @@ class HistoryManager:
     def _backup_sidecar_path(self, backup_path: Path) -> Path:
         return backup_path.with_suffix(backup_path.suffix + self.BACKUP_SIDECAR_SUFFIX)
 
+    def _snapshot_assets_root(self, snapshot_path: Path) -> Path:
+        return snapshot_path.with_suffix(".assets")
+
+    def _database_artifact_companion_paths(self, base_path: Path) -> tuple[Path, ...]:
+        return tuple(
+            Path(f"{base_path}{suffix}") for suffix in self.DATABASE_ARTIFACT_COMPANION_SUFFIXES
+        )
+
     def _ensure_registry_sidecars(self) -> None:
         for snapshot in self._all_snapshots():
             sidecar_path = self._snapshot_sidecar_path(Path(snapshot.db_snapshot_path))
@@ -2652,6 +2666,9 @@ class HistoryManager:
             snapshot_path = Path(snapshot.db_snapshot_path)
             self._remove_path(snapshot_path)
             self._remove_path(self._snapshot_sidecar_path(snapshot_path))
+            for companion_path in self._database_artifact_companion_paths(snapshot_path):
+                self._remove_path(companion_path)
+            self._remove_path(self._snapshot_assets_root(snapshot_path))
             for state in (snapshot.manifest or {}).get("managed_directories", {}).values():
                 asset_path = state.get("snapshot_path")
                 if asset_path:

@@ -143,6 +143,8 @@ class HelpContentTests(unittest.TestCase):
         self.assertIn("Catalog Cleanup", diagnostics.content_html)
         self.assertIn("owner Party company name", settings.content_html)
         self.assertIn("custom value acts as an explicit override", settings.content_html)
+        self.assertIn("Export Settings", settings.content_html)
+        self.assertIn("GTIN contracts CSV", settings.content_html)
 
 
 if __name__ == "__main__":

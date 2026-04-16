@@ -1593,6 +1593,8 @@ class AppShellTestCase(unittest.TestCase):
             settings_texts,
             [
                 "Application Settings…",
+                "Export Settings…",
+                "Import Settings…",
                 "Audio Authenticity Keys…",
             ],
         )
@@ -2078,6 +2080,18 @@ class AppShellTestCase(unittest.TestCase):
             ),
             mock.patch.object(
                 app_module.App,
+                "export_application_settings_bundle",
+                autospec=True,
+                side_effect=_record("export_settings"),
+            ),
+            mock.patch.object(
+                app_module.App,
+                "import_application_settings_bundle",
+                autospec=True,
+                side_effect=_record("import_settings"),
+            ),
+            mock.patch.object(
+                app_module.App,
                 "open_quality_dashboard",
                 autospec=True,
                 side_effect=_record("quality"),
@@ -2111,6 +2125,8 @@ class AppShellTestCase(unittest.TestCase):
             self.window.add_track_action.trigger()
             self.window.add_album_action.trigger()
             self.window.settings_action.trigger()
+            self.window.export_settings_action.trigger()
+            self.window.import_settings_action.trigger()
             self.window.show_history_action.trigger()
             self.window.help_contents_action.trigger()
             self.window.diagnostics_action.trigger()
@@ -2127,6 +2143,8 @@ class AppShellTestCase(unittest.TestCase):
                 "add_track",
                 "add_album",
                 "settings",
+                "export_settings",
+                "import_settings",
                 "history",
                 "help",
                 "diagnostics",

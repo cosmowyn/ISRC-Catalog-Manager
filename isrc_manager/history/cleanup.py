@@ -92,11 +92,14 @@ class HistoryStorageProjection:
 class HistoryStorageCleanupService:
     """Inspects and removes safe-to-delete history artifacts."""
 
-    SESSION_SNAPSHOT_SUFFIXES = ("", "-wal", "-shm")
+    SESSION_SNAPSHOT_SUFFIXES = ("", "-wal", "-shm", "-journal")
     AUTO_SNAPSHOT_KIND_PREFIX = "auto_"
     AUTO_CLEANUP_ITEM_TYPES = {
         "orphan_snapshot_file",
+        "orphan_snapshot_bundle",
+        "orphan_snapshot_companion",
         "orphan_backup_file",
+        "orphan_backup_companion",
         "snapshot_archive",
         "file_state_bundle",
         "session_snapshot",
@@ -137,9 +140,7 @@ class HistoryStorageCleanupService:
                 label=snapshot.label,
                 created_at=snapshot.created_at,
                 path=str(snapshot_path),
-                bytes_on_disk=self._path_size(snapshot_path)
-                + self._path_size(self.history_manager._snapshot_sidecar_path(snapshot_path))
-                + self._path_size(snapshot_path.with_suffix(".assets")),
+                bytes_on_disk=self._snapshot_bundle_size(snapshot_path),
                 reason=(
                     "This snapshot is still referenced by undo, redo, or retained snapshot history."
                     if is_protected
@@ -161,8 +162,7 @@ class HistoryStorageCleanupService:
                     label=backup.label,
                     created_at=backup.created_at,
                     path=str(backup_path),
-                    bytes_on_disk=self._path_size(backup_path)
-                    + self._path_size(self.history_manager._backup_sidecar_path(backup_path)),
+                    bytes_on_disk=self._backup_bundle_size(backup_path),
                     reason=(
                         "Safety backup created before a restore."
                         if "pre_restore" in kind_label
@@ -182,10 +182,40 @@ class HistoryStorageCleanupService:
                     label=path.name,
                     created_at=self._path_created_at(path),
                     path=str(path),
-                    bytes_on_disk=self._path_size(path)
-                    + self._path_size(self.history_manager._snapshot_sidecar_path(path))
-                    + self._path_size(path.with_suffix(".assets")),
+                    bytes_on_disk=self._snapshot_bundle_size(path),
                     reason="Snapshot file is present on disk but not registered in HistorySnapshots.",
+                    eligible=True,
+                )
+            )
+
+        for path in self._orphan_snapshot_bundle_roots():
+            eligible.append(
+                HistoryCleanupItem(
+                    item_key=f"orphan_snapshot_bundle:{path}",
+                    item_type="orphan_snapshot_bundle",
+                    label=path.name,
+                    created_at=self._path_created_at(path),
+                    path=str(path),
+                    bytes_on_disk=self._path_size(path),
+                    reason=(
+                        "Snapshot asset bundle is present on disk without its matching snapshot database file."
+                    ),
+                    eligible=True,
+                )
+            )
+
+        for path in self._orphan_snapshot_companion_files():
+            eligible.append(
+                HistoryCleanupItem(
+                    item_key=f"orphan_snapshot_companion:{path}",
+                    item_type="orphan_snapshot_companion",
+                    label=path.name,
+                    created_at=self._path_created_at(path),
+                    path=str(path),
+                    bytes_on_disk=self._path_size(path),
+                    reason=(
+                        "Snapshot companion file is present on disk without its matching snapshot database file."
+                    ),
                     eligible=True,
                 )
             )
@@ -198,9 +228,24 @@ class HistoryStorageCleanupService:
                     label=path.name,
                     created_at=self._path_created_at(path),
                     path=str(path),
-                    bytes_on_disk=self._path_size(path)
-                    + self._path_size(self.history_manager._backup_sidecar_path(path)),
+                    bytes_on_disk=self._backup_bundle_size(path),
                     reason="Backup file is present on disk but not registered in HistoryBackups.",
+                    eligible=True,
+                )
+            )
+
+        for path in self._orphan_backup_companion_files():
+            eligible.append(
+                HistoryCleanupItem(
+                    item_key=f"orphan_backup_companion:{path}",
+                    item_type="orphan_backup_companion",
+                    label=path.name,
+                    created_at=self._path_created_at(path),
+                    path=str(path),
+                    bytes_on_disk=self._path_size(path),
+                    reason=(
+                        "Backup companion file is present on disk without its matching backup database file."
+                    ),
                     eligible=True,
                 )
             )
@@ -213,9 +258,7 @@ class HistoryStorageCleanupService:
                 label=archive_path.name,
                 created_at=self._path_created_at(archive_path),
                 path=str(archive_path),
-                bytes_on_disk=self._path_size(archive_path)
-                + self._path_size(self.history_manager._snapshot_sidecar_path(archive_path))
-                + self._path_size(archive_path.with_suffix(".assets")),
+                bytes_on_disk=self._snapshot_bundle_size(archive_path),
                 reason=(
                     "This archived snapshot is still required by snapshot create/delete history."
                     if is_protected
@@ -462,8 +505,23 @@ class HistoryStorageCleanupService:
             removed.append(str(item_path))
             return removed
 
+        if item.item_type == "orphan_snapshot_bundle":
+            self.history_manager._remove_path(item_path)
+            removed.append(str(item_path))
+            return removed
+
+        if item.item_type == "orphan_snapshot_companion":
+            self.history_manager._remove_path(item_path)
+            removed.append(str(item_path))
+            return removed
+
         if item.item_type == "orphan_backup_file":
             self._remove_backup_bundle(item_path)
+            removed.append(str(item_path))
+            return removed
+
+        if item.item_type == "orphan_backup_companion":
+            self.history_manager._remove_path(item_path)
             removed.append(str(item_path))
             return removed
 
@@ -568,13 +626,19 @@ class HistoryStorageCleanupService:
 
     def _remove_snapshot_bundle(self, snapshot_path: Path) -> None:
         self.history_manager._remove_path(snapshot_path)
+        for companion_path in self.history_manager._database_artifact_companion_paths(
+            snapshot_path
+        ):
+            self.history_manager._remove_path(companion_path)
         self.history_manager._remove_path(
             self.history_manager._snapshot_sidecar_path(snapshot_path)
         )
-        self.history_manager._remove_path(snapshot_path.with_suffix(".assets"))
+        self.history_manager._remove_path(self.history_manager._snapshot_assets_root(snapshot_path))
 
     def _remove_backup_bundle(self, backup_path: Path) -> None:
         self.history_manager._remove_path(backup_path)
+        for companion_path in self.history_manager._database_artifact_companion_paths(backup_path):
+            self.history_manager._remove_path(companion_path)
         self.history_manager._remove_path(self.history_manager._backup_sidecar_path(backup_path))
 
     def _protected_snapshot_ids(self, entries: list[HistoryEntry]) -> set[int]:
@@ -666,6 +730,70 @@ class HistoryStorageCleanupService:
             return set()
         return self._paths_under_root(state, self._session_snapshots_root())
 
+    def _snapshot_bundle_size(self, snapshot_path: Path) -> int:
+        total = self._path_size(snapshot_path)
+        total += self._path_size(self.history_manager._snapshot_sidecar_path(snapshot_path))
+        total += self._path_size(self.history_manager._snapshot_assets_root(snapshot_path))
+        for companion_path in self.history_manager._database_artifact_companion_paths(
+            snapshot_path
+        ):
+            total += self._path_size(companion_path)
+        return total
+
+    def _backup_bundle_size(self, backup_path: Path) -> int:
+        total = self._path_size(backup_path)
+        total += self._path_size(self.history_manager._backup_sidecar_path(backup_path))
+        for companion_path in self.history_manager._database_artifact_companion_paths(backup_path):
+            total += self._path_size(companion_path)
+        return total
+
+    def _orphan_snapshot_bundle_roots(self) -> list[Path]:
+        bundle_roots: list[Path] = []
+        for root in (
+            self.history_manager.history_root / "snapshots" / self.history_manager.db_path.stem,
+            self._snapshot_archive_root(),
+        ):
+            if not root.exists():
+                continue
+            for path in sorted(
+                candidate for candidate in root.glob("*.assets") if candidate.is_dir()
+            ):
+                if path.with_suffix(".db").exists():
+                    continue
+                bundle_roots.append(path)
+        return bundle_roots
+
+    def _orphan_snapshot_companion_files(self) -> list[Path]:
+        files: list[Path] = []
+        for root in (
+            self.history_manager.history_root / "snapshots" / self.history_manager.db_path.stem,
+            self._snapshot_archive_root(),
+        ):
+            if not root.exists():
+                continue
+            files.extend(self._orphan_database_companion_files_under_root(root))
+        return sorted(files)
+
+    def _orphan_backup_companion_files(self) -> list[Path]:
+        if (
+            self.history_manager.backups_root is None
+            or not self.history_manager.backups_root.exists()
+        ):
+            return []
+        return self._orphan_database_companion_files_under_root(self.history_manager.backups_root)
+
+    def _orphan_database_companion_files_under_root(self, root: Path) -> list[Path]:
+        files: list[Path] = []
+        for suffix in self.history_manager.DATABASE_ARTIFACT_COMPANION_SUFFIXES:
+            for path in root.rglob(f"*{suffix}"):
+                if not path.is_file():
+                    continue
+                base_path = Path(str(path)[: -len(suffix)])
+                if base_path.exists():
+                    continue
+                files.append(path)
+        return sorted(files)
+
     def _live_paths_under_root(self, entries: list[HistoryEntry], root: Path) -> set[Path]:
         live_paths: set[Path] = set()
         for entry in entries:
@@ -740,14 +868,26 @@ class HistoryStorageCleanupService:
     def _path_size(path: Path) -> int:
         try:
             if path.is_dir():
-                return sum(
-                    file_path.stat().st_size for file_path in path.rglob("*") if file_path.is_file()
-                )
+                total = HistoryStorageCleanupService._allocated_path_size(path)
+                for child_path in path.rglob("*"):
+                    total += HistoryStorageCleanupService._allocated_path_size(child_path)
+                return total
             if path.exists():
-                return int(path.stat().st_size)
+                return HistoryStorageCleanupService._allocated_path_size(path)
         except Exception:
             return 0
         return 0
+
+    @staticmethod
+    def _allocated_path_size(path: Path) -> int:
+        try:
+            stat_result = path.stat()
+        except Exception:
+            return 0
+        blocks = getattr(stat_result, "st_blocks", 0)
+        if blocks:
+            return int(blocks) * 512
+        return int(stat_result.st_size or 0)
 
     def _session_snapshot_size(self, snapshot_path: Path) -> int:
         total = 0

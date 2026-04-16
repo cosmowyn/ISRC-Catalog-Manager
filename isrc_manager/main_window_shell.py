@@ -617,6 +617,25 @@ def _build_actions_and_menus(app: Any, *, movable: bool) -> None:
         shortcuts=("Ctrl+,", "Meta+,"),
     )
     settings_menu.addAction(app.settings_action)
+    app.export_settings_action = app._create_action(
+        "Export Settings…",
+        slot=app.export_application_settings_bundle,
+    )
+    app.export_settings_action.setStatusTip(
+        "Export the current General, GS1, and Theme settings plus stored GS1 assets into a portable ZIP bundle."
+    )
+    app.export_settings_action.setToolTip(app.export_settings_action.statusTip())
+    settings_menu.addAction(app.export_settings_action)
+    app.import_settings_action = app._create_action(
+        "Import Settings…",
+        slot=app.import_application_settings_bundle,
+    )
+    app.import_settings_action.setStatusTip(
+        "Import a portable settings ZIP bundle and apply its General, GS1, and Theme configuration to the current profile."
+    )
+    app.import_settings_action.setToolTip(app.import_settings_action.statusTip())
+    settings_menu.addAction(app.import_settings_action)
+    settings_menu.addSeparator()
     app.authenticity_keys_action = app._create_action(
         "Audio Authenticity Keys…",
         slot=app.open_audio_authenticity_keys_dialog,

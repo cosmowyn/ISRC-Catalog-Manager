@@ -246,6 +246,53 @@ class HistoryCleanupServiceTests(unittest.TestCase):
         self.assertIsNone(self.history.fetch_snapshot(old_auto_snapshot.snapshot_id))
         self.assertIsNotNone(self.history.fetch_snapshot(manual_snapshot.snapshot_id))
 
+    def test_preview_storage_budget_counts_orphan_snapshot_assets_and_companions(self):
+        snapshot_dir = self.history_root / "snapshots" / self.db_path.stem
+        snapshot_dir.mkdir(parents=True, exist_ok=True)
+
+        orphan_assets = snapshot_dir / "orphan_snapshot.assets"
+        orphan_assets.mkdir(parents=True, exist_ok=True)
+        (orphan_assets / "artifact.bin").write_bytes(b"bundle")
+
+        orphan_companion = snapshot_dir / "orphan_snapshot.db-journal"
+        orphan_companion.write_bytes(b"journal")
+
+        settings = HistoryRetentionSettings(
+            auto_cleanup_enabled=True,
+            storage_budget_mb=1,
+            auto_snapshot_keep_latest=1,
+            prune_pre_restore_copies_after_days=0,
+        )
+
+        preview = self.cleanup.preview_storage_budget(settings)
+        candidate_keys = {item.item_key for item in preview.candidate_items}
+
+        self.assertIn(f"orphan_snapshot_bundle:{orphan_assets}", candidate_keys)
+        self.assertIn(f"orphan_snapshot_companion:{orphan_companion}", candidate_keys)
+        self.assertGreaterEqual(preview.total_bytes, len(b"bundle") + len(b"journal"))
+
+        result = self.cleanup.enforce_storage_budget(settings)
+        removed_keys = set(result.removed_item_keys)
+        self.assertIn(f"orphan_snapshot_bundle:{orphan_assets}", removed_keys)
+        self.assertIn(f"orphan_snapshot_companion:{orphan_companion}", removed_keys)
+        self.assertFalse(orphan_assets.exists())
+        self.assertFalse(orphan_companion.exists())
+
+    def test_delete_snapshot_removes_assets_root_and_companion_files(self):
+        snapshot = self.history.capture_snapshot(kind="manual", label="Loose Snapshot")
+        snapshot_path = Path(snapshot.db_snapshot_path)
+        assets_root = snapshot_path.with_suffix(".assets")
+        assets_root.mkdir(parents=True, exist_ok=True)
+        (assets_root / "artifact.bin").write_bytes(b"artifact")
+        companion = Path(f"{snapshot_path}-journal")
+        companion.write_bytes(b"journal")
+
+        self.history.delete_snapshot(snapshot.snapshot_id)
+
+        self.assertFalse(snapshot_path.exists())
+        self.assertFalse(assets_root.exists())
+        self.assertFalse(companion.exists())
+
     def test_preview_storage_projection_flags_when_growth_would_exceed_budget(self):
         self.history.create_manual_snapshot("Manual Keep")
 
