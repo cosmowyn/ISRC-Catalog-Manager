@@ -123,7 +123,7 @@ class CatalogReadService:
 
     def fetch_blob_badge_payload(
         self,
-        track_ids,
+        track_ids: list[int] | tuple[int, ...],
         active_custom_fields: list[dict[str, object]],
         *,
         track_service: TrackService | None,
@@ -166,12 +166,23 @@ class CatalogReadService:
                 4,
                 f"Loaded standard media badge metadata for {len(standard_media)} catalog cells.",
             )
-        blob_field_ids = [
-            int(field["id"])
-            for field in active_custom_fields
-            if str(field.get("field_type") or "").strip().lower() in {"blob_audio", "blob_image"}
-            and field.get("id") is not None
-        ]
+        blob_field_ids: list[int] = []
+        for field in active_custom_fields:
+            if str(field.get("field_type") or "").strip().lower() not in {
+                "blob_audio",
+                "blob_image",
+            }:
+                continue
+            field_id = field.get("id")
+            if field_id is None:
+                continue
+            field_id_text = str(field_id).strip()
+            if not field_id_text:
+                continue
+            try:
+                blob_field_ids.append(int(field_id_text))
+            except (TypeError, ValueError):
+                continue
         custom_fields = (
             custom_field_values.get_value_meta_map(
                 blob_field_ids,

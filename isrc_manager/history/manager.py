@@ -2650,9 +2650,7 @@ class HistoryManager:
         artifact_roots: list[Path] | tuple[Path, ...] | set[Path] | None = None,
     ) -> list[int]:
         target_snapshot_ids = {
-            int(snapshot_id)
-            for snapshot_id in (snapshot_ids or ())
-            if int(snapshot_id or 0) > 0
+            int(snapshot_id) for snapshot_id in (snapshot_ids or ()) if int(snapshot_id or 0) > 0
         }
         normalized_roots = self._normalize_artifact_roots(artifact_roots or ())
         if not target_snapshot_ids and not normalized_roots:
@@ -2714,10 +2712,7 @@ class HistoryManager:
                         artifact_roots=payload_roots,
                     )
                     changed = (
-                        changed
-                        or payload_path_changed
-                        or inverse_path_changed
-                        or redo_path_changed
+                        changed or payload_path_changed or inverse_path_changed or redo_path_changed
                     )
                 if not changed:
                     continue
@@ -2747,7 +2742,11 @@ class HistoryManager:
                 affected_entry_ids.append(int(entry.entry_id))
 
             affected_set = set(affected_entry_ids)
-            if affected_set and current_id is not None and affected_set.intersection(current_plan_ids):
+            if (
+                affected_set
+                and current_id is not None
+                and affected_set.intersection(current_plan_ids)
+            ):
                 fallback_head_id = self._nearest_visible_unaffected_ancestor(
                     current_id,
                     affected_set,

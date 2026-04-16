@@ -17,11 +17,9 @@ from isrc_manager.constants import (
     MAX_AUTO_SNAPSHOT_INTERVAL_MINUTES,
     MAX_HISTORY_AUTO_SNAPSHOT_KEEP_LATEST,
     MAX_HISTORY_PRUNE_PRE_RESTORE_COPIES_AFTER_DAYS,
-    MAX_HISTORY_STORAGE_BUDGET_MB,
     MIN_AUTO_SNAPSHOT_INTERVAL_MINUTES,
     MIN_HISTORY_AUTO_SNAPSHOT_KEEP_LATEST,
     MIN_HISTORY_PRUNE_PRE_RESTORE_COPIES_AFTER_DAYS,
-    MIN_HISTORY_STORAGE_BUDGET_MB,
 )
 from isrc_manager.storage_sizes import parse_history_storage_budget_mb
 
@@ -382,7 +380,8 @@ class SettingsReadService:
 
     def load_history_storage_budget_mb(self) -> int:
         raw = self._read_profile_value("history_storage_budget_mb")
-        return parse_history_storage_budget_mb(raw)
+        parsed_budget = parse_history_storage_budget_mb(raw)
+        return int(parsed_budget)
 
     def load_history_auto_snapshot_keep_latest(self) -> int:
         raw = self._read_profile_value("history_auto_snapshot_keep_latest")

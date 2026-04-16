@@ -215,7 +215,9 @@ class StorageAdminServiceTests(unittest.TestCase):
             allow_warning_deletes=True,
         )
 
-        history_entries_after = self.conn.execute("SELECT COUNT(*) FROM HistoryEntries").fetchone()[0]
+        history_entries_after = self.conn.execute("SELECT COUNT(*) FROM HistoryEntries").fetchone()[
+            0
+        ]
         quarantined_rows = self.conn.execute(
             """
             SELECT reversible, status

@@ -526,9 +526,10 @@ class StorageBudgetSpinBox(FocusWheelSpinBox):
             parse_storage_text_to_megabytes(clean)
         except ValueError:
             lowered = clean.lower().replace(",", ".")
-            if lowered.endswith((".", ",", "m", "mb", "g", "gb", "t", "tb")) or lowered[
-                -1:
-            ].isdigit():
+            if (
+                lowered.endswith((".", ",", "m", "mb", "g", "gb", "t", "tb"))
+                or lowered[-1:].isdigit()
+            ):
                 return (QValidator.Intermediate, text, pos)
             return (QValidator.Invalid, text, pos)
         return (QValidator.Acceptable, text, pos)

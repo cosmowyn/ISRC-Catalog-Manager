@@ -3037,7 +3037,9 @@ class AppShellTestCase(unittest.TestCase):
             self.app.processEvents()
 
         history_after = self.window.history_manager.list_entries(limit=20)
-        self.assertEqual([entry.label for entry in history_after], [entry.label for entry in history_before])
+        self.assertEqual(
+            [entry.label for entry in history_after], [entry.label for entry in history_before]
+        )
 
     def case_interactive_header_resize_records_a_single_visible_history_entry(self):
         self._create_track(index=140, title="Interactive Resize One")
@@ -6000,7 +6002,9 @@ class AppShellTestCase(unittest.TestCase):
         self.assertFalse(self.window.audio_file_warning_label.isHidden())
         self.assertIn("MP3", self.window.audio_file_warning_label.text())
 
-    def case_add_track_workspace_initializes_governance_controls_when_shown_without_entry_reset(self):
+    def case_add_track_workspace_initializes_governance_controls_when_shown_without_entry_reset(
+        self,
+    ):
         self.window.open_add_track_workspace()
         self.app.processEvents()
 
@@ -6909,7 +6913,9 @@ class AppShellTestCase(unittest.TestCase):
         ):
             self.window.save()
 
-        self.assertEqual(submitted.get("worker_completion_progress"), (89, "Finalizing background track save..."))
+        self.assertEqual(
+            submitted.get("worker_completion_progress"), (89, "Finalizing background track save...")
+        )
         self.assertTrue(callable(submitted.get("on_success_before_cleanup")))
         self.assertIsNone(submitted.get("on_success"))
         self.assertTrue(callable(submitted.get("on_success_after_cleanup")))
@@ -6924,7 +6930,9 @@ class AppShellTestCase(unittest.TestCase):
         _worker_values, ui_values = self._assert_ui_ready_progress(progress, worker_terminal=89)
         ui_messages = [str(message or "") for _value, _maximum, message in progress["ui_progress"]]
         self.assertTrue(
-            any("Painting refreshed catalog icons and widgets" in message for message in ui_messages)
+            any(
+                "Painting refreshed catalog icons and widgets" in message for message in ui_messages
+            )
         )
         self.assertIn(98, ui_values)
         track_row = self.window.conn.execute(
@@ -6972,7 +6980,9 @@ class AppShellTestCase(unittest.TestCase):
                 progress,
                 worker_terminal=89,
             )
-            ui_messages = [str(message or "") for _value, _maximum, message in progress["ui_progress"]]
+            ui_messages = [
+                str(message or "") for _value, _maximum, message in progress["ui_progress"]
+            ]
             self.assertTrue(
                 any(
                     "Painting refreshed catalog icons and widgets" in message
@@ -7040,7 +7050,9 @@ class AppShellTestCase(unittest.TestCase):
         _worker_values, ui_values = self._assert_ui_ready_progress(progress, worker_terminal=89)
         ui_messages = [str(message or "") for _value, _maximum, message in progress["ui_progress"]]
         self.assertTrue(
-            any("Painting refreshed catalog icons and widgets" in message for message in ui_messages)
+            any(
+                "Painting refreshed catalog icons and widgets" in message for message in ui_messages
+            )
         )
         self.assertIn(98, ui_values)
         self.assertIsNone(self.window.track_service.fetch_track_snapshot(track_id))

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from isrc_manager.constants import (
     DEFAULT_HISTORY_STORAGE_BUDGET_MB,
@@ -29,7 +29,7 @@ def clamp_history_storage_budget_mb(value: int) -> int:
     return max(MIN_HISTORY_STORAGE_BUDGET_MB, min(MAX_HISTORY_STORAGE_BUDGET_MB, parsed))
 
 
-def parse_history_storage_budget_mb(raw_value) -> int:
+def parse_history_storage_budget_mb(raw_value: object | None) -> int:
     try:
         parsed = int(raw_value)
     except Exception:

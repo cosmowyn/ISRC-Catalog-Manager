@@ -29,7 +29,9 @@ class StorageSizeTests(unittest.TestCase):
         self.assertEqual(parse_storage_text_to_megabytes("1 tb"), 1048576)
 
     def test_storage_budget_reader_uses_default_for_invalid_and_clamps_numeric_values(self):
-        self.assertEqual(parse_history_storage_budget_mb("bad-value"), DEFAULT_HISTORY_STORAGE_BUDGET_MB)
+        self.assertEqual(
+            parse_history_storage_budget_mb("bad-value"), DEFAULT_HISTORY_STORAGE_BUDGET_MB
+        )
         self.assertEqual(
             parse_history_storage_budget_mb(str(MAX_HISTORY_STORAGE_BUDGET_MB + 1)),
             MAX_HISTORY_STORAGE_BUDGET_MB,

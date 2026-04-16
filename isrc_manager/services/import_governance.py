@@ -317,10 +317,10 @@ class GovernedImportCoordinator:
                     )
                 results.append(
                     self.create_governed_track(
-                    payload,
-                    cursor=cur,
-                    batch_cache=batch_cache,
-                    profile_name=profile_name,
+                        payload,
+                        cursor=cur,
+                        batch_cache=batch_cache,
+                        profile_name=profile_name,
                     )
                 )
                 if callable(progress_callback):

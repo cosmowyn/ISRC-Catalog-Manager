@@ -54,9 +54,8 @@ class HistoryCleanupServiceTests(unittest.TestCase):
 
     def _snapshot_create_entry(self, snapshot_id: int):
         for entry in self.history.list_entries(limit=100, include_hidden=True):
-            if (
-                entry.action_type == "snapshot.create"
-                and str(entry.entity_id or "") == str(int(snapshot_id))
+            if entry.action_type == "snapshot.create" and str(entry.entity_id or "") == str(
+                int(snapshot_id)
             ):
                 return entry
         self.fail(f"Could not find snapshot.create entry for snapshot {snapshot_id}")
@@ -324,9 +323,7 @@ class HistoryCleanupServiceTests(unittest.TestCase):
     def test_enforce_snapshot_retention_quarantines_old_snapshot_history_in_place(self):
         old_snapshot = self.history.create_manual_snapshot("Old Snapshot")
         old_entry = self._snapshot_create_entry(old_snapshot.snapshot_id)
-        old_archive_path = Path(
-            old_entry.redo_payload["archived_snapshot"]["db_snapshot_path"]
-        )
+        old_archive_path = Path(old_entry.redo_payload["archived_snapshot"]["db_snapshot_path"])
         self.assertTrue(old_archive_path.exists())
 
         current_snapshot = self.history.create_manual_snapshot("Current Snapshot")

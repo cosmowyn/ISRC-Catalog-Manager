@@ -1627,7 +1627,9 @@ class ApplicationStorageAdminService:
         for root in roots:
             if not root.exists():
                 continue
-            for path in sorted(candidate for candidate in root.glob("*.assets") if candidate.is_dir()):
+            for path in sorted(
+                candidate for candidate in root.glob("*.assets") if candidate.is_dir()
+            ):
                 if path.with_suffix(".db").exists():
                     continue
                 bundle_roots.append(path)
